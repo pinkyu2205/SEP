@@ -1,4 +1,4 @@
-import type { Property, Tenant } from '../types';
+import type { Property, Tenant, Manager, Contract, Equipment } from '../types';
 
 /**
  * Dữ liệu mẫu cho Property & Room.
@@ -77,4 +77,34 @@ export const MOCK_TENANTS: Tenant[] = [
   { id: 't10', fullName: 'Lý Văn K', phone: '0901111010', cccd: '079201001010', propertyId: 'prop-3', propertyName: 'Nhà Cách Mạng Tháng 8', roomId: 'r18', roomCode: 'P202', moveInDate: '2026-04-01', status: 'active', createdAt: '2026-03-30' },
   { id: 't11', fullName: 'Trương Văn L', phone: '0901111011', cccd: '079201001011', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r3', roomCode: 'P103', moveInDate: '2026-04-25', status: 'pending_activation', createdAt: '2026-04-24' },
   { id: 't12', fullName: 'Đinh Thị M', phone: '0901111012', cccd: '079201001012', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r1', roomCode: 'P101', moveInDate: '2025-06-01', moveOutDate: '2025-12-31', status: 'moved_out', createdAt: '2025-05-28' },
+];
+
+/**
+ * Dữ liệu mẫu cho Quản lý (Manager).
+ */
+export const MOCK_MANAGERS: Manager[] = [
+  { id: 'm1', fullName: 'Nguyễn Văn Quản', phone: '0901234567', email: 'quan.nv@example.com', status: 'active', assignedPropertyIds: ['prop-1', 'prop-3'], createdAt: '2025-12-01' },
+  { id: 'm2', fullName: 'Trần Thị Quản', phone: '0912345678', email: 'quan.tt@example.com', status: 'active', assignedPropertyIds: ['prop-2'], createdAt: '2026-01-15' },
+  { id: 'm3', fullName: 'Lê Văn Trợ', phone: '0923456789', status: 'inactive', assignedPropertyIds: [], createdAt: '2026-02-20' },
+];
+
+/**
+ * Dữ liệu mẫu cho Hợp đồng (Contract).
+ */
+export const MOCK_CONTRACTS: Contract[] = [
+  { id: 'c1', code: 'HD-2026-001', tenantId: 't1', tenantName: 'Trần Văn A', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r1', roomCode: 'P101', startDate: '2026-01-20', endDate: '2027-01-20', depositAmount: 3500000, rentAmount: 3500000, status: 'active', createdAt: '2026-01-19' },
+  { id: 'c2', code: 'HD-2026-002', tenantId: 't2', tenantName: 'Lê Thị B', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r2', roomCode: 'P102', startDate: '2026-02-01', endDate: '2026-05-15', depositAmount: 3200000, rentAmount: 3200000, status: 'expiring_soon', notes: 'Hợp đồng ngắn hạn', createdAt: '2026-01-30' },
+  { id: 'c3', code: 'HD-2025-099', tenantId: 't12', tenantName: 'Đinh Thị M', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r1', roomCode: 'P101', startDate: '2025-06-01', endDate: '2025-12-31', depositAmount: 3500000, rentAmount: 3500000, status: 'terminated', notes: 'Khách dọn đi đúng hạn', createdAt: '2025-05-28' },
+];
+
+/**
+ * Dữ liệu mẫu cho Trang thiết bị (Equipment).
+ */
+export const MOCK_EQUIPMENTS: Equipment[] = [
+  { id: 'eq1', code: 'EQ-101-AC', name: 'Điều hòa Daikin 9000BTU', category: 'Điện lạnh', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r1', roomCode: 'P101', purchaseDate: '2025-01-10', purchasePrice: 8500000, status: 'good', createdAt: '2025-01-10' },
+  { id: 'eq2', code: 'EQ-101-WM', name: 'Máy giặt Toshiba 8kg', category: 'Điện lạnh', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r1', roomCode: 'P101', purchaseDate: '2025-01-10', purchasePrice: 4500000, status: 'good', createdAt: '2025-01-10' },
+  { id: 'eq3', code: 'EQ-102-AC', name: 'Điều hòa Panasonic 9000BTU', category: 'Điện lạnh', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r2', roomCode: 'P102', purchaseDate: '2025-01-10', purchasePrice: 8200000, status: 'maintenance', notes: 'Báo lỗi E4, thợ đang kiểm tra', createdAt: '2025-01-10' },
+  { id: 'eq4', code: 'EQ-103-FR', name: 'Tủ lạnh Aqua 130L', category: 'Điện lạnh', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', roomId: 'r3', roomCode: 'P103', purchaseDate: '2025-01-10', purchasePrice: 3200000, status: 'broken', notes: 'Không làm lạnh', createdAt: '2025-01-10' },
+  { id: 'eq5', code: 'EQ-C-WM01', name: 'Máy giặt chung khu A', category: 'Điện lạnh', propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi', purchaseDate: '2025-01-10', purchasePrice: 7500000, status: 'good', createdAt: '2025-01-10' },
+  { id: 'eq6', code: 'EQ-201-AC', name: 'Điều hòa Casper 9000BTU', category: 'Điện lạnh', propertyId: 'prop-2', propertyName: 'Nhà Lê Văn Sỹ', roomId: 'r7', roomCode: 'P201', purchaseDate: '2025-10-15', purchasePrice: 5500000, status: 'good', createdAt: '2025-10-15' },
 ];

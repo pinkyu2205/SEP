@@ -53,3 +53,59 @@ export interface Tenant {
   status: TenantStatus;
   createdAt: string;
 }
+
+/** Trạng thái Quản lý */
+export type ManagerStatus = 'active' | 'inactive';
+
+/** Thông tin Quản lý tòa nhà */
+export interface Manager {
+  id: string;
+  fullName: string;
+  phone: string; // Tên đăng nhập Mobile App
+  email?: string;
+  status: ManagerStatus;
+  assignedPropertyIds: string[]; // Danh sách ID các nhà đang quản lý
+  createdAt: string;
+}
+
+/** Trạng thái Hợp đồng */
+export type ContractStatus = 'active' | 'expiring_soon' | 'terminated';
+
+/** Thông tin Hợp đồng */
+export interface Contract {
+  id: string;
+  code: string; // Mã HĐ, VD: HD-2026-001
+  tenantId: string;
+  tenantName: string;
+  propertyId: string;
+  propertyName: string;
+  roomId: string;
+  roomCode: string;
+  startDate: string;
+  endDate: string;
+  depositAmount: number;
+  rentAmount: number;
+  status: ContractStatus;
+  notes?: string;
+  createdAt: string;
+}
+
+/** Trạng thái Trang thiết bị */
+export type EquipmentStatus = 'good' | 'broken' | 'maintenance' | 'disposed';
+
+/** Thông tin Trang thiết bị */
+export interface Equipment {
+  id: string;
+  code: string; // Mã QR Code của thiết bị (VD: EQ-101-AC)
+  name: string; // Tên thiết bị (VD: Điều hòa Daikin 9000BTU)
+  category: string; // Phân loại (VD: Điện lạnh, Nội thất, Vệ sinh...)
+  propertyId: string;
+  propertyName: string;
+  roomId?: string; // Nếu không có roomId thì là tài sản chung của tòa nhà
+  roomCode?: string;
+  purchaseDate: string;
+  purchasePrice: number;
+  status: EquipmentStatus;
+  notes?: string;
+  createdAt: string;
+}

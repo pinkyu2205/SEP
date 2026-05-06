@@ -23,3 +23,30 @@ export const tenantStatusMap = {
   active: { label: 'Đang thuê', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   moved_out: { label: 'Đã rời', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
 };
+
+/**
+ * Map trạng thái Quản lý
+ */
+export const managerStatusMap = {
+  active: { label: 'Hoạt động', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  inactive: { label: 'Ngừng HĐ', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
+};
+
+/**
+ * Map trạng thái Hợp đồng
+ */
+export const contractStatusMap = {
+  active: { label: 'Đang hiệu lực', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  expiring_soon: { label: 'Sắp hết hạn', color: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
+  terminated: { label: 'Đã thanh lý', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
+};
+
+/**
+ * Map trạng thái Trang thiết bị
+ */
+export const equipmentStatusMap = {
+  good: { label: 'Hoạt động tốt', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  broken: { label: 'Đang hỏng', color: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
+  maintenance: { label: 'Đang sửa chữa', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  disposed: { label: 'Đã thanh lý', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
+};
