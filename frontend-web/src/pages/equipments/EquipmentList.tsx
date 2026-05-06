@@ -16,6 +16,9 @@ export const EquipmentList = () => {
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null);
 
+  // State hiển thị QR giả lập
+  const [qrCodeToPrint, setQrCodeToPrint] = useState<string | null>(null);
+
   // Derive rooms based on selected property
   const selectedPropObj = MOCK_PROPERTIES.find(p => p.id === filterProperty);
   const availableRoomsForFilter = selectedPropObj?.rooms || [];
@@ -64,7 +67,7 @@ export const EquipmentList = () => {
   };
 
   const handlePrintQR = (code: string) => {
-    alert(`Đang tiến hành in mã QR cho thiết bị: ${code}`);
+    setQrCodeToPrint(code);
   };
 
   return (
@@ -242,7 +245,35 @@ export const EquipmentList = () => {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Modal QR Code giả lập để test quét */}
+      {qrCodeToPrint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setQrCodeToPrint(null)} />
+          <div className="relative bg-white rounded-2xl shadow-xl p-8 text-center max-w-sm w-full mx-4">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Mã QR Thiết bị</h3>
+            <p className="text-slate-500 mb-6 font-mono bg-slate-100 py-1 rounded inline-block px-3">{qrCodeToPrint}</p>
+            
+            <div className="bg-white p-4 border-2 border-slate-200 rounded-xl inline-block mb-6">
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${qrCodeToPrint}`} 
+                alt={`QR Code for ${qrCodeToPrint}`} 
+                className="w-[200px] h-[200px]"
+              />
+            </div>
+            
+            <p className="text-sm text-slate-500 mb-6">Bạn có thể dùng Mobile App để quét mã QR này và kiểm tra luồng báo hỏng.</p>
+            
+            <button 
+              onClick={() => setQrCodeToPrint(null)}
+              className="btn-primary w-full"
+            >
+              Đóng
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Form */}
       {showFormModal && (
         <EquipmentFormModal
           equipment={editingEquipment}
