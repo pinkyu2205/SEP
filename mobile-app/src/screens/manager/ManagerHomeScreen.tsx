@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { Card } from '../../components/common';
 import { useAuth } from '../../hooks';
@@ -32,6 +33,7 @@ const StatCard: React.FC<StatCardProps> = ({ emoji, label, value, color }) => (
 
 export const ManagerHomeScreen: React.FC = () => {
   const { user } = useAuth();
+  const navigation = useNavigation<any>();
   const stats = MOCK_STATS;
   const occupancyRate = Math.round((stats.occupied / stats.totalRooms) * 100);
 
@@ -74,12 +76,12 @@ export const ManagerHomeScreen: React.FC = () => {
         <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
         <View style={styles.actionsRow}>
           {[
-            { emoji: '⚡', label: 'Chốt điện nước' },
-            { emoji: '🔧', label: 'Sửa chữa' },
-            { emoji: '📊', label: 'Báo cáo' },
-            { emoji: '🏠', label: 'Phòng' },
+            { emoji: '🤝', label: 'Đón khách', route: 'Onboarding' },
+            { emoji: '🔧', label: 'Sửa chữa', route: 'ManagerMaintenance' },
+            { emoji: '📊', label: 'Báo cáo', route: 'ManagerHome' },
+            { emoji: '🏠', label: 'Phòng', route: 'ManagerHome' },
           ].map((a, i) => (
-            <TouchableOpacity key={i} style={styles.actionBtn}>
+            <TouchableOpacity key={i} style={styles.actionBtn} onPress={() => a.route && navigation.navigate(a.route)}>
               <Text style={{ fontSize: 24 }}>{a.emoji}</Text>
               <Text style={styles.actionLabel}>{a.label}</Text>
             </TouchableOpacity>

@@ -1,7 +1,8 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { Text, Platform } from 'react-native';
 import { ManagerHomeScreen } from '../screens/manager/ManagerHomeScreen';
+import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
 import { MaintenanceListScreen } from '../screens/tenant/MaintenanceListScreen';
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
 import { Colors } from '../constants';
@@ -20,8 +21,8 @@ export const ManagerTabNavigator: React.FC = () => {
         tabBarStyle: {
           backgroundColor: Colors.white,
           borderTopColor: Colors.divider,
-          height: 60,
-          paddingBottom: 8,
+          height: Platform.OS === 'ios' ? 80 : 60,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 8,
           paddingTop: 4,
         },
         tabBarActiveTintColor: Colors.primary,
@@ -38,6 +39,14 @@ export const ManagerTabNavigator: React.FC = () => {
         options={{
           tabBarLabel: 'Tổng quan',
           tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="MeterReading"
+        component={MeterReadingScreen}
+        options={{
+          tabBarLabel: 'Chốt số',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="⚡" focused={focused} />,
         }}
       />
       <Tab.Screen
