@@ -10,8 +10,9 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (phone: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (data: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -20,6 +21,7 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   login: async () => {},
   logout: async () => {},
+  updateUser: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -28,7 +30,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Kiểm tra trạng thái đăng nhập khi app khởi động
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -46,39 +47,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ======== MOCK MODE ========
-  // Đặt USE_MOCK = true để xem giao diện mà không cần backend API.
-  // Khi backend sẵn sàng, đổi thành false.
   const USE_MOCK = true;
 
-  const MOCK_TENANT: User = {
-    id: 'mock-1',
-    email: 'tenant@test.com',
-    fullName: 'Nguyễn Văn A',
-    phone: '0901234567',
-    role: 'tenant',
-    roomId: 'r1',
-    createdAt: '2026-01-01',
-  };
-
-  const MOCK_MANAGER: User = {
-    id: 'mock-2',
-    email: 'manager@test.com',
-    fullName: 'Trần Thị B',
-    phone: '0909876543',
-    role: 'manager',
-    createdAt: '2026-01-01',
+  const MOCK_USERS: Record<string, User> = {
+    '0909876543': {
+      id: 'mock-manager',
+      email: 'manager@test.com',
+      fullName: 'Trần Thị B',
+      phone: '0909876543',
+      role: 'manager',
+      createdAt: '2026-01-01',
+    },
+    '0901234567': {
+      id: 'mock-tenant-old',
+      email: 'tenant@test.com',
+      fullName: 'Nguyễn Văn A',
+      phone: '0901234567',
+      role: 'tenant',
+      roomId: 'r1',
+      createdAt: '2026-01-01',
+    },
+    '0888888888': {
+      id: 'mock-tenant-new',
+      email: 'newtenant@test.com',
+      fullName: 'Lê Văn C',
+      phone: '0888888888',
+      role: 'tenant',
+      roomId: 'r2',
+      isFirstLogin: true,
+      createdAt: '2026-05-11',
+    }
   };
   // ============================
 
-  const login = async (email: string, password: string) => {
+  const login = async (phone: string, password: string) => {
     if (USE_MOCK) {
-      // Mock: email chứa "manager" → vào màn Manager, ngược lại → Tenant
-      const mockUser = email.toLowerCase().includes('manager') ? MOCK_MANAGER : MOCK_TENANT;
+      const mockUser = MOCK_USERS[phone];
+      if (!mockUser) {
+        throw new Error('Số điện thoại không tồn tại (Mock: 0909876543, 0901234567, 0888888888)');
+      }
+      if (phone === '0909876543' && password !== 'manager123') throw new Error('Sai mật khẩu!');
+      if (phone === '0901234567' && password !== 'tenant123') throw new Error('Sai mật khẩu!');
+      if (phone === '0888888888' && password !== '123456') throw new Error('Sai mật khẩu!');
+
       setUser(mockUser);
       return;
     }
-    const result = await authService.login({ email, password });
-    setUser(result.user);
+    // TODO: implement actual authService.login(phone, password)
   };
 
   const logout = async () => {
@@ -86,6 +101,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await authService.logout();
     }
     setUser(null);
+  };
+
+  const updateUser = (data: Partial<User>) => {
+    if (user) {
+      setUser({ ...user, ...data });
+    }
   };
 
   return (
@@ -96,6 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         login,
         logout,
+        updateUser,
       }}
     >
       {children}

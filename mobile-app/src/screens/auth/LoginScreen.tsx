@@ -12,21 +12,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { Button, Input } from '../../components/common';
 import { useAuth } from '../../hooks';
+import { useNavigation } from '@react-navigation/native';
 
 export const LoginScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ phone?: string; password?: string }>({});
 
   const validate = (): boolean => {
-    const newErrors: { email?: string; password?: string } = {};
-    if (!email.trim()) {
-      newErrors.email = 'Vui lòng nhập email';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Email không hợp lệ';
+    const newErrors: { phone?: string; password?: string } = {};
+    if (!phone.trim()) {
+      newErrors.phone = 'Vui lòng nhập số điện thoại';
+    } else if (!/^[0-9]{10}$/.test(phone.trim())) {
+      newErrors.phone = 'Số điện thoại không hợp lệ (10 số)';
     }
     if (!password.trim()) {
       newErrors.password = 'Vui lòng nhập mật khẩu';
@@ -42,12 +44,12 @@ export const LoginScreen: React.FC = () => {
 
     setLoading(true);
     try {
-      await login(email, password);
-      // Navigation sẽ tự chuyển sang Home thông qua AuthContext
+      await login(phone.trim(), password);
+      // Navigation sẽ tự chuyển sang Home thông qua RootNavigator (dựa vào cờ isFirstLogin và isAuthenticated)
     } catch (error: any) {
       Alert.alert(
         'Đăng nhập thất bại',
-        error.response?.data?.message || 'Sai email hoặc mật khẩu. Vui lòng thử lại.'
+        error.message || 'Sai số điện thoại hoặc mật khẩu. Vui lòng thử lại.'
       );
     } finally {
       setLoading(false);
@@ -69,18 +71,25 @@ export const LoginScreen: React.FC = () => {
           <Text style={styles.appSlogan}>Quản lý phòng trọ thông minh</Text>
         </View>
 
+        {/* Demo Credentials Info */}
+        <View style={styles.demoBox}>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager:</Text> 0909876543 / manager123</Text>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant cũ:</Text> 0901234567 / tenant123</Text>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant mới:</Text> 0888888888 / 123456</Text>
+        </View>
+
         {/* Login Form */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Đăng nhập</Text>
 
           <Input
-            label="Email"
-            placeholder="example@email.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
+            label="Số điện thoại"
+            placeholder="090..."
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
             autoCapitalize="none"
-            error={errors.email}
+            error={errors.phone}
           />
 
           <Input
@@ -99,7 +108,7 @@ export const LoginScreen: React.FC = () => {
             }
           />
 
-          <TouchableOpacity style={styles.forgotPassword}>
+          <TouchableOpacity style={styles.forgotPassword} onPress={() => navigation.navigate('ForgotPassword')}>
             <Text style={styles.forgotPasswordText}>Quên mật khẩu?</Text>
           </TouchableOpacity>
 
@@ -137,7 +146,7 @@ const styles = StyleSheet.create({
   // Branding
   brandSection: {
     alignItems: 'center',
-    marginBottom: Spacing['3xl'],
+    marginBottom: Spacing.lg,
   },
   logoContainer: {
     width: 80,
@@ -161,6 +170,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255,255,255,0.8)',
     marginTop: Spacing.xs,
+  },
+  // Demo Box
+  demoBox: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing.xl,
+  },
+  demoText: {
+    color: Colors.white,
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 4,
   },
   // Form Card
   formCard: {

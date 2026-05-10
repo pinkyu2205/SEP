@@ -1,12 +1,11 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Image, Modal, Platform
+  TextInput, Alert, Image, Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import * as ImagePicker from 'expo-image-picker';
-import SignatureScreen from 'react-native-signature-canvas';
 
 // ===================== MOCK DATA =====================
 const MOCK_PROPERTIES = [
@@ -20,7 +19,7 @@ const MOCK_PROPERTIES = [
   },
 ];
 
-const STEPS = ['Chọn Phòng', 'Khách Thuê', 'Điện Nước', 'Hiện Trạng', 'Xác Nhận'];
+const STEPS = ['Chọn Phòng', 'Khách Thuê', 'Điện Nước', 'Hiện Trạng', 'Xác Thực'];
 
 export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [step, setStep] = useState(0);
@@ -32,14 +31,12 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [tenantInfo, setTenantInfo] = useState({ fullName: '', phone: '', cccd: '', deposit: '3000000', startDate: '2026-05-10' });
   const [meters, setMeters] = useState({ elec: '', water: '' });
   const [photos, setPhotos] = useState<string[]>([]);
-  const [signature, setSignature] = useState<string | null>(null);
-
-  const ref = useRef<any>();
+  const [otp, setOtp] = useState('');
 
   // Handlers
   const handleNext = () => {
     if (step === 0 && !roomId) return Alert.alert('Lỗi', 'Vui lòng chọn phòng trống.');
-    if (step === 1 && (!tenantInfo.fullName || !tenantInfo.phone)) return Alert.alert('Lỗi', 'Vui lòng nhập tên và SĐT.');
+    if (step === 1 && (!tenantInfo.fullName || !tenantInfo.phone || !tenantInfo.cccd)) return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT và số CCCD.');
     if (step === 2 && (!meters.elec || !meters.water)) return Alert.alert('Lỗi', 'Vui lòng chốt số điện nước đầu kỳ.');
     
     if (step < STEPS.length - 1) setStep(prev => prev + 1);
@@ -60,16 +57,18 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
-  const handleSignatureOK = (sig: string) => {
-    setSignature(sig);
-  };
-
-  const submitContract = () => {
-    if (!signature) return Alert.alert('Lỗi', 'Khách thuê cần ký tên xác nhận.');
+  const verifyOTPAndSubmit = () => {
+    if (otp !== '123456') {
+      return Alert.alert('Lỗi', 'Mã OTP không hợp lệ. Vui lòng thử lại (Mock: 123456).');
+    }
     
-    Alert.alert('Thành công 🎉', `Đã tạo hợp đồng cho ${tenantInfo.fullName} tại ${MOCK_PROPERTIES[0].rooms.find(r => r.id === roomId)?.name}.`, [
-      { text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }
-    ]);
+    Alert.alert(
+      'Thành công 🎉', 
+      `Đã tạo tài khoản cho ${tenantInfo.fullName}. Mật khẩu mặc định là 123456 đã được gửi SMS đến SĐT ${tenantInfo.phone}.`, 
+      [
+        { text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }
+      ]
+    );
   };
 
   // Render Steps
@@ -112,8 +111,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         <TextInput style={styles.input} value={tenantInfo.phone} onChangeText={(t) => setTenantInfo({...tenantInfo, phone: t})} keyboardType="phone-pad" placeholder="090..." />
       </View>
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Căn cước công dân</Text>
-        <TextInput style={styles.input} value={tenantInfo.cccd} onChangeText={(t) => setTenantInfo({...tenantInfo, cccd: t})} keyboardType="number-pad" placeholder="Nhập CCCD..." />
+        <Text style={styles.label}>Căn cước công dân *</Text>
+        <TextInput style={styles.input} value={tenantInfo.cccd} onChangeText={(t) => setTenantInfo({...tenantInfo, cccd: t})} keyboardType="number-pad" placeholder="Nhập số CCCD..." />
       </View>
       
       <View style={styles.row}>
@@ -170,40 +169,37 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
   const renderStep4 = () => (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Xác nhận & Khởi tạo</Text>
+      <Text style={styles.sectionTitle}>Xác nhận thông tin</Text>
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLine}>Khách thuê: {tenantInfo.fullName}</Text>
         <Text style={styles.summaryLine}>SĐT: {tenantInfo.phone}</Text>
         <Text style={styles.summaryLine}>Điện đầu kỳ: {meters.elec} kWh</Text>
         <Text style={styles.summaryLine}>Nước đầu kỳ: {meters.water} m³</Text>
-        <Text style={styles.summaryLine}>Tiền cọc: {parseInt(tenantInfo.deposit).toLocaleString('vi-VN')} đ</Text>
+        <Text style={styles.summaryLine}>Tiền cọc: {parseInt(tenantInfo.deposit || '0').toLocaleString('vi-VN')} đ</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Chữ ký khách thuê *</Text>
-      <View style={styles.signatureContainer}>
-        {signature ? (
-          <Image source={{ uri: signature }} style={{ width: '100%', height: 180 }} resizeMode="contain" />
-        ) : (
-          <SignatureScreen
-            ref={ref}
-            onOK={handleSignatureOK}
-            webStyle={`.m-signature-pad {box-shadow: none; border: none;} .m-signature-pad--body {border: none;} .m-signature-pad--footer {display: none; margin: 0;}`}
-          />
-        )}
+      <Text style={styles.sectionTitle}>Xác thực OTP & Khởi tạo</Text>
+      <Text style={styles.hint}>
+        Hệ thống đã gửi một mã OTP gồm 6 chữ số qua SMS đến SĐT {tenantInfo.phone}.
+        Vui lòng đọc mã OTP để hoàn tất.
+      </Text>
+      
+      <View style={[styles.inputGroup, { marginTop: Spacing.sm }]}>
+        <Text style={styles.label}>Mã OTP (Nhập 123456 để test)</Text>
+        <TextInput 
+          style={[styles.input, { fontSize: 24, textAlign: 'center', letterSpacing: 5 }]} 
+          value={otp} 
+          onChangeText={setOtp} 
+          keyboardType="number-pad" 
+          maxLength={6}
+          placeholder="------" 
+        />
       </View>
-      {!signature && (
-        <View style={styles.sigActions}>
-          <TouchableOpacity style={styles.sigBtnClear} onPress={() => ref.current?.clearSignature()}><Text style={styles.sigBtnTextClear}>Xóa chữ ký</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.sigBtnSave} onPress={() => ref.current?.readSignature()}><Text style={styles.sigBtnText}>Lưu chữ ký</Text></TouchableOpacity>
-        </View>
-      )}
-      {signature && (
-        <TouchableOpacity style={styles.sigBtnClear} onPress={() => setSignature(null)}><Text style={styles.sigBtnTextClear}>Ký lại</Text></TouchableOpacity>
-      )}
 
-      <TouchableOpacity style={[styles.submitBtn, !signature && styles.submitBtnDisabled]} onPress={submitContract} disabled={!signature}>
-        <Text style={styles.submitBtnText}>Khởi tạo Hợp đồng</Text>
+      <TouchableOpacity style={[styles.submitBtn, { marginTop: Spacing.xl, backgroundColor: otp.length === 6 ? Colors.success : Colors.divider }]} onPress={verifyOTPAndSubmit} disabled={otp.length !== 6}>
+        <Text style={[styles.submitBtnText, { color: otp.length === 6 ? Colors.white : Colors.textMuted }]}>Hoàn tất Khởi tạo</Text>
       </TouchableOpacity>
+      
       <View style={{height: 100}} />
     </ScrollView>
   );
@@ -300,9 +296,8 @@ const styles = StyleSheet.create({
   sigBtnSave: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md },
   sigBtnText: { color: Colors.white, fontWeight: '600' },
 
-  submitBtn: { backgroundColor: Colors.success, padding: Spacing.lg, borderRadius: BorderRadius.lg, alignItems: 'center', marginTop: Spacing.lg },
-  submitBtnDisabled: { opacity: 0.5 },
-  submitBtnText: { color: Colors.white, fontSize: 18, fontWeight: '700' },
+  submitBtn: { backgroundColor: Colors.primary, padding: Spacing.lg, borderRadius: BorderRadius.lg, alignItems: 'center', marginTop: Spacing.lg },
+  submitBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
 
   footer: { padding: Spacing.lg, backgroundColor: Colors.white, borderTopWidth: 1, borderColor: Colors.divider },
   nextBtn: { backgroundColor: Colors.primary, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center' },

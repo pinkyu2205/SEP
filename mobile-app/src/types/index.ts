@@ -11,6 +11,7 @@ export interface User {
   avatar?: string;
   role: UserRole;
   roomId?: string; // Chỉ có nếu là Tenant
+  isFirstLogin?: boolean;
   createdAt: string;
 }
 
