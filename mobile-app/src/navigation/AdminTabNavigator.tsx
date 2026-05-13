@@ -1,9 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, Platform } from 'react-native';
-import { ManagerHomeScreen } from '../screens/manager/ManagerHomeScreen';
-import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
-import { TenantListScreen } from '../screens/manager/TenantListScreen';
+import { AdminHomeScreen } from '../screens/admin/AdminHomeScreen';
 import { ContractListScreen } from '../screens/shared/ContractListScreen';
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
 import { Colors } from '../constants';
@@ -14,12 +12,12 @@ const TabIcon = ({ emoji, focused }: { emoji: string; focused: boolean }) => (
   <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
 );
 
-// Wrapper to pass filterType for Manager contracts
-const ManagerContractScreen = (props: any) => (
-  <ContractListScreen {...props} filterType="manager_tenant" />
+// Wrapper to filter only Admin↔Manager contracts
+const AdminContractScreen = (props: any) => (
+  <ContractListScreen {...props} filterType="admin_manager" />
 );
 
-export const ManagerTabNavigator: React.FC = () => {
+export const AdminTabNavigator: React.FC = () => {
   return (
     <Tab.Navigator
       screenOptions={{
@@ -40,39 +38,23 @@ export const ManagerTabNavigator: React.FC = () => {
       }}
     >
       <Tab.Screen
-        name="ManagerHome"
-        component={ManagerHomeScreen}
+        name="AdminHome"
+        component={AdminHomeScreen}
         options={{
           tabBarLabel: 'Tổng quan',
           tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} />,
         }}
       />
       <Tab.Screen
-        name="MeterReading"
-        component={MeterReadingScreen}
-        options={{
-          tabBarLabel: 'Chốt số',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="⚡" focused={focused} />,
-        }}
-      />
-      <Tab.Screen
-        name="TenantList"
-        component={TenantListScreen}
-        options={{
-          tabBarLabel: 'Khách thuê',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} />,
-        }}
-      />
-      <Tab.Screen
-        name="ManagerContracts"
-        component={ManagerContractScreen}
+        name="AdminContracts"
+        component={AdminContractScreen}
         options={{
           tabBarLabel: 'Hợp đồng',
           tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} />,
         }}
       />
       <Tab.Screen
-        name="ManagerProfile"
+        name="AdminProfile"
         component={ProfileScreen}
         options={{
           tabBarLabel: 'Tài khoản',

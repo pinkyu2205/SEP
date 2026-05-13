@@ -19,9 +19,12 @@ const MOCK_PROPERTIES = [
   },
 ];
 
-const STEPS = ['Chọn Phòng', 'Khách Thuê', 'Điện Nước', 'Hiện Trạng', 'Xác Thực'];
+const STEPS_MANAGER = ['Chọn Phòng', 'Khách Thuê', 'Điện Nước', 'Hiện Trạng', 'Xác Thực'];
+const STEPS_ADMIN = ['Chọn Nhà', 'Thông Tin', 'Hiện Trạng', 'Xác Thực'];
 
-export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
+export const OnboardingScreen: React.FC<any> = ({ navigation, route }) => {
+  const isAdmin = route?.name === 'AdminOnboarding';
+  const STEPS = isAdmin ? STEPS_ADMIN : STEPS_MANAGER;
   const [step, setStep] = useState(0);
 
   // Form Data
@@ -35,10 +38,14 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
   // Handlers
   const handleNext = () => {
-    if (step === 0 && !roomId) return Alert.alert('Lỗi', 'Vui lòng chọn phòng trống.');
-    if (step === 1 && (!tenantInfo.fullName || !tenantInfo.phone || !tenantInfo.cccd)) return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT và số CCCD.');
-    if (step === 2 && (!meters.elec || !meters.water)) return Alert.alert('Lỗi', 'Vui lòng chốt số điện nước đầu kỳ.');
-    
+    if (isAdmin) {
+      if (step === 0 && !propertyId) return Alert.alert('Lỗi', 'Vui lòng chọn nhà.');
+      if (step === 1 && (!tenantInfo.fullName || !tenantInfo.phone || !tenantInfo.cccd)) return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT và số CCCD.');
+    } else {
+      if (step === 0 && !roomId) return Alert.alert('Lỗi', 'Vui lòng chọn phòng trống.');
+      if (step === 1 && (!tenantInfo.fullName || !tenantInfo.phone || !tenantInfo.cccd)) return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT và số CCCD.');
+      if (step === 2 && (!meters.elec || !meters.water)) return Alert.alert('Lỗi', 'Vui lòng chốt số điện nước đầu kỳ.');
+    }
     if (step < STEPS.length - 1) setStep(prev => prev + 1);
   };
 
@@ -66,7 +73,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       'Thành công 🎉', 
       `Đã tạo tài khoản cho ${tenantInfo.fullName}. Mật khẩu mặc định là 123456 đã được gửi SMS đến SĐT ${tenantInfo.phone}.`, 
       [
-        { text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }
+        { text: 'Hoàn tất', onPress: () => navigation.navigate(isAdmin ? 'AdminTabs' : 'ManagerTabs') }
       ]
     );
   };
@@ -74,7 +81,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   // Render Steps
   const renderStep0 = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.sectionTitle}>Tòa nhà</Text>
+      <Text style={styles.sectionTitle}>{isAdmin ? 'Chọn nhà cho thuê' : 'Tòa nhà'}</Text>
       <View style={styles.row}>
         {MOCK_PROPERTIES.map(p => (
           <TouchableOpacity key={p.id} style={[styles.chip, propertyId === p.id && styles.chipActive]} onPress={() => setPropertyId(p.id)}>
@@ -83,7 +90,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         ))}
       </View>
 
-      {propertyId && (
+      {propertyId && !isAdmin && (
         <>
           <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Phòng trống</Text>
           <View style={styles.roomGrid}>
@@ -209,7 +216,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backBtn}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
-        <Text style={styles.title}>Đón khách mới</Text>
+        <Text style={styles.title}>{isAdmin ? 'Tiếp khách' : 'Đón khách mới'}</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -223,15 +230,26 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
       {/* Body */}
       <View style={styles.body}>
-        {step === 0 && renderStep0()}
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-        {step === 4 && renderStep4()}
+        {isAdmin ? (
+          <>
+            {step === 0 && renderStep0()}
+            {step === 1 && renderStep1()}
+            {step === 2 && renderStep3()}
+            {step === 3 && renderStep4()}
+          </>
+        ) : (
+          <>
+            {step === 0 && renderStep0()}
+            {step === 1 && renderStep1()}
+            {step === 2 && renderStep2()}
+            {step === 3 && renderStep3()}
+            {step === 4 && renderStep4()}
+          </>
+        )}
       </View>
 
       {/* Footer / Next Button */}
-      {step < 4 && (
+      {step < STEPS.length - 1 && (
         <View style={styles.footer}>
           <TouchableOpacity style={styles.nextBtn} onPress={handleNext}>
             <Text style={styles.nextBtnText}>Tiếp tục →</Text>

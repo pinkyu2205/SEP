@@ -32,9 +32,9 @@ export const PropertyList = () => {
         name: data.name || '',
         address: data.address || '',
         totalFloors: data.totalFloors || 1,
+        totalRooms: data.totalRooms || 4,
         monthlyLeaseCost: data.monthlyLeaseCost || 0,
-        managerName: data.managerName || '',
-        managerPhone: data.managerPhone || '',
+        deposit: data.deposit || 0,
         rooms: [],
         createdAt: new Date().toISOString().split('T')[0],
       };
@@ -166,11 +166,11 @@ export const PropertyList = () => {
                 <div className="flex items-center justify-between text-sm text-slate-500 pt-2 border-t border-slate-100">
                   <span className="flex items-center gap-1.5">
                     <User className="w-4 h-4" />
-                    {property.managerName}
+                    {property.managerName || 'Chưa có Manager'}
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <Phone className="w-4 h-4" />
-                    {property.managerPhone}
+                    <Home className="w-4 h-4" />
+                    {property.totalRooms} phòng (dự kiến)
                   </span>
                 </div>
               </div>

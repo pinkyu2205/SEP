@@ -8,7 +8,9 @@ import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { TutorialScreen } from '../screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
+import { AdminTabNavigator } from './AdminTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
+import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
 
@@ -38,10 +40,16 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
             <Stack.Screen name="Tutorial" component={TutorialScreen} />
           </Stack.Group>
-        ) : user?.role === 'manager' || user?.role === 'admin' ? (
+        ) : user?.role === 'admin' ? (
+          <Stack.Group>
+            <Stack.Screen name="AdminTabs" component={AdminTabNavigator} />
+            <Stack.Screen name="AdminOnboarding" component={OnboardingScreen} />
+          </Stack.Group>
+        ) : user?.role === 'manager' ? (
           <Stack.Group>
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="RoomManage" component={RoomManageScreen} />
           </Stack.Group>
         ) : (
           <Stack.Screen name="TenantTabs" component={TenantTabNavigator} />

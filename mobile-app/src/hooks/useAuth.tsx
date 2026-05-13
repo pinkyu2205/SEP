@@ -50,6 +50,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const USE_MOCK = true;
 
   const MOCK_USERS: Record<string, User> = {
+    '0999999999': {
+      id: 'mock-admin',
+      email: 'admin@roomrent.com',
+      fullName: 'Chủ tịch A',
+      phone: '0999999999',
+      role: 'admin',
+      createdAt: '2025-01-01',
+    },
     '0909876543': {
       id: 'mock-manager',
       email: 'manager@test.com',
@@ -84,8 +92,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (USE_MOCK) {
       const mockUser = MOCK_USERS[phone];
       if (!mockUser) {
-        throw new Error('Số điện thoại không tồn tại (Mock: 0909876543, 0901234567, 0888888888)');
+        throw new Error('Số điện thoại không tồn tại');
       }
+      if (phone === '0999999999' && password !== 'admin123') throw new Error('Sai mật khẩu!');
       if (phone === '0909876543' && password !== 'manager123') throw new Error('Sai mật khẩu!');
       if (phone === '0901234567' && password !== 'tenant123') throw new Error('Sai mật khẩu!');
       if (phone === '0888888888' && password !== '123456') throw new Error('Sai mật khẩu!');

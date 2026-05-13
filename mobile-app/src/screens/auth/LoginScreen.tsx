@@ -73,6 +73,7 @@ export const LoginScreen: React.FC = () => {
 
         {/* Demo Credentials Info */}
         <View style={styles.demoBox}>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Admin:</Text> 0999999999 / admin123</Text>
           <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager:</Text> 0909876543 / manager123</Text>
           <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant cũ:</Text> 0901234567 / tenant123</Text>
           <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant mới:</Text> 0888888888 / 123456</Text>

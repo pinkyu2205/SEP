@@ -4,7 +4,7 @@ import { Dashboard } from './pages/dashboard/Dashboard';
 import { PropertyList } from './pages/properties/PropertyList';
 import { PropertyDetail } from './pages/properties/PropertyDetail';
 import { TenantList } from './pages/tenants/TenantList';
-import { ManagerList } from './pages/managers/ManagerList';
+import { ManagerList } from './pages/managers/ManagerList'; // Kept but not in sidebar
 import { ContractList } from './pages/contracts/ContractList';
 import { EquipmentList } from './pages/equipments/EquipmentList';
 
@@ -22,7 +22,7 @@ function App() {
           {/* Quản lý Khách thuê */}
           <Route path="/tenants" element={<TenantList />} />
           
-          {/* Quản lý Nhân sự */}
+          {/* Quản lý cho thuê (Managers đang thuê nhà - được truy cập từ sidebar nhưng hiển thị khác) */}
           <Route path="/managers" element={<ManagerList />} />
 
           {/* Quản lý Hợp đồng */}

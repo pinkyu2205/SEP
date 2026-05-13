@@ -3,7 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, Platform } from 'react-native';
 import { TenantHomeScreen } from '../screens/tenant/TenantHomeScreen';
 import { InvoiceListScreen } from '../screens/tenant/InvoiceListScreen';
-import { MaintenanceListScreen } from '../screens/tenant/MaintenanceListScreen';
+import { ContractListScreen } from '../screens/shared/ContractListScreen';
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
 import { ScanScreen } from '../screens/tenant/ScanScreen';
 import { Colors } from '../constants';
@@ -20,6 +20,11 @@ const ScanButton = () => (
       <Text style={{ fontSize: 24 }}>📸</Text>
     </View>
   </View>
+);
+
+// Wrapper to filter only Manager↔Tenant contracts for tenant view
+const TenantContractScreen = (props: any) => (
+  <ContractListScreen {...props} filterType="manager_tenant" />
 );
 
 export const TenantTabNavigator: React.FC = () => {
@@ -67,11 +72,11 @@ export const TenantTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="MaintenanceList"
-        component={MaintenanceListScreen}
+        name="TenantContracts"
+        component={TenantContractScreen}
         options={{
-          tabBarLabel: 'Sửa chữa',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} />,
+          tabBarLabel: 'Hợp đồng',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} />,
         }}
       />
       <Tab.Screen

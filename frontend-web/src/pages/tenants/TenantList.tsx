@@ -1,156 +1,43 @@
 import { useState } from 'react';
-import { Search, Plus, User, Phone, CreditCard, ChevronRight, ChevronDown, DoorOpen, Building2, MapPin } from 'lucide-react';
-import type { Tenant, TenantStatus } from '../../types';
-import { MOCK_TENANTS, MOCK_PROPERTIES } from '../../utils/mockData';
-import { tenantStatusMap } from '../../utils';
-import { TenantFormModal } from './TenantFormModal';
-import { TenantDetailModal } from './TenantDetailModal';
+import { Search, ChevronRight, Building2, MapPin, ChevronDown, User, Phone } from 'lucide-react';
+import type { AppUser } from '../../types';
+import { MOCK_USERS, MOCK_CONTRACTS, MOCK_PROPERTIES } from '../../utils/mockData';
+
+const statusMap: Record<string, { label: string; color: string; dot: string }> = {
+  active: { label: 'Đang hoạt động', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
+  pending_activation: { label: 'Chờ kích hoạt', color: 'bg-amber-50 text-amber-600', dot: 'bg-amber-500' },
+  moved_out: { label: 'Đã rời', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
+};
 
 export const TenantList = () => {
-  const [tenants, setTenants] = useState<Tenant[]>(MOCK_TENANTS);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Tabs: 'assigned' (Khách đang thuê) | 'unassigned' (Khách chờ phòng/đã rời)
-  const [activeTab, setActiveTab] = useState<'assigned' | 'unassigned'>('assigned');
-  
-  // Accordion state cho Tab 1
+  const [activeTab, setActiveTab] = useState<'managers' | 'tenants'>('managers');
   const [expandedProperty, setExpandedProperty] = useState<string | null>(null);
 
-  const [showFormModal, setShowFormModal] = useState(false);
-  const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
-  const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
+  const managers = MOCK_USERS.filter(u => u.role === 'manager');
+  const tenants = MOCK_USERS.filter(u => u.role === 'tenant');
 
-  // Phân loại khách
-  const assignedTenants = tenants.filter(t => t.propertyId && t.status !== 'moved_out');
-  const unassignedTenants = tenants.filter(t => !t.propertyId || t.status === 'moved_out');
+  const filterBySearch = (u: AppUser) =>
+    u.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.phone.includes(searchTerm) ||
+    u.cccd.includes(searchTerm);
 
-  // Lọc theo search term
-  const filterBySearch = (t: Tenant) => 
-    t.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.phone.includes(searchTerm) ||
-    t.cccd.includes(searchTerm);
+  // Get contracts for a manager
+  const getManagerContracts = (managerId: string) =>
+    MOCK_CONTRACTS.filter(c => c.type === 'admin_manager' && c.lesseeId === managerId);
 
-  const handleSave = (data: Partial<Tenant>) => {
-    if (editingTenant) {
-      setTenants((prev) => prev.map((t) => (t.id === editingTenant.id ? { ...t, ...data } : t)));
-    } else {
-      const newTenant: Tenant = {
-        id: `t-${Date.now()}`,
-        fullName: data.fullName || '',
-        phone: data.phone || '',
-        cccd: data.cccd || '',
-        email: data.email || '',
-        propertyId: data.propertyId || '',
-        propertyName: data.propertyName || '',
-        roomId: data.roomId || '',
-        roomCode: data.roomCode || '',
-        moveInDate: data.moveInDate || new Date().toISOString().split('T')[0],
-        status: data.propertyId ? 'pending_activation' : 'pending_activation', // Chưa gán phòng cũng chờ
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setTenants((prev) => [newTenant, ...prev]);
-    }
-    setShowFormModal(false);
-    setEditingTenant(null);
-  };
-
-  // Render Table dùng chung cho cả phần Accordion và Tab 2
-  const renderTenantTable = (data: Tenant[], showPropertyCol: boolean = false) => {
-    const displayData = data.filter(filterBySearch);
-
-    if (displayData.length === 0) {
-      return (
-        <div className="py-8 text-center text-slate-500">
-          Không có khách thuê nào phù hợp.
-        </div>
-      );
-    }
-
-    return (
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm text-slate-600">
-          <thead className="bg-slate-50 text-slate-500 uppercase font-medium border-b border-slate-100">
-            <tr>
-              <th className="px-4 py-3">Khách thuê</th>
-              <th className="px-4 py-3">Liên hệ</th>
-              {showPropertyCol && <th className="px-4 py-3">Nhà / Phòng</th>}
-              {!showPropertyCol && <th className="px-4 py-3">Phòng</th>}
-              <th className="px-4 py-3">Trạng thái</th>
-              <th className="px-4 py-3 text-right">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {displayData.map((tenant) => {
-              const statusInfo = tenantStatusMap[tenant.status];
-              return (
-                <tr key={tenant.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-slate-900">{tenant.fullName}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p>{tenant.phone}</p>
-                  </td>
-                  {showPropertyCol && (
-                    <td className="px-4 py-3">
-                      {tenant.propertyId ? (
-                        <>
-                          <p className="font-medium text-slate-900">{tenant.propertyName}</p>
-                          <p className="text-xs text-slate-500">P.{tenant.roomCode}</p>
-                        </>
-                      ) : (
-                        <span className="text-slate-400 italic">Chưa có</span>
-                      )}
-                    </td>
-                  )}
-                  {!showPropertyCol && (
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-primary-600">{tenant.roomCode}</span>
-                    </td>
-                  )}
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${statusInfo.color}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
-                      {statusInfo.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); setSelectedTenant(tenant); }}
-                      className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
-                      title="Xem chi tiết"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  // Get tenants for a property (via manager_tenant contracts)
+  const getTenantsForProperty = (propertyId: string) =>
+    MOCK_CONTRACTS.filter(c => c.type === 'manager_tenant' && c.propertyId === propertyId);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Quản lý Khách thuê</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Tổng số: <span className="font-semibold text-slate-900">{tenants.length}</span> khách thuê trên toàn hệ thống
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingTenant(null);
-            setShowFormModal(true);
-          }}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Thêm khách mới
-        </button>
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Quản lý cho thuê</h1>
+        <p className="text-sm text-slate-500 mt-1">
+          {managers.length} Manager · {tenants.length} Tenant trên toàn hệ thống
+        </p>
       </div>
 
       {/* Toolbar */}
@@ -158,24 +45,20 @@ export const TenantList = () => {
         {/* Tabs */}
         <div className="flex p-1 bg-slate-100 rounded-lg w-fit">
           <button
-            onClick={() => setActiveTab('assigned')}
+            onClick={() => setActiveTab('managers')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
-              activeTab === 'assigned' 
-                ? 'bg-white text-primary-600 shadow-sm' 
-                : 'text-slate-500 hover:text-slate-700'
+              activeTab === 'managers' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
-            Khách đang thuê ({assignedTenants.length})
+            Manager ({managers.length})
           </button>
           <button
-            onClick={() => setActiveTab('unassigned')}
+            onClick={() => setActiveTab('tenants')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
-              activeTab === 'unassigned' 
-                ? 'bg-white text-primary-600 shadow-sm' 
-                : 'text-slate-500 hover:text-slate-700'
+              activeTab === 'tenants' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
-            Khách chờ / Đã rời ({unassignedTenants.length})
+            Tenant ({tenants.length})
           </button>
         </div>
 
@@ -192,43 +75,36 @@ export const TenantList = () => {
         </div>
       </div>
 
-      {/* Main Content Area */}
-      {activeTab === 'assigned' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {MOCK_PROPERTIES.map((property) => {
-            const tenantsInProperty = assignedTenants.filter(t => t.propertyId === property.id);
-            const isExpanded = expandedProperty === property.id;
-            
-            // Nếu đang search và không có ai match trong nhà này, có thể ẩn card đi
-            if (searchTerm && tenantsInProperty.filter(filterBySearch).length === 0) return null;
+      {/* Manager Tab */}
+      {activeTab === 'managers' ? (
+        <div className="space-y-4">
+          {managers.filter(filterBySearch).map(manager => {
+            const contracts = getManagerContracts(manager.id);
+            const isExpanded = expandedProperty === manager.id;
 
             return (
-              <div 
-                key={property.id} 
-                className={`card transition-all duration-300 ${isExpanded ? 'lg:col-span-2 shadow-md ring-1 ring-primary-100' : 'hover:border-primary-200'}`}
-              >
-                {/* Card Header (Clickable) */}
-                <div 
+              <div key={manager.id} className={`card transition-all duration-300 ${isExpanded ? 'shadow-md ring-1 ring-primary-100' : 'hover:border-primary-200'}`}>
+                <div
                   className={`p-5 cursor-pointer flex items-center justify-between ${isExpanded ? 'bg-slate-50 border-b border-slate-100' : ''}`}
-                  onClick={() => setExpandedProperty(isExpanded ? null : property.id)}
+                  onClick={() => setExpandedProperty(isExpanded ? null : manager.id)}
                 >
                   <div className="flex items-center gap-4">
-                    <div className="p-3 bg-primary-50 rounded-xl">
-                      <Building2 className="w-6 h-6 text-primary-600" />
+                    <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center text-primary-600 font-bold text-lg">
+                      {manager.fullName.charAt(0)}
                     </div>
                     <div>
-                      <h3 className="font-bold text-slate-900 text-lg">{property.name}</h3>
-                      <p className="text-sm text-slate-500 flex items-center gap-1 mt-0.5">
-                        <MapPin className="w-3.5 h-3.5" />
-                        {property.address}
+                      <h3 className="font-bold text-slate-900 text-lg">{manager.fullName}</h3>
+                      <p className="text-sm text-slate-500 flex items-center gap-3">
+                        <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" /> {manager.phone}</span>
+                        <span>CCCD: {manager.cccd}</span>
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-4">
                     <div className="text-right hidden sm:block">
-                      <p className="text-sm font-semibold text-slate-900">{tenantsInProperty.length} khách</p>
-                      <p className="text-xs text-slate-500">Đang lưu trú</p>
+                      <p className="text-sm font-semibold text-slate-900">{contracts.length} nhà</p>
+                      <p className="text-xs text-slate-500">Đang thuê</p>
                     </div>
                     <div className={`p-2 rounded-full transition-transform duration-200 ${isExpanded ? 'bg-primary-100 text-primary-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
                       <ChevronDown className="w-5 h-5" />
@@ -236,52 +112,97 @@ export const TenantList = () => {
                   </div>
                 </div>
 
-                {/* Expanded Accordion Content */}
+                {/* Expanded: Show properties & tenants */}
                 {isExpanded && (
-                  <div className="p-0 animate-in slide-in-from-top-2 duration-200">
-                    {renderTenantTable(tenantsInProperty, false)}
+                  <div className="p-5 space-y-4">
+                    {contracts.map(contract => {
+                      const tenantContracts = getTenantsForProperty(contract.propertyId);
+                      return (
+                        <div key={contract.id} className="bg-slate-50 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="w-5 h-5 text-primary-500" />
+                              <span className="font-bold text-slate-900">{contract.propertyName}</span>
+                            </div>
+                            <span className="text-xs text-slate-500">{contract.code}</span>
+                          </div>
+                          <div className="text-sm text-slate-600 mb-3">
+                            <p>Tiền thuê: <span className="font-semibold text-primary-600">{contract.rentAmount.toLocaleString('vi-VN')}đ/tháng</span></p>
+                            <p>Thời hạn: {contract.startDate} → {contract.endDate}</p>
+                            <p>Tài sản bàn giao: {contract.equipmentList.length} món</p>
+                          </div>
+
+                          {tenantContracts.length > 0 && (
+                            <div className="border-t border-slate-200 pt-3">
+                              <p className="text-xs font-medium text-slate-500 uppercase mb-2">Khách thuê phòng ({tenantContracts.length})</p>
+                              <div className="space-y-2">
+                                {tenantContracts.map(tc => (
+                                  <div key={tc.id} className="flex items-center justify-between bg-white rounded-lg p-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <User className="w-4 h-4 text-slate-400" />
+                                      <span className="font-medium text-slate-900">{tc.lesseeName}</span>
+                                      <span className="text-xs text-slate-500">· {tc.roomCode}</span>
+                                    </div>
+                                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusMap[tc.status].color}`}>
+                                      {statusMap[tc.status].label}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
             );
           })}
+
+          {managers.filter(filterBySearch).length === 0 && (
+            <div className="text-center py-16">
+              <User className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500">Không tìm thấy Manager nào.</p>
+            </div>
+          )}
         </div>
       ) : (
+        /* Tenant Tab */
         <div className="card">
-          <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-slate-900">Danh sách chờ gán phòng / Đã rời</h3>
-              <p className="text-sm text-slate-500 mt-1">
-                Các khách hàng có tài khoản nhưng chưa (hoặc không còn) thuê phòng.
-              </p>
-            </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-600">
+              <thead className="bg-slate-50 text-slate-500 uppercase font-medium border-b border-slate-100">
+                <tr>
+                  <th className="px-4 py-3">Khách thuê</th>
+                  <th className="px-4 py-3">Số điện thoại</th>
+                  <th className="px-4 py-3">CCCD</th>
+                  <th className="px-4 py-3">Trạng thái</th>
+                  <th className="px-4 py-3">Ngày tạo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {tenants.filter(filterBySearch).map(tenant => {
+                  const st = statusMap[tenant.status];
+                  return (
+                    <tr key={tenant.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3 font-semibold text-slate-900">{tenant.fullName}</td>
+                      <td className="px-4 py-3">{tenant.phone}</td>
+                      <td className="px-4 py-3 text-slate-500">{tenant.cccd}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${st.color}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                          {st.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{tenant.createdAt}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          {renderTenantTable(unassignedTenants, true)}
         </div>
-      )}
-
-      {/* Modals */}
-      {showFormModal && (
-        <TenantFormModal
-          tenant={editingTenant}
-          onSave={handleSave}
-          onClose={() => {
-            setShowFormModal(false);
-            setEditingTenant(null);
-          }}
-        />
-      )}
-
-      {selectedTenant && (
-        <TenantDetailModal
-          tenant={selectedTenant}
-          onClose={() => setSelectedTenant(null)}
-          onEdit={() => {
-            setEditingTenant(selectedTenant);
-            setShowFormModal(true);
-            setSelectedTenant(null);
-          }}
-        />
       )}
     </div>
   );

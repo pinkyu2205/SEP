@@ -79,7 +79,7 @@ export const ManagerHomeScreen: React.FC = () => {
             { emoji: '🤝', label: 'Đón khách', route: 'Onboarding' },
             { emoji: '🔧', label: 'Sửa chữa', route: 'ManagerMaintenance' },
             { emoji: '📊', label: 'Báo cáo', route: 'ManagerHome' },
-            { emoji: '🏠', label: 'Phòng', route: 'ManagerHome' },
+            { emoji: '🏠', label: 'QL Phòng', route: 'RoomManage' },
           ].map((a, i) => (
             <TouchableOpacity key={i} style={styles.actionBtn} onPress={() => a.route && navigation.navigate(a.route)}>
               <Text style={{ fontSize: 24 }}>{a.emoji}</Text>

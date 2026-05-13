@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, CalendarClock } from 'lucide-react';
 import type { Contract } from '../../types';
-import { MOCK_TENANTS, MOCK_PROPERTIES } from '../../utils/mockData';
+import { MOCK_USERS, MOCK_PROPERTIES } from '../../utils/mockData';
 
 interface Props {
   contract: Contract | null;
@@ -12,7 +12,7 @@ interface Props {
 
 export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) => {
   const [form, setForm] = useState({
-    tenantId: '',
+    lesseeId: '',
     propertyId: '',
     roomId: '',
     startDate: new Date().toISOString().split('T')[0],
@@ -22,18 +22,16 @@ export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) =>
     notes: '',
   });
 
-  // Filter out tenants that already have active contracts?
-  // For simplicity, just list pending/active ones without contracts, or just everyone for mock.
-  const eligibleTenants = MOCK_TENANTS; 
+  const eligibleUsers = MOCK_USERS;
   const selectedProperty = MOCK_PROPERTIES.find(p => p.id === form.propertyId);
   const availableRooms = selectedProperty?.rooms.filter(r => r.status === 'available' || r.id === form.roomId) || [];
 
   useEffect(() => {
     if (contract) {
       setForm({
-        tenantId: contract.tenantId,
+        lesseeId: contract.lesseeId,
         propertyId: contract.propertyId,
-        roomId: contract.roomId,
+        roomId: contract.roomId || '',
         startDate: contract.startDate,
         endDate: contract.endDate,
         depositAmount: contract.depositAmount,
@@ -70,15 +68,21 @@ export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) =>
     e.preventDefault();
     
     // Fill in display names
-    const tName = MOCK_TENANTS.find(t => t.id === form.tenantId)?.fullName || '';
+    const lessee = MOCK_USERS.find(u => u.id === form.lesseeId);
     const pName = MOCK_PROPERTIES.find(p => p.id === form.propertyId)?.name || '';
     const rCode = availableRooms.find(r => r.id === form.roomId)?.code || '';
 
     onSave({
       ...form,
-      tenantName: tName,
+      lessorId: 'admin',
+      lessorName: 'Admin',
+      lesseeId: form.lesseeId,
+      lesseeName: lessee?.fullName || '',
+      lesseeCccd: lessee?.cccd,
+      lesseePhone: lessee?.phone,
       propertyName: pName,
-      roomCode: rCode,
+      roomCode: rCode || undefined,
+      equipmentList: [],
     });
   };
 
@@ -100,13 +104,13 @@ export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) =>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Thông tin Khách & Phòng (Chỉ hiển thị hoặc disabled khi gia hạn) */}
+          {/* Thông tin Bên thuê & Nhà */}
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Khách thuê <span className="text-rose-500">*</span></label>
-              <select name="tenantId" value={form.tenantId} onChange={handleChange} className="input-field" required disabled={isExtension}>
-                <option value="">-- Chọn khách thuê --</option>
-                {eligibleTenants.map(t => <option key={t.id} value={t.id}>{t.fullName} ({t.phone})</option>)}
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Bên thuê <span className="text-rose-500">*</span></label>
+              <select name="lesseeId" value={form.lesseeId} onChange={handleChange} className="input-field" required disabled={isExtension}>
+                <option value="">-- Chọn người thuê --</option>
+                {eligibleUsers.map(u => <option key={u.id} value={u.id}>{u.fullName} ({u.phone}) - {u.role === 'manager' ? 'Manager' : 'Tenant'}</option>)}
               </select>
             </div>
             
@@ -119,8 +123,8 @@ export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) =>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Phòng <span className="text-rose-500">*</span></label>
-                <select name="roomId" value={form.roomId} onChange={handleChange} className="input-field" required disabled={isExtension || !form.propertyId}>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Phòng (nếu có)</label>
+                <select name="roomId" value={form.roomId} onChange={handleChange} className="input-field" disabled={isExtension || !form.propertyId}>
                   <option value="">-- Chọn phòng --</option>
                   {availableRooms.map(r => <option key={r.id} value={r.id}>{r.code}</option>)}
                 </select>

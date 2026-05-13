@@ -5,8 +5,7 @@ import clsx from 'clsx';
 const navItems = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Bất động sản', path: '/properties', icon: Building2 },
-  { name: 'Khách thuê', path: '/tenants', icon: Users },
-  { name: 'Nhân sự', path: '/managers', icon: UserCog },
+  { name: 'Quản lý cho thuê', path: '/tenants', icon: Users },
   { name: 'Hợp đồng', path: '/contracts', icon: FileText },
   { name: 'Trang thiết bị', path: '/equipments', icon: PenTool },
   { name: 'Cài đặt', path: '/settings', icon: Settings },

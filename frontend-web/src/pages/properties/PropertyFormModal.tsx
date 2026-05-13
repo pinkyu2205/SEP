@@ -13,9 +13,9 @@ export const PropertyFormModal = ({ property, onSave, onClose }: Props) => {
     name: '',
     address: '',
     totalFloors: 1,
+    totalRooms: 4,
     monthlyLeaseCost: 0,
-    managerName: '',
-    managerPhone: '',
+    deposit: 0,
   });
 
   useEffect(() => {
@@ -24,9 +24,9 @@ export const PropertyFormModal = ({ property, onSave, onClose }: Props) => {
         name: property.name,
         address: property.address,
         totalFloors: property.totalFloors,
+        totalRooms: property.totalRooms,
         monthlyLeaseCost: property.monthlyLeaseCost,
-        managerName: property.managerName,
-        managerPhone: property.managerPhone,
+        deposit: property.deposit,
       });
     }
   }, [property]);
@@ -113,6 +113,24 @@ export const PropertyFormModal = ({ property, onSave, onClose }: Props) => {
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                Số lượng phòng
+              </label>
+              <input
+                type="number"
+                name="totalRooms"
+                value={form.totalRooms}
+                onChange={handleChange}
+                min={1}
+                max={50}
+                className="input-field"
+              />
+              <p className="text-xs text-slate-400 mt-1">Manager sẽ tự tạo phòng sau khi cải tạo</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">
                 Tiền thuê gốc (₫/tháng)
               </label>
               <input
@@ -125,32 +143,17 @@ export const PropertyFormModal = ({ property, onSave, onClose }: Props) => {
                 className="input-field"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                Người quản lý
+                Tiền cọc nhà gốc (₫)
               </label>
               <input
-                type="text"
-                name="managerName"
-                value={form.managerName}
+                type="number"
+                name="deposit"
+                value={form.deposit}
                 onChange={handleChange}
-                placeholder="Họ tên quản lý"
-                className="input-field"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                SĐT quản lý
-              </label>
-              <input
-                type="tel"
-                name="managerPhone"
-                value={form.managerPhone}
-                onChange={handleChange}
-                placeholder="0901234567"
+                min={0}
+                step={100000}
                 className="input-field"
               />
             </div>

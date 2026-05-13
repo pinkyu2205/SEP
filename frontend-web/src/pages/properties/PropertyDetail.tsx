@@ -104,10 +104,10 @@ export const PropertyDetail = () => {
 
             <div className="flex items-center gap-6 text-sm text-slate-500">
               <span className="flex items-center gap-1.5">
-                <User className="w-4 h-4" /> {property.managerName}
+                <User className="w-4 h-4" /> {property.managerName || 'Chưa có Manager'}
               </span>
               <span className="flex items-center gap-1.5">
-                <Phone className="w-4 h-4" /> {property.managerPhone}
+                <DoorOpen className="w-4 h-4" /> {property.totalRooms} phòng (dự kiến)
               </span>
             </div>
           </div>
