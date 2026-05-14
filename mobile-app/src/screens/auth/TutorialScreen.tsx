@@ -1,7 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import PagerView from 'react-native-pager-view';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { useAuth } from '../../hooks';
 
@@ -27,12 +26,14 @@ const TUTORIAL_DATA = [
 
 export const TutorialScreen: React.FC = () => {
   const { updateUser } = useAuth();
-  const pagerRef = useRef<PagerView>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [currentPage, setCurrentPage] = useState(0);
 
   const handleNext = () => {
     if (currentPage < TUTORIAL_DATA.length - 1) {
-      pagerRef.current?.setPage(currentPage + 1);
+      const nextPage = currentPage + 1;
+      scrollRef.current?.scrollTo({ x: nextPage * width, animated: true });
+      setCurrentPage(nextPage);
     } else {
       // Hoàn tất Tutorial, update isFirstLogin = false để vào Home
       updateUser({ isFirstLogin: false });
@@ -43,6 +44,14 @@ export const TutorialScreen: React.FC = () => {
     updateUser({ isFirstLogin: false });
   };
 
+  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const x = event.nativeEvent.contentOffset.x;
+    const page = Math.round(x / width);
+    if (page !== currentPage) {
+      setCurrentPage(page);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -51,14 +60,16 @@ export const TutorialScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <PagerView
-        ref={pagerRef}
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onScroll}
         style={styles.pagerView}
-        initialPage={0}
-        onPageSelected={(e) => setCurrentPage(e.nativeEvent.position)}
       >
         {TUTORIAL_DATA.map((item, index) => (
-          <View key={index} style={styles.page}>
+          <View key={index} style={[styles.page, { width }]}>
             <View style={styles.emojiContainer}>
               <Text style={styles.emoji}>{item.emoji}</Text>
             </View>
@@ -66,7 +77,7 @@ export const TutorialScreen: React.FC = () => {
             <Text style={styles.desc}>{item.desc}</Text>
           </View>
         ))}
-      </PagerView>
+      </ScrollView>
 
       <View style={styles.footer}>
         <View style={styles.dotsContainer}>

@@ -85,6 +85,12 @@ export const ContractListScreen: React.FC<Props> = ({ navigation, filterRole, fi
 
   // Filter contracts based on role
   let contracts = MOCK_CONTRACTS;
+  if (filterRole === 'tenant') {
+    contracts = contracts.filter(c => c.type === 'manager_tenant');
+  } else if (filterRole === 'admin') {
+    contracts = contracts.filter(c => c.type === 'admin_manager');
+  }
+  // filterRole === 'manager' → show ALL (both types)
   if (filterType) {
     contracts = contracts.filter(c => c.type === filterType);
   }

@@ -10,6 +10,7 @@ import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
 import { AdminTabNavigator } from './AdminTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
+import { AdminOnboardingScreen } from '../screens/admin/AdminOnboardingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
@@ -43,7 +44,7 @@ export const RootNavigator: React.FC = () => {
         ) : user?.role === 'admin' ? (
           <Stack.Group>
             <Stack.Screen name="AdminTabs" component={AdminTabNavigator} />
-            <Stack.Screen name="AdminOnboarding" component={OnboardingScreen} />
+            <Stack.Screen name="AdminOnboarding" component={AdminOnboardingScreen} />
           </Stack.Group>
         ) : user?.role === 'manager' ? (
           <Stack.Group>

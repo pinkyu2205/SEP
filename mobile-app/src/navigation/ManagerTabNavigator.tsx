@@ -4,6 +4,7 @@ import { Text, Platform } from 'react-native';
 import { ManagerHomeScreen } from '../screens/manager/ManagerHomeScreen';
 import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
 import { TenantListScreen } from '../screens/manager/TenantListScreen';
+import { EquipmentScreen } from '../screens/manager/EquipmentScreen';
 import { ContractListScreen } from '../screens/shared/ContractListScreen';
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
 import { Colors } from '../constants';
@@ -14,9 +15,9 @@ const TabIcon = ({ emoji, focused }: { emoji: string; focused: boolean }) => (
   <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
 );
 
-// Wrapper to pass filterType for Manager contracts
+// Manager sees BOTH admin_manager (their own lease) and manager_tenant (their tenants)
 const ManagerContractScreen = (props: any) => (
-  <ContractListScreen {...props} filterType="manager_tenant" />
+  <ContractListScreen {...props} filterRole="manager" />
 );
 
 export const ManagerTabNavigator: React.FC = () => {
@@ -34,7 +35,7 @@ export const ManagerTabNavigator: React.FC = () => {
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
         },
       }}
@@ -61,6 +62,14 @@ export const ManagerTabNavigator: React.FC = () => {
         options={{
           tabBarLabel: 'Khách thuê',
           tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="Equipment"
+        component={EquipmentScreen}
+        options={{
+          tabBarLabel: 'Thiết bị',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="📦" focused={focused} />,
         }}
       />
       <Tab.Screen

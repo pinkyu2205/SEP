@@ -41,9 +41,9 @@ export const ManagerList = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Quản lý Nhân sự</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Danh sách khách thuê</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Quản lý tài khoản Manager dùng trên Mobile App
+            Danh sách Manager đang thuê nhà nguyên căn từ Chủ đầu tư
           </p>
         </div>
         <button
@@ -75,7 +75,7 @@ export const ManagerList = () => {
           <table className="w-full text-left text-sm text-slate-600">
             <thead className="bg-slate-50 text-slate-500 uppercase font-medium border-b border-slate-100">
               <tr>
-                <th className="px-6 py-4">Nhân sự</th>
+                <th className="px-6 py-4">Khách thuê</th>
                 <th className="px-6 py-4">Liên hệ</th>
                 <th className="px-6 py-4">Nhà quản lý</th>
                 <th className="px-6 py-4">Trạng thái</th>
@@ -152,7 +152,7 @@ export const ManagerList = () => {
                 <tr>
                   <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
                     <UserCog className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    Không tìm thấy nhân sự nào.
+                    Không tìm thấy khách thuê nào.
                   </td>
                 </tr>
               )}

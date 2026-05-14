@@ -10,82 +10,62 @@ import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 interface PropertyOption {
   id: string;
   name: string;
-  rooms: RoomOption[];
-}
-
-interface RoomOption {
-  id: string;
-  name: string;
-  tenantName: string;
+  address: string;
   prevElectricity: number;
   prevWater: number;
+  activeTenants: number; // Tổng số người đang thuê trong nhà
   isRecorded: boolean; // Đã chốt tháng này chưa
 }
 
-const MOCK_PROPERTIES: PropertyOption[] = [
-  {
-    id: 'p1',
-    name: 'Nhà Trọ Sunrise',
-    rooms: [
-      { id: 'r1', name: 'Phòng 101', tenantName: 'Nguyễn Văn A', prevElectricity: 1200, prevWater: 45, isRecorded: false },
-      { id: 'r2', name: 'Phòng 102', tenantName: 'Trần Thị B', prevElectricity: 980, prevWater: 38, isRecorded: false },
-      { id: 'r3', name: 'Phòng 201', tenantName: 'Lê Văn C', prevElectricity: 1450, prevWater: 52, isRecorded: true },
-      { id: 'r4', name: 'Phòng 202', tenantName: 'Phạm Thị D', prevElectricity: 870, prevWater: 30, isRecorded: false },
-    ],
-  },
-  {
-    id: 'p2',
-    name: 'Nhà Trọ Moonlight',
-    rooms: [
-      { id: 'r5', name: 'Phòng 101', tenantName: 'Hoàng Văn E', prevElectricity: 600, prevWater: 20, isRecorded: false },
-      { id: 'r6', name: 'Phòng 102', tenantName: 'Vũ Thị F', prevElectricity: 750, prevWater: 28, isRecorded: false },
-    ],
-  },
+const INITIAL_PROPERTIES: PropertyOption[] = [
+  { id: 'p1', name: 'Nhà Nguyễn Trãi', address: 'Quận 1, TP.HCM', prevElectricity: 12000, prevWater: 450, activeTenants: 8, isRecorded: false },
+  { id: 'p2', name: 'Nhà Lê Văn Sỹ', address: 'Quận 3, TP.HCM', prevElectricity: 8500, prevWater: 280, activeTenants: 5, isRecorded: true },
 ];
 
 const UNIT_PRICE = {
   electricity: 3500, // đ/kWh
   water: 20000,      // đ/m³
-  room: 3000000,
-  service: 150000,
 };
 
 // ===================== COMPONENT =====================
 export const MeterReadingScreen: React.FC = () => {
+  const [properties, setProperties] = useState(INITIAL_PROPERTIES);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [newElectricity, setNewElectricity] = useState('');
   const [newWater, setNewWater] = useState('');
-  const [rooms, setRooms] = useState(MOCK_PROPERTIES);
 
-  const selectedProperty = rooms.find(p => p.id === selectedPropertyId);
-  const selectedRoom = selectedProperty?.rooms.find(r => r.id === selectedRoomId);
+  const selectedProperty = properties.find(p => p.id === selectedPropertyId);
 
   // Tính toán real-time
   const elecConsumption = useMemo(() => {
-    if (!selectedRoom || !newElectricity) return 0;
+    if (!selectedProperty || !newElectricity) return 0;
     const val = parseInt(newElectricity, 10);
-    return isNaN(val) ? 0 : Math.max(0, val - selectedRoom.prevElectricity);
-  }, [newElectricity, selectedRoom]);
+    return isNaN(val) ? 0 : Math.max(0, val - selectedProperty.prevElectricity);
+  }, [newElectricity, selectedProperty]);
 
   const waterConsumption = useMemo(() => {
-    if (!selectedRoom || !newWater) return 0;
+    if (!selectedProperty || !newWater) return 0;
     const val = parseInt(newWater, 10);
-    return isNaN(val) ? 0 : Math.max(0, val - selectedRoom.prevWater);
-  }, [newWater, selectedRoom]);
+    return isNaN(val) ? 0 : Math.max(0, val - selectedProperty.prevWater);
+  }, [newWater, selectedProperty]);
 
   const elecCost = elecConsumption * UNIT_PRICE.electricity;
   const waterCost = waterConsumption * UNIT_PRICE.water;
-  const totalInvoice = UNIT_PRICE.room + elecCost + waterCost + UNIT_PRICE.service;
+  const totalUtilityCost = elecCost + waterCost;
+  
+  // Tính toán chia tiền (Split)
+  const costPerTenant = selectedProperty && selectedProperty.activeTenants > 0 
+    ? Math.round(totalUtilityCost / selectedProperty.activeTenants) 
+    : 0;
 
-  const handleSelectRoom = (room: RoomOption) => {
-    setSelectedRoomId(room.id);
+  const handleSelectProperty = (prop: PropertyOption) => {
+    setSelectedPropertyId(prop.id);
     setNewElectricity('');
     setNewWater('');
   };
 
   const handleSubmit = () => {
-    if (!selectedRoom) return;
+    if (!selectedProperty) return;
 
     const elecVal = parseInt(newElectricity, 10);
     const waterVal = parseInt(newWater, 10);
@@ -95,49 +75,48 @@ export const MeterReadingScreen: React.FC = () => {
       return;
     }
 
-    if (elecVal < selectedRoom.prevElectricity) {
+    if (elecVal < selectedProperty.prevElectricity) {
       Alert.alert('Lỗi', 'Chỉ số điện mới không thể nhỏ hơn chỉ số cũ.');
       return;
     }
-    if (waterVal < selectedRoom.prevWater) {
+    if (waterVal < selectedProperty.prevWater) {
       Alert.alert('Lỗi', 'Chỉ số nước mới không thể nhỏ hơn chỉ số cũ.');
       return;
     }
 
     Alert.alert(
-      'Xác nhận chốt số',
-      `Phòng: ${selectedRoom.name}\n` +
+      'Xác nhận chốt & Chia tiền',
+      `Tòa nhà: ${selectedProperty.name}\n` +
       `Điện tiêu thụ: ${elecConsumption} kWh (${elecCost.toLocaleString('vi-VN')}đ)\n` +
       `Nước tiêu thụ: ${waterConsumption} m³ (${waterCost.toLocaleString('vi-VN')}đ)\n\n` +
-      `Tổng hóa đơn: ${totalInvoice.toLocaleString('vi-VN')}đ\n\n` +
-      `Hóa đơn sẽ được gửi cho ${selectedRoom.tenantName}.`,
+      `Tổng tiền chung: ${totalUtilityCost.toLocaleString('vi-VN')}đ\n` +
+      `Số người đang ở: ${selectedProperty.activeTenants} người\n` +
+      `👉 Mỗi người trả: ${costPerTenant.toLocaleString('vi-VN')}đ\n\n` +
+      `Hệ thống sẽ tự động gộp số tiền này vào hóa đơn phòng của từng người.`,
       [
         { text: 'Hủy', style: 'cancel' },
         {
-          text: 'Chốt & Phát hành',
+          text: 'Chốt & Tách Bill',
           onPress: () => {
-            // Đánh dấu phòng đã chốt
-            setRooms(prev => prev.map(p => ({
-              ...p,
-              rooms: p.rooms.map(r =>
-                r.id === selectedRoom.id
-                  ? { ...r, isRecorded: true, prevElectricity: elecVal, prevWater: waterVal }
-                  : r
-              ),
-            })));
-            setSelectedRoomId(null);
+            // Đánh dấu nhà đã chốt
+            setProperties(prev => prev.map(p => 
+              p.id === selectedProperty.id
+                ? { ...p, isRecorded: true, prevElectricity: elecVal, prevWater: waterVal }
+                : p
+            ));
+            setSelectedPropertyId(null);
             setNewElectricity('');
             setNewWater('');
-            Alert.alert('Thành công!', `Đã phát hành hóa đơn cho ${selectedRoom.name}.`);
+            Alert.alert('Thành công!', `Đã tính toán và tách bill cho các phòng tại ${selectedProperty.name}.`);
           },
         },
       ]
     );
   };
 
-  // Đếm tổng số phòng đã chốt / tổng phòng
-  const totalRooms = rooms.reduce((acc, p) => acc + p.rooms.length, 0);
-  const recordedRooms = rooms.reduce((acc, p) => acc + p.rooms.filter(r => r.isRecorded).length, 0);
+  // Đếm tiến độ
+  const totalProperties = properties.length;
+  const recordedProperties = properties.filter(p => p.isRecorded).length;
 
   // ===================== RENDER =====================
   return (
@@ -145,108 +124,67 @@ export const MeterReadingScreen: React.FC = () => {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Chốt điện nước</Text>
-          <Text style={styles.subtitle}>Tháng 05/2026</Text>
+          <Text style={styles.title}>Chốt số Tòa nhà</Text>
+          <Text style={styles.subtitle}>Chốt số tổng để hệ thống tự chia tiền</Text>
         </View>
 
         {/* Progress */}
         <View style={styles.progressCard}>
           <View style={styles.progressRow}>
-            <Text style={styles.progressLabel}>Tiến độ chốt số</Text>
-            <Text style={styles.progressValue}>{recordedRooms}/{totalRooms} phòng</Text>
+            <Text style={styles.progressLabel}>Tiến độ tháng này</Text>
+            <Text style={styles.progressValue}>{recordedProperties}/{totalProperties} nhà</Text>
           </View>
           <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${totalRooms > 0 ? (recordedRooms / totalRooms) * 100 : 0}%` }]} />
+            <View style={[styles.progressBarFill, { width: `${totalProperties > 0 ? (recordedProperties / totalProperties) * 100 : 0}%` }]} />
           </View>
         </View>
 
-        {/* Chọn Tòa nhà */}
-        <Text style={styles.sectionTitle}>Chọn tòa nhà</Text>
-        <View style={styles.propertyRow}>
-          {rooms.map(p => {
-            const recorded = p.rooms.filter(r => r.isRecorded).length;
-            const total = p.rooms.length;
-            const allDone = recorded === total;
-            return (
-              <TouchableOpacity
-                key={p.id}
-                style={[
-                  styles.propertyChip,
-                  selectedPropertyId === p.id && styles.propertyChipActive,
-                  allDone && styles.propertyChipDone,
-                ]}
-                onPress={() => {
-                  setSelectedPropertyId(p.id);
-                  setSelectedRoomId(null);
-                }}
-              >
-                <Text style={[
-                  styles.propertyChipText,
-                  selectedPropertyId === p.id && styles.propertyChipTextActive,
-                ]}>
-                  {p.name}
-                </Text>
-                <Text style={[
-                  styles.propertyChipSub,
-                  selectedPropertyId === p.id && { color: 'rgba(255,255,255,0.8)' },
-                ]}>
-                  {allDone ? '✅ Hoàn tất' : `${recorded}/${total} phòng`}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        {/* Danh sách Tòa nhà */}
+        <Text style={styles.sectionTitle}>Danh sách Tòa nhà</Text>
+        <View style={styles.propertyGrid}>
+          {properties.map(p => (
+            <TouchableOpacity
+              key={p.id}
+              style={[
+                styles.propertyCard,
+                selectedPropertyId === p.id && styles.propertyCardActive,
+                p.isRecorded && styles.propertyCardDone,
+              ]}
+              onPress={() => !p.isRecorded && handleSelectProperty(p)}
+              disabled={p.isRecorded}
+            >
+              <Text style={styles.propertyEmoji}>{p.isRecorded ? '✅' : '🏢'}</Text>
+              <Text style={[
+                styles.propertyName,
+                selectedPropertyId === p.id && { color: Colors.white },
+                p.isRecorded && { color: Colors.textMuted },
+              ]}>{p.name}</Text>
+              <Text style={[
+                styles.propertyTenants,
+                selectedPropertyId === p.id && { color: 'rgba(255,255,255,0.8)' },
+                p.isRecorded && { color: Colors.textMuted },
+              ]}>{p.activeTenants} người đang ở</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
-        {/* Danh sách Phòng */}
-        {selectedProperty && (
-          <>
-            <Text style={styles.sectionTitle}>Chọn phòng</Text>
-            <View style={styles.roomGrid}>
-              {selectedProperty.rooms.map(room => (
-                <TouchableOpacity
-                  key={room.id}
-                  style={[
-                    styles.roomCard,
-                    selectedRoomId === room.id && styles.roomCardActive,
-                    room.isRecorded && styles.roomCardDone,
-                  ]}
-                  onPress={() => !room.isRecorded && handleSelectRoom(room)}
-                  disabled={room.isRecorded}
-                >
-                  <Text style={styles.roomEmoji}>{room.isRecorded ? '✅' : '🚪'}</Text>
-                  <Text style={[
-                    styles.roomName,
-                    selectedRoomId === room.id && { color: Colors.white },
-                    room.isRecorded && { color: Colors.textMuted },
-                  ]}>{room.name}</Text>
-                  <Text style={[
-                    styles.roomTenant,
-                    selectedRoomId === room.id && { color: 'rgba(255,255,255,0.8)' },
-                    room.isRecorded && { color: Colors.textMuted },
-                  ]}>{room.tenantName}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        )}
-
         {/* Form nhập chỉ số */}
-        {selectedRoom && !selectedRoom.isRecorded && (
+        {selectedProperty && !selectedProperty.isRecorded && (
           <View style={styles.formSection}>
-            <Text style={styles.sectionTitle}>Nhập chỉ số — {selectedRoom.name}</Text>
+            <Text style={styles.sectionTitle}>Nhập chỉ số đồng hồ tổng</Text>
 
             {/* Điện */}
             <View style={styles.meterCard}>
               <View style={styles.meterHeader}>
                 <Text style={styles.meterEmoji}>⚡</Text>
-                <Text style={styles.meterTitle}>Điện</Text>
+                <Text style={styles.meterTitle}>Điện tổng</Text>
                 <Text style={styles.unitPrice}>{UNIT_PRICE.electricity.toLocaleString('vi-VN')}đ/kWh</Text>
               </View>
               <View style={styles.meterRow}>
                 <View style={styles.meterCol}>
                   <Text style={styles.meterLabel}>Chỉ số cũ</Text>
                   <View style={styles.readonlyInput}>
-                    <Text style={styles.readonlyText}>{selectedRoom.prevElectricity}</Text>
+                    <Text style={styles.readonlyText}>{selectedProperty.prevElectricity}</Text>
                   </View>
                 </View>
                 <View style={styles.meterArrow}>
@@ -275,14 +213,14 @@ export const MeterReadingScreen: React.FC = () => {
             <View style={styles.meterCard}>
               <View style={styles.meterHeader}>
                 <Text style={styles.meterEmoji}>💧</Text>
-                <Text style={styles.meterTitle}>Nước</Text>
+                <Text style={styles.meterTitle}>Nước tổng</Text>
                 <Text style={styles.unitPrice}>{UNIT_PRICE.water.toLocaleString('vi-VN')}đ/m³</Text>
               </View>
               <View style={styles.meterRow}>
                 <View style={styles.meterCol}>
                   <Text style={styles.meterLabel}>Chỉ số cũ</Text>
                   <View style={styles.readonlyInput}>
-                    <Text style={styles.readonlyText}>{selectedRoom.prevWater}</Text>
+                    <Text style={styles.readonlyText}>{selectedProperty.prevWater}</Text>
                   </View>
                 </View>
                 <View style={styles.meterArrow}>
@@ -307,30 +245,34 @@ export const MeterReadingScreen: React.FC = () => {
               )}
             </View>
 
-            {/* Bảng tổng kết hóa đơn */}
+            {/* Bảng tổng kết chia tiền */}
             {(elecConsumption > 0 || waterConsumption > 0) && (
               <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Bảng tổng kết hóa đơn</Text>
-                <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>Tiền phòng</Text>
-                  <Text style={styles.summaryVal}>{UNIT_PRICE.room.toLocaleString('vi-VN')}đ</Text>
+                <View style={styles.summaryHeader}>
+                  <Text style={styles.summaryTitle}>Dự kiến Tách Bill (Chia đều)</Text>
+                  <Text style={styles.summaryBadge}>Tự động</Text>
                 </View>
+                
                 <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>Tiền điện ({elecConsumption} kWh)</Text>
+                  <Text style={styles.summaryLabel}>Tiền điện tổng</Text>
                   <Text style={styles.summaryVal}>{elecCost.toLocaleString('vi-VN')}đ</Text>
                 </View>
                 <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>Tiền nước ({waterConsumption} m³)</Text>
+                  <Text style={styles.summaryLabel}>Tiền nước tổng</Text>
                   <Text style={styles.summaryVal}>{waterCost.toLocaleString('vi-VN')}đ</Text>
-                </View>
-                <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>Phí dịch vụ</Text>
-                  <Text style={styles.summaryVal}>{UNIT_PRICE.service.toLocaleString('vi-VN')}đ</Text>
                 </View>
                 <View style={styles.summaryDivider} />
                 <View style={styles.summaryLine}>
-                  <Text style={styles.grandTotalLabel}>TỔNG CỘNG</Text>
-                  <Text style={styles.grandTotalVal}>{totalInvoice.toLocaleString('vi-VN')}đ</Text>
+                  <Text style={styles.grandTotalLabel}>TỔNG TIỀN CHUNG</Text>
+                  <Text style={styles.grandTotalVal}>{totalUtilityCost.toLocaleString('vi-VN')}đ</Text>
+                </View>
+                <View style={styles.splitBox}>
+                  <Text style={styles.splitBoxText}>
+                    Chia đều cho <Text style={{fontWeight: 'bold'}}>{selectedProperty.activeTenants} người</Text> đang ở
+                  </Text>
+                  <Text style={styles.splitResult}>
+                    👉 Mỗi người trả: {costPerTenant.toLocaleString('vi-VN')}đ
+                  </Text>
                 </View>
               </View>
             )}
@@ -341,7 +283,7 @@ export const MeterReadingScreen: React.FC = () => {
               onPress={handleSubmit}
               disabled={!newElectricity || !newWater}
             >
-              <Text style={styles.submitBtnText}>📋 Chốt & Phát hành hóa đơn</Text>
+              <Text style={styles.submitBtnText}>🧮 Chốt số & Hệ thống tự chia tiền</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -371,29 +313,17 @@ const styles = StyleSheet.create({
 
   sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },
 
-  // Property chips
-  propertyRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.lg, flexWrap: 'wrap' },
-  propertyChip: {
-    flex: 1, minWidth: '45%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, borderWidth: 2, borderColor: Colors.border, ...Shadow.sm,
-  },
-  propertyChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  propertyChipDone: { borderColor: Colors.success, opacity: 0.7 },
-  propertyChipText: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
-  propertyChipTextActive: { color: Colors.white },
-  propertyChipSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
-
-  // Room grid
-  roomGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, marginBottom: Spacing.lg },
-  roomCard: {
+  // Property grid
+  propertyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, marginBottom: Spacing.lg },
+  propertyCard: {
     width: '47%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     padding: Spacing.base, alignItems: 'center', borderWidth: 2, borderColor: Colors.border, ...Shadow.sm,
   },
-  roomCardActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  roomCardDone: { backgroundColor: Colors.successLight, borderColor: Colors.success, opacity: 0.6 },
-  roomEmoji: { fontSize: 24, marginBottom: Spacing.xs },
-  roomName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  roomTenant: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  propertyCardActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  propertyCardDone: { backgroundColor: Colors.successLight, borderColor: Colors.success, opacity: 0.6 },
+  propertyEmoji: { fontSize: 28, marginBottom: Spacing.xs },
+  propertyName: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center' },
+  propertyTenants: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
 
   // Form
   formSection: { marginTop: Spacing.sm },
@@ -430,19 +360,29 @@ const styles = StyleSheet.create({
   consumptionVal: { fontWeight: '700', color: Colors.primary },
   consumptionCost: { fontSize: 14, fontWeight: '700', color: Colors.primary },
 
-  // Summary
+  // Summary (Split Bill)
   summaryCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     padding: Spacing.base, marginBottom: Spacing.lg, ...Shadow.md,
     borderWidth: 1, borderColor: Colors.primary, borderStyle: 'dashed',
   },
-  summaryTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },
+  summaryHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
+  summaryTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  summaryBadge: { backgroundColor: Colors.primaryBg, color: Colors.primary, fontSize: 11, fontWeight: '700', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  
   summaryLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.sm },
   summaryLabel: { fontSize: 14, color: Colors.textSecondary },
   summaryVal: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   summaryDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
   grandTotalLabel: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   grandTotalVal: { fontSize: 20, fontWeight: '800', color: Colors.primary },
+
+  splitBox: {
+    backgroundColor: '#F8FAFC', borderRadius: BorderRadius.md, padding: Spacing.md, marginTop: Spacing.md,
+    borderLeftWidth: 4, borderLeftColor: Colors.primary
+  },
+  splitBoxText: { fontSize: 13, color: Colors.textSecondary, marginBottom: 4 },
+  splitResult: { fontSize: 16, fontWeight: '800', color: Colors.primary },
 
   // Submit
   submitBtn: {
