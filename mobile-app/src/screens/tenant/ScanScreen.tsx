@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: Colors.text,
+    color: Colors.textPrimary,
     marginBottom: 20,
     marginTop: 20,
   },
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   actionText: {
-    color: Colors.text,
+    color: Colors.textPrimary,
     fontWeight: '500',
   },
   previewImage: {
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 15,
     fontSize: 16,
-    color: Colors.text,
+    color: Colors.textPrimary,
     textAlignVertical: 'top',
     marginBottom: 24,
   },

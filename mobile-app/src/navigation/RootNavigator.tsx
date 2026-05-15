@@ -12,6 +12,7 @@ import { AdminTabNavigator } from './AdminTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
 import { AdminOnboardingScreen } from '../screens/admin/AdminOnboardingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
+import { NotificationCenterScreen } from '../screens/manager/NotificationCenterScreen';
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
 
@@ -51,6 +52,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
+            <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
           </Stack.Group>
         ) : (
           <Stack.Screen name="TenantTabs" component={TenantTabNavigator} />

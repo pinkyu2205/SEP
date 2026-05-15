@@ -9,19 +9,21 @@ import { useAuth } from '../../hooks';
 
 const MOCK_REQUESTS: MaintenanceRequest[] = [
   {
-    id: '1', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    id: '1', ticketCode: 'TK-T-001', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Vòi nước bồn rửa bị rỉ', description: 'Vòi nước bồn rửa mặt trong toilet bị rỉ nước liên tục.',
-    category: 'plumbing', status: 'pending', images: [], createdAt: '2026-04-28', updatedAt: '2026-04-28',
+    category: 'plumbing', priority: 'medium', status: 'pending', images: [], timeline: [],
+    createdAt: '2026-04-28', updatedAt: '2026-04-28',
   },
   {
-    id: '2', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    id: '2', ticketCode: 'TK-T-002', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Ổ cắm điện bị cháy', description: 'Ổ cắm bên cạnh bàn học bị cháy, có mùi khét.',
-    category: 'electrical', status: 'in_progress', images: [], createdAt: '2026-04-25', updatedAt: '2026-04-27',
+    category: 'electrical', priority: 'urgent', status: 'in_progress', images: [], timeline: [],
+    createdAt: '2026-04-25', updatedAt: '2026-04-27',
   },
   {
-    id: '3', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    id: '3', ticketCode: 'TK-T-003', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Tủ quần áo bị hỏng bản lề', description: 'Bản lề cánh tủ trái bị gãy.',
-    category: 'furniture', status: 'resolved', images: [], repairCost: 150000,
+    category: 'furniture', priority: 'low', status: 'resolved', images: [], repairCost: 150000, timeline: [],
     createdAt: '2026-04-20', updatedAt: '2026-04-22', resolvedAt: '2026-04-22',
   },
 ];
@@ -196,7 +198,7 @@ const styles = StyleSheet.create({
   fab: { position: 'absolute', bottom: 30, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', ...Shadow.lg },
   fabText: { fontSize: 28, color: Colors.white, fontWeight: '300', marginTop: -2 },
   actionBtn: { marginTop: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: Colors.primaryBg, alignItems: 'center' },
-  actionBtnSuccess: { backgroundColor: Colors.successBg },
+  actionBtnSuccess: { backgroundColor: Colors.successLight },
   actionBtnText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
   costText: { marginTop: 12, fontSize: 13, color: Colors.textSecondary, fontStyle: 'italic', textAlign: 'right' },
   
