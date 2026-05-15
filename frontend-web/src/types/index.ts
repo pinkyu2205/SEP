@@ -1,5 +1,5 @@
 // ==========================================
-//  TYPES - Web Admin Portal (Sub-leasing Model)
+//  TYPES - Host Management Portal (UrbanNest Sub-leasing Model)
 // ==========================================
 
 /** Trạng thái phòng */
@@ -8,92 +8,95 @@ export type RoomStatus = 'available' | 'occupied' | 'maintenance';
 /** Thông tin một phòng */
 export interface Room {
   id: string;
-  code: string;           // Mã phòng: VD "P101"
-  floor: number;          // Tầng
-  area: number;           // Diện tích (m²)
-  maxOccupants: number;   // Sức chứa tối đa
-  rentPrice: number;      // Giá thuê (VNĐ/tháng)
-  deposit: number;        // Tiền cọc (VNĐ)
-  electricityRate: number;// Đơn giá điện (VNĐ/kWh)
-  waterRate: number;      // Đơn giá nước (VNĐ/m³)
-  serviceCharge: number;  // Phí dịch vụ/tháng
+  code: string;
+  floor: number;
+  area: number;
+  maxOccupants: number;
+  rentPrice: number;
+  deposit: number;
+  electricityRate: number;
+  waterRate: number;
+  serviceCharge: number;
   status: RoomStatus;
-  tenantName?: string;    // Tên khách thuê hiện tại (nếu occupied)
+  tenantName?: string;
 }
 
 /** Thông tin một căn nhà nguyên căn */
 export interface Property {
   id: string;
-  name: string;           // Tên tòa nhà: VD "Nhà Nguyễn Văn A"
-  address: string;        // Địa chỉ
-  totalFloors: number;    // Số tầng
-  totalRooms: number;     // Số lượng phòng (Admin ghi, Manager tự tạo sau)
-  monthlyLeaseCost: number; // Tiền thuê nhà gốc trả cho chủ (VNĐ/tháng)
-  deposit: number;        // Tiền cọc nhà gốc
-  managerId?: string;     // ID Manager đang thuê (liên kết qua HĐ)
-  managerName?: string;   // Tên Manager (lấy từ HĐ, chỉ để hiển thị)
-  rooms: Room[];          // Danh sách phòng (Manager tạo sau khi cải tạo)
+  name: string;
+  address: string;
+  totalFloors: number;
+  totalRooms: number;
+  monthlyLeaseCost: number;
+  deposit: number;
+  managerId?: string;
+  managerName?: string;
+  rooms: Room[];
   createdAt: string;
 }
 
 /** Trạng thái tài khoản */
 export type UserStatus = 'pending_activation' | 'active' | 'moved_out';
 
-/** Thông tin người dùng (dùng cho cả Manager và Tenant) */
+/** Thông tin người dùng (Host, Manager, Tenant) */
 export interface AppUser {
   id: string;
-  fullName: string;       // Họ và tên
-  phone: string;          // Số điện thoại (cũng là username đăng nhập)
-  cccd: string;           // Số CCCD
-  email?: string;         // Email (tuỳ chọn)
-  role: 'admin' | 'manager' | 'tenant';
+  fullName: string;
+  phone: string;
+  cccd: string;
+  email?: string;
+  role: 'host' | 'manager' | 'tenant';
   status: UserStatus;
   createdAt: string;
+  // Optional tenant-specific fields (populated when assigned to a room)
+  propertyId?: string;
+  propertyName?: string;
+  roomId?: string;
+  roomCode?: string;
+  moveInDate?: string;
+  moveOutDate?: string;
 }
 
 // Backward-compatible aliases
 export type TenantStatus = UserStatus;
-export type ManagerStatus = 'active' | 'inactive';
+export type ManagerStatus = 'active' | 'inactive' | 'on_leave';
 export type Tenant = AppUser;
-export type Manager = AppUser & {
+export type Manager = Omit<AppUser, 'status'> & {
   assignedPropertyIds: string[];
+  status: ManagerStatus;
 };
 
 /** Loại Hợp đồng */
 export type ContractType = 'admin_manager' | 'manager_tenant';
 
 /** Trạng thái Hợp đồng */
-export type ContractStatus = 'active' | 'expiring_soon' | 'terminated';
+export type ContractStatus = 'pending_approval' | 'active' | 'expiring_soon' | 'terminated';
 
 /** Thông tin Hợp đồng (2 tầng) */
 export interface Contract {
   id: string;
-  code: string;           // Mã HĐ, VD: HD-2026-001
-  type: ContractType;     // Loại HĐ
+  code: string;
+  type: ContractType;
 
-  // Bên cho thuê (Admin hoặc Manager)
   lessorId: string;
   lessorName: string;
 
-  // Bên thuê (Manager hoặc Tenant)
   lesseeId: string;
   lesseeName: string;
   lesseeCccd?: string;
   lesseePhone?: string;
 
-  // Thông tin tài sản
   propertyId: string;
   propertyName: string;
-  roomId?: string;        // Chỉ có nếu type = manager_tenant
+  roomId?: string;
   roomCode?: string;
 
-  // Điều khoản
   startDate: string;
   endDate: string;
   depositAmount: number;
   rentAmount: number;
-  
-  // Tài sản bàn giao kèm HĐ
+
   equipmentList: ContractEquipment[];
 
   status: ContractStatus;
@@ -104,10 +107,10 @@ export interface Contract {
 /** Tài sản bàn giao trong Hợp đồng */
 export interface ContractEquipment {
   id: string;
-  name: string;           // Tên thiết bị (VD: "Điều hòa Daikin 9000BTU")
-  quantity: number;       // Số lượng
-  condition: string;      // Tình trạng (VD: "Mới", "Đã sử dụng - Tốt")
-  source: 'admin' | 'manager'; // Ai bàn giao (Admin bàn giao nhà hoặc Manager thêm vào)
+  name: string;
+  quantity: number;
+  condition: string;
+  source: 'host' | 'manager';
 }
 
 /** Trạng thái Trang thiết bị */
@@ -116,9 +119,9 @@ export type EquipmentStatus = 'good' | 'broken' | 'maintenance' | 'disposed';
 /** Thông tin Trang thiết bị */
 export interface Equipment {
   id: string;
-  code: string;           // Mã QR Code của thiết bị (VD: EQ-101-AC)
-  name: string;           // Tên thiết bị (VD: Điều hòa Daikin 9000BTU)
-  category: string;       // Phân loại (VD: Điện lạnh, Nội thất, Vệ sinh...)
+  code: string;
+  name: string;
+  category: string;
   propertyId: string;
   propertyName: string;
   roomId?: string;
@@ -127,5 +130,51 @@ export interface Equipment {
   purchasePrice: number;
   status: EquipmentStatus;
   notes?: string;
+  createdAt: string;
+}
+
+// ==========================================
+//  NEW TYPES - Host Management Portal
+// ==========================================
+
+export type MaintenancePriority = 'critical' | 'high' | 'medium' | 'low';
+export type MaintenanceStatus = 'open' | 'in_progress' | 'resolved' | 'cancelled';
+
+export interface MaintenanceRequest {
+  id: string;
+  code: string;
+  propertyId: string;
+  propertyName: string;
+  roomId?: string;
+  roomCode?: string;
+  title: string;
+  description: string;
+  priority: MaintenancePriority;
+  status: MaintenanceStatus;
+  reportedBy: string;
+  assignedManagerId?: string;
+  assignedManagerName?: string;
+  estimatedCost?: number;
+  actualCost?: number;
+  reportedAt: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export type NotificationType =
+  | 'contract_expiry'
+  | 'unpaid_invoice'
+  | 'maintenance_delay'
+  | 'occupancy_alert'
+  | 'approval_needed';
+
+export interface PortalNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  isRead: boolean;
+  priority: 'high' | 'medium' | 'low';
+  relatedId?: string;
   createdAt: string;
 }

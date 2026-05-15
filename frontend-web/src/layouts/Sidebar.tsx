@@ -1,52 +1,156 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Building2, FileText, Settings, Users, PenTool, UserCog } from 'lucide-react';
+import {
+  LayoutDashboard, Building2, UserCog, Users, FileText,
+  Wrench, DollarSign, Package, BarChart3, Bell, Settings,
+  ChevronRight,
+} from 'lucide-react';
 import clsx from 'clsx';
+import { MOCK_NOTIFICATIONS, ALL_CONTRACTS } from '../utils/mockData';
 
-const navItems = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { name: 'Bất động sản', path: '/properties', icon: Building2 },
-  { name: 'Danh sách khách thuê', path: '/managers', icon: UserCog },
-  { name: 'Hợp đồng', path: '/contracts', icon: FileText },
-  { name: 'Trang thiết bị', path: '/equipments', icon: PenTool },
-  { name: 'Cài đặt', path: '/settings', icon: Settings },
+interface NavItem {
+  name: string;
+  path: string;
+  icon: React.ElementType;
+  end?: boolean;
+  badge?: number;
+  badgeColor?: string;
+}
+
+interface NavSection {
+  label: string;
+  items: NavItem[];
+}
+
+const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;
+const pendingCount = ALL_CONTRACTS.filter(c => c.status === 'pending_approval').length;
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: 'Tổng quan',
+    items: [
+      { name: 'Bảng điều hành', path: '/', icon: LayoutDashboard, end: true },
+    ],
+  },
+  {
+    label: 'Vận hành',
+    items: [
+      { name: 'Bất động sản',       path: '/properties',          icon: Building2 },
+      { name: 'Quản lý vận hành',   path: '/operations-managers', icon: UserCog },
+      { name: 'Khách thuê',         path: '/tenants',             icon: Users },
+    ],
+  },
+  {
+    label: 'Hợp đồng & Phê duyệt',
+    items: [
+      {
+        name: 'Phê duyệt hợp đồng',
+        path: '/contracts',
+        icon: FileText,
+        badge: pendingCount > 0 ? pendingCount : undefined,
+        badgeColor: 'bg-amber-500',
+      },
+    ],
+  },
+  {
+    label: 'Giám sát & Tài sản',
+    items: [
+      { name: 'Giám sát bảo trì',    path: '/maintenance', icon: Wrench },
+      { name: 'Danh mục tài sản', path: '/equipments',  icon: Package },
+    ],
+  },
+  {
+    label: 'Tài chính & Báo cáo',
+    items: [
+      { name: 'Quản lý tài chính',  path: '/financial', icon: DollarSign },
+      { name: 'Báo cáo & Phân tích', path: '/reports',  icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Hệ thống',
+    items: [
+      {
+        name: 'Thông báo',
+        path: '/notifications',
+        icon: Bell,
+        badge: unreadCount > 0 ? unreadCount : undefined,
+        badgeColor: 'bg-rose-500',
+      },
+      { name: 'Cài đặt', path: '/settings', icon: Settings },
+    ],
+  },
 ];
 
 export const Sidebar = () => {
   return (
-    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col h-screen sticky top-0">
-      <div className="h-16 flex items-center px-6 border-b border-slate-800">
-        <span className="text-xl font-bold text-white flex items-center gap-2">
-          <span>🏠</span> RoomRent
-        </span>
+    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col h-screen sticky top-0 select-none">
+      {/* Brand */}
+      <div className="h-16 flex items-center px-5 border-b border-slate-800/80 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-900/30">
+            <Building2 className="w-4 h-4 text-white" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold text-white leading-tight tracking-tight">UrbanNest</p>
+            <p className="text-[10px] text-slate-400 leading-tight font-medium">Cổng Quản lý Host</p>
+          </div>
+        </div>
       </div>
-      
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) => clsx(
-              "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors duration-200",
-              isActive 
-                ? "bg-primary-600 text-white font-medium shadow-sm" 
-                : "hover:bg-slate-800 hover:text-white"
-            )}
-          >
-            <item.icon className="w-5 h-5" />
-            {item.name}
-          </NavLink>
+
+      {/* Navigation */}
+      <nav className="flex-1 py-3 overflow-y-auto scrollbar-thin">
+        {NAV_SECTIONS.map((section, sIdx) => (
+          <div key={sIdx} className={sIdx > 0 ? 'mt-1' : ''}>
+            <div className="px-4 pt-3 pb-1">
+              <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">{section.label}</p>
+            </div>
+            <div className="px-2 space-y-0.5">
+              {section.items.map(item => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.end}
+                  className={({ isActive }) => clsx(
+                    'group flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150 text-sm relative',
+                    isActive
+                      ? 'bg-primary-600 text-white font-semibold shadow-lg shadow-primary-900/20'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                  )}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon className={clsx('w-4 h-4 flex-shrink-0 transition-transform group-hover:scale-110', isActive ? 'text-white' : 'text-slate-500 group-hover:text-slate-300')} />
+                      <span className="flex-1 truncate">{item.name}</span>
+                      {item.badge !== undefined && (
+                        <span className={`${item.badgeColor || 'bg-slate-600'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 flex-shrink-0`}>
+                          {item.badge}
+                        </span>
+                      )}
+                      {!item.badge && !isActive && (
+                        <ChevronRight className="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
-      <div className="p-4 border-t border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary-600 flex items-center justify-center text-white font-bold">
-            AD
+      {/* Divider */}
+      <div className="mx-4 border-t border-slate-800" />
+
+      {/* User Card */}
+      <div className="p-4 flex-shrink-0">
+        <div className="flex items-center gap-3 bg-slate-800/60 rounded-xl px-3 py-2.5 border border-slate-700/50">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md">
+            UN
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">Admin System</p>
-            <p className="text-xs text-slate-400 truncate">admin@roomrent.com</p>
+            <p className="text-xs font-bold text-white truncate leading-tight">UrbanNest Host</p>
+            <p className="text-[10px] text-slate-400 truncate leading-tight">host@urbannest.vn</p>
           </div>
+          <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 shadow-lg shadow-emerald-900/50" title="Đang hoạt động" />
         </div>
       </div>
     </aside>

@@ -14,7 +14,7 @@ export const ManagerFormModal = ({ manager, onSave, onClose }: Props) => {
     fullName: '',
     phone: '',
     email: '',
-    status: 'active' as 'active' | 'inactive',
+    status: 'active' as 'active' | 'inactive' | 'on_leave',
     assignedPropertyIds: [] as string[],
   });
 
@@ -87,6 +87,7 @@ export const ManagerFormModal = ({ manager, onSave, onClose }: Props) => {
               <select name="status" value={form.status} onChange={handleChange} className="input-field">
                 <option value="active">Hoạt động</option>
                 <option value="inactive">Ngừng hoạt động</option>
+                <option value="on_leave">Tạm nghỉ phép</option>
               </select>
             </div>
           </div>

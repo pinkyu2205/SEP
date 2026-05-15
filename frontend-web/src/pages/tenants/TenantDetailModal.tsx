@@ -1,4 +1,4 @@
-import { X, User, Phone, CreditCard, Mail, MapPin, DoorOpen, Calendar, Edit2, ShieldAlert } from 'lucide-react';
+import { X, Phone, CreditCard, Mail, MapPin, DoorOpen, Calendar, Edit2, ShieldAlert } from 'lucide-react';
 import type { Tenant } from '../../types';
 import { tenantStatusMap } from '../../utils';
 

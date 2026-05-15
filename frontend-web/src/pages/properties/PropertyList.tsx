@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, MapPin, Phone, User, Plus, ChevronRight, Home, Search } from 'lucide-react';
+import { Building2, MapPin, User, Plus, ChevronRight, Home, Search } from 'lucide-react';
 import type { Property } from '../../types';
 import { MOCK_PROPERTIES } from '../../utils/mockData';
 import { formatCurrency, roomStatusMap } from '../../utils';
@@ -55,9 +55,9 @@ export const PropertyList = () => {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Quản lý Bất động sản</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Bất động sản</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Quản lý {properties.length} căn nhà nguyên căn trong hệ thống
+            {properties.length} bất động sản trong danh mục UrbanNest
           </p>
         </div>
         <button
@@ -68,7 +68,7 @@ export const PropertyList = () => {
           className="btn-primary flex items-center gap-2"
         >
           <Plus className="w-5 h-5" />
-          Thêm nhà mới
+          Thêm bất động sản
         </button>
       </div>
 
@@ -166,7 +166,7 @@ export const PropertyList = () => {
                 <div className="flex items-center justify-between text-sm text-slate-500 pt-2 border-t border-slate-100">
                   <span className="flex items-center gap-1.5">
                     <User className="w-4 h-4" />
-                    {property.managerName || 'Chưa có Manager'}
+                    {property.managerName || 'Chưa có quản lý'}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Home className="w-4 h-4" />
@@ -209,7 +209,7 @@ export const PropertyList = () => {
       {filtered.length === 0 && (
         <div className="text-center py-16">
           <Home className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">Không tìm thấy căn nhà nào.</p>
+          <p className="text-slate-500">Không tìm thấy bất động sản nào.</p>
         </div>
       )}
 

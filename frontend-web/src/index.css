@@ -6,22 +6,141 @@
   body {
     @apply bg-slate-50 text-slate-900 font-sans antialiased;
   }
+
+  * {
+    @apply box-border;
+  }
+
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
 }
 
 @layer components {
   .btn-primary {
-    @apply px-4 py-2 bg-primary-600 text-white rounded-md font-medium hover:bg-primary-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 bg-primary-600 text-white rounded-lg font-semibold text-sm hover:bg-primary-700 active:bg-primary-800 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
   }
-  
+
   .btn-secondary {
-    @apply px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-md font-medium hover:bg-slate-50 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg font-semibold text-sm hover:bg-slate-50 active:bg-slate-100 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-100 transition-colors duration-150 focus:outline-none;
   }
 
   .card {
     @apply bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden;
   }
 
+  .card-hover {
+    @apply bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-slate-200 transition-all duration-200;
+  }
+
   .input-field {
-    @apply block w-full rounded-md border-slate-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm px-3 py-2 border outline-none transition-colors duration-200;
+    @apply block w-full rounded-lg border-slate-300 shadow-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 focus:ring-opacity-20 sm:text-sm px-3 py-2 border outline-none transition-colors duration-150 bg-white placeholder-slate-400;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full;
+  }
+
+  .section-title {
+    @apply text-xs font-bold text-slate-900 uppercase tracking-wider;
+  }
+
+  .page-title {
+    @apply text-xl font-bold text-slate-900;
+  }
+
+  .page-subtitle {
+    @apply text-sm text-slate-500 mt-0.5;
+  }
+
+  .table-header {
+    @apply bg-slate-50 text-slate-500 uppercase font-semibold border-b border-slate-200 text-xs tracking-wide;
+  }
+
+  .table-row {
+    @apply hover:bg-slate-50/70 transition-colors border-b border-slate-100 last:border-0;
+  }
+
+  .stat-card {
+    @apply bg-white rounded-xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow;
+  }
+
+  .priority-critical {
+    @apply bg-rose-100 text-rose-700 border border-rose-200;
+  }
+
+  .priority-high {
+    @apply bg-orange-100 text-orange-700 border border-orange-200;
+  }
+
+  .priority-medium {
+    @apply bg-amber-100 text-amber-700 border border-amber-200;
+  }
+
+  .priority-low {
+    @apply bg-slate-100 text-slate-600 border border-slate-200;
+  }
+
+  .status-active {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+
+  .status-pending {
+    @apply bg-amber-100 text-amber-700;
+  }
+
+  .status-inactive {
+    @apply bg-slate-100 text-slate-500;
+  }
+
+  .status-critical {
+    @apply bg-rose-100 text-rose-700;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-slate-700 rounded-full;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .gradient-primary {
+    background: linear-gradient(135deg, theme('colors.primary.600'), theme('colors.primary.800'));
+  }
+
+  .gradient-success {
+    background: linear-gradient(135deg, #10b981, #059669);
+  }
+
+  .gradient-warning {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+  }
+
+  .gradient-danger {
+    background: linear-gradient(135deg, #f43f5e, #e11d48);
   }
 }

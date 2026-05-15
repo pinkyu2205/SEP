@@ -32,9 +32,9 @@ export const TenantFormModal = ({ tenant, onSave, onClose }: Props) => {
         phone: tenant.phone,
         cccd: tenant.cccd,
         email: tenant.email || '',
-        propertyId: tenant.propertyId,
-        roomId: tenant.roomId,
-        moveInDate: tenant.moveInDate,
+        propertyId: tenant.propertyId ?? '',
+        roomId: tenant.roomId ?? '',
+        moveInDate: tenant.moveInDate ?? new Date().toISOString().split('T')[0],
       });
     }
   }, [tenant]);

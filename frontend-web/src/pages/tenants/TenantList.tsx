@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Search, ChevronRight, Building2, MapPin, ChevronDown, User, Phone } from 'lucide-react';
+import { Search, Building2, ChevronDown, User, Phone } from 'lucide-react';
 import type { AppUser } from '../../types';
-import { MOCK_USERS, MOCK_CONTRACTS, MOCK_PROPERTIES } from '../../utils/mockData';
+import { MOCK_USERS, MOCK_CONTRACTS } from '../../utils/mockData';
 
 const statusMap: Record<string, { label: string; color: string; dot: string }> = {
-  active: { label: 'Đang hoạt động', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
-  pending_activation: { label: 'Chờ kích hoạt', color: 'bg-amber-50 text-amber-600', dot: 'bg-amber-500' },
-  moved_out: { label: 'Đã rời', color: 'bg-slate-100 text-slate-500', dot: 'bg-slate-400' },
+  active:             { label: 'Đang hoạt động', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
+  pending_activation: { label: 'Chờ kích hoạt',  color: 'bg-amber-50 text-amber-600',    dot: 'bg-amber-500' },
+  moved_out:          { label: 'Đã rời đi',       color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },
 };
 
 export const TenantList = () => {
@@ -34,9 +34,9 @@ export const TenantList = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Quản lý cho thuê</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Khách thuê</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {managers.length} Manager · {tenants.length} Tenant trên toàn hệ thống
+          {managers.length} quản lý vận hành · {tenants.length} khách thuê trên tất cả bất động sản
         </p>
       </div>
 
@@ -50,7 +50,7 @@ export const TenantList = () => {
               activeTab === 'managers' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
-            Manager ({managers.length})
+            Quản lý ({managers.length})
           </button>
           <button
             onClick={() => setActiveTab('tenants')}
@@ -58,7 +58,7 @@ export const TenantList = () => {
               activeTab === 'tenants' ? 'bg-white text-primary-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
           >
-            Tenant ({tenants.length})
+            Khách thuê ({tenants.length})
           </button>
         </div>
 

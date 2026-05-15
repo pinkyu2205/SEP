@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, MapPin, Phone, User, Plus, Edit2, Trash2,
+  ArrowLeft, Building2, MapPin, User, Plus, Edit2, Trash2,
   DoorOpen, Users, Ruler, Zap, Droplets, Wrench,
 } from 'lucide-react';
 import type { Room, RoomStatus } from '../../types';
