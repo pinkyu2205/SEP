@@ -94,3 +94,89 @@ export const getCurrentMonthYear = (): string => {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   return `Tháng ${month}/${now.getFullYear()}`;
 };
+
+export const getContractStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    draft: 'Bản nháp',
+    waiting_sign: 'Chờ ký',
+    active: 'Đang hiệu lực',
+    expiring_soon: 'Sắp hết hạn',
+    expired: 'Đã hết hạn',
+    terminated: 'Đã chấm dứt',
+  };
+  return labels[status] || status;
+};
+
+export const getContractStatusColor = (status: string): string => {
+  const colors: Record<string, string> = {
+    draft: '#94A3B8',
+    waiting_sign: '#F59E0B',
+    active: '#10B981',
+    expiring_soon: '#EF4444',
+    expired: '#6B7280',
+    terminated: '#EF4444',
+  };
+  return colors[status] || '#94A3B8';
+};
+
+export const getMaintenancePriorityLabel = (priority: string): string => {
+  const labels: Record<string, string> = {
+    low: 'Thấp',
+    medium: 'Trung bình',
+    high: 'Cao',
+    urgent: 'Khẩn cấp',
+  };
+  return labels[priority] || priority;
+};
+
+export const getMaintenancePriorityColor = (priority: string): string => {
+  const colors: Record<string, string> = {
+    low: '#10B981',
+    medium: '#F59E0B',
+    high: '#EF4444',
+    urgent: '#7C3AED',
+  };
+  return colors[priority] || '#94A3B8';
+};
+
+export const getNotificationTypeEmoji = (type: string): string => {
+  const map: Record<string, string> = {
+    new_bill: '📄',
+    bill_overdue: '⚠️',
+    payment_success: '✅',
+    payment_failed: '❌',
+    payment_pending_verify: '🕐',
+    contract_expiring: '📋',
+    contract_expired: '📋',
+    maintenance_new: '🔧',
+    maintenance_accepted: '🔧',
+    maintenance_resolved: '✅',
+    equipment_damaged: '⚙️',
+    meter_reading_due: '📊',
+    tenant_onboarded: '🏠',
+    system: '🔔',
+  };
+  return map[type] || '🔔';
+};
+
+export const getDaysUntil = (dateStr: string): number => {
+  const target = new Date(dateStr);
+  const now = new Date();
+  const diff = target.getTime() - now.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+};
+
+export const formatRelativeTime = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return 'Vừa xong';
+  if (diffMins < 60) return `${diffMins} phút trước`;
+  if (diffHours < 24) return `${diffHours} giờ trước`;
+  if (diffDays < 7) return `${diffDays} ngày trước`;
+  return formatDate(dateStr);
+};

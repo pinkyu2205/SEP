@@ -377,6 +377,103 @@ export interface Tenant {
   createdAt: string;
 }
 
+// ======================== RENEWAL & CHECKOUT ========================
+export type RenewalStatus = 'pending' | 'approved' | 'rejected';
+export type CheckoutStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled';
+
+export interface RenewalRequest {
+  id: string;
+  contractId: string;
+  tenantId: string;
+  requestedMonths: number;
+  proposedStartDate: string;
+  proposedEndDate: string;
+  note?: string;
+  status: RenewalStatus;
+  createdAt: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+}
+
+export interface CheckoutRequest {
+  id: string;
+  contractId: string;
+  tenantId: string;
+  requestedMoveOutDate: string;
+  reason: string;
+  assetReturnConfirmed: boolean;
+  depositRefundAmount?: number;
+  depositRefundStatus?: 'pending' | 'processing' | 'paid';
+  finalElectricity?: number;
+  finalWater?: number;
+  status: CheckoutStatus;
+  createdAt: string;
+  confirmedAt?: string;
+}
+
+// ======================== ONBOARDING ========================
+export type OnboardingStep = 'room_inspection' | 'asset_confirmation' | 'meter_reading' | 'sign_confirmation';
+
+export interface OnboardingAsset {
+  id: string;
+  name: string;
+  quantity: number;
+  condition: 'good' | 'fair' | 'poor';
+  notes?: string;
+  confirmed: boolean;
+}
+
+export interface TenantOnboarding {
+  id: string;
+  contractId: string;
+  tenantId: string;
+  roomId: string;
+  roomName: string;
+  step: OnboardingStep;
+  completedSteps: OnboardingStep[];
+  roomConditionNotes?: string;
+  roomConditionImages?: string[];
+  assets: OnboardingAsset[];
+  initialElectricity?: number;
+  initialWater?: number;
+  meterImages?: string[];
+  signatureImageUri?: string;
+  confirmedAt?: string;
+  createdAt: string;
+}
+
+// ======================== NOTIFICATION CENTER ========================
+export interface NotificationGroup {
+  date: string;
+  notifications: AppNotification[];
+}
+
+// ======================== CHAT / COMMUNICATION ========================
+export type MessageStatus = 'sent' | 'delivered' | 'read';
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: UserRole;
+  receiverId: string;
+  content: string;
+  imageUri?: string;
+  status: MessageStatus;
+  createdAt: string;
+}
+
+export interface ChatThread {
+  id: string;
+  participantId: string;
+  participantName: string;
+  participantRole: UserRole;
+  participantAvatar?: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  unreadCount: number;
+}
+
 // ======================== API RESPONSE ========================
 export interface ApiResponse<T> {
   success: boolean;

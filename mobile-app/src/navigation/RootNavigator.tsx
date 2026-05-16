@@ -13,6 +13,16 @@ import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
 import { AdminOnboardingScreen } from '../screens/admin/AdminOnboardingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { NotificationCenterScreen } from '../screens/manager/NotificationCenterScreen';
+
+// Tenant-specific screens
+import { ProfileScreen } from '../screens/shared/ProfileScreen';
+import { ContractDetailScreen } from '../screens/tenant/ContractDetailScreen';
+import { MaintenanceCreateScreen } from '../screens/tenant/MaintenanceCreateScreen';
+import { MaintenanceDetailScreen } from '../screens/tenant/MaintenanceDetailScreen';
+import { PaymentHistoryScreen } from '../screens/tenant/PaymentHistoryScreen';
+import { TenantOnboardingScreen } from '../screens/tenant/TenantOnboardingScreen';
+import { TenantNotificationScreen } from '../screens/tenant/TenantNotificationScreen';
+
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
 
@@ -55,7 +65,45 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
           </Stack.Group>
         ) : (
-          <Stack.Screen name="TenantTabs" component={TenantTabNavigator} />
+          // Tenant stack — tabs + all detail screens
+          <Stack.Group>
+            <Stack.Screen name="TenantTabs" component={TenantTabNavigator} />
+            <Stack.Screen
+              name="ContractDetail"
+              component={ContractDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="MaintenanceCreate"
+              component={MaintenanceCreateScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="MaintenanceDetail"
+              component={MaintenanceDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="PaymentHistory"
+              component={PaymentHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="TenantOnboarding"
+              component={TenantOnboardingScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="TenantNotifications"
+              component={TenantNotificationScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Profile"
+              component={ProfileScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+          </Stack.Group>
         )}
       </Stack.Navigator>
     </NavigationContainer>

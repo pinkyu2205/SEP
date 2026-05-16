@@ -3,28 +3,23 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, Platform } from 'react-native';
 import { TenantHomeScreen } from '../screens/tenant/TenantHomeScreen';
 import { InvoiceListScreen } from '../screens/tenant/InvoiceListScreen';
-import { ContractListScreen } from '../screens/shared/ContractListScreen';
-import { ProfileScreen } from '../screens/shared/ProfileScreen';
 import { ScanScreen } from '../screens/tenant/ScanScreen';
+import { TenantContractScreen } from '../screens/tenant/TenantContractScreen';
+import { MaintenanceListScreen } from '../screens/tenant/MaintenanceListScreen';
 import { Colors } from '../constants';
 
 const Tab = createBottomTabNavigator();
 
 const TabIcon = ({ emoji, focused }: { emoji: string; focused: boolean }) => (
-  <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.5 }}>{emoji}</Text>
+  <Text style={{ fontSize: 22, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>
 );
 
 const ScanButton = () => (
   <View style={styles.fabContainer}>
     <View style={styles.fab}>
-      <Text style={{ fontSize: 24 }}>📸</Text>
+      <Text style={{ fontSize: 26 }}>📷</Text>
     </View>
   </View>
-);
-
-// Wrapper to filter only Manager↔Tenant contracts for tenant view
-const TenantContractScreen = (props: any) => (
-  <ContractListScreen {...props} filterType="manager_tenant" />
 );
 
 export const TenantTabNavigator: React.FC = () => {
@@ -35,15 +30,17 @@ export const TenantTabNavigator: React.FC = () => {
         tabBarStyle: {
           backgroundColor: Colors.white,
           borderTopColor: Colors.divider,
-          height: Platform.OS === 'ios' ? 80 : 60,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 8,
-          paddingTop: 4,
+          borderTopWidth: 1,
+          height: Platform.OS === 'ios' ? 84 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+          paddingTop: 6,
         },
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: '600',
+          marginTop: 2,
         },
       }}
     >
@@ -72,19 +69,19 @@ export const TenantTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
+        name="MaintenanceList"
+        component={MaintenanceListScreen}
+        options={{
+          tabBarLabel: 'Sửa chữa',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} />,
+        }}
+      />
+      <Tab.Screen
         name="TenantContracts"
         component={TenantContractScreen}
         options={{
           tabBarLabel: 'Hợp đồng',
           tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} />,
-        }}
-      />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarLabel: 'Tài khoản',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} />,
         }}
       />
     </Tab.Navigator>
@@ -93,25 +90,22 @@ export const TenantTabNavigator: React.FC = () => {
 
 const styles = StyleSheet.create({
   fabContainer: {
-    top: -20,
+    top: -22,
     justifyContent: 'center',
     alignItems: 'center',
   },
   fab: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: Colors.primary,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 10,
     borderWidth: 4,
     borderColor: Colors.white,
   },
