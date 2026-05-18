@@ -5,8 +5,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  EyeOff,
   KeyRound,
   Lock,
+  Plus,
   Search,
   Unlock,
   Users,
@@ -14,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { PlatformAccountStatus, PlatformRole, PlatformUser } from '../../types';
 import { ROLE_SCOPE_RULES } from '../../types';
-import { PLATFORM_USERS, SUPER_ADMIN_PERMISSIONS } from '../../utils/superAdminMockData';
+import { PLATFORM_HOSTS, PLATFORM_USERS, SUPER_ADMIN_PERMISSIONS } from '../../utils/superAdminMockData';
 import {
   EmptyState,
   PAGE_SIZE,
@@ -24,6 +26,26 @@ import {
   roleConfig,
 } from './shared';
 
+interface CreateUserForm {
+  fullName: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: PlatformRole;
+  hostId: string;
+  districts: string;
+}
+
+const EMPTY_FORM: CreateUserForm = {
+  fullName: '',
+  email: '',
+  phone: '',
+  password: '',
+  role: 'manager',
+  hostId: PLATFORM_HOSTS[0]?.id ?? '',
+  districts: '',
+};
+
 export const UserRoleManagement = () => {
   const [users, setUsers] = useState<PlatformUser[]>(PLATFORM_USERS);
   const [userSearch, setUserSearch] = useState('');
@@ -31,6 +53,10 @@ export const UserRoleManagement = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | PlatformAccountStatus>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState<PlatformUser | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateUserForm>(EMPTY_FORM);
+  const [createError, setCreateError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const filteredUsers = useMemo(() => {
     const keyword = userSearch.trim().toLowerCase();
@@ -48,23 +74,54 @@ export const UserRoleManagement = () => {
   const safePage = Math.min(currentPage, pageCount);
   const pagedUsers = filteredUsers.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const handleCreateUser = () => {
-    const nextId = users.length + 1;
+  const openCreateModal = () => {
+    setCreateForm(EMPTY_FORM);
+    setCreateError('');
+    setShowPassword(false);
+    setShowCreateModal(true);
+  };
+
+  const handleCreateSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!createForm.fullName.trim()) return setCreateError('Vui lòng nhập họ tên.');
+    if (!createForm.email.trim() || !createForm.email.includes('@')) return setCreateError('Email không hợp lệ.');
+    if (!createForm.phone.trim()) return setCreateError('Vui lòng nhập số điện thoại.');
+    if (createForm.password.length < 6) return setCreateError('Mật khẩu phải có ít nhất 6 ký tự.');
+    if (createForm.role === 'host' && !createForm.districts.trim()) return setCreateError('Vui lòng nhập khu vực hoạt động.');
+    if (users.some(u => u.email.toLowerCase() === createForm.email.trim().toLowerCase())) {
+      return setCreateError('Email này đã tồn tại trong hệ thống.');
+    }
+
+    const selectedHost = PLATFORM_HOSTS.find(h => h.id === createForm.hostId);
+    const nextId = `user-${Date.now()}`;
+
     const newUser: PlatformUser = {
-      id: `new-user-${nextId}`,
-      fullName: `Tài khoản mới ${nextId}`,
-      email: `new.user.${nextId}@roomrent.local`,
-      phone: `090${String(1000000 + nextId).slice(0, 7)}`,
-      role: 'manager',
+      id: nextId,
+      fullName: createForm.fullName.trim(),
+      email: createForm.email.trim(),
+      phone: createForm.phone.trim(),
+      role: createForm.role,
       status: 'pending_approval',
-      hostId: 'host-1',
-      hostName: 'UrbanNest Host',
-      assignedScope: 'Chờ phân quyền',
-      createdAt: '2026-05-18',
+      ...(createForm.role === 'host' && {
+        assignedScope: createForm.districts.trim(),
+        scopeDetail: '0 buildings · 0 rooms',
+      }),
+      ...(createForm.role === 'manager' && {
+        hostId: selectedHost?.id,
+        hostName: selectedHost?.businessName,
+        assignedScope: selectedHost?.districts ?? 'Chờ phân quyền',
+        scopeDetail: `${selectedHost?.buildings ?? 0} buildings · ${selectedHost?.rooms ?? 0} rooms`,
+      }),
+      ...(createForm.role === 'super_admin' && {
+        assignedScope: 'Toàn nền tảng',
+      }),
+      createdAt: new Date().toISOString().slice(0, 10),
       lastLoginAt: 'Chưa đăng nhập',
     };
+
     setUsers(prev => [newUser, ...prev]);
     setCurrentPage(1);
+    setShowCreateModal(false);
     setSelectedUser(newUser);
   };
 
@@ -85,8 +142,8 @@ export const UserRoleManagement = () => {
         subtitle="Xem toàn bộ users, tạo tài khoản, đổi vai trò, khóa/mở khóa, kích hoạt/vô hiệu hóa và reset mật khẩu"
         icon={Users}
         action={
-          <button onClick={handleCreateUser} className="btn-primary flex items-center gap-2">
-            <Users className="h-4 w-4" />
+          <button onClick={openCreateModal} className="btn-primary flex items-center gap-2">
+            <Plus className="h-4 w-4" />
             Tạo tài khoản
           </button>
         }
@@ -162,8 +219,8 @@ export const UserRoleManagement = () => {
                       <StatusPill label={status.label} color={status.color} dot={status.dot} />
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      <p className="font-medium text-slate-800">{user.hostName ?? 'Platform'}</p>
-                      <p className="text-xs text-slate-500">{user.assignedScope}</p>
+                      <p className="font-medium text-slate-800">{user.assignedScope ?? 'Toàn nền tảng'}</p>
+                      {user.scopeDetail && <p className="text-xs text-slate-500">{user.scopeDetail}</p>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-500">{user.lastLoginAt ?? 'Chưa đăng nhập'}</td>
                     <td className="px-4 py-3">
@@ -218,6 +275,133 @@ export const UserRoleManagement = () => {
         </div>
       </SectionShell>
 
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button aria-label="Đóng modal" className="absolute inset-0 bg-slate-950/50" onClick={() => setShowCreateModal(false)} />
+          <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 p-5">
+              <div>
+                <h3 className="text-lg font-black text-slate-950">Tạo tài khoản mới</h3>
+                <p className="text-sm text-slate-500">Điền thông tin để tạo tài khoản cho người dùng</p>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateSubmit} className="space-y-4 p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-bold text-slate-700">Họ và tên <span className="text-rose-500">*</span></span>
+                  <input
+                    value={createForm.fullName}
+                    onChange={e => setCreateForm(prev => ({ ...prev, fullName: e.target.value }))}
+                    className="input-field"
+                    placeholder="Nguyễn Văn A"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-bold text-slate-700">Số điện thoại <span className="text-rose-500">*</span></span>
+                  <input
+                    value={createForm.phone}
+                    onChange={e => setCreateForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="input-field"
+                    placeholder="0901234567"
+                    type="tel"
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold text-slate-700">Email <span className="text-rose-500">*</span></span>
+                <input
+                  value={createForm.email}
+                  onChange={e => setCreateForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="input-field"
+                  placeholder="user@company.vn"
+                  type="email"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold text-slate-700">Mật khẩu <span className="text-rose-500">*</span></span>
+                <div className="relative">
+                  <input
+                    value={createForm.password}
+                    onChange={e => setCreateForm(prev => ({ ...prev, password: e.target.value }))}
+                    className="input-field pr-10"
+                    placeholder="Ít nhất 6 ký tự"
+                    type={showPassword ? 'text' : 'password'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(prev => !prev)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </label>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-bold text-slate-700">Vai trò</span>
+                  <select
+                    value={createForm.role}
+                    onChange={e => setCreateForm(prev => ({ ...prev, role: e.target.value as PlatformRole, districts: '', hostId: PLATFORM_HOSTS[0]?.id ?? '' }))}
+                    className="input-field"
+                  >
+                    {Object.entries(roleConfig).map(([role, cfg]) => <option key={role} value={role}>{cfg.label}</option>)}
+                  </select>
+                </label>
+
+                {createForm.role === 'host' && (
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-bold text-slate-700">Khu vực hoạt động <span className="text-rose-500">*</span></span>
+                    <input
+                      value={createForm.districts}
+                      onChange={e => setCreateForm(prev => ({ ...prev, districts: e.target.value }))}
+                      className="input-field"
+                      placeholder="Quận 1, Quận 3..."
+                    />
+                  </label>
+                )}
+
+                {createForm.role === 'manager' && (
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-bold text-slate-700">Thuộc Host <span className="text-rose-500">*</span></span>
+                    <select
+                      value={createForm.hostId}
+                      onChange={e => setCreateForm(prev => ({ ...prev, hostId: e.target.value }))}
+                      className="input-field"
+                    >
+                      {PLATFORM_HOSTS.map(h => (
+                        <option key={h.id} value={h.id}>{h.ownerName}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-bold text-slate-700">Permission scope của vai trò <span className="font-black text-slate-900">{roleConfig[createForm.role].label}</span>:</p>
+                <p className="mt-1 text-xs text-slate-600">{SUPER_ADMIN_PERMISSIONS[createForm.role].scope}</p>
+              </div>
+
+              {createError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  {createError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="btn-secondary">Hủy</button>
+                <button type="submit" className="btn-primary flex items-center gap-2">
+                  <Plus className="h-4 w-4" />
+                  Tạo tài khoản
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {selectedUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button aria-label="Đóng modal" className="absolute inset-0 bg-slate-950/50" onClick={() => setSelectedUser(null)} />
@@ -235,7 +419,7 @@ export const UserRoleManagement = () => {
               <div className="rounded-xl bg-slate-50 p-4">
                 <p className="text-xl font-black text-slate-950">{selectedUser.fullName}</p>
                 <p className="mt-1 text-sm text-slate-600">{selectedUser.email} · {selectedUser.phone}</p>
-                <p className="mt-1 text-xs text-slate-500">Host scope: {selectedUser.hostName ?? 'Platform'} · {selectedUser.assignedScope}</p>
+                <p className="mt-1 text-xs text-slate-500">{selectedUser.assignedScope ?? 'Toàn nền tảng'}</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block">

@@ -1,5 +1,5 @@
 import { Wrench } from 'lucide-react';
-import { PLATFORM_EQUIPMENT_ROWS, PLATFORM_MAINTENANCE_REQUESTS } from '../../utils/superAdminMockData';
+import { PLATFORM_EQUIPMENT_ROWS, PLATFORM_HOSTS, PLATFORM_MAINTENANCE_REQUESTS } from '../../utils/superAdminMockData';
 import {
   SectionShell,
   StatusPill,
@@ -7,6 +7,8 @@ import {
   formatVnd,
   maintenanceStatusMap,
 } from './shared';
+
+const ownerByBusiness = Object.fromEntries(PLATFORM_HOSTS.map(h => [h.businessName, h.ownerName]));
 
 export const MaintenanceEquipmentMonitoring = () => {
   return (
@@ -35,7 +37,7 @@ export const MaintenanceEquipmentMonitoring = () => {
                 {PLATFORM_MAINTENANCE_REQUESTS.map(request => (
                   <tr key={request.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3"><p className="font-bold text-slate-900">{request.code}</p><p className="line-clamp-1 text-xs text-slate-500">{request.title}</p></td>
-                    <td className="px-4 py-3"><p className="font-semibold text-slate-800">{request.hostName}</p><p className="text-xs text-slate-500">{request.propertyName} {request.roomCode ? `· ${request.roomCode}` : ''}</p></td>
+                    <td className="px-4 py-3"><p className="font-semibold text-slate-800">{ownerByBusiness[request.hostName] ?? request.hostName}</p><p className="text-xs text-slate-500">{request.propertyName} {request.roomCode ? `· ${request.roomCode}` : ''}</p></td>
                     <td className="px-4 py-3 text-xs text-slate-500">{request.assignedManagerName ?? 'Chưa gán'}</td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{request.estimatedCost ? formatVnd(request.estimatedCost) : 'N/A'}</td>
                     <td className="px-4 py-3"><StatusPill label={maintenanceStatusMap[request.status].label} color={maintenanceStatusMap[request.status].color} /></td>
@@ -66,7 +68,7 @@ export const MaintenanceEquipmentMonitoring = () => {
                   return (
                     <tr key={item.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3"><p className="font-bold text-slate-900">{item.name}</p><p className="font-mono text-xs text-slate-500">{item.code}</p></td>
-                      <td className="px-4 py-3"><p className="font-semibold text-slate-800">{item.hostName}</p><p className="text-xs text-slate-500">{item.buildingName} · {item.roomCode}</p></td>
+                      <td className="px-4 py-3"><p className="font-semibold text-slate-800">{ownerByBusiness[item.hostName] ?? item.hostName}</p><p className="text-xs text-slate-500">{item.buildingName} · {item.roomCode}</p></td>
                       <td className="px-4 py-3 font-mono text-xs text-cyan-700">{item.qrPayload}</td>
                       <td className="px-4 py-3"><StatusPill label={status.label} color={status.color} /></td>
                     </tr>

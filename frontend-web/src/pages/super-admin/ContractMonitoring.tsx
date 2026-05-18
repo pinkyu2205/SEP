@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { FileText } from 'lucide-react';
-import { PLATFORM_CONTRACTS } from '../../utils/superAdminMockData';
+import { PLATFORM_CONTRACTS, PLATFORM_HOSTS } from '../../utils/superAdminMockData';
 import type { PlatformContractStatus } from '../../utils/superAdminMockData';
 import { SectionShell, StatusPill, contractStatusMap } from './shared';
+
+const ownerByBusiness = Object.fromEntries(PLATFORM_HOSTS.map(h => [h.businessName, h.ownerName]));
 
 export const ContractMonitoring = () => {
   const [contractStatusFilter, setContractStatusFilter] = useState<'all' | PlatformContractStatus>('all');
@@ -41,7 +43,7 @@ export const ContractMonitoring = () => {
             {filteredContracts.map(contract => (
               <tr key={contract.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3"><p className="font-mono text-xs font-bold text-slate-800">{contract.code}</p><p className="text-xs text-slate-500">{contract.contractType}</p></td>
-                <td className="px-4 py-3"><p className="font-bold text-slate-900">{contract.hostName}</p><p className="text-xs text-slate-500">{contract.buildingName}</p></td>
+                <td className="px-4 py-3"><p className="font-bold text-slate-900">{ownerByBusiness[contract.hostName] ?? contract.hostName}</p><p className="text-xs text-slate-500">{contract.buildingName}</p></td>
                 <td className="px-4 py-3"><p className="font-semibold text-slate-800">{contract.creatorName}</p><p className="text-xs text-slate-500">{contract.creatorRole}</p></td>
                 <td className="px-4 py-3 text-slate-700">{contract.tenantOrManager}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{contract.approvalHistory}</td>

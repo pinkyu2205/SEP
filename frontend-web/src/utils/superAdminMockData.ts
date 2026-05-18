@@ -90,6 +90,7 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
     performanceScore: 92,
     registeredAt: '2025-10-15',
     lastActivityAt: '2026-05-18 09:12',
+    districts: 'Quận 1, Quận 3',
   },
   {
     id: 'host-2',
@@ -107,6 +108,7 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
     performanceScore: 0,
     registeredAt: '2026-05-16',
     lastActivityAt: '2026-05-18 08:44',
+    districts: 'TP. Thủ Đức',
   },
   {
     id: 'host-3',
@@ -124,6 +126,7 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
     performanceScore: 68,
     registeredAt: '2025-08-20',
     lastActivityAt: '2026-05-12 18:02',
+    districts: 'Quận 7, Bình Thạnh, Gò Vấp',
   },
   {
     id: 'host-4',
@@ -141,6 +144,7 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
     performanceScore: 85,
     registeredAt: '2025-12-08',
     lastActivityAt: '2026-05-18 07:39',
+    districts: 'Quận 4, Quận 7',
   },
 ];
 
@@ -148,7 +152,7 @@ export const PLATFORM_USERS: PlatformUser[] = [
   {
     id: 'sa-1',
     fullName: 'Super Admin',
-    email: 'superadmin@roomrent.vn',
+    email: 'superadmin@urbannest.vn',
     phone: '0900000000',
     role: 'super_admin',
     status: 'active',
@@ -165,20 +169,21 @@ export const PLATFORM_USERS: PlatformUser[] = [
     status: host.status,
     hostId: host.id,
     hostName: host.businessName,
-    assignedScope: `${host.buildings} buildings, ${host.rooms} rooms`,
+    assignedScope: host.districts ?? `${host.buildings} buildings`,
+    scopeDetail: `${host.buildings} buildings · ${host.rooms} rooms`,
     lastLoginAt: host.lastActivityAt,
     createdAt: host.registeredAt,
   })),
   ...MOCK_USERS.map(user => ({
     id: user.id,
     fullName: user.fullName,
-    email: user.email ?? `${user.phone}@roomrent.local`,
+    email: user.email ?? `${user.phone}@urbannest.local`,
     phone: user.phone,
     role: user.role,
     status: user.status === 'moved_out' ? 'inactive' as PlatformAccountStatus : 'active' as PlatformAccountStatus,
     hostId: 'host-1',
     hostName: 'UrbanNest Host',
-    assignedScope: user.role === 'manager' ? 'Buildings được Host phân công' : 'Tenant app cá nhân',
+    assignedScope: user.role === 'manager' ? 'Quận 1, Quận 3' : 'Cá nhân',
     lastLoginAt: user.role === 'manager' ? '2026-05-18 08:15' : '2026-05-17 21:04',
     createdAt: user.createdAt,
   })),
@@ -293,21 +298,29 @@ export const PLATFORM_CONTRACTS: PlatformContractRow[] = [
   },
 ];
 
+const extractDistrict = (address: string) => address.split(', ')[1] ?? '';
+
 export const PLATFORM_BUILDINGS = [
   ...MOCK_PROPERTIES.map(property => ({
     id: property.id,
     hostName: 'UrbanNest Host',
+    ownerName: 'Nguyễn Minh Khôi',
     buildingName: property.name,
     address: property.address,
+    district: extractDistrict(property.address),
     managerName: property.managerName ?? 'Chưa phân công',
     totalRooms: property.rooms.length,
     occupiedRooms: property.rooms.filter(room => room.status === 'occupied').length,
     maintenanceRooms: property.rooms.filter(room => room.status === 'maintenance').length,
     monthlyRevenue: property.rooms.filter(room => room.status === 'occupied').reduce((sum, room) => sum + room.rentPrice, 0),
+    tenantCount: property.rooms.filter(room => room.status === 'occupied').length,
+    floors: property.totalFloors,
   })),
-  { id: 'sys-building-1', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', address: '22 Phan Xích Long, Phú Nhuận, TP.HCM', managerName: 'Đặng Quang Phúc', totalRooms: 24, occupiedRooms: 19, maintenanceRooms: 2, monthlyRevenue: 142000000 },
-  { id: 'sys-building-2', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', address: '88 Nguyễn Thị Thập, Quận 7, TP.HCM', managerName: 'Ngô Minh Long', totalRooms: 18, occupiedRooms: 16, maintenanceRooms: 1, monthlyRevenue: 99000000 },
-  { id: 'sys-building-3', hostName: 'AnHouse System', buildingName: 'AnHouse Bình Thạnh', address: '15 Ung Văn Khiêm, Bình Thạnh, TP.HCM', managerName: 'Chờ duyệt Host', totalRooms: 26, occupiedRooms: 0, maintenanceRooms: 0, monthlyRevenue: 0 },
+  { id: 'sys-building-1', hostName: 'MaiStay Rentals', ownerName: 'Lê Thanh Mai', buildingName: 'Mai Tower 1', address: '22 Phan Xích Long, Phú Nhuận, TP.HCM', district: 'Phú Nhuận', managerName: 'Đặng Quang Phúc', totalRooms: 24, occupiedRooms: 19, maintenanceRooms: 2, monthlyRevenue: 142000000, tenantCount: 19, floors: 5 },
+  { id: 'sys-building-2', hostName: 'Huy Residence', ownerName: 'Phạm Quốc Huy', buildingName: 'Huy Residence Q7', address: '88 Nguyễn Thị Thập, Quận 7, TP.HCM', district: 'Quận 7', managerName: 'Ngô Minh Long', totalRooms: 18, occupiedRooms: 16, maintenanceRooms: 1, monthlyRevenue: 99000000, tenantCount: 16, floors: 4 },
+  { id: 'sys-building-3', hostName: 'AnHouse System', ownerName: 'Trần Hoàng An', buildingName: 'AnHouse Bình Thạnh', address: '15 Ung Văn Khiêm, Bình Thạnh, TP.HCM', district: 'Bình Thạnh', managerName: 'Chờ duyệt Host', totalRooms: 26, occupiedRooms: 0, maintenanceRooms: 0, monthlyRevenue: 0, tenantCount: 0, floors: 6 },
+  { id: 'sys-building-4', hostName: 'MaiStay Rentals', ownerName: 'Lê Thanh Mai', buildingName: 'Mai Studio Bình Thạnh', address: '101 Xô Viết Nghệ Tĩnh, Bình Thạnh, TP.HCM', district: 'Bình Thạnh', managerName: 'Trần Bảo Châu', totalRooms: 20, occupiedRooms: 14, maintenanceRooms: 3, monthlyRevenue: 88000000, tenantCount: 14, floors: 4 },
+  { id: 'sys-building-5', hostName: 'Huy Residence', ownerName: 'Phạm Quốc Huy', buildingName: 'Huy House Gò Vấp', address: '55 Quang Trung, Gò Vấp, TP.HCM', district: 'Gò Vấp', managerName: 'Lâm Mỹ Duyên', totalRooms: 14, occupiedRooms: 10, maintenanceRooms: 1, monthlyRevenue: 61000000, tenantCount: 10, floors: 3 },
 ];
 
 export const PLATFORM_EQUIPMENT_ROWS = [
@@ -319,11 +332,11 @@ export const PLATFORM_EQUIPMENT_ROWS = [
     buildingName: equipment.propertyName,
     roomCode: equipment.roomCode ?? 'Khu chung',
     status: equipment.status,
-    qrPayload: `roomrent://equipment/${equipment.code}`,
+    qrPayload: `urbannest://equipment/${equipment.code}`,
     lastUpdatedAt: equipment.createdAt,
   })),
-  { id: 'eq-sys-1', code: 'EQ-MAI-CAM-02', name: 'Camera hành lang tầng 2', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', roomCode: 'Khu chung', status: 'maintenance', qrPayload: 'roomrent://equipment/EQ-MAI-CAM-02', lastUpdatedAt: '2026-05-12' },
-  { id: 'eq-sys-2', code: 'EQ-HUY-PUMP-01', name: 'Máy bơm nước chính', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', roomCode: 'Kỹ thuật', status: 'good', qrPayload: 'roomrent://equipment/EQ-HUY-PUMP-01', lastUpdatedAt: '2026-05-01' },
+  { id: 'eq-sys-1', code: 'EQ-MAI-CAM-02', name: 'Camera hành lang tầng 2', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', roomCode: 'Khu chung', status: 'maintenance', qrPayload: 'urbannest://equipment/EQ-MAI-CAM-02', lastUpdatedAt: '2026-05-12' },
+  { id: 'eq-sys-2', code: 'EQ-HUY-PUMP-01', name: 'Máy bơm nước chính', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', roomCode: 'Kỹ thuật', status: 'good', qrPayload: 'urbannest://equipment/EQ-HUY-PUMP-01', lastUpdatedAt: '2026-05-01' },
 ];
 
 export const PLATFORM_MAINTENANCE_REQUESTS = [

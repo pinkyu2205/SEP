@@ -41,7 +41,7 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
           <ShieldCheck className="w-5 h-5 text-white" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-extrabold text-white leading-tight">RoomRent OS</p>
+          <p className="text-sm font-extrabold text-white leading-tight">UrbanNest</p>
           <p className="text-[10px] text-cyan-200/80 leading-tight font-semibold">Super Admin Web Console</p>
         </div>
       </div>

@@ -36,8 +36,8 @@ export const HostManagement = () => {
               return (
                 <tr key={host.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <p className="font-bold text-slate-900">{host.businessName}</p>
-                    <p className="text-xs text-slate-500">{host.ownerName} · {host.email}</p>
+                    <p className="font-bold text-slate-900">{host.ownerName}</p>
+                    <p className="text-xs text-slate-500">{host.email}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {host.buildings} buildings · {host.rooms} rooms · {host.managers} managers · {host.tenants} tenants

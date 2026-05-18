@@ -16,7 +16,9 @@ interface WebAuthContextValue {
   logout: () => void;
 }
 
-const STORAGE_KEY = 'roomrent_web_user';
+const STORAGE_KEY = 'urbannest_web_user';
+
+const storage = sessionStorage;
 
 const DEMO_ACCOUNTS: Array<WebAuthUser & { password: string }> = [
   {
@@ -39,10 +41,10 @@ const WebAuthContext = createContext<WebAuthContextValue | null>(null);
 
 const readStoredUser = (): WebAuthUser | null => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) as WebAuthUser : null;
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    storage.removeItem(STORAGE_KEY);
     return null;
   }
 };
@@ -68,12 +70,12 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
         role: account.role,
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+      storage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
       setUser(nextUser);
       return nextUser;
     },
     logout: () => {
-      localStorage.removeItem(STORAGE_KEY);
+      storage.removeItem(STORAGE_KEY);
       setUser(null);
     },
   }), [user]);

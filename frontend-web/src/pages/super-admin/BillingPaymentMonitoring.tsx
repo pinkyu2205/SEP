@@ -10,6 +10,7 @@ export const BillingPaymentMonitoring = () => {
   const [billSearch, setBillSearch] = useState('');
 
   const uniqueHosts = PLATFORM_HOSTS.map(host => host.businessName);
+  const ownerByBusiness = Object.fromEntries(PLATFORM_HOSTS.map(h => [h.businessName, h.ownerName]));
 
   const filteredBills = useMemo(() => {
     const keyword = billSearch.trim().toLowerCase();
@@ -41,7 +42,7 @@ export const BillingPaymentMonitoring = () => {
         </div>
         <select value={hostFilter} onChange={event => setHostFilter(event.target.value)} className="input-field">
           <option value="all">Tất cả Host</option>
-          {uniqueHosts.map(hostName => <option key={hostName} value={hostName}>{hostName}</option>)}
+          {uniqueHosts.map(hostName => <option key={hostName} value={hostName}>{ownerByBusiness[hostName] ?? hostName}</option>)}
         </select>
         <select value={billStatusFilter} onChange={event => setBillStatusFilter(event.target.value as 'all' | PlatformBillStatus)} className="input-field">
           <option value="all">Tất cả trạng thái</option>
@@ -70,7 +71,7 @@ export const BillingPaymentMonitoring = () => {
             {filteredBills.map(bill => (
               <tr key={bill.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{bill.id}</td>
-                <td className="px-4 py-3"><p className="font-bold text-slate-900">{bill.hostName}</p><p className="text-xs text-slate-500">{bill.buildingName}</p></td>
+                <td className="px-4 py-3"><p className="font-bold text-slate-900">{ownerByBusiness[bill.hostName] ?? bill.hostName}</p><p className="text-xs text-slate-500">{bill.buildingName}</p></td>
                 <td className="px-4 py-3 text-slate-700">{bill.tenantName}</td>
                 <td className="px-4 py-3 text-right font-bold text-slate-950">{formatVnd(bill.amount)}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{bill.paymentMethod}</td>

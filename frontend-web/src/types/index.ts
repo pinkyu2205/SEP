@@ -45,6 +45,7 @@ export interface PlatformUser {
   hostId?: string;
   hostName?: string;
   assignedScope?: string;
+  scopeDetail?: string;
   lastLoginAt?: string;
   createdAt: string;
 }
@@ -65,6 +66,7 @@ export interface PlatformHostAccount {
   performanceScore: number;
   registeredAt: string;
   lastActivityAt: string;
+  districts?: string;
 }
 
 export type PlatformBillStatus = 'paid' | 'unpaid' | 'overdue' | 'pending';

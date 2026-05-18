@@ -21,8 +21,11 @@ export const WebLogin = () => {
     try {
       const user = await login(email, password);
       const from = (location.state as { from?: string } | null)?.from;
-      const fallback = user.role === 'super_admin' ? '/super-admin' : '/';
-      navigate(from && from !== '/login' ? from : fallback, { replace: true });
+      const defaultPath = user.role === 'super_admin' ? '/super-admin' : '/';
+      const validFrom = from && from !== '/login' && (
+        user.role === 'super_admin' ? from.startsWith('/super-admin') : !from.startsWith('/super-admin')
+      );
+      navigate(validFrom ? from : defaultPath, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể đăng nhập.');
     } finally {
@@ -51,7 +54,7 @@ export const WebLogin = () => {
               <Building2 className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-lg font-black leading-tight">RoomRent OS</p>
+              <p className="text-lg font-black leading-tight">UrbanNest</p>
               <p className="text-xs font-semibold uppercase tracking-widest text-cyan-200">Web Admin Portal</p>
             </div>
           </div>
@@ -70,18 +73,6 @@ export const WebLogin = () => {
           </div>
         </div>
 
-        <div className="relative mt-16 grid gap-3 text-sm md:grid-cols-3">
-          {[
-            ['Super Admin', 'Toàn quyền hệ thống'],
-            ['Host/Admin System', 'Quản lý phạm vi Host'],
-            ['RBAC Guard', 'Chặn truy cập sai role'],
-          ].map(([title, desc]) => (
-            <div key={title} className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-              <p className="font-bold text-white">{title}</p>
-              <p className="mt-1 text-xs text-slate-300">{desc}</p>
-            </div>
-          ))}
-        </div>
       </section>
 
       <section className="flex items-center justify-center bg-slate-100 px-6 py-10 text-slate-900">
