@@ -1,31 +1,36 @@
-import { useState, useEffect } from 'react';
-import { useLocation, Link } from 'react-router-dom';
-import { Bell, Search, ChevronRight, Home } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Bell, ChevronRight, Home, LogOut, Search } from 'lucide-react';
+import { useWebAuth } from '../auth/WebAuthContext';
 import { MOCK_NOTIFICATIONS } from '../utils/mockData';
 
 const ROUTE_LABELS: Record<string, string> = {
-  '/':                    'Bảng điều hành',
-  '/properties':          'Bất động sản',
+  '/': 'Bảng điều hành',
+  '/properties': 'Bất động sản',
   '/operations-managers': 'Quản lý vận hành',
-  '/managers':            'Quản lý vận hành',
-  '/tenants':             'Khách thuê',
-  '/contracts':           'Phê duyệt hợp đồng',
-  '/maintenance':         'Giám sát bảo trì',
-  '/financial':           'Quản lý tài chính',
-  '/equipments':          'Danh mục tài sản',
-  '/reports':             'Báo cáo & Phân tích',
-  '/notifications':       'Thông báo',
-  '/settings':            'Cài đặt',
+  '/managers': 'Quản lý vận hành',
+  '/tenants': 'Khách thuê',
+  '/contracts': 'Phê duyệt hợp đồng',
+  '/maintenance': 'Giám sát bảo trì',
+  '/financial': 'Quản lý tài chính',
+  '/equipments': 'Danh mục tài sản',
+  '/reports': 'Báo cáo & Phân tích',
+  '/notifications': 'Thông báo',
+  '/settings': 'Cài đặt',
 };
 
 const formatVNDate = (date: Date) => {
   return date.toLocaleDateString('vi-VN', {
-    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
   });
 };
 
 export const Header = () => {
   const location = useLocation();
+  const { user, logout } = useWebAuth();
   const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;
   const [currentTime, setCurrentTime] = useState(new Date('2026-05-15T08:00:00'));
 
@@ -43,7 +48,6 @@ export const Header = () => {
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10 flex-shrink-0">
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm min-w-0">
         {!isRoot ? (
           <>
@@ -69,28 +73,18 @@ export const Header = () => {
         )}
       </div>
 
-      {/* Center: Search */}
       <div className="flex-1 max-w-md mx-6 hidden md:block">
         <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-3.5 w-3.5 text-slate-400" />
-          </div>
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <input
             type="text"
             placeholder="Tìm kiếm bất động sản, quản lý, khách thuê..."
             className="block w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-primary-500 focus:border-primary-500 transition-colors"
           />
-          <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
-            <kbd className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 bg-slate-100 border border-slate-200 rounded">
-              Ctrl K
-            </kbd>
-          </div>
         </div>
       </div>
 
-      {/* Right */}
       <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-        {/* Date/time */}
         <div className="hidden lg:flex flex-col items-end">
           <span className="text-[11px] font-semibold text-slate-700 leading-tight">
             {currentTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -102,7 +96,6 @@ export const Header = () => {
 
         <div className="h-5 w-px bg-slate-200 hidden lg:block" />
 
-        {/* Notification bell */}
         <Link
           to="/notifications"
           className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-lg hover:bg-slate-100"
@@ -118,16 +111,23 @@ export const Header = () => {
 
         <div className="h-5 w-px bg-slate-200" />
 
-        {/* User profile */}
-        <div className="flex items-center gap-2.5 cursor-pointer group">
+        <div className="flex items-center gap-2.5 group">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-            UN
+            {user?.role === 'super_admin' ? 'SA' : 'UN'}
           </div>
           <div className="hidden sm:block">
-            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">UrbanNest Host</p>
-            <p className="text-[10px] text-slate-400 leading-tight">Cổng quản lý Host</p>
+            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'UrbanNest Host'}</p>
+            <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'super_admin' ? 'Super Admin' : 'Cổng quản lý Host'}</p>
           </div>
         </div>
+
+        <button
+          onClick={logout}
+          className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50"
+          title="Đăng xuất"
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
       </div>
     </header>
   );

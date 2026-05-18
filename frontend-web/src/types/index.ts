@@ -2,6 +2,98 @@
 //  TYPES - Host Management Portal (UrbanNest Sub-leasing Model)
 // ==========================================
 
+export type PlatformRole = 'super_admin' | 'host' | 'manager' | 'tenant';
+
+export const ROLE_HIERARCHY: PlatformRole[] = ['super_admin', 'host', 'manager', 'tenant'];
+
+export const ROLE_SCOPE_RULES: Record<PlatformRole, string> = {
+  super_admin: 'Full access to every web module and all platform data',
+  host: 'Manage only assigned buildings, managers, contracts, billing, and reports',
+  manager: 'Manage only assigned buildings, rooms, tenants, maintenance, and bills',
+  tenant: 'Access only personal information and tenant app services',
+};
+
+export type SuperAdminPermission =
+  | 'users.manage'
+  | 'roles.manage'
+  | 'hosts.approve'
+  | 'buildings.monitor'
+  | 'rooms.monitor'
+  | 'billing.monitor'
+  | 'contracts.monitor'
+  | 'maintenance.monitor'
+  | 'equipment.monitor'
+  | 'settings.manage'
+  | 'audit.view'
+  | 'security.manage';
+
+export type PlatformAccountStatus =
+  | 'pending_approval'
+  | 'active'
+  | 'inactive'
+  | 'locked'
+  | 'suspended'
+  | 'rejected';
+
+export interface PlatformUser {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  role: PlatformRole;
+  status: PlatformAccountStatus;
+  hostId?: string;
+  hostName?: string;
+  assignedScope?: string;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
+export interface PlatformHostAccount {
+  id: string;
+  ownerName: string;
+  businessName: string;
+  email: string;
+  phone: string;
+  status: PlatformAccountStatus;
+  buildings: number;
+  rooms: number;
+  managers: number;
+  tenants: number;
+  monthlyRevenue: number;
+  unpaidBills: number;
+  performanceScore: number;
+  registeredAt: string;
+  lastActivityAt: string;
+}
+
+export type PlatformBillStatus = 'paid' | 'unpaid' | 'overdue' | 'pending';
+
+export interface PlatformBill {
+  id: string;
+  hostName: string;
+  buildingName: string;
+  tenantName: string;
+  amount: number;
+  status: PlatformBillStatus;
+  paymentMethod: 'bank_transfer' | 'cash' | 'qr' | 'card';
+  issuedAt: string;
+  dueDate: string;
+}
+
+export type AuditSeverity = 'normal' | 'warning' | 'critical';
+
+export interface AuditLog {
+  id: string;
+  actor: string;
+  role: PlatformRole;
+  action: string;
+  target: string;
+  ipAddress: string;
+  severity: AuditSeverity;
+  createdAt: string;
+}
+
 /** Trạng thái phòng */
 export type RoomStatus = 'available' | 'occupied' | 'maintenance';
 
@@ -46,7 +138,7 @@ export interface AppUser {
   phone: string;
   cccd: string;
   email?: string;
-  role: 'host' | 'manager' | 'tenant';
+  role: Exclude<PlatformRole, 'super_admin'>;
   status: UserStatus;
   createdAt: string;
   // Optional tenant-specific fields (populated when assigned to a room)
