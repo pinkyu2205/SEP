@@ -7,8 +7,8 @@ export const WebLogin = () => {
   const { login } = useWebAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('superadmin@roomrent.vn');
-  const [password, setPassword] = useState('super123');
+  const [email, setEmail] = useState('superadmin@gmail.com');
+  const [password, setPassword] = useState('123456');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
