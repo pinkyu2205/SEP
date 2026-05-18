@@ -5,41 +5,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { useBills, billsStore, SharedBill } from '../../store/billsStore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 // ===================== TYPES =====================
 type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial';
+type Bill = SharedBill;
 type PaymentMethod = 'qr' | 'bank_transfer' | 'cash';
 type TabType = 'bills' | 'payments';
 
-interface BillItem {
-  label: string;
-  amount: number;
-}
-
-interface Bill {
-  id: string;
-  code: string;
-  roomName: string;
-  propertyName: string;
-  tenantName: string;
-  tenantPhone: string;
-  month: number;
-  year: number;
-  items: BillItem[];
-  totalAmount: number;
-  lateFee: number;
-  grandTotal: number;
-  status: BillStatus;
-  dueDate: string;
-  paidAt?: string;
-  paidAmount?: number;
-  paymentMethod?: PaymentMethod;
-  transactionId?: string;
-  createdAt: string;
-  daysOverdue?: number;
-}
 
 interface PaymentRecord {
   id: string;
@@ -58,79 +33,6 @@ interface PaymentRecord {
 const VIETQR_BANK_BIN = '970422';
 const VIETQR_ACCOUNT = '0865803493';
 const LATE_FEE_RATE = 0.01;
-
-const MOCK_BILLS: Bill[] = [
-  {
-    id: 'b1', code: 'HD-T5-101', roomName: 'P101', propertyName: 'Nhà Nguyễn Trãi',
-    tenantName: 'Trần Văn A', tenantPhone: '0901111001', month: 5, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 3500000 },
-      { label: 'Điện (135 kWh)', amount: 472500 },
-      { label: 'Nước (14 m³)', amount: 280000 },
-      { label: 'Internet', amount: 100000 },
-    ],
-    totalAmount: 4352500, lateFee: 0, grandTotal: 4352500,
-    status: 'pending', dueDate: '2026-05-15', createdAt: '2026-05-01',
-  },
-  {
-    id: 'b2', code: 'HD-T5-102', roomName: 'P102', propertyName: 'Nhà Nguyễn Trãi',
-    tenantName: 'Lê Thị B', tenantPhone: '0901111002', month: 5, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 3200000 },
-      { label: 'Điện (120 kWh)', amount: 420000 },
-      { label: 'Nước (12 m³)', amount: 240000 },
-    ],
-    totalAmount: 3860000, lateFee: 0, grandTotal: 3860000,
-    status: 'paid', dueDate: '2026-05-15', paidAt: '2026-05-10',
-    paidAmount: 3860000, paymentMethod: 'qr', transactionId: 'VQR-001-2026',
-    createdAt: '2026-05-01',
-  },
-  {
-    id: 'b3', code: 'HD-T5-201', roomName: 'P201', propertyName: 'Nhà Nguyễn Trãi',
-    tenantName: 'Phạm Văn C', tenantPhone: '0901111003', month: 5, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 3800000 },
-      { label: 'Điện (145 kWh)', amount: 507500 },
-      { label: 'Nước (15 m³)', amount: 300000 },
-      { label: 'Dịch vụ', amount: 150000 },
-    ],
-    totalAmount: 4757500, lateFee: 47575, grandTotal: 4805075,
-    status: 'overdue', dueDate: '2026-05-15', createdAt: '2026-05-01', daysOverdue: 1,
-  },
-  {
-    id: 'b4', code: 'HD-T5-301', roomName: 'P301', propertyName: 'Nhà Nguyễn Trãi',
-    tenantName: 'Ngô Thị D', tenantPhone: '0901111004', month: 5, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 3500000 },
-      { label: 'Điện (110 kWh)', amount: 385000 },
-      { label: 'Nước (11 m³)', amount: 220000 },
-    ],
-    totalAmount: 4105000, lateFee: 0, grandTotal: 4105000,
-    status: 'pending', dueDate: '2026-05-15', createdAt: '2026-05-01',
-  },
-  {
-    id: 'b5', code: 'HD-T5-CMT-101', roomName: 'P101', propertyName: 'Nhà CMT8',
-    tenantName: 'Bùi Văn H', tenantPhone: '0901111008', month: 5, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 4000000 },
-      { label: 'Điện (150 kWh)', amount: 525000 },
-      { label: 'Nước (16 m³)', amount: 320000 },
-    ],
-    totalAmount: 4845000, lateFee: 0, grandTotal: 4845000,
-    status: 'pending', dueDate: '2026-05-15', createdAt: '2026-05-01',
-  },
-  {
-    id: 'b6', code: 'HD-T4-201', roomName: 'P201', propertyName: 'Nhà Nguyễn Trãi',
-    tenantName: 'Phạm Văn C', tenantPhone: '0901111003', month: 4, year: 2026,
-    items: [
-      { label: 'Tiền phòng', amount: 3800000 },
-      { label: 'Điện (140 kWh)', amount: 490000 },
-      { label: 'Nước (14 m³)', amount: 280000 },
-    ],
-    totalAmount: 4570000, lateFee: 45700, grandTotal: 4615700,
-    status: 'overdue', dueDate: '2026-04-15', createdAt: '2026-04-01', daysOverdue: 31,
-  },
-];
 
 const MOCK_PAYMENTS: PaymentRecord[] = [
   {
@@ -212,7 +114,7 @@ const BillCard: React.FC<{ bill: Bill; onPress: () => void }> = ({ bill, onPress
 // ===================== MAIN =====================
 export const BillingManagementScreen: React.FC = () => {
   const [tab, setTab] = useState<TabType>('bills');
-  const [bills, setBills] = useState(MOCK_BILLS);
+  const bills = useBills();
   const [payments, setPayments] = useState(MOCK_PAYMENTS);
   const [statusFilter, setStatusFilter] = useState<'all' | BillStatus>('all');
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
@@ -237,11 +139,11 @@ export const BillingManagementScreen: React.FC = () => {
 
   const handleMarkPaidCash = () => {
     if (!selectedBill) return;
-    setBills(prev => prev.map(b =>
-      b.id === selectedBill.id
-        ? { ...b, status: 'paid', paidAt: new Date().toISOString().split('T')[0], paymentMethod: 'cash', paidAmount: b.grandTotal }
-        : b
-    ));
+    billsStore.updateStatus(selectedBill.id, 'paid', {
+      paidAt: new Date().toISOString().split('T')[0],
+      paymentMethod: 'cash',
+      paidAmount: selectedBill.grandTotal,
+    });
     setShowCashModal(false);
     setSelectedBill(null);
     Alert.alert('✅ Thành công', 'Đã ghi nhận thanh toán tiền mặt.');
@@ -265,11 +167,10 @@ export const BillingManagementScreen: React.FC = () => {
                   : p
               ));
               if (approved) {
-                setBills(prev => prev.map(b =>
-                  b.code === payment.billCode
-                    ? { ...b, status: 'paid', paidAt: new Date().toISOString().split('T')[0], paidAmount: payment.amount }
-                    : b
-                ));
+                billsStore.updateByCode(payment.billCode, 'paid', {
+                  paidAt: new Date().toISOString().split('T')[0],
+                  paidAmount: payment.amount,
+                });
               }
               setSelectedPayment(null);
             }
@@ -564,11 +465,11 @@ export const BillingManagementScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.confirmPayBtn}
                 onPress={() => {
-                  setBills(prev => prev.map(b =>
-                    b.id === selectedBill.id
-                      ? { ...b, status: 'paid', paidAt: new Date().toISOString().split('T')[0], paymentMethod: 'qr', paidAmount: b.grandTotal }
-                      : b
-                  ));
+                  billsStore.updateStatus(selectedBill.id, 'paid', {
+                    paidAt: new Date().toISOString().split('T')[0],
+                    paymentMethod: 'qr',
+                    paidAmount: selectedBill.grandTotal,
+                  });
                   setShowQRModal(false);
                   setSelectedBill(null);
                   Alert.alert('✅ Đã ghi nhận!', 'Thanh toán QR được xác nhận.');

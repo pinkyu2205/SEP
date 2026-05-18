@@ -4,7 +4,9 @@ import {
   TextInput, Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { DatePickerField } from '../../components/common/DatePickerField';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -92,6 +94,67 @@ const DEFAULT_TERMS =
   'Điều 2: Tiền thuê thanh toán vào ngày 05 hàng tháng.\n' +
   'Điều 3: Thông báo trước 30 ngày khi chấm dứt hợp đồng.\n' +
   'Điều 4: Không được chuyển nhượng hợp đồng cho bên thứ ba.';
+
+const MOCK_HOST_CONTRACTS: Contract[] = [
+  {
+    id: 'h1', code: 'HD-NH-2026-001', type: 'building_rental',
+    lessorName: 'Nguyễn Văn Host', lesseeName: 'Nguyễn Văn Quản',
+    lesseeCccd: '079201002001', lesseePhone: '0901222001',
+    propertyName: 'Nhà Nguyễn Trãi',
+    startDate: '01/01/2026', endDate: '01/01/2028',
+    depositAmount: 20000000, rentAmount: 8000000,
+    status: 'active', daysUntilExpiry: 228,
+    otpVerified: true, signedAt: '01/01/2026',
+    equipmentList: [],
+    terms: DEFAULT_TERMS,
+    submittedBy: 'Nguyễn Văn Host',
+    approvedBy: 'Admin Hệ thống',
+    approvalHistory: [
+      { action: 'created', by: 'Nguyễn Văn Host', at: '28/12/2025' },
+      { action: 'approved', by: 'Admin Hệ thống', at: '30/12/2025' },
+      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/01/2026' },
+    ],
+    createdAt: '28/12/2025', updatedAt: '01/01/2026',
+  },
+  {
+    id: 'h2', code: 'HD-NH-2026-002', type: 'building_rental',
+    lessorName: 'Trần Văn Host', lesseeName: 'Nguyễn Văn Quản',
+    lesseeCccd: '079201002001', lesseePhone: '0901222001',
+    propertyName: 'Nhà Lê Văn Sỹ',
+    startDate: '01/03/2026', endDate: '01/03/2027',
+    depositAmount: 15000000, rentAmount: 6500000,
+    status: 'expiring_soon', daysUntilExpiry: 18,
+    otpVerified: true, signedAt: '01/03/2026',
+    equipmentList: [],
+    terms: DEFAULT_TERMS,
+    submittedBy: 'Trần Văn Host',
+    approvedBy: 'Admin Hệ thống',
+    approvalHistory: [
+      { action: 'created', by: 'Trần Văn Host', at: '26/02/2026' },
+      { action: 'approved', by: 'Admin Hệ thống', at: '28/02/2026' },
+      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/03/2026' },
+    ],
+    createdAt: '26/02/2026', updatedAt: '01/03/2026',
+  },
+  {
+    id: 'h3', code: 'HD-NH-2025-003', type: 'building_rental',
+    lessorName: 'Lê Văn Host', lesseeName: 'Nguyễn Văn Quản',
+    lesseeCccd: '079201002001', lesseePhone: '0901222001',
+    propertyName: 'Nhà Phan Đình Phùng',
+    startDate: '01/06/2024', endDate: '01/06/2025',
+    depositAmount: 12000000, rentAmount: 5000000,
+    status: 'expired', daysUntilExpiry: -348,
+    otpVerified: true, signedAt: '01/06/2024',
+    equipmentList: [],
+    terms: DEFAULT_TERMS,
+    approvalHistory: [
+      { action: 'created', by: 'Lê Văn Host', at: '28/05/2024' },
+      { action: 'approved', by: 'Admin Hệ thống', at: '30/05/2024' },
+      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/06/2024' },
+    ],
+    createdAt: '28/05/2024', updatedAt: '01/06/2024',
+  },
+];
 
 const MOCK_CONTRACTS: Contract[] = [
   {
@@ -740,6 +803,76 @@ const ContractDetailView: React.FC<{
   );
 };
 
+// ===================== AVAILABLE PROPERTIES & ROOMS =====================
+interface HostEquipment { id: string; name: string; quantity: number; condition: string }
+
+const AVAILABLE_PROPERTIES: {
+  id: string; name: string;
+  rooms: { code: string; rentSuggested: number; equipment: HostEquipment[] }[]
+}[] = [
+  {
+    id: 'prop-1',
+    name: 'Nhà Nguyễn Trãi',
+    rooms: [
+      {
+        code: 'P301', rentSuggested: 3000000,
+        equipment: [
+          { id: 'eq-p301-1', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p301-2', name: 'Giường đôi 1m6 + Nệm', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p301-3', name: 'Tủ quần áo 3 cánh', quantity: 1, condition: 'Mới' },
+        ],
+      },
+      {
+        code: 'P302', rentSuggested: 3200000,
+        equipment: [
+          { id: 'eq-p302-1', name: 'Điều hòa Panasonic 9000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p302-2', name: 'Máy giặt Toshiba 8kg', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p302-3', name: 'Bình nước nóng 30L', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p302-4', name: 'Tủ lạnh mini Aqua', quantity: 1, condition: 'Mới' },
+        ],
+      },
+      {
+        code: 'P303', rentSuggested: 3200000,
+        equipment: [
+          { id: 'eq-p303-1', name: 'Điều hòa Casper 9000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p303-2', name: 'Giường đôi 1m6', quantity: 1, condition: 'Mới' },
+          { id: 'eq-p303-3', name: 'Bàn học + ghế', quantity: 1, condition: 'Mới' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'prop-2',
+    name: 'Nhà Lê Văn Sỹ',
+    rooms: [
+      {
+        code: 'P101', rentSuggested: 3500000,
+        equipment: [
+          { id: 'eq-lv-p101-1', name: 'Điều hòa Daikin 12000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p101-2', name: 'Giường đôi 1m8', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p101-3', name: 'Bình nước nóng Ariston 30L', quantity: 1, condition: 'Mới' },
+        ],
+      },
+      {
+        code: 'P102', rentSuggested: 3500000,
+        equipment: [
+          { id: 'eq-lv-p102-1', name: 'Điều hòa Samsung 9000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p102-2', name: 'Máy giặt Electrolux 7kg', quantity: 1, condition: 'Mới' },
+        ],
+      },
+      {
+        code: 'P201', rentSuggested: 3800000,
+        equipment: [
+          { id: 'eq-lv-p201-1', name: 'Điều hòa Casper 9000BTU', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p201-2', name: 'Giường đôi 1m6 + Nệm', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p201-3', name: 'Tủ quần áo 2 cánh', quantity: 1, condition: 'Mới' },
+          { id: 'eq-lv-p201-4', name: 'Bàn học + ghế', quantity: 1, condition: 'Mới' },
+        ],
+      },
+    ],
+  },
+];
+
 // ===================== CREATE CONTRACT VIEW =====================
 const CreateContractView: React.FC<{
   initial?: Contract | null;
@@ -767,31 +900,14 @@ const CreateContractView: React.FC<{
       : { ...DEFAULT_FORM }
   );
 
-  const [eqName, setEqName] = useState('');
-  const [eqQty, setEqQty] = useState('1');
-  const [eqCondition, setEqCondition] = useState('Mới');
-  const [showEqForm, setShowEqForm] = useState(false);
+  const [showPropertyPicker, setShowPropertyPicker] = useState(false);
+  const [showRoomPicker, setShowRoomPicker] = useState(false);
+
+  const selectedProperty = AVAILABLE_PROPERTIES.find(p => p.name === form.propertyName);
+  const availableRooms = selectedProperty?.rooms ?? [];
 
   const set = (key: keyof ContractForm, value: any) =>
     setForm(prev => ({ ...prev, [key]: value }));
-
-  const addEquipment = () => {
-    if (!eqName.trim()) return;
-    const newItem: ContractEquipment = {
-      id: Date.now().toString(),
-      name: eqName.trim(),
-      quantity: parseInt(eqQty) || 1,
-      condition: eqCondition.trim() || 'Mới',
-    };
-    set('equipmentList', [...form.equipmentList, newItem]);
-    setEqName('');
-    setEqQty('1');
-    setEqCondition('Mới');
-    setShowEqForm(false);
-  };
-
-  const removeEquipment = (id: string) =>
-    set('equipmentList', form.equipmentList.filter(e => e.id !== id));
 
   const validate = (): string | null => {
     if (!form.lesseeName.trim()) return 'Vui lòng nhập tên bên thuê';
@@ -850,34 +966,20 @@ const CreateContractView: React.FC<{
       </View>
 
       <ScrollView style={createStyles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Contract type */}
+        {/* Contract type info (read-only for manager) */}
         <View style={createStyles.section}>
           <SectionHeader icon="📋" title="Loại hợp đồng" />
-          <View style={createStyles.typeRow}>
-            <TouchableOpacity
-              style={[createStyles.typeBtn, form.type === 'room_rental' && createStyles.typeBtnActive]}
-              onPress={() => set('type', 'room_rental')}
-            >
-              <Text style={createStyles.typeBtnIcon}>🚪</Text>
-              <Text style={[createStyles.typeBtnLabel, form.type === 'room_rental' && createStyles.typeBtnLabelActive]}>
+          <View style={[createStyles.typeBtn, createStyles.typeBtnActive, { opacity: 1 }]}>
+            <Text style={createStyles.typeBtnIcon}>🚪</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[createStyles.typeBtnLabel, createStyles.typeBtnLabelActive]}>
                 Hợp đồng thuê phòng
               </Text>
-              <Text style={[createStyles.typeBtnSub, form.type === 'room_rental' && { color: Colors.primary }]}>
+              <Text style={[createStyles.typeBtnSub, { color: Colors.primary }]}>
                 Manager → Khách thuê
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[createStyles.typeBtn, form.type === 'building_rental' && createStyles.typeBtnActive]}
-              onPress={() => set('type', 'building_rental')}
-            >
-              <Text style={createStyles.typeBtnIcon}>🏢</Text>
-              <Text style={[createStyles.typeBtnLabel, form.type === 'building_rental' && createStyles.typeBtnLabelActive]}>
-                Hợp đồng thuê nhà
-              </Text>
-              <Text style={[createStyles.typeBtnSub, form.type === 'building_rental' && { color: Colors.primary }]}>
-                Host/Admin → Manager
-              </Text>
-            </TouchableOpacity>
+            </View>
+            <Text style={{ fontSize: 16 }}>✓</Text>
           </View>
         </View>
 
@@ -920,23 +1022,69 @@ const CreateContractView: React.FC<{
         <View style={createStyles.section}>
           <SectionHeader icon="🏠" title="Tài sản cho thuê" />
           <FieldLabel label="Tên nhà/tòa nhà" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="Ví dụ: Nhà Nguyễn Trãi"
-            placeholderTextColor={Colors.textMuted}
-            value={form.propertyName}
-            onChangeText={v => set('propertyName', v)}
-          />
+          <TouchableOpacity
+            style={[createStyles.input, createStyles.dropdownBtn]}
+            onPress={() => { setShowPropertyPicker(v => !v); setShowRoomPicker(false); }}
+          >
+            <Text style={form.propertyName ? createStyles.dropdownVal : createStyles.dropdownPlaceholder}>
+              {form.propertyName || 'Chọn nhà/tòa nhà...'}
+            </Text>
+            <Text style={createStyles.dropdownArrow}>{showPropertyPicker ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
+          {showPropertyPicker && (
+            <View style={createStyles.dropdownList}>
+              {AVAILABLE_PROPERTIES.map(p => (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[createStyles.dropdownItem, form.propertyName === p.name && createStyles.dropdownItemActive]}
+                  onPress={() => {
+                    set('propertyName', p.name);
+                    set('roomCode', '');
+                    setShowPropertyPicker(false);
+                  }}
+                >
+                  <Text style={[createStyles.dropdownItemText, form.propertyName === p.name && { color: Colors.primary, fontWeight: '700' }]}>
+                    🏠 {p.name}
+                  </Text>
+                  <Text style={createStyles.dropdownItemSub}>{p.rooms.length} phòng trống</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           {form.type === 'room_rental' && (
             <>
-              <FieldLabel label="Mã phòng" required />
-              <TextInput
-                style={createStyles.input}
-                placeholder="Ví dụ: P101"
-                placeholderTextColor={Colors.textMuted}
-                value={form.roomCode}
-                onChangeText={v => set('roomCode', v)}
-              />
+              <FieldLabel label="Phòng trống" required />
+              <TouchableOpacity
+                style={[createStyles.input, createStyles.dropdownBtn, !selectedProperty && createStyles.dropdownDisabled]}
+                onPress={() => { if (selectedProperty) { setShowRoomPicker(v => !v); setShowPropertyPicker(false); } }}
+              >
+                <Text style={form.roomCode ? createStyles.dropdownVal : createStyles.dropdownPlaceholder}>
+                  {form.roomCode || (selectedProperty ? 'Chọn phòng...' : 'Chọn nhà trước')}
+                </Text>
+                <Text style={createStyles.dropdownArrow}>{showRoomPicker ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {showRoomPicker && availableRooms.length > 0 && (
+                <View style={createStyles.dropdownList}>
+                  {availableRooms.map(r => (
+                    <TouchableOpacity
+                      key={r.code}
+                      style={[createStyles.dropdownItem, form.roomCode === r.code && createStyles.dropdownItemActive]}
+                      onPress={() => {
+                        set('roomCode', r.code);
+                        if (!form.rentAmount) set('rentAmount', String(r.rentSuggested));
+                        set('equipmentList', r.equipment.map(e => ({ id: e.id, name: e.name, quantity: e.quantity, condition: e.condition })));
+                        setShowRoomPicker(false);
+                      }}
+                    >
+                      <Text style={[createStyles.dropdownItemText, form.roomCode === r.code && { color: Colors.primary, fontWeight: '700' }]}>
+                        🚪 {r.code}
+                      </Text>
+                      <Text style={createStyles.dropdownItemSub}>Gợi ý: {fmt(r.rentSuggested)}/tháng</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </>
           )}
         </View>
@@ -973,15 +1121,69 @@ const CreateContractView: React.FC<{
         {/* Dates */}
         <View style={createStyles.section}>
           <SectionHeader icon="📅" title="Thời hạn hợp đồng" />
+
+          {/* Quick duration shortcuts */}
+          <View style={createStyles.durationRow}>
+            {[
+              { label: '1 năm',   months: 12 },
+              { label: '2 năm',   months: 24 },
+              { label: '3 năm',   months: 36 },
+            ].map(opt => {
+              const isActive = (() => {
+                if (!form.startDate || !form.endDate) return false;
+                const [ds, ms, ys] = form.startDate.split('/').map(Number);
+                const [de, me, ye] = form.endDate.split('/').map(Number);
+                if (!ds || !ms || !ys || !de || !me || !ye) return false;
+                const start = new Date(ys, ms - 1, ds);
+                const expected = new Date(ys, ms - 1 + opt.months, ds);
+                const end = new Date(ye, me - 1, de);
+                return expected.getTime() === end.getTime();
+              })();
+              return (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[createStyles.durationChip, isActive && createStyles.durationChipActive]}
+                  onPress={() => {
+                    const base = form.startDate || (() => {
+                      const t = new Date();
+                      return `${String(t.getDate()).padStart(2,'0')}/${String(t.getMonth()+1).padStart(2,'0')}/${t.getFullYear()}`;
+                    })();
+                    const [d, m, y] = base.split('/').map(Number);
+                    if (!d || !m || !y) return;
+                    if (!form.startDate) set('startDate', base);
+                    const end = new Date(y, m - 1 + opt.months, d);
+                    const ed = `${String(end.getDate()).padStart(2,'0')}/${String(end.getMonth()+1).padStart(2,'0')}/${end.getFullYear()}`;
+                    set('endDate', ed);
+                  }}
+                >
+                  <Text style={[createStyles.durationChipText, isActive && createStyles.durationChipTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           <View style={createStyles.dateRow}>
             <View style={{ flex: 1 }}>
               <FieldLabel label="Ngày bắt đầu" required />
-              <TextInput
-                style={createStyles.input}
-                placeholder="DD/MM/YYYY"
-                placeholderTextColor={Colors.textMuted}
+              <DatePickerField
                 value={form.startDate}
-                onChangeText={v => set('startDate', v)}
+                onChange={v => {
+                  set('startDate', v);
+                  // Recalculate end date if a duration was active
+                  if (form.endDate) {
+                    const [ds, ms, ys] = v.split('/').map(Number);
+                    const [de, me, ye] = form.endDate.split('/').map(Number);
+                    if (ds && ms && ys && de && me && ye) {
+                      const totalMonths = (ye - ys) * 12 + (me - ms);
+                      if ([6, 12, 24, 36].includes(totalMonths)) {
+                        const end = new Date(ys, ms - 1 + totalMonths, ds);
+                        set('endDate', `${String(end.getDate()).padStart(2,'0')}/${String(end.getMonth()+1).padStart(2,'0')}/${end.getFullYear()}`);
+                      }
+                    }
+                  }
+                }}
               />
             </View>
             <View style={createStyles.dateSep}>
@@ -989,12 +1191,9 @@ const CreateContractView: React.FC<{
             </View>
             <View style={{ flex: 1 }}>
               <FieldLabel label="Ngày kết thúc" required />
-              <TextInput
-                style={createStyles.input}
-                placeholder="DD/MM/YYYY"
-                placeholderTextColor={Colors.textMuted}
+              <DatePickerField
                 value={form.endDate}
-                onChangeText={v => set('endDate', v)}
+                onChange={v => set('endDate', v)}
               />
             </View>
           </View>
@@ -1022,78 +1221,36 @@ const CreateContractView: React.FC<{
               <Text style={createStyles.sectionIcon}>🛠️</Text>
               <Text style={createStyles.sectionTitle}>Tài sản bàn giao</Text>
             </View>
-            <TouchableOpacity
-              style={createStyles.addEqBtn}
-              onPress={() => setShowEqForm(true)}
-            >
-              <Text style={createStyles.addEqBtnText}>+ Thêm</Text>
-            </TouchableOpacity>
+            <View style={createStyles.hostBadge}>
+              <Text style={createStyles.hostBadgeText}>📋 Từ Host</Text>
+            </View>
           </View>
 
-          {form.equipmentList.length === 0 && !showEqForm && (
-            <Text style={createStyles.emptyEqText}>Chưa có tài sản nào. Nhấn "+ Thêm" để thêm.</Text>
-          )}
-
-          {form.equipmentList.map(eq => (
-            <View key={eq.id} style={createStyles.eqItem}>
-              <View style={{ flex: 1 }}>
-                <Text style={createStyles.eqItemName}>{eq.name}</Text>
-                <Text style={createStyles.eqItemSub}>SL: {eq.quantity} · {eq.condition}</Text>
-              </View>
-              <TouchableOpacity onPress={() => removeEquipment(eq.id)}>
-                <Text style={createStyles.eqRemoveBtn}>✕</Text>
-              </TouchableOpacity>
+          {form.equipmentList.length === 0 ? (
+            <View style={createStyles.emptyEqBox}>
+              <Text style={createStyles.emptyEqText}>
+                {form.roomCode
+                  ? 'Phòng này chưa có thiết bị được thiết lập.'
+                  : 'Chọn phòng để hiển thị tài sản bàn giao do Host thiết lập.'}
+              </Text>
             </View>
-          ))}
-
-          {showEqForm && (
-            <View style={createStyles.eqForm}>
-              <Text style={createStyles.eqFormTitle}>Thêm tài sản</Text>
-              <TextInput
-                style={createStyles.input}
-                placeholder="Tên tài sản (VD: Điều hòa Daikin 9000BTU)"
-                placeholderTextColor={Colors.textMuted}
-                value={eqName}
-                onChangeText={setEqName}
-                autoFocus
-              />
-              <View style={createStyles.eqFormRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={createStyles.fieldLabel}>Số lượng</Text>
-                  <TextInput
-                    style={createStyles.input}
-                    keyboardType="numeric"
-                    value={eqQty}
-                    onChangeText={setEqQty}
-                  />
+          ) : (
+            <>
+              {form.equipmentList.map((eq, i) => (
+                <View key={eq.id} style={[createStyles.eqItem, i === form.equipmentList.length - 1 && { borderBottomWidth: 0 }]}>
+                  <View style={createStyles.eqItemIcon}>
+                    <Text style={{ fontSize: 16 }}>⚙️</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={createStyles.eqItemName}>{eq.name}</Text>
+                    <Text style={createStyles.eqItemSub}>SL: {eq.quantity} · {eq.condition}</Text>
+                  </View>
+                  <View style={createStyles.eqConditionBadge}>
+                    <Text style={createStyles.eqConditionText}>{eq.condition}</Text>
+                  </View>
                 </View>
-                <View style={{ width: 12 }} />
-                <View style={{ flex: 2 }}>
-                  <Text style={createStyles.fieldLabel}>Tình trạng</Text>
-                  <TextInput
-                    style={createStyles.input}
-                    placeholder="Mới / Đã sử dụng - Tốt"
-                    placeholderTextColor={Colors.textMuted}
-                    value={eqCondition}
-                    onChangeText={setEqCondition}
-                  />
-                </View>
-              </View>
-              <View style={createStyles.eqFormActions}>
-                <TouchableOpacity
-                  style={createStyles.eqCancelBtn}
-                  onPress={() => setShowEqForm(false)}
-                >
-                  <Text style={createStyles.eqCancelBtnText}>Hủy</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={createStyles.eqConfirmBtn}
-                  onPress={addEquipment}
-                >
-                  <Text style={createStyles.eqConfirmBtnText}>Thêm vào danh sách</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+              ))}
+            </>
           )}
         </View>
 
@@ -1136,20 +1293,29 @@ interface Props {
 
 // ===================== MAIN =====================
 export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) => {
+  const navigation = useNavigation<any>();
   type ViewMode = 'list' | 'detail' | 'create';
+  type ContractSection = 'tenant' | 'host';
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [contracts, setContracts] = useState<Contract[]>(MOCK_CONTRACTS);
+  const [hostContracts] = useState<Contract[]>(MOCK_HOST_CONTRACTS);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | ContractStatus>('all');
+  const [activeSection, setActiveSection] = useState<ContractSection>('tenant');
+
+  const isManager = !filterRole || filterRole === 'manager';
 
   const displayContracts = useMemo(() => {
+    if (isManager) {
+      return activeSection === 'tenant' ? contracts : hostContracts;
+    }
     let list = contracts;
     if (filterType) list = list.filter(c => c.type === filterType);
     if (filterRole === 'tenant') list = list.filter(c => c.type === 'room_rental');
     else if (filterRole === 'admin') list = list.filter(c => c.type === 'building_rental');
     return list;
-  }, [contracts, filterRole, filterType]);
+  }, [contracts, hostContracts, filterRole, filterType, activeSection, isManager]);
 
   const filtered = useMemo(() => {
     if (statusFilter === 'all') return displayContracts;
@@ -1430,17 +1596,66 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.listHeader}>
-        <View>
-          <Text style={styles.listTitle}>Hợp đồng</Text>
-          <Text style={styles.listSubtitle}>{displayContracts.length} hợp đồng</Text>
+        <View style={styles.listHeaderLeft}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.backBtnText}>‹</Text>
+            </TouchableOpacity>
+          )}
+          <View>
+            <Text style={styles.listTitle}>Hợp đồng</Text>
+            <Text style={styles.listSubtitle}>{displayContracts.length} hợp đồng</Text>
+          </View>
         </View>
-        <TouchableOpacity
-          style={styles.createBtn}
-          onPress={() => { setEditingContract(null); setViewMode('create'); }}
-        >
-          <Text style={styles.createBtnText}>+ Tạo HĐ</Text>
-        </TouchableOpacity>
+        {isManager && activeSection === 'tenant' && (
+          <TouchableOpacity
+            style={styles.createBtn}
+            onPress={() => { setEditingContract(null); setViewMode('create'); }}
+          >
+            <Text style={styles.createBtnText}>+ Tạo HĐ</Text>
+          </TouchableOpacity>
+        )}
+        {(!isManager) && (
+          <TouchableOpacity
+            style={styles.createBtn}
+            onPress={() => { setEditingContract(null); setViewMode('create'); }}
+          >
+            <Text style={styles.createBtnText}>+ Tạo HĐ</Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {/* Manager section tabs */}
+      {isManager && (
+        <View style={styles.sectionTabRow}>
+          <TouchableOpacity
+            style={[styles.sectionTab, activeSection === 'tenant' && styles.sectionTabActive]}
+            onPress={() => { setActiveSection('tenant'); setStatusFilter('all'); }}
+          >
+            <Text style={[styles.sectionTabText, activeSection === 'tenant' && styles.sectionTabTextActive]}>
+              🚪 Với khách thuê
+            </Text>
+            <View style={[styles.sectionTabBadge, activeSection === 'tenant' && styles.sectionTabBadgeActive]}>
+              <Text style={[styles.sectionTabBadgeText, activeSection === 'tenant' && styles.sectionTabBadgeTextActive]}>
+                {contracts.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.sectionTab, activeSection === 'host' && styles.sectionTabActive]}
+            onPress={() => { setActiveSection('host'); setStatusFilter('all'); }}
+          >
+            <Text style={[styles.sectionTabText, activeSection === 'host' && styles.sectionTabTextActive]}>
+              🏢 Với Host/Admin
+            </Text>
+            <View style={[styles.sectionTabBadge, activeSection === 'host' && styles.sectionTabBadgeActive]}>
+              <Text style={[styles.sectionTabBadgeText, activeSection === 'host' && styles.sectionTabBadgeTextActive]}>
+                {hostContracts.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Stats row */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -1521,13 +1736,19 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📋</Text>
             <Text style={styles.emptyTitle}>Chưa có hợp đồng</Text>
-            <Text style={styles.emptyDesc}>Nhấn "+ Tạo HĐ" để tạo hợp đồng mới.</Text>
-            <TouchableOpacity
-              style={styles.emptyCreateBtn}
-              onPress={() => { setEditingContract(null); setViewMode('create'); }}
-            >
-              <Text style={styles.emptyCreateBtnText}>+ Tạo hợp đồng</Text>
-            </TouchableOpacity>
+            {isManager && activeSection === 'host' ? (
+              <Text style={styles.emptyDesc}>Hợp đồng thuê nhà từ Host/Admin sẽ hiển thị tại đây.</Text>
+            ) : (
+              <>
+                <Text style={styles.emptyDesc}>Nhấn "+ Tạo HĐ" để tạo hợp đồng với khách thuê.</Text>
+                <TouchableOpacity
+                  style={styles.emptyCreateBtn}
+                  onPress={() => { setEditingContract(null); setViewMode('create'); }}
+                >
+                  <Text style={styles.emptyCreateBtnText}>+ Tạo hợp đồng</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         }
       />
@@ -1543,6 +1764,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.sm,
   },
+  listHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   listTitle: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   listSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   createBtn: {
@@ -1632,6 +1856,27 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg, ...Shadow.md,
   },
   emptyCreateBtnText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
+
+  // Section tabs (manager: tenant vs host)
+  sectionTabRow: {
+    flexDirection: 'row', marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: 4,
+    ...Shadow.sm,
+  },
+  sectionTab: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 10, borderRadius: BorderRadius.md, gap: 6,
+  },
+  sectionTabActive: { backgroundColor: Colors.primary },
+  sectionTabText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  sectionTabTextActive: { color: Colors.white },
+  sectionTabBadge: {
+    backgroundColor: Colors.background, borderRadius: BorderRadius.full,
+    minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
+  },
+  sectionTabBadgeActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  sectionTabBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
+  sectionTabBadgeTextActive: { color: Colors.white },
 });
 
 // ===================== DETAIL STYLES =====================
@@ -1792,8 +2037,35 @@ const createStyles = StyleSheet.create({
     borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: 12,
     fontSize: 14, color: Colors.textPrimary,
   },
+  dropdownBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dropdownPlaceholder: { fontSize: 14, color: Colors.textMuted, flex: 1 },
+  dropdownVal: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500', flex: 1 },
+  dropdownArrow: { fontSize: 11, color: Colors.textMuted, marginLeft: Spacing.sm },
+  dropdownDisabled: { opacity: 0.5 },
+  dropdownList: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.white, marginBottom: Spacing.sm, overflow: 'hidden', ...Shadow.sm,
+  },
+  dropdownItem: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  dropdownItemActive: { backgroundColor: Colors.primaryBg },
+  dropdownItemText: { fontSize: 14, color: Colors.textPrimary },
+  dropdownItemSub: { fontSize: 12, color: Colors.textMuted },
   textArea: { minHeight: 120, textAlignVertical: 'top', paddingTop: Spacing.md },
   formatHint: { fontSize: 12, color: Colors.primary, fontWeight: '600', marginTop: 4 },
+
+  durationRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+  durationChip: {
+    flex: 1, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full,
+    borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center',
+    backgroundColor: Colors.white,
+  },
+  durationChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  durationChipText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  durationChipTextActive: { color: Colors.white },
 
   dateRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 0 },
   dateSep: { width: 28, alignItems: 'center', paddingBottom: 14 },
@@ -1813,6 +2085,13 @@ const createStyles = StyleSheet.create({
   addEqBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
   emptyEqText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingVertical: Spacing.md },
+
+  hostBadge: { backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
+  hostBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  emptyEqBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.md, padding: Spacing.base, alignItems: 'center' },
+  eqItemIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center', marginRight: Spacing.sm },
+  eqConditionBadge: { backgroundColor: Colors.successLight, paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  eqConditionText: { fontSize: 10, fontWeight: '700', color: Colors.success },
 
   eqItem: {
     flexDirection: 'row', alignItems: 'center',

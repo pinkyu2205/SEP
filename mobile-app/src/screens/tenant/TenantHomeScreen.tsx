@@ -1,399 +1,304 @@
 import React from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
-import { formatCurrency, getDaysUntil, formatRelativeTime } from '../../utils';
+import { formatCurrency, getDaysUntil } from '../../utils';
 
-// Dữ liệu mẫu tổng hợp dashboard — sẽ thay bằng API
+// ── Mock data ──────────────────────────────────────────────
+const BUILDING_INFO = {
+  name: 'Nhà Nguyễn Trãi',
+  address: '123 Nguyễn Trãi, Quận 5, TP.HCM',
+  totalFloors: 3,
+  totalRooms: 8,
+  electricityRate: 3500,    // đ/kWh — do host cài đặt
+  waterRate: 15000,         // đ/m³  — do host cài đặt
+  serviceCharge: 100000,    // đ/tháng — do host cài đặt
+  hostName: 'Nguyễn Văn Host',
+  hostPhone: '0901000001',
+};
+
 const DASHBOARD_DATA = {
-  room: {
-    name: 'Phòng 201',
-    property: 'Nhà 15 Nguyễn Trãi',
-    floor: 2,
-    area: 25,
-    moveInDate: '2026-01-01',
-  },
-  contract: {
-    code: 'HD-MT-2025-001',
-    endDate: '2026-12-31',
-    status: 'active',
-    daysLeft: getDaysUntil('2026-12-31'),
-  },
+  room: { name: 'Phòng 201', property: BUILDING_INFO.name, floor: 2, area: 25 },
+  contract: { code: 'HD-MT-2025-001', endDate: '2026-12-31', daysLeft: getDaysUntil('2026-12-31') },
   currentInvoice: {
-    month: 5,
-    year: 2026,
-    total: 3855000,
-    status: 'pending',
+    month: 5, year: 2026, total: 3855000,
+    status: 'overdue' as const,
     dueDate: '2026-05-15',
     daysUntilDue: getDaysUntil('2026-05-15'),
   },
   overdueInvoices: 1,
   overdueAmount: 3855000,
-  maintenance: {
-    pending: 1,
-    inProgress: 1,
-  },
-  notifications: [
-    { id: '1', emoji: '⚠️', title: 'Hóa đơn tháng 3/2026 đã quá hạn', time: '2026-05-01T10:00:00Z', type: 'bill_overdue' },
-    { id: '2', emoji: '🔧', title: 'Yêu cầu sửa ổ cắm đang được xử lý', time: '2026-04-27T14:00:00Z', type: 'maintenance_accepted' },
-    { id: '3', emoji: '📄', title: 'Hóa đơn tháng 5/2026 đã được tạo', time: '2026-04-29T09:00:00Z', type: 'new_bill' },
-  ],
+  maintenance: { pending: 1, inProgress: 1 },
+  unreadNotifications: 3,
 };
 
-interface QuickActionProps {
-  emoji: string;
-  label: string;
-  sublabel?: string;
-  color: string;
-  badge?: number;
-  onPress: () => void;
-}
+const QUICK_ACTIONS = [
+  { emoji: '📄', label: 'Hóa đơn',   route: 'InvoiceList',    badge: 1,   color: Colors.primary   },
+  { emoji: '🔧', label: 'Sửa chữa',  route: 'MaintenanceList', badge: 1,   color: Colors.warning   },
+  { emoji: '📋', label: 'Hợp đồng',  route: 'TenantContracts', badge: 0,   color: Colors.info      },
+  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory', badge: 0,   color: Colors.success   },
+  { emoji: '📷', label: 'Quét QR',   route: 'Scan',            badge: 0,   color: Colors.accent    },
+  { emoji: '🏠', label: 'Bàn giao',  route: 'TenantOnboarding', badge: 0,  color: Colors.textSecondary },
+  { emoji: '👤', label: 'Hồ sơ',     route: 'Profile',          badge: 0,  color: Colors.primaryDark },
+];
 
-const QuickAction: React.FC<QuickActionProps> = ({ emoji, label, sublabel, color, badge, onPress }) => (
-  <TouchableOpacity style={styles.quickAction} onPress={onPress} activeOpacity={0.7}>
-    <View style={[styles.quickActionIcon, { backgroundColor: color + '15' }]}>
-      <Text style={styles.quickActionEmoji}>{emoji}</Text>
-      {badge !== undefined && badge > 0 && (
-        <View style={styles.quickActionBadge}>
-          <Text style={styles.quickActionBadgeText}>{badge}</Text>
-        </View>
-      )}
-    </View>
-    <Text style={styles.quickActionLabel}>{label}</Text>
-    {sublabel && <Text style={styles.quickActionSublabel}>{sublabel}</Text>}
-  </TouchableOpacity>
-);
-
+// ── Component ──────────────────────────────────────────────
 export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const data = DASHBOARD_DATA;
 
-  const isInvoiceUrgent = data.currentInvoice.daysUntilDue <= 3 && data.currentInvoice.status === 'pending';
-  const hasOverdue = data.overdueInvoices > 0;
-  const contractIsExpiringSoon = data.contract.daysLeft <= 60;
+  const hasOverdue          = data.overdueInvoices > 0;
+  const hasMaintenance      = data.maintenance.pending > 0 || data.maintenance.inProgress > 0;
+  const contractExpiringSoon = data.contract.daysLeft <= 60;
+
+  const alerts = [
+    hasOverdue       && { id: 'bill',     icon: '⚠️', text: `${data.overdueInvoices} hóa đơn quá hạn · ${formatCurrency(data.overdueAmount)}`, route: 'InvoiceList',    color: Colors.error   },
+    hasMaintenance   && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`,  route: 'MaintenanceList', color: Colors.warning },
+    contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                                    route: 'TenantContracts', color: Colors.info    },
+  ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
+
+  const invoiceStatusColor = hasOverdue ? Colors.error : data.currentInvoice.status === 'overdue' ? Colors.error : Colors.warning;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ===== Header ===== */}
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Xin chào 👋</Text>
-            <Text style={styles.userName}>{user?.fullName || 'Khách thuê'}</Text>
+            <Text style={styles.userName}>{user?.fullName ?? 'Khách thuê'}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.notifBadge}
-            onPress={() => navigation.navigate('TenantNotifications')}
-          >
-            <Text style={styles.notifEmoji}>🔔</Text>
-            {data.notifications.length > 0 && (
-              <View style={styles.notifCount}>
-                <Text style={styles.notifCountText}>{data.notifications.length}</Text>
+          <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('TenantNotifications')}>
+            <Text style={{ fontSize: 22 }}>🔔</Text>
+            {data.unreadNotifications > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{data.unreadNotifications}</Text>
               </View>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* ===== Cảnh báo quá hạn ===== */}
-        {hasOverdue && (
-          <TouchableOpacity
-            style={styles.alertBanner}
-            onPress={() => navigation.navigate('InvoiceList')}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.alertEmoji}>🚨</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.alertTitle}>Hóa đơn quá hạn!</Text>
-              <Text style={styles.alertDesc}>
-                {data.overdueInvoices} hóa đơn đang quá hạn · {formatCurrency(data.overdueAmount)}
-              </Text>
-            </View>
-            <Text style={styles.alertArrow}>→</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* ===== Room Card ===== */}
+        {/* Room Banner */}
         <View style={styles.roomCard}>
-          <View style={styles.roomCardOverlay}>
-            <View style={styles.roomCardTop}>
-              <View>
-                <Text style={styles.roomCardLabel}>Phòng của bạn</Text>
-                <Text style={styles.roomCardName}>{data.room.name}</Text>
-                <Text style={styles.roomCardProperty}>{data.room.property}</Text>
-              </View>
-              <View style={styles.roomCardStats}>
-                <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>{data.room.area}m²</Text>
-                  <Text style={styles.roomStatLabel}>Diện tích</Text>
-                </View>
-                <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
-                  <Text style={styles.roomStatLabel}>Vị trí</Text>
-                </View>
+          <View style={styles.roomTop}>
+            <View style={{ flex: 1, marginRight: 10 }}>
+              <Text style={styles.roomLabel}>PHÒNG CỦA BẠN</Text>
+              <Text style={styles.roomName}>{data.room.name}</Text>
+              <Text style={styles.roomProperty}>{data.room.property}</Text>
+              <View style={styles.addressRow}>
+                <Text style={styles.addressIcon}>📍</Text>
+                <Text style={styles.addressText} numberOfLines={2}>{BUILDING_INFO.address}</Text>
               </View>
             </View>
-
-            {/* Contract expiry bar */}
-            <View style={styles.contractBar}>
-              <Text style={styles.contractBarLabel}>
-                📋 HĐ {data.contract.code}
-              </Text>
-              <Text style={[styles.contractBarDays, contractIsExpiringSoon && { color: '#FCD34D' }]}>
-                {contractIsExpiringSoon ? '⚠️ ' : ''}{data.contract.daysLeft} ngày
-              </Text>
+            <View style={styles.roomStats}>
+              <View style={styles.roomStat}>
+                <Text style={styles.roomStatValue}>{data.room.area}m²</Text>
+                <Text style={styles.roomStatLabel}>Diện tích</Text>
+              </View>
+              <View style={styles.roomStat}>
+                <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
+                <Text style={styles.roomStatLabel}>Vị trí</Text>
+              </View>
+              <View style={styles.roomStat}>
+                <Text style={styles.roomStatValue}>{BUILDING_INFO.totalFloors} tầng</Text>
+                <Text style={styles.roomStatLabel}>Tòa nhà</Text>
+              </View>
             </View>
+          </View>
+          <View style={styles.contractBar}>
+            <Text style={styles.contractBarText}>📋 HĐ {data.contract.code}</Text>
+            <Text style={[styles.contractBarDays, contractExpiringSoon && { color: '#FCD34D' }]}>
+              {contractExpiringSoon ? '⚠️ ' : ''}{data.contract.daysLeft} ngày
+            </Text>
           </View>
         </View>
 
-        {/* ===== Invoice Card ===== */}
-        <View style={[styles.invoiceCard, isInvoiceUrgent && styles.invoiceCardUrgent, hasOverdue && !isInvoiceUrgent && styles.invoiceCardOverdue]}>
-          <View style={styles.invoiceCardHeader}>
+        {/* Building info card — thông tin do host/admin cài đặt */}
+        <View style={styles.buildingCard}>
+          <View style={styles.buildingCardHeader}>
+            <Text style={styles.buildingCardTitle}>🏢 Thông tin tòa nhà</Text>
+            <Text style={styles.buildingCardSub}>Cài đặt bởi Host</Text>
+          </View>
+          <View style={styles.buildingAddressRow}>
+            <Text style={styles.buildingAddressIcon}>📍</Text>
+            <Text style={styles.buildingAddress}>{BUILDING_INFO.address}</Text>
+          </View>
+          <View style={styles.buildingRatesRow}>
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateIcon}>⚡</Text>
+              <Text style={styles.buildingRateValue}>{BUILDING_INFO.electricityRate.toLocaleString('vi-VN')}đ</Text>
+              <Text style={styles.buildingRateLabel}>/ kWh</Text>
+            </View>
+            <View style={styles.buildingRateDivider} />
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateIcon}>💧</Text>
+              <Text style={styles.buildingRateValue}>{BUILDING_INFO.waterRate.toLocaleString('vi-VN')}đ</Text>
+              <Text style={styles.buildingRateLabel}>/ m³</Text>
+            </View>
+            <View style={styles.buildingRateDivider} />
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateIcon}>🏠</Text>
+              <Text style={styles.buildingRateValue}>{(BUILDING_INFO.serviceCharge / 1000).toFixed(0)}k</Text>
+              <Text style={styles.buildingRateLabel}>Dịch vụ/tháng</Text>
+            </View>
+          </View>
+          <View style={styles.buildingHostRow}>
+            <Text style={styles.buildingHostLabel}>Chủ nhà: </Text>
+            <Text style={styles.buildingHostName}>{BUILDING_INFO.hostName}</Text>
+            <Text style={styles.buildingHostPhone}>  {BUILDING_INFO.hostPhone}</Text>
+          </View>
+        </View>
+
+        {/* Alert pills */}
+        {alerts.length > 0 && (
+          <View style={styles.alertsCol}>
+            {alerts.map(a => (
+              <TouchableOpacity
+                key={a.id}
+                style={[styles.alertPill, { borderColor: a.color + '40', backgroundColor: a.color + '0D' }]}
+                onPress={() => navigation.navigate(a.route)}
+              >
+                <Text style={styles.alertPillIcon}>{a.icon}</Text>
+                <Text style={[styles.alertPillText, { color: a.color }]}>{a.text}</Text>
+                <Text style={[styles.alertPillArrow, { color: a.color }]}>›</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Invoice CTA */}
+        <TouchableOpacity
+          style={[styles.invoiceCard, { borderColor: invoiceStatusColor + '50' }]}
+          onPress={() => navigation.navigate('InvoiceList')}
+          activeOpacity={0.8}
+        >
+          <View style={styles.invoiceRow}>
             <View>
-              <Text style={styles.invoiceCardLabel}>
-                {hasOverdue ? '⚠️ Có hóa đơn quá hạn' : `Hóa đơn tháng ${String(data.currentInvoice.month).padStart(2, '0')}/${data.currentInvoice.year}`}
+              <Text style={styles.invoiceLabel}>
+                {hasOverdue ? 'Hóa đơn quá hạn' : `Hóa đơn T${String(data.currentInvoice.month).padStart(2,'0')}/${data.currentInvoice.year}`}
               </Text>
-              <Text style={[styles.invoiceCardAmount, hasOverdue && { color: Colors.error }]}>
+              <Text style={[styles.invoiceAmount, { color: invoiceStatusColor }]}>
                 {formatCurrency(hasOverdue ? data.overdueAmount : data.currentInvoice.total)}
               </Text>
             </View>
-            <View style={[
-              styles.invoiceStatusBadge,
-              { backgroundColor: hasOverdue ? Colors.error : data.currentInvoice.status === 'pending' ? Colors.warning : Colors.success }
-            ]}>
-              <Text style={styles.invoiceStatusText}>
-                {hasOverdue ? 'Quá hạn' : data.currentInvoice.status === 'pending' ? 'Chờ TT' : 'Đã TT'}
-              </Text>
+            <View style={[styles.invoiceStatusBadge, { backgroundColor: invoiceStatusColor }]}>
+              <Text style={styles.invoiceStatusText}>{hasOverdue ? 'Quá hạn' : 'Chờ TT'}</Text>
             </View>
           </View>
-
-          {data.currentInvoice.status === 'pending' && !hasOverdue && (
-            <Text style={styles.invoiceDue}>
-              📅 Hạn thanh toán: {data.currentInvoice.daysUntilDue} ngày nữa
-            </Text>
-          )}
-
-          <TouchableOpacity
-            style={[styles.invoicePayBtn, hasOverdue && { backgroundColor: Colors.error }]}
-            onPress={() => navigation.navigate('InvoiceList')}
-          >
-            <Text style={styles.invoicePayBtnText}>
+          <View style={[styles.invoiceBtn, { backgroundColor: invoiceStatusColor }]}>
+            <Text style={styles.invoiceBtnText}>
               {hasOverdue ? '🚨 Thanh toán ngay' : '💳 Xem & Thanh toán'}
             </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+        </TouchableOpacity>
 
-        {/* ===== Quick Actions ===== */}
+        {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
-        <View style={styles.quickGrid}>
-          <QuickAction
-            emoji="📄" label="Hóa đơn" sublabel="Xem hóa đơn" color={Colors.primary}
-            badge={data.overdueInvoices}
-            onPress={() => navigation.navigate('InvoiceList')}
-          />
-          <QuickAction
-            emoji="🔧" label="Sửa chữa" sublabel={`${data.maintenance.pending} chờ xử lý`}
-            color={Colors.warning} badge={data.maintenance.pending}
-            onPress={() => navigation.navigate('MaintenanceList')}
-          />
-          <QuickAction
-            emoji="📋" label="Hợp đồng" sublabel="Xem hợp đồng" color={Colors.accent}
-            onPress={() => navigation.navigate('TenantContracts')}
-          />
-          <QuickAction
-            emoji="💳" label="Lịch sử TT" sublabel="Giao dịch" color={Colors.success}
-            onPress={() => navigation.navigate('PaymentHistory')}
-          />
-          <QuickAction
-            emoji="📷" label="Quét QR" sublabel="Thiết bị" color={Colors.info}
-            onPress={() => navigation.navigate('Scan')}
-          />
-          <QuickAction
-            emoji="🏠" label="Bàn giao" sublabel="Nhận phòng" color={Colors.textSecondary}
-            onPress={() => navigation.navigate('TenantOnboarding')}
-          />
-          <QuickAction
-            emoji="👤" label="Hồ sơ" sublabel="Tài khoản" color={Colors.primaryDark}
-            onPress={() => navigation.navigate('Profile')}
-          />
-        </View>
-
-        {/* ===== Tình trạng bảo trì ===== */}
-        {(data.maintenance.pending > 0 || data.maintenance.inProgress > 0) && (
-          <>
-            <Text style={styles.sectionTitle}>Tiến độ sửa chữa</Text>
+        <View style={styles.actionsGrid}>
+          {QUICK_ACTIONS.map((a, i) => (
             <TouchableOpacity
-              style={styles.maintenanceCard}
-              onPress={() => navigation.navigate('MaintenanceList')}
-              activeOpacity={0.7}
+              key={i}
+              style={styles.actionBtn}
+              onPress={() => navigation.navigate(a.route)}
             >
-              <View style={styles.maintenanceRow}>
-                <View style={[styles.maintenanceStat, { backgroundColor: Colors.warningLight }]}>
-                  <Text style={[styles.maintenanceStatNum, { color: Colors.warning }]}>{data.maintenance.pending}</Text>
-                  <Text style={[styles.maintenanceStatLabel, { color: Colors.warning }]}>Chờ xử lý</Text>
-                </View>
-                <View style={[styles.maintenanceStat, { backgroundColor: Colors.primaryBg }]}>
-                  <Text style={[styles.maintenanceStatNum, { color: Colors.primary }]}>{data.maintenance.inProgress}</Text>
-                  <Text style={[styles.maintenanceStatLabel, { color: Colors.primary }]}>Đang sửa</Text>
-                </View>
-                <View style={styles.maintenanceArrow}>
-                  <Text style={styles.maintenanceArrowText}>→</Text>
-                </View>
+              <View style={[styles.actionIconWrap, { backgroundColor: a.color + '18' }]}>
+                <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                {a.badge > 0 && (
+                  <View style={styles.actionBadge}>
+                    <Text style={styles.actionBadgeText}>{a.badge}</Text>
+                  </View>
+                )}
               </View>
+              <Text style={styles.actionLabel}>{a.label}</Text>
             </TouchableOpacity>
-          </>
-        )}
-
-        {/* ===== Hợp đồng sắp hết hạn ===== */}
-        {contractIsExpiringSoon && (
-          <>
-            <Text style={styles.sectionTitle}>Cảnh báo hợp đồng</Text>
-            <TouchableOpacity
-              style={styles.contractAlert}
-              onPress={() => navigation.navigate('TenantContracts')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.contractAlertEmoji}>📋</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.contractAlertTitle}>Hợp đồng sắp hết hạn</Text>
-                <Text style={styles.contractAlertDesc}>
-                  Còn {data.contract.daysLeft} ngày · Nhấn để xem và yêu cầu gia hạn
-                </Text>
-              </View>
-              <Text style={styles.contractAlertArrow}>→</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* ===== Thông báo gần đây ===== */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Thông báo gần đây</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('TenantNotifications')}>
-            <Text style={styles.seeAllText}>Xem tất cả →</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.notifCard}>
-          {data.notifications.map((notif, i) => (
-            <React.Fragment key={notif.id}>
-              <View style={styles.notifItem}>
-                <Text style={styles.notifEmoji}>{notif.emoji}</Text>
-                <View style={styles.notifContent}>
-                  <Text style={styles.notifTitle}>{notif.title}</Text>
-                  <Text style={styles.notifTime}>{formatRelativeTime(notif.time)}</Text>
-                </View>
-              </View>
-              {i < data.notifications.length - 1 && <View style={styles.notifDivider} />}
-            </React.Fragment>
           ))}
         </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
+// ── Styles ─────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Colors.background },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing['3xl'] },
+  safe:   { flex: 1, backgroundColor: Colors.background },
+  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing['3xl'] },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.lg },
-  greeting: { fontSize: 14, color: Colors.textSecondary },
-  userName: { fontSize: 22, fontWeight: '700', color: Colors.textPrimary, marginTop: 2 },
-  notifBadge: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  notifEmoji: { fontSize: 22 },
-  notifCount: { position: 'absolute', top: 6, right: 6, backgroundColor: Colors.error, borderRadius: 10, width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
-  notifCountText: { color: Colors.white, fontSize: 10, fontWeight: '700' },
+  greeting: { fontSize: 13, color: Colors.textSecondary },
+  userName: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  notifBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
+  notifBadge: { position: 'absolute', top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  notifBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
 
-  // Alert Banner
-  alertBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.lg, padding: Spacing.md,
-    marginBottom: Spacing.base, borderWidth: 1, borderColor: Colors.error + '40',
-  },
-  alertEmoji: { fontSize: 22 },
-  alertTitle: { fontSize: 14, fontWeight: '700', color: Colors.error },
-  alertDesc: { fontSize: 12, color: Colors.error, marginTop: 2 },
-  alertArrow: { fontSize: 16, color: Colors.error, fontWeight: '700' },
-
-  // Room Card
-  roomCard: { height: 150, borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.base, ...Shadow.md },
-  roomCardOverlay: { flex: 1, padding: Spacing.lg, backgroundColor: 'rgba(79, 70, 229, 0.95)', justifyContent: 'space-between' },
-  roomCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  roomCardLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  roomCardName: { fontSize: 24, fontWeight: '800', color: Colors.white, marginTop: 2 },
-  roomCardProperty: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  roomCardStats: { alignItems: 'flex-end', gap: 4 },
+  // Room card
+  roomCard: { borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.md, backgroundColor: 'rgba(79,70,229,0.95)', padding: Spacing.lg, ...Shadow.md },
+  roomTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
+  roomLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
+  roomName: { fontSize: 26, fontWeight: '800', color: Colors.white, marginTop: 2 },
+  roomProperty: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5, gap: 3 },
+  addressIcon: { fontSize: 11, marginTop: 1 },
+  addressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', flex: 1, lineHeight: 16 },
+  roomStats: { alignItems: 'flex-end', gap: 6 },
   roomStat: { alignItems: 'flex-end' },
   roomStatValue: { fontSize: 13, fontWeight: '700', color: Colors.white },
   roomStatLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)' },
-  contractBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: BorderRadius.sm, padding: Spacing.xs + 2 },
-  contractBarLabel: { fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
+  contractBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 6 },
+  contractBarText: { fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
   contractBarDays: { fontSize: 11, fontWeight: '700', color: Colors.white },
 
-  // Invoice Card
-  invoiceCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.md, marginBottom: Spacing.lg },
-  invoiceCardUrgent: { borderWidth: 1.5, borderColor: Colors.error },
-  invoiceCardOverdue: { borderWidth: 1.5, borderColor: Colors.error },
-  invoiceCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.sm },
-  invoiceCardLabel: { fontSize: 13, color: Colors.textSecondary },
-  invoiceCardAmount: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
-  invoiceStatusBadge: { paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2, borderRadius: BorderRadius.full },
+  // Building info card
+  buildingCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm, borderWidth: 1, borderColor: Colors.border },
+  buildingCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
+  buildingCardTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  buildingCardSub: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic' },
+  buildingAddressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: Spacing.sm, paddingBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  buildingAddressIcon: { fontSize: 13, marginTop: 1 },
+  buildingAddress: { fontSize: 13, color: Colors.textPrimary, fontWeight: '500', flex: 1, lineHeight: 18 },
+  buildingRatesRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.sm, marginBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  buildingRate: { flex: 1, alignItems: 'center', gap: 2 },
+  buildingRateIcon: { fontSize: 16 },
+  buildingRateValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  buildingRateLabel: { fontSize: 10, color: Colors.textMuted },
+  buildingRateDivider: { width: 1, height: 36, backgroundColor: Colors.divider },
+  buildingHostRow: { flexDirection: 'row', alignItems: 'center' },
+  buildingHostLabel: { fontSize: 12, color: Colors.textSecondary },
+  buildingHostName: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
+  buildingHostPhone: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
+
+  // Alerts
+  alertsCol: { gap: Spacing.xs, marginBottom: Spacing.md },
+  alertPill: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingHorizontal: Spacing.sm, paddingVertical: 9, borderRadius: BorderRadius.lg, borderWidth: 1 },
+  alertPillIcon: { fontSize: 14 },
+  alertPillText: { flex: 1, fontSize: 12, fontWeight: '600' },
+  alertPillArrow: { fontSize: 20, fontWeight: '400' },
+
+  // Invoice CTA
+  invoiceCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.lg, borderWidth: 1.5, ...Shadow.sm },
+  invoiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
+  invoiceLabel: { fontSize: 12, color: Colors.textSecondary },
+  invoiceAmount: { fontSize: 26, fontWeight: '800', marginTop: 2 },
+  invoiceStatusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   invoiceStatusText: { fontSize: 11, fontWeight: '700', color: Colors.white },
-  invoiceDue: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.md },
-  invoicePayBtn: { backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingVertical: Spacing.md, alignItems: 'center' },
-  invoicePayBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+  invoiceBtn: { borderRadius: BorderRadius.lg, paddingVertical: Spacing.md, alignItems: 'center' },
+  invoiceBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 
-  // Section
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md, marginTop: Spacing.sm },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md, marginTop: Spacing.sm },
-  seeAllText: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+  // Section title
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
 
-  // Quick Actions Grid
-  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, marginBottom: Spacing.lg },
-  quickAction: { width: '30%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md, ...Shadow.sm, alignItems: 'flex-start' },
-  quickActionIcon: { width: 44, height: 44, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.sm, position: 'relative' },
-  quickActionEmoji: { fontSize: 22 },
-  quickActionBadge: { position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center' },
-  quickActionBadgeText: { fontSize: 10, fontWeight: '700', color: Colors.white },
-  quickActionLabel: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  quickActionSublabel: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-
-  // Maintenance
-  maintenanceCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm, marginBottom: Spacing.lg },
-  maintenanceRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  maintenanceStat: { flex: 1, borderRadius: BorderRadius.md, padding: Spacing.md, alignItems: 'center' },
-  maintenanceStatNum: { fontSize: 24, fontWeight: '800' },
-  maintenanceStatLabel: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-  maintenanceArrow: { width: 32, alignItems: 'center' },
-  maintenanceArrowText: { fontSize: 20, color: Colors.textMuted },
-
-  // Contract Alert
-  contractAlert: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.lg, padding: Spacing.md,
-    marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.warning + '40',
-  },
-  contractAlertEmoji: { fontSize: 28 },
-  contractAlertTitle: { fontSize: 14, fontWeight: '700', color: Colors.warning },
-  contractAlertDesc: { fontSize: 12, color: Colors.warning, marginTop: 2 },
-  contractAlertArrow: { fontSize: 16, color: Colors.warning, fontWeight: '700' },
-
-  // Notifications
-  notifCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm, marginBottom: Spacing.lg },
-  notifItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  notifEmoji: { fontSize: 20 },
-  notifContent: { flex: 1 },
-  notifTitle: { fontSize: 14, fontWeight: '500', color: Colors.textPrimary },
-  notifTime: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  notifDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
+  // Quick Actions
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  actionBtn: { width: '22%', alignItems: 'center', backgroundColor: Colors.white, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm },
+  actionIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.xs },
+  actionEmoji: { fontSize: 22 },
+  actionBadge: { position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  actionBadgeText: { fontSize: 9, fontWeight: '800', color: Colors.white },
+  actionLabel: { fontSize: 10, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center' },
 });

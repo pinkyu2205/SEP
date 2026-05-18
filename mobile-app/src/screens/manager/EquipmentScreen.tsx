@@ -4,6 +4,7 @@ import {
   TextInput, Alert, Modal, FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 
 // ===================== TYPES =====================
@@ -378,6 +379,7 @@ const detailStyles = StyleSheet.create({
 
 // ===================== MAIN COMPONENT =====================
 export const EquipmentScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const [equipments, setEquipments] = useState(MOCK_EQUIPMENT);
   const [selectedHouseId, setSelectedHouseId] = useState(MOCK_HOUSES[0].id);
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
@@ -460,9 +462,16 @@ export const EquipmentScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Trang thiết bị</Text>
-          <Text style={styles.subtitle}>Tổng: {equipments.filter(e => e.houseId === selectedHouseId).length} thiết bị</Text>
+        <View style={styles.headerLeft}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.backBtnText}>‹</Text>
+            </TouchableOpacity>
+          )}
+          <View>
+            <Text style={styles.title}>Trang thiết bị</Text>
+            <Text style={styles.subtitle}>Tổng: {equipments.filter(e => e.houseId === selectedHouseId).length} thiết bị</Text>
+          </View>
         </View>
         <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddModal(true)}>
           <Text style={styles.addBtnText}>+ Thêm</Text>
@@ -652,6 +661,9 @@ export const EquipmentScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.lg, paddingTop: Spacing.xl },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   addBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.lg },
@@ -674,8 +686,8 @@ const styles = StyleSheet.create({
   searchContainer: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   searchInput: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md, fontSize: 14, color: Colors.textPrimary, ...Shadow.sm },
   filterRow: { maxHeight: 48 },
-  filterContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
-  filterChip: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
+  filterContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  filterChip: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterTextActive: { color: Colors.white },

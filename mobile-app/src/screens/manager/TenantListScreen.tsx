@@ -199,25 +199,21 @@ const TenantDetailModal: React.FC<{
               <View style={modalStyles.actionsSection}>
                 <Text style={modalStyles.sectionTitle}>Thao tác</Text>
                 <View style={modalStyles.actionsGrid}>
-                  <TouchableOpacity style={modalStyles.actionBtn} onPress={() => onAction('billing', tenant)}>
-                    <Text style={modalStyles.actionIcon}>🧾</Text>
-                    <Text style={modalStyles.actionLabel}>Hóa đơn</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={modalStyles.actionBtn} onPress={() => onAction('contract', tenant)}>
-                    <Text style={modalStyles.actionIcon}>📋</Text>
-                    <Text style={modalStyles.actionLabel}>Hợp đồng</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={modalStyles.actionBtn} onPress={() => onAction('maintenance', tenant)}>
-                    <Text style={modalStyles.actionIcon}>🔧</Text>
-                    <Text style={modalStyles.actionLabel}>Bảo trì</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[modalStyles.actionBtn, { borderColor: Colors.error }]}
-                    onPress={() => onAction('checkout', tenant)}
-                  >
-                    <Text style={modalStyles.actionIcon}>🚪</Text>
-                    <Text style={[modalStyles.actionLabel, { color: Colors.error }]}>Trả phòng</Text>
-                  </TouchableOpacity>
+                  {[
+                    { key: 'billing',     icon: '🧾', label: 'Hóa đơn',  color: Colors.warning },
+                    { key: 'contract',    icon: '📋', label: 'Hợp đồng', color: Colors.info },
+                    { key: 'maintenance', icon: '🔧', label: 'Bảo trì',  color: Colors.primary },
+                    { key: 'checkout',    icon: '🚪', label: 'Trả phòng', color: Colors.error },
+                  ].map(({ key, icon, label, color }) => (
+                    <TouchableOpacity
+                      key={key}
+                      style={[modalStyles.actionBtn, { borderColor: color + '40', backgroundColor: color + '10' }]}
+                      onPress={() => onAction(key, tenant)}
+                    >
+                      <Text style={modalStyles.actionIcon}>{icon}</Text>
+                      <Text style={[modalStyles.actionLabel, { color }]}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </View>
             )}
@@ -288,11 +284,11 @@ const modalStyles = StyleSheet.create({
   actionsSection: { marginBottom: Spacing.md },
   actionsGrid: { flexDirection: 'row', gap: Spacing.md },
   actionBtn: {
-    flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, alignItems: 'center', borderWidth: 1.5, borderColor: Colors.border,
+    flex: 1, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md, alignItems: 'center', borderWidth: 1.5,
   },
   actionIcon: { fontSize: 22, marginBottom: 4 },
-  actionLabel: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary },
+  actionLabel: { fontSize: 11, fontWeight: '700' },
   activateBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
     paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md,
@@ -341,7 +337,7 @@ export const TenantListScreen: React.FC = () => {
     switch (action) {
       case 'billing':
         setSelectedTenant(null);
-        navigation.navigate('ManagerBilling');
+        navigation.navigate('ManagerTabs', { screen: 'ManagerBilling' });
         break;
       case 'contract':
         setSelectedTenant(null);
@@ -349,7 +345,7 @@ export const TenantListScreen: React.FC = () => {
         break;
       case 'maintenance':
         setSelectedTenant(null);
-        navigation.navigate('ManagerMaintenance');
+        navigation.navigate('ManagerTabs', { screen: 'ManagerMaintenance' });
         break;
       case 'checkout':
         Alert.alert(
@@ -429,11 +425,18 @@ export const TenantListScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Khách thuê</Text>
-          <Text style={styles.subtitle}>
-            {stats.active} đang ở · {stats.pending} chờ kích hoạt
-          </Text>
+        <View style={styles.headerLeft}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.backBtnText}>‹</Text>
+            </TouchableOpacity>
+          )}
+          <View>
+            <Text style={styles.title}>Khách thuê</Text>
+            <Text style={styles.subtitle}>
+              {stats.active} đang ở · {stats.pending} chờ kích hoạt
+            </Text>
+          </View>
         </View>
         <TouchableOpacity
           style={styles.addBtn}
@@ -533,6 +536,9 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
 
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.lg, paddingTop: Spacing.xl },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
   addBtn: {

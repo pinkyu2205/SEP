@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import * as ImagePicker from 'expo-image-picker';
+import { DatePickerField } from '../../components/common/DatePickerField';
 
 // ===================== MOCK DATA =====================
 const MOCK_PROPERTIES = [
@@ -31,7 +32,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation, route }) => {
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   
-  const [tenantInfo, setTenantInfo] = useState({ fullName: '', phone: '', cccd: '', deposit: '3000000', startDate: '2026-05-10' });
+  const [tenantInfo, setTenantInfo] = useState({ fullName: '', phone: '', cccd: '', deposit: '3000000', startDate: '10/05/2026' });
   const [meters, setMeters] = useState({ elec: '', water: '' });
   const [photos, setPhotos] = useState<string[]>([]);
   const [otp, setOtp] = useState('');
@@ -125,7 +126,10 @@ export const OnboardingScreen: React.FC<any> = ({ navigation, route }) => {
       <View style={styles.row}>
         <View style={[styles.inputGroup, { flex: 1, marginRight: Spacing.md }]}>
           <Text style={styles.label}>Ngày tính tiền</Text>
-          <TextInput style={styles.input} value={tenantInfo.startDate} onChangeText={(t) => setTenantInfo({...tenantInfo, startDate: t})} />
+          <DatePickerField
+            value={tenantInfo.startDate}
+            onChange={v => setTenantInfo({ ...tenantInfo, startDate: v })}
+          />
         </View>
         <View style={[styles.inputGroup, { flex: 1 }]}>
           <Text style={styles.label}>Tiền cọc (VNĐ)</Text>

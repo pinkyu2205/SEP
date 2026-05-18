@@ -13,6 +13,9 @@ import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
 import { AdminOnboardingScreen } from '../screens/admin/AdminOnboardingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { NotificationCenterScreen } from '../screens/manager/NotificationCenterScreen';
+import { TenantListScreen } from '../screens/manager/TenantListScreen';
+import { EquipmentScreen } from '../screens/manager/EquipmentScreen';
+import { ContractListScreen } from '../screens/shared/ContractListScreen';
 
 // Tenant-specific screens
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
@@ -22,6 +25,7 @@ import { MaintenanceDetailScreen } from '../screens/tenant/MaintenanceDetailScre
 import { PaymentHistoryScreen } from '../screens/tenant/PaymentHistoryScreen';
 import { TenantOnboardingScreen } from '../screens/tenant/TenantOnboardingScreen';
 import { TenantNotificationScreen } from '../screens/tenant/TenantNotificationScreen';
+import { ScanScreen } from '../screens/tenant/ScanScreen';
 
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
@@ -63,6 +67,9 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
             <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
+            <Stack.Screen name="TenantList" component={TenantListScreen} />
+            <Stack.Screen name="Equipment" component={EquipmentScreen} />
+            <Stack.Screen name="ManagerContracts" component={ContractListScreen} />
           </Stack.Group>
         ) : (
           // Tenant stack — tabs + all detail screens
@@ -97,6 +104,11 @@ export const RootNavigator: React.FC = () => {
               name="TenantNotifications"
               component={TenantNotificationScreen}
               options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="Scan"
+              component={ScanScreen}
+              options={{ animation: 'slide_from_bottom' }}
             />
             <Stack.Screen
               name="Profile"

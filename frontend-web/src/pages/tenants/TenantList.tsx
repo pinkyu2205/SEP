@@ -4,9 +4,13 @@ import type { AppUser } from '../../types';
 import { MOCK_USERS, MOCK_CONTRACTS } from '../../utils/mockData';
 
 const statusMap: Record<string, { label: string; color: string; dot: string }> = {
-  active:             { label: 'Đang hoạt động', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
-  pending_activation: { label: 'Chờ kích hoạt',  color: 'bg-amber-50 text-amber-600',    dot: 'bg-amber-500' },
-  moved_out:          { label: 'Đã rời đi',       color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },
+  active:             { label: 'Đang hoạt động',  color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
+  pending_activation: { label: 'Chờ kích hoạt',   color: 'bg-amber-50 text-amber-600',    dot: 'bg-amber-500' },
+  moved_out:          { label: 'Đã rời đi',        color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },
+  expiring_soon:      { label: 'Sắp hết hạn',      color: 'bg-orange-50 text-orange-600',  dot: 'bg-orange-500' },
+  expired:            { label: 'Đã hết hạn',       color: 'bg-red-50 text-red-600',        dot: 'bg-red-500' },
+  pending_approval:   { label: 'Chờ phê duyệt',    color: 'bg-blue-50 text-blue-600',      dot: 'bg-blue-500' },
+  terminated:         { label: 'Đã chấm dứt',      color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },
 };
 
 export const TenantList = () => {

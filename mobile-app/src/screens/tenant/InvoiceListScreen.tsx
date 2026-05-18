@@ -6,8 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Invoice, InvoiceStatus } from '../../types';
-import { formatCurrency, formatDate, getInvoiceStatusLabel, getDaysUntil } from '../../utils';
+import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
+import { useBills, billsStore, SharedBill, BillStatus } from '../../store/billsStore';
+
+type Invoice = SharedBill;
+type InvoiceStatus = BillStatus;
 
 // VietQR — MB Bank
 const VIETQR_BANK_BIN = '970422';
@@ -17,52 +20,12 @@ const VIETQR_ACCOUNT_NAME = 'ROOMRENT';
 const buildVietQRUrl = (amount: number, content: string): string =>
   `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(VIETQR_ACCOUNT_NAME)}`;
 
-export const MOCK_INVOICES: Invoice[] = [
-  {
-    id: '1', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
-    month: 5, year: 2026,
-    items: [
-      { label: 'Tiền thuê phòng', unitPrice: 3000000, amount: 3000000 },
-      { label: 'Điện (150 kWh × 3.500đ)', quantity: 150, unitPrice: 3500, amount: 525000 },
-      { label: 'Nước (12 m³ × 15.000đ)', quantity: 12, unitPrice: 15000, amount: 180000 },
-      { label: 'Phí dịch vụ', unitPrice: 150000, amount: 150000 },
-    ],
-    totalAmount: 3855000, outstandingBalance: 0, grandTotal: 3855000,
-    status: 'pending', dueDate: '2026-05-15', createdAt: '2026-04-29',
-    electricityConsumption: 150, waterConsumption: 12,
-  },
-  {
-    id: '2', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
-    month: 4, year: 2026,
-    items: [
-      { label: 'Tiền thuê phòng', unitPrice: 3000000, amount: 3000000 },
-      { label: 'Điện (130 kWh × 3.500đ)', quantity: 130, unitPrice: 3500, amount: 455000 },
-      { label: 'Nước (10 m³ × 15.000đ)', quantity: 10, unitPrice: 15000, amount: 150000 },
-      { label: 'Phí dịch vụ', unitPrice: 150000, amount: 150000 },
-    ],
-    totalAmount: 3755000, outstandingBalance: 0, grandTotal: 3755000,
-    status: 'paid', dueDate: '2026-04-15', paidAt: '2026-04-10', createdAt: '2026-03-29',
-    paymentMethod: 'qr', transactionId: 'TXN-2026-04-001',
-  },
-  {
-    id: '3', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
-    month: 3, year: 2026,
-    items: [
-      { label: 'Tiền thuê phòng', unitPrice: 3000000, amount: 3000000 },
-      { label: 'Điện (140 kWh × 3.500đ)', quantity: 140, unitPrice: 3500, amount: 490000 },
-      { label: 'Nước (11 m³ × 15.000đ)', quantity: 11, unitPrice: 15000, amount: 165000 },
-      { label: 'Phí dịch vụ', unitPrice: 150000, amount: 150000 },
-    ],
-    totalAmount: 3805000, outstandingBalance: 0, grandTotal: 3855000,
-    lateFee: 50000,
-    status: 'overdue', dueDate: '2026-03-15', createdAt: '2026-02-28',
-  },
-];
 
 const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
   pending: { label: 'Chờ thanh toán', color: Colors.warning, bg: Colors.warningLight },
   paid: { label: 'Đã thanh toán', color: Colors.success, bg: Colors.successLight },
   overdue: { label: 'Quá hạn', color: Colors.error, bg: Colors.errorLight },
+  partial: { label: 'Thanh toán 1 phần', color: Colors.info, bg: Colors.infoLight },
 };
 
 const FILTER_TABS: { key: 'all' | InvoiceStatus; label: string }[] = [
@@ -74,7 +37,8 @@ const FILTER_TABS: { key: 'all' | InvoiceStatus; label: string }[] = [
 
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [invoices, setInvoices] = useState(MOCK_INVOICES);
+  // Hiện tất cả bills từ store (demo: tenant thấy toàn bộ hóa đơn hệ thống)
+  const invoices = useBills();
   const [filter, setFilter] = useState<'all' | InvoiceStatus>('all');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [payStep, setPayStep] = useState<'qr' | 'confirm'>('qr');
@@ -100,11 +64,9 @@ export const InvoiceListScreen: React.FC = () => {
         {
           text: 'Đã chuyển',
           onPress: () => {
-            setInvoices(prev => prev.map(inv =>
-              inv.id === payingInvoice.id
-                ? { ...inv, status: 'paid' as InvoiceStatus, paidAt: new Date().toISOString().slice(0, 10) }
-                : inv
-            ));
+            billsStore.updateStatus(payingInvoice.id, 'paid', {
+              paidAt: new Date().toISOString().slice(0, 10),
+            });
             setPayingInvoice(null);
             Alert.alert(
               'Ghi nhận thành công! ✅',
@@ -194,13 +156,6 @@ export const InvoiceListScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Quick detail link */}
-        <TouchableOpacity
-          style={styles.detailLink}
-          onPress={() => navigation.navigate('PaymentHistory')}
-        >
-          <Text style={styles.detailLinkText}>Xem lịch sử thanh toán →</Text>
-        </TouchableOpacity>
       </View>
     );
   };
@@ -369,11 +324,11 @@ const styles = StyleSheet.create({
   overdueBadge: { backgroundColor: Colors.error, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
   overdueBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.white },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.sm },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

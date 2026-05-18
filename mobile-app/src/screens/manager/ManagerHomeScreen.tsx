@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Dimensions,
@@ -11,22 +11,50 @@ import { useAuth } from '../../hooks';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ===================== MOCK DATA =====================
+const MANAGED_PROPERTIES = [
+  {
+    id: 'prop-1',
+    name: 'Nhà Nguyễn Trãi',
+    address: '123 Nguyễn Trãi, Quận 5, TP.HCM',
+    totalFloors: 3,
+    totalRooms: 8,
+    occupied: 5,
+    available: 2,
+    maintenance: 1,
+    monthlyLeaseCost: 25000000,
+    electricityRate: 3500,
+    waterRate: 15000,
+    serviceCharge: 100000,
+    hostName: 'Nguyễn Văn Host',
+  },
+  {
+    id: 'prop-3',
+    name: 'Nhà Cách Mạng Tháng 8',
+    address: '789 CMT8, Quận 10, TP.HCM',
+    totalFloors: 2,
+    totalRooms: 4,
+    occupied: 3,
+    available: 1,
+    maintenance: 0,
+    monthlyLeaseCost: 18000000,
+    electricityRate: 3500,
+    waterRate: 15000,
+    serviceCharge: 80000,
+    hostName: 'Trần Văn Host',
+  },
+];
+
 const MOCK_STATS = {
   totalRooms: 20,
   occupied: 16,
   available: 3,
   maintenance: 1,
-  pendingPayments: 5,
   overduePayments: 2,
   totalDebt: 12500000,
-  debtRatio: 8.2,
   openMaintenanceTickets: 4,
   urgentMaintenanceTickets: 1,
-  maintenanceCostThisMonth: 1800000,
   contractsExpiringSoon: 2,
-  contractsExpired: 0,
   revenueThisMonth: 64000000,
-  revenueLastMonth: 59500000,
   revenueTrend: 7.6,
   profitThisMonth: 48200000,
   expenseThisMonth: 15800000,
@@ -42,9 +70,20 @@ const MONTHLY_REVENUE = [
 ];
 
 const MOCK_ALERTS = [
-  { id: '1', type: 'overdue', icon: '⚠️', text: '2 hóa đơn quá hạn thanh toán', route: 'ManagerBilling', color: '#EF4444' },
-  { id: '2', type: 'maintenance', icon: '🔧', text: '1 ticket bảo trì khẩn cấp', route: 'ManagerMaintenance', color: '#F59E0B' },
-  { id: '3', type: 'contract', icon: '📋', text: '2 hợp đồng sắp hết hạn', route: 'ManagerContracts', color: '#3B82F6' },
+  { id: '1', icon: '⚠️', text: '2 hóa đơn quá hạn', route: 'ManagerBilling', color: '#EF4444' },
+  { id: '2', icon: '🔧', text: '1 bảo trì khẩn cấp', route: 'ManagerMaintenance', color: '#F59E0B' },
+  { id: '3', icon: '📋', text: '2 hợp đồng sắp hết hạn', route: 'ManagerContracts', color: '#3B82F6' },
+];
+
+const QUICK_ACTIONS = [
+  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',         color: Colors.primary },
+  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',      badge: 2, color: Colors.warning },
+  { emoji: '🔧', label: 'Sửa chữa',  route: 'ManagerMaintenance',  badge: 4, color: Colors.error },
+  { emoji: '🏠', label: 'Phòng',      route: 'RoomManage',          color: Colors.success },
+  { emoji: '⚡', label: 'Chốt số',   route: 'MeterReading',        color: Colors.accent },
+  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',    badge: 2, color: Colors.info },
+  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',           color: Colors.textSecondary },
+  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',          color: Colors.primaryDark },
 ];
 
 // ===================== MINI BAR CHART =====================
@@ -84,35 +123,12 @@ const chartStyles = StyleSheet.create({
   labelHighlight: { color: Colors.primary, fontWeight: '800' },
 });
 
-// ===================== QUICK ACTION =====================
-interface QuickAction {
-  emoji: string;
-  label: string;
-  route: string;
-  badge?: number;
-  color?: string;
-}
-
-const QUICK_ACTIONS: QuickAction[] = [
-  { emoji: '🤝', label: 'Đón khách', route: 'Onboarding', color: Colors.primary },
-  { emoji: '🧾', label: 'Hóa đơn', route: 'ManagerBilling', badge: 5, color: Colors.warning },
-  { emoji: '🔧', label: 'Sửa chữa', route: 'ManagerMaintenance', badge: 4, color: Colors.error },
-  { emoji: '🏠', label: 'Phòng', route: 'RoomManage', color: Colors.success },
-  { emoji: '⚡', label: 'Chốt số', route: 'MeterReading', color: Colors.accent },
-  { emoji: '📋', label: 'Hợp đồng', route: 'ManagerContracts', badge: 2, color: Colors.info },
-  { emoji: '📦', label: 'Thiết bị', route: 'Equipment', color: Colors.textSecondary },
-  { emoji: '👥', label: 'Khách thuê', route: 'TenantList', color: Colors.primaryDark },
-];
-
 // ===================== MAIN =====================
 export const ManagerHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const stats = MOCK_STATS;
   const occupancyRate = Math.round((stats.occupied / stats.totalRooms) * 100);
-  const [showAllActions, setShowAllActions] = useState(false);
-
-  const visibleActions = showAllActions ? QUICK_ACTIONS : QUICK_ACTIONS.slice(0, 4);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -165,125 +181,48 @@ export const ManagerHomeScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Alerts */}
+        {/* Alerts — compact pill row */}
         {MOCK_ALERTS.length > 0 && (
-          <View style={styles.alertsSection}>
+          <View style={styles.alertsRow}>
             {MOCK_ALERTS.map(alert => (
               <TouchableOpacity
                 key={alert.id}
-                style={[styles.alertCard, { borderLeftColor: alert.color }]}
+                style={[styles.alertPill, { borderColor: alert.color + '40', backgroundColor: alert.color + '0D' }]}
                 onPress={() => navigation.navigate(alert.route)}
               >
-                <Text style={styles.alertIcon}>{alert.icon}</Text>
-                <Text style={styles.alertText}>{alert.text}</Text>
-                <Text style={[styles.alertArrow, { color: alert.color }]}>›</Text>
+                <Text style={styles.alertPillIcon}>{alert.icon}</Text>
+                <Text style={[styles.alertPillText, { color: alert.color }]}>{alert.text}</Text>
               </TouchableOpacity>
             ))}
           </View>
         )}
 
-        {/* Revenue + Profit Stats */}
+        {/* Revenue + Profit */}
         <View style={styles.statsRow}>
           <TouchableOpacity
-            style={[styles.statsCard, { borderLeftColor: Colors.success }]}
+            style={styles.statsCard}
             onPress={() => navigation.navigate('ManagerBilling')}
           >
-            <Text style={styles.statsIcon}>💰</Text>
-            <Text style={styles.statsValue}>
-              {(stats.revenueThisMonth / 1_000_000).toFixed(1)}tr
-            </Text>
             <Text style={styles.statsLabel}>Doanh thu T5</Text>
-            <View style={styles.trendBadge}>
-              <Text style={styles.trendText}>▲ {stats.revenueTrend}%</Text>
-            </View>
+            <Text style={styles.statsValue}>{(stats.revenueThisMonth / 1_000_000).toFixed(1)}tr</Text>
+            <Text style={styles.statsTrend}>▲ {stats.revenueTrend}%</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
-            style={[styles.statsCard, { borderLeftColor: Colors.primary }]}
+            style={[styles.statsCard, styles.statsCardAlt]}
             onPress={() => navigation.navigate('ManagerBilling')}
           >
-            <Text style={styles.statsIcon}>📈</Text>
-            <Text style={styles.statsValue}>
-              {(stats.profitThisMonth / 1_000_000).toFixed(1)}tr
-            </Text>
             <Text style={styles.statsLabel}>Lợi nhuận</Text>
-            <View style={[styles.trendBadge, { backgroundColor: Colors.primaryBg }]}>
-              <Text style={[styles.trendText, { color: Colors.primary }]}>Net</Text>
-            </View>
+            <Text style={[styles.statsValue, { color: Colors.primary }]}>{(stats.profitThisMonth / 1_000_000).toFixed(1)}tr</Text>
+            <Text style={[styles.statsTrend, { color: Colors.textMuted }]}>
+              Chi: {(stats.expenseThisMonth / 1_000_000).toFixed(1)}tr
+            </Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.statsCard, { borderLeftColor: Colors.error }]}
-            onPress={() => navigation.navigate('ManagerBilling')}
-          >
-            <Text style={styles.statsIcon}>⚠️</Text>
-            <Text style={[styles.statsValue, { color: Colors.error }]}>
-              {(stats.totalDebt / 1_000_000).toFixed(1)}tr
-            </Text>
-            <Text style={styles.statsLabel}>Dư nợ</Text>
-            <View style={[styles.trendBadge, { backgroundColor: Colors.errorLight }]}>
-              <Text style={[styles.trendText, { color: Colors.error }]}>{stats.debtRatio}%</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.statsCard, { borderLeftColor: Colors.warning }]}
-            onPress={() => navigation.navigate('ManagerMaintenance')}
-          >
-            <Text style={styles.statsIcon}>🔧</Text>
-            <Text style={[styles.statsValue, stats.urgentMaintenanceTickets > 0 && { color: Colors.warning }]}>
-              {stats.openMaintenanceTickets}
-            </Text>
-            <Text style={styles.statsLabel}>Đang sửa</Text>
-            {stats.urgentMaintenanceTickets > 0 && (
-              <View style={[styles.trendBadge, { backgroundColor: Colors.warningLight }]}>
-                <Text style={[styles.trendText, { color: Colors.warning }]}>
-                  {stats.urgentMaintenanceTickets} khẩn
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Revenue Chart */}
-        <View style={styles.chartCard}>
-          <View style={styles.chartHeader}>
-            <Text style={styles.sectionTitle}>Doanh thu 5 tháng</Text>
-            <View style={styles.legendRow}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
-                <Text style={styles.legendText}>Thu</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.errorLight }]} />
-                <Text style={styles.legendText}>Chi</Text>
-              </View>
-            </View>
-          </View>
-          <MiniBarChart data={MONTHLY_REVENUE} />
-          <View style={styles.chartFooter}>
-            <Text style={styles.chartFooterText}>
-              Thu T5: <Text style={styles.chartFooterValue}>
-                {stats.revenueThisMonth.toLocaleString('vi-VN')}đ
-              </Text>
-            </Text>
-            <Text style={styles.chartFooterText}>
-              Chi: <Text style={[styles.chartFooterValue, { color: Colors.error }]}>
-                {stats.expenseThisMonth.toLocaleString('vi-VN')}đ
-              </Text>
-            </Text>
-          </View>
         </View>
 
         {/* Quick Actions */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
-          <TouchableOpacity onPress={() => setShowAllActions(v => !v)}>
-            <Text style={styles.seeAll}>{showAllActions ? 'Thu gọn' : 'Xem thêm'}</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
         <View style={styles.actionsGrid}>
-          {visibleActions.map((a, i) => (
+          {QUICK_ACTIONS.map((a, i) => (
             <TouchableOpacity
               key={i}
               style={styles.actionBtn}
@@ -302,91 +241,85 @@ export const ManagerHomeScreen: React.FC = () => {
           ))}
         </View>
 
-        {/* Payment Summary */}
-        <View style={styles.paymentSummaryCard}>
-          <View style={styles.paymentSummaryHeader}>
-            <Text style={styles.sectionTitle}>Thanh toán tháng này</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('ManagerBilling')}>
-              <Text style={styles.seeAll}>Xem tất cả</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.paymentRow}>
-            <View style={styles.paymentItem}>
-              <Text style={styles.paymentNum}>{stats.occupied - stats.pendingPayments - stats.overduePayments}</Text>
-              <Text style={styles.paymentLabel}>Đã thanh toán</Text>
-              <View style={[styles.paymentDot, { backgroundColor: Colors.success }]} />
+        {/* Managed Properties */}
+        <Text style={styles.sectionTitle}>Toà nhà đang quản lý</Text>
+        {MANAGED_PROPERTIES.map(prop => (
+          <View key={prop.id} style={styles.propCard}>
+            <View style={styles.propHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.propName}>{prop.name}</Text>
+                <View style={styles.propAddressRow}>
+                  <Text style={styles.propAddressIcon}>📍</Text>
+                  <Text style={styles.propAddress}>{prop.address}</Text>
+                </View>
+              </View>
+              <View style={styles.propFloorBadge}>
+                <Text style={styles.propFloorText}>{prop.totalFloors} tầng</Text>
+              </View>
             </View>
-            <View style={styles.paymentDivider} />
-            <View style={styles.paymentItem}>
-              <Text style={[styles.paymentNum, { color: Colors.warning }]}>{stats.pendingPayments}</Text>
-              <Text style={styles.paymentLabel}>Chưa thanh toán</Text>
-              <View style={[styles.paymentDot, { backgroundColor: Colors.warning }]} />
-            </View>
-            <View style={styles.paymentDivider} />
-            <View style={styles.paymentItem}>
-              <Text style={[styles.paymentNum, { color: Colors.error }]}>{stats.overduePayments}</Text>
-              <Text style={styles.paymentLabel}>Quá hạn</Text>
-              <View style={[styles.paymentDot, { backgroundColor: Colors.error }]} />
-            </View>
-          </View>
-          <TouchableOpacity
-            style={styles.collectBtn}
-            onPress={() => navigation.navigate('ManagerBilling')}
-          >
-            <Text style={styles.collectBtnText}>📊 Quản lý hóa đơn & thu tiền</Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* Maintenance Summary */}
-        <View style={styles.maintenanceSummaryCard}>
-          <View style={styles.paymentSummaryHeader}>
-            <Text style={styles.sectionTitle}>Bảo trì & Sửa chữa</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('ManagerMaintenance')}>
-              <Text style={styles.seeAll}>Xem tất cả</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.maintenanceStats}>
-            <View style={styles.maintenanceStatItem}>
-              <Text style={[styles.maintenanceStatNum, { color: Colors.error }]}>1</Text>
-              <Text style={styles.maintenanceStatLabel}>Khẩn cấp</Text>
+            <View style={styles.propRoomRow}>
+              <View style={[styles.propRoomStat, { borderColor: Colors.success + '40', backgroundColor: Colors.success + '0D' }]}>
+                <Text style={[styles.propRoomNum, { color: Colors.success }]}>{prop.occupied}</Text>
+                <Text style={styles.propRoomLabel}>Đang thuê</Text>
+              </View>
+              <View style={[styles.propRoomStat, { borderColor: Colors.info + '40', backgroundColor: Colors.info + '0D' }]}>
+                <Text style={[styles.propRoomNum, { color: Colors.info }]}>{prop.available}</Text>
+                <Text style={styles.propRoomLabel}>Còn trống</Text>
+              </View>
+              {prop.maintenance > 0 && (
+                <View style={[styles.propRoomStat, { borderColor: Colors.warning + '40', backgroundColor: Colors.warning + '0D' }]}>
+                  <Text style={[styles.propRoomNum, { color: Colors.warning }]}>{prop.maintenance}</Text>
+                  <Text style={styles.propRoomLabel}>Bảo trì</Text>
+                </View>
+              )}
+              <View style={[styles.propRoomStat, { borderColor: Colors.border, backgroundColor: Colors.background }]}>
+                <Text style={styles.propRoomNum}>{prop.totalRooms}</Text>
+                <Text style={styles.propRoomLabel}>Tổng phòng</Text>
+              </View>
             </View>
-            <View style={styles.maintenanceStatItem}>
-              <Text style={[styles.maintenanceStatNum, { color: Colors.warning }]}>2</Text>
-              <Text style={styles.maintenanceStatLabel}>Đang xử lý</Text>
-            </View>
-            <View style={styles.maintenanceStatItem}>
-              <Text style={[styles.maintenanceStatNum, { color: Colors.textSecondary }]}>1</Text>
-              <Text style={styles.maintenanceStatLabel}>Chờ tiếp nhận</Text>
-            </View>
-            <View style={styles.maintenanceStatItem}>
-              <Text style={[styles.maintenanceStatNum, { color: Colors.success }]}>8</Text>
-              <Text style={styles.maintenanceStatLabel}>Hoàn tất T5</Text>
-            </View>
-          </View>
-          <View style={styles.maintenanceCostRow}>
-            <Text style={styles.maintenanceCostLabel}>Chi phí sửa chữa T5:</Text>
-            <Text style={styles.maintenanceCostValue}>
-              {stats.maintenanceCostThisMonth.toLocaleString('vi-VN')}đ
-            </Text>
-          </View>
-        </View>
 
-        {/* Contract Expiry */}
-        {stats.contractsExpiringSoon > 0 && (
-          <TouchableOpacity
-            style={styles.contractAlertCard}
-            onPress={() => navigation.navigate('ManagerContracts')}
-          >
-            <Text style={styles.contractAlertIcon}>📋</Text>
-            <View style={styles.contractAlertBody}>
-              <Text style={styles.contractAlertTitle}>
-                {stats.contractsExpiringSoon} hợp đồng sắp hết hạn
-              </Text>
-              <Text style={styles.contractAlertSub}>Trong 30 ngày tới — nhấn để xem và gia hạn</Text>
+            <View style={styles.propRatesRow}>
+              <View style={styles.propRate}>
+                <Text style={styles.propRateIcon}>⚡</Text>
+                <Text style={styles.propRateValue}>{prop.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
+              </View>
+              <Text style={styles.propRateSep}>·</Text>
+              <View style={styles.propRate}>
+                <Text style={styles.propRateIcon}>💧</Text>
+                <Text style={styles.propRateValue}>{prop.waterRate.toLocaleString('vi-VN')}đ/m³</Text>
+              </View>
+              <Text style={styles.propRateSep}>·</Text>
+              <View style={styles.propRate}>
+                <Text style={styles.propRateIcon}>🏠</Text>
+                <Text style={styles.propRateValue}>DV {(prop.serviceCharge / 1000).toFixed(0)}k/th</Text>
+              </View>
             </View>
-            <Text style={styles.contractAlertArrow}>›</Text>
-          </TouchableOpacity>
-        )}
+
+            <View style={styles.propFooter}>
+              <Text style={styles.propHostLabel}>Chủ nhà: <Text style={styles.propHostName}>{prop.hostName}</Text></Text>
+              <Text style={styles.propLeaseCost}>Thuê: {(prop.monthlyLeaseCost / 1_000_000).toFixed(0)}tr/tháng</Text>
+            </View>
+          </View>
+        ))}
+
+        {/* Revenue Chart */}
+        <View style={styles.chartCard}>
+          <View style={styles.chartHeader}>
+            <Text style={styles.sectionTitle}>Doanh thu 5 tháng</Text>
+            <View style={styles.legendRow}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
+                <Text style={styles.legendText}>Thu</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: Colors.errorLight }]} />
+                <Text style={styles.legendText}>Chi</Text>
+              </View>
+            </View>
+          </View>
+          <MiniBarChart data={MONTHLY_REVENUE} />
+        </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -428,70 +361,39 @@ const styles = StyleSheet.create({
   },
   bannerValue: { fontSize: 44, fontWeight: '800', color: Colors.white, marginTop: 2 },
   bannerSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2, marginBottom: Spacing.sm },
-  progressBg: {
-    height: 6, backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 3, marginTop: Spacing.xs,
-  },
+  progressBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 3, marginTop: Spacing.xs },
   progressFill: { height: 6, backgroundColor: Colors.accent, borderRadius: 3 },
   bannerRight: { flex: 1, justifyContent: 'center', paddingLeft: Spacing.md },
   bannerStatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   bannerDot: { width: 8, height: 8, borderRadius: 4 },
   bannerStatText: { fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: '500' },
 
-  // Alerts
-  alertsSection: { marginBottom: Spacing.md, gap: Spacing.sm },
-  alertCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg, padding: Spacing.md, borderLeftWidth: 4, ...Shadow.sm, gap: Spacing.sm,
+  // Alerts compact
+  alertsRow: { gap: Spacing.xs, marginBottom: Spacing.md },
+  alertPill: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm, paddingVertical: 8,
+    borderRadius: BorderRadius.lg, borderWidth: 1,
   },
-  alertIcon: { fontSize: 18 },
-  alertText: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  alertArrow: { fontSize: 22, fontWeight: '600' },
+  alertPillIcon: { fontSize: 14 },
+  alertPillText: { fontSize: 12, fontWeight: '600', flex: 1 },
 
-  // Stats row
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
+  // Stats
+  statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
   statsCard: {
-    width: '47%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, borderLeftWidth: 3, ...Shadow.sm,
+    flex: 1, backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
+    padding: Spacing.md, ...Shadow.sm,
   },
-  statsIcon: { fontSize: 20, marginBottom: 4 },
-  statsValue: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
-  statsLabel: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  trendBadge: {
-    marginTop: 6, alignSelf: 'flex-start', backgroundColor: Colors.successLight,
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8,
-  },
-  trendText: { fontSize: 10, fontWeight: '700', color: Colors.success },
+  statsCardAlt: { borderWidth: 1, borderColor: Colors.primary + '20' },
+  statsLabel: { fontSize: 11, color: Colors.textSecondary, marginBottom: 4 },
+  statsValue: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary },
+  statsTrend: { fontSize: 11, fontWeight: '600', color: Colors.success, marginTop: 4 },
 
-  // Chart
-  chartCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
-  },
-  chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
-  legendRow: { flexDirection: 'row', gap: Spacing.md },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 11, color: Colors.textSecondary },
-  chartFooter: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    marginTop: Spacing.sm, paddingTop: Spacing.sm, borderTopWidth: 1, borderColor: Colors.divider,
-  },
-  chartFooterText: { fontSize: 12, color: Colors.textSecondary },
-  chartFooterValue: { fontWeight: '700', color: Colors.success },
-
-  // Section header
-  sectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  seeAll: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+  // Section title
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
 
   // Quick Actions
-  actionsGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md,
-  },
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.lg },
   actionBtn: {
     width: '22%', alignItems: 'center', backgroundColor: Colors.white,
     paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm,
@@ -509,54 +411,57 @@ const styles = StyleSheet.create({
   actionBadgeText: { fontSize: 9, fontWeight: '800', color: Colors.white },
   actionLabel: { fontSize: 10, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center' },
 
-  // Payment summary
-  paymentSummaryCard: {
+  // Chart
+  chartCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
     padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
   },
-  paymentSummaryHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  paymentRow: { flexDirection: 'row', marginBottom: Spacing.md },
-  paymentItem: { flex: 1, alignItems: 'center' },
-  paymentNum: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
-  paymentLabel: { fontSize: 11, color: Colors.textSecondary, marginTop: 2, textAlign: 'center' },
-  paymentDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4 },
-  paymentDivider: { width: 1, backgroundColor: Colors.divider, marginHorizontal: Spacing.sm },
-  collectBtn: {
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.sm, alignItems: 'center',
-  },
-  collectBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
+  legendRow: { flexDirection: 'row', gap: Spacing.md },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontSize: 11, color: Colors.textSecondary },
 
-  // Maintenance summary
-  maintenanceSummaryCard: {
+  // Managed property cards
+  propCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
     padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
+    borderWidth: 1, borderColor: Colors.border,
   },
-  maintenanceStats: {
-    flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.md,
+  propHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.sm },
+  propName: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
+  propAddressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 3 },
+  propAddressIcon: { fontSize: 12, marginTop: 1 },
+  propAddress: { fontSize: 12, color: Colors.textSecondary, flex: 1, lineHeight: 17 },
+  propFloorBadge: {
+    backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm, paddingVertical: 4,
+    borderRadius: BorderRadius.full, marginLeft: Spacing.sm,
   },
-  maintenanceStatItem: { alignItems: 'center', flex: 1 },
-  maintenanceStatNum: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
-  maintenanceStatLabel: { fontSize: 10, color: Colors.textSecondary, marginTop: 2, textAlign: 'center' },
-  maintenanceCostRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    borderTopWidth: 1, borderColor: Colors.divider, paddingTop: Spacing.sm,
-  },
-  maintenanceCostLabel: { fontSize: 13, color: Colors.textSecondary },
-  maintenanceCostValue: { fontSize: 14, fontWeight: '700', color: Colors.error },
+  propFloorText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
 
-  // Contract alert
-  contractAlertCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.infoLight,
-    borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.md,
-    gap: Spacing.md, borderWidth: 1, borderColor: Colors.info + '40',
+  propRoomRow: {
+    flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm,
+    paddingBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  contractAlertIcon: { fontSize: 28 },
-  contractAlertBody: { flex: 1 },
-  contractAlertTitle: { fontSize: 14, fontWeight: '700', color: Colors.info },
-  contractAlertSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  contractAlertArrow: { fontSize: 24, color: Colors.info, fontWeight: '600' },
+  propRoomStat: {
+    flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: BorderRadius.md,
+    borderWidth: 1,
+  },
+  propRoomNum: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  propRoomLabel: { fontSize: 9, color: Colors.textSecondary, marginTop: 1, textAlign: 'center' },
+
+  propRatesRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    marginBottom: Spacing.sm, paddingBottom: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider, gap: 6,
+  },
+  propRate: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  propRateIcon: { fontSize: 12 },
+  propRateValue: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
+  propRateSep: { color: Colors.textMuted, fontSize: 14 },
+
+  propFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  propHostLabel: { fontSize: 12, color: Colors.textSecondary },
+  propHostName: { fontWeight: '700', color: Colors.textPrimary },
+  propLeaseCost: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 });

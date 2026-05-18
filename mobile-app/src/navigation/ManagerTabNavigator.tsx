@@ -64,14 +64,6 @@ export const ManagerTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="MeterReading"
-        component={MeterReadingScreen}
-        options={{
-          tabBarLabel: 'Chốt số',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="⚡" focused={focused} />,
-        }}
-      />
-      <Tab.Screen
         name="ManagerBilling"
         component={BillingManagementScreen}
         options={{
@@ -80,11 +72,11 @@ export const ManagerTabNavigator: React.FC = () => {
         }}
       />
       <Tab.Screen
-        name="TenantList"
-        component={TenantListScreen}
+        name="MeterReading"
+        component={MeterReadingScreen}
         options={{
-          tabBarLabel: 'Khách thuê',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👥" focused={focused} />,
+          tabBarLabel: 'Chốt số',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="⚡" focused={focused} />,
         }}
       />
       <Tab.Screen
@@ -93,22 +85,6 @@ export const ManagerTabNavigator: React.FC = () => {
         options={{
           tabBarLabel: 'Bảo trì',
           tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} badge={4} />,
-        }}
-      />
-      <Tab.Screen
-        name="ManagerContracts"
-        component={ManagerContractScreen}
-        options={{
-          tabBarLabel: 'Hợp đồng',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="📋" focused={focused} badge={2} />,
-        }}
-      />
-      <Tab.Screen
-        name="Equipment"
-        component={EquipmentScreen}
-        options={{
-          tabBarLabel: 'Thiết bị',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="📦" focused={focused} />,
         }}
       />
       <Tab.Screen

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -73,6 +73,7 @@ const LABELS_VN: Record<string, string> = {
 export const MaintenanceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<'all' | MaintenanceStatus>('all');
+  const [fabOpen, setFabOpen] = useState(false);
 
   const filtered = filter === 'all' ? MOCK_MAINTENANCE : MOCK_MAINTENANCE.filter(r => r.status === filter);
 
@@ -211,14 +212,45 @@ export const MaintenanceListScreen: React.FC = () => {
         }
       />
 
-      {/* FAB tạo mới */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate('MaintenanceCreate')}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.fabIcon}>＋</Text>
-      </TouchableOpacity>
+      {/* Speed dial overlay */}
+      {fabOpen && (
+        <TouchableOpacity style={styles.fabOverlay} activeOpacity={1} onPress={() => setFabOpen(false)} />
+      )}
+
+      <View style={styles.fabGroup}>
+        {fabOpen && (
+          <>
+            <View style={styles.fabItem}>
+              <View style={styles.fabLabel}><Text style={styles.fabLabelText}>Quét mã QR thiết bị</Text></View>
+              <TouchableOpacity
+                style={[styles.fabMini, { backgroundColor: Colors.accent }]}
+                onPress={() => { setFabOpen(false); navigation.navigate('Scan'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.fabMiniIcon}>📷</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.fabItem}>
+              <View style={styles.fabLabel}><Text style={styles.fabLabelText}>Nhập thủ công</Text></View>
+              <TouchableOpacity
+                style={[styles.fabMini, { backgroundColor: Colors.info }]}
+                onPress={() => { setFabOpen(false); navigation.navigate('MaintenanceCreate'); }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.fabMiniIcon}>✏️</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        <TouchableOpacity
+          style={[styles.fab, fabOpen && styles.fabActive]}
+          onPress={() => setFabOpen(prev => !prev)}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.fabIcon, fabOpen && { transform: [{ rotate: '45deg' }] }]}>＋</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
@@ -237,11 +269,11 @@ const styles = StyleSheet.create({
   summaryNumber: { fontSize: 24, fontWeight: '800' },
   summaryLabel: { fontSize: 11, fontWeight: '600', marginTop: 2 },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.sm },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
@@ -284,10 +316,24 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center' },
 
+  fabOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
+  fabGroup: { position: 'absolute', bottom: 30, right: 24, alignItems: 'flex-end', gap: Spacing.md, zIndex: 20 },
+  fabItem: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  fabLabel: {
+    backgroundColor: Colors.textPrimary, paddingHorizontal: Spacing.md, paddingVertical: 6,
+    borderRadius: BorderRadius.md, ...Shadow.sm,
+  },
+  fabLabelText: { fontSize: 13, fontWeight: '600', color: Colors.white },
+  fabMini: {
+    width: 48, height: 48, borderRadius: 24,
+    alignItems: 'center', justifyContent: 'center', ...Shadow.md,
+  },
+  fabMiniIcon: { fontSize: 20 },
   fab: {
-    position: 'absolute', bottom: 30, right: 24, width: 60, height: 60,
-    borderRadius: 30, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
     ...Shadow.lg,
   },
+  fabActive: { backgroundColor: Colors.error },
   fabIcon: { fontSize: 30, color: Colors.white, fontWeight: '300', marginTop: -2 },
 });

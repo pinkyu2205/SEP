@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Image,
-  ScrollView, TextInput,
+  ScrollView, TextInput, ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,39 +10,102 @@ import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { Equipment } from '../../types';
 import { formatDate } from '../../utils';
 
-// Dữ liệu mẫu thiết bị (sẽ lấy từ API theo QR code)
+// Dữ liệu mẫu thiết bị — đồng bộ với web mockData.ts (MOCK_EQUIPMENTS)
 const MOCK_EQUIPMENT_DB: Record<string, Equipment> = {
-  'EQ-P201-AC': {
-    id: 'e1', assetId: 'EQ-P201-AC', name: 'Điều hòa Daikin 9000BTU',
-    houseId: 'h1', houseName: 'Nhà 15 Nguyễn Trãi',
-    roomId: 'r1', roomName: 'Phòng 201',
-    category: 'Điều hòa nhiệt độ', qrCode: 'EQ-P201-AC',
+  'EQ-101-AC': {
+    id: 'eq1', assetId: 'EQ-101-AC', name: 'Điều hòa Daikin 9000BTU',
+    houseId: 'prop-1', houseName: 'Nhà Nguyễn Trãi',
+    roomId: 'r1', roomName: 'Phòng P101',
+    category: 'Điện lạnh', qrCode: 'EQ-101-AC',
     status: 'active', brand: 'Daikin', model: 'FTKA25UAVMV',
-    serialNumber: 'DK25-2024-001',
-    purchasePrice: 8500000, purchaseDate: '2024-03-15',
-    installationDate: '2024-03-20',
-    warrantyExpiry: '2027-03-20',
-    lastMaintenanceAt: '2025-12-01',
+    serialNumber: 'SN-EQ101AC-EQ1',
+    purchasePrice: 8500000, purchaseDate: '2025-01-10',
+    installationDate: '2025-01-15',
+    warrantyExpiry: '2028-01-15',
+    lastMaintenanceAt: '2026-03-18',
     maintenanceHistory: [
-      { id: 'mh1', date: '2025-12-01', type: 'maintenance', description: 'Vệ sinh lưới lọc, kiểm tra gas', cost: 250000, performedBy: 'Kỹ thuật viên Daikin' },
-      { id: 'mh2', date: '2025-06-15', type: 'maintenance', description: 'Bơm gas, kiểm tra định kỳ', cost: 350000, performedBy: 'Kỹ thuật viên Daikin' },
+      { id: 'mh1', date: '2026-03-18', type: 'maintenance', description: 'Vệ sinh lưới lọc, kiểm tra gas', cost: 250000, performedBy: 'Kỹ thuật viên Daikin' },
+      { id: 'mh2', date: '2025-09-10', type: 'maintenance', description: 'Bơm gas, kiểm tra định kỳ', cost: 350000, performedBy: 'Kỹ thuật viên Daikin' },
     ],
     images: [],
     notes: 'Sử dụng chế độ Eco để tiết kiệm điện. Nhiệt độ khuyến nghị 26-28°C.',
   },
-  'EQ-P201-WH': {
-    id: 'e2', assetId: 'EQ-P201-WH', name: 'Máy nước nóng Ariston 20L',
-    houseId: 'h1', houseName: 'Nhà 15 Nguyễn Trãi',
-    roomId: 'r1', roomName: 'Phòng 201',
-    category: 'Máy nước nóng', qrCode: 'EQ-P201-WH',
-    status: 'active', brand: 'Ariston', model: 'SL2 15 VN',
-    serialNumber: 'AR15-2023-007',
-    purchasePrice: 3200000, purchaseDate: '2023-08-10',
-    installationDate: '2023-08-15',
-    warrantyExpiry: '2026-08-15',
-    lastMaintenanceAt: '2025-10-01',
+  'EQ-101-WM': {
+    id: 'eq2', assetId: 'EQ-101-WM', name: 'Máy giặt Toshiba 8kg',
+    houseId: 'prop-1', houseName: 'Nhà Nguyễn Trãi',
+    roomId: 'r1', roomName: 'Phòng P101',
+    category: 'Điện lạnh', qrCode: 'EQ-101-WM',
+    status: 'active', brand: 'Toshiba', model: 'TW-BH85S2V',
+    serialNumber: 'SN-EQ101WM-EQ2',
+    purchasePrice: 4500000, purchaseDate: '2025-01-10',
+    installationDate: '2025-01-15',
+    warrantyExpiry: '2027-01-15',
+    lastMaintenanceAt: '2025-12-01',
     maintenanceHistory: [],
     images: [],
+    notes: 'Không giặt quá 8kg. Vệ sinh lưới lọc mỗi tháng.',
+  },
+  'EQ-102-AC': {
+    id: 'eq3', assetId: 'EQ-102-AC', name: 'Điều hòa Panasonic 9000BTU',
+    houseId: 'prop-1', houseName: 'Nhà Nguyễn Trãi',
+    roomId: 'r2', roomName: 'Phòng P102',
+    category: 'Điện lạnh', qrCode: 'EQ-102-AC',
+    status: 'repairing', brand: 'Panasonic', model: 'CU/CS-PU9WKH-8',
+    serialNumber: 'SN-EQ102AC-EQ3',
+    purchasePrice: 8200000, purchaseDate: '2025-01-10',
+    installationDate: '2025-01-15',
+    warrantyExpiry: '2028-01-15',
+    lastMaintenanceAt: '2026-04-28',
+    maintenanceHistory: [
+      { id: 'mh3', date: '2026-04-28', type: 'repair', description: 'Báo lỗi E4 — thợ đang kiểm tra board mạch', cost: 500000, performedBy: 'Trung tâm bảo hành Panasonic' },
+    ],
+    images: [],
+    notes: 'Đang trong quá trình sửa chữa. Liên hệ quản lý nếu cần hỗ trợ.',
+  },
+  'EQ-103-FR': {
+    id: 'eq4', assetId: 'EQ-103-FR', name: 'Tủ lạnh Aqua 130L',
+    houseId: 'prop-1', houseName: 'Nhà Nguyễn Trãi',
+    roomId: 'r3', roomName: 'Phòng P103',
+    category: 'Điện lạnh', qrCode: 'EQ-103-FR',
+    status: 'damaged', brand: 'Aqua', model: 'AQR-T150FA',
+    serialNumber: 'SN-EQ103FR-EQ4',
+    purchasePrice: 3200000, purchaseDate: '2025-01-10',
+    installationDate: '2025-01-15',
+    warrantyExpiry: '2027-01-15',
+    lastMaintenanceAt: undefined,
+    maintenanceHistory: [],
+    images: [],
+    notes: 'Thiết bị đang hỏng — không làm lạnh. Đã báo cáo quản lý.',
+  },
+  'EQ-C-WM01': {
+    id: 'eq5', assetId: 'EQ-C-WM01', name: 'Máy giặt chung khu A',
+    houseId: 'prop-1', houseName: 'Nhà Nguyễn Trãi',
+    roomId: undefined, roomName: 'Khu vực chung',
+    category: 'Điện lạnh', qrCode: 'EQ-C-WM01',
+    status: 'active', brand: 'Samsung', model: 'WW10T534DAW',
+    serialNumber: 'SN-EQCWM01-EQ5',
+    purchasePrice: 7500000, purchaseDate: '2025-01-10',
+    installationDate: '2025-01-15',
+    warrantyExpiry: '2028-01-15',
+    lastMaintenanceAt: '2026-02-01',
+    maintenanceHistory: [],
+    images: [],
+    notes: 'Máy giặt dùng chung. Vui lòng không giặt đồ quá 10kg mỗi lần.',
+  },
+  'EQ-201-AC': {
+    id: 'eq6', assetId: 'EQ-201-AC', name: 'Điều hòa Casper 9000BTU',
+    houseId: 'prop-2', houseName: 'Nhà Lê Văn Sỹ',
+    roomId: 'r7', roomName: 'Phòng P201',
+    category: 'Điện lạnh', qrCode: 'EQ-201-AC',
+    status: 'active', brand: 'Casper', model: 'IC-09TL32',
+    serialNumber: 'SN-EQ201AC-EQ6',
+    purchasePrice: 5500000, purchaseDate: '2025-10-15',
+    installationDate: '2025-10-20',
+    warrantyExpiry: '2028-10-20',
+    lastMaintenanceAt: '2026-01-15',
+    maintenanceHistory: [],
+    images: [],
+    notes: 'Nhiệt độ khuyến nghị 26-28°C. Tắt khi ra ngoài quá 30 phút.',
   },
 };
 
@@ -73,6 +136,7 @@ export const ScanScreen: React.FC = () => {
   const [reportImages, setReportImages] = useState<string[]>([]);
   const [reportCategory, setReportCategory] = useState('');
   const [activeTab, setActiveTab] = useState<'info' | 'warranty' | 'usage' | 'history'>('info');
+  const [analyzingImage, setAnalyzingImage] = useState(false);
 
   const navigation = useNavigation<any>();
 
@@ -93,18 +157,33 @@ export const ScanScreen: React.FC = () => {
     );
   }
 
+  // Parse both formats:
+  //   slms://tenant/maintenance-report?assetId=eq1&qr=EQ-101-AC  (web QR)
+  //   EQ-101-AC  (raw code, fallback)
+  const resolveEquipmentCode = (raw: string): string => {
+    if (raw.startsWith('slms://')) {
+      try {
+        const qs = raw.split('?')[1] ?? '';
+        const params = Object.fromEntries(qs.split('&').map(p => p.split('=')));
+        return decodeURIComponent(params['qr'] ?? '');
+      } catch { return ''; }
+    }
+    return raw;
+  };
+
   const handleBarCodeScanned = ({ data }: { type: string; data: string }) => {
     if (scannedCode) return;
     setScannedCode(data);
 
-    const found = MOCK_EQUIPMENT_DB[data];
+    const code = resolveEquipmentCode(data);
+    const found = MOCK_EQUIPMENT_DB[code];
     if (found) {
       setEquipment(found);
       setScanState('equipment_detail');
     } else {
       Alert.alert(
         'Không nhận ra mã QR',
-        `Mã "${data}" không thuộc thiết bị nào trong hệ thống. Vui lòng quét lại hoặc liên hệ quản lý.`,
+        `Mã "${code || data}" không thuộc thiết bị nào trong hệ thống. Vui lòng quét lại hoặc liên hệ quản lý.`,
         [{ text: 'Quét lại', onPress: resetScan }]
       );
     }
@@ -118,6 +197,31 @@ export const ScanScreen: React.FC = () => {
     setReportImages([]);
     setReportCategory('');
     setActiveTab('info');
+  };
+
+  const pickImageToScan = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Cần quyền truy cập', 'Vui lòng cấp quyền truy cập thư viện ảnh để sử dụng tính năng này.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+    if (result.canceled || !result.assets[0]) return;
+
+    setAnalyzingImage(true);
+    // Simulate QR decoding from image (1.2s delay for realism)
+    setTimeout(() => {
+      setAnalyzingImage(false);
+      const mockCode = 'EQ-101-AC';
+      const found = MOCK_EQUIPMENT_DB[mockCode];
+      if (found) {
+        setScannedCode(mockCode);
+        setEquipment(found);
+        setScanState('equipment_detail');
+      } else {
+        Alert.alert('Không tìm thấy mã QR', 'Không nhận diện được mã QR trong ảnh. Vui lòng chụp rõ hơn hoặc quét trực tiếp.', [{ text: 'Thử lại' }]);
+      }
+    }, 1200);
   };
 
   const pickImage = async () => {
@@ -144,7 +248,13 @@ export const ScanScreen: React.FC = () => {
     Alert.alert(
       'Báo hỏng thành công! 🔧',
       `Đã gửi báo cáo sự cố cho thiết bị ${equipment?.name}. Quản lý sẽ sớm liên hệ.`,
-      [{ text: 'OK', onPress: resetScan }]
+      [{
+        text: 'Xem yêu cầu sửa chữa',
+        onPress: () => {
+          resetScan();
+          navigation.navigate('TenantTabs', { screen: 'MaintenanceList' });
+        },
+      }]
     );
   };
 
@@ -159,6 +269,10 @@ export const ScanScreen: React.FC = () => {
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         >
           <View style={styles.scanOverlay}>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.closeBtnText}>✕</Text>
+            </TouchableOpacity>
+
             <Text style={styles.scanTitle}>Quét mã QR thiết bị</Text>
 
             <View style={styles.scanFrame}>
@@ -171,12 +285,26 @@ export const ScanScreen: React.FC = () => {
             <Text style={styles.scanHint}>
               Hướng camera vào mã QR dán trên thiết bị để xem thông tin và báo hỏng
             </Text>
+
+            <View style={styles.scanDividerRow}>
+              <View style={styles.scanDividerLine} />
+              <Text style={styles.scanDividerText}>hoặc</Text>
+              <View style={styles.scanDividerLine} />
+            </View>
+
+            <TouchableOpacity style={styles.pickImageBtn} onPress={pickImageToScan}>
+              <Text style={styles.pickImageBtnIcon}>🖼️</Text>
+              <Text style={styles.pickImageBtnText}>Chọn ảnh từ thư viện</Text>
+            </TouchableOpacity>
           </View>
         </CameraView>
 
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.cancelBtnText}>✕ Đóng</Text>
-        </TouchableOpacity>
+        {analyzingImage && (
+          <View style={styles.analyzingOverlay}>
+            <ActivityIndicator size="large" color={Colors.white} />
+            <Text style={styles.analyzingText}>Đang nhận diện mã QR...</Text>
+          </View>
+        )}
       </View>
     );
   }
@@ -434,9 +562,17 @@ const styles = StyleSheet.create({
   scanCornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
   scanCornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
   scanCornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
-  scanHint: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22 },
-  cancelBtn: { position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.full },
-  cancelBtnText: { color: Colors.white, fontWeight: '700', fontSize: 15 },
+  scanHint: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22, marginBottom: Spacing.xl },
+  closeBtn: { position: 'absolute', top: 52, left: Spacing.lg, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  closeBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+  scanDividerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.lg, width: '70%' },
+  scanDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.3)' },
+  scanDividerText: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
+  pickImageBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  pickImageBtnIcon: { fontSize: 18 },
+  pickImageBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
+  analyzingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
+  analyzingText: { color: Colors.white, fontSize: 15, fontWeight: '600' },
 
   // Equipment Detail
   detailContainer: { flex: 1, backgroundColor: Colors.background },

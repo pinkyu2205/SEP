@@ -214,11 +214,11 @@ const styles = StyleSheet.create({
   summaryAmount: { fontSize: 28, fontWeight: '800', color: Colors.white },
   summaryCount: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4 },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, gap: Spacing.sm },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

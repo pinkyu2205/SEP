@@ -12,9 +12,9 @@ import { OnboardingAsset } from '../../types';
 type Step = 'room' | 'assets' | 'meter' | 'confirm';
 
 const STEPS: { key: Step; label: string; emoji: string }[] = [
-  { key: 'room', label: 'Tình trạng phòng', emoji: '🏠' },
+  { key: 'room', label: 'Hiện trạng phòng', emoji: '🏠' },
   { key: 'assets', label: 'Tài sản bàn giao', emoji: '📦' },
-  { key: 'meter', label: 'Chỉ số đồng hồ', emoji: '📊' },
+  { key: 'meter', label: 'Điện & Nước', emoji: '📊' },
   { key: 'confirm', label: 'Xác nhận', emoji: '✅' },
 ];
 
@@ -28,8 +28,8 @@ const INITIAL_ASSETS: OnboardingAsset[] = [
 
 const CONDITION_OPTIONS: { key: OnboardingAsset['condition']; label: string; color: string }[] = [
   { key: 'good', label: 'Tốt', color: Colors.success },
-  { key: 'fair', label: 'Khá', color: Colors.warning },
-  { key: 'poor', label: 'Hỏng', color: Colors.error },
+  { key: 'fair', label: 'Bình thường', color: Colors.warning },
+  { key: 'poor', label: 'Có hư hỏng', color: Colors.error },
 ];
 
 export const TenantOnboardingScreen: React.FC = () => {
@@ -125,12 +125,12 @@ export const TenantOnboardingScreen: React.FC = () => {
   // ===== STEP 1: ROOM CONDITION =====
   const RoomStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>🏠 Tình trạng phòng khi nhận</Text>
+      <Text style={styles.stepTitle}>🏠 Hiện trạng phòng khi nhận</Text>
       <Text style={styles.stepDesc}>
-        Vui lòng kiểm tra và ghi nhận tình trạng phòng. Chụp ảnh các vị trí cần lưu ý để làm bằng chứng.
+        Kiểm tra kỹ phòng trước khi ký nhận. Nếu có vết hư hỏng sẵn, hãy ghi chú và chụp ảnh lại — những bằng chứng này bảo vệ bạn khi trả phòng.
       </Text>
 
-      <Text style={styles.fieldLabel}>Ghi chú tình trạng phòng</Text>
+      <Text style={styles.fieldLabel}>Ghi chú hư hỏng / bất thường (nếu có)</Text>
       <TextInput
         style={[styles.input, { height: 120, textAlignVertical: 'top' }]}
         placeholder="Ví dụ: Tường có vết nứt nhỏ phía cửa sổ, sàn còn tốt, cửa kéo hơi nặng..."
@@ -139,7 +139,7 @@ export const TenantOnboardingScreen: React.FC = () => {
         onChangeText={setRoomNotes}
       />
 
-      <Text style={styles.fieldLabel}>Ảnh tình trạng phòng</Text>
+      <Text style={styles.fieldLabel}>Chụp ảnh làm bằng chứng (tường, sàn, cửa...)</Text>
       <TouchableOpacity style={styles.photoBtn} onPress={() => pickImage(setRoomImages)}>
         <Text style={{ fontSize: 20 }}>📷</Text>
         <Text style={styles.photoBtnText}>Chụp ảnh ({roomImages.length}/5)</Text>
@@ -154,7 +154,7 @@ export const TenantOnboardingScreen: React.FC = () => {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoBoxText}>
-          💡 Những ghi chú và ảnh này sẽ được lưu vào hệ thống làm bằng chứng khi bạn trả phòng.
+          💡 Ghi chú và ảnh được lưu vào hệ thống. Khi trả phòng, manager sẽ đối chiếu với tình trạng này để xác định bồi thường (nếu có).
         </Text>
       </View>
     </View>
@@ -163,9 +163,9 @@ export const TenantOnboardingScreen: React.FC = () => {
   // ===== STEP 2: ASSETS =====
   const AssetsStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📦 Xác nhận tài sản bàn giao</Text>
+      <Text style={styles.stepTitle}>📦 Kiểm tra tài sản trong phòng</Text>
       <Text style={styles.stepDesc}>
-        Kiểm tra từng tài sản và xác nhận tình trạng thực tế.
+        Kiểm tra từng món đồ, chọn tình trạng thực tế rồi nhấn vòng tròn ✓ bên phải để xác nhận. Nếu có hư hỏng, hãy chọn "Có hư hỏng" và ghi chú thêm.
       </Text>
 
       {assets.map(asset => (
@@ -179,13 +179,13 @@ export const TenantOnboardingScreen: React.FC = () => {
               style={[styles.confirmCheck, asset.confirmed && styles.confirmCheckDone]}
               onPress={() => updateAsset(asset.id, 'confirmed', !asset.confirmed)}
             >
-              <Text style={{ color: Colors.white, fontWeight: '700', fontSize: 12 }}>
-                {asset.confirmed ? '✓' : ''}
+              <Text style={{ color: asset.confirmed ? Colors.white : Colors.textMuted, fontWeight: '700', fontSize: asset.confirmed ? 12 : 10 }}>
+                {asset.confirmed ? '✓' : 'KT'}
               </Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.conditionLabel}>Tình trạng:</Text>
+          <Text style={styles.conditionLabel}>Tình trạng thực tế:</Text>
           <View style={styles.conditionRow}>
             {CONDITION_OPTIONS.map(opt => (
               <TouchableOpacity
@@ -203,7 +203,7 @@ export const TenantOnboardingScreen: React.FC = () => {
           {asset.condition === 'poor' && (
             <TextInput
               style={styles.assetNoteInput}
-              placeholder="Ghi chú tình trạng hư hỏng..."
+              placeholder="Mô tả chi tiết hư hỏng (để làm bằng chứng)..."
               value={asset.notes || ''}
               onChangeText={v => updateAsset(asset.id, 'notes', v)}
             />
@@ -213,7 +213,7 @@ export const TenantOnboardingScreen: React.FC = () => {
 
       {!assets.every(a => a.confirmed) && (
         <Text style={styles.warningText}>
-          ⚠️ Vui lòng xác nhận tất cả tài sản để tiếp tục.
+          ⚠️ Còn {assets.filter(a => !a.confirmed).length} món chưa kiểm tra — nhấn nút "KT" để xác nhận từng món.
         </Text>
       )}
     </View>
@@ -222,12 +222,12 @@ export const TenantOnboardingScreen: React.FC = () => {
   // ===== STEP 3: METER READING =====
   const MeterStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📊 Chỉ số đồng hồ ban đầu</Text>
+      <Text style={styles.stepTitle}>📊 Chỉ số điện & nước khi nhận phòng</Text>
       <Text style={styles.stepDesc}>
-        Ghi lại chỉ số điện và nước tại thời điểm nhận phòng. Đây là chỉ số gốc để tính tiền tiêu thụ của bạn.
+        Ghi lại số trên mặt đồng hồ điện và nước ngay lúc này. Đây là mốc gốc — hóa đơn hàng tháng sẽ tính dựa trên phần tiêu thụ từ số này trở đi.
       </Text>
 
-      <Text style={styles.fieldLabel}>⚡ Chỉ số điện (kWh)</Text>
+      <Text style={styles.fieldLabel}>⚡ Chỉ số điện hiện tại (kWh)</Text>
       <TextInput
         style={styles.input}
         placeholder="Ví dụ: 1250"
@@ -236,7 +236,7 @@ export const TenantOnboardingScreen: React.FC = () => {
         onChangeText={setElectricityReading}
       />
 
-      <Text style={styles.fieldLabel}>🚰 Chỉ số nước (m³)</Text>
+      <Text style={styles.fieldLabel}>🚰 Chỉ số nước hiện tại (m³)</Text>
       <TextInput
         style={styles.input}
         placeholder="Ví dụ: 45"
@@ -245,12 +245,12 @@ export const TenantOnboardingScreen: React.FC = () => {
         onChangeText={setWaterReading}
       />
 
-      <Text style={styles.fieldLabel}>Ảnh đồng hồ (bắt buộc)</Text>
+      <Text style={styles.fieldLabel}>📷 Chụp ảnh mặt đồng hồ làm bằng chứng</Text>
       <View style={styles.meterPhotoRow}>
         <TouchableOpacity style={styles.meterPhotoBtn} onPress={() => pickImage(setMeterImages)}>
           <Text style={{ fontSize: 24 }}>📷</Text>
           <Text style={styles.photoBtnText}>Chụp ảnh đồng hồ điện & nước</Text>
-          <Text style={styles.photoBtnSub}>{meterImages.length} ảnh đã chụp</Text>
+          <Text style={styles.photoBtnSub}>{meterImages.length > 0 ? `${meterImages.length} ảnh đã chụp` : 'Chưa có ảnh'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -264,7 +264,7 @@ export const TenantOnboardingScreen: React.FC = () => {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoBoxText}>
-          📸 Ảnh đồng hồ sẽ được dùng để xác minh chỉ số khi có tranh chấp về tiền điện nước.
+          📸 Ảnh đồng hồ là bằng chứng tránh tranh chấp về tiền điện/nước sau này. Hãy chụp rõ số trên mặt đồng hồ.
         </Text>
       </View>
     </View>
@@ -273,10 +273,10 @@ export const TenantOnboardingScreen: React.FC = () => {
   // ===== STEP 4: CONFIRM =====
   const ConfirmStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>✅ Xác nhận hoàn tất bàn giao</Text>
+      <Text style={styles.stepTitle}>✅ Xác nhận & Hoàn tất nhận phòng</Text>
 
       <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>Tổng hợp thông tin bàn giao</Text>
+        <Text style={styles.summaryTitle}>Thông tin bàn giao của bạn</Text>
 
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Phòng</Text>
@@ -309,13 +309,13 @@ export const TenantOnboardingScreen: React.FC = () => {
           {agreeTerms && <Text style={{ color: Colors.white, fontSize: 12, fontWeight: '700' }}>✓</Text>}
         </View>
         <Text style={styles.agreeText}>
-          Tôi xác nhận đã kiểm tra và đồng ý với các thông tin tình trạng phòng và tài sản được ghi nhận trên đây.
+          Tôi đã tự kiểm tra phòng và tài sản, đồng ý với thông tin đã ghi nhận ở trên.
         </Text>
       </TouchableOpacity>
 
       <View style={styles.infoBox}>
         <Text style={styles.infoBoxText}>
-          ⚠️ Bằng việc xác nhận, bạn đồng ý với tất cả các thông tin tình trạng đã ghi nhận. Thông tin này sẽ được dùng khi bạn trả phòng để đối chiếu.
+          ⚠️ Sau khi xác nhận, thông tin này không thể chỉnh sửa. Khi trả phòng, manager sẽ đối chiếu để xác định có thiệt hại gì không.
         </Text>
       </View>
     </View>

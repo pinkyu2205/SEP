@@ -199,10 +199,16 @@ export const NotificationCenterScreen: React.FC = () => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
   };
 
+  const TAB_ROUTES = ['ManagerBilling', 'ManagerMaintenance', 'MeterReading', 'ManagerHome'];
+
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);
     if (notif.actionRoute) {
-      navigation.navigate(notif.actionRoute);
+      if (TAB_ROUTES.includes(notif.actionRoute)) {
+        navigation.navigate('ManagerTabs', { screen: notif.actionRoute });
+      } else {
+        navigation.navigate(notif.actionRoute);
+      }
     }
   };
 
@@ -324,11 +330,11 @@ const styles = StyleSheet.create({
 
   // Filter
   filterContainer: { height: 46 },
-  filterContent: { paddingHorizontal: Spacing.lg, gap: Spacing.sm, alignItems: 'center' },
+  filterContent: { paddingHorizontal: Spacing.lg, alignItems: 'center' },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: 7,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
