@@ -269,11 +269,12 @@ const styles = StyleSheet.create({
   summaryNumber: { fontSize: 24, fontWeight: '800' },
   summaryLabel: { fontSize: 11, fontWeight: '600', marginTop: 2 },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, alignItems: 'center' },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
     borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
+    alignSelf: 'flex-start',
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

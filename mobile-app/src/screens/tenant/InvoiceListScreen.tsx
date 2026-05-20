@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Modal,
-  Image, Alert, ScrollView,
+  Image, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -37,11 +37,10 @@ const FILTER_TABS: { key: 'all' | InvoiceStatus; label: string }[] = [
 
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  // Hiện tất cả bills từ store (demo: tenant thấy toàn bộ hóa đơn hệ thống)
-  const invoices = useBills();
+  const invoices = useBills('Nguyễn Văn A');
   const [filter, setFilter] = useState<'all' | InvoiceStatus>('all');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
-  const [payStep, setPayStep] = useState<'qr' | 'confirm'>('qr');
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const filtered = filter === 'all' ? invoices : invoices.filter(i => i.status === filter);
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
@@ -51,31 +50,20 @@ export const InvoiceListScreen: React.FC = () => {
 
   const handlePay = (invoice: Invoice) => {
     setPayingInvoice(invoice);
-    setPayStep('qr');
+    setIsProcessing(false);
   };
 
   const handleConfirmPaid = () => {
-    if (!payingInvoice) return;
-    Alert.alert(
-      'Xác nhận thanh toán',
-      'Bạn đã chuyển khoản thành công? Giao dịch sẽ được quản lý xác minh trong vài giờ.',
-      [
-        { text: 'Chưa', style: 'cancel' },
-        {
-          text: 'Đã chuyển',
-          onPress: () => {
-            billsStore.updateStatus(payingInvoice.id, 'paid', {
-              paidAt: new Date().toISOString().slice(0, 10),
-            });
-            setPayingInvoice(null);
-            Alert.alert(
-              'Ghi nhận thành công! ✅',
-              'Thanh toán đang chờ xác minh từ quản lý. Bạn sẽ nhận thông báo khi được xác nhận.',
-            );
-          },
-        },
-      ]
-    );
+    if (!payingInvoice || isProcessing) return;
+    setIsProcessing(true);
+    setTimeout(() => {
+      billsStore.updateStatus(payingInvoice.id, 'paid', {
+        paidAt: new Date().toISOString().slice(0, 10),
+        paymentMethod: 'qr',
+      });
+      setIsProcessing(false);
+      setPayingInvoice(null);
+    }, 3000);
   };
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
@@ -108,7 +96,7 @@ export const InvoiceListScreen: React.FC = () => {
         ))}
 
         {/* Phí trễ */}
-        {item.lateFee && item.lateFee > 0 && (
+        {(item.lateFee ?? 0) > 0 && (
           <View style={styles.lineRow}>
             <Text style={[styles.lineLabel, { color: Colors.error }]}>⚠️ Phí trả chậm</Text>
             <Text style={[styles.lineVal, { color: Colors.error }]}>+{formatCurrency(item.lateFee)}</Text>
@@ -278,20 +266,33 @@ export const InvoiceListScreen: React.FC = () => {
               </View>
             </View>
 
-            {payingInvoice?.lateFee && payingInvoice.lateFee > 0 && (
+            {(payingInvoice?.lateFee ?? 0) > 0 && (
               <View style={styles.lateFeeWarning}>
                 <Text style={styles.lateFeeText}>
-                  ⚠️ Bao gồm phí trả chậm: {formatCurrency(payingInvoice.lateFee)}
+                  ⚠️ Bao gồm phí trả chậm: {formatCurrency(payingInvoice?.lateFee ?? 0)}
                 </Text>
               </View>
             )}
 
-            <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmPaid}>
-              <Text style={styles.confirmBtnText}>✅ Tôi đã chuyển khoản</Text>
+            <TouchableOpacity
+              style={[styles.confirmBtn, isProcessing && styles.confirmBtnProcessing]}
+              onPress={handleConfirmPaid}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <>
+                  <ActivityIndicator size="small" color={Colors.white} style={{ marginRight: 8 }} />
+                  <Text style={styles.confirmBtnText}>Hệ thống sẽ tự xác nhận sau khi nhận giao dịch</Text>
+                </>
+              ) : (
+                <Text style={styles.confirmBtnText}>✅ Tôi đã chuyển khoản</Text>
+              )}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setPayingInvoice(null)}>
-              <Text style={styles.cancelBtnText}>Để sau</Text>
-            </TouchableOpacity>
+            {!isProcessing && (
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setPayingInvoice(null)}>
+                <Text style={styles.cancelBtnText}>Để sau</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -324,15 +325,41 @@ const styles = StyleSheet.create({
   overdueBadge: { backgroundColor: Colors.error, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
   overdueBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.white },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
-  filterChip: {
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
-  },
-  filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  filterTextActive: { color: Colors.white },
+filterRow: {
+  paddingHorizontal: Spacing.lg,
+  paddingTop: 0,
+  paddingBottom: Spacing.sm,
+  alignItems: 'center',
+},
+
+filterChip: {
+  height: 40,
+  minWidth: 86,
+  justifyContent: 'center',
+  alignItems: 'center',
+  paddingHorizontal: 16,
+  borderRadius: BorderRadius.full,
+  backgroundColor: Colors.white,
+  borderWidth: 1,
+  borderColor: Colors.border,
+  marginRight: Spacing.sm,
+},
+
+filterChipActive: {
+  backgroundColor: Colors.primary,
+  borderColor: Colors.primary,
+},
+
+filterText: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: Colors.textSecondary,
+  textAlign: 'center',
+},
+
+filterTextActive: {
+  color: Colors.white,
+},
 
   list: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.md, overflow: 'hidden' },
@@ -412,9 +439,11 @@ const styles = StyleSheet.create({
 
   confirmBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', ...Shadow.md, marginBottom: Spacing.md,
+    paddingVertical: Spacing.base, alignItems: 'center', flexDirection: 'row',
+    justifyContent: 'center', ...Shadow.md, marginBottom: Spacing.md,
   },
-  confirmBtnText: { fontSize: 16, fontWeight: '700', color: Colors.white },
+  confirmBtnProcessing: { backgroundColor: Colors.textSecondary },
+  confirmBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white, textAlign: 'center', flexShrink: 1 },
   cancelBtn: { alignItems: 'center', paddingVertical: Spacing.sm },
   cancelBtnText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
 });

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 
 // ===================== TYPES =====================
 export type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial';
-export type BillPaymentMethod = 'qr' | 'bank_transfer' | 'cash';
+export type BillPaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet' | 'other';
 
 export interface BillItem {
   label: string;

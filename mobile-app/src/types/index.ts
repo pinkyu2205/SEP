@@ -15,7 +15,7 @@ export interface User {
   createdAt: string;
 }
 
-export type UserRole = 'tenant' | 'manager' | 'admin';
+export type UserRole = 'tenant' | 'manager';
 
 export interface LoginRequest {
   email: string;
@@ -29,7 +29,14 @@ export interface LoginResponse {
 }
 
 // ======================== ROOM ========================
-export type RoomStatus = 'available' | 'occupied' | 'maintenance';
+export type RoomStatus =
+  | 'available'
+  | 'occupied'
+  | 'maintenance'
+  | 'reserved'
+  | 'pending_cleaning'
+  | 'pending_contract'
+  | 'expiring_soon';
 
 export interface Room {
   id: string;
@@ -205,7 +212,7 @@ export interface PropertyMeterRecord {
 }
 
 // ======================== EQUIPMENT (Trang thiết bị) ========================
-export type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';
+export type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired' | 'broken';
 
 export interface EquipmentMaintenanceRecord {
   id: string;
@@ -244,7 +251,15 @@ export interface Equipment {
 }
 
 // ======================== CONTRACT ========================
-export type ContractStatus = 'draft' | 'waiting_sign' | 'active' | 'expiring_soon' | 'expired' | 'terminated';
+export type ContractStatus =
+  | 'draft'
+  | 'pending_host_approval'
+  | 'waiting_tenant_signature'
+  | 'waiting_sign'
+  | 'active'
+  | 'expiring_soon'
+  | 'expired'
+  | 'terminated';
 export type ContractType = 'admin_manager' | 'manager_tenant';
 
 export interface ContractEquipment {
@@ -377,6 +392,45 @@ export interface Tenant {
   createdAt: string;
 }
 
+// ======================== TENANT RISK & WISHLIST ========================
+export type TenantRiskLevel = 'low' | 'medium' | 'high';
+
+export interface TenantRiskIndicator {
+  tenantId: string;
+  latePaymentCount: number;
+  maintenanceFrequency: number;
+  contractViolations: number;
+  riskLevel: TenantRiskLevel;
+  lastAssessedAt: string;
+}
+
+export interface WishlistUser {
+  id: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  preferredDistrict?: string;
+  maxBudget?: number;
+  desiredMoveInDate?: string;
+  notes?: string;
+  createdAt: string;
+  status: 'waiting' | 'contacted' | 'converted';
+}
+
+export interface TenantTimeline {
+  tenantId: string;
+  events: TenantTimelineEvent[];
+}
+
+export interface TenantTimelineEvent {
+  id: string;
+  type: 'move_in' | 'move_out' | 'payment' | 'maintenance' | 'contract_renewal' | 'violation';
+  title: string;
+  description?: string;
+  amount?: number;
+  date: string;
+}
+
 // ======================== RENEWAL & CHECKOUT ========================
 export type RenewalStatus = 'pending' | 'approved' | 'rejected';
 export type CheckoutStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled';
@@ -412,7 +466,14 @@ export interface CheckoutRequest {
 }
 
 // ======================== ONBOARDING ========================
-export type OnboardingStep = 'room_inspection' | 'asset_confirmation' | 'meter_reading' | 'sign_confirmation';
+export type OnboardingStep =
+  | 'id_capture'
+  | 'tenant_info'
+  | 'room_inspection'
+  | 'asset_confirmation'
+  | 'meter_reading'
+  | 'handover_confirmation'
+  | 'sign_confirmation';
 
 export interface OnboardingAsset {
   id: string;
@@ -431,12 +492,34 @@ export interface TenantOnboarding {
   roomName: string;
   step: OnboardingStep;
   completedSteps: OnboardingStep[];
+  // Step 1: ID Capture
+  cccdFrontUri?: string;
+  cccdBackUri?: string;
+  ocrFullName?: string;
+  ocrCccdNumber?: string;
+  ocrDateOfBirth?: string;
+  // Step 2: Tenant info + prorate
+  moveInDate?: string;
+  proratedRentAmount?: number;
+  proratedDays?: number;
+  // Step 3: Room condition
   roomConditionNotes?: string;
   roomConditionImages?: string[];
+  roomConditionAreas?: { area: string; imageUri?: string; note?: string }[];
+  // Step 4: Assets
   assets: OnboardingAsset[];
+  // Step 5: Meter reading
   initialElectricity?: number;
   initialWater?: number;
   meterImages?: string[];
+  meterOcrElec?: number;
+  meterOcrWater?: number;
+  // Step 6: Handover confirmation
+  depositAmount?: number;
+  equipmentList?: { name: string; quantity: number; condition: string }[];
+  tenantSignatureUri?: string;
+  managerSignatureUri?: string;
+  handoverReportGenerated?: boolean;
   signatureImageUri?: string;
   confirmedAt?: string;
   createdAt: string;

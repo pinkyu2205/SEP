@@ -9,7 +9,6 @@ import { useAuth } from '../../hooks';
 const ROLE_CONFIG = {
   manager: { label: 'Quản lý vận hành', color: Colors.primary,   bg: Colors.primaryBg   },
   tenant:  { label: 'Khách thuê',        color: Colors.success,   bg: Colors.successLight },
-  admin:   { label: 'Quản trị viên',     color: Colors.warning,   bg: Colors.warningLight },
 };
 
 const MOCK_MANAGER_STATS = { properties: 2, tenants: 10, activeContracts: 3 };

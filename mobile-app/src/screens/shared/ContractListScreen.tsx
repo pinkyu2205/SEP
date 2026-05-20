@@ -1287,7 +1287,7 @@ const CreateContractView: React.FC<{
 interface Props {
   navigation?: any;
   route?: any;
-  filterRole?: 'admin' | 'manager' | 'tenant';
+  filterRole?: 'manager' | 'tenant';
   filterType?: 'building_rental' | 'room_rental';
 }
 
@@ -1313,7 +1313,6 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
     let list = contracts;
     if (filterType) list = list.filter(c => c.type === filterType);
     if (filterRole === 'tenant') list = list.filter(c => c.type === 'room_rental');
-    else if (filterRole === 'admin') list = list.filter(c => c.type === 'building_rental');
     return list;
   }, [contracts, hostContracts, filterRole, filterType, activeSection, isManager]);
 
@@ -1775,17 +1774,39 @@ const styles = StyleSheet.create({
   },
   createBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
 
-  statsScroll: { height: 90 },
-  statsContent: { paddingHorizontal: Spacing.lg, paddingVertical: 8, alignItems: 'flex-start' },
-  statCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
-    borderTopWidth: 3, ...Shadow.sm, minWidth: 78, alignItems: 'center', marginRight: Spacing.md,
-  },
+statsScroll: {
+  flexGrow: 0,
+  marginBottom: Spacing.sm,
+},
+statsContent: {
+  paddingHorizontal: Spacing.lg,
+  paddingVertical: 4,
+  alignItems: 'center',
+},
+statCard: {
+  backgroundColor: Colors.white,
+  borderRadius: BorderRadius.lg,
+  paddingVertical: Spacing.sm,
+  paddingHorizontal: Spacing.md,
+  borderTopWidth: 3,
+  ...Shadow.sm,
+  minWidth: 78,
+  alignItems: 'center',
+  marginRight: Spacing.md,
+},
   statNum: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   statLabel: { fontSize: 10, color: Colors.textSecondary, marginTop: 2, textAlign: 'center' },
 
-  filterRow: { height: 50 },
-  filterContent: { paddingHorizontal: Spacing.lg, paddingVertical: 8, alignItems: 'flex-start' },
+filterRow: {
+  flexGrow: 0,
+  marginTop: Spacing.xs,
+  marginBottom: Spacing.sm,
+},
+filterContent: {
+  paddingHorizontal: Spacing.lg,
+  paddingVertical: 4,
+  alignItems: 'center',
+},
   filterChip: {
     height: 34, justifyContent: 'center', paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
@@ -1795,7 +1816,11 @@ const styles = StyleSheet.create({
   filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterTextActive: { color: Colors.white },
 
-  listContent: { paddingHorizontal: Spacing.lg, paddingBottom: 100, paddingTop: Spacing.sm },
+listContent: {
+  paddingHorizontal: Spacing.lg,
+  paddingTop: Spacing.sm,
+  paddingBottom: 100,
+},
 
   // Contract card
   card: {

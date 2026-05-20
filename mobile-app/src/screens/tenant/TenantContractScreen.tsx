@@ -271,11 +271,12 @@ const styles = StyleSheet.create({
   summaryDays: { fontSize: 28, fontWeight: '800', color: Colors.primary },
   summaryDaysLabel: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, alignItems: 'center' },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
     borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
+    alignSelf: 'flex-start',
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

@@ -1,47 +1,34 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Dimensions,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import {
+  MANAGED_PROPERTIES, getPropPriority, getPriorityMeta, getHealthSummary,
+} from '../../data/managedProperties';
 
 // ===================== MOCK DATA =====================
-const MANAGED_PROPERTIES = [
-  {
-    id: 'prop-1',
-    name: 'Nhà Nguyễn Trãi',
-    address: '123 Nguyễn Trãi, Quận 5, TP.HCM',
-    totalFloors: 3,
-    totalRooms: 8,
-    occupied: 5,
-    available: 2,
-    maintenance: 1,
-    monthlyLeaseCost: 25000000,
-    electricityRate: 3500,
-    waterRate: 15000,
-    serviceCharge: 100000,
-    hostName: 'Nguyễn Văn Host',
-  },
-  {
-    id: 'prop-3',
-    name: 'Nhà Cách Mạng Tháng 8',
-    address: '789 CMT8, Quận 10, TP.HCM',
-    totalFloors: 2,
-    totalRooms: 4,
-    occupied: 3,
-    available: 1,
-    maintenance: 0,
-    monthlyLeaseCost: 18000000,
-    electricityRate: 3500,
-    waterRate: 15000,
-    serviceCharge: 80000,
-    hostName: 'Trần Văn Host',
-  },
+
+const CRITICAL_TASKS = [
+  { id: 't2', icon: '🧾', label: 'Hóa đơn quá hạn', count: 2, color: '#EF4444', route: 'ManagerBilling' },
+  { id: 't3', icon: '🔧', label: 'Bảo trì khẩn', count: 1, color: '#EF4444', route: 'ManagerMaintenance' },
+  { id: 't6', icon: '📦', label: 'Check-out hôm nay', count: 0, color: '#EF4444', route: 'TenantList' },
+];
+
+const OPERATIONAL_TASKS = [
+  { id: 't1', icon: '⚡', label: 'Chốt điện nước', count: 3, color: '#F59E0B', route: 'MeterReading' },
+  { id: 't5', icon: '🚪', label: 'Check-in hôm nay', count: 1, color: '#10B981', route: 'Onboarding' },
+  { id: 't4', icon: '📋', label: 'HĐ sắp hết hạn', count: 2, color: '#3B82F6', route: 'ManagerContracts' },
+];
+
+const OPERATIONAL_INDICATORS = [
+  { id: 'o1', icon: '🏚️', label: 'Trống quá lâu', desc: '1 phòng >30 ngày', color: '#F59E0B', route: 'RoomManage' },
+  { id: 'o2', icon: '💸', label: 'Trễ thanh toán', desc: '2 khách nợ cũ', color: '#EF4444', route: 'ManagerBilling' },
+  { id: 'o3', icon: '🔔', label: 'Chờ duyệt bảo trì', desc: '1 yêu cầu mới', color: '#8B5CF6', route: 'ManagerMaintenance' },
 ];
 
 const MOCK_STATS = {
@@ -49,78 +36,91 @@ const MOCK_STATS = {
   occupied: 16,
   available: 3,
   maintenance: 1,
-  overduePayments: 2,
   totalDebt: 12500000,
-  openMaintenanceTickets: 4,
-  urgentMaintenanceTickets: 1,
-  contractsExpiringSoon: 2,
-  revenueThisMonth: 64000000,
-  revenueTrend: 7.6,
-  profitThisMonth: 48200000,
-  expenseThisMonth: 15800000,
   unreadNotifications: 6,
 };
 
-const MONTHLY_REVENUE = [
-  { label: 'T1', revenue: 52000000, expense: 12000000 },
-  { label: 'T2', revenue: 55000000, expense: 13500000 },
-  { label: 'T3', revenue: 58000000, expense: 14000000 },
-  { label: 'T4', revenue: 59500000, expense: 14800000 },
-  { label: 'T5', revenue: 64000000, expense: 15800000 },
+const PRIMARY_ACTIONS = [
+  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',        color: Colors.primary },
+  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     badge: 2, color: '#F59E0B' },
+  { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', badge: 4, color: '#EF4444' },
+  { emoji: '⚡', label: 'Chốt số',   route: 'MeterReading',       color: Colors.accent },
 ];
 
-const MOCK_ALERTS = [
-  { id: '1', icon: '⚠️', text: '2 hóa đơn quá hạn', route: 'ManagerBilling', color: '#EF4444' },
-  { id: '2', icon: '🔧', text: '1 bảo trì khẩn cấp', route: 'ManagerMaintenance', color: '#F59E0B' },
-  { id: '3', icon: '📋', text: '2 hợp đồng sắp hết hạn', route: 'ManagerContracts', color: '#3B82F6' },
+const SECONDARY_ACTIONS = [
+  { emoji: '🏠', label: 'Phòng',     route: 'RoomManage',       color: Colors.success },
+  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts', badge: 2, color: Colors.info },
+  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',        color: Colors.textSecondary },
+  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',       color: Colors.primary },
 ];
 
-const QUICK_ACTIONS = [
-  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',         color: Colors.primary },
-  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',      badge: 2, color: Colors.warning },
-  { emoji: '🔧', label: 'Sửa chữa',  route: 'ManagerMaintenance',  badge: 4, color: Colors.error },
-  { emoji: '🏠', label: 'Phòng',      route: 'RoomManage',          color: Colors.success },
-  { emoji: '⚡', label: 'Chốt số',   route: 'MeterReading',        color: Colors.accent },
-  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',    badge: 2, color: Colors.info },
-  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',           color: Colors.textSecondary },
-  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',          color: Colors.primaryDark },
+const BUILDING_FILTERS = [
+  { id: 'all',         label: 'Tất cả' },
+  { id: 'vacant',      label: '🚪 Phòng trống' },
+  { id: 'maintenance', label: '🔧 Bảo trì' },
+  { id: 'expiring',    label: '📋 HĐ sắp hết' },
+  { id: 'unpaid',      label: '💸 Nợ tiền' },
+  { id: 'utility',     label: '⚡ Thiếu chỉ số' },
 ];
 
-// ===================== MINI BAR CHART =====================
-const MiniBarChart: React.FC<{ data: typeof MONTHLY_REVENUE }> = ({ data }) => {
-  const maxRevenue = Math.max(...data.map(d => d.revenue));
-  const barWidth = (SCREEN_WIDTH - Spacing.lg * 2 - 32) / data.length - 8;
+// ===================== TASK CARDS =====================
+type CriticalTask = typeof CRITICAL_TASKS[0];
+type OperationalTask = typeof OPERATIONAL_TASKS[0];
 
+const CriticalTaskCard: React.FC<{ task: CriticalTask; onPress: () => void }> = ({ task, onPress }) => {
+  const active = task.count > 0;
   return (
-    <View style={chartStyles.container}>
-      {data.map((item, i) => {
-        const revenueHeight = (item.revenue / maxRevenue) * 70;
-        const expenseHeight = (item.expense / maxRevenue) * 70;
-        const isLast = i === data.length - 1;
-        return (
-          <View key={i} style={chartStyles.barGroup}>
-            <View style={chartStyles.barsRow}>
-              <View style={[chartStyles.bar, chartStyles.revenueBar, { height: revenueHeight, width: barWidth * 0.45 }, isLast && chartStyles.barHighlight]} />
-              <View style={[chartStyles.bar, chartStyles.expenseBar, { height: expenseHeight, width: barWidth * 0.45 }]} />
-            </View>
-            <Text style={[chartStyles.label, isLast && chartStyles.labelHighlight]}>{item.label}</Text>
-          </View>
-        );
-      })}
-    </View>
+    <TouchableOpacity
+      style={[
+        taskSt.card,
+        active ? { borderLeftColor: task.color } : taskSt.cardEmpty,
+      ]}
+      onPress={onPress}
+      activeOpacity={0.75}
+    >
+      <View style={[taskSt.iconWrap, { backgroundColor: active ? task.color + '15' : '#F3F4F6' }]}>
+        <Text style={taskSt.icon}>{task.icon}</Text>
+      </View>
+      <Text style={[taskSt.count, { color: active ? task.color : '#C4C9D4' }]}>{task.count}</Text>
+      <Text style={taskSt.label} numberOfLines={2}>{task.label}</Text>
+    </TouchableOpacity>
   );
 };
 
-const chartStyles = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 90, paddingTop: 8 },
-  barGroup: { alignItems: 'center', flex: 1 },
-  barsRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 2 },
-  bar: { borderRadius: 3 },
-  revenueBar: { backgroundColor: Colors.primary },
-  expenseBar: { backgroundColor: Colors.errorLight },
-  barHighlight: { backgroundColor: Colors.accent },
-  label: { fontSize: 10, color: Colors.textMuted, marginTop: 4, fontWeight: '600' },
-  labelHighlight: { color: Colors.primary, fontWeight: '800' },
+const OperationalTaskCard: React.FC<{ task: OperationalTask; onPress: () => void }> = ({ task, onPress }) => {
+  const active = task.count > 0;
+  return (
+    <TouchableOpacity style={taskSt.opCard} onPress={onPress} activeOpacity={0.75}>
+      <Text style={taskSt.opIcon}>{task.icon}</Text>
+      <Text style={[taskSt.opCount, { color: active ? task.color : '#C4C9D4' }]}>{task.count}</Text>
+      <Text style={taskSt.opLabel} numberOfLines={2}>{task.label}</Text>
+    </TouchableOpacity>
+  );
+};
+
+const taskSt = StyleSheet.create({
+  card: {
+    width: '30%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    padding: Spacing.sm, alignItems: 'center',
+    ...Shadow.sm, borderWidth: 1, borderColor: Colors.border, borderLeftWidth: 4,
+  },
+  cardEmpty: { borderLeftColor: '#E5E7EB', backgroundColor: '#FAFAFA', opacity: 0.8 },
+  iconWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  icon: { fontSize: 16 },
+  count: { fontSize: 22, fontWeight: '800', lineHeight: 26 },
+  label: { fontSize: 10, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center', marginTop: 2, lineHeight: 14 },
+
+  opCard: {
+    width: '30%', backgroundColor: '#F8FAFC', borderRadius: BorderRadius.lg,
+    padding: Spacing.sm, alignItems: 'center',
+    borderWidth: 1, borderColor: '#EEF2F7',
+  },
+  opIcon: { fontSize: 18, marginBottom: 3 },
+  opCount: { fontSize: 20, fontWeight: '700', lineHeight: 24 },
+  opLabel: { fontSize: 10, fontWeight: '500', color: Colors.textMuted, textAlign: 'center', marginTop: 2, lineHeight: 14 },
 });
 
 // ===================== MAIN =====================
@@ -129,6 +129,32 @@ export const ManagerHomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const stats = MOCK_STATS;
   const occupancyRate = Math.round((stats.occupied / stats.totalRooms) * 100);
+
+  const [buildingFilter, setBuildingFilter] = useState('all');
+  const [buildingSearch, setBuildingSearch] = useState('');
+  const [showMoreActions, setShowMoreActions] = useState(false);
+
+  const criticalActiveCount = CRITICAL_TASKS.filter(t => t.count > 0).length;
+
+  const filteredProps = useMemo(() => {
+    let props = [...MANAGED_PROPERTIES].sort((a, b) => getPropPriority(a) - getPropPriority(b));
+    if (buildingSearch.trim()) {
+      const q = buildingSearch.toLowerCase();
+      props = props.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.district.toLowerCase().includes(q) ||
+        p.address.toLowerCase().includes(q)
+      );
+    }
+    switch (buildingFilter) {
+      case 'vacant':      return props.filter(p => p.available > 0);
+      case 'maintenance': return props.filter(p => p.maintenance > 0);
+      case 'expiring':    return props.filter(p => p.hasExpiringContracts);
+      case 'unpaid':      return props.filter(p => p.hasUnpaidInvoices);
+      case 'utility':     return props.filter(p => p.missingUtility);
+      default:            return props;
+    }
+  }, [buildingFilter, buildingSearch]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -140,10 +166,7 @@ export const ManagerHomeScreen: React.FC = () => {
             <Text style={styles.greeting}>Xin chào 👋</Text>
             <Text style={styles.userName}>{user?.fullName || 'Quản lý'}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.notifBtn}
-            onPress={() => navigation.navigate('NotificationCenter')}
-          >
+          <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
             <Text style={{ fontSize: 22 }}>🔔</Text>
             {stats.unreadNotifications > 0 && (
               <View style={styles.notifBadge}>
@@ -155,79 +178,112 @@ export const ManagerHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Occupancy Banner */}
+        {/* Hero Banner — Property Operations Overview */}
         <View style={styles.banner}>
-          <View style={styles.bannerLeft}>
-            <Text style={styles.bannerLabel}>TỈ LỆ LẤP ĐẦY</Text>
-            <Text style={styles.bannerValue}>{occupancyRate}%</Text>
-            <Text style={styles.bannerSub}>{stats.occupied}/{stats.totalRooms} phòng đang thuê</Text>
-            <View style={styles.progressBg}>
-              <View style={[styles.progressFill, { width: `${occupancyRate}%` }]} />
+
+          {/* Top row: occupancy + status breakdown */}
+          <View style={styles.bannerTopRow}>
+            {/* Left: occupancy */}
+            <View style={styles.bannerLeft}>
+              <Text style={styles.bannerLabel}>TỈ LỆ LẤP ĐẦY</Text>
+              <Text style={styles.bannerValue}>{occupancyRate}%</Text>
+              <Text style={styles.bannerSub}>{stats.occupied}/{stats.totalRooms} phòng đang thuê</Text>
+              <Text style={styles.bannerMeta}>
+                {MANAGED_PROPERTIES.length} tòa nhà  ·  {stats.totalRooms} phòng
+              </Text>
+            </View>
+
+            {/* Right: room status breakdown */}
+            <View style={styles.bannerRight}>
+              <View style={styles.bannerStatRow}>
+                <Text style={styles.bannerStatEmoji}>⚪</Text>
+                <Text style={styles.bannerStatLabel}>Phòng trống</Text>
+                <Text style={styles.bannerStatCount}>{stats.available}</Text>
+              </View>
+              <View style={styles.bannerStatRow}>
+                <Text style={styles.bannerStatEmoji}>🟢</Text>
+                <Text style={styles.bannerStatLabel}>Đang thuê</Text>
+                <Text style={styles.bannerStatCount}>{stats.occupied}</Text>
+              </View>
+              <View style={styles.bannerStatRow}>
+                <Text style={styles.bannerStatEmoji}>🟡</Text>
+                <Text style={styles.bannerStatLabel}>Bảo trì</Text>
+                <Text style={styles.bannerStatCount}>{stats.maintenance}</Text>
+              </View>
             </View>
           </View>
-          <View style={styles.bannerRight}>
-            <View style={styles.bannerStatRow}>
-              <View style={[styles.bannerDot, { backgroundColor: Colors.successLight }]} />
-              <Text style={styles.bannerStatText}>{stats.available} trống</Text>
+
+          {/* Divider */}
+          <View style={styles.bannerDivider} />
+
+          {/* Bottom row: debt + progress bar */}
+          <View style={styles.bannerBottomRow}>
+            <View style={styles.bannerDebtSection}>
+              <Text style={styles.bannerDebtLabel}>Công nợ cần thu</Text>
+              <Text style={styles.bannerDebtVal}>{(stats.totalDebt / 1_000_000).toFixed(1)}tr</Text>
             </View>
-            <View style={styles.bannerStatRow}>
-              <View style={[styles.bannerDot, { backgroundColor: Colors.accentLight }]} />
-              <Text style={styles.bannerStatText}>{stats.occupied} đang thuê</Text>
-            </View>
-            <View style={styles.bannerStatRow}>
-              <View style={[styles.bannerDot, { backgroundColor: Colors.warningLight }]} />
-              <Text style={styles.bannerStatText}>{stats.maintenance} bảo trì</Text>
+            <View style={styles.bannerProgressSection}>
+              <Text style={styles.bannerProgressLabel}>Tỉ lệ lấp đầy</Text>
+              <View style={styles.progressBg}>
+                <View style={[styles.progressFill, { width: `${occupancyRate}%` }]} />
+              </View>
+              <Text style={styles.bannerProgressPct}>{occupancyRate}% · {stats.occupied}/{stats.totalRooms}</Text>
             </View>
           </View>
+
         </View>
 
-        {/* Alerts — compact pill row */}
-        {MOCK_ALERTS.length > 0 && (
-          <View style={styles.alertsRow}>
-            {MOCK_ALERTS.map(alert => (
-              <TouchableOpacity
-                key={alert.id}
-                style={[styles.alertPill, { borderColor: alert.color + '40', backgroundColor: alert.color + '0D' }]}
-                onPress={() => navigation.navigate(alert.route)}
-              >
-                <Text style={styles.alertPillIcon}>{alert.icon}</Text>
-                <Text style={[styles.alertPillText, { color: alert.color }]}>{alert.text}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Revenue + Profit */}
-        <View style={styles.statsRow}>
-          <TouchableOpacity
-            style={styles.statsCard}
-            onPress={() => navigation.navigate('ManagerBilling')}
-          >
-            <Text style={styles.statsLabel}>Doanh thu T5</Text>
-            <Text style={styles.statsValue}>{(stats.revenueThisMonth / 1_000_000).toFixed(1)}tr</Text>
-            <Text style={styles.statsTrend}>▲ {stats.revenueTrend}%</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.statsCard, styles.statsCardAlt]}
-            onPress={() => navigation.navigate('ManagerBilling')}
-          >
-            <Text style={styles.statsLabel}>Lợi nhuận</Text>
-            <Text style={[styles.statsValue, { color: Colors.primary }]}>{(stats.profitThisMonth / 1_000_000).toFixed(1)}tr</Text>
-            <Text style={[styles.statsTrend, { color: Colors.textMuted }]}>
-              Chi: {(stats.expenseThisMonth / 1_000_000).toFixed(1)}tr
-            </Text>
-          </TouchableOpacity>
+        {/* Ưu tiên xử lý — Critical tasks */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Ưu tiên xử lý</Text>
+          {criticalActiveCount > 0 && (
+            <View style={styles.criticalBadge}>
+              <Text style={styles.criticalBadgeText}>{criticalActiveCount} cần xử lý</Text>
+            </View>
+          )}
+        </View>
+        <View style={styles.taskGrid}>
+          {CRITICAL_TASKS.map(task => (
+            <CriticalTaskCard key={task.id} task={task} onPress={() => navigation.navigate(task.route)} />
+          ))}
         </View>
 
-        {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
-        <View style={styles.actionsGrid}>
-          {QUICK_ACTIONS.map((a, i) => (
+        {/* Công việc hôm nay — Operational tasks */}
+        <Text style={[styles.sectionTitleSoft, { marginBottom: Spacing.sm }]}>Công việc hôm nay</Text>
+        <View style={[styles.taskGrid, { marginBottom: Spacing.lg }]}>
+          {OPERATIONAL_TASKS.map(task => (
+            <OperationalTaskCard key={task.id} task={task} onPress={() => navigation.navigate(task.route)} />
+          ))}
+        </View>
+
+        {/* Operational Indicators */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={styles.indicatorsRow} contentContainerStyle={styles.indicatorsContent}>
+          {OPERATIONAL_INDICATORS.map(ind => (
             <TouchableOpacity
-              key={i}
-              style={styles.actionBtn}
-              onPress={() => navigation.navigate(a.route)}
+              key={ind.id}
+              style={[styles.indicatorCard, { borderColor: ind.color + '30' }]}
+              onPress={() => navigation.navigate(ind.route)}
             >
+              <Text style={styles.indicatorIcon}>{ind.icon}</Text>
+              <View>
+                <Text style={[styles.indicatorLabel, { color: ind.color }]}>{ind.label}</Text>
+                <Text style={styles.indicatorDesc}>{ind.desc}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Quick Actions — Primary */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
+          <TouchableOpacity onPress={() => setShowMoreActions(v => !v)}>
+            <Text style={styles.sectionLink}>{showMoreActions ? 'Thu gọn' : 'Xem thêm'}</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.actionsGrid}>
+          {PRIMARY_ACTIONS.map((a, i) => (
+            <TouchableOpacity key={i} style={styles.actionBtn} onPress={() => navigation.navigate(a.route)}>
               <View style={[styles.actionIconWrap, { backgroundColor: a.color + '18' }]}>
                 <Text style={styles.actionEmoji}>{a.emoji}</Text>
                 {a.badge && a.badge > 0 ? (
@@ -241,85 +297,137 @@ export const ManagerHomeScreen: React.FC = () => {
           ))}
         </View>
 
-        {/* Managed Properties */}
-        <Text style={styles.sectionTitle}>Toà nhà đang quản lý</Text>
-        {MANAGED_PROPERTIES.map(prop => (
-          <View key={prop.id} style={styles.propCard}>
-            <View style={styles.propHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.propName}>{prop.name}</Text>
-                <View style={styles.propAddressRow}>
-                  <Text style={styles.propAddressIcon}>📍</Text>
-                  <Text style={styles.propAddress}>{prop.address}</Text>
+        {/* Quick Actions — Secondary (toggled) */}
+        {showMoreActions && (
+          <View style={[styles.actionsGrid, { marginTop: Spacing.xs }]}>
+            {SECONDARY_ACTIONS.map((a, i) => (
+              <TouchableOpacity key={i} style={[styles.actionBtn, styles.actionBtnSecondary]}
+                onPress={() => navigation.navigate(a.route)}>
+                <View style={[styles.actionIconWrap, { backgroundColor: a.color + '12' }]}>
+                  <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                  {a.badge && a.badge > 0 ? (
+                    <View style={styles.actionBadge}>
+                      <Text style={styles.actionBadgeText}>{a.badge}</Text>
+                    </View>
+                  ) : null}
                 </View>
-              </View>
-              <View style={styles.propFloorBadge}>
-                <Text style={styles.propFloorText}>{prop.totalFloors} tầng</Text>
-              </View>
-            </View>
-
-            <View style={styles.propRoomRow}>
-              <View style={[styles.propRoomStat, { borderColor: Colors.success + '40', backgroundColor: Colors.success + '0D' }]}>
-                <Text style={[styles.propRoomNum, { color: Colors.success }]}>{prop.occupied}</Text>
-                <Text style={styles.propRoomLabel}>Đang thuê</Text>
-              </View>
-              <View style={[styles.propRoomStat, { borderColor: Colors.info + '40', backgroundColor: Colors.info + '0D' }]}>
-                <Text style={[styles.propRoomNum, { color: Colors.info }]}>{prop.available}</Text>
-                <Text style={styles.propRoomLabel}>Còn trống</Text>
-              </View>
-              {prop.maintenance > 0 && (
-                <View style={[styles.propRoomStat, { borderColor: Colors.warning + '40', backgroundColor: Colors.warning + '0D' }]}>
-                  <Text style={[styles.propRoomNum, { color: Colors.warning }]}>{prop.maintenance}</Text>
-                  <Text style={styles.propRoomLabel}>Bảo trì</Text>
-                </View>
-              )}
-              <View style={[styles.propRoomStat, { borderColor: Colors.border, backgroundColor: Colors.background }]}>
-                <Text style={styles.propRoomNum}>{prop.totalRooms}</Text>
-                <Text style={styles.propRoomLabel}>Tổng phòng</Text>
-              </View>
-            </View>
-
-            <View style={styles.propRatesRow}>
-              <View style={styles.propRate}>
-                <Text style={styles.propRateIcon}>⚡</Text>
-                <Text style={styles.propRateValue}>{prop.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
-              </View>
-              <Text style={styles.propRateSep}>·</Text>
-              <View style={styles.propRate}>
-                <Text style={styles.propRateIcon}>💧</Text>
-                <Text style={styles.propRateValue}>{prop.waterRate.toLocaleString('vi-VN')}đ/m³</Text>
-              </View>
-              <Text style={styles.propRateSep}>·</Text>
-              <View style={styles.propRate}>
-                <Text style={styles.propRateIcon}>🏠</Text>
-                <Text style={styles.propRateValue}>DV {(prop.serviceCharge / 1000).toFixed(0)}k/th</Text>
-              </View>
-            </View>
-
-            <View style={styles.propFooter}>
-              <Text style={styles.propHostLabel}>Chủ nhà: <Text style={styles.propHostName}>{prop.hostName}</Text></Text>
-              <Text style={styles.propLeaseCost}>Thuê: {(prop.monthlyLeaseCost / 1_000_000).toFixed(0)}tr/tháng</Text>
-            </View>
+                <Text style={[styles.actionLabel, { color: Colors.textMuted }]}>{a.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        ))}
+        )}
 
-        {/* Revenue Chart */}
-        <View style={styles.chartCard}>
-          <View style={styles.chartHeader}>
-            <Text style={styles.sectionTitle}>Doanh thu 5 tháng</Text>
-            <View style={styles.legendRow}>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.primary }]} />
-                <Text style={styles.legendText}>Thu</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: Colors.errorLight }]} />
-                <Text style={styles.legendText}>Chi</Text>
-              </View>
-            </View>
-          </View>
-          <MiniBarChart data={MONTHLY_REVENUE} />
+        {/* Building Search + Filter */}
+        <View style={[styles.sectionHeader, { marginTop: Spacing.xl }]}>
+          <Text style={styles.sectionTitle}>Toà nhà đang quản lý</Text>
+          <Text style={styles.sectionCount}>{filteredProps.length}/{MANAGED_PROPERTIES.length} toà</Text>
         </View>
+
+        <View style={styles.searchBar}>
+          <Text style={styles.searchBarIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchBarInput}
+            placeholder="Tìm theo tên, quận, địa chỉ..."
+            placeholderTextColor={Colors.textMuted}
+            value={buildingSearch}
+            onChangeText={setBuildingSearch}
+          />
+          {buildingSearch.length > 0 && (
+            <TouchableOpacity onPress={() => setBuildingSearch('')}>
+              <Text style={styles.searchBarClear}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={styles.bFilterRow} contentContainerStyle={styles.bFilterContent}>
+          {BUILDING_FILTERS.map(f => (
+            <TouchableOpacity
+              key={f.id}
+              style={[styles.bFilterChip, buildingFilter === f.id && styles.bFilterChipActive]}
+              onPress={() => setBuildingFilter(f.id)}
+            >
+              <Text style={[styles.bFilterText, buildingFilter === f.id && styles.bFilterTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Building Cards */}
+        {filteredProps.length === 0 ? (
+          <View style={styles.emptyProps}>
+            <Text style={styles.emptyPropsText}>Không tìm thấy toà nhà phù hợp</Text>
+          </View>
+        ) : filteredProps.map(prop => {
+          const occ = Math.round((prop.occupied / prop.totalRooms) * 100);
+          const occColor = occ >= 80 ? Colors.success : occ >= 60 ? Colors.primary : occ >= 40 ? '#F59E0B' : '#EF4444';
+          const { severity, color: priorityColor } = getPriorityMeta(prop);
+          const health = getHealthSummary(prop);
+
+          return (
+            <TouchableOpacity
+              key={prop.id}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('BuildingDetail', { propertyId: prop.id })}
+              style={[
+                styles.propCard,
+                priorityColor != null && { borderLeftWidth: 3, borderLeftColor: priorityColor },
+                severity === 'critical' && styles.propCardCritical,
+              ]}
+            >
+              {/* Header — name · address · floors */}
+              <View style={styles.propHeader}>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.propNameRow}>
+                    {priorityColor != null && <View style={[styles.priorityDot, { backgroundColor: priorityColor }]} />}
+                    <Text style={styles.propName} numberOfLines={1}>{prop.name}</Text>
+                  </View>
+                  <Text style={styles.propAddress} numberOfLines={1}>{prop.address}</Text>
+                </View>
+                <View style={styles.propFloorBadge}>
+                  <Text style={styles.propFloorText}>{prop.totalFloors} tầng</Text>
+                </View>
+              </View>
+
+              {/* Occupancy bar */}
+              <View style={styles.propOccRow}>
+                <View style={styles.propOccBarBg}>
+                  <View style={[styles.propOccBarFill, { width: `${occ}%`, backgroundColor: occColor }]} />
+                </View>
+                <Text style={[styles.propOccPct, { color: occColor }]}>{occ}%</Text>
+              </View>
+
+              {/* Room status — occupied · vacant · maintenance(if >0) */}
+              <View style={styles.propRoomRow}>
+                <View style={styles.propRoomStat}>
+                  <Text style={[styles.propRoomNum, { color: Colors.success }]}>{prop.occupied}</Text>
+                  <Text style={styles.propRoomLabel}>đang thuê</Text>
+                </View>
+                <View style={styles.propRoomSep} />
+                <View style={styles.propRoomStat}>
+                  <Text style={[styles.propRoomNum, { color: Colors.textSecondary }]}>{prop.available}</Text>
+                  <Text style={styles.propRoomLabel}>trống</Text>
+                </View>
+                {prop.maintenance > 0 && (
+                  <>
+                    <View style={styles.propRoomSep} />
+                    <View style={styles.propRoomStat}>
+                      <Text style={[styles.propRoomNum, { color: '#F59E0B' }]}>{prop.maintenance}</Text>
+                      <Text style={styles.propRoomLabel}>bảo trì</Text>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              {/* Lightweight health summary + navigation affordance */}
+              <View style={styles.propHealthRow}>
+                <Text style={[styles.propHealthText, { color: health.color }]}>{health.label}</Text>
+                <Text style={styles.propChevron}>Chi tiết ›</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -349,54 +457,73 @@ const styles = StyleSheet.create({
   },
   notifBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
 
-  // Banner
+  // Hero Banner
   banner: {
-    flexDirection: 'row', backgroundColor: Colors.primary, borderRadius: BorderRadius.xl,
-    padding: Spacing.lg, marginBottom: Spacing.md,
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.xl,
+    padding: Spacing.lg, marginBottom: Spacing.xl,
   },
-  bannerLeft: { flex: 1.5 },
-  bannerLabel: {
-    fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '700',
-    letterSpacing: 0.8, textTransform: 'uppercase',
-  },
-  bannerValue: { fontSize: 44, fontWeight: '800', color: Colors.white, marginTop: 2 },
-  bannerSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2, marginBottom: Spacing.sm },
-  progressBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 3, marginTop: Spacing.xs },
-  progressFill: { height: 6, backgroundColor: Colors.accent, borderRadius: 3 },
+  bannerTopRow: { flexDirection: 'row', marginBottom: Spacing.sm },
+  bannerLeft: { flex: 1.4 },
+  bannerLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '700', letterSpacing: 1 },
+  bannerValue: { fontSize: 52, fontWeight: '900', color: Colors.white, marginTop: 2, lineHeight: 58 },
+  bannerSub: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  bannerMeta: { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4, fontWeight: '500' },
   bannerRight: { flex: 1, justifyContent: 'center', paddingLeft: Spacing.md },
-  bannerStatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
-  bannerDot: { width: 8, height: 8, borderRadius: 4 },
-  bannerStatText: { fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: '500' },
+  bannerStatRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
+  bannerStatEmoji: { fontSize: 13, width: 18 },
+  bannerStatLabel: { fontSize: 11, color: 'rgba(255,255,255,0.75)', flex: 1, fontWeight: '500' },
+  bannerStatCount: { fontSize: 15, fontWeight: '800', color: Colors.white },
+  bannerDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginBottom: Spacing.md },
+  bannerBottomRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.md },
+  bannerDebtSection: { flex: 1 },
+  bannerDebtLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '600', marginBottom: 2 },
+  bannerDebtVal: { fontSize: 22, fontWeight: '900', color: '#FCD34D' },
+  bannerProgressSection: { flex: 1.6 },
+  bannerProgressLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: '600', marginBottom: 4 },
+  progressBg: { height: 6, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 3, marginBottom: 4 },
+  progressFill: { height: 6, backgroundColor: Colors.accent, borderRadius: 3 },
+  bannerProgressPct: { fontSize: 11, color: 'rgba(255,255,255,0.65)', fontWeight: '500' },
 
-  // Alerts compact
-  alertsRow: { gap: Spacing.xs, marginBottom: Spacing.md },
-  alertPill: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
-    paddingHorizontal: Spacing.sm, paddingVertical: 8,
-    borderRadius: BorderRadius.lg, borderWidth: 1,
+  // Section headers
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
   },
-  alertPillIcon: { fontSize: 14 },
-  alertPillText: { fontSize: 12, fontWeight: '600', flex: 1 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  sectionTitleSoft: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  sectionCount: { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
+  sectionLink: { fontSize: 13, color: Colors.primary, fontWeight: '600' },
 
-  // Stats
-  statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
-  statsCard: {
-    flex: 1, backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.md, ...Shadow.sm,
+  criticalBadge: {
+    backgroundColor: '#FEE2E2', paddingHorizontal: Spacing.sm, paddingVertical: 3,
+    borderRadius: BorderRadius.full,
   },
-  statsCardAlt: { borderWidth: 1, borderColor: Colors.primary + '20' },
-  statsLabel: { fontSize: 11, color: Colors.textSecondary, marginBottom: 4 },
-  statsValue: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary },
-  statsTrend: { fontSize: 11, fontWeight: '600', color: Colors.success, marginTop: 4 },
+  criticalBadgeText: { fontSize: 11, fontWeight: '700', color: '#EF4444' },
 
-  // Section title
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  taskGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
+
+  // Operational Indicators
+  indicatorsRow: { flexGrow: 0, marginBottom: Spacing.lg },
+  indicatorsContent: { paddingBottom: 4, gap: Spacing.sm },
+  indicatorCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    borderWidth: 1, ...Shadow.sm,
+  },
+  indicatorIcon: { fontSize: 18 },
+  indicatorLabel: { fontSize: 12, fontWeight: '700' },
+  indicatorDesc: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
 
   // Quick Actions
-  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.lg },
+  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
   actionBtn: {
     width: '22%', alignItems: 'center', backgroundColor: Colors.white,
     paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm,
+  },
+  actionBtnSecondary: {
+    backgroundColor: Colors.background, elevation: 0, shadowOpacity: 0,
+    borderWidth: 1, borderColor: Colors.border,
   },
   actionIconWrap: {
     width: 44, height: 44, borderRadius: 22,
@@ -411,57 +538,68 @@ const styles = StyleSheet.create({
   actionBadgeText: { fontSize: 9, fontWeight: '800', color: Colors.white },
   actionLabel: { fontSize: 10, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center' },
 
-  // Chart
-  chartCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
+  // Building search + filter
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: 10,
+    ...Shadow.sm, marginBottom: Spacing.sm, gap: Spacing.sm,
   },
-  chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
-  legendRow: { flexDirection: 'row', gap: Spacing.md },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 11, color: Colors.textSecondary },
+  searchBarIcon: { fontSize: 16 },
+  searchBarInput: { flex: 1, fontSize: 13, color: Colors.textPrimary },
+  searchBarClear: { fontSize: 14, color: Colors.textMuted, fontWeight: '600', padding: 4 },
 
-  // Managed property cards
+  bFilterRow: { flexGrow: 0, marginBottom: Spacing.md },
+  bFilterContent: { paddingBottom: 4, gap: Spacing.sm },
+  bFilterChip: {
+    height: 32, justifyContent: 'center',
+    paddingHorizontal: Spacing.md, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  bFilterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  bFilterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  bFilterTextActive: { color: Colors.white },
+
+  emptyProps: { alignItems: 'center', paddingVertical: Spacing.xl },
+  emptyPropsText: { fontSize: 13, color: Colors.textMuted },
+
+  // Building Cards
   propCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
-    borderWidth: 1, borderColor: Colors.border,
+    padding: Spacing.base, marginBottom: Spacing.md,
+    ...Shadow.sm, borderWidth: 1, borderColor: Colors.border,
   },
+  propCardCritical: { backgroundColor: '#FFFBFB' },
   propHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.sm },
-  propName: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
-  propAddressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 3 },
-  propAddressIcon: { fontSize: 12, marginTop: 1 },
-  propAddress: { fontSize: 12, color: Colors.textSecondary, flex: 1, lineHeight: 17 },
+  propNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
+  propName: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, flexShrink: 1 },
+  priorityDot: { width: 8, height: 8, borderRadius: 4 },
+  propAddress: { fontSize: 12, color: Colors.textMuted },
   propFloorBadge: {
-    backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm, paddingVertical: 4,
+    backgroundColor: '#F1F5F9', paddingHorizontal: Spacing.sm, paddingVertical: 4,
     borderRadius: BorderRadius.full, marginLeft: Spacing.sm,
   },
-  propFloorText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  propFloorText: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary },
+
+  propOccRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm,
+  },
+  propOccBarBg: { flex: 1, height: 6, backgroundColor: '#F0F0F0', borderRadius: 3 },
+  propOccBarFill: { height: 6, borderRadius: 3 },
+  propOccPct: { fontSize: 13, fontWeight: '700', minWidth: 36, textAlign: 'right' },
 
   propRoomRow: {
-    flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm,
-    paddingBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm,
   },
-  propRoomStat: {
-    flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: BorderRadius.md,
-    borderWidth: 1,
-  },
-  propRoomNum: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
-  propRoomLabel: { fontSize: 9, color: Colors.textSecondary, marginTop: 1, textAlign: 'center' },
+  propRoomStat: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  propRoomNum: { fontSize: 14, fontWeight: '800' },
+  propRoomLabel: { fontSize: 11, color: Colors.textMuted },
+  propRoomSep: { width: 1, height: 12, backgroundColor: Colors.divider },
 
-  propRatesRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.sm, paddingBottom: Spacing.sm,
-    borderBottomWidth: 1, borderBottomColor: Colors.divider, gap: 6,
+  propHealthRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: Spacing.sm, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.divider,
   },
-  propRate: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  propRateIcon: { fontSize: 12 },
-  propRateValue: { fontSize: 11, color: Colors.textSecondary, fontWeight: '600' },
-  propRateSep: { color: Colors.textMuted, fontSize: 14 },
-
-  propFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  propHostLabel: { fontSize: 12, color: Colors.textSecondary },
-  propHostName: { fontWeight: '700', color: Colors.textPrimary },
-  propLeaseCost: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  propHealthText: { fontSize: 12, fontWeight: '700' },
+  propChevron: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
 });

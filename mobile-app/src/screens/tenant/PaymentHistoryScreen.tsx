@@ -35,13 +35,6 @@ const MOCK_TRANSACTIONS: PaymentTransaction[] = [
     verifiedBy: 'Trần Văn Minh',
     notes: 'Thanh toán tiền mặt tại văn phòng',
   },
-  {
-    id: 'txn-4', invoiceId: '1', invoiceCode: 'HD-T05-2026', tenantId: 't1',
-    tenantName: 'Nguyễn Văn A', roomName: 'Phòng 201',
-    amount: 3855000, method: 'qr', status: 'pending',
-    transferContent: 'HD1 T5 Phong 201',
-    createdAt: '2026-05-02T08:00:00Z',
-  },
 ];
 
 const METHOD_CONFIG: Record<string, { label: string; emoji: string }> = {
@@ -58,24 +51,11 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
   rejected: { label: 'Bị từ chối', color: Colors.error, bg: Colors.errorLight },
 };
 
-const FILTER_OPTIONS: { key: 'all' | 'pending' | 'verified' | 'rejected'; label: string }[] = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'pending', label: 'Chờ xác nhận' },
-  { key: 'verified', label: 'Đã xác nhận' },
-  { key: 'rejected', label: 'Bị từ chối' },
-];
 
 export const PaymentHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [filter, setFilter] = useState<'all' | string>('all');
 
-  const filtered = filter === 'all'
-    ? MOCK_TRANSACTIONS
-    : MOCK_TRANSACTIONS.filter(t => t.status === filter);
-
-  const totalPaid = MOCK_TRANSACTIONS
-    .filter(t => t.status === 'verified')
-    .reduce((sum, t) => sum + t.amount, 0);
+  const totalPaid = MOCK_TRANSACTIONS.reduce((sum, t) => sum + t.amount, 0);
 
   const renderTransaction = ({ item }: { item: PaymentTransaction }) => {
     const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
@@ -159,25 +139,12 @@ export const PaymentHistoryScreen: React.FC = () => {
         <Text style={styles.summaryLabel}>Tổng đã thanh toán</Text>
         <Text style={styles.summaryAmount}>{formatCurrency(totalPaid)}</Text>
         <Text style={styles.summaryCount}>
-          {MOCK_TRANSACTIONS.filter(t => t.status === 'verified').length} giao dịch đã xác nhận
+          {MOCK_TRANSACTIONS.length} giao dịch đã xác nhận
         </Text>
       </View>
 
-      {/* Bộ lọc */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        {FILTER_OPTIONS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
       <FlatList
-        data={filtered}
+        data={MOCK_TRANSACTIONS}
         renderItem={renderTransaction}
         keyExtractor={t => t.id}
         contentContainerStyle={styles.list}
@@ -214,11 +181,12 @@ const styles = StyleSheet.create({
   summaryAmount: { fontSize: 28, fontWeight: '800', color: Colors.white },
   summaryCount: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4 },
 
-  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  filterRow: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md, alignItems: 'center' },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
     borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
+    alignSelf: 'flex-start',
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

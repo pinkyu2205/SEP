@@ -8,10 +8,15 @@ import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { TutorialScreen } from '../screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
-import { AdminTabNavigator } from './AdminTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
-import { AdminOnboardingScreen } from '../screens/admin/AdminOnboardingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
+import { BuildingDetailScreen } from '../screens/manager/BuildingDetailScreen';
+import { BuildingInvoiceScreen } from '../screens/manager/BuildingInvoiceScreen';
+import { BuildingUtilityScreen } from '../screens/manager/BuildingUtilityScreen';
+import { BuildingMaintenanceScreen } from '../screens/manager/BuildingMaintenanceScreen';
+import { BuildingRoomScreen } from '../screens/manager/BuildingRoomScreen';
+import { BuildingContractScreen } from '../screens/manager/BuildingContractScreen';
+import { BuildingTenantScreen } from '../screens/manager/BuildingTenantScreen';
 import { NotificationCenterScreen } from '../screens/manager/NotificationCenterScreen';
 import { TenantListScreen } from '../screens/manager/TenantListScreen';
 import { EquipmentScreen } from '../screens/manager/EquipmentScreen';
@@ -56,16 +61,22 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
             <Stack.Screen name="Tutorial" component={TutorialScreen} />
           </Stack.Group>
-        ) : user?.role === 'admin' ? (
-          <Stack.Group>
-            <Stack.Screen name="AdminTabs" component={AdminTabNavigator} />
-            <Stack.Screen name="AdminOnboarding" component={AdminOnboardingScreen} />
-          </Stack.Group>
         ) : user?.role === 'manager' ? (
           <Stack.Group>
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
+            <Stack.Screen
+              name="BuildingDetail"
+              component={BuildingDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen name="BuildingInvoice" component={BuildingInvoiceScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="BuildingUtility" component={BuildingUtilityScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="BuildingMaintenance" component={BuildingMaintenanceScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="BuildingRoom" component={BuildingRoomScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="BuildingContract" component={BuildingContractScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="BuildingTenant" component={BuildingTenantScreen} options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
             <Stack.Screen name="TenantList" component={TenantListScreen} />
             <Stack.Screen name="Equipment" component={EquipmentScreen} />
