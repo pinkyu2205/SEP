@@ -127,6 +127,14 @@ export const LoginScreen: React.FC = () => {
             Chưa có tài khoản?{' '}
             <Text style={styles.footerLink}>Liên hệ quản lý</Text>
           </Text>
+          <TouchableOpacity 
+            style={styles.exploreButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.exploreButtonText}>
+              ← Khám phá phòng trọ không cần đăng nhập
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -198,7 +206,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   showPasswordText: {
-    fontSize: 13,
+    fontSize: 14,
     color: Colors.primary,
     fontWeight: '600',
   },
@@ -228,4 +236,19 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: '700',
   },
+  exploreButton: {
+    marginTop: Spacing.base,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  exploreButtonText: {
+    fontSize: 14,
+    color: Colors.white,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
 });
+

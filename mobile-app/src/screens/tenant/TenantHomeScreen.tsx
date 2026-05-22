@@ -22,12 +22,12 @@ const BUILDING_INFO = {
 const DASHBOARD_DATA = {
   room: { name: 'Phòng 201', property: BUILDING_INFO.name, floor: 2, area: 25 },
   contract: { code: 'HD-MT-2025-001', endDate: '2026-12-31', daysLeft: getDaysUntil('2026-12-31') },
-  currentInvoice: {
-    month: 5, year: 2026, total: 3855000,
-    status: 'overdue' as const,
-    dueDate: '2026-05-15',
-    daysUntilDue: getDaysUntil('2026-05-15'),
-  },
+  depositAmount: 7000000,
+  invoices: [
+    { id: 'inv-1', type: 'rent', month: 5, year: 2026, total: 3500000, status: 'pending' as const, dueDate: '2026-05-15' },
+    { id: 'inv-2', type: 'electricity', month: 4, year: 2026, total: 205000, status: 'overdue' as const, dueDate: '2026-05-05' },
+    { id: 'inv-3', type: 'water', month: 4, year: 2026, total: 150000, status: 'paid' as const, dueDate: '2026-05-05' },
+  ],
   overdueInvoices: 1,
   overdueAmount: 3855000,
   maintenance: { pending: 1, inProgress: 1 },
@@ -55,12 +55,18 @@ export const TenantHomeScreen: React.FC = () => {
   const contractExpiringSoon = data.contract.daysLeft <= 60;
 
   const alerts = [
-    hasOverdue       && { id: 'bill',     icon: '⚠️', text: `${data.overdueInvoices} hóa đơn quá hạn · ${formatCurrency(data.overdueAmount)}`, route: 'InvoiceList',    color: Colors.error   },
     hasMaintenance   && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`,  route: 'MaintenanceList', color: Colors.warning },
     contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                                    route: 'TenantContracts', color: Colors.info    },
   ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
 
-  const invoiceStatusColor = hasOverdue ? Colors.error : data.currentInvoice.status === 'overdue' ? Colors.error : Colors.warning;
+  const getInvoiceConfig = (type: string) => {
+    switch(type) {
+      case 'electricity': return { label: 'Tiền điện', icon: '⚡', color: Colors.warning };
+      case 'water': return { label: 'Tiền nước', icon: '💧', color: Colors.info };
+      case 'rent': return { label: 'Tiền nhà', icon: '🏠', color: Colors.primary };
+      default: return { label: 'Hóa đơn', icon: '📄', color: Colors.textSecondary };
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -95,17 +101,25 @@ export const TenantHomeScreen: React.FC = () => {
               </View>
             </View>
             <View style={styles.roomStats}>
-              <View style={styles.roomStat}>
-                <Text style={styles.roomStatValue}>{data.room.area}m²</Text>
-                <Text style={styles.roomStatLabel}>Diện tích</Text>
+              <View style={styles.roomStatRow}>
+                <View style={styles.roomStat}>
+                  <Text style={styles.roomStatValue}>{data.room.area}m²</Text>
+                  <Text style={styles.roomStatLabel}>Diện tích</Text>
+                </View>
+                <View style={styles.roomStat}>
+                  <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
+                  <Text style={styles.roomStatLabel}>Vị trí</Text>
+                </View>
               </View>
-              <View style={styles.roomStat}>
-                <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
-                <Text style={styles.roomStatLabel}>Vị trí</Text>
-              </View>
-              <View style={styles.roomStat}>
-                <Text style={styles.roomStatValue}>{BUILDING_INFO.totalFloors} tầng</Text>
-                <Text style={styles.roomStatLabel}>Tòa nhà</Text>
+              <View style={[styles.roomStatRow, { marginTop: 8 }]}>
+                <View style={styles.roomStat}>
+                  <Text style={styles.roomStatValue}>{BUILDING_INFO.totalFloors} tầng</Text>
+                  <Text style={styles.roomStatLabel}>Tòa nhà</Text>
+                </View>
+                <View style={styles.roomStat}>
+                  <Text style={styles.roomStatValue}>{formatCurrency(data.depositAmount).replace(' đ', 'đ')}</Text>
+                  <Text style={styles.roomStatLabel}>Tiền cọc</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -170,31 +184,56 @@ export const TenantHomeScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Invoice CTA */}
-        <TouchableOpacity
-          style={[styles.invoiceCard, { borderColor: invoiceStatusColor + '50' }]}
-          onPress={() => navigation.navigate('InvoiceList')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.invoiceRow}>
-            <View>
-              <Text style={styles.invoiceLabel}>
-                {hasOverdue ? 'Hóa đơn quá hạn' : `Hóa đơn T${String(data.currentInvoice.month).padStart(2,'0')}/${data.currentInvoice.year}`}
-              </Text>
-              <Text style={[styles.invoiceAmount, { color: invoiceStatusColor }]}>
-                {formatCurrency(hasOverdue ? data.overdueAmount : data.currentInvoice.total)}
-              </Text>
-            </View>
-            <View style={[styles.invoiceStatusBadge, { backgroundColor: invoiceStatusColor }]}>
-              <Text style={styles.invoiceStatusText}>{hasOverdue ? 'Quá hạn' : 'Chờ TT'}</Text>
-            </View>
-          </View>
-          <View style={[styles.invoiceBtn, { backgroundColor: invoiceStatusColor }]}>
-            <Text style={styles.invoiceBtnText}>
-              {hasOverdue ? '🚨 Thanh toán ngay' : '💳 Xem & Thanh toán'}
-            </Text>
-          </View>
-        </TouchableOpacity>
+        {/* Invoices List */}
+        <Text style={styles.sectionTitle}>Hóa đơn cần thanh toán</Text>
+        {data.invoices.map((invoice) => {
+          const config = getInvoiceConfig(invoice.type);
+          const isOverdue = invoice.status === 'overdue';
+          const isPaid = invoice.status === 'paid';
+          
+          let statusColor = config.color;
+          if (isOverdue) statusColor = Colors.error;
+          if (isPaid) statusColor = Colors.success;
+
+          return (
+            <TouchableOpacity
+              key={invoice.id}
+              style={[styles.invoiceCard, { borderColor: statusColor + '50' }]}
+              onPress={() => navigation.navigate('InvoiceList')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.invoiceRow}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={[styles.invoiceIconBox, { backgroundColor: statusColor + '15' }]}>
+                    <Text style={styles.invoiceIconText}>{config.icon}</Text>
+                  </View>
+                  <View style={{ marginLeft: 12 }}>
+                    <Text style={styles.invoiceLabel}>
+                      {config.label} T{String(invoice.month).padStart(2,'0')}/{invoice.year}
+                    </Text>
+                    <Text style={[styles.invoiceAmount, { color: statusColor }]}>
+                      {formatCurrency(invoice.total)}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={[styles.invoiceStatusBadge, { backgroundColor: statusColor }]}>
+                  <Text style={styles.invoiceStatusText}>
+                    {isOverdue ? 'Quá hạn' : isPaid ? 'Đã TT' : 'Chờ TT'}
+                  </Text>
+                </View>
+              </View>
+              
+              {!isPaid && (
+                <View style={[styles.invoiceBtn, { backgroundColor: statusColor }]}>
+                  <Text style={styles.invoiceBtnText}>
+                    {isOverdue ? '🚨 Thanh toán ngay' : '💳 Xem & Thanh toán'}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
 
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
@@ -247,6 +286,7 @@ const styles = StyleSheet.create({
   addressIcon: { fontSize: 11, marginTop: 1 },
   addressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', flex: 1, lineHeight: 16 },
   roomStats: { alignItems: 'flex-end', gap: 6 },
+  roomStatRow: { flexDirection: 'row', gap: 16, justifyContent: 'flex-end' },
   roomStat: { alignItems: 'flex-end' },
   roomStatValue: { fontSize: 13, fontWeight: '700', color: Colors.white },
   roomStatLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)' },
@@ -280,11 +320,13 @@ const styles = StyleSheet.create({
   alertPillText: { flex: 1, fontSize: 12, fontWeight: '600' },
   alertPillArrow: { fontSize: 20, fontWeight: '400' },
 
-  // Invoice CTA
-  invoiceCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.lg, borderWidth: 1.5, ...Shadow.sm },
+  // Invoice List
+  invoiceCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.md, borderWidth: 1.5, ...Shadow.sm },
   invoiceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
-  invoiceLabel: { fontSize: 12, color: Colors.textSecondary },
-  invoiceAmount: { fontSize: 26, fontWeight: '800', marginTop: 2 },
+  invoiceIconBox: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  invoiceIconText: { fontSize: 24 },
+  invoiceLabel: { fontSize: 13, color: Colors.textSecondary, fontWeight: '500', marginBottom: 2 },
+  invoiceAmount: { fontSize: 20, fontWeight: '800' },
   invoiceStatusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   invoiceStatusText: { fontSize: 11, fontWeight: '700', color: Colors.white },
   invoiceBtn: { borderRadius: BorderRadius.lg, paddingVertical: Spacing.md, alignItems: 'center' },

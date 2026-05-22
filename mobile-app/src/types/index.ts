@@ -572,3 +572,84 @@ export interface PaginatedResponse<T> {
   pageSize: number;
   totalPages: number;
 }
+
+// ======================== SEARCH & LOCATION ========================
+export interface District {
+  id: string;
+  name: string;
+  availableRooms: number;
+}
+
+export interface Ward {
+  id: string;
+  districtId: string;
+  name: string;
+  availableRooms: number;
+}
+
+export interface SearchFilters {
+  keyword?: string;
+  districtId?: string;
+  wardIds?: string[];
+  priceMin?: number;
+  priceMax?: number;
+  areaMin?: number;
+  areaMax?: number;
+  amenities?: string[];
+  sortBy?: 'price_asc' | 'price_desc' | 'newest' | 'nearest';
+  latitude?: number;
+  longitude?: number;
+  page?: number;
+  limit?: number;
+}
+
+export interface PropertyListing {
+  id: string;
+  name: string;
+  address: string;
+  district: string;
+  ward: string;
+  districtId: string;
+  wardId: string;
+  photos: string[];
+  priceFrom: number;
+  priceTo: number;
+  totalRooms: number;
+  availableRooms: number;
+  area: number;
+  amenities: string[];
+  electricityRate: number;
+  waterRate: number;
+  depositMonths: number;
+  serviceFee: number;
+  description: string;
+  latitude: number;
+  longitude: number;
+  rooms: PropertyRoom[];
+  hostName?: string;
+  hostPhone?: string;
+  createdAt: string;
+}
+
+export interface PropertyRoom {
+  id: string;
+  name: string;
+  floor: number;
+  area: number;
+  price: number;
+  status: 'available' | 'occupied';
+}
+
+export interface SearchResult {
+  properties: PropertyListing[];
+  total: number;
+  page: number;
+  totalPages: number;
+}
+
+export interface NearbyRequest {
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  limit?: number;
+}
