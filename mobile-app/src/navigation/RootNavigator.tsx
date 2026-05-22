@@ -2,9 +2,8 @@ import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { LoginScreen } from '../screens/auth/LoginScreen';
+import { GuestStackNavigator } from './GuestStackNavigator';
 import { ChangePasswordScreen } from '../screens/auth/ChangePasswordScreen';
-import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
 import { TutorialScreen } from '../screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
@@ -67,10 +66,7 @@ export const RootNavigator: React.FC = () => {
     <NavigationContainer>
       <Stack.Navigator screenOptions={baseStackOptions}>
         {!isAuthenticated ? (
-          <Stack.Group>
-            <Stack.Screen name="Login" component={LoginScreen} />
-            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
-          </Stack.Group>
+          <Stack.Screen name="GuestStack" component={GuestStackNavigator} />
         ) : user?.isFirstLogin ? (
           <Stack.Group>
             <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
