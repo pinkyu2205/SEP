@@ -9,6 +9,7 @@ import { TutorialScreen } from '../screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
+import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { BuildingDetailScreen } from '../screens/manager/BuildingDetailScreen';
 import { BuildingInvoiceScreen } from '../screens/manager/BuildingInvoiceScreen';
@@ -21,6 +22,13 @@ import { NotificationCenterScreen } from '../screens/manager/NotificationCenterS
 import { TenantListScreen } from '../screens/manager/TenantListScreen';
 import { EquipmentScreen } from '../screens/manager/EquipmentScreen';
 import { ContractListScreen } from '../screens/shared/ContractListScreen';
+import { BuildingBillingScreen } from '../screens/manager/BuildingBillingScreen';
+import { TicketDetailScreen } from '../screens/manager/TicketDetailScreen';
+import { WholeHouseDetailScreen } from '../screens/manager/WholeHouseDetailScreen';
+import { TenantInvoicesScreen } from '../screens/manager/TenantInvoicesScreen';
+import { TenantContractDetailScreen } from '../screens/manager/TenantContractDetailScreen';
+import { TenantMaintenanceScreen } from '../screens/manager/TenantMaintenanceScreen';
+import { InspectionDetailScreen } from '../screens/manager/InspectionDetailScreen';
 
 // Tenant-specific screens
 import { ProfileScreen } from '../screens/shared/ProfileScreen';
@@ -37,6 +45,13 @@ import { Colors } from '../constants';
 
 const Stack = createNativeStackNavigator();
 
+const baseStackOptions = {
+  headerShown: false,
+  gestureEnabled: true,
+  fullScreenGestureEnabled: true,
+  animation: 'slide_from_right' as const,
+};
+
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
 
@@ -50,7 +65,7 @@ export const RootNavigator: React.FC = () => {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={baseStackOptions}>
         {!isAuthenticated ? (
           <Stack.Group>
             <Stack.Screen name="Login" component={LoginScreen} />
@@ -62,25 +77,33 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="Tutorial" component={TutorialScreen} />
           </Stack.Group>
         ) : user?.role === 'manager' ? (
-          <Stack.Group>
-            <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} />
+          <Stack.Group screenOptions={baseStackOptions}>
+            <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} options={{ animation: 'fade' }} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="MeterReading" component={MeterReadingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
             <Stack.Screen
               name="BuildingDetail"
               component={BuildingDetailScreen}
-              options={{ animation: 'slide_from_right' }}
             />
-            <Stack.Screen name="BuildingInvoice" component={BuildingInvoiceScreen} options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="BuildingUtility" component={BuildingUtilityScreen} options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="BuildingMaintenance" component={BuildingMaintenanceScreen} options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="BuildingRoom" component={BuildingRoomScreen} options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="BuildingContract" component={BuildingContractScreen} options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="BuildingTenant" component={BuildingTenantScreen} options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="WholeHouseDetail" component={WholeHouseDetailScreen} />
+            <Stack.Screen name="BuildingInvoice" component={BuildingInvoiceScreen} />
+            <Stack.Screen name="BuildingUtility" component={BuildingUtilityScreen} />
+            <Stack.Screen name="BuildingMaintenance" component={BuildingMaintenanceScreen} />
+            <Stack.Screen name="BuildingRoom" component={BuildingRoomScreen} />
+            <Stack.Screen name="BuildingContract" component={BuildingContractScreen} />
+            <Stack.Screen name="BuildingTenant" component={BuildingTenantScreen} />
             <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
             <Stack.Screen name="TenantList" component={TenantListScreen} />
             <Stack.Screen name="Equipment" component={EquipmentScreen} />
             <Stack.Screen name="ManagerContracts" component={ContractListScreen} />
+            <Stack.Screen name="BuildingBilling" component={BuildingBillingScreen} />
+            <Stack.Screen name="MaintenanceTicketDetail" component={TicketDetailScreen} />
+            {/* Tenant-scoped screens — opened from Tenant Detail modal */}
+            <Stack.Screen name="TenantInvoices" component={TenantInvoicesScreen} />
+            <Stack.Screen name="TenantContractDetail" component={TenantContractDetailScreen} />
+            <Stack.Screen name="TenantMaintenance" component={TenantMaintenanceScreen} />
+            <Stack.Screen name="InspectionDetail" component={InspectionDetailScreen} />
           </Stack.Group>
         ) : (
           // Tenant stack — tabs + all detail screens

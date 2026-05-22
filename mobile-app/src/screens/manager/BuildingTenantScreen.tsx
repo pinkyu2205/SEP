@@ -23,6 +23,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
   const ops = getBuildingOps(propertyId);
   const [filter, setFilter] = useState<'all' | PaymentRisk>('all');
   const [openId, setOpenId] = useState<string | null>(null);
+  const isWholeHouse = prop?.propertyType === 'WHOLE_HOUSE';
 
   const list = filter === 'all' ? ops.tenants : ops.tenants.filter(t => t.paymentRisk === filter);
 
@@ -43,22 +44,46 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
         <View style={styles.headerTitleWrap}>
-          <Text style={styles.title}>Khách thuê</Text>
+          <Text style={styles.title}>{isWholeHouse ? 'Người đại diện thuê nhà' : 'Khách thuê'}</Text>
           <Text style={styles.subtitle} numberOfLines={1}>{prop?.name || ''}</Text>
         </View>
         <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-        {FILTERS.map(f => (
-          <TouchableOpacity key={f.id} style={[styles.chip, filter === f.id && styles.chipActive]} onPress={() => setFilter(f.id)}>
-            <Text style={[styles.chipText, filter === f.id && styles.chipTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {!isWholeHouse && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
+          {FILTERS.map(f => (
+            <TouchableOpacity key={f.id} style={[styles.chip, filter === f.id && styles.chipActive]} onPress={() => setFilter(f.id)}>
+              <Text style={[styles.chipText, filter === f.id && styles.chipTextActive]}>{f.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {list.length === 0 ? (
+        {isWholeHouse ? (
+          <View style={styles.card}>
+            <View style={styles.cardTop}>
+              <View style={styles.avatar}><Text style={styles.avatarText}>{prop?.tenantName?.charAt(0) || '?'}</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.name}>{prop?.tenantName || 'Chưa có người đại diện'}</Text>
+                <Text style={styles.meta}>Người đại diện thuê nhà · {prop?.contractEndDate ? `HĐ đến ${prop.contractEndDate}` : 'Chưa có hợp đồng'}</Text>
+              </View>
+            </View>
+            <View style={styles.detail}>
+              {(prop?.occupants || []).map(member => (
+                <View key={member.name} style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>{member.relation}</Text>
+                  <Text style={styles.detailVal}>{member.name}{member.phone ? ` · ${member.phone}` : ''}</Text>
+                </View>
+              ))}
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Giá thuê</Text>
+                <Text style={styles.detailVal}>{prop?.monthlyRent ? `${prop.monthlyRent.toLocaleString('vi-VN')}đ/tháng` : 'Chưa cấu hình'}</Text>
+              </View>
+            </View>
+          </View>
+        ) : list.length === 0 ? (
           <Text style={styles.empty}>Không có khách thuê</Text>
         ) : list.map(t => {
           const risk = RISK_META[t.paymentRisk];

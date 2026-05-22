@@ -218,11 +218,18 @@ export const NotificationCenterScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Thông báo</Text>
-          {unreadCount > 0 && (
-            <Text style={styles.subtitle}>{unreadCount} chưa đọc</Text>
+        <View style={styles.headerLeft}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Text style={styles.backBtnText}>‹</Text>
+            </TouchableOpacity>
           )}
+          <View>
+            <Text style={styles.title}>Thông báo</Text>
+            {unreadCount > 0 && (
+              <Text style={styles.subtitle}>{unreadCount} chưa đọc</Text>
+            )}
+          </View>
         </View>
         {unreadCount > 0 && (
           <TouchableOpacity style={styles.markAllBtn} onPress={markAllRead}>
@@ -309,6 +316,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.sm,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
+  backBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
+  },
+  backBtnText: { fontSize: 24, lineHeight: 26, color: Colors.primary, fontWeight: '900' },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.error, fontWeight: '600', marginTop: 2 },
   markAllBtn: {

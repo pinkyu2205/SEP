@@ -9,6 +9,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 
 // ===================== TYPES =====================
 type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';
+type EquipmentPropertyType = 'MULTI_ROOM' | 'WHOLE_HOUSE';
 
 interface MaintenanceRecord {
   id: string;
@@ -27,6 +28,7 @@ interface EquipmentItem {
   houseId: string;
   houseName: string;
   roomName: string;
+  propertyType?: EquipmentPropertyType;
   category: string;
   brand?: string;
   model?: string;
@@ -43,8 +45,10 @@ interface EquipmentItem {
 
 // ===================== MOCK DATA =====================
 const MOCK_HOUSES = [
-  { id: 'h1', name: 'Nhà Nguyễn Trãi' },
-  { id: 'h2', name: 'Nhà Lê Văn Sỹ' },
+  { id: 'h1', name: 'Nhà Nguyễn Trãi', propertyType: 'MULTI_ROOM' as EquipmentPropertyType },
+  { id: 'h2', name: 'Nhà Lê Văn Sỹ', propertyType: 'MULTI_ROOM' as EquipmentPropertyType },
+  { id: 'house-1', name: 'Nhà Nguyễn Văn Cừ', propertyType: 'WHOLE_HOUSE' as EquipmentPropertyType },
+  { id: 'house-3', name: 'Nhà Trần Hưng Đạo', propertyType: 'WHOLE_HOUSE' as EquipmentPropertyType },
 ];
 
 const MOCK_EQUIPMENT: EquipmentItem[] = [
@@ -119,6 +123,38 @@ const MOCK_EQUIPMENT: EquipmentItem[] = [
       { id: 'm5', date: '01/01/2026', type: 'maintenance', description: 'Kiểm tra tổng thể đầu năm, bơm còn tốt', cost: 500000, performedBy: 'Thợ Hùng' },
     ],
   },
+  {
+    id: 'eq-house-1', assetId: 'AST-NVC-001', name: 'Máy lạnh phòng khách Daikin 2HP',
+    houseId: 'house-1', houseName: 'Nhà Nguyễn Văn Cừ', roomName: 'Toàn bộ nhà',
+    propertyType: 'WHOLE_HOUSE',
+    category: 'Điện lạnh', brand: 'Daikin', model: 'FTKC50',
+    qrCode: 'QR-NVC-AC-01', status: 'active',
+    installationDate: '01/01/2026', purchasePrice: 18500000,
+    warrantyExpiry: '01/01/2028', currentTenantName: 'Gia đình anh Minh',
+    maintenanceHistory: [],
+  },
+  {
+    id: 'eq-house-2', assetId: 'AST-NVC-002', name: 'Máy bơm nước Pentax',
+    houseId: 'house-1', houseName: 'Nhà Nguyễn Văn Cừ', roomName: 'Toàn bộ nhà',
+    propertyType: 'WHOLE_HOUSE',
+    category: 'Hạ tầng', brand: 'Pentax', model: 'CM 100',
+    qrCode: 'QR-NVC-PUMP-01', status: 'repairing',
+    installationDate: '01/01/2026', purchasePrice: 9500000,
+    lastMaintenanceAt: '20/05/2026', currentTenantName: 'Gia đình anh Minh',
+    maintenanceHistory: [
+      { id: 'm-house-1', date: '20/05/2026', type: 'repair', description: 'Máy bơm yếu, đang kiểm tra tụ và đường cấp nước', cost: 450000, performedBy: 'Thợ Hùng', ticketCode: 'TK-NVC-001' },
+    ],
+  },
+  {
+    id: 'eq-house-3', assetId: 'AST-THD-001', name: 'Tủ điện tổng 3 pha',
+    houseId: 'house-3', houseName: 'Nhà Trần Hưng Đạo', roomName: 'Toàn bộ nhà',
+    propertyType: 'WHOLE_HOUSE',
+    category: 'Hạ tầng', brand: 'Schneider',
+    qrCode: 'QR-THD-POWER-01', status: 'active',
+    installationDate: '15/06/2025', purchasePrice: 22000000,
+    currentTenantName: 'Công ty An Phú',
+    maintenanceHistory: [],
+  },
 ];
 
 const STATUS_CONFIG: Record<EquipmentStatus, { label: string; color: string; bg: string; icon: string }> = {
@@ -180,7 +216,8 @@ const EquipmentDetailModal: React.FC<{
             {/* Info */}
             <View style={detailStyles.section}>
               <Text style={detailStyles.sectionTitle}>Chi tiết thiết bị</Text>
-              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Vị trí</Text><Text style={detailStyles.infoVal}>{item.houseName} · {item.roomName}</Text></View>
+              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Loại tài sản</Text><Text style={detailStyles.infoVal}>{item.propertyType === 'WHOLE_HOUSE' ? 'Nhà nguyên căn' : 'Tòa nhà nhiều phòng'}</Text></View>
+              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Vị trí</Text><Text style={detailStyles.infoVal}>{item.houseName} · {item.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : item.roomName}</Text></View>
               <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Danh mục</Text><Text style={detailStyles.infoVal}>{item.category}</Text></View>
               {item.brand && <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Hãng</Text><Text style={detailStyles.infoVal}>{item.brand}{item.model ? ` - ${item.model}` : ''}</Text></View>}
               {item.purchasePrice && <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Giá mua</Text><Text style={[detailStyles.infoVal, { color: Colors.primary }]}>{fmt(item.purchasePrice)}</Text></View>}
@@ -433,18 +470,22 @@ export const EquipmentScreen: React.FC = () => {
   };
 
   const handleAdd = () => {
-    if (!newName.trim() || !newRoom.trim()) {
-      return Alert.alert('Lỗi', 'Vui lòng nhập tên thiết bị và phòng.');
+    const selectedHouse = MOCK_HOUSES.find(h => h.id === selectedHouseId);
+    const isWholeHouse = selectedHouse?.propertyType === 'WHOLE_HOUSE';
+    if (!newName.trim() || (!isWholeHouse && !newRoom.trim())) {
+      return Alert.alert('Lỗi', 'Vui lòng nhập tên thiết bị và vị trí.');
     }
+    const roomLabel = isWholeHouse ? 'Toàn bộ nhà' : newRoom;
     const assetId = `AST-${new Date().getFullYear()}-${String(equipments.length + 1).padStart(3, '0')}`;
-    const qrCode = `QR-${newRoom.toUpperCase().replace(/\s/g, '')}-${Date.now().toString(36).toUpperCase()}`;
+    const qrCode = `QR-${roomLabel.toUpperCase().replace(/\s/g, '')}-${Date.now().toString(36).toUpperCase()}`;
     const newEq: EquipmentItem = {
       id: `eq-${Date.now()}`,
       assetId,
       name: newName,
       houseId: selectedHouseId,
-      houseName: MOCK_HOUSES.find(h => h.id === selectedHouseId)?.name || '',
-      roomName: newRoom,
+      houseName: selectedHouse?.name || '',
+      roomName: roomLabel,
+      propertyType: selectedHouse?.propertyType,
       category: newCategory,
       brand: newBrand || undefined,
       qrCode,
@@ -487,10 +528,13 @@ export const EquipmentScreen: React.FC = () => {
               style={[styles.houseTab, selectedHouseId === h.id && styles.houseTabActive]}
               onPress={() => setSelectedHouseId(h.id)}
             >
-              <Text style={styles.houseEmoji}>🏠</Text>
+              <Text style={styles.houseEmoji}>{h.propertyType === 'WHOLE_HOUSE' ? '🏡' : '🏠'}</Text>
               <Text style={[styles.houseTabText, selectedHouseId === h.id && styles.houseTabTextActive]}>
                 {h.name}
               </Text>
+              {h.propertyType === 'WHOLE_HOUSE' && (
+                <Text style={[styles.houseTypeMini, selectedHouseId === h.id && styles.houseTypeMiniActive]}>Nguyên căn</Text>
+              )}
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -560,7 +604,9 @@ export const EquipmentScreen: React.FC = () => {
         ) : (
           Object.entries(groupedByRoom).map(([room, items]) => (
             <View key={room} style={styles.roomSection}>
-              <Text style={styles.roomTitle}>🚪 {room} ({items.length})</Text>
+              <Text style={styles.roomTitle}>
+                {items[0]?.propertyType === 'WHOLE_HOUSE' ? '🏡 Nhà nguyên căn' : `🚪 ${room}`} ({items.length})
+              </Text>
               {items.map(eq => {
                 const cfg = STATUS_CONFIG[eq.status];
                 return (
@@ -574,7 +620,9 @@ export const EquipmentScreen: React.FC = () => {
                           </View>
                         )}
                       </View>
-                      <Text style={styles.eqAssetId}>#{eq.assetId} · {eq.category}</Text>
+                      <Text style={styles.eqAssetId}>
+                        #{eq.assetId} · {eq.category}{eq.propertyType === 'WHOLE_HOUSE' ? ' · Theo nhà' : ''}
+                      </Text>
                       {eq.currentTenantName && (
                         <Text style={styles.eqTenant}>👤 {eq.currentTenantName}</Text>
                       )}
@@ -613,15 +661,23 @@ export const EquipmentScreen: React.FC = () => {
               <Text style={styles.modalTitle}>Thêm thiết bị mới</Text>
               <Text style={styles.modalSubtitle}>
                 {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.name}
+                {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.propertyType === 'WHOLE_HOUSE' ? ' · Nhà nguyên căn' : ''}
               </Text>
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Tên thiết bị *</Text>
                 <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="Điều hòa Daikin 9000BTU..." />
               </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Phòng / Khu vực *</Text>
-                <TextInput style={styles.input} value={newRoom} onChangeText={setNewRoom} placeholder="P101 / Khu vực chung..." />
-              </View>
+              {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.propertyType !== 'WHOLE_HOUSE' ? (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Phòng / Khu vực *</Text>
+                  <TextInput style={styles.input} value={newRoom} onChangeText={setNewRoom} placeholder="P101 / Khu vực chung..." />
+                </View>
+              ) : (
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Vị trí</Text>
+                  <Text style={styles.wholeHouseLocationHint}>Gắn trực tiếp với toàn bộ nhà nguyên căn</Text>
+                </View>
+              )}
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Hãng sản xuất</Text>
                 <TextInput style={styles.input} value={newBrand} onChangeText={setNewBrand} placeholder="Daikin, Panasonic..." />
@@ -675,6 +731,8 @@ const styles = StyleSheet.create({
   houseEmoji: { fontSize: 16 },
   houseTabText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   houseTabTextActive: { color: Colors.primary },
+  houseTypeMini: { fontSize: 10, fontWeight: '700', color: '#D97706', backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: BorderRadius.full },
+  houseTypeMiniActive: { backgroundColor: Colors.white, color: Colors.primary },
   statusSummaryRow: { maxHeight: 46 },
   statusSummaryContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
   statusChip: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
@@ -704,6 +762,15 @@ const styles = StyleSheet.create({
   statusDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   eqAssetId: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
   eqTenant: { fontSize: 11, color: Colors.primary, fontWeight: '500' },
+  wholeHouseLocationHint: {
+    fontSize: 13,
+    color: '#D97706',
+    fontWeight: '700',
+    backgroundColor: '#FEF3C7',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
   eqStatus: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
   eqStatusText: { fontSize: 11, fontWeight: '600' },
   eqWarranty: { fontSize: 10, color: Colors.textMuted },

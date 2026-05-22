@@ -7,6 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { DatePickerField } from '../../components/common/DatePickerField';
+import { MANAGED_PROPERTIES, getBuildingOps } from '../../data/managedProperties';
+import {
+  getInspectionsByContractId,
+  getInspectionStatusLabel,
+  getInspectionTypeLabel,
+  RoomInspection,
+} from '../../data/roomInspections';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -547,7 +554,9 @@ const ContractDetailView: React.FC<{
   onBack: () => void;
   onAction: (action: string, contract: Contract) => void;
 }> = ({ contract, onBack, onAction }) => {
+  const navigation = useNavigation<any>();
   const cfg = STATUS_CONFIG[contract.status];
+  const inspections = getInspectionsByContractId(contract.id);
 
   const SectionHeader = ({ title }: { title: string }) => (
     <View style={detailStyles.sectionHeader}>
@@ -689,6 +698,22 @@ const ContractDetailView: React.FC<{
             </View>
           )}
 
+          <View style={detailStyles.section}>
+            <SectionHeader title="Biên bản hiện trạng" />
+            {inspections.length === 0 ? (
+              <View style={detailStyles.inspectionEmpty}>
+                <Text style={detailStyles.inspectionEmptyTitle}>Chưa có biên bản hiện trạng.</Text>
+                <Text style={detailStyles.inspectionEmptyText}>Ảnh check-in/check-out sẽ được lưu theo hợp đồng này.</Text>
+              </View>
+            ) : inspections.map(inspection => (
+              <ContractInspectionCard
+                key={inspection.id}
+                inspection={inspection}
+                onPress={() => navigation.navigate('InspectionDetail', { inspectionId: inspection.id })}
+              />
+            ))}
+          </View>
+
           {/* Approval History */}
           <View style={detailStyles.section}>
             <SectionHeader title="Lịch sử phê duyệt" />
@@ -802,6 +827,30 @@ const ContractDetailView: React.FC<{
     </SafeAreaView>
   );
 };
+
+const ContractInspectionCard = ({
+  inspection,
+  onPress,
+}: {
+  inspection: RoomInspection;
+  onPress: () => void;
+}) => (
+  <TouchableOpacity style={detailStyles.inspectionCard} onPress={onPress} activeOpacity={0.82}>
+    <Text style={detailStyles.inspectionIcon}>📸</Text>
+    <View style={detailStyles.inspectionBody}>
+      <Text style={detailStyles.inspectionTitle}>{getInspectionTypeLabel(inspection.inspectionType)} Inspection</Text>
+      <Text style={detailStyles.inspectionMeta}>
+        {inspection.images.length} photos · {inspection.createdAt} · {inspection.createdBy}
+      </Text>
+      <Text style={detailStyles.inspectionMeta}>{getInspectionStatusLabel(inspection.status)}</Text>
+      {inspection.depositDeductionAmount ? (
+        <Text style={detailStyles.inspectionDeduction}>
+          Deposit deduction: {inspection.depositDeductionAmount.toLocaleString('vi-VN')}đ
+        </Text>
+      ) : null}
+    </View>
+  </TouchableOpacity>
+);
 
 // ===================== AVAILABLE PROPERTIES & ROOMS =====================
 interface HostEquipment { id: string; name: string; quantity: number; condition: string }
@@ -1287,49 +1336,49 @@ const CreateContractView: React.FC<{
 interface Props {
   navigation?: any;
   route?: any;
-  filterRole?: 'manager' | 'tenant';
-  filterType?: 'building_rental' | 'room_rental';
 }
 
-// ===================== MAIN =====================
-export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) => {
+// ===================== MAIN (DASHBOARD) =====================
+export const ContractListScreen: React.FC<Props> = () => {
   const navigation = useNavigation<any>();
-  type ViewMode = 'list' | 'detail' | 'create';
-  type ContractSection = 'tenant' | 'host';
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  type ViewMode = 'dashboard' | 'detail' | 'create';
+  type TabType = 'tenant' | 'host';
+  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+  const [tab, setTab] = useState<TabType>('tenant');
   const [contracts, setContracts] = useState<Contract[]>(MOCK_CONTRACTS);
   const [hostContracts] = useState<Contract[]>(MOCK_HOST_CONTRACTS);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'all' | ContractStatus>('all');
-  const [activeSection, setActiveSection] = useState<ContractSection>('tenant');
 
-  const isManager = !filterRole || filterRole === 'manager';
+  const tenantStats = useMemo(() => ({
+    total: contracts.length,
+    active: contracts.filter(c => c.status === 'active').length,
+    approved: contracts.filter(c => c.status === 'approved').length,
+    expiring: contracts.filter(c => c.status === 'expiring_soon').length,
+    pending: contracts.filter(c => c.status === 'pending_approval').length,
+    draft: contracts.filter(c => c.status === 'draft').length,
+    rejected: contracts.filter(c => c.status === 'rejected').length,
+  }), [contracts]);
 
-  const displayContracts = useMemo(() => {
-    if (isManager) {
-      return activeSection === 'tenant' ? contracts : hostContracts;
-    }
-    let list = contracts;
-    if (filterType) list = list.filter(c => c.type === filterType);
-    if (filterRole === 'tenant') list = list.filter(c => c.type === 'room_rental');
-    return list;
-  }, [contracts, hostContracts, filterRole, filterType, activeSection, isManager]);
+  const hostStats = useMemo(() => ({
+    total: hostContracts.length,
+    active: hostContracts.filter(c => c.status === 'active').length,
+    approved: hostContracts.filter(c => c.status === 'approved').length,
+    expiring: hostContracts.filter(c => c.status === 'expiring_soon').length,
+    pending: hostContracts.filter(c => c.status === 'pending_approval').length,
+    draft: 0,
+    rejected: 0,
+  }), [hostContracts]);
 
-  const filtered = useMemo(() => {
-    if (statusFilter === 'all') return displayContracts;
-    return displayContracts.filter(c => c.status === statusFilter);
-  }, [displayContracts, statusFilter]);
+  const buildingCards = useMemo(() =>
+    MANAGED_PROPERTIES.map(p => ({ prop: p, bContracts: getBuildingOps(p.id).contracts })),
+    []
+  );
 
-  const stats = useMemo(() => ({
-    total: displayContracts.length,
-    draft: displayContracts.filter(c => c.status === 'draft').length,
-    pending: displayContracts.filter(c => c.status === 'pending_approval').length,
-    approved: displayContracts.filter(c => c.status === 'approved').length,
-    active: displayContracts.filter(c => c.status === 'active' || c.status === 'expiring_soon').length,
-    rejected: displayContracts.filter(c => c.status === 'rejected').length,
-    expired: displayContracts.filter(c => c.status === 'expired').length,
-  }), [displayContracts]);
+  const recentActivity = useMemo(() =>
+    contracts.filter(c => ['pending_approval', 'expiring_soon', 'rejected', 'draft'].includes(c.status)).slice(0, 5),
+    [contracts]
+  );
 
   const handleAction = (action: string, contract: Contract) => {
     switch (action) {
@@ -1364,7 +1413,7 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
                     : c
                 ));
                 setSelectedContract(null);
-                setViewMode('list');
+                setViewMode('dashboard');
                 Alert.alert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
               },
             },
@@ -1399,7 +1448,7 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
                     : c
                 ));
                 setSelectedContract(null);
-                setViewMode('list');
+                setViewMode('dashboard');
                 Alert.alert('🟢 Hợp đồng đang hiệu lực!', `Hợp đồng ${contract.code} đã được kích hoạt thành công.`);
               },
             },
@@ -1433,7 +1482,7 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
                     : c
                 ));
                 setSelectedContract(null);
-                setViewMode('list');
+                setViewMode('dashboard');
                 Alert.alert('✅ Đã gia hạn!', `Hợp đồng ${contract.code} được gia hạn đến 16/05/2027.`);
               },
             },
@@ -1467,7 +1516,7 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
                     : c
                 ));
                 setSelectedContract(null);
-                setViewMode('list');
+                setViewMode('dashboard');
                 Alert.alert('✅ Đã thanh lý!', `Hợp đồng ${contract.code} đã được thanh lý.`);
               },
             },
@@ -1528,7 +1577,7 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
       setContracts(prev => [newContract, ...prev]);
     }
     setEditingContract(null);
-    setViewMode('list');
+    setViewMode('dashboard');
     Alert.alert('💾 Đã lưu nháp', 'Hợp đồng đã được lưu vào danh sách nháp.');
   };
 
@@ -1563,194 +1612,210 @@ export const ContractListScreen: React.FC<Props> = ({ filterRole, filterType }) 
     };
     setContracts(prev => [newContract, ...prev]);
     setEditingContract(null);
-    setViewMode('list');
+    setViewMode('dashboard');
     Alert.alert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin để xem xét.');
   };
 
-  // Render create view
   if (viewMode === 'create') {
     return (
       <CreateContractView
         initial={editingContract}
-        onBack={() => { setEditingContract(null); setViewMode('list'); }}
+        onBack={() => { setEditingContract(null); setViewMode('dashboard'); }}
         onSaveDraft={handleSaveDraft}
         onSubmit={handleSubmitNew}
       />
     );
   }
 
-  // Render detail view
   if (viewMode === 'detail' && selectedContract) {
     return (
       <ContractDetailView
         contract={selectedContract}
-        onBack={() => { setSelectedContract(null); setViewMode('list'); }}
+        onBack={() => { setSelectedContract(null); setViewMode('dashboard'); }}
         onAction={handleAction}
       />
     );
   }
 
-  // Render list view
+  const curStats = tab === 'tenant' ? tenantStats : hostStats;
+
   return (
     <SafeAreaView style={styles.safe}>
       {/* Header */}
-      <View style={styles.listHeader}>
-        <View style={styles.listHeaderLeft}>
+      <View style={dashStyles.header}>
+        <View style={dashStyles.headerLeft}>
           {navigation.canGoBack() && (
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.backBtnText}>‹</Text>
+            <TouchableOpacity style={dashStyles.backBtn} onPress={() => navigation.goBack()}>
+              <Text style={dashStyles.backBtnText}>‹</Text>
             </TouchableOpacity>
           )}
-          <View>
-            <Text style={styles.listTitle}>Hợp đồng</Text>
-            <Text style={styles.listSubtitle}>{displayContracts.length} hợp đồng</Text>
-          </View>
+          <Text style={dashStyles.headerTitle}>Hợp đồng</Text>
         </View>
-        {isManager && activeSection === 'tenant' && (
-          <TouchableOpacity
-            style={styles.createBtn}
-            onPress={() => { setEditingContract(null); setViewMode('create'); }}
-          >
-            <Text style={styles.createBtnText}>+ Tạo HĐ</Text>
-          </TouchableOpacity>
-        )}
-        {(!isManager) && (
-          <TouchableOpacity
-            style={styles.createBtn}
-            onPress={() => { setEditingContract(null); setViewMode('create'); }}
-          >
-            <Text style={styles.createBtnText}>+ Tạo HĐ</Text>
+        {tab === 'tenant' && (
+          <TouchableOpacity style={dashStyles.createBtn} onPress={() => { setEditingContract(null); setViewMode('create'); }}>
+            <Text style={dashStyles.createBtnText}>+ Tạo HĐ</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Manager section tabs */}
-      {isManager && (
-        <View style={styles.sectionTabRow}>
-          <TouchableOpacity
-            style={[styles.sectionTab, activeSection === 'tenant' && styles.sectionTabActive]}
-            onPress={() => { setActiveSection('tenant'); setStatusFilter('all'); }}
-          >
-            <Text style={[styles.sectionTabText, activeSection === 'tenant' && styles.sectionTabTextActive]}>
-              🚪 Với khách thuê
+      {/* Tab switcher */}
+      <View style={dashStyles.tabRow}>
+        <TouchableOpacity
+          style={[dashStyles.tabPill, tab === 'tenant' && dashStyles.tabPillActive]}
+          onPress={() => setTab('tenant')}
+        >
+          <Text style={[dashStyles.tabPillText, tab === 'tenant' && dashStyles.tabPillTextActive]}>
+            🚪 Với khách thuê ({contracts.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[dashStyles.tabPill, tab === 'host' && dashStyles.tabPillActive]}
+          onPress={() => setTab('host')}
+        >
+          <Text style={[dashStyles.tabPillText, tab === 'host' && dashStyles.tabPillTextActive]}>
+            🏢 Với Host ({hostContracts.length})
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={dashStyles.scrollContent}>
+        {/* Stats row */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dashStyles.statsContent}>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.success }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.success }]}>{curStats.active}</Text>
+            <Text style={dashStyles.statLabel}>Hiệu lực</Text>
+          </View>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.info }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.info }]}>{curStats.pending}</Text>
+            <Text style={dashStyles.statLabel}>Chờ duyệt</Text>
+          </View>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.primary }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.primary }]}>{curStats.approved}</Text>
+            <Text style={dashStyles.statLabel}>Đã duyệt</Text>
+          </View>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.textMuted }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.textMuted }]}>{curStats.draft}</Text>
+            <Text style={dashStyles.statLabel}>Nháp</Text>
+          </View>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.warning }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.warning }]}>{curStats.expiring}</Text>
+            <Text style={dashStyles.statLabel}>Sắp hết hạn</Text>
+          </View>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.error }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.error }]}>{curStats.rejected}</Text>
+            <Text style={dashStyles.statLabel}>Bị từ chối</Text>
+          </View>
+        </ScrollView>
+
+        {/* Alert banner */}
+        {tab === 'tenant' && (tenantStats.expiring > 0 || tenantStats.pending > 0 || tenantStats.rejected > 0) && (
+          <View style={dashStyles.alertBanner}>
+            <Text style={dashStyles.alertText}>
+              {[
+                tenantStats.expiring > 0 && `${tenantStats.expiring} sắp hết hạn`,
+                tenantStats.pending > 0 && `${tenantStats.pending} chờ duyệt`,
+                tenantStats.rejected > 0 && `${tenantStats.rejected} bị từ chối`,
+              ].filter(Boolean).join(' · ')}
             </Text>
-            <View style={[styles.sectionTabBadge, activeSection === 'tenant' && styles.sectionTabBadgeActive]}>
-              <Text style={[styles.sectionTabBadgeText, activeSection === 'tenant' && styles.sectionTabBadgeTextActive]}>
-                {contracts.length}
-              </Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.sectionTab, activeSection === 'host' && styles.sectionTabActive]}
-            onPress={() => { setActiveSection('host'); setStatusFilter('all'); }}
-          >
-            <Text style={[styles.sectionTabText, activeSection === 'host' && styles.sectionTabTextActive]}>
-              🏢 Với Host/Admin
-            </Text>
-            <View style={[styles.sectionTabBadge, activeSection === 'host' && styles.sectionTabBadgeActive]}>
-              <Text style={[styles.sectionTabBadgeText, activeSection === 'host' && styles.sectionTabBadgeTextActive]}>
-                {hostContracts.length}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      )}
+          </View>
+        )}
 
-      {/* Stats row */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={styles.statsScroll} contentContainerStyle={styles.statsContent}>
-        <View style={[styles.statCard, { borderTopColor: Colors.success }]}>
-          <Text style={[styles.statNum, { color: Colors.success }]}>{stats.active}</Text>
-          <Text style={styles.statLabel}>Hiệu lực</Text>
-        </View>
-        {stats.pending > 0 && (
-          <View style={[styles.statCard, { borderTopColor: Colors.warning }]}>
-            <Text style={[styles.statNum, { color: Colors.warning }]}>{stats.pending}</Text>
-            <Text style={styles.statLabel}>Chờ duyệt</Text>
-          </View>
-        )}
-        {stats.approved > 0 && (
-          <View style={[styles.statCard, { borderTopColor: Colors.info }]}>
-            <Text style={[styles.statNum, { color: Colors.info }]}>{stats.approved}</Text>
-            <Text style={styles.statLabel}>Đã duyệt</Text>
-          </View>
-        )}
-        {stats.draft > 0 && (
-          <View style={[styles.statCard, { borderTopColor: Colors.textMuted }]}>
-            <Text style={[styles.statNum, { color: Colors.textMuted }]}>{stats.draft}</Text>
-            <Text style={styles.statLabel}>Nháp</Text>
-          </View>
-        )}
-        {stats.rejected > 0 && (
-          <View style={[styles.statCard, { borderTopColor: Colors.error }]}>
-            <Text style={[styles.statNum, { color: Colors.error }]}>{stats.rejected}</Text>
-            <Text style={styles.statLabel}>Bị từ chối</Text>
-          </View>
-        )}
-        {stats.expired > 0 && (
-          <View style={[styles.statCard, { borderTopColor: Colors.error }]}>
-            <Text style={[styles.statNum, { color: Colors.error }]}>{stats.expired}</Text>
-            <Text style={styles.statLabel}>Đã hết hạn</Text>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Filter tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-        {FILTER_TABS.map(tab => {
-          const count = tab.key === 'all'
-            ? displayContracts.length
-            : displayContracts.filter(c => c.status === tab.key).length;
-          if (tab.key !== 'all' && count === 0) return null;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={[styles.filterChip, statusFilter === tab.key && styles.filterChipActive]}
-              onPress={() => setStatusFilter(tab.key)}
-            >
-              <Text style={[styles.filterText, statusFilter === tab.key && styles.filterTextActive]}>
-                {tab.label} ({count})
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* Contract list */}
-      <FlatList
-        data={filtered}
-        keyExtractor={i => i.id}
-        renderItem={({ item }) => (
-          <ContractCard
-            contract={item}
-            onPress={() => { setSelectedContract(item); setViewMode('detail'); }}
-            onAction={handleAction}
-          />
-        )}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>📋</Text>
-            <Text style={styles.emptyTitle}>Chưa có hợp đồng</Text>
-            {isManager && activeSection === 'host' ? (
-              <Text style={styles.emptyDesc}>Hợp đồng thuê nhà từ Host/Admin sẽ hiển thị tại đây.</Text>
-            ) : (
-              <>
-                <Text style={styles.emptyDesc}>Nhấn "+ Tạo HĐ" để tạo hợp đồng với khách thuê.</Text>
+        {tab === 'tenant' ? (
+          <>
+            {/* Building cards */}
+            <Text style={dashStyles.sectionTitle}>Theo bất động sản</Text>
+            {buildingCards.map(({ prop, bContracts }) => {
+              const isWholeHouse = prop.propertyType === 'WHOLE_HOUSE';
+              const activeCount = bContracts.filter(c => c.status === 'active').length;
+              const expiringCount = bContracts.filter(c => c.status === 'expiring' || c.status === 'expiring_soon').length;
+              const pendingCount = bContracts.filter(c => c.status === 'pending' || c.status === 'pending_approval').length;
+              const occ = prop.totalRooms > 0 ? Math.round((prop.occupied / prop.totalRooms) * 100) : 0;
+              const needsAction = isWholeHouse ? prop.expiringContractCount : expiringCount + pendingCount;
+              return (
                 <TouchableOpacity
-                  style={styles.emptyCreateBtn}
-                  onPress={() => { setEditingContract(null); setViewMode('create'); }}
+                  key={prop.id}
+                  style={dashStyles.buildingCard}
+                  onPress={() => navigation.navigate(isWholeHouse ? 'WholeHouseDetail' : 'BuildingContract', { propertyId: prop.id })}
+                  activeOpacity={0.7}
                 >
-                  <Text style={styles.emptyCreateBtnText}>+ Tạo hợp đồng</Text>
+                  <View style={dashStyles.buildingCardTop}>
+                    <Text style={dashStyles.buildingName}>{prop.name}</Text>
+                    {needsAction > 0 ? (
+                      <View style={dashStyles.warningBadge}>
+                        <Text style={dashStyles.warningBadgeText}>{needsAction} cần xử lý</Text>
+                      </View>
+                    ) : (
+                      <Text style={dashStyles.buildingArrow}>›</Text>
+                    )}
+                  </View>
+                  <Text style={dashStyles.buildingMeta}>
+                    {isWholeHouse
+                      ? `${prop.district} · Nhà nguyên căn · ${prop.tenantName || 'Chưa có khách'}`
+                      : `${prop.district} · ${prop.occupied}/${prop.totalRooms} phòng đang thuê (${occ}%)`}
+                  </Text>
+                  <View style={dashStyles.buildingMetricRow}>
+                    <View style={dashStyles.buildingMetric}>
+                      <Text style={dashStyles.buildingMetricValue}>{bContracts.length}</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Tổng HĐ</Text>
+                    </View>
+                    <View style={dashStyles.buildingMetric}>
+                      <Text style={[dashStyles.buildingMetricValue, { color: Colors.success }]}>{activeCount}</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Hiệu lực</Text>
+                    </View>
+                    <View style={dashStyles.buildingMetric}>
+                      <Text style={[dashStyles.buildingMetricValue, { color: Colors.info }]}>{pendingCount}</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Chờ duyệt</Text>
+                    </View>
+                    <View style={dashStyles.buildingMetric}>
+                      <Text style={[dashStyles.buildingMetricValue, { color: Colors.warning }]}>{expiringCount}</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Sắp hết hạn</Text>
+                    </View>
+                  </View>
                 </TouchableOpacity>
+              );
+            })}
+
+            {/* Recent activity */}
+            {recentActivity.length > 0 && (
+              <>
+                <Text style={dashStyles.sectionTitle}>Hoạt động gần đây</Text>
+                {recentActivity.map(c => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={dashStyles.activityRow}
+                    activeOpacity={0.75}
+                    onPress={() => { setSelectedContract(c); setViewMode('detail'); }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={dashStyles.activityTitle} numberOfLines={1}>{c.code} · {c.lesseeName}</Text>
+                      <Text style={dashStyles.activityMeta} numberOfLines={1}>{c.propertyName}{c.roomCode ? ` · ${c.roomCode}` : ''}</Text>
+                    </View>
+                    <Text style={dashStyles.activityStatus}>{STATUS_CONFIG[c.status].label}</Text>
+                  </TouchableOpacity>
+                ))}
               </>
             )}
-          </View>
-        }
-      />
+          </>
+        ) : (
+          <>
+            <Text style={dashStyles.sectionTitle}>Hợp đồng với Host/Admin</Text>
+            {hostContracts.length === 0 ? (
+              <View style={dashStyles.emptyBox}>
+                <Text style={dashStyles.emptyText}>📋  Chưa có hợp đồng với Host/Admin</Text>
+              </View>
+            ) : hostContracts.map(c => (
+              <ContractCard
+                key={c.id}
+                contract={c}
+                onPress={() => { setSelectedContract(c); setViewMode('detail'); }}
+                onAction={handleAction}
+              />
+            ))}
+          </>
+        )}
+
+        <View style={{ height: 80 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -1904,6 +1969,111 @@ listContent: {
   sectionTabBadgeTextActive: { color: Colors.white },
 });
 
+const dashStyles = StyleSheet.create({
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
+    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
+  backBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
+  },
+  backBtnText: { fontSize: 24, lineHeight: 26, color: Colors.primary, fontWeight: '900' },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: Colors.textPrimary },
+  createBtn: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md, paddingVertical: 8,
+  },
+  createBtnText: { color: Colors.white, fontWeight: '800', fontSize: 12 },
+
+  tabRow: {
+    flexDirection: 'row', gap: Spacing.sm,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.white,
+  },
+  tabPill: {
+    flex: 1, minHeight: 34, alignItems: 'center', justifyContent: 'center',
+    borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.background, paddingHorizontal: Spacing.sm,
+  },
+  tabPillActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
+  tabPillText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '800' },
+  tabPillTextActive: { color: Colors.primary },
+
+  scrollContent: { paddingBottom: Spacing.lg },
+  statsContent: {
+    paddingHorizontal: Spacing.base, paddingTop: Spacing.sm, paddingBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  statCard: {
+    width: 86, minHeight: 58, backgroundColor: Colors.white,
+    borderRadius: BorderRadius.md, borderTopWidth: 3,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingVertical: 7, alignItems: 'center', justifyContent: 'center',
+  },
+  statNum: { fontSize: 18, fontWeight: '900' },
+  statLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: '700', marginTop: 2, textAlign: 'center' },
+
+  alertBanner: {
+    marginHorizontal: Spacing.base, marginBottom: Spacing.md,
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 8,
+  },
+  alertText: { color: Colors.warning, fontSize: 12, fontWeight: '800' },
+  sectionTitle: {
+    fontSize: 15, fontWeight: '900', color: Colors.textPrimary,
+    marginHorizontal: Spacing.base, marginTop: Spacing.sm, marginBottom: Spacing.sm,
+  },
+
+  buildingCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    marginHorizontal: Spacing.base, marginBottom: Spacing.sm,
+    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border,
+    ...Shadow.sm,
+  },
+  buildingCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  buildingName: { flex: 1, fontSize: 14, fontWeight: '900', color: Colors.textPrimary },
+  buildingArrow: { fontSize: 22, color: Colors.textMuted, fontWeight: '700' },
+  buildingMeta: { fontSize: 11, color: Colors.textSecondary, marginTop: 3, fontWeight: '600' },
+  warningBadge: {
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.full,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  warningBadgeText: { fontSize: 10, color: Colors.warning, fontWeight: '900' },
+  buildingMetricRow: {
+    flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm,
+  },
+  buildingMetric: {
+    flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.md,
+    paddingVertical: 7, alignItems: 'center',
+  },
+  buildingMetricValue: { fontSize: 14, fontWeight: '900', color: Colors.textPrimary },
+  buildingMetricLabel: { fontSize: 9, color: Colors.textMuted, fontWeight: '700', marginTop: 1 },
+  buildingTagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
+  buildingTag: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 4 },
+  buildingTagText: { fontSize: 10, fontWeight: '800' },
+
+  activityRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginHorizontal: Spacing.base, marginBottom: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  activityTitle: { fontSize: 12, color: Colors.textPrimary, fontWeight: '800' },
+  activityMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  activityStatus: { fontSize: 11, color: Colors.primary, fontWeight: '900' },
+
+  emptyBox: {
+    marginHorizontal: Spacing.base, backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg, padding: Spacing.lg, alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  emptyText: { fontSize: 13, color: Colors.textMuted, fontWeight: '600' },
+});
+
 // ===================== DETAIL STYLES =====================
 const detailStyles = StyleSheet.create({
   topBar: {
@@ -1970,6 +2140,22 @@ const detailStyles = StyleSheet.create({
   eqHeaderCell: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, textTransform: 'uppercase' },
   eqRow: { flexDirection: 'row', paddingVertical: Spacing.sm, paddingHorizontal: Spacing.md, borderTopWidth: 1, borderColor: Colors.divider },
   eqCell: { fontSize: 13, color: Colors.textPrimary },
+
+  inspectionCard: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    padding: Spacing.base,
+    borderBottomWidth: 1,
+    borderColor: Colors.divider,
+  },
+  inspectionIcon: { fontSize: 22 },
+  inspectionBody: { flex: 1 },
+  inspectionTitle: { fontSize: 13, color: Colors.textPrimary, fontWeight: '900' },
+  inspectionMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 3, fontWeight: '600' },
+  inspectionDeduction: { fontSize: 12, color: Colors.warning, marginTop: 4, fontWeight: '900' },
+  inspectionEmpty: { padding: Spacing.base },
+  inspectionEmptyTitle: { fontSize: 13, color: Colors.textPrimary, fontWeight: '900' },
+  inspectionEmptyText: { fontSize: 12, color: Colors.textMuted, marginTop: 4, lineHeight: 18 },
 
   // Approval history timeline
   timelineEntry: { flexDirection: 'row', paddingHorizontal: Spacing.base, paddingTop: Spacing.md },

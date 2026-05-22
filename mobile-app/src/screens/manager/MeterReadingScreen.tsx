@@ -117,6 +117,18 @@ const INITIAL_PROPERTIES: PropertyData[] = [
     waterRate: 15000, serviceCharge: 200000, rentAmount: 15000000,
     activeTenants: 4, prevElec: 8540, prevWater: 142, isRecorded: true,
   },
+  {
+    id: 'house-1', name: 'Nhà Nguyễn Văn Cừ', address: '45 Nguyễn Văn Cừ, Quận 5, TP.HCM',
+    type: 'single_unit', electricityRate: 3500, waterBillingType: 'per_meter',
+    waterRate: 15000, serviceCharge: 0, rentAmount: 12000000,
+    activeTenants: 4, prevElec: 1850, prevWater: 126, isRecorded: false,
+  },
+  {
+    id: 'house-3', name: 'Nhà Trần Hưng Đạo', address: '210 Trần Hưng Đạo, Quận 1, TP.HCM',
+    type: 'single_unit', electricityRate: 3500, waterBillingType: 'per_meter',
+    waterRate: 15000, serviceCharge: 0, rentAmount: 18000000,
+    activeTenants: 6, prevElec: 4120, prevWater: 310, isRecorded: false,
+  },
 ];
 
 const INITIAL_HISTORY: HistoryRecord[] = [
@@ -127,6 +139,14 @@ const INITIAL_HISTORY: HistoryRecord[] = [
     totalElecCost: 380 * 3500, totalWaterCost: 25 * 15000,
     totalCost: 380 * 3500 + 25 * 15000,
     recordedAt: '2026-05-01', invoicesGenerated: true, hasPhotos: true,
+  },
+  {
+    id: 'h-house-1', propertyId: 'house-1', propertyName: 'Nhà Nguyễn Văn Cừ', propertyType: 'single_unit',
+    waterBillingType: 'per_meter', month: 4, year: 2026,
+    totalElecConsumption: 260, totalWaterConsumption: 18,
+    totalElecCost: 260 * 3500, totalWaterCost: 18 * 15000,
+    totalCost: 260 * 3500 + 18 * 15000,
+    recordedAt: '2026-04-30', invoicesGenerated: true, hasPhotos: true,
   },
   {
     id: 'h2', propertyId: 'p1', propertyName: 'Nhà Nguyễn Trãi', propertyType: 'multi_room',
@@ -978,7 +998,7 @@ export const MeterReadingScreen: React.FC = () => {
           <View style={styles.progressCard}>
             <View style={styles.progressRow}>
               <Text style={styles.progressLabel}>Tiến độ tháng này</Text>
-              <Text style={styles.progressValue}>{totalRecorded}/{properties.length} tòa nhà</Text>
+              <Text style={styles.progressValue}>{totalRecorded}/{properties.length} tài sản</Text>
             </View>
             <View style={styles.progressBarBg}>
               <View style={[styles.progressBarFill, { width: `${properties.length > 0 ? (totalRecorded / properties.length) * 100 : 0}%` }]} />
@@ -1001,8 +1021,8 @@ export const MeterReadingScreen: React.FC = () => {
             </View>
             <Text style={styles.progressHint}>
               {totalRecorded === properties.length
-                ? '✅ Tất cả tòa nhà đã ghi chỉ số tháng này!'
-                : `Còn ${properties.length - totalRecorded} tòa nhà · ${totalRoomsAll - completedRoomsAll} phòng chưa ghi`}
+                ? '✅ Tất cả tài sản đã ghi chỉ số tháng này!'
+                : `Còn ${properties.length - totalRecorded} tài sản · ${totalRoomsAll - completedRoomsAll} điểm ghi chưa xong`}
             </Text>
           </View>
 
@@ -1011,7 +1031,7 @@ export const MeterReadingScreen: React.FC = () => {
             <Text style={styles.ocrNoteText}>💡 Chụp ảnh đồng hồ để nhận diện chỉ số tự động. Có thể nhập tay nếu ảnh không nhận diện được số.</Text>
           </View>
 
-          <Text style={styles.sectionTitle}>Chọn tòa nhà để ghi chỉ số</Text>
+          <Text style={styles.sectionTitle}>Chọn bất động sản để ghi chỉ số</Text>
 
           {properties.map(prop => (
             <View key={prop.id}>

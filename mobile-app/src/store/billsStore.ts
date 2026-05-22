@@ -12,6 +12,7 @@ export interface BillItem {
 export interface SharedBill {
   id: string;
   code: string;
+  propertyType?: 'MULTI_ROOM' | 'WHOLE_HOUSE';
   roomId: string;
   roomName: string;
   propertyId: string;
@@ -113,6 +114,37 @@ const MANAGER_SEED: SharedBill[] = [
     ],
     totalAmount: 4570000, lateFee: 45700, grandTotal: 4615700,
     status: 'overdue', dueDate: '2026-04-15', createdAt: '2026-04-01', daysOverdue: 31,
+  },
+  {
+    id: 'b-house-1', code: 'HD-NVC-T5', propertyType: 'WHOLE_HOUSE',
+    roomId: 'house-1', roomName: 'Nhà nguyên căn', propertyId: 'house-1',
+    propertyName: 'Nhà Nguyễn Văn Cừ', tenantId: 'wh-t1', tenantName: 'Gia đình anh Minh', tenantPhone: '0909111222',
+    month: 5, year: 2026,
+    items: [
+      { label: 'Tiền thuê nhà', amount: 12000000 },
+      { label: 'Điện (260 kWh)', amount: 910000 },
+      { label: 'Nước (22 m³)', amount: 330000 },
+      { label: 'Phí dịch vụ', amount: 0 },
+      { label: 'Giảm trừ', amount: -200000 },
+    ],
+    totalAmount: 13040000, lateFee: 0, grandTotal: 13040000,
+    status: 'pending', dueDate: '2026-05-15', createdAt: '2026-05-01',
+  },
+  {
+    id: 'b-house-3', code: 'HD-THD-T5', propertyType: 'WHOLE_HOUSE',
+    roomId: 'house-3', roomName: 'Nhà nguyên căn', propertyId: 'house-3',
+    propertyName: 'Nhà Trần Hưng Đạo', tenantId: 'wh-t3', tenantName: 'Công ty An Phú', tenantPhone: '0912222333',
+    month: 5, year: 2026,
+    items: [
+      { label: 'Tiền thuê nhà', amount: 18000000 },
+      { label: 'Điện (420 kWh)', amount: 1470000 },
+      { label: 'Nước (35 m³)', amount: 525000 },
+      { label: 'Phí phát sinh', amount: 350000 },
+    ],
+    totalAmount: 20345000, lateFee: 0, grandTotal: 20345000,
+    status: 'paid', dueDate: '2026-05-15', paidAt: '2026-05-05',
+    paidAmount: 20345000, paymentMethod: 'bank_transfer', transactionId: 'WH-THD-0526',
+    createdAt: '2026-05-01',
   },
 ];
 

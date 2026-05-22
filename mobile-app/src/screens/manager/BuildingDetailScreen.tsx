@@ -78,7 +78,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
       route: 'BuildingUtility',
     }));
 
-    ops.contracts.filter(c => c.status === 'expiring').forEach(c => upcoming.push({
+    ops.contracts.filter(c => c.status === 'expiring' || c.status === 'expiring_soon').forEach(c => upcoming.push({
       key: `ct-${c.id}`, icon: '📋', color: '#7C3AED',
       title: `HĐ sắp hết hạn · ${c.room}`, meta: `${c.tenant} · đến ${c.endDate}`,
       route: 'BuildingContract',

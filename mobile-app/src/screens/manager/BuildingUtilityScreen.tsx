@@ -3,11 +3,26 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { getPropertyById, getBuildingOps, BuildingUtilityReading } from '../../data/managedProperties';
+import { billsStore } from '../../store/billsStore';
 
 export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
   const prop = getPropertyById(propertyId);
-  const [readings, setReadings] = useState<BuildingUtilityReading[]>(() => getBuildingOps(propertyId).utility);
+  const isWholeHouse = prop?.propertyType === 'WHOLE_HOUSE';
+  const [readings, setReadings] = useState<BuildingUtilityReading[]>(() => {
+    if (isWholeHouse && prop) {
+      return [{
+        id: `${prop.id}-utility`,
+        room: 'Toàn bộ nhà',
+        tenant: prop.tenantName || 'Chưa có người đại diện',
+        status: 'missing',
+        lastReadingDate: '2026-04-30',
+        elecPrev: 1850,
+        waterPrev: 126,
+      }];
+    }
+    return getBuildingOps(propertyId).utility;
+  });
   const [openId, setOpenId] = useState<string | null>(null);
   const [form, setForm] = useState<{ elec: string; water: string }>({ elec: '', water: '' });
 
@@ -30,6 +45,39 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
     const water = Number(form.water);
     if (!elec || !water) return Alert.alert('Thiếu dữ liệu', 'Vui lòng nhập đủ chỉ số điện và nước.');
     if (elec < r.elecPrev || water < r.waterPrev) return Alert.alert('Lỗi', 'Chỉ số mới không được nhỏ hơn chỉ số cũ.');
+    const electricityAmount = Math.max(elec - r.elecPrev, 0) * (prop?.electricityRate || 3500);
+    const waterAmount = Math.max(water - r.waterPrev, 0) * (prop?.waterRate || 15000);
+    if (isWholeHouse && prop?.tenantName) {
+      const rent = prop.monthlyRent || 0;
+      const totalAmount = rent + electricityAmount + waterAmount + prop.serviceCharge;
+      billsStore.addBills([{
+        id: `bill-${prop.id}-${Date.now()}`,
+        code: `HD-${prop.id.toUpperCase()}-T5`,
+        propertyType: 'WHOLE_HOUSE',
+        roomId: prop.id,
+        roomName: 'Nhà nguyên căn',
+        propertyId: prop.id,
+        propertyName: prop.name,
+        tenantId: `${prop.id}-tenant`,
+        tenantName: prop.tenantName,
+        tenantPhone: prop.occupants?.[0]?.phone || '',
+        month: 5,
+        year: 2026,
+        items: [
+          { label: 'Tiền thuê nhà', amount: rent },
+          { label: `Điện (${Math.max(elec - r.elecPrev, 0)} kWh)`, amount: electricityAmount },
+          { label: `Nước (${Math.max(water - r.waterPrev, 0)} m³)`, amount: waterAmount },
+          { label: 'Phí dịch vụ', amount: prop.serviceCharge },
+        ],
+        totalAmount,
+        lateFee: 0,
+        grandTotal: totalAmount,
+        status: 'pending',
+        dueDate: '2026-05-15',
+        createdAt: new Date().toISOString().split('T')[0],
+      }]);
+      Alert.alert('Đã tạo hóa đơn', 'Chỉ số nhà nguyên căn đã được ghi nhận và hóa đơn tháng này đã được cập nhật.');
+    }
     setReadings(prev => prev.map(x => x.id === r.id ? {
       ...x, status: 'done', elecPrev: elec, waterPrev: water, lastReadingDate: '2026-05-20',
     } : x));
@@ -52,7 +100,9 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {missingCount > 0 && (
           <View style={styles.warnBanner}>
-            <Text style={styles.warnText}>⚡ Còn {missingCount} phòng chưa chốt chỉ số tháng này</Text>
+            <Text style={styles.warnText}>
+              {isWholeHouse ? '⚡ Nhà nguyên căn chưa chốt chỉ số tháng này' : `⚡ Còn ${missingCount} phòng chưa chốt chỉ số tháng này`}
+            </Text>
           </View>
         )}
 
@@ -63,7 +113,7 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
             <View key={r.id} style={styles.card}>
               <TouchableOpacity style={styles.cardTop} activeOpacity={0.7} onPress={() => openRow(r)}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{r.room} · {r.tenant}</Text>
+                  <Text style={styles.cardTitle}>{isWholeHouse ? 'Toàn bộ nhà' : r.room} · {r.tenant}</Text>
                   <Text style={styles.cardMeta}>Điện: {r.elecPrev} kWh · Nước: {r.waterPrev} m³ · {r.lastReadingDate}</Text>
                 </View>
                 <View style={[styles.badge, { backgroundColor: done ? '#F0FDF4' : '#FEF3C7' }]}>
