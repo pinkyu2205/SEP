@@ -281,23 +281,13 @@ export const EquipmentDetailScreen: React.FC = () => {
             <Text style={styles.qrCodeText}>{equipment.qrCode}</Text>
           </View>
 
-          <View style={styles.qrActions}>
-            <TouchableOpacity
-              style={styles.qrScanBtn}
-              onPress={() => navigation.navigate('Scan')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.qrScanBtnText}>📷 Quét QR</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.reportBtn}
-              onPress={() => navigation.navigate('MaintenanceCreate', { equipment })}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.reportBtnText}>🚨 Báo hỏng thiết bị</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={styles.reportBtn}
+            onPress={() => navigation.navigate('MaintenanceCreate', { equipment })}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.reportBtnText}>🚨 Báo hỏng thiết bị này</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={{ height: 40 }} />
@@ -452,15 +442,9 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace', letterSpacing: 1,
   },
 
-  qrActions: { flexDirection: 'row', gap: Spacing.sm },
-  qrScanBtn: {
-    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
-    borderWidth: 1.5, borderColor: Colors.primary, alignItems: 'center',
-  },
-  qrScanBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
   reportBtn: {
-    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.base, borderRadius: BorderRadius.lg,
     backgroundColor: Colors.error, alignItems: 'center', ...Shadow.sm,
   },
-  reportBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+  reportBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
 });

@@ -138,9 +138,12 @@ export const MaintenanceCreateScreen: React.FC = () => {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.equipmentName}>{equipment.name}</Text>
-                <Text style={styles.equipmentMeta}>{equipment.assetId} · {equipment.roomName}</Text>
-                {equipment.houseName && (
-                  <Text style={styles.equipmentMeta}>🏠 {equipment.houseName}</Text>
+                <Text style={styles.equipmentMeta}>Mã: {equipment.assetId}</Text>
+                {equipment.roomName && (
+                  <Text style={styles.equipmentMeta}>📍 {equipment.roomName}{equipment.houseName ? ` · ${equipment.houseName}` : ''}</Text>
+                )}
+                {equipment.qrCode && (
+                  <Text style={styles.equipmentQr}>QR: {equipment.qrCode}</Text>
                 )}
               </View>
               <View style={styles.qrBadge}>
@@ -334,6 +337,7 @@ const styles = StyleSheet.create({
   },
   equipmentName: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   equipmentMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  equipmentQr: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontFamily: 'monospace' },
   qrBadge: {
     backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm,
     paddingVertical: 3, borderRadius: BorderRadius.full,
