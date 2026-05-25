@@ -212,7 +212,7 @@ export interface PropertyMeterRecord {
 }
 
 // ======================== EQUIPMENT (Trang thiết bị) ========================
-export type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired' | 'broken';
+export type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired' | 'broken' | 'needs_check';
 
 export interface EquipmentMaintenanceRecord {
   id: string;

@@ -32,7 +32,6 @@ const FILTER_TABS: { key: 'all' | InvoiceStatus; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
   { key: 'pending', label: 'Chờ TT' },
   { key: 'overdue', label: 'Quá hạn' },
-  { key: 'paid', label: 'Đã TT' },
 ];
 
 export const InvoiceListScreen: React.FC = () => {
@@ -42,7 +41,9 @@ export const InvoiceListScreen: React.FC = () => {
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const filtered = filter === 'all' ? invoices : invoices.filter(i => i.status === filter);
+  const filtered = filter === 'all'
+    ? invoices.filter(i => i.status !== 'paid')
+    : invoices.filter(i => i.status === filter);
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
   const pendingTotal = invoices
     .filter(i => i.status === 'pending' || i.status === 'overdue')
@@ -72,7 +73,11 @@ export const InvoiceListScreen: React.FC = () => {
     const daysOverdue = isOverdue ? Math.abs(getDaysUntil(item.dueDate)) : 0;
 
     return (
-      <View style={[styles.card, isOverdue && styles.cardOverdue]}>
+      <TouchableOpacity
+        style={[styles.card, isOverdue && styles.cardOverdue]}
+        activeOpacity={0.75}
+        onPress={() => navigation.navigate('InvoiceDetail', { invoice: item })}
+      >
         {isOverdue && <View style={styles.overdueStripe} />}
 
         {/* Header */}
@@ -144,7 +149,10 @@ export const InvoiceListScreen: React.FC = () => {
           </View>
         )}
 
-      </View>
+        <View style={styles.detailFooter}>
+          <Text style={styles.detailLink}>Xem chi tiết →</Text>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -162,7 +170,7 @@ export const InvoiceListScreen: React.FC = () => {
         </View>
         <TouchableOpacity
           style={styles.historyBtn}
-          onPress={() => navigation.navigate('PaymentHistory')}
+          onPress={() => navigation.navigate('InvoiceHistory')}
         >
           <Text style={styles.historyBtnText}>Lịch sử</Text>
         </TouchableOpacity>
@@ -393,8 +401,8 @@ filterTextActive: {
   paidText: { fontSize: 13, color: Colors.success, fontWeight: '600' },
   paidMethod: { fontSize: 12, color: Colors.textMuted },
 
-  detailLink: { marginTop: Spacing.sm, alignItems: 'flex-end' },
-  detailLinkText: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
+  detailFooter: { marginTop: Spacing.sm, alignItems: 'flex-end' },
+  detailLink: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
 
   empty: { paddingTop: 60, alignItems: 'center' },
   emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },

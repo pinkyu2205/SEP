@@ -1,0 +1,466 @@
+import React, { useState } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Equipment } from '../../types';
+import { formatDate } from '../../utils';
+
+type Tab = 'info' | 'warranty' | 'usage' | 'history';
+
+const STATUS_LABEL: Record<string, string> = {
+  active:      'Hoạt động tốt',
+  repairing:   'Đang sửa chữa',
+  damaged:     'Hỏng hóc',
+  needs_check: 'Cần kiểm tra',
+  replaced:    'Đã thay thế',
+  retired:     'Đã thanh lý',
+};
+
+const STATUS_STYLE: Record<string, { bg: string; text: string }> = {
+  active:      { bg: Colors.successLight, text: Colors.success },
+  repairing:   { bg: Colors.warningLight, text: Colors.warning },
+  damaged:     { bg: Colors.errorLight,   text: Colors.error   },
+  needs_check: { bg: '#FEF3C7',           text: '#D97706'      },
+  replaced:    { bg: Colors.divider,      text: Colors.textMuted },
+  retired:     { bg: Colors.divider,      text: Colors.textMuted },
+};
+
+const CATEGORY_ICON: Record<string, string> = {
+  'Điện lạnh': '❄️',
+  'Điện':      '⚡',
+  'Điện tử':   '📺',
+  'Nội thất':  '🛋️',
+  'Vệ sinh':   '🚿',
+  'Cơ học':    '⚙️',
+};
+
+const getCategoryIcon = (category: string) => CATEGORY_ICON[category] ?? '🔧';
+
+const REPAIR_TYPE_ICON: Record<string, string> = {
+  repair:      '🔧',
+  maintenance: '🛠️',
+  replacement: '🔄',
+};
+
+const REPAIR_TYPE_LABEL: Record<string, string> = {
+  repair:      'Sửa chữa',
+  maintenance: 'Bảo trì',
+  replacement: 'Thay thế',
+};
+
+export const EquipmentDetailScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const equipment: Equipment = route.params?.equipment;
+  const [activeTab, setActiveTab] = useState<Tab>('info');
+
+  if (!equipment) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.errorWrap}>
+          <Text style={styles.errorText}>Không tìm thấy thông tin thiết bị.</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.errorBtn}>
+            <Text style={styles.errorBtnText}>Quay lại</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const statusStyle = STATUS_STYLE[equipment.status] ?? STATUS_STYLE.active;
+  const categoryIcon = getCategoryIcon(equipment.category);
+  const isWarrantyValid = equipment.warrantyExpiry
+    ? new Date(equipment.warrantyExpiry) > new Date()
+    : false;
+  const warrantyDaysLeft = equipment.warrantyExpiry
+    ? Math.ceil((new Date(equipment.warrantyExpiry).getTime() - Date.now()) / 86400000)
+    : 0;
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'info',    label: '📋 Thông tin' },
+    { key: 'warranty',label: '🛡️ Bảo hành'  },
+    { key: 'usage',   label: '📖 Hướng dẫn' },
+    { key: 'history', label: '🔧 Lịch sử'   },
+  ];
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="light-content" />
+
+      {/* Colored Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Text style={styles.backArrow}>‹</Text>
+        </TouchableOpacity>
+
+        <View style={styles.headerBody}>
+          <View style={styles.iconCircle}>
+            <Text style={styles.iconText}>{categoryIcon}</Text>
+          </View>
+          <Text style={styles.equipName}>{equipment.name}</Text>
+          <Text style={styles.equipCode}>{equipment.assetId}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+            <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>
+              {STATUS_LABEL[equipment.status] ?? equipment.status}
+            </Text>
+          </View>
+          <Text style={styles.locationText}>
+            📍 {equipment.roomName ?? 'Phòng chung'} · {equipment.houseName}
+          </Text>
+        </View>
+      </View>
+
+      {/* Tab Bar */}
+      <View style={styles.tabBarWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBar}>
+          {tabs.map(tab => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+              onPress={() => setActiveTab(tab.key)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.tabText, activeTab === tab.key && styles.tabTextActive]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
+
+        {/* ── Tab: Thông tin ── */}
+        {activeTab === 'info' && (
+          <View>
+            <View style={styles.section}>
+              {[
+                { label: 'Danh mục',      value: equipment.category },
+                { label: 'Hãng sản xuất', value: equipment.brand ?? 'Không rõ' },
+                { label: 'Model',         value: equipment.model ?? 'Không rõ' },
+                { label: 'Số serial',     value: equipment.serialNumber ?? 'Không rõ' },
+                { label: 'Phòng',         value: equipment.roomName ?? 'Khu vực chung' },
+                { label: 'Tòa nhà',       value: equipment.houseName },
+                { label: 'Ngày mua',      value: equipment.purchaseDate ? formatDate(equipment.purchaseDate) : 'Không rõ' },
+                { label: 'Ngày lắp đặt', value: formatDate(equipment.installationDate) },
+                { label: 'Bảo trì gần nhất', value: equipment.lastMaintenanceAt ? formatDate(equipment.lastMaintenanceAt) : 'Chưa có' },
+                { label: 'Số lần bảo trì',   value: `${equipment.maintenanceHistory.length} lần` },
+              ].map((row, i) => (
+                <View key={i} style={[styles.infoRow, i === 9 && { borderBottomWidth: 0 }]}>
+                  <Text style={styles.infoLabel}>{row.label}</Text>
+                  <Text style={styles.infoValue}>{row.value}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Manager notes */}
+            {equipment.notes && (
+              <View style={styles.notesCard}>
+                <Text style={styles.notesTitle}>📝 Ghi chú từ quản lý</Text>
+                <Text style={styles.notesText}>{equipment.notes}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Tab: Bảo hành ── */}
+        {activeTab === 'warranty' && (
+          <View>
+            <View style={[
+              styles.warrantyBanner,
+              { backgroundColor: isWarrantyValid ? Colors.successLight : Colors.errorLight },
+            ]}>
+              <Text style={styles.warrantyBannerIcon}>{isWarrantyValid ? '🛡️' : '⚠️'}</Text>
+              <Text style={[styles.warrantyBannerStatus, { color: isWarrantyValid ? Colors.success : Colors.error }]}>
+                {isWarrantyValid ? 'Còn bảo hành' : 'Hết bảo hành'}
+              </Text>
+              {equipment.warrantyExpiry && (
+                <Text style={styles.warrantyDate}>
+                  Hạn bảo hành: {formatDate(equipment.warrantyExpiry)}
+                </Text>
+              )}
+              {isWarrantyValid && warrantyDaysLeft > 0 && (
+                <Text style={styles.warrantyDays}>Còn {warrantyDaysLeft} ngày</Text>
+              )}
+              {!equipment.warrantyExpiry && (
+                <Text style={styles.warrantyDate}>Không có thông tin bảo hành</Text>
+              )}
+            </View>
+
+            {isWarrantyValid && (
+              <View style={styles.warrantyNote}>
+                <Text style={styles.warrantyNoteText}>
+                  💡 Thiết bị còn trong thời hạn bảo hành. Nếu có sự cố do lỗi kỹ thuật nhà sản xuất, chi phí sửa chữa sẽ được bảo hành chi trả.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Tab: Hướng dẫn ── */}
+        {activeTab === 'usage' && (
+          <View>
+            <View style={styles.usageCard}>
+              <Text style={styles.usageTitle}>Hướng dẫn sử dụng</Text>
+              {equipment.notes
+                ? <Text style={styles.usageBody}>{equipment.notes}</Text>
+                : <Text style={styles.usageEmpty}>Chưa có hướng dẫn sử dụng cho thiết bị này.</Text>
+              }
+            </View>
+            <View style={styles.tipsCard}>
+              <Text style={styles.tipsTitle}>💡 Lưu ý chung</Text>
+              <Text style={styles.tipItem}>• Không tự ý tháo lắp, sửa chữa thiết bị</Text>
+              <Text style={styles.tipItem}>• Báo ngay cho quản lý khi phát hiện sự cố</Text>
+              <Text style={styles.tipItem}>• Vệ sinh định kỳ theo hướng dẫn từ nhà sản xuất</Text>
+              <Text style={styles.tipItem}>• Tắt thiết bị khi ra khỏi phòng</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Tab: Lịch sử sửa chữa ── */}
+        {activeTab === 'history' && (
+          <View>
+            <Text style={styles.historyTitle}>Lịch sử sửa chữa</Text>
+            {equipment.maintenanceHistory.length === 0
+              ? (
+                <View style={styles.historyEmpty}>
+                  <Text style={styles.historyEmptyIcon}>📂</Text>
+                  <Text style={styles.historyEmptyText}>Chưa có lịch sử bảo trì cho thiết bị này</Text>
+                </View>
+              )
+              : equipment.maintenanceHistory.map((rec, i) => (
+                <View key={rec.id ?? i} style={styles.historyCard}>
+                  <View style={styles.historyCardTop}>
+                    <View style={styles.historyTypeWrap}>
+                      <Text style={styles.historyTypeIcon}>{REPAIR_TYPE_ICON[rec.type] ?? '🔧'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.historyDesc}>{rec.description}</Text>
+                      <Text style={styles.historyType}>{REPAIR_TYPE_LABEL[rec.type] ?? rec.type}</Text>
+                    </View>
+                    <View style={styles.historyStatusChip}>
+                      <Text style={styles.historyStatusText}>Hoàn tất</Text>
+                    </View>
+                  </View>
+                  <View style={styles.historyCardMeta}>
+                    <Text style={styles.historyMetaItem}>📅 {formatDate(rec.date)}</Text>
+                    <Text style={styles.historyMetaItem}>👷 {rec.performedBy}</Text>
+                    {rec.cost > 0 && (
+                      <Text style={[styles.historyMetaItem, { color: Colors.primary, fontWeight: '700' }]}>
+                        💰 {rec.cost.toLocaleString('vi-VN')}đ
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              ))
+            }
+          </View>
+        )}
+
+        {/* ── QR Code Section (always visible below tabs) ── */}
+        <View style={styles.qrSection}>
+          <Text style={styles.qrSectionTitle}>Mã QR thiết bị</Text>
+          <Text style={styles.qrSectionHint}>
+            QR này được dán trực tiếp trên thiết bị để hỗ trợ sửa chữa và quản lý nhanh.
+          </Text>
+
+          <View style={styles.qrBox}>
+            {/* QR visual pattern */}
+            <View style={styles.qrPattern}>
+              <View style={styles.qrCornerBlock} />
+              <View style={[styles.qrCornerBlock, { alignSelf: 'flex-end' }]} />
+              <View style={styles.qrCenter}>
+                <Text style={styles.qrCenterIcon}>📷</Text>
+              </View>
+              <View style={[styles.qrCornerBlock, { alignSelf: 'flex-start' }]} />
+              <View style={[styles.qrCornerBlock, { alignSelf: 'flex-end', opacity: 0 }]} />
+            </View>
+            <Text style={styles.qrCodeText}>{equipment.qrCode}</Text>
+          </View>
+
+          <View style={styles.qrActions}>
+            <TouchableOpacity
+              style={styles.qrScanBtn}
+              onPress={() => navigation.navigate('Scan')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.qrScanBtnText}>📷 Quét QR</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.reportBtn}
+              onPress={() => navigation.navigate('MaintenanceCreate', { equipment })}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.reportBtnText}>🚨 Báo hỏng thiết bị</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: Colors.background },
+
+  // Error state
+  errorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
+  errorText: { fontSize: 15, color: Colors.textSecondary, marginBottom: Spacing.lg },
+  errorBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg },
+  errorBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+
+  // Header
+  header: { backgroundColor: Colors.primary, paddingBottom: Spacing.xl },
+  backBtn: {
+    position: 'absolute', top: 12, left: Spacing.lg, zIndex: 10,
+    width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20,
+  },
+  backArrow: { fontSize: 28, color: Colors.white, lineHeight: 32 },
+  headerBody: { alignItems: 'center', paddingTop: 56, paddingHorizontal: Spacing.xl },
+  iconCircle: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+  },
+  iconText: { fontSize: 36 },
+  equipName: { fontSize: 20, fontWeight: '800', color: Colors.white, textAlign: 'center' },
+  equipCode: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontFamily: 'monospace' },
+  statusBadge: { marginTop: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: 4, borderRadius: BorderRadius.full },
+  statusBadgeText: { fontSize: 12, fontWeight: '700' },
+  locationText: { marginTop: Spacing.sm, fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+
+  // Tab bar
+  tabBarWrap: { backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  tabBar: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
+  tab: {
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full, backgroundColor: Colors.background,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  tabActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  tabText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  tabTextActive: { color: Colors.white },
+
+  body: { padding: Spacing.lg, gap: Spacing.md },
+
+  // Info tab
+  section: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
+  },
+  infoRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  infoLabel: { fontSize: 13, color: Colors.textMuted },
+  infoValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, textAlign: 'right', maxWidth: '55%' },
+
+  notesCard: {
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
+    padding: Spacing.base, borderWidth: 1, borderColor: Colors.primary + '30',
+  },
+  notesTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
+  notesText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 22 },
+
+  // Warranty tab
+  warrantyBanner: {
+    borderRadius: BorderRadius.xl, padding: Spacing.xl, alignItems: 'center', gap: Spacing.xs,
+  },
+  warrantyBannerIcon: { fontSize: 40 },
+  warrantyBannerStatus: { fontSize: 20, fontWeight: '800' },
+  warrantyDate: { fontSize: 13, color: Colors.textSecondary },
+  warrantyDays: { fontSize: 13, color: Colors.textSecondary },
+  warrantyNote: {
+    backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg, padding: Spacing.base,
+  },
+  warrantyNoteText: { fontSize: 13, color: Colors.success, lineHeight: 20 },
+
+  // Usage tab
+  usageCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  usageTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  usageBody: { fontSize: 14, color: Colors.textSecondary, lineHeight: 22 },
+  usageEmpty: { fontSize: 14, color: Colors.textMuted, fontStyle: 'italic' },
+  tipsCard: {
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.base,
+  },
+  tipsTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
+  tipItem: { fontSize: 14, color: Colors.textSecondary, lineHeight: 24 },
+
+  // History tab
+  historyTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  historyEmpty: { alignItems: 'center', paddingVertical: Spacing.xl },
+  historyEmptyIcon: { fontSize: 36, marginBottom: Spacing.sm },
+  historyEmptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center' },
+
+  historyCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm, marginBottom: Spacing.sm,
+  },
+  historyCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.sm },
+  historyTypeWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
+  },
+  historyTypeIcon: { fontSize: 18 },
+  historyDesc: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, lineHeight: 20 },
+  historyType: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  historyStatusChip: {
+    backgroundColor: Colors.successLight, paddingHorizontal: Spacing.sm,
+    paddingVertical: 2, borderRadius: BorderRadius.full,
+  },
+  historyStatusText: { fontSize: 10, fontWeight: '700', color: Colors.success },
+  historyCardMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider, paddingTop: Spacing.sm },
+  historyMetaItem: { fontSize: 12, color: Colors.textSecondary },
+
+  // QR Section
+  qrSection: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  qrSectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: 4 },
+  qrSectionHint: { fontSize: 12, color: Colors.textMuted, lineHeight: 18, marginBottom: Spacing.base },
+
+  qrBox: { alignItems: 'center', marginBottom: Spacing.base },
+  qrPattern: {
+    width: 120, height: 120, borderWidth: 2, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, padding: Spacing.sm,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: Spacing.sm, backgroundColor: Colors.background,
+  },
+  qrCornerBlock: {
+    width: 28, height: 28, borderWidth: 3, borderColor: Colors.primary,
+    borderRadius: 4,
+  },
+  qrCenter: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  qrCenterIcon: { fontSize: 28 },
+  qrCodeText: {
+    fontSize: 13, fontWeight: '700', color: Colors.textPrimary,
+    fontFamily: 'monospace', letterSpacing: 1,
+  },
+
+  qrActions: { flexDirection: 'row', gap: Spacing.sm },
+  qrScanBtn: {
+    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+    borderWidth: 1.5, borderColor: Colors.primary, alignItems: 'center',
+  },
+  qrScanBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
+  reportBtn: {
+    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.error, alignItems: 'center', ...Shadow.sm,
+  },
+  reportBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+});

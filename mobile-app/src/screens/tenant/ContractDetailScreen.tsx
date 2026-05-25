@@ -227,14 +227,14 @@ export const ContractDetailScreen: React.FC = () => {
             </TouchableOpacity>
           )}
 
-          {/* Yêu cầu chấm dứt */}
+          {/* Yêu cầu trả phòng — full checkout flow */}
           {canTerminate && (
             <TouchableOpacity
-              style={[styles.actionBtnOutline, { borderColor: Colors.error }]}
-              onPress={() => setShowTerminateModal(true)}
+              style={[styles.actionBtnOutline, { borderColor: '#DC2626' }]}
+              onPress={() => navigation.navigate('RequestCheckout', { contract })}
             >
-              <Text style={[styles.actionBtnOutlineText, { color: Colors.error }]}>
-                🚪 Yêu cầu chấm dứt hợp đồng
+              <Text style={[styles.actionBtnOutlineText, { color: '#DC2626' }]}>
+                🚪 Yêu cầu trả phòng
               </Text>
             </TouchableOpacity>
           )}

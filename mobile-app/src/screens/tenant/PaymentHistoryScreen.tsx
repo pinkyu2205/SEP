@@ -62,7 +62,11 @@ export const PaymentHistoryScreen: React.FC = () => {
     const status = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
 
     return (
-      <View style={styles.card}>
+      <TouchableOpacity
+        style={styles.card}
+        activeOpacity={0.75}
+        onPress={() => navigation.navigate('PaymentHistoryDetail', { transaction: item })}
+      >
         <View style={styles.cardTop}>
           <View style={[styles.methodIcon, { backgroundColor: Colors.primaryBg }]}>
             <Text style={{ fontSize: 22 }}>{method.emoji}</Text>
@@ -120,7 +124,11 @@ export const PaymentHistoryScreen: React.FC = () => {
             </Text>
           </View>
         )}
-      </View>
+
+        <View style={styles.detailFooter}>
+          <Text style={styles.detailLink}>Xem chi tiết →</Text>
+        </View>
+      </TouchableOpacity>
     );
   };
 
@@ -222,6 +230,9 @@ const styles = StyleSheet.create({
 
   rejectedNote: { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: Spacing.sm, marginTop: Spacing.sm },
   rejectedText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
+
+  detailFooter: { marginTop: Spacing.sm, alignItems: 'flex-end' },
+  detailLink: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 
   empty: { paddingTop: 60, alignItems: 'center' },
   emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },

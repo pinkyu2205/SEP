@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
 
@@ -57,6 +58,7 @@ const SectionHeader: React.FC<{ title: string }> = ({ title }) => (
 // ── Main ──────────────────────────────────────────────────
 export const ProfileScreen: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigation = useNavigation<any>();
   const [notifEnabled, setNotifEnabled] = useState(true);
   const roleCfg = ROLE_CONFIG[user?.role ?? 'tenant'];
 
@@ -155,6 +157,26 @@ export const ProfileScreen: React.FC = () => {
           <View style={styles.itemDivider} />
           <MenuItem icon="🔒" label="Đổi mật khẩu" onPress={handleChangePassword} />
         </View>
+
+        {/* ── Hợp đồng & Trả phòng (tenant only) ── */}
+        {user?.role === 'tenant' && (
+          <>
+            <SectionHeader title="Hợp đồng" />
+            <View style={styles.card}>
+              <MenuItem
+                icon="🚪"
+                label="Yêu cầu kết thúc hợp đồng"
+                onPress={() => navigation.navigate('RequestCheckout')}
+              />
+              <View style={styles.itemDivider} />
+              <MenuItem
+                icon="📍"
+                label="Tiến trình trả phòng"
+                onPress={() => navigation.navigate('CheckoutDetail')}
+              />
+            </View>
+          </>
+        )}
 
         {/* ── Hỗ trợ ── */}
         <SectionHeader title="Hỗ trợ" />

@@ -1,4 +1,66 @@
 import { useState, useEffect } from 'react';
+import { MaintenanceRequest, MaintenanceStatus } from '../types';
+
+// ===================== TENANT MAINTENANCE REQUESTS =====================
+const SEED_TENANT_REQUESTS: MaintenanceRequest[] = [
+  {
+    id: '1', ticketCode: 'TK-T-001', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    title: 'Vòi nước bồn rửa bị rỉ', description: 'Vòi nước bồn rửa mặt trong toilet bị rỉ nước liên tục, gây lãng phí nước.',
+    category: 'plumbing', priority: 'medium', status: 'pending', images: [],
+    timeline: [{ status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-28T09:00:00Z' }],
+    createdAt: '2026-04-28', updatedAt: '2026-04-28',
+  },
+  {
+    id: '2', ticketCode: 'TK-T-002', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    title: 'Ổ cắm điện bị cháy', description: 'Ổ cắm bên cạnh bàn học bị cháy, có mùi khét, không dùng được.',
+    category: 'electrical', priority: 'urgent', status: 'in_progress', images: [],
+    assignedTo: 'Thợ điện Nguyễn Quốc',
+    timeline: [
+      { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-25T08:00:00Z' },
+      { status: 'accepted', note: 'Quản lý đã tiếp nhận và phân công thợ', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-25T10:00:00Z' },
+      { status: 'in_progress', note: 'Thợ đang kiểm tra và sửa chữa', updatedBy: 'Thợ điện Nguyễn Quốc', updatedAt: '2026-04-27T14:00:00Z' },
+    ],
+    createdAt: '2026-04-25', updatedAt: '2026-04-27', estimatedCompletionDate: '2026-04-30',
+  },
+  {
+    id: '3', ticketCode: 'TK-T-003', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
+    title: 'Tủ quần áo bị hỏng bản lề', description: 'Bản lề cánh tủ trái bị gãy, không đóng được.',
+    category: 'furniture', priority: 'low', status: 'resolved', images: [], repairCost: 150000,
+    timeline: [
+      { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-20T09:00:00Z' },
+      { status: 'accepted', note: 'Đã tiếp nhận', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-20T11:00:00Z' },
+      { status: 'resolved', note: 'Đã thay bản lề mới, tủ đóng mở bình thường', updatedBy: 'Thợ mộc', updatedAt: '2026-04-22T16:00:00Z' },
+    ],
+    createdAt: '2026-04-20', updatedAt: '2026-04-22', resolvedAt: '2026-04-22',
+  },
+];
+
+const ACTIVE_STATUSES: MaintenanceStatus[] = ['pending', 'accepted', 'in_progress'];
+const HISTORY_STATUSES: MaintenanceStatus[] = ['resolved', 'cancelled'];
+
+let _tenantRequests: MaintenanceRequest[] = [...SEED_TENANT_REQUESTS];
+const _tenantListeners = new Set<() => void>();
+const _notifyTenant = () => _tenantListeners.forEach(fn => fn());
+
+export const tenantMaintenanceStore = {
+  getAll: () => _tenantRequests,
+  getActive: () => _tenantRequests.filter(r => ACTIVE_STATUSES.includes(r.status as MaintenanceStatus)),
+  getHistory: () => _tenantRequests.filter(r => HISTORY_STATUSES.includes(r.status as MaintenanceStatus)),
+  add: (req: MaintenanceRequest) => {
+    _tenantRequests = [req, ..._tenantRequests];
+    _notifyTenant();
+  },
+};
+
+export const useTenantRequests = () => {
+  const [requests, setRequests] = useState<MaintenanceRequest[]>(() => [..._tenantRequests]);
+  useEffect(() => {
+    const update = () => setRequests([..._tenantRequests]);
+    _tenantListeners.add(update);
+    return () => { _tenantListeners.delete(update); };
+  }, []);
+  return requests;
+};
 
 // ===================== TYPES =====================
 export type TicketStatus   = 'pending' | 'accepted' | 'in_progress' | 'resolved' | 'cancelled';

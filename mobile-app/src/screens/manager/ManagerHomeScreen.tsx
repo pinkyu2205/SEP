@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { useAuth } from '../../hooks';
 import {
@@ -39,6 +40,21 @@ const MOCK_STATS = {
   totalDebt: 12500000,
   unreadNotifications: 6,
 };
+
+// Overview card — system-wide aggregates (separate from MOCK_STATS room counts)
+const OV = {
+  totalBuildings:     MANAGED_PROPERTIES.length,
+  multiRoomTotal:     20,
+  multiRoomOccupied:  16,
+  wholeHouseTotal:    2,
+  wholeHouseOccupied: 2,
+  totalTenants:       18,
+  totalDebt:          12_500_000,
+  unpaidInvoices:     8,
+};
+const fmtM = (n: number) => `${(n / 1_000_000).toFixed(1)}tr`;
+const multiRate    = Math.round((OV.multiRoomOccupied  / OV.multiRoomTotal)  * 100);
+const wholeRate    = Math.round((OV.wholeHouseOccupied / OV.wholeHouseTotal) * 100);
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -91,69 +107,100 @@ export const ManagerHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* ── Hero Analytics Card ────────────────────────────────────── */}
-        {/*
-          Depth achieved through three layers:
-            1. Decorative circles (position:absolute, clipped by overflow:hidden)
-            2. A progress bar that uses the accent colour as a "glow fill"
-            3. A live status sentence that turns amber when issues exist
-        */}
-        <View style={s.hero}>
+        {/* ── Overview Card ─────────────────────────────────────────── */}
+        <View style={s.ovCard}>
 
-          {/* Background decoration — purely visual, no touch interception */}
-          <View style={s.heroDecor1} pointerEvents="none" />
-          <View style={s.heroDecor2} pointerEvents="none" />
-          <View style={s.heroDecor3} pointerEvents="none" />
-
-          {/* Label row */}
-          <Text style={s.heroLabel}>
-            TỔNG QUAN  ·  {MANAGED_PROPERTIES.length} toà  ·  {stats.totalRooms} phòng
-          </Text>
-
-          {/* Primary metric: occupancy % (dominant) + alert pill */}
-          <View style={s.heroMetricRow}>
-            <Text style={s.heroRate}>{occupancyRate}%</Text>
+          {/* Header row */}
+          <View style={s.ovCardHdr}>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={s.ovCardTitle}>Tổng quan hệ thống</Text>
+              <Text style={s.ovCardSub} numberOfLines={1}>
+                {OV.totalBuildings} tòa nhà • {OV.multiRoomTotal} phòng lẻ • {OV.wholeHouseTotal} nhà nguyên căn
+              </Text>
+            </View>
             {urgentTotal > 0 && (
-              <View style={s.heroAlertPill}>
-                <Text style={s.heroAlertPillText}>⚠ {urgentTotal} khẩn</Text>
+              <View style={s.ovCardBadge}>
+                <Text style={s.ovCardBadgeText}>⚠ {urgentTotal} việc</Text>
               </View>
             )}
           </View>
 
-          {/* Progress bar */}
-          <View style={s.heroProg}>
-            <View style={[s.heroProgFill, { width: `${occupancyRate}%` as any }]} />
+          {/* 3 KPI metrics — icon circle on left, value stack on right */}
+          <View style={s.ovKpiRow}>
+            {/* Tenant */}
+            <View style={s.ovKpiItem}>
+              <View style={[s.ovKpiIcon, { backgroundColor: Colors.primaryBg }]}>
+                <MaterialIcons name="perm-identity" size={22} color={Colors.primary} />
+              </View>
+              <View style={s.ovKpiTexts}>
+                <Text style={[s.ovKpiVal, { color: Colors.primary }]}>{OV.totalTenants}</Text>
+                <Text style={s.ovKpiLbl}>Khách thuê</Text>
+                <Text style={s.ovKpiNote}>Đang ở</Text>
+              </View>
+            </View>
+
+            <View style={s.ovKpiSep} />
+
+            {/* Debt */}
+            <View style={s.ovKpiItem}>
+              <View style={[s.ovKpiIcon, { backgroundColor: Colors.successLight }]}>
+                <MaterialIcons name="account-balance-wallet" size={22} color={Colors.success} />
+              </View>
+              <View style={s.ovKpiTexts}>
+                <Text style={[s.ovKpiVal, { color: Colors.success }]}>{fmtM(OV.totalDebt)}</Text>
+                <Text style={s.ovKpiLbl}>Cần thu</Text>
+                <Text style={s.ovKpiNote}>Công nợ quá hạn</Text>
+              </View>
+            </View>
+
+            <View style={s.ovKpiSep} />
+
+            {/* Invoices */}
+            <View style={s.ovKpiItem}>
+              <View style={[s.ovKpiIcon, { backgroundColor: Colors.warningLight }]}>
+                <MaterialIcons name="description" size={22} color={Colors.warning} />
+              </View>
+              <View style={s.ovKpiTexts}>
+                <Text style={[s.ovKpiVal, { color: Colors.warning }]}>{OV.unpaidInvoices}</Text>
+                <Text style={s.ovKpiLbl}>Hóa đơn</Text>
+                <Text style={s.ovKpiNote}>Chưa thanh toán</Text>
+              </View>
+            </View>
           </View>
 
-          {/* Meta + live status — in one row for compactness */}
-          <View style={s.heroMetaRow}>
-            <Text style={s.heroMeta}>{stats.occupied}/{stats.totalRooms} phòng đang thuê</Text>
-            <View style={[s.heroStatusDot, { backgroundColor: heroStatusColor }]} />
-            <Text style={[s.heroStatusText, { color: heroStatusColor }]}>{heroStatusText}</Text>
+          {/* Rental summary pills — icon circle + text + highlighted % */}
+          <View style={s.ovRentalRow}>
+            {/* Phòng lẻ */}
+            <View style={[s.ovRentalPill, { backgroundColor: Colors.primaryBg }]}>
+              <View style={[s.ovRentalIconWrap, { backgroundColor: Colors.primary + '20' }]}>
+                <MaterialIcons name="apartment" size={18} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.ovRentalLabel, { color: Colors.primary }]}>Phòng lẻ</Text>
+                <Text style={s.ovRentalValue}>
+                  {OV.multiRoomOccupied}/{OV.multiRoomTotal} đang thuê
+                  {'  '}
+                  <Text style={{ color: Colors.primary, fontWeight: '700' }}>{multiRate}%</Text>
+                </Text>
+              </View>
+            </View>
+
+            {/* Nhà nguyên căn */}
+            <View style={[s.ovRentalPill, { backgroundColor: Colors.successLight }]}>
+              <View style={[s.ovRentalIconWrap, { backgroundColor: Colors.success + '25' }]}>
+                <MaterialIcons name="home" size={18} color={Colors.success} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.ovRentalLabel, { color: Colors.success }]}>Nhà nguyên căn</Text>
+                <Text style={s.ovRentalValue}>
+                  {OV.wholeHouseOccupied}/{OV.wholeHouseTotal} đang thuê
+                  {'  '}
+                  <Text style={{ color: Colors.success, fontWeight: '700' }}>{wholeRate}%</Text>
+                </Text>
+              </View>
+            </View>
           </View>
 
-          {/* Hairline divider */}
-          <View style={s.heroDivider} />
-
-          {/* Secondary stats — clearly subordinate row */}
-          <View style={s.heroStatsRow}>
-            <View style={s.heroStatItem}>
-              <Text style={s.heroStatNum}>{stats.occupied}</Text>
-              <Text style={s.heroStatLbl}>Đang thuê</Text>
-            </View>
-            <View style={s.heroStatSep} />
-            <View style={s.heroStatItem}>
-              <Text style={[s.heroStatNum, { color: 'rgba(255,255,255,0.5)' }]}>{stats.available}</Text>
-              <Text style={s.heroStatLbl}>Phòng trống</Text>
-            </View>
-            <View style={s.heroStatSep} />
-            <View style={s.heroStatItem}>
-              <Text style={[s.heroStatNum, { color: '#FCD34D' }]}>
-                {(stats.totalDebt / 1_000_000).toFixed(1)}tr
-              </Text>
-              <Text style={s.heroStatLbl}>Công nợ</Text>
-            </View>
-          </View>
 
         </View>
 
@@ -359,80 +406,137 @@ const s = StyleSheet.create({
   },
   notifBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
 
-  // ── Hero Card ─────────────────────────────────────────────────────
-  hero: {
-    backgroundColor: Colors.primary,
+  // ── Overview Card ─────────────────────────────────────────────────
+  ovCard: {
+    backgroundColor: Colors.white,
     borderRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.base,
     paddingTop: 14,
-    paddingBottom: 13,
+    paddingBottom: 0,
     marginBottom: Spacing.lg,
-    overflow: 'hidden',   // clips the decorative circles
-    // Colour-matched shadow — avoids the generic grey smear
-    shadowColor: Colors.primaryDark,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-    elevation: 5,
+    shadowColor: '#1E2347',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    elevation: 3,
   },
-
-  // Decorative background circles — absolute, clipped, touch-transparent
-  heroDecor1: {
-    position: 'absolute', top: -45, right: -35,
-    width: 160, height: 160, borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+  ovCardHdr: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  heroDecor2: {
-    position: 'absolute', bottom: -20, right: 32,
-    width: 84, height: 84, borderRadius: 42,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+  ovCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 2,
   },
-  heroDecor3: {
-    position: 'absolute', top: 18, right: 80,
-    width: 46, height: 46, borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+  ovCardSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontWeight: '400',
   },
-
-  heroLabel: {
-    fontSize: 9, fontWeight: '600',
-    color: 'rgba(255,255,255,0.45)', letterSpacing: 0.6, marginBottom: 7,
-  },
-
-  heroMetricRow: {
-    flexDirection: 'row', alignItems: 'flex-end',
-    justifyContent: 'space-between', marginBottom: 8,
-  },
-  heroRate: { fontSize: 36, fontWeight: '900', color: Colors.white, lineHeight: 40 },
-
-  heroAlertPill: {
-    backgroundColor: 'rgba(239,68,68,0.85)',
+  ovCardBadge: {
+    backgroundColor: Colors.errorLight,
     borderRadius: BorderRadius.full,
-    paddingHorizontal: 9, paddingVertical: 4, marginBottom: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginTop: 1,
+    flexShrink: 0,
   },
-  heroAlertPillText: { fontSize: 10, fontWeight: '700', color: Colors.white },
-
-  heroProg: {
-    height: 4, backgroundColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 2, marginBottom: 7,
+  ovCardBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.error,
   },
-  heroProgFill: { height: 4, backgroundColor: Colors.accent, borderRadius: 2 },
 
-  // Meta + live status sentence on one compact row
-  heroMetaRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 6, marginBottom: 11, flexWrap: 'wrap',
+  // KPI row — horizontal: icon circle left, text stack right
+  ovKpiRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
+    marginBottom: 10,
   },
-  heroMeta: { fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: '400' },
-  heroStatusDot: { width: 5, height: 5, borderRadius: 2.5 },
-  heroStatusText: { fontSize: 10, fontWeight: '600' },
+  ovKpiItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  ovKpiIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  ovKpiTexts: {
+    flex: 1,
+  },
+  ovKpiSep: {
+    width: 1,
+    backgroundColor: Colors.divider,
+    marginVertical: 2,
+  },
+  ovKpiVal: {
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 22,
+  },
+  ovKpiLbl: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  ovKpiNote: {
+    fontSize: 9,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
 
-  heroDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.1)', marginBottom: 11 },
+  // Rental summary row
+  ovRentalRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  ovRentalPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  ovRentalIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  ovRentalLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  ovRentalValue: {
+    fontSize: 10,
+    fontWeight: '400',
+    color: Colors.textSecondary,
+    lineHeight: 13,
+  },
 
-  heroStatsRow: { flexDirection: 'row', alignItems: 'center' },
-  heroStatItem: { flex: 1, alignItems: 'center' },
-  heroStatSep:  { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.13)' },
-  heroStatNum:  { fontSize: 15, fontWeight: '700', color: Colors.white },
-  heroStatLbl:  { fontSize: 9, color: 'rgba(255,255,255,0.45)', fontWeight: '400', marginTop: 2 },
+  // Footer link
 
   // ── Section headers ───────────────────────────────────────────────
   sectionRow: {

@@ -38,6 +38,14 @@ import { PaymentHistoryScreen } from '../screens/tenant/PaymentHistoryScreen';
 import { TenantOnboardingScreen } from '../screens/tenant/TenantOnboardingScreen';
 import { TenantNotificationScreen } from '../screens/tenant/TenantNotificationScreen';
 import { ScanScreen } from '../screens/tenant/ScanScreen';
+import { InvoiceHistoryScreen } from '../screens/tenant/InvoiceHistoryScreen';
+import { MaintenanceHistoryScreen } from '../screens/tenant/MaintenanceHistoryScreen';
+import { InvoiceDetailScreen } from '../screens/tenant/InvoiceDetailScreen';
+import { PaymentHistoryDetailScreen } from '../screens/tenant/PaymentHistoryDetailScreen';
+import { RoomEquipmentScreen } from '../screens/tenant/RoomEquipmentScreen';
+import { EquipmentDetailScreen } from '../screens/tenant/EquipmentDetailScreen';
+import { RequestCheckoutScreen } from '../screens/tenant/RequestCheckoutScreen';
+import { CheckoutDetailScreen } from '../screens/tenant/CheckoutDetailScreen';
 
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
@@ -143,6 +151,46 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen
               name="Profile"
               component={ProfileScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="InvoiceHistory"
+              component={InvoiceHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="MaintenanceHistory"
+              component={MaintenanceHistoryScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="InvoiceDetail"
+              component={InvoiceDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="PaymentHistoryDetail"
+              component={PaymentHistoryDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="RoomEquipment"
+              component={RoomEquipmentScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="EquipmentDetail"
+              component={EquipmentDetailScreen}
+              options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="RequestCheckout"
+              component={RequestCheckoutScreen}
+              options={{ animation: 'slide_from_bottom' }}
+            />
+            <Stack.Screen
+              name="CheckoutDetail"
+              component={CheckoutDetailScreen}
               options={{ animation: 'slide_from_right' }}
             />
           </Stack.Group>

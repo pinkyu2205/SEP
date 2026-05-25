@@ -4,10 +4,12 @@ import {
   Image, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { MaintenanceCategory, MaintenancePriority } from '../../types';
+import { MaintenanceCategory, MaintenancePriority, Equipment } from '../../types';
+import { formatDate } from '../../utils';
+import { tenantMaintenanceStore } from '../../store/maintenanceStore';
 
 const CATEGORIES: { key: MaintenanceCategory; label: string; emoji: string }[] = [
   { key: 'electrical', label: 'Điện', emoji: '⚡' },
@@ -24,48 +26,41 @@ const PRIORITIES: { key: MaintenancePriority; label: string; color: string; desc
   { key: 'urgent', label: 'Khẩn cấp', color: '#7C3AED', desc: 'Nguy hiểm, cần xử lý ngay' },
 ];
 
+const mapEquipmentCategory = (eqCategory: string): MaintenanceCategory => {
+  const lower = eqCategory.toLowerCase();
+  if (lower.includes('điện') && !lower.includes('lạnh')) return 'electrical';
+  if (lower.includes('nước') || lower.includes('ống')) return 'plumbing';
+  if (lower.includes('nội thất') || lower.includes('furniture')) return 'furniture';
+  return 'appliance';
+};
+
 export const MaintenanceCreateScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const equipment: Equipment | undefined = route.params?.equipment;
 
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(equipment?.name ?? '');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<MaintenanceCategory | null>(null);
+  const [category, setCategory] = useState<MaintenanceCategory | null>(
+    equipment ? mapEquipmentCategory(equipment.category) : null
+  );
   const [priority, setPriority] = useState<MaintenancePriority>('medium');
   const [images, setImages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const pickImage = async () => {
-    if (images.length >= 5) {
-      Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: false,
-      quality: 0.6,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setImages(prev => [...prev, result.assets[0].uri]);
-    }
+    if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: false, quality: 0.6 });
+    if (!result.canceled && result.assets[0]) setImages(prev => [...prev, result.assets[0].uri]);
   };
 
   const takePhoto = async () => {
-    if (images.length >= 5) {
-      Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 0.6,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setImages(prev => [...prev, result.assets[0].uri]);
-    }
+    if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
+    if (!result.canceled && result.assets[0]) setImages(prev => [...prev, result.assets[0].uri]);
   };
 
-  const removeImage = (idx: number) => {
-    setImages(prev => prev.filter((_, i) => i !== idx));
-  };
+  const removeImage = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async () => {
     if (!title.trim()) { Alert.alert('Lỗi', 'Vui lòng nhập tiêu đề sự cố.'); return; }
@@ -73,13 +68,47 @@ export const MaintenanceCreateScreen: React.FC = () => {
     if (!category) { Alert.alert('Lỗi', 'Vui lòng chọn loại sự cố.'); return; }
 
     setSubmitting(true);
-    // Simulate API call
     await new Promise(r => setTimeout(r, 1200));
     setSubmitting(false);
 
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const ticketNum = String(Math.floor(Math.random() * 900) + 100);
+
+    tenantMaintenanceStore.add({
+      id: `req-${Date.now()}`,
+      ticketCode: `TK-T-${ticketNum}`,
+      roomId: equipment?.roomId ?? 'r1',
+      roomName: equipment?.roomName ?? 'Phòng 201',
+      propertyId: equipment?.houseId,
+      propertyName: equipment?.houseName,
+      tenantId: 't1',
+      tenantName: 'Nguyễn Văn A',
+      title: title.trim(),
+      description: description.trim(),
+      category: category!,
+      priority,
+      status: 'pending',
+      images,
+      equipmentId: equipment?.id,
+      equipmentName: equipment?.name,
+      timeline: [{
+        status: 'pending',
+        note: equipment
+          ? `Yêu cầu tạo qua QR thiết bị: ${equipment.name} (${equipment.assetId})`
+          : 'Yêu cầu đã được tạo',
+        updatedBy: 'Nguyễn Văn A',
+        updatedAt: now.toISOString(),
+      }],
+      createdAt: dateStr,
+      updatedAt: dateStr,
+    });
+
     Alert.alert(
-      'Gửi yêu cầu thành công! 🔧',
-      'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý sẽ tiếp nhận và phản hồi sớm nhất.',
+      '🔧 Gửi yêu cầu thành công!',
+      equipment
+        ? `Yêu cầu sửa chữa cho thiết bị "${equipment.name}" đã được gửi. Quản lý sẽ được thông báo và phân công thợ sớm nhất.`
+        : 'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý sẽ tiếp nhận và phản hồi sớm nhất.',
       [{ text: 'OK', onPress: () => navigation.goBack() }]
     );
   };
@@ -88,16 +117,72 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>← Hủy</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Yêu cầu sửa chữa</Text>
+        <Text style={styles.headerTitle}>
+          {equipment ? 'Báo hỏng thiết bị' : 'Yêu cầu sửa chữa'}
+        </Text>
         <View style={{ width: 60 }} />
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Equipment info card (QR flow only) */}
+        {equipment && (
+          <View style={styles.equipmentCard}>
+            <View style={styles.equipmentCardHeader}>
+              <View style={styles.equipmentIconWrap}>
+                <Text style={{ fontSize: 22 }}>⚙️</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.equipmentName}>{equipment.name}</Text>
+                <Text style={styles.equipmentMeta}>{equipment.assetId} · {equipment.roomName}</Text>
+                {equipment.houseName && (
+                  <Text style={styles.equipmentMeta}>🏠 {equipment.houseName}</Text>
+                )}
+              </View>
+              <View style={styles.qrBadge}>
+                <Text style={styles.qrBadgeText}>📷 QR</Text>
+              </View>
+            </View>
+
+            <View style={styles.equipmentCardDivider} />
+
+            <View style={styles.equipmentInfoRow}>
+              {equipment.installationDate && (
+                <View style={styles.equipmentInfoItem}>
+                  <Text style={styles.equipmentInfoLabel}>Ngày lắp đặt</Text>
+                  <Text style={styles.equipmentInfoValue}>{formatDate(equipment.installationDate)}</Text>
+                </View>
+              )}
+              {equipment.lastMaintenanceAt && (
+                <View style={styles.equipmentInfoItem}>
+                  <Text style={styles.equipmentInfoLabel}>Bảo trì gần nhất</Text>
+                  <Text style={styles.equipmentInfoValue}>{formatDate(equipment.lastMaintenanceAt)}</Text>
+                </View>
+              )}
+              {!equipment.lastMaintenanceAt && (
+                <View style={styles.equipmentInfoItem}>
+                  <Text style={styles.equipmentInfoLabel}>Bảo trì gần nhất</Text>
+                  <Text style={[styles.equipmentInfoValue, { color: Colors.textMuted }]}>Chưa có</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Last maintenance note */}
+            {equipment.maintenanceHistory && equipment.maintenanceHistory.length > 0 && (
+              <View style={styles.lastRepairNote}>
+                <Text style={styles.lastRepairLabel}>Lần sửa trước:</Text>
+                <Text style={styles.lastRepairText} numberOfLines={2}>
+                  {equipment.maintenanceHistory[0].description}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Tiêu đề */}
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Tiêu đề sự cố <Text style={styles.required}>*</Text></Text>
@@ -158,7 +243,9 @@ export const MaintenanceCreateScreen: React.FC = () => {
           <Text style={styles.fieldLabel}>Mô tả chi tiết <Text style={styles.required}>*</Text></Text>
           <TextInput
             style={[styles.input, styles.textArea]}
-            placeholder="Mô tả rõ tình trạng sự cố: vị trí, triệu chứng, thời điểm phát sinh..."
+            placeholder={equipment
+              ? `Mô tả sự cố của ${equipment.name}: triệu chứng, thời điểm phát sinh, mức độ ảnh hưởng...`
+              : 'Mô tả rõ tình trạng sự cố: vị trí, triệu chứng, thời điểm phát sinh...'}
             multiline
             numberOfLines={5}
             textAlignVertical="top"
@@ -200,11 +287,12 @@ export const MaintenanceCreateScreen: React.FC = () => {
         {/* Lưu ý */}
         <View style={styles.noticeCard}>
           <Text style={styles.noticeText}>
-            💡 Sau khi gửi, quản lý sẽ tiếp nhận và phân công thợ trong vòng 24-48 giờ làm việc. Bạn sẽ nhận thông báo khi có cập nhật.
+            {equipment
+              ? `💡 Thông tin thiết bị "${equipment.name}" sẽ được gửi kèm yêu cầu giúp quản lý xử lý nhanh hơn.`
+              : '💡 Sau khi gửi, quản lý sẽ tiếp nhận và phân công thợ trong vòng 24-48 giờ làm việc. Bạn sẽ nhận thông báo khi có cập nhật.'}
           </Text>
         </View>
 
-        {/* Nút gửi */}
         <TouchableOpacity
           style={[styles.submitBtn, (!isValid || submitting) && styles.submitBtnDisabled]}
           onPress={handleSubmit}
@@ -231,6 +319,38 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   scroll: { flex: 1 },
+
+  // Equipment card (QR pre-fill)
+  equipmentCard: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.lg,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    borderWidth: 1.5, borderColor: Colors.primary + '40',
+    padding: Spacing.base, ...Shadow.sm,
+  },
+  equipmentCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md },
+  equipmentIconWrap: {
+    width: 44, height: 44, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
+  },
+  equipmentName: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  equipmentMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  qrBadge: {
+    backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm,
+    paddingVertical: 3, borderRadius: BorderRadius.full,
+  },
+  qrBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  equipmentCardDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
+  equipmentInfoRow: { flexDirection: 'row', gap: Spacing.lg },
+  equipmentInfoItem: { flex: 1 },
+  equipmentInfoLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
+  equipmentInfoValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  lastRepairNote: {
+    marginTop: Spacing.sm, backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md, padding: Spacing.sm,
+  },
+  lastRepairLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted, marginBottom: 2 },
+  lastRepairText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+
   field: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg },
   fieldLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   required: { color: Colors.error },
