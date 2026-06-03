@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
@@ -7,8 +7,8 @@ import {
   Building2,
   CreditCard,
   FileText,
-  Home,
   LogOut,
+  MapPin,
   Menu,
   Search,
   Settings,
@@ -27,6 +27,7 @@ const navItems = [
   { path: '/super-admin/hosts', label: 'Host/Admin System', icon: ShieldCheck, badge: PLATFORM_HOSTS.filter(h => h.status === 'pending_approval').length },
   { path: '/super-admin/buildings', label: 'Buildings & Rooms', icon: Building2 },
   { path: '/super-admin/billing', label: 'Billing & Payments', icon: CreditCard },
+  { path: '/super-admin/zones', label: 'Quản lý Khu vực', icon: MapPin },
   { path: '/super-admin/contracts', label: 'Contracts', icon: FileText },
   { path: '/super-admin/maintenance', label: 'Maintenance & Equipment', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(m => m.status !== 'resolved').length },
   { path: '/super-admin/settings', label: 'System Configuration', icon: Settings },

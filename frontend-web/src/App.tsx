@@ -22,6 +22,7 @@ import { MaintenanceEquipmentMonitoring } from './pages/super-admin/MaintenanceE
 import { SuperAdminOverview } from './pages/super-admin/SuperAdminOverview';
 import { SystemConfiguration } from './pages/super-admin/SystemConfiguration';
 import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
+import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TenantList } from './pages/tenants/TenantList';
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
             <Route path="/super-admin/buildings" element={<BuildingRoomMonitoring />} />
             <Route path="/super-admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/super-admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/super-admin/zones" element={<ZoneManagement />} />
             <Route path="/super-admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/super-admin/settings" element={<SystemConfiguration />} />
             <Route path="/super-admin/security" element={<ActivityLogsSecurity />} />

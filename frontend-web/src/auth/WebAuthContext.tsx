@@ -1,18 +1,19 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import api from '../services/api';
 
 export type WebRole = 'super_admin' | 'host';
 
 export interface WebAuthUser {
   id: string;
   fullName: string;
-  email: string;
+  username: string;
   role: WebRole;
 }
 
 interface WebAuthContextValue {
   user: WebAuthUser | null;
-  login: (email: string, password: string) => Promise<WebAuthUser>;
+  login: (username: string, password: string) => Promise<WebAuthUser>;
   logout: () => void;
 }
 
@@ -24,15 +25,15 @@ const DEMO_ACCOUNTS: Array<WebAuthUser & { password: string }> = [
   {
     id: 'web-super-admin',
     fullName: 'Super Admin',
-    email: 'superadmin@gmail.com',
+    username: 'superadmin',
     password: '123456',
     role: 'super_admin',
   },
   {
     id: 'web-host',
     fullName: 'UrbanNest Host',
-    email: 'host@gmail.com',
-    password: '123456',
+    username: 'hoangge',
+    password: 'mysecretpassword',
     role: 'host',
   },
 ];
@@ -54,28 +55,66 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
 
   const value = useMemo<WebAuthContextValue>(() => ({
     user,
-    login: async (email: string, password: string) => {
-      const account = DEMO_ACCOUNTS.find(item =>
-        item.email.toLowerCase() === email.trim().toLowerCase() && item.password === password
-      );
+    login: async (username: string, password: string) => {
+      try {
+        // 1. Thử đăng nhập thông qua Backend API thực tế
+        const response: any = await api.post('/api/v1/auth/login', {
+          username: username.trim(),
+          password: password,
+        });
 
-      if (!account) {
-        throw new Error('Email hoặc mật khẩu không đúng.');
+        if (response && response.token) {
+          // Lưu JWT Token thực tế vào localStorage để API interceptor tự động đính kèm Bearer token
+          localStorage.setItem('access_token', response.token);
+
+          // Ánh xạ Role từ Backend (ROLE_ADMIN, ROLE_MANAGER...) sang Frontend WebRole
+          const backendRole = response.role; // e.g., 'ROLE_ADMIN'
+          const webRole: WebRole = backendRole === 'ROLE_ADMIN' ? 'super_admin' : 'host';
+
+          const nextUser: WebAuthUser = {
+            id: response.username || username,
+            fullName: response.username || 'User',
+            username: username,
+            role: webRole,
+          };
+
+          storage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+          setUser(nextUser);
+          return nextUser;
+        }
+        throw new Error('Không nhận được JWT Token từ máy chủ.');
+      } catch (backendError: any) {
+        console.warn('Đăng nhập qua Backend thất bại, thử kiểm tra tài khoản Demo...', backendError);
+
+        // 2. Fallback: Nếu backend lỗi hoặc không chạy, kiểm tra tài khoản DEMO để dev offline mượt mà
+        const account = DEMO_ACCOUNTS.find(item =>
+          item.username.toLowerCase() === username.trim().toLowerCase() && item.password === password
+        );
+
+        if (!account) {
+          // Nếu cả hai đều sai, ném lỗi thực tế
+          const errorMsg = backendError.response?.data?.message || 'Tên đăng nhập hoặc mật khẩu không đúng.';
+          throw new Error(errorMsg);
+        }
+
+        // Tạo JWT Token giả để pass các kiểm thử cục bộ nếu xài demo account
+        localStorage.setItem('access_token', 'mock-jwt-token-demo');
+
+        const nextUser: WebAuthUser = {
+          id: account.id,
+          fullName: account.fullName,
+          username: account.username,
+          role: account.role,
+        };
+
+        storage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+        setUser(nextUser);
+        return nextUser;
       }
-
-      const nextUser: WebAuthUser = {
-        id: account.id,
-        fullName: account.fullName,
-        email: account.email,
-        role: account.role,
-      };
-
-      storage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
-      setUser(nextUser);
-      return nextUser;
     },
     logout: () => {
       storage.removeItem(STORAGE_KEY);
+      localStorage.removeItem('access_token'); // Xóa JWT Token khi đăng xuất
       setUser(null);
     },
   }), [user]);
