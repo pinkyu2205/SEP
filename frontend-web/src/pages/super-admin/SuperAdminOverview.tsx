@@ -3,12 +3,10 @@ import {
   AlertTriangle,
   Building2,
   CreditCard,
-  DoorOpen,
   Download,
   ServerCog,
   ShieldCheck,
   TrendingUp,
-  UserCog,
   Users,
   Wrench,
 } from 'lucide-react';
@@ -44,9 +42,8 @@ import { KpiCard, formatShortVnd, formatVnd, moneyTooltip } from './shared';
 
 export const SuperAdminOverview = () => {
   const allRooms = PLATFORM_BUILDINGS.reduce((sum, building) => sum + building.totalRooms, 0);
-  const occupiedRooms = PLATFORM_BUILDINGS.reduce((sum, building) => sum + building.occupiedRooms, 0);
   const maintenanceRooms = PLATFORM_BUILDINGS.reduce((sum, building) => sum + building.maintenanceRooms, 0);
-  const occupancyRate = allRooms > 0 ? Math.round((occupiedRooms / allRooms) * 100) : 0;
+
   const currentRevenue = PLATFORM_REVENUE_CHART[PLATFORM_REVENUE_CHART.length - 1].revenue;
   const unpaidBills = PLATFORM_BILLS.filter(bill => bill.status !== 'paid');
   const openMaintenance = PLATFORM_MAINTENANCE_REQUESTS.filter(req => req.status !== 'resolved');
@@ -87,12 +84,9 @@ export const SuperAdminOverview = () => {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-          <KpiCard title="Total Hosts" value={String(PLATFORM_HOSTS.length)} icon={ShieldCheck} color="bg-cyan-50 text-cyan-700" helper={`${PLATFORM_HOSTS.filter(h => h.status === 'pending_approval').length} chờ duyệt`} />
-          <KpiCard title="Total Managers" value="38" icon={UserCog} color="bg-indigo-50 text-indigo-700" helper="Toàn bộ Host" />
-          <KpiCard title="Total Tenants" value="135" icon={Users} color="bg-emerald-50 text-emerald-700" helper="Bao gồm tenant app" />
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard title="Total Hosts" value={String(PLATFORM_HOSTS.length)} icon={ShieldCheck} color="bg-cyan-50 text-cyan-700" helper={`${PLATFORM_HOSTS.filter(h => h.status === 'active').length} active`} />
           <KpiCard title="Total Buildings" value={String(PLATFORM_BUILDINGS.length)} icon={Building2} color="bg-blue-50 text-blue-700" helper={`${allRooms} rooms`} />
-          <KpiCard title="Occupancy Rate" value={`${occupancyRate}%`} icon={DoorOpen} color="bg-amber-50 text-amber-700" helper={`${occupiedRooms}/${allRooms} phòng đang thuê`} />
           <KpiCard title="Total Revenue" value={formatShortVnd(currentRevenue)} icon={TrendingUp} color="bg-emerald-50 text-emerald-700" helper="Tháng 05/2026" />
           <KpiCard title="Unpaid Bills" value={String(unpaidBills.length)} icon={CreditCard} color="bg-rose-50 text-rose-700" helper={formatVnd(unpaidBills.reduce((sum, bill) => sum + bill.amount, 0))} />
           <KpiCard title="Maintenance Requests" value={String(openMaintenance.length)} icon={Wrench} color="bg-orange-50 text-orange-700" helper={`${maintenanceRooms} phòng bảo trì`} />

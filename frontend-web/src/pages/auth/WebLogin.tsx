@@ -7,7 +7,7 @@ export const WebLogin = () => {
   const { login } = useWebAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('superadmin@gmail.com');
+  const [username, setUsername] = useState('superadmin');
   const [password, setPassword] = useState('123456');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -19,7 +19,7 @@ export const WebLogin = () => {
     setLoading(true);
 
     try {
-      const user = await login(email, password);
+      const user = await login(username, password);
       const from = (location.state as { from?: string } | null)?.from;
       const defaultPath = user.role === 'super_admin' ? '/super-admin' : '/';
       const validFrom = from && from !== '/login' && (
@@ -35,11 +35,11 @@ export const WebLogin = () => {
 
   const fillDemo = (role: 'super_admin' | 'host') => {
     if (role === 'super_admin') {
-      setEmail('superadmin@gmail.com');
+      setUsername('superadmin');
       setPassword('123456');
     } else {
-      setEmail('host@gmail.com');
-      setPassword('123456');
+      setUsername('hoangge');
+      setPassword('mysecretpassword');
     }
     setError('');
   };
@@ -89,7 +89,7 @@ export const WebLogin = () => {
               className="rounded-2xl border border-cyan-200 bg-cyan-50 p-3 text-left hover:bg-cyan-100"
             >
               <p className="text-sm font-black text-cyan-900">Super Admin</p>
-              <p className="mt-1 text-xs text-cyan-700">superadmin@gmail.com</p>
+              <p className="mt-1 text-xs text-cyan-700">superadmin</p>
             </button>
             <button
               type="button"
@@ -97,20 +97,20 @@ export const WebLogin = () => {
               className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-left hover:bg-indigo-100"
             >
               <p className="text-sm font-black text-indigo-900">Host</p>
-              <p className="mt-1 text-xs text-indigo-700">host@gmail.com</p>
+              <p className="mt-1 text-xs text-indigo-700">hoangge</p>
             </button>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Email</span>
+              <span className="mb-1.5 block text-sm font-bold text-slate-700">Tên đăng nhập</span>
               <input
-                value={email}
-                onChange={event => setEmail(event.target.value)}
+                value={username}
+                onChange={event => setUsername(event.target.value)}
                 className="input-field"
-                placeholder="you@company.vn"
-                type="email"
-                autoComplete="email"
+                placeholder="Nhập tên đăng nhập"
+                type="text"
+                autoComplete="username"
               />
             </label>
 
@@ -155,8 +155,8 @@ export const WebLogin = () => {
 
           <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs text-slate-600">
             <p className="font-bold text-slate-800">Tài khoản demo</p>
-            <p className="mt-1">Super Admin: superadmin@gmail.com / 123456</p>
-            <p>Host: host@gmail.com / 123456</p>
+            <p className="mt-1">Super Admin: superadmin / 123456</p>
+            <p>Host: hoangge / mysecretpassword</p>
           </div>
         </div>
       </section>
