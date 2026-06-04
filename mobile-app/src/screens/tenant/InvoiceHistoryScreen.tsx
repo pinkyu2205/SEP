@@ -4,30 +4,41 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { formatCurrency, formatDate } from '../../utils';
-import { useBills, SharedBill } from '../../store/billsStore';
+import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
+
+const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
+  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+};
 
 export const InvoiceHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const invoices = useBills('Nguyễn Văn A');
   const paidInvoices = invoices.filter(i => i.status === 'paid');
 
-  const renderItem = ({ item }: { item: SharedBill }) => (
+  const renderItem = ({ item }: { item: SharedBill }) => {
+    const tc = TYPE_CFG[item.invoiceType];
+    return (
     <TouchableOpacity
       style={styles.card}
       activeOpacity={0.75}
       onPress={() => navigation.navigate('InvoiceDetail', { invoice: item })}
     >
       <View style={styles.cardHeader}>
-        <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[styles.typeBadge, { backgroundColor: tc.bg }]}>
+            <Text style={[styles.typeBadgeText, { color: tc.color }]}>{tc.icon} {tc.label}</Text>
+          </View>
           <Text style={styles.invoiceMonth}>
-            Tháng {String(item.month).padStart(2, '0')}/{item.year}
+            T{String(item.month).padStart(2, '0')}/{item.year}
           </Text>
-          <Text style={styles.invoiceRoom}>{item.roomName}</Text>
         </View>
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>Đã thanh toán</Text>
         </View>
       </View>
+      <Text style={styles.invoiceRoom}>{item.roomName} · {item.propertyName}</Text>
 
       <View style={styles.divider} />
 
@@ -58,7 +69,7 @@ export const InvoiceHistoryScreen: React.FC = () => {
         <Text style={styles.detailLink}>Xem chi tiết →</Text>
       </View>
     </TouchableOpacity>
-  );
+  );};
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -116,8 +127,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  invoiceMonth: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  invoiceRoom: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  typeBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+  invoiceMonth: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
+  invoiceRoom: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.sm },
   statusBadge: {
     backgroundColor: Colors.successLight,
     paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2,

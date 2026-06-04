@@ -203,7 +203,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
               <Text style={styles.helpText}>
-                ❓ Cần hỗ trợ gấp? Liên hệ quản lý qua tab Nhắn tin.
+                ❓ Cần hỗ trợ gấp? Liên hệ quản lý.
               </Text>
             </View>
           </View>

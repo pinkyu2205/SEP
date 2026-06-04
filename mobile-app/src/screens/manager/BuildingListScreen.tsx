@@ -92,7 +92,7 @@ export const BuildingListScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={handleBack}>

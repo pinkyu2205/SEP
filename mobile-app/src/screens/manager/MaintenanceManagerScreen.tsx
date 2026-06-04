@@ -84,7 +84,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
   }, [tickets]);
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Header ───────────────────────────────────────────────── */}

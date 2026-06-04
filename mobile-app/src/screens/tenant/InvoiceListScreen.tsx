@@ -7,10 +7,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { useBills, billsStore, SharedBill, BillStatus } from '../../store/billsStore';
+import { useBills, billsStore, SharedBill, BillStatus, InvoiceType } from '../../store/billsStore';
 
 type Invoice = SharedBill;
 type InvoiceStatus = BillStatus;
+type TypeFilter = 'all' | InvoiceType;
+type StatusFilter = 'all' | 'unpaid' | InvoiceStatus;
 
 // VietQR — MB Bank
 const VIETQR_BANK_BIN = '970422';
@@ -20,34 +22,57 @@ const VIETQR_ACCOUNT_NAME = 'ROOMRENT';
 const buildVietQRUrl = (amount: number, content: string): string =>
   `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(VIETQR_ACCOUNT_NAME)}`;
 
-
 const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
-  pending: { label: 'Chờ thanh toán', color: Colors.warning, bg: Colors.warningLight },
-  paid: { label: 'Đã thanh toán', color: Colors.success, bg: Colors.successLight },
-  overdue: { label: 'Quá hạn', color: Colors.error, bg: Colors.errorLight },
-  partial: { label: 'Thanh toán 1 phần', color: Colors.info, bg: Colors.infoLight },
+  pending:   { label: 'Chờ thanh toán',    color: Colors.warning, bg: Colors.warningLight },
+  paid:      { label: 'Đã thanh toán',     color: Colors.success, bg: Colors.successLight },
+  overdue:   { label: 'Quá hạn',           color: Colors.error,   bg: Colors.errorLight },
+  partial:   { label: 'Thanh toán 1 phần', color: Colors.info,    bg: Colors.infoLight },
+  cancelled: { label: 'Đã huỷ',           color: Colors.textMuted, bg: Colors.background },
 };
 
-const FILTER_TABS: { key: 'all' | InvoiceStatus; label: string }[] = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'pending', label: 'Chờ TT' },
+const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
+  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+};
+
+const TYPE_FILTER_TABS: { key: TypeFilter; label: string }[] = [
+  { key: 'all',         label: 'Tất cả' },
+  { key: 'rent',        label: '🏠 Phòng' },
+  { key: 'electricity', label: '⚡ Điện' },
+  { key: 'water',       label: '💧 Nước' },
+];
+
+const STATUS_FILTER_TABS: { key: StatusFilter; label: string }[] = [
+  { key: 'unpaid',  label: 'Chưa TT' },
   { key: 'overdue', label: 'Quá hạn' },
+  { key: 'paid',    label: 'Đã TT' },
+  { key: 'all',     label: 'Tất cả' },
 ];
 
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const invoices = useBills('Nguyễn Văn A');
-  const [filter, setFilter] = useState<'all' | InvoiceStatus>('all');
+  const [typeFilter, setTypeFilter]     = useState<TypeFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unpaid');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing]   = useState(false);
 
-  const filtered = filter === 'all'
-    ? invoices.filter(i => i.status !== 'paid')
-    : invoices.filter(i => i.status === filter);
+  const filtered = invoices.filter(i => {
+    if (typeFilter !== 'all' && i.invoiceType !== typeFilter) return false;
+    if (statusFilter === 'unpaid') return i.status === 'pending' || i.status === 'overdue';
+    if (statusFilter === 'all') return true;
+    return i.status === statusFilter;
+  });
+
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
   const pendingTotal = invoices
     .filter(i => i.status === 'pending' || i.status === 'overdue')
     .reduce((sum, i) => sum + i.grandTotal, 0);
+  const paidCount = invoices.filter(i => i.status === 'paid').length;
+
+  const unpaidByType = (type: InvoiceType) =>
+    invoices.filter(i => i.invoiceType === type && (i.status === 'pending' || i.status === 'overdue'));
 
   const handlePay = (invoice: Invoice) => {
     setPayingInvoice(invoice);
@@ -68,8 +93,10 @@ export const InvoiceListScreen: React.FC = () => {
   };
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
-    const cfg = STATUS_CONFIG[item.status];
+    const cfg     = STATUS_CONFIG[item.status];
+    const typeCfg = TYPE_CONFIG[item.invoiceType];
     const isOverdue = item.status === 'overdue';
+    const isPaid    = item.status === 'paid';
     const daysOverdue = isOverdue ? Math.abs(getDaysUntil(item.dueDate)) : 0;
 
     return (
@@ -80,73 +107,62 @@ export const InvoiceListScreen: React.FC = () => {
       >
         {isOverdue && <View style={styles.overdueStripe} />}
 
-        {/* Header */}
+        {/* Header: type badge + month + status */}
         <View style={styles.cardHeader}>
-          <View>
-            <Text style={styles.invoiceMonth}>Tháng {String(item.month).padStart(2, '0')}/{item.year}</Text>
-            <Text style={styles.invoiceRoom}>{item.roomName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={[styles.typeBadge, { backgroundColor: typeCfg.bg }]}>
+              <Text style={[styles.typeBadgeText, { color: typeCfg.color }]}>
+                {typeCfg.icon} {typeCfg.label}
+              </Text>
+            </View>
+            <Text style={styles.invoiceMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
             <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
           </View>
         </View>
 
-        {/* Items */}
-        <View style={styles.divider} />
-        {item.items.map((li, i) => (
-          <View key={i} style={styles.lineRow}>
-            <Text style={styles.lineLabel}>{li.label}</Text>
-            <Text style={styles.lineVal}>{formatCurrency(li.amount)}</Text>
-          </View>
-        ))}
+        {/* Room info */}
+        <Text style={styles.invoiceRoom}>{item.roomName} · {item.propertyName}</Text>
 
-        {/* Phí trễ */}
-        {(item.lateFee ?? 0) > 0 && (
-          <View style={styles.lineRow}>
-            <Text style={[styles.lineLabel, { color: Colors.error }]}>⚠️ Phí trả chậm</Text>
-            <Text style={[styles.lineVal, { color: Colors.error }]}>+{formatCurrency(item.lateFee)}</Text>
-          </View>
+        {/* Utility detail line */}
+        {item.invoiceType === 'electricity' && item.kwhUsed !== undefined && (
+          <Text style={styles.utilityDetail}>⚡ {item.kwhUsed} kWh · {item.billingPeriod ?? '—'}</Text>
+        )}
+        {item.invoiceType === 'water' && item.m3Used !== undefined && (
+          <Text style={styles.utilityDetail}>💧 {item.m3Used} m³ · {item.billingPeriod ?? '—'}</Text>
         )}
 
-        <View style={styles.divider} />
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Tổng cộng</Text>
-          <Text style={[styles.totalVal, isOverdue && { color: Colors.error }]}>
+        {/* Amount row + due date */}
+        <View style={styles.amountRow}>
+          <Text style={[styles.amountVal, isOverdue && { color: Colors.error }, isPaid && { color: Colors.success }]}>
             {formatCurrency(item.grandTotal)}
           </Text>
+          {isPaid ? (
+            <Text style={styles.paidDateText}>✅ {item.paidAt ? formatDate(item.paidAt) : 'Đã TT'}</Text>
+          ) : (
+            <Text style={[styles.dueDateText, isOverdue && { color: Colors.error }]}>
+              {isOverdue
+                ? `Quá hạn ${daysOverdue} ngày`
+                : `Hạn: ${formatDate(item.dueDate)}`}
+            </Text>
+          )}
         </View>
 
-        {/* Due date */}
-        {item.status !== 'paid' && (
-          <Text style={[styles.dueDate, isOverdue && { color: Colors.error }]}>
-            {isOverdue
-              ? `⚠️ Đã quá hạn ${daysOverdue} ngày (Hạn: ${formatDate(item.dueDate)})`
-              : `📅 Hạn thanh toán: ${formatDate(item.dueDate)}`}
-          </Text>
+        {(item.lateFee ?? 0) > 0 && (
+          <Text style={styles.lateFeeText}>+ Phí trả chậm: {formatCurrency(item.lateFee)}</Text>
         )}
 
-        {/* Actions */}
+        {/* Action buttons */}
         {item.status === 'pending' && (
           <TouchableOpacity style={styles.payBtn} onPress={() => handlePay(item)}>
             <Text style={styles.payBtnText}>💳 Thanh toán ngay</Text>
           </TouchableOpacity>
         )}
-
-        {item.status === 'overdue' && (
+        {isOverdue && (
           <TouchableOpacity style={[styles.payBtn, { backgroundColor: Colors.error }]} onPress={() => handlePay(item)}>
             <Text style={styles.payBtnText}>🚨 Thanh toán ngay (Quá hạn)</Text>
           </TouchableOpacity>
-        )}
-
-        {item.status === 'paid' && (
-          <View style={styles.paidInfo}>
-            <Text style={styles.paidText}>✅ Đã thanh toán ngày {item.paidAt ? formatDate(item.paidAt) : ''}</Text>
-            {item.paymentMethod && (
-              <Text style={styles.paidMethod}>
-                {item.paymentMethod === 'qr' ? 'QR Code' : item.paymentMethod}
-              </Text>
-            )}
-          </View>
         )}
 
         <View style={styles.detailFooter}>
@@ -166,49 +182,88 @@ export const InvoiceListScreen: React.FC = () => {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Hóa đơn</Text>
-          <Text style={styles.subtitle}>Danh sách hóa đơn hàng tháng</Text>
+          <Text style={styles.subtitle}>Tiền phòng · Điện · Nước</Text>
         </View>
-        <TouchableOpacity
-          style={styles.historyBtn}
-          onPress={() => navigation.navigate('InvoiceHistory')}
-        >
+        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('InvoiceHistory')}>
           <Text style={styles.historyBtnText}>Lịch sử</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Tổng nợ cần thanh toán */}
-      {pendingTotal > 0 && (
-        <View style={[styles.summaryBanner, overdueCount > 0 && styles.summaryBannerError]}>
-          <View>
-            <Text style={styles.summaryLabel}>
-              {overdueCount > 0 ? '⚠️ Cần thanh toán (bao gồm quá hạn)' : '💳 Cần thanh toán'}
-            </Text>
-            <Text style={[styles.summaryAmount, overdueCount > 0 && { color: Colors.error }]}>
-              {formatCurrency(pendingTotal)}
-            </Text>
-          </View>
+      {/* ── Summary chips ── */}
+      {(overdueCount > 0 || pendingTotal > 0) && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.summaryRow}>
+          {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
+            const bills = unpaidByType(type);
+            if (!bills.length) return null;
+            const cfg = TYPE_CONFIG[type];
+            const total = bills.reduce((s, b) => s + b.grandTotal, 0);
+            const isActive = typeFilter === type && statusFilter === 'unpaid';
+            return (
+              <TouchableOpacity
+                key={type}
+                style={[styles.summaryChip, { backgroundColor: cfg.bg }, isActive && styles.summaryChipActive]}
+                onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
+              >
+                <Text style={styles.summaryChipIcon}>{cfg.icon}</Text>
+                <Text style={[styles.summaryChipLabel, { color: cfg.color }]}>{cfg.label}</Text>
+                <Text style={[styles.summaryChipAmount, { color: cfg.color }]}>{formatCurrency(total)}</Text>
+              </TouchableOpacity>
+            );
+          })}
           {overdueCount > 0 && (
-            <View style={styles.overdueBadge}>
-              <Text style={styles.overdueBadgeText}>{overdueCount} quá hạn</Text>
-            </View>
+            <TouchableOpacity
+              style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
+              onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
+            >
+              <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
+                ⚠️ {overdueCount} quá hạn
+              </Text>
+            </TouchableOpacity>
           )}
-        </View>
+        </ScrollView>
       )}
 
-      {/* Bộ lọc */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-        {FILTER_TABS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* ── Filter row 1: Loại ── */}
+      <View style={styles.filterBlock}>
+        <Text style={styles.filterLabel}>Loại</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+          {TYPE_FILTER_TABS.map(f => {
+            const isActive = typeFilter === f.key;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                onPress={() => setTypeFilter(f.key)}
+              >
+                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>{f.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* ── Filter row 2: Trạng thái ── */}
+      <View style={[styles.filterBlock, styles.filterBlockLast]}>
+        <Text style={styles.filterLabel}>Trạng thái</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+          {STATUS_FILTER_TABS.map(f => {
+            const isActive = statusFilter === f.key;
+            const activeStyle = f.key === 'overdue' ? styles.filterChipOverdue
+              : f.key === 'paid' ? styles.filterChipPaid
+              : styles.filterChipActive;
+            return (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.filterChip, isActive && activeStyle]}
+                onPress={() => setStatusFilter(f.key)}
+              >
+                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>{f.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       <FlatList
         data={filtered}
@@ -219,9 +274,17 @@ export const InvoiceListScreen: React.FC = () => {
         ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>📄</Text>
+            <Text style={styles.emptyEmoji}>
+              {statusFilter === 'paid' ? '✅' : '📄'}
+            </Text>
             <Text style={styles.emptyTitle}>Không có hóa đơn</Text>
-            <Text style={styles.emptyDesc}>Không có hóa đơn nào với trạng thái này.</Text>
+            <Text style={styles.emptyDesc}>
+              {statusFilter === 'paid'
+                ? 'Chưa có hóa đơn nào đã thanh toán.'
+                : statusFilter === 'unpaid'
+                  ? 'Tất cả hóa đơn đã được thanh toán.'
+                  : 'Không có hóa đơn nào phù hợp với bộ lọc này.'}
+            </Text>
           </View>
         }
       />
@@ -234,25 +297,31 @@ export const InvoiceListScreen: React.FC = () => {
               <Text style={{ fontSize: 16, color: Colors.textMuted }}>✕</Text>
             </TouchableOpacity>
 
-            <Text style={styles.modalTitle}>💳 Thanh toán hóa đơn</Text>
+            <Text style={styles.modalTitle}>Thanh toán hóa đơn</Text>
             {payingInvoice && (
-              <Text style={styles.modalSub}>
-                Tháng {String(payingInvoice.month).padStart(2, '0')}/{payingInvoice.year} · {payingInvoice.roomName}
-              </Text>
+              <>
+                <View style={[styles.typeBadge, {
+                  backgroundColor: TYPE_CONFIG[payingInvoice.invoiceType].bg,
+                  alignSelf: 'center', marginBottom: 4,
+                }]}>
+                  <Text style={[styles.typeBadgeText, { color: TYPE_CONFIG[payingInvoice.invoiceType].color }]}>
+                    {TYPE_CONFIG[payingInvoice.invoiceType].icon} {TYPE_CONFIG[payingInvoice.invoiceType].label}
+                  </Text>
+                </View>
+                <Text style={styles.modalSub}>
+                  Tháng {String(payingInvoice.month).padStart(2, '0')}/{payingInvoice.year} · {payingInvoice.roomName}
+                </Text>
+              </>
             )}
 
-            {/* QR Code */}
             <View style={styles.qrContainer}>
               {payingInvoice && (
                 <Image source={{ uri: qrUrl }} style={styles.qrImage} resizeMode="contain" />
               )}
             </View>
 
-            <Text style={styles.qrHint}>
-              Mở app Ngân hàng → Quét mã QR → Thông tin tự động điền sẵn
-            </Text>
+            <Text style={styles.qrHint}>Mở app Ngân hàng → Quét mã QR → Thông tin tự động điền sẵn</Text>
 
-            {/* Thông tin CK */}
             <View style={styles.bankInfo}>
               <View style={styles.bankRow}>
                 <Text style={styles.bankLabel}>Ngân hàng</Text>
@@ -277,7 +346,7 @@ export const InvoiceListScreen: React.FC = () => {
             {(payingInvoice?.lateFee ?? 0) > 0 && (
               <View style={styles.lateFeeWarning}>
                 <Text style={styles.lateFeeText}>
-                  ⚠️ Bao gồm phí trả chậm: {formatCurrency(payingInvoice?.lateFee ?? 0)}
+                  Bao gồm phí trả chậm: {formatCurrency(payingInvoice?.lateFee ?? 0)}
                 </Text>
               </View>
             )}
@@ -293,7 +362,7 @@ export const InvoiceListScreen: React.FC = () => {
                   <Text style={styles.confirmBtnText}>Hệ thống sẽ tự xác nhận sau khi nhận giao dịch</Text>
                 </>
               ) : (
-                <Text style={styles.confirmBtnText}>✅ Tôi đã chuyển khoản</Text>
+                <Text style={styles.confirmBtnText}>Tôi đã chuyển khoản</Text>
               )}
             </TouchableOpacity>
             {!isProcessing && (
@@ -322,84 +391,74 @@ const styles = StyleSheet.create({
   },
   historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
-  summaryBanner: {
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.md,
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.base,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  // Summary chips
+  summaryRow: {
+    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm,
+    gap: Spacing.sm, flexDirection: 'row', alignItems: 'center',
   },
-  summaryBannerError: { backgroundColor: Colors.errorLight },
-  summaryLabel: { fontSize: 12, color: Colors.textSecondary, marginBottom: 4 },
-  summaryAmount: { fontSize: 22, fontWeight: '800', color: Colors.primary },
-  overdueBadge: { backgroundColor: Colors.error, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs },
-  overdueBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.white },
+  summaryChip: {
+    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    alignItems: 'center', minWidth: 90, borderWidth: 1.5, borderColor: 'transparent',
+  },
+  summaryChipActive: { borderColor: Colors.primary + '80' },
+  summaryChipIcon:   { fontSize: 18, marginBottom: 2 },
+  summaryChipLabel:  { fontSize: 11, fontWeight: '700' },
+  summaryChipAmount: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+  overduePill: {
+    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs + 1,
+    borderWidth: 1, borderColor: Colors.error + '40',
+  },
+  overduePillActive: { backgroundColor: Colors.error },
+  overduePillText: { fontSize: 12, fontWeight: '700', color: Colors.error },
 
-filterRow: {
-  paddingHorizontal: Spacing.lg,
-  paddingTop: 0,
-  paddingBottom: Spacing.sm,
-  alignItems: 'center',
-},
-
-filterChip: {
-  height: 40,
-  minWidth: 86,
-  justifyContent: 'center',
-  alignItems: 'center',
-  paddingHorizontal: 16,
-  borderRadius: BorderRadius.full,
-  backgroundColor: Colors.white,
-  borderWidth: 1,
-  borderColor: Colors.border,
-  marginRight: Spacing.sm,
-},
-
-filterChipActive: {
-  backgroundColor: Colors.primary,
-  borderColor: Colors.primary,
-},
-
-filterText: {
-  fontSize: 13,
-  fontWeight: '700',
-  color: Colors.textSecondary,
-  textAlign: 'center',
-},
-
-filterTextActive: {
-  color: Colors.white,
-},
+  // Filter rows
+  filterBlock: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingLeft: Spacing.lg, paddingBottom: Spacing.xs,
+  },
+  filterBlockLast: { paddingBottom: Spacing.sm },
+  filterLabel: {
+    fontSize: 11, fontWeight: '700', color: Colors.textMuted,
+    width: 72, flexShrink: 0,
+  },
+  filterChips: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingRight: Spacing.lg },
+  filterChip: {
+    height: 32, paddingHorizontal: 14, borderRadius: BorderRadius.full,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  filterChipActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterChipOverdue: { backgroundColor: Colors.error,   borderColor: Colors.error   },
+  filterChipPaid:    { backgroundColor: Colors.success, borderColor: Colors.success },
+  filterText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  filterTextActive: { color: Colors.white },
 
   list: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.md, overflow: 'hidden' },
   cardOverdue: { borderWidth: 1.5, borderColor: Colors.error + '60' },
   overdueStripe: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, backgroundColor: Colors.error },
 
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
-  invoiceMonth: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  invoiceRoom: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  typeBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  typeBadgeText: { fontSize: 11, fontWeight: '700' },
+  invoiceMonth: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  invoiceRoom: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.xs },
+  utilityDetail: { fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.xs },
   statusBadge: { paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2, borderRadius: BorderRadius.full },
   statusText: { fontSize: 11, fontWeight: '700' },
 
-  divider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
-  lineRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.xs },
-  lineLabel: { fontSize: 13, color: Colors.textSecondary, flex: 1 },
-  lineVal: { fontSize: 13, fontWeight: '500', color: Colors.textPrimary },
-
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalLabel: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
-  totalVal: { fontSize: 22, fontWeight: '800', color: Colors.primary },
-
-  dueDate: { fontSize: 13, color: Colors.textSecondary, marginTop: Spacing.sm },
+  amountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.sm },
+  amountVal: { fontSize: 22, fontWeight: '800', color: Colors.primary },
+  dueDateText: { fontSize: 12, color: Colors.textSecondary },
+  paidDateText: { fontSize: 12, color: Colors.success, fontWeight: '600' },
+  lateFeeText: { fontSize: 12, color: Colors.error, fontWeight: '600', marginTop: 3 },
 
   payBtn: {
     backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
     paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md,
   },
-  payBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
-
-  paidInfo: { marginTop: Spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  paidText: { fontSize: 13, color: Colors.success, fontWeight: '600' },
-  paidMethod: { fontSize: 12, color: Colors.textMuted },
+  payBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 
   detailFooter: { marginTop: Spacing.sm, alignItems: 'flex-end' },
   detailLink: { fontSize: 12, color: Colors.primary, fontWeight: '700' },

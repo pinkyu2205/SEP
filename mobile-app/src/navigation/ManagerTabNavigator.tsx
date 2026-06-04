@@ -202,7 +202,7 @@ export const ManagerTabNavigator: React.FC = () => {
 
 const styles = StyleSheet.create({
   barSafeArea: {
-    backgroundColor: 'transparent',
+    backgroundColor: Colors.white,
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.xs,
   },

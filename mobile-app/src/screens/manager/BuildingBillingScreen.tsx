@@ -12,7 +12,7 @@ import { getPropertyById } from '../../data/managedProperties';
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 // ===================== TYPES =====================
-type BillStatus    = 'pending' | 'paid' | 'overdue' | 'partial';
+type BillStatus    = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 type PaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet';
 type FilterType    = 'all' | BillStatus;
 
@@ -26,10 +26,11 @@ const buildQRUrl = (amount: number, content: string) =>
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
 const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: string }> = {
-  pending: { label: 'Chưa thanh toán',     color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  paid:    { label: 'Đã thanh toán',        color: '#10B981', bg: '#F0FDF4', icon: '✅' },
-  overdue: { label: 'Quá hạn',             color: '#EF4444', bg: '#FEF2F2', icon: '🚨' },
-  partial: { label: 'Thanh toán một phần', color: '#3B82F6', bg: '#EFF6FF', icon: '💛' },
+  pending:   { label: 'Chưa thanh toán',    color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
+  paid:      { label: 'Đã thanh toán',      color: '#10B981', bg: '#F0FDF4', icon: '✅' },
+  overdue:   { label: 'Quá hạn',            color: '#EF4444', bg: '#FEF2F2', icon: '🚨' },
+  partial:   { label: 'Thanh toán một phần', color: '#3B82F6', bg: '#EFF6FF', icon: '💛' },
+  cancelled: { label: 'Đã huỷ',            color: '#9CA3AF', bg: '#F3F4F6', icon: '🚫' },
 };
 
 const METHOD_CONFIG: Record<PaymentMethod, { label: string; icon: string }> = {
@@ -52,7 +53,7 @@ const FILTERS: { id: FilterType; label: string }[] = [
   { id: 'partial', label: '💛 Một phần' },
 ];
 
-const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3 };
+const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3, cancelled: 4 };
 
 const getItemIcon = (label: string) => {
   for (const key of Object.keys(ITEM_ICONS)) {

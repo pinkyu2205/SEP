@@ -869,6 +869,7 @@ export const MeterReadingScreen: React.FC = () => {
             const billTotal = billItems.reduce((s, i) => s + i.amount, 0);
             const newBill: SharedBill = {
               id: `bill-${Date.now()}`, code: `HD-T${CURRENT_MONTH}-${prop.id.toUpperCase()}-${room.code}`,
+              invoiceType: 'rent',
               roomId: room.id, roomName: room.code, propertyId: prop.id, propertyName: prop.name,
               tenantId: room.id, tenantName: room.tenantName ?? 'Khách thuê', tenantPhone: '',
               month: CURRENT_MONTH, year: CURRENT_YEAR, items: billItems,
@@ -946,6 +947,7 @@ export const MeterReadingScreen: React.FC = () => {
     const billTotal = billItems.reduce((s, i) => s + i.amount, 0);
     const newBill: SharedBill = {
       id: `bill-${Date.now()}`, code: `HD-T${CURRENT_MONTH}-${selectedProp.id.toUpperCase()}`,
+      invoiceType: 'rent',
       roomId: selectedProp.id, roomName: selectedProp.name, propertyId: selectedProp.id,
       propertyName: selectedProp.name, tenantId: selectedProp.id,
       tenantName: `Khách thuê ${selectedProp.name}`, tenantPhone: '',

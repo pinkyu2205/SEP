@@ -16,7 +16,7 @@ import {
 const PRIORITY_ITEMS = [
   { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',  count: 2, urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
   { id: 'p2', icon: '🔧', label: 'Bảo trì khẩn cấp', count: 1, urgency: 'critical', color: Colors.error,   route: 'ManagerMaintenance' },
-  { id: 'p3', icon: '⚡', label: 'Chốt điện nước',   count: 3, urgency: 'warning',  color: Colors.warning, route: 'MeterReading' },
+  { id: 'p3', icon: '⚡', label: 'Chốt điện nước',   count: 3, urgency: 'warning',  color: Colors.warning, route: 'UtilityBilling' },
   { id: 'p4', icon: '📋', label: 'HĐ sắp hết hạn',   count: 2, urgency: 'info',     color: Colors.info,    route: 'ManagerContracts' },
   { id: 'p5', icon: '🚪', label: 'Check-in hôm nay', count: 1, urgency: 'success',  color: Colors.success, route: 'Onboarding' },
 ];
@@ -25,7 +25,7 @@ const QUICK_ACTIONS = [
   { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',        color: Colors.primary,       badge: 0 },
   { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning,       badge: 2 },
   { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error,         badge: 4 },
-  { emoji: '⚡', label: 'Chốt số',   route: 'MeterReading',       color: Colors.accent,        badge: 0 },
+  { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent,        badge: 0 },
   { emoji: '🏠', label: 'Phòng',     route: 'RoomManage',         color: Colors.success,       badge: 0 },
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary,       badge: 0 },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary, badge: 0 },
@@ -86,7 +86,7 @@ export const ManagerHomeScreen: React.FC = () => {
   });
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Header ─────────────────────────────────────────────────── */}

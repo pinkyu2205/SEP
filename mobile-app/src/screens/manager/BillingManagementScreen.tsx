@@ -96,6 +96,7 @@ export const BillingManagementScreen: React.FC = () => {
   }), [managerBills]);
 
   const pendingVerifications = payments.filter(p => p.status === 'pending_verify');
+  const paidCount = managerBills.filter(b => b.status === 'paid').length;
 
   // Group bills by building
   const buildingGroups = useMemo(() => {
@@ -149,14 +150,28 @@ export const BillingManagementScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Header ───────────────────────────────────────────────── */}
         <View style={s.header}>
-          <TouchableOpacity style={s.backBtn} onPress={handleBack}>
-            <Text style={s.backBtnText}>‹</Text>
-          </TouchableOpacity>
+          <View style={s.headerTop}>
+            <TouchableOpacity style={s.backBtn} onPress={handleBack}>
+              <Text style={s.backBtnText}>‹</Text>
+            </TouchableOpacity>
+            {/* Nút Lịch sử */}
+            <TouchableOpacity
+              style={s.historyBtn}
+              onPress={() => navigation.navigate('BillingHistory', { bills: managerBills })}
+            >
+              <Text style={s.historyBtnText}>📋 Lịch sử</Text>
+              {paidCount > 0 && (
+                <View style={s.historyBadge}>
+                  <Text style={s.historyBadgeText}>{paidCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
           <Text style={s.title}>Hóa đơn & Thanh toán</Text>
           <Text style={s.subtitle}>Tháng 05/2026</Text>
         </View>
@@ -322,15 +337,28 @@ const s = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.base },
 
-  header:   { paddingTop: Spacing.md, paddingBottom: Spacing.base },
+  header:    { paddingTop: Spacing.md, paddingBottom: Spacing.base },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
   backBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
   backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
   title:    { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+
+  historyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
+  },
+  historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  historyBadge: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
+    minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  historyBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
 
   statsScroll:  { flexGrow: 0, marginBottom: Spacing.lg },
   statsContent: { paddingVertical: 4, gap: Spacing.sm },

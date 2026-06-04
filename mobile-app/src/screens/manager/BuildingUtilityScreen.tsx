@@ -52,7 +52,8 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
       const totalAmount = rent + electricityAmount + waterAmount + prop.serviceCharge;
       billsStore.addBills([{
         id: `bill-${prop.id}-${Date.now()}`,
-        code: `HD-${prop.id.toUpperCase()}-T5`,
+        code: `HD-${prop.id.toUpperCase()}-T5-RENT`,
+        invoiceType: 'rent',
         propertyType: 'WHOLE_HOUSE',
         roomId: prop.id,
         roomName: 'Nhà nguyên căn',
@@ -65,13 +66,11 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
         year: 2026,
         items: [
           { label: 'Tiền thuê nhà', amount: rent },
-          { label: `Điện (${Math.max(elec - r.elecPrev, 0)} kWh)`, amount: electricityAmount },
-          { label: `Nước (${Math.max(water - r.waterPrev, 0)} m³)`, amount: waterAmount },
           { label: 'Phí dịch vụ', amount: prop.serviceCharge },
         ],
-        totalAmount,
+        totalAmount: rent + prop.serviceCharge,
         lateFee: 0,
-        grandTotal: totalAmount,
+        grandTotal: rent + prop.serviceCharge,
         status: 'pending',
         dueDate: '2026-05-15',
         createdAt: new Date().toISOString().split('T')[0],

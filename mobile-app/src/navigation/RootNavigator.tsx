@@ -9,6 +9,7 @@ import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
 import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
+import { UtilityBillingScreen } from '../screens/manager/UtilityBillingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
 import { BuildingDetailScreen } from '../screens/manager/BuildingDetailScreen';
 import { BuildingInvoiceScreen } from '../screens/manager/BuildingInvoiceScreen';
@@ -22,6 +23,7 @@ import { TenantListScreen } from '../screens/manager/TenantListScreen';
 import { EquipmentScreen } from '../screens/manager/EquipmentScreen';
 import { ContractListScreen } from '../screens/shared/ContractListScreen';
 import { BuildingBillingScreen } from '../screens/manager/BuildingBillingScreen';
+import { BillingHistoryScreen } from '../screens/manager/BillingHistoryScreen';
 import { TicketDetailScreen } from '../screens/manager/TicketDetailScreen';
 import { WholeHouseDetailScreen } from '../screens/manager/WholeHouseDetailScreen';
 import { TenantInvoicesScreen } from '../screens/manager/TenantInvoicesScreen';
@@ -85,6 +87,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} options={{ animation: 'fade' }} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="MeterReading" component={MeterReadingScreen} />
+            <Stack.Screen name="UtilityBilling" component={UtilityBillingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
             <Stack.Screen
               name="BuildingDetail"
@@ -102,6 +105,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="Equipment" component={EquipmentScreen} />
             <Stack.Screen name="ManagerContracts" component={ContractListScreen} />
             <Stack.Screen name="BuildingBilling" component={BuildingBillingScreen} />
+            <Stack.Screen name="BillingHistory" component={BillingHistoryScreen} />
             <Stack.Screen name="MaintenanceTicketDetail" component={TicketDetailScreen} />
             {/* Tenant-scoped screens — opened from Tenant Detail modal */}
             <Stack.Screen name="TenantInvoices" component={TenantInvoicesScreen} />

@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
-import { formatCurrency, getDaysUntil } from '../../utils';
+import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
+import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
 
 // ── Mock data ──────────────────────────────────────────────
 const BUILDING_INFO = {
@@ -19,27 +20,10 @@ const BUILDING_INFO = {
   hostPhone: '0901000001',
 };
 
-type InvoiceStatus = 'pending' | 'overdue' | 'awaiting' | 'paid';
-
-const MONTHLY_INVOICE = {
-  id: 'inv-may-2026',
-  period: 'T05/2026',
-  dueDate: '2026-05-25',
-  status: 'pending' as InvoiceStatus,
-  total: 3855000,
-  breakdown: [
-    { icon: '🏠', label: 'Tiền nhà',       amount: 3000000 },
-    { icon: '⚡', label: 'Điện',            amount: 525000  },
-    { icon: '💧', label: 'Nước',            amount: 180000  },
-    { icon: '🧾', label: 'Phí dịch vụ',    amount: 150000  },
-  ],
-};
-
-const INV_STATUS_CFG: Record<InvoiceStatus, { label: string; badge: string; amount: string; cta: string }> = {
-  pending:  { label: 'Chưa thanh toán', badge: Colors.warning, amount: Colors.textPrimary, cta: Colors.primary },
-  overdue:  { label: 'Quá hạn',         badge: Colors.error,   amount: Colors.error,       cta: Colors.error   },
-  awaiting: { label: 'Chờ xác nhận',    badge: Colors.info,    amount: Colors.textPrimary, cta: Colors.info    },
-  paid:     { label: 'Đã thanh toán',   badge: Colors.success, amount: Colors.success,     cta: Colors.success },
+const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
+  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
 };
 
 const DASHBOARD_DATA = {
@@ -67,19 +51,27 @@ export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const data = DASHBOARD_DATA;
-  const inv = MONTHLY_INVOICE;
-  const invCfg = INV_STATUS_CFG[inv.status];
-  const [breakdownExpanded, setBreakdownExpanded] = useState(false);
-  const [actionsExpanded, setActionsExpanded]     = useState(false);
+  const [actionsExpanded, setActionsExpanded] = useState(false);
+  const allBills = useBills('Nguyễn Văn A');
 
-  const isOverdue           = inv.status === 'overdue';
+  const unpaidBills = allBills.filter(b => b.status === 'pending' || b.status === 'overdue');
+  const overdueInvoices = allBills.filter(b => b.status === 'overdue');
+  const overdueTotal = overdueInvoices.reduce((s, b) => s + b.grandTotal, 0);
+  const hasOverdue = overdueInvoices.length > 0;
+
+  // Show at most the 3 most urgent unpaid bills (one per type, prioritise overdue)
+  const displayBills = (['rent', 'electricity', 'water'] as InvoiceType[])
+    .map(type => unpaidBills.find(b => b.invoiceType === type && b.status === 'overdue')
+      ?? unpaidBills.find(b => b.invoiceType === type))
+    .filter(Boolean) as SharedBill[];
+
   const hasMaintenance      = data.maintenance.pending > 0 || data.maintenance.inProgress > 0;
   const contractExpiringSoon = data.contract.daysLeft <= 60;
 
   const alerts = [
-    isOverdue        && { id: 'overdue',  icon: '🚨', text: `Hóa đơn T05/2026 quá hạn — ${inv.total.toLocaleString('vi-VN')}đ`,         route: 'InvoiceList',     color: Colors.error   },
-    hasMaintenance   && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
-    contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                            route: 'TenantContracts', color: Colors.info    },
+    hasOverdue        && { id: 'overdue',  icon: '🚨', text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
+    hasMaintenance    && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
+    contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                               route: 'TenantContracts', color: Colors.info    },
   ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
 
   return (
@@ -198,75 +190,83 @@ export const TenantHomeScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Monthly Invoice Card ── */}
-        <Text style={styles.sectionTitle}>Hóa đơn cần thanh toán</Text>
-        <View style={[styles.invCard, isOverdue && styles.invCardOverdue]}>
-
-          {/* Top: total + status badge */}
-          <View style={styles.invTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.invTotalLabel}>Tổng cần thanh toán</Text>
-              <Text style={[styles.invTotalAmount, { color: invCfg.amount }]}>
-                {formatCurrency(inv.total)}
-              </Text>
-            </View>
-            <View style={[styles.invStatusBadge, { backgroundColor: invCfg.badge }]}>
-              <Text style={styles.invStatusText}>{invCfg.label}</Text>
-            </View>
-          </View>
-
-          {/* Meta */}
-          <View style={styles.invMeta}>
-            <Text style={styles.invMetaItem}>
-              <Text style={styles.invMetaKey}>📅 Kỳ hóa đơn  </Text>
-              <Text style={styles.invMetaVal}>{inv.period}</Text>
-            </Text>
-            <Text style={styles.invMetaItem}>
-              <Text style={styles.invMetaKey}>⏰ Hạn thanh toán  </Text>
-              <Text style={[styles.invMetaVal, isOverdue && { color: Colors.error, fontWeight: '700' }]}>
-                {inv.dueDate.split('-').reverse().join('/')}
-              </Text>
-            </Text>
-          </View>
-
-          <View style={styles.invDivider} />
-
-          {/* Collapsible breakdown */}
-          <TouchableOpacity
-            style={styles.invBreakdownToggle}
-            onPress={() => setBreakdownExpanded(e => !e)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.invBreakdownLabel}>Chi tiết gồm có</Text>
-            <Text style={styles.invBreakdownArrow}>{breakdownExpanded ? '▲' : '▼'}</Text>
+        {/* ── Invoice Cards ── */}
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Hóa đơn</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('InvoiceList')}>
+            <Text style={styles.sectionLink}>Tất cả →</Text>
           </TouchableOpacity>
-
-          {breakdownExpanded && (
-            <View style={styles.invBreakdown}>
-              {inv.breakdown.map((row, idx) => (
-                <View key={idx} style={styles.invBreakdownRow}>
-                  <Text style={styles.invBdIcon}>{row.icon}</Text>
-                  <Text style={styles.invBdLabel}>{row.label}</Text>
-                  <View style={styles.invBdDots} />
-                  <Text style={styles.invBdAmount}>{row.amount.toLocaleString('vi-VN')}đ</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* CTA */}
-          {inv.status !== 'paid' && (
-            <TouchableOpacity
-              style={[styles.invCTA, { backgroundColor: invCfg.cta }]}
-              onPress={() => navigation.navigate('InvoiceList')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.invCTAText}>
-                {isOverdue ? '🚨 Thanh toán ngay' : 'Xem chi tiết & Thanh toán'}
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
+
+        {displayBills.length === 0 ? (
+          <View style={styles.allPaidCard}>
+            <Text style={styles.allPaidEmoji}>✅</Text>
+            <Text style={styles.allPaidText}>Tất cả hóa đơn đã được thanh toán</Text>
+          </View>
+        ) : (
+          displayBills.map(bill => {
+            const tc = TYPE_CFG[bill.invoiceType];
+            const isOver = bill.status === 'overdue';
+            const isPending = bill.status === 'pending';
+            return (
+              <TouchableOpacity
+                key={bill.id}
+                style={[styles.invCard, isOver && styles.invCardOverdue]}
+                activeOpacity={0.75}
+                onPress={() => navigation.navigate('InvoiceList')}
+              >
+                {isOver && <View style={styles.invOverdueStripe} />}
+                <View style={styles.invCardHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={[styles.invTypeBadge, { backgroundColor: tc.bg }]}>
+                      <Text style={[styles.invTypeBadgeText, { color: tc.color }]}>
+                        {tc.icon} {tc.label}
+                      </Text>
+                    </View>
+                    <Text style={styles.invMonth}>T{String(bill.month).padStart(2, '0')}/{bill.year}</Text>
+                  </View>
+                  <View style={[styles.invStatusBadge, {
+                    backgroundColor: isOver ? Colors.errorLight : Colors.warningLight,
+                  }]}>
+                    <Text style={[styles.invStatusText, { color: isOver ? Colors.error : Colors.warning }]}>
+                      {isOver ? 'Quá hạn' : 'Chờ thanh toán'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.invRoom}>{bill.roomName} · {bill.propertyName}</Text>
+
+                {bill.invoiceType === 'electricity' && bill.kwhUsed !== undefined && (
+                  <Text style={styles.invDetail}>⚡ {bill.kwhUsed} kWh · {bill.billingPeriod}</Text>
+                )}
+                {bill.invoiceType === 'water' && bill.m3Used !== undefined && (
+                  <Text style={styles.invDetail}>💧 {bill.m3Used} m³ · {bill.billingPeriod}</Text>
+                )}
+
+                <View style={styles.invAmountRow}>
+                  <Text style={[styles.invAmount, isOver && { color: Colors.error }]}>
+                    {formatCurrency(bill.grandTotal)}
+                  </Text>
+                  <Text style={[styles.invDue, isOver && { color: Colors.error }]}>
+                    {isOver ? `Quá hạn ${Math.abs(getDaysUntil(bill.dueDate))} ngày` : `Hạn: ${formatDate(bill.dueDate)}`}
+                  </Text>
+                </View>
+
+                {(isOver || isPending) && (
+                  <TouchableOpacity
+                    style={[styles.invPayBtn, { backgroundColor: isOver ? Colors.error : Colors.primary }]}
+                    onPress={() => navigation.navigate('InvoiceList')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.invPayBtnText}>
+                      {isOver ? '🚨 Thanh toán ngay' : '💳 Xem & Thanh toán'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            );
+          })
+        )}
 
         {/* Quick Actions */}
         <View style={styles.sectionRow}>
@@ -370,40 +370,38 @@ const styles = StyleSheet.create({
   alertPillText: { flex: 1, fontSize: 12, fontWeight: '600' },
   alertPillArrow: { fontSize: 20, fontWeight: '400' },
 
-  // ── Unified Invoice Card ──
+  // ── Separate Invoice Cards ──
+  sectionLink: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  allPaidCard: {
+    backgroundColor: Colors.successLight, borderRadius: BorderRadius.xl,
+    padding: Spacing.base, marginBottom: Spacing.md,
+    alignItems: 'center', flexDirection: 'row', gap: Spacing.sm,
+  },
+  allPaidEmoji: { fontSize: 22 },
+  allPaidText: { fontSize: 14, fontWeight: '600', color: Colors.success },
   invCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, marginBottom: Spacing.md,
-    borderWidth: 1.5, borderColor: Colors.border, ...Shadow.sm,
+    padding: Spacing.base, marginBottom: Spacing.sm,
+    borderWidth: 1.5, borderColor: Colors.border, ...Shadow.sm, overflow: 'hidden',
   },
   invCardOverdue: { borderColor: Colors.error + '60' },
-  invTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.sm },
-  invTotalLabel: { fontSize: 11, color: Colors.textMuted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
-  invTotalAmount: { fontSize: 26, fontWeight: '800' },
-  invStatusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 5, borderRadius: BorderRadius.full, marginTop: 4 },
-  invStatusText: { fontSize: 11, fontWeight: '700', color: Colors.white },
-  invMeta: { gap: 3, marginBottom: Spacing.sm },
-  invMetaItem: { fontSize: 12, lineHeight: 18 },
-  invMetaKey: { color: Colors.textMuted },
-  invMetaVal: { color: Colors.textPrimary, fontWeight: '600' },
-  invDivider: { height: 1, backgroundColor: Colors.divider, marginBottom: Spacing.sm },
-  invBreakdownToggle: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 4,
+  invOverdueStripe: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, backgroundColor: Colors.error },
+  invCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  invTypeBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  invTypeBadgeText: { fontSize: 11, fontWeight: '700' },
+  invMonth: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  invStatusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  invStatusText: { fontSize: 11, fontWeight: '700' },
+  invRoom: { fontSize: 12, color: Colors.textMuted, marginBottom: 3 },
+  invDetail: { fontSize: 11, color: Colors.textSecondary, marginBottom: 4 },
+  invAmountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  invAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
+  invDue: { fontSize: 11, color: Colors.textSecondary },
+  invPayBtn: {
+    marginTop: Spacing.sm, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm + 2, alignItems: 'center',
   },
-  invBreakdownLabel: { fontSize: 12, fontWeight: '700', color: Colors.primary },
-  invBreakdownArrow: { fontSize: 10, color: Colors.textMuted },
-  invBreakdown: { paddingTop: Spacing.sm, gap: 6 },
-  invBreakdownRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  invBdIcon:   { fontSize: 14, width: 20, textAlign: 'center' },
-  invBdLabel:  { fontSize: 12, color: Colors.textSecondary },
-  invBdDots:   { flex: 1, height: 1, borderBottomWidth: 1, borderBottomColor: Colors.divider, borderStyle: 'dashed' },
-  invBdAmount: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
-  invCTA: {
-    marginTop: Spacing.base, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md, alignItems: 'center',
-  },
-  invCTAText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+  invPayBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
 
   // Section title
   sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
