@@ -1,30 +1,38 @@
 import publicApiClient from './publicApiClient';
-import { District, Ward, PropertyListing, SearchFilters, SearchResult, NearbyRequest } from '../types';
+import { City, District, Ward, PropertyListing, SearchFilters, SearchResult, NearbyRequest } from '../types';
 import { 
-  DISTRICTS, 
-  getWardsByDistrict, 
+  CITIES,
+  DISTRICTS,
+  getWardsByCity,
+  getWardsByDistrict,
   searchProperties as mockSearch,
   getNearbyProperties as mockNearby,
   MOCK_PROPERTIES,
-  getFeaturedProperties as mockFeatured
+  getFeaturedProperties as mockFeatured,
+  getSimilarProperties as mockSimilar
 } from '../data/locationData';
 
 const USE_MOCK = true;
 
 class SearchService {
-  async getDistricts(): Promise<District[]> {
+  async getCities(): Promise<City[]> {
     if (USE_MOCK) {
-      return Promise.resolve(DISTRICTS);
+      return Promise.resolve(CITIES);
     }
-    const response = await publicApiClient.get('/districts');
+    const response = await publicApiClient.get('/cities');
     return response.data;
   }
 
-  async getWards(districtId: string): Promise<Ward[]> {
+  /** @deprecated Use getCities instead */
+  async getDistricts(): Promise<District[]> {
+    return this.getCities();
+  }
+
+  async getWards(cityId: string): Promise<Ward[]> {
     if (USE_MOCK) {
-      return Promise.resolve(getWardsByDistrict(districtId));
+      return Promise.resolve(getWardsByCity(cityId));
     }
-    const response = await publicApiClient.get(`/districts/${districtId}/wards`);
+    const response = await publicApiClient.get(`/cities/${cityId}/wards`);
     return response.data;
   }
 
@@ -58,6 +66,14 @@ class SearchService {
       return Promise.resolve(mockFeatured());
     }
     const response = await publicApiClient.get('/properties/featured');
+    return response.data;
+  }
+
+  async getSimilarProperties(propertyId: string, limit: number = 3): Promise<PropertyListing[]> {
+    if (USE_MOCK) {
+      return Promise.resolve(mockSimilar(propertyId, limit));
+    }
+    const response = await publicApiClient.get(`/properties/${propertyId}/similar`, { params: { limit } });
     return response.data;
   }
 }

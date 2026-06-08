@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { District } from '../../types';
+import { City, District } from '../../types';
 
 interface DistrictCardProps {
-  district: District;
+  district: City | District;
   onPress?: () => void;
 }
 
@@ -20,7 +20,7 @@ export const DistrictCard: React.FC<DistrictCardProps> = ({ district, onPress })
       </View>
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>{district.name}</Text>
-        <Text style={styles.rooms}>{district.availableRooms} phòng trống</Text>
+        <Text style={styles.rooms}>{district.availableRooms} căn hộ trống</Text>
       </View>
     </TouchableOpacity>
   );

@@ -10,7 +10,7 @@ import { SearchFilters } from '../types';
 
 export type GuestStackParamList = {
   GuestHome: undefined;
-  Search: { districtId?: string; wardId?: string; priceMin?: number; priceMax?: number } | undefined;
+  Search: { cityId?: string; wardId?: string; priceMin?: number; priceMax?: number } | undefined;
   SearchResult: { filters: SearchFilters };
   PropertyDetail: { propertyId: string };
   Login: undefined;

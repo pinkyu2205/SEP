@@ -29,7 +29,7 @@ export const PropertyCard: React.FC<PropertyCardProps> = ({
       
       <View style={styles.content}>
         <Text style={styles.name} numberOfLines={1}>{property.name}</Text>
-        <Text style={styles.address} numberOfLines={1}>📍 {property.ward}, {property.district}</Text>
+        <Text style={styles.address} numberOfLines={1}>📍 {property.ward}, {property.city}</Text>
         
         <View style={styles.priceRow}>
           <Text style={styles.price}>{formatCurrency(property.priceFrom)}</Text>
