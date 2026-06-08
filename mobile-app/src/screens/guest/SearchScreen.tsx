@@ -1,12 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Animated,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors, Spacing, BorderRadius, Typography } from '../../constants';
+import { Colors, Spacing, BorderRadius, Typography, Shadow } from '../../constants';
 import { SearchBar, FilterChips, PickerModal } from '../../components/common';
 import { searchService } from '../../services';
-import { District, Ward, SearchFilters } from '../../types';
+import { City, Ward, SearchFilters } from '../../types';
 import { GuestStackParamList } from '../../navigation/GuestStackNavigator';
 
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'Search'>;
@@ -35,11 +43,11 @@ export const SearchScreen: React.FC = () => {
   const route = useRoute<RouteProps>();
 
   const [keyword, setKeyword] = useState('');
-  
-  // District state
-  const [districts, setDistricts] = useState<District[]>([]);
-  const [selectedDistrictId, setSelectedDistrictId] = useState<string>('');
-  const [districtModalVisible, setDistrictModalVisible] = useState(false);
+
+  // City state
+  const [cities, setCities] = useState<City[]>([]);
+  const [selectedCityId, setSelectedCityId] = useState<string>('');
+  const [cityModalVisible, setCityModalVisible] = useState(false);
 
   // Ward state
   const [wards, setWards] = useState<Ward[]>([]);
@@ -52,37 +60,60 @@ export const SearchScreen: React.FC = () => {
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
 
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnims = useRef(
+    Array.from({ length: 5 }, () => new Animated.Value(20))
+  ).current;
+
   useEffect(() => {
-    loadDistricts();
-    if (route.params?.districtId) {
-      handleSelectDistrict(route.params.districtId);
+    loadCities();
+    if (route.params?.cityId) {
+      handleSelectCity(route.params.cityId);
     }
+
+    // Entrance animation
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+
+    const stagger = slideAnims.map((anim, i) =>
+      Animated.timing(anim, {
+        toValue: 0,
+        duration: 350,
+        delay: i * 60,
+        useNativeDriver: true,
+      })
+    );
+    Animated.stagger(60, stagger).start();
   }, []);
 
-  const loadDistricts = async () => {
-    const data = await searchService.getDistricts();
-    setDistricts(data);
+  const loadCities = async () => {
+    const data = await searchService.getCities();
+    setCities(data);
   };
 
-  const loadWards = async (districtId: string) => {
-    const data = await searchService.getWards(districtId);
+  const loadWards = async (cityId: string) => {
+    const data = await searchService.getWards(cityId);
     setWards(data);
   };
 
-  const handleSelectDistrict = (id: string) => {
-    setSelectedDistrictId(id);
-    setSelectedWardIds([]); // Reset wards when district changes
+  const handleSelectCity = (id: string) => {
+    setSelectedCityId(id);
+    setSelectedWardIds([]); // Reset wards when city changes
     loadWards(id);
   };
 
   const handleToggleWard = (id: string) => {
-    setSelectedWardIds(prev => 
+    setSelectedWardIds(prev =>
       prev.includes(id) ? prev.filter(w => w !== id) : [...prev, id]
     );
   };
 
   const handleToggleAmenity = (id: string) => {
-    setSelectedAmenities(prev => 
+    setSelectedAmenities(prev =>
       prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]
     );
   };
@@ -90,12 +121,12 @@ export const SearchScreen: React.FC = () => {
   const handleSearch = () => {
     const filters: SearchFilters = {};
     if (keyword.trim()) filters.keyword = keyword.trim();
-    if (selectedDistrictId) filters.districtId = selectedDistrictId;
+    if (selectedCityId) filters.cityId = selectedCityId;
     if (selectedWardIds.length > 0) filters.wardIds = selectedWardIds;
     if (priceMin) filters.priceMin = parseInt(priceMin);
     if (priceMax) filters.priceMax = parseInt(priceMax);
     if (selectedAmenities.length > 0) filters.amenities = selectedAmenities;
-    
+
     if (selectedAreaId) {
       if (selectedAreaId === '<20') filters.areaMax = 20;
       else if (selectedAreaId === '20-30') { filters.areaMin = 20; filters.areaMax = 30; }
@@ -108,15 +139,40 @@ export const SearchScreen: React.FC = () => {
 
   const resetFilters = () => {
     setKeyword('');
-    setSelectedDistrictId('');
+    setSelectedCityId('');
     setSelectedWardIds([]);
+    setWards([]);
     setPriceMin('');
     setPriceMax('');
     setSelectedAreaId('');
     setSelectedAmenities([]);
   };
 
-  const selectedDistrictName = districts.find(d => d.id === selectedDistrictId)?.name;
+  const activeFilterCount = [
+    keyword.trim(),
+    selectedCityId,
+    selectedWardIds.length > 0,
+    priceMin,
+    priceMax,
+    selectedAreaId,
+    selectedAmenities.length > 0,
+  ].filter(Boolean).length;
+
+  const selectedCityName = cities.find(c => c.id === selectedCityId)?.name;
+
+  const renderAnimatedSection = (index: number, children: React.ReactNode) => (
+    <Animated.View
+      style={[
+        styles.section,
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnims[index] }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -125,110 +181,148 @@ export const SearchScreen: React.FC = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Tìm kiếm</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Tìm kiếm</Text>
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        
+
         {/* Keyword Search */}
-        <View style={styles.section}>
-          <SearchBar 
-            mode="active" 
-            placeholder="Tên nhà trọ, địa chỉ..." 
-            value={keyword}
-            onChangeText={setKeyword}
-            autoFocus={!route.params?.districtId && !route.params?.priceMax}
-          />
-        </View>
+        {renderAnimatedSection(0,
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>🔎</Text>
+              <Text style={styles.sectionTitle}>Từ khoá</Text>
+            </View>
+            <SearchBar
+              mode="active"
+              placeholder="Tên nhà trọ, địa chỉ..."
+              value={keyword}
+              onChangeText={setKeyword}
+              autoFocus={!route.params?.cityId && !route.params?.priceMax}
+            />
+          </View>
+        )}
 
         {/* Location Picker */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Quận / Huyện</Text>
-          <TouchableOpacity 
-            style={styles.pickerBtn}
-            onPress={() => setDistrictModalVisible(true)}
-          >
-            <Text style={selectedDistrictId ? styles.pickerText : styles.pickerPlaceholder}>
-              {selectedDistrictName || 'Chọn Quận / Huyện'}
-            </Text>
-            <Text style={styles.pickerIcon}>▼</Text>
-          </TouchableOpacity>
-
-          <Text style={[styles.label, { marginTop: Spacing.md }]}>Phường / Xã</Text>
-          <TouchableOpacity 
-            style={[styles.pickerBtn, !selectedDistrictId && styles.pickerDisabled]}
-            disabled={!selectedDistrictId}
-            onPress={() => setWardModalVisible(true)}
-          >
-            <Text style={selectedWardIds.length > 0 ? styles.pickerText : styles.pickerPlaceholder}>
-              {selectedWardIds.length > 0 
-                ? `Đã chọn ${selectedWardIds.length} phường` 
-                : 'Chọn Phường / Xã'}
-            </Text>
-            <Text style={styles.pickerIcon}>▼</Text>
-          </TouchableOpacity>
-
-          {wards.length > 0 && (
-            <View style={styles.quickWards}>
-              <FilterChips
-                options={wards.map(w => ({ id: w.id, label: w.name }))}
-                selected={selectedWardIds}
-                onToggle={handleToggleWard}
-                multiSelect={true}
-                scrollable={true}
-              />
+        {renderAnimatedSection(1,
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>📍</Text>
+              <Text style={styles.sectionTitle}>Vị trí</Text>
             </View>
-          )}
-        </View>
+
+            <Text style={styles.label}>Thành phố</Text>
+            <TouchableOpacity
+              style={styles.pickerBtn}
+              onPress={() => setCityModalVisible(true)}
+            >
+              <Text style={selectedCityId ? styles.pickerText : styles.pickerPlaceholder}>
+                {selectedCityName || 'Chọn Thành phố'}
+              </Text>
+              <Text style={styles.pickerIcon}>▼</Text>
+            </TouchableOpacity>
+
+            <Text style={[styles.label, { marginTop: Spacing.md }]}>Phường / Xã</Text>
+            <TouchableOpacity
+              style={[styles.pickerBtn, !selectedCityId && styles.pickerDisabled]}
+              disabled={!selectedCityId}
+              onPress={() => setWardModalVisible(true)}
+            >
+              <Text style={selectedWardIds.length > 0 ? styles.pickerText : styles.pickerPlaceholder}>
+                {selectedWardIds.length > 0
+                  ? `Đã chọn ${selectedWardIds.length} phường`
+                  : 'Chọn Phường / Xã'}
+              </Text>
+              <Text style={styles.pickerIcon}>▼</Text>
+            </TouchableOpacity>
+
+            {wards.length > 0 && (
+              <View style={styles.quickWards}>
+                <FilterChips
+                  options={wards.map(w => ({ id: w.id, label: w.name }))}
+                  selected={selectedWardIds}
+                  onToggle={handleToggleWard}
+                  multiSelect={true}
+                  scrollable={true}
+                />
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Price Range */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Khoảng giá (VNĐ)</Text>
-          <View style={styles.row}>
-            <View style={styles.inputWrap}>
-              <TextInput 
-                style={styles.input}
-                placeholder="Từ (VD: 2000000)"
-                keyboardType="numeric"
-                value={priceMin}
-                onChangeText={setPriceMin}
-              />
+        {renderAnimatedSection(2,
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>💰</Text>
+              <Text style={styles.sectionTitle}>Khoảng giá</Text>
             </View>
-            <Text style={styles.dash}>-</Text>
-            <View style={styles.inputWrap}>
-              <TextInput 
-                style={styles.input}
-                placeholder="Đến (VD: 5000000)"
-                keyboardType="numeric"
-                value={priceMax}
-                onChangeText={setPriceMax}
-              />
+            <Text style={styles.label}>Khoảng giá (VNĐ)</Text>
+            <View style={styles.row}>
+              <View style={styles.inputWrap}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Từ (VD: 2000000)"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="numeric"
+                  value={priceMin}
+                  onChangeText={setPriceMin}
+                />
+              </View>
+              <Text style={styles.dash}>—</Text>
+              <View style={styles.inputWrap}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Đến (VD: 5000000)"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="numeric"
+                  value={priceMax}
+                  onChangeText={setPriceMax}
+                />
+              </View>
             </View>
           </View>
-        </View>
+        )}
 
         {/* Area */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Diện tích</Text>
-          <FilterChips
-            options={AREA_OPTIONS}
-            selected={selectedAreaId ? [selectedAreaId] : []}
-            onToggle={(id) => setSelectedAreaId(id === selectedAreaId ? '' : id)}
-            multiSelect={false}
-          />
-        </View>
+        {renderAnimatedSection(3,
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>📐</Text>
+              <Text style={styles.sectionTitle}>Diện tích</Text>
+            </View>
+            <FilterChips
+              options={AREA_OPTIONS}
+              selected={selectedAreaId ? [selectedAreaId] : []}
+              onToggle={(id) => setSelectedAreaId(id === selectedAreaId ? '' : id)}
+              multiSelect={false}
+            />
+          </View>
+        )}
 
         {/* Amenities */}
-        <View style={styles.section}>
-          <Text style={styles.label}>Tiện ích</Text>
-          <FilterChips
-            options={AMENITIES_OPTIONS}
-            selected={selectedAmenities}
-            onToggle={handleToggleAmenity}
-            multiSelect={true}
-          />
-        </View>
+        {renderAnimatedSection(4,
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionIcon}>✨</Text>
+              <Text style={styles.sectionTitle}>Tiện ích</Text>
+            </View>
+            <FilterChips
+              options={AMENITIES_OPTIONS}
+              selected={selectedAmenities}
+              onToggle={handleToggleAmenity}
+              multiSelect={true}
+            />
+          </View>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -236,7 +330,7 @@ export const SearchScreen: React.FC = () => {
       {/* Floating Action Buttons */}
       <View style={styles.footer}>
         <TouchableOpacity style={styles.resetBtn} onPress={resetFilters}>
-          <Text style={styles.resetText}>↺ Xóa</Text>
+          <Text style={styles.resetText}>↺ Xóa bộ lọc</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
           <Text style={styles.searchText}>🔍 Tìm kiếm</Text>
@@ -245,18 +339,18 @@ export const SearchScreen: React.FC = () => {
 
       {/* Modals */}
       <PickerModal
-        visible={districtModalVisible}
-        title="Chọn Quận / Huyện"
-        options={districts.map(d => ({ id: d.id, label: d.name, subtitle: `${d.availableRooms} phòng trống` }))}
-        selected={selectedDistrictId ? [selectedDistrictId] : []}
-        onSelect={handleSelectDistrict}
-        onClose={() => setDistrictModalVisible(false)}
+        visible={cityModalVisible}
+        title="Chọn Thành phố"
+        options={cities.map(c => ({ id: c.id, label: c.name, subtitle: `${c.availableRooms} căn hộ trống` }))}
+        selected={selectedCityId ? [selectedCityId] : []}
+        onSelect={handleSelectCity}
+        onClose={() => setCityModalVisible(false)}
       />
-      
+
       <PickerModal
         visible={wardModalVisible}
         title="Chọn Phường / Xã"
-        options={wards.map(w => ({ id: w.id, label: w.name, subtitle: `${w.availableRooms} phòng trống` }))}
+        options={wards.map(w => ({ id: w.id, label: w.name, subtitle: `${w.availableRooms} căn hộ trống` }))}
         selected={selectedWardIds}
         onSelect={handleToggleWard}
         onClose={() => setWardModalVisible(false)}
@@ -279,6 +373,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+    ...Shadow.sm,
   },
   backBtn: {
     padding: Spacing.xs,
@@ -288,17 +383,54 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: Colors.textPrimary,
   },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   headerTitle: {
     ...Typography.h3,
+  },
+  filterBadge: {
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.full,
+    minWidth: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xs,
+  },
+  filterBadgeText: {
+    ...Typography.caption,
+    color: Colors.white,
+    fontWeight: '700',
+    fontSize: 12,
   },
   container: {
     flex: 1,
   },
   content: {
-    padding: Spacing.lg,
+    padding: Spacing.base,
+    gap: Spacing.md,
   },
-  section: {
-    marginBottom: Spacing.xl,
+  section: {},
+  sectionCard: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.base,
+    ...Shadow.sm,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  sectionIcon: {
+    fontSize: 18,
+  },
+  sectionTitle: {
+    ...Typography.h4,
   },
   label: {
     ...Typography.label,
@@ -308,19 +440,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.background,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
   },
   pickerDisabled: {
-    backgroundColor: Colors.background,
-    opacity: 0.7,
+    backgroundColor: Colors.divider,
+    opacity: 0.6,
   },
   pickerText: {
     fontSize: 15,
     color: Colors.textPrimary,
+    fontWeight: '500',
   },
   pickerPlaceholder: {
     fontSize: 15,
@@ -339,12 +472,13 @@ const styles = StyleSheet.create({
   },
   inputWrap: {
     flex: 1,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.background,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: BorderRadius.md,
-    height: 44,
+    height: 46,
     paddingHorizontal: Spacing.sm,
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
@@ -354,6 +488,7 @@ const styles = StyleSheet.create({
   dash: {
     marginHorizontal: Spacing.md,
     color: Colors.textSecondary,
+    fontSize: 16,
   },
   footer: {
     flexDirection: 'row',
@@ -362,13 +497,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Colors.divider,
     gap: Spacing.md,
+    ...Shadow.md,
   },
   resetBtn: {
     flex: 1,
-    padding: Spacing.md,
+    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
     backgroundColor: Colors.background,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   resetText: {
     ...Typography.button,
@@ -376,13 +515,15 @@ const styles = StyleSheet.create({
   },
   searchBtn: {
     flex: 2,
-    padding: Spacing.md,
+    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
     backgroundColor: Colors.primary,
     alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.sm,
   },
   searchText: {
     ...Typography.button,
     color: Colors.white,
-  }
+  },
 });

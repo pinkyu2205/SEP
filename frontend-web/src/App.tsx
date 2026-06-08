@@ -22,6 +22,7 @@ import { MaintenanceEquipmentMonitoring } from './pages/super-admin/MaintenanceE
 import { SuperAdminOverview } from './pages/super-admin/SuperAdminOverview';
 import { SystemConfiguration } from './pages/super-admin/SystemConfiguration';
 import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
+import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TenantList } from './pages/tenants/TenantList';
 
@@ -39,6 +40,7 @@ function App() {
             <Route path="/super-admin/users" element={<UserRoleManagement />} />
             <Route path="/super-admin/hosts" element={<HostManagement />} />
             <Route path="/super-admin/buildings" element={<BuildingRoomMonitoring />} />
+            <Route path="/super-admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
             <Route path="/super-admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/super-admin/contracts" element={<ContractMonitoring />} />
             <Route path="/super-admin/zones" element={<ZoneManagement />} />

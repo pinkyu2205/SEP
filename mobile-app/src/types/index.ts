@@ -574,22 +574,27 @@ export interface PaginatedResponse<T> {
 }
 
 // ======================== SEARCH & LOCATION ========================
-export interface District {
+export interface City {
   id: string;
   name: string;
   availableRooms: number;
 }
+
+/** @deprecated Use City instead */
+export type District = City;
 
 export interface Ward {
   id: string;
-  districtId: string;
+  cityId: string;
   name: string;
   availableRooms: number;
 }
 
+export type PropertyType = 'apartment' | 'whole_house';
+
 export interface SearchFilters {
   keyword?: string;
-  districtId?: string;
+  cityId?: string;
   wardIds?: string[];
   priceMin?: number;
   priceMax?: number;
@@ -607,9 +612,9 @@ export interface PropertyListing {
   id: string;
   name: string;
   address: string;
-  district: string;
+  city: string;
   ward: string;
-  districtId: string;
+  cityId: string;
   wardId: string;
   photos: string[];
   priceFrom: number;
@@ -617,12 +622,15 @@ export interface PropertyListing {
   totalRooms: number;
   availableRooms: number;
   area: number;
+  propertyType: PropertyType;
   amenities: string[];
+  houseEquipments?: string[];
   electricityRate: number;
   waterRate: number;
   depositMonths: number;
   serviceFee: number;
   description: string;
+  paymentNote?: string;
   latitude: number;
   longitude: number;
   rooms: PropertyRoom[];
@@ -638,6 +646,9 @@ export interface PropertyRoom {
   area: number;
   price: number;
   status: 'available' | 'occupied';
+  photos?: string[];
+  equipments?: string[];
+  description?: string;
 }
 
 export interface SearchResult {

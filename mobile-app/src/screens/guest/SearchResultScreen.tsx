@@ -50,7 +50,7 @@ export const SearchResultScreen: React.FC = () => {
 
   const getFilterSummary = () => {
     const parts = [];
-    if (filters.districtId) parts.push('Q.Huyện');
+    if (filters.cityId) parts.push('Thành phố');
     if (filters.priceMax) parts.push('Dưới ' + (filters.priceMax / 1000000) + 'tr');
     if (filters.keyword) parts.push(`"${filters.keyword}"`);
     return parts.length > 0 ? parts.join(' • ') : 'Tất cả';
