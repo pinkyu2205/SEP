@@ -1,26 +1,24 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Building2, CheckCircle2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Building2, CheckCircle2, ChevronLeft } from 'lucide-react';
 import type { PropertyResponse } from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
-
-import { StepPropertyInfo } from './StepPropertyInfo';
-import { StepRooms } from './StepRooms';
-import { StepEquipments } from './StepEquipments';
-import { StepRenovations } from './StepRenovations';
-import { StepInboundContract } from './StepInboundContract';
-import { StepDepreciation } from './StepDepreciation';
 import { StepConfirmPrice } from './StepConfirmPrice';
+import { StepPropertyInfo } from './StepPropertyInfo';
+import { StepRenovations } from './StepRenovations';
 
 const STEPS = [
-  { id: 1, label: 'Thông tin cơ bản' },
-  { id: 2, label: 'Danh sách phòng' },
-  { id: 3, label: 'Thiết bị' },
-  { id: 4, label: 'Cải tạo' },
-  { id: 5, label: 'Hợp đồng gốc' },
-  { id: 6, label: 'Tính khấu hao' },
-  { id: 7, label: 'Kích hoạt Giá' },
+  { id: 1, label: 'Thông tin & hợp đồng' },
+  { id: 2, label: 'Cải tạo & khấu hao' },
+  { id: 3, label: 'Duyệt cho Host' },
 ];
+
+const statusLabel: Record<string, string> = {
+  DRAFT: 'Nháp',
+  ACTIVE: 'Available',
+  MAINTENANCE: 'Đang cải tạo',
+  INACTIVE: 'Ngừng hoạt động',
+};
 
 export const PropertyOnboardingWizard = () => {
   const { id } = useParams();
@@ -35,14 +33,14 @@ export const PropertyOnboardingWizard = () => {
     }
   }, [id]);
 
-  const fetchProperty = async (propId: number) => {
+  const fetchProperty = async (propertyId: number) => {
     setLoading(true);
     try {
-      const data = await propertyService.getPropertyById(propId);
+      const data = await propertyService.getPropertyById(propertyId);
       setProperty(data);
     } catch (err) {
       console.error(err);
-      alert('Không tìm thấy Tòa nhà');
+      alert('Không tìm thấy căn nhà này.');
       navigate('/super-admin/buildings');
     } finally {
       setLoading(false);
@@ -50,98 +48,113 @@ export const PropertyOnboardingWizard = () => {
   };
 
   const handleNext = () => {
-    if (currentStep === 1 && property?.wholeHouse) {
-      // Bỏ qua bước Phòng nếu là nhà nguyên căn
-      setCurrentStep(3);
-    } else if (currentStep < 7) {
+    if (currentStep < STEPS.length) {
       setCurrentStep(prev => prev + 1);
-    } else {
-      navigate('/super-admin/buildings');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
+
+    navigate('/super-admin/buildings');
   };
 
   const handleBack = () => {
-    if (currentStep === 3 && property?.wholeHouse) {
-      setCurrentStep(1);
-    } else if (currentStep > 1) {
+    if (currentStep > 1) {
       setCurrentStep(prev => prev - 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
+
+    navigate('/super-admin/buildings');
   };
 
+  const progressWidth = `${((currentStep - 1) / (STEPS.length - 1)) * 100}%`;
+
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/super-admin/buildings')} className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition">
-              <ChevronLeft className="w-6 h-6" />
+    <div className="min-h-screen bg-slate-50 pb-16">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4 shadow-sm">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <button onClick={handleBack} className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100" title="Quay lại">
+              <ChevronLeft className="h-6 w-6" />
             </button>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                <Building2 className="w-6 h-6 text-indigo-600" />
-                {property ? property.propertyName : 'Tạo mới Tòa nhà (Onboarding)'}
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 truncate text-xl font-black text-slate-900">
+                <Building2 className="h-6 w-6 shrink-0 text-indigo-600" />
+                {property ? property.propertyName : 'Thêm nhà thuê mới'}
               </h1>
-              <p className="text-sm text-slate-500 font-medium">Quy trình thiết lập & cấu hình chi tiết trước khi cho thuê</p>
+              <p className="mt-1 text-sm font-medium text-slate-500">
+                Luồng Admin: nhập hợp đồng gốc, ghi nhận cải tạo, duyệt available để Host tiếp tục vận hành.
+              </p>
             </div>
           </div>
           {property && (
-            <div className={`px-3 py-1 rounded-full text-sm font-bold ${property.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
-              Trạng thái: {property.status}
+            <div className={`shrink-0 rounded-full px-3 py-1 text-sm font-bold ${property.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
+              Trạng thái: {statusLabel[property.status] || property.status}
             </div>
           )}
         </div>
       </div>
 
-      {/* Progress Bar */}
-      <div className="max-w-5xl mx-auto mt-8 px-6">
-        <div className="flex items-center justify-between relative">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-indigo-500 rounded-full z-0 transition-all duration-500" style={{ width: `${((currentStep - 1) / (7 - 1)) * 100}%` }}></div>
-          
-          {STEPS.map(step => {
-            const isHidden = property?.wholeHouse && step.id === 2;
-            if (isHidden) return null;
+      <div className="mx-auto mt-8 max-w-6xl px-6">
+        <div className="relative flex items-start justify-between">
+          <div className="absolute left-0 top-5 z-0 h-1 w-full rounded-full bg-slate-200" />
+          <div className="absolute left-0 top-5 z-0 h-1 rounded-full bg-indigo-500 transition-all duration-500" style={{ width: progressWidth }} />
 
+          {STEPS.map(step => {
             const isActive = step.id === currentStep;
             const isCompleted = step.id < currentStep;
 
             return (
-              <div key={step.id} className="relative z-10 flex flex-col items-center gap-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-sm ${isActive ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : isCompleted ? 'bg-indigo-500 text-white' : 'bg-white text-slate-400 border-2 border-slate-200'}`}>
-                  {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.id}
+              <div key={step.id} className="relative z-10 flex min-w-0 flex-1 flex-col items-center gap-2">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold shadow-sm transition-all ${isActive ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : isCompleted ? 'bg-indigo-500 text-white' : 'border-2 border-slate-200 bg-white text-slate-400'}`}>
+                  {isCompleted ? <CheckCircle2 className="h-5 w-5" /> : step.id}
                 </div>
-                <span className={`text-xs font-bold absolute -bottom-6 w-24 text-center ${isActive ? 'text-indigo-900' : isCompleted ? 'text-indigo-600' : 'text-slate-400'}`}>{step.label}</span>
+                <span className={`max-w-36 text-center text-xs font-bold ${isActive ? 'text-indigo-900' : isCompleted ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  {step.label}
+                </span>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="max-w-4xl mx-auto mt-16 px-6">
-        {loading ? (
-          <div className="text-center py-20 text-slate-400 font-semibold">Đang tải dữ liệu...</div>
-        ) : (
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-            {currentStep === 1 && (
-              <StepPropertyInfo 
-                property={property} 
-                onSaved={(p) => { 
-                  setProperty(p); 
-                  if (!property) navigate(`/super-admin/properties/onboarding/${p.id}`, { replace: true });
-                  handleNext(); 
-                }} 
-              />
-            )}
-            {currentStep === 2 && !property?.wholeHouse && property && <StepRooms property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 3 && property && <StepEquipments property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 4 && property && <StepRenovations property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 5 && property && <StepInboundContract property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 6 && property && <StepDepreciation property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 7 && property && <StepConfirmPrice property={property} onNext={handleNext} onBack={handleBack} onSuccess={() => fetchProperty(property.id)} />}
-          </div>
-        )}
+      <div className="mx-auto mt-10 max-w-5xl px-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+          {loading ? (
+            <div className="py-20 text-center font-semibold text-slate-400">Đang tải dữ liệu...</div>
+          ) : (
+            <>
+              {currentStep === 1 && (
+                <StepPropertyInfo
+                  property={property}
+                  onSaved={(savedProperty) => {
+                    setProperty(savedProperty);
+                    if (!property) {
+                      navigate(`/super-admin/properties/onboarding/${savedProperty.id}`, { replace: true });
+                    }
+                    handleNext();
+                  }}
+                />
+              )}
+              {currentStep === 2 && property && (
+                <StepRenovations property={property} onNext={handleNext} onBack={handleBack} />
+              )}
+              {currentStep === 3 && property && (
+                <StepConfirmPrice
+                  property={property}
+                  onNext={handleNext}
+                  onBack={handleBack}
+                  onSuccess={() => fetchProperty(property.id)}
+                />
+              )}
+              {currentStep > 1 && !property && (
+                <div className="py-16 text-center text-sm font-semibold text-slate-500">
+                  Vui lòng lưu thông tin căn nhà trước khi qua bước tiếp theo.
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

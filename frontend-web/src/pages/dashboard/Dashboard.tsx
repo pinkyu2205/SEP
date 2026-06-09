@@ -309,7 +309,7 @@ export const Dashboard = () => {
           subtitle={`${MOCK_PROPERTIES.length} bất động sản · ${allRooms.length} phòng`}
           icon={Building2}
           action={
-            <Link to="/properties" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+            <Link to="/host/properties" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
               Xem tất cả <ArrowRight className="w-3 h-3" />
             </Link>
           }
@@ -340,7 +340,7 @@ export const Dashboard = () => {
             return (
               <Link
                 key={prop.id}
-                to={`/properties/${prop.id}`}
+                to={`/host/properties/${prop.id}`}
                 className="block border border-slate-100 rounded-xl p-4 hover:border-primary-200 hover:shadow-md transition-all group"
               >
                 <div className="flex items-start justify-between mb-3">
@@ -389,7 +389,7 @@ export const Dashboard = () => {
           subtitle="Tỷ lệ thực tế so với mục tiêu 90% — 6 tháng"
           icon={Activity}
           action={
-            <Link to="/reports" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+            <Link to="/host/reports" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
               Báo cáo chi tiết <ArrowRight className="w-3 h-3" />
             </Link>
           }
@@ -423,7 +423,7 @@ export const Dashboard = () => {
             subtitle={`${pendingContracts.length} hợp đồng đang chờ chữ ký Host`}
             icon={ShieldCheck}
             action={
-              <Link to="/contracts" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+              <Link to="/host/contracts" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
                 Tất cả <ArrowRight className="w-3 h-3" />
               </Link>
             }
@@ -479,7 +479,7 @@ export const Dashboard = () => {
             subtitle={`${maintenancePending} sự cố đang mở / đang xử lý (ưu tiên giảm dần)`}
             icon={Wrench}
             action={
-              <Link to="/maintenance" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+              <Link to="/host/maintenance" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
                 Giám sát <ArrowRight className="w-3 h-3" />
               </Link>
             }
@@ -523,7 +523,7 @@ export const Dashboard = () => {
             subtitle={`${alerts.length} cảnh báo chưa đọc cần xử lý`}
             icon={AlertTriangle}
             action={
-              <Link to="/notifications" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+              <Link to="/host/notifications" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
                 Tất cả <ArrowRight className="w-3 h-3" />
               </Link>
             }
@@ -565,7 +565,7 @@ export const Dashboard = () => {
           subtitle={`${activeManagers} quản lý đang hoạt động · ${MOCK_PROPERTIES.length} bất động sản được phân công`}
           icon={Users}
           action={
-            <Link to="/operations-managers" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
+            <Link to="/host/operations-managers" className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 px-3 py-1.5 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors">
               Tất cả <ArrowRight className="w-3 h-3" />
             </Link>
           }

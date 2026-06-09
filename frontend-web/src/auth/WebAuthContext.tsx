@@ -136,7 +136,7 @@ export const useWebAuth = () => {
 
 const defaultPathByRole: Record<WebRole, string> = {
   super_admin: '/super-admin',
-  host: '/',
+  host: '/host',
 };
 
 export const ProtectedRoute = ({ allowedRoles }: { allowedRoles: WebRole[] }) => {

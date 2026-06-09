@@ -1,5 +1,8 @@
+import { lazy } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute, PublicOnlyRoute } from './auth/WebAuthContext';
+import { AuthLayout } from './layouts/AuthLayout';
+import { PublicLayout } from './layouts/PublicLayout';
 import { HostLayout } from './layouts/HostLayout';
 import { SuperAdminLayout } from './layouts/SuperAdminLayout';
 import { WebLogin } from './pages/auth/WebLogin';
@@ -26,14 +29,32 @@ import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TenantList } from './pages/tenants/TenantList';
 
+// Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
+const HomePage = lazy(() => import('./pages/public/HomePage'));
+const PropertyListPage = lazy(() => import('./pages/public/PropertyListPage'));
+const PropertyDetailPage = lazy(() => import('./pages/public/PropertyDetailPage'));
+const ContactPage = lazy(() => import('./pages/public/ContactPage'));
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<PublicOnlyRoute />}>
-          <Route path="/login" element={<WebLogin />} />
+        {/* ─── Public Website (khách thuê / người tìm phòng) ─── */}
+        <Route element={<PublicLayout />}>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/properties" element={<PropertyListPage />} />
+          <Route path="/properties/:id" element={<PropertyDetailPage />} />
+          <Route path="/contact" element={<ContactPage />} />
         </Route>
 
+        {/* ─── Đăng nhập quản trị ─── */}
+        <Route element={<PublicOnlyRoute />}>
+          <Route element={<AuthLayout />}>
+            <Route path="/login" element={<WebLogin />} />
+          </Route>
+        </Route>
+
+        {/* ─── Dashboard Super Admin ─── */}
         <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
           <Route element={<SuperAdminLayout />}>
             <Route path="/super-admin" element={<SuperAdminOverview />} />
@@ -50,22 +71,23 @@ function App() {
           </Route>
         </Route>
 
+        {/* ─── Dashboard Host (Admin System) — prefix /host ─── */}
         <Route element={<ProtectedRoute allowedRoles={['host', 'super_admin']} />}>
           <Route element={<HostLayout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/properties" element={<PropertyList />} />
-            <Route path="/properties/:id" element={<PropertyDetail />} />
-            <Route path="/operations-managers" element={<ManagerList />} />
-            <Route path="/managers" element={<ManagerList />} />
-            <Route path="/tenants" element={<TenantList />} />
-            <Route path="/contracts" element={<ContractList />} />
-            <Route path="/maintenance" element={<MaintenanceList />} />
-            <Route path="/financial" element={<FinancialManagement />} />
-            <Route path="/equipments" element={<EquipmentList />} />
-            <Route path="/reports" element={<ReportsAnalytics />} />
-            <Route path="/notifications" element={<NotificationCenter />} />
+            <Route path="/host" element={<Dashboard />} />
+            <Route path="/host/properties" element={<PropertyList />} />
+            <Route path="/host/properties/:id" element={<PropertyDetail />} />
+            <Route path="/host/operations-managers" element={<ManagerList />} />
+            <Route path="/host/managers" element={<ManagerList />} />
+            <Route path="/host/tenants" element={<TenantList />} />
+            <Route path="/host/contracts" element={<ContractList />} />
+            <Route path="/host/maintenance" element={<MaintenanceList />} />
+            <Route path="/host/financial" element={<FinancialManagement />} />
+            <Route path="/host/equipments" element={<EquipmentList />} />
+            <Route path="/host/reports" element={<ReportsAnalytics />} />
+            <Route path="/host/notifications" element={<NotificationCenter />} />
             <Route
-              path="/settings"
+              path="/host/settings"
               element={
                 <div className="p-6">
                   <h1 className="text-2xl font-bold text-slate-900">Cài đặt</h1>
@@ -75,7 +97,9 @@ function App() {
             />
           </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/login" replace />} />
+
+        {/* Route không khớp -> về Landing Page */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

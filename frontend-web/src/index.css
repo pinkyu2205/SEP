@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,6 +7,10 @@
 @layer base {
   body {
     @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 
   * {
@@ -115,7 +121,72 @@
   }
 }
 
+@layer components {
+  /* ── Public Website (giao diện khách thuê) ── */
+  .pub-container {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .pub-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-bold text-white shadow-glow transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary-700 hover:shadow-card-hover active:translate-y-0;
+  }
+
+  .pub-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-6 py-3 text-sm font-bold text-slate-700 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:text-primary-700;
+  }
+
+  .pub-chip {
+    @apply inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-cyan-100 backdrop-blur;
+  }
+
+  .pub-eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full bg-primary-50 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-primary-600;
+  }
+
+  .glass {
+    @apply border border-white/60 bg-white/70 backdrop-blur-xl;
+  }
+
+  .glass-dark {
+    @apply border border-white/10 bg-white/[0.06] backdrop-blur-xl;
+  }
+}
+
 @layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-600 via-violet-500 to-accent-500 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-light {
+    @apply bg-gradient-to-r from-white via-cyan-100 to-violet-200 bg-clip-text text-transparent;
+  }
+
+  .bg-mesh {
+    background-image:
+      radial-gradient(at 15% 15%, rgba(99, 102, 241, 0.35), transparent 45%),
+      radial-gradient(at 85% 10%, rgba(6, 182, 212, 0.30), transparent 40%),
+      radial-gradient(at 75% 90%, rgba(139, 92, 246, 0.30), transparent 45%),
+      radial-gradient(at 10% 85%, rgba(79, 70, 229, 0.25), transparent 40%);
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
   }

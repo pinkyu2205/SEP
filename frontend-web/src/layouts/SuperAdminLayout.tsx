@@ -24,31 +24,31 @@ import { AUDIT_LOGS, PLATFORM_HOSTS, PLATFORM_MAINTENANCE_REQUESTS } from '../ut
 const navItems = [
   { path: '/super-admin', label: 'Tổng quan', icon: BarChart3, end: true },
   { path: '/super-admin/users', label: 'Người dùng & RBAC', icon: Users },
-  { path: '/super-admin/hosts', label: 'Host/Admin System', icon: ShieldCheck, badge: PLATFORM_HOSTS.filter(h => h.status === 'pending_approval').length },
-  { path: '/super-admin/buildings', label: 'Buildings & Rooms', icon: Building2 },
-  { path: '/super-admin/billing', label: 'Billing & Payments', icon: CreditCard },
-  { path: '/super-admin/zones', label: 'Quản lý Khu vực', icon: MapPin },
-  { path: '/super-admin/contracts', label: 'Contracts', icon: FileText },
-  { path: '/super-admin/maintenance', label: 'Maintenance & Equipment', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(m => m.status !== 'resolved').length },
-  { path: '/super-admin/settings', label: 'System Configuration', icon: Settings },
-  { path: '/super-admin/security', label: 'Audit & Security', icon: Activity, badge: AUDIT_LOGS.filter(log => log.severity === 'critical').length },
+  { path: '/super-admin/hosts', label: 'Host/Admin System', icon: ShieldCheck, badge: PLATFORM_HOSTS.filter(host => host.status === 'pending_approval').length },
+  { path: '/super-admin/buildings', label: 'Nhà thuê Admin', icon: Building2 },
+  { path: '/super-admin/billing', label: 'Thanh toán', icon: CreditCard },
+  { path: '/super-admin/zones', label: 'Quản lý khu vực', icon: MapPin },
+  { path: '/super-admin/contracts', label: 'Hợp đồng', icon: FileText },
+  { path: '/super-admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(item => item.status !== 'resolved').length },
+  { path: '/super-admin/settings', label: 'Cấu hình hệ thống', icon: Settings },
+  { path: '/super-admin/security', label: 'Nhật ký & bảo mật', icon: Activity, badge: AUDIT_LOGS.filter(log => log.severity === 'critical').length },
 ];
 
 const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
   <>
-    <div className="h-16 flex items-center px-5 border-b border-slate-800/80">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 rounded-xl bg-cyan-500 flex items-center justify-center shadow-lg shadow-cyan-950/30">
-          <ShieldCheck className="w-5 h-5 text-white" />
+    <div className="flex h-16 items-center border-b border-slate-800/80 px-5">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500 shadow-lg shadow-cyan-950/30">
+          <ShieldCheck className="h-5 w-5 text-white" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-extrabold text-white leading-tight">UrbanNest</p>
-          <p className="text-[10px] text-cyan-200/80 leading-tight font-semibold">Super Admin Web Console</p>
+          <p className="text-sm font-extrabold leading-tight text-white">UrbanNest</p>
+          <p className="text-[10px] font-semibold leading-tight text-cyan-200/80">Bảng điều khiển Admin</p>
         </div>
       </div>
     </div>
 
-    <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+    <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
       {navItems.map(item => (
         <NavLink
           key={item.path}
@@ -56,19 +56,19 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
           end={item.end}
           onClick={onNavigate}
           className={({ isActive }) => clsx(
-            'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors',
+            'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors',
             isActive
               ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-950/20'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              : 'text-slate-400 hover:bg-slate-800 hover:text-white'
           )}
         >
           {({ isActive }) => (
             <>
-              <item.icon className={clsx('w-4 h-4', isActive ? 'text-white' : 'text-slate-500 group-hover:text-cyan-300')} />
+              <item.icon className={clsx('h-4 w-4', isActive ? 'text-white' : 'text-slate-500 group-hover:text-cyan-300')} />
               <span className="flex-1 truncate">{item.label}</span>
               {!!item.badge && (
                 <span className={clsx(
-                  'min-w-5 h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center',
+                  'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold',
                   isActive ? 'bg-white text-cyan-700' : 'bg-cyan-500 text-white'
                 )}>
                   {item.badge > 9 ? '9+' : item.badge}
@@ -88,7 +88,7 @@ export const SuperAdminLayout = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
-      <aside className="hidden lg:flex w-72 h-screen sticky top-0 bg-slate-950 text-slate-300 flex-col">
+      <aside className="sticky top-0 hidden h-screen w-72 flex-col bg-slate-950 text-slate-300 lg:flex">
         <SidebarContent />
       </aside>
 
@@ -99,14 +99,14 @@ export const SuperAdminLayout = () => {
             className="absolute inset-0 bg-slate-950/60"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="relative w-80 max-w-[86vw] h-full bg-slate-950 text-slate-300 flex flex-col shadow-2xl">
+          <aside className="relative flex h-full w-80 max-w-[86vw] flex-col bg-slate-950 text-slate-300 shadow-2xl">
             <div className="absolute right-3 top-3">
               <button
                 aria-label="Đóng menu"
                 onClick={() => setMobileOpen(false)}
-                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
               >
-                <X className="w-5 h-5" />
+                <X className="h-5 w-5" />
               </button>
             </div>
             <SidebarContent onNavigate={() => setMobileOpen(false)} />
@@ -114,28 +114,28 @@ export const SuperAdminLayout = () => {
         </div>
       )}
 
-      <div className="flex-1 min-w-0">
-        <header className="sticky top-0 z-30 h-16 bg-white/95 backdrop-blur border-b border-slate-200 flex items-center justify-between px-4 md:px-6">
-          <div className="flex items-center gap-3 min-w-0">
+      <div className="min-w-0 flex-1">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               aria-label="Mở menu"
               onClick={() => setMobileOpen(true)}
-              className="lg:hidden p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"
+              className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 lg:hidden"
             >
-              <Menu className="w-5 h-5" />
+              <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-widest text-cyan-600">Web platform only</p>
-              <h1 className="text-base md:text-lg font-extrabold text-slate-950 truncate">Super Admin Dashboard</h1>
+              <p className="text-xs font-bold uppercase tracking-widest text-cyan-600">Chỉ dành cho web</p>
+              <h1 className="truncate text-base font-extrabold text-slate-950 md:text-lg">Bảng điều khiển Admin</h1>
             </div>
           </div>
 
-          <div className="hidden md:block flex-1 max-w-xl mx-6">
+          <div className="mx-6 hidden max-w-xl flex-1 md:block">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-cyan-500 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-                placeholder="Tìm user, Host, building, invoice, contract..."
+                placeholder="Tìm người dùng, Host, nhà thuê, hóa đơn, hợp đồng..."
               />
             </div>
           </div>
@@ -143,31 +143,31 @@ export const SuperAdminLayout = () => {
           <div className="flex items-center gap-3">
             <button
               className={clsx(
-                'relative p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50',
+                'relative rounded-xl border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-800',
                 AUDIT_LOGS.some(log => log.severity === 'critical') && 'text-rose-600'
               )}
               title="Cảnh báo bảo mật"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="h-4 w-4" />
               {AUDIT_LOGS.some(log => log.severity === 'critical') && (
-                <span className="absolute -right-1 -top-1 w-3 h-3 rounded-full bg-rose-500 ring-2 ring-white" />
+                <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-rose-500 ring-2 ring-white" />
               )}
             </button>
-            <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-200">
-              <div className="w-9 h-9 rounded-xl bg-slate-950 text-white flex items-center justify-center text-xs font-black">
+            <div className="hidden items-center gap-2 border-l border-slate-200 pl-3 sm:flex">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-xs font-black text-white">
                 SA
               </div>
               <div>
-                <p className="text-xs font-bold text-slate-900 leading-tight">{user?.fullName ?? 'Super Admin'}</p>
-                <p className="text-[10px] text-slate-500 leading-tight">Toàn quyền hệ thống</p>
+                <p className="text-xs font-bold leading-tight text-slate-900">{user?.fullName ?? 'Admin'}</p>
+                <p className="text-[10px] leading-tight text-slate-500">Toàn quyền hệ thống</p>
               </div>
             </div>
             <button
               onClick={logout}
-              className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+              className="rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
               title="Đăng xuất"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="h-4 w-4" />
             </button>
           </div>
         </header>

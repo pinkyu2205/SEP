@@ -24,7 +24,7 @@ export const PropertyDetail = () => {
     return (
       <div className="text-center py-20">
         <p className="text-slate-500">Không tìm thấy thông tin căn nhà này.</p>
-        <button onClick={() => navigate('/properties')} className="btn-primary mt-4">
+        <button onClick={() => navigate('/host/properties')} className="btn-primary mt-4">
           Quay lại danh sách
         </button>
       </div>
@@ -80,7 +80,7 @@ export const PropertyDetail = () => {
       {/* Back + Property Info Header */}
       <div>
         <button
-          onClick={() => navigate('/properties')}
+          onClick={() => navigate('/host/properties')}
           className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-primary-600 transition-colors mb-4"
         >
           <ArrowLeft className="w-4 h-4" />

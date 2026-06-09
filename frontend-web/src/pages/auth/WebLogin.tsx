@@ -21,7 +21,7 @@ export const WebLogin = () => {
     try {
       const user = await login(username, password);
       const from = (location.state as { from?: string } | null)?.from;
-      const defaultPath = user.role === 'super_admin' ? '/super-admin' : '/';
+      const defaultPath = user.role === 'super_admin' ? '/super-admin' : '/host';
       const validFrom = from && from !== '/login' && (
         user.role === 'super_admin' ? from.startsWith('/super-admin') : !from.startsWith('/super-admin')
       );

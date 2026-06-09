@@ -100,7 +100,7 @@ export const PropertyList = () => {
             <div
               key={property.id}
               className="card hover:shadow-md transition-shadow duration-200 cursor-pointer group"
-              onClick={() => navigate(`/properties/${property.id}`)}
+              onClick={() => navigate(`/host/properties/${property.id}`)}
             >
               {/* Card Header */}
               <div className="p-5 border-b border-slate-100">

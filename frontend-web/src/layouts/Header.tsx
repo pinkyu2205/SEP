@@ -5,18 +5,18 @@ import { useWebAuth } from '../auth/WebAuthContext';
 import { MOCK_NOTIFICATIONS } from '../utils/mockData';
 
 const ROUTE_LABELS: Record<string, string> = {
-  '/': 'Bảng điều hành',
-  '/properties': 'Bất động sản',
-  '/operations-managers': 'Quản lý vận hành',
-  '/managers': 'Quản lý vận hành',
-  '/tenants': 'Khách thuê',
-  '/contracts': 'Phê duyệt hợp đồng',
-  '/maintenance': 'Giám sát bảo trì',
-  '/financial': 'Quản lý tài chính',
-  '/equipments': 'Danh mục tài sản',
-  '/reports': 'Báo cáo & Phân tích',
-  '/notifications': 'Thông báo',
-  '/settings': 'Cài đặt',
+  '/host': 'Bảng điều hành',
+  '/host/properties': 'Bất động sản',
+  '/host/operations-managers': 'Quản lý vận hành',
+  '/host/managers': 'Quản lý vận hành',
+  '/host/tenants': 'Khách thuê',
+  '/host/contracts': 'Phê duyệt hợp đồng',
+  '/host/maintenance': 'Giám sát bảo trì',
+  '/host/financial': 'Quản lý tài chính',
+  '/host/equipments': 'Danh mục tài sản',
+  '/host/reports': 'Báo cáo & Phân tích',
+  '/host/notifications': 'Thông báo',
+  '/host/settings': 'Cài đặt',
 };
 
 const formatVNDate = (date: Date) => {
@@ -39,25 +39,25 @@ export const Header = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const isPropertyDetail = location.pathname.startsWith('/properties/') && location.pathname !== '/properties';
+  const isPropertyDetail = location.pathname.startsWith('/host/properties/') && location.pathname !== '/host/properties';
   const pathLabel = isPropertyDetail
     ? 'Chi tiết bất động sản'
     : (ROUTE_LABELS[location.pathname] ?? 'Trang tổng quan');
 
-  const isRoot = location.pathname === '/';
+  const isRoot = location.pathname === '/host';
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10 flex-shrink-0">
       <div className="flex items-center gap-2 text-sm min-w-0">
         {!isRoot ? (
           <>
-            <Link to="/" className="flex items-center gap-1 text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0">
+            <Link to="/host" className="flex items-center gap-1 text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0">
               <Home className="w-3.5 h-3.5" />
             </Link>
             <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
             {isPropertyDetail && (
               <>
-                <Link to="/properties" className="text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0 text-xs">
+                <Link to="/host/properties" className="text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0 text-xs">
                   Bất động sản
                 </Link>
                 <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
@@ -97,7 +97,7 @@ export const Header = () => {
         <div className="h-5 w-px bg-slate-200 hidden lg:block" />
 
         <Link
-          to="/notifications"
+          to="/host/notifications"
           className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-lg hover:bg-slate-100"
           title="Thông báo"
         >

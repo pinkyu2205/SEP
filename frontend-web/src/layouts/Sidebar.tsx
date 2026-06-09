@@ -28,15 +28,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Tổng quan',
     items: [
-      { name: 'Bảng điều hành', path: '/', icon: LayoutDashboard, end: true },
+      { name: 'Bảng điều hành', path: '/host', icon: LayoutDashboard, end: true },
     ],
   },
   {
     label: 'Vận hành',
     items: [
-      { name: 'Bất động sản',       path: '/properties',          icon: Building2 },
-      { name: 'Quản lý vận hành',   path: '/operations-managers', icon: UserCog },
-      { name: 'Khách thuê',         path: '/tenants',             icon: Users },
+      { name: 'Bất động sản',       path: '/host/properties',          icon: Building2 },
+      { name: 'Quản lý vận hành',   path: '/host/operations-managers', icon: UserCog },
+      { name: 'Khách thuê',         path: '/host/tenants',             icon: Users },
     ],
   },
   {
@@ -44,7 +44,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       {
         name: 'Phê duyệt hợp đồng',
-        path: '/contracts',
+        path: '/host/contracts',
         icon: FileText,
         badge: pendingCount > 0 ? pendingCount : undefined,
         badgeColor: 'bg-amber-500',
@@ -54,15 +54,15 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Giám sát & Tài sản',
     items: [
-      { name: 'Giám sát bảo trì',    path: '/maintenance', icon: Wrench },
-      { name: 'Danh mục tài sản', path: '/equipments',  icon: Package },
+      { name: 'Giám sát bảo trì',    path: '/host/maintenance', icon: Wrench },
+      { name: 'Danh mục tài sản', path: '/host/equipments',  icon: Package },
     ],
   },
   {
     label: 'Tài chính & Báo cáo',
     items: [
-      { name: 'Quản lý tài chính',  path: '/financial', icon: DollarSign },
-      { name: 'Báo cáo & Phân tích', path: '/reports',  icon: BarChart3 },
+      { name: 'Quản lý tài chính',  path: '/host/financial', icon: DollarSign },
+      { name: 'Báo cáo & Phân tích', path: '/host/reports',  icon: BarChart3 },
     ],
   },
   {
@@ -70,12 +70,12 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       {
         name: 'Thông báo',
-        path: '/notifications',
+        path: '/host/notifications',
         icon: Bell,
         badge: unreadCount > 0 ? unreadCount : undefined,
         badgeColor: 'bg-rose-500',
       },
-      { name: 'Cài đặt', path: '/settings', icon: Settings },
+      { name: 'Cài đặt', path: '/host/settings', icon: Settings },
     ],
   },
 ];
