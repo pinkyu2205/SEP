@@ -2,8 +2,6 @@ import { City, Ward, PropertyListing, SearchFilters, SearchResult, NearbyRequest
 
 export const CITIES: City[] = [
   { id: 'hcm', name: 'TP. Hồ Chí Minh', availableRooms: 180 },
-  { id: 'hn', name: 'Hà Nội', availableRooms: 95 },
-  { id: 'dn', name: 'Đà Nẵng', availableRooms: 42 },
 ];
 
 // Keep backward compatibility
@@ -22,21 +20,12 @@ export const WARDS: Record<string, Ward[]> = {
     { id: 'hcm-dk', cityId: 'hcm', name: 'Phường Đa Kao (Quận 1)', availableRooms: 6 },
     { id: 'hcm-tb', cityId: 'hcm', name: 'Phường 2 (Tân Bình)', availableRooms: 10 },
   ],
-  'hn': [
-    { id: 'hn-cg', cityId: 'hn', name: 'Phường Cầu Giấy', availableRooms: 20 },
-    { id: 'hn-dt', cityId: 'hn', name: 'Phường Đống Đa', availableRooms: 18 },
-    { id: 'hn-tx', cityId: 'hn', name: 'Phường Thanh Xuân', availableRooms: 15 },
-  ],
-  'dn': [
-    { id: 'dn-hc', cityId: 'dn', name: 'Phường Hải Châu', availableRooms: 22 },
-    { id: 'dn-st', cityId: 'dn', name: 'Phường Sơn Trà', availableRooms: 20 },
-  ]
 };
 
 export const MOCK_PROPERTIES: PropertyListing[] = [
   {
     id: 'prop-1',
-    name: 'Căn hộ dịch vụ Minh Phát',
+    name: 'Phòng trọ Minh Phát',
     address: '12 Nguyễn Thị Thập',
     city: 'TP. Hồ Chí Minh',
     ward: 'Phường Tân Phú (Quận 7)',
@@ -93,7 +82,7 @@ export const MOCK_PROPERTIES: PropertyListing[] = [
   },
   {
     id: 'prop-2',
-    name: 'Căn hộ Sunrise',
+    name: 'Phòng trọ Sunrise',
     address: '45 Lê Văn Lương',
     city: 'TP. Hồ Chí Minh',
     ward: 'Phường Bình Thuận (Quận 7)',
@@ -156,7 +145,7 @@ export const MOCK_PROPERTIES: PropertyListing[] = [
   },
   {
     id: 'prop-3',
-    name: 'Căn hộ Sinh viên HUTECH',
+    name: 'Phòng trọ Sinh viên HUTECH',
     address: '150 Điện Biên Phủ',
     city: 'TP. Hồ Chí Minh',
     ward: 'Phường 25 (Bình Thạnh)',
@@ -218,7 +207,7 @@ export const MOCK_PROPERTIES: PropertyListing[] = [
     totalRooms: 12,
     availableRooms: 3,
     area: 35,
-    propertyType: 'apartment',
+    propertyType: 'whole_house',
     amenities: ['Máy lạnh', 'Wifi', 'Máy giặt', 'Giữ xe', 'Bảo vệ', 'Bếp riêng', 'Ban công'],
     electricityRate: 3500,
     waterRate: 15000,
@@ -389,6 +378,10 @@ export const getWardsByCity = (cityId: string): Ward[] => {
 
 export const searchProperties = (filters: SearchFilters): SearchResult => {
   let filtered = [...MOCK_PROPERTIES];
+
+  if (filters.propertyType) {
+    filtered = filtered.filter(p => p.propertyType === filters.propertyType);
+  }
 
   if (filters.keyword) {
     const kw = filters.keyword.toLowerCase();

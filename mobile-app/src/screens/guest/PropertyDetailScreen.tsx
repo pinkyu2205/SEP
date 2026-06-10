@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Alert, Modal, Animated, Dimensions,
-  FlatList
+  ActivityIndicator, Modal, Animated, Dimensions, Image, StatusBar, PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, BorderRadius, Typography, Shadow } from '../../constants';
-import { FilterChips, Card, PropertyCard } from '../../components/common';
+import { PropertyCard, StickyContactBar } from '../../components/common';
 import { searchService } from '../../services';
 import { PropertyListing, PropertyRoom } from '../../types';
 import { formatCurrency } from '../../utils/helpers';
@@ -17,9 +16,200 @@ import { GuestStackParamList } from '../../navigation/GuestStackNavigator';
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'PropertyDetail'>;
 type RouteProps = RouteProp<GuestStackParamList, 'PropertyDetail'>;
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ==================== Room Detail Bottom Sheet ====================
+// =====================================================================
+// Zoomable single photo (pinch + double-tap)
+// =====================================================================
+interface ZoomableImageProps {
+  uri: string;
+  onZoomChange: (zoomed: boolean) => void;
+}
+
+const ZoomableImage: React.FC<ZoomableImageProps> = ({ uri, onZoomChange }) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const tx = useRef(new Animated.Value(0)).current;
+  const ty = useRef(new Animated.Value(0)).current;
+
+  const lastScale = useRef(1);
+  const lastTx = useRef(0);
+  const lastTy = useRef(0);
+  const pinchDist0 = useRef<number | null>(null);
+  const pinchScale0 = useRef(1);
+  const lastTapTime = useRef(0);
+
+  const getDist = (touches: any[]) => {
+    const dx = touches[0].pageX - touches[1].pageX;
+    const dy = touches[0].pageY - touches[1].pageY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const springReset = () => {
+    lastScale.current = 1; lastTx.current = 0; lastTy.current = 0;
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }),
+      Animated.spring(tx, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }),
+      Animated.spring(ty, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }),
+    ]).start(() => onZoomChange(false));
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        lastScale.current > 1 || Math.abs(gs.dy) > 3,
+
+      onPanResponderGrant: (evt) => {
+        const touches = evt.nativeEvent.touches;
+        if (touches.length === 2) {
+          pinchDist0.current = getDist(touches);
+          pinchScale0.current = lastScale.current;
+        } else {
+          const now = Date.now();
+          if (now - lastTapTime.current < 280) {
+            if (lastScale.current > 1) {
+              springReset();
+            } else {
+              lastScale.current = 2.8;
+              onZoomChange(true);
+              Animated.spring(scale, { toValue: 2.8, useNativeDriver: true, tension: 80, friction: 8 }).start();
+            }
+          }
+          lastTapTime.current = now;
+        }
+      },
+
+      onPanResponderMove: (evt, gs) => {
+        const touches = evt.nativeEvent.touches;
+        if (touches.length >= 2 && pinchDist0.current) {
+          const newScale = Math.max(1, Math.min(5, pinchScale0.current * (getDist(touches) / pinchDist0.current)));
+          lastScale.current = newScale;
+          scale.setValue(newScale);
+          onZoomChange(newScale > 1.05);
+        } else if (touches.length === 1 && lastScale.current > 1) {
+          const maxPanX = (SCREEN_WIDTH * (lastScale.current - 1)) / 2;
+          const maxPanY = (SCREEN_HEIGHT * (lastScale.current - 1)) / 2;
+          tx.setValue(Math.max(-maxPanX, Math.min(maxPanX, lastTx.current + gs.dx)));
+          ty.setValue(Math.max(-maxPanY, Math.min(maxPanY, lastTy.current + gs.dy)));
+        }
+      },
+
+      onPanResponderRelease: (_, gs) => {
+        pinchDist0.current = null;
+        if (lastScale.current < 1.05) {
+          springReset();
+        } else {
+          const maxPanX = (SCREEN_WIDTH * (lastScale.current - 1)) / 2;
+          const maxPanY = (SCREEN_HEIGHT * (lastScale.current - 1)) / 2;
+          lastTx.current = Math.max(-maxPanX, Math.min(maxPanX, lastTx.current + gs.dx));
+          lastTy.current = Math.max(-maxPanY, Math.min(maxPanY, lastTy.current + gs.dy));
+        }
+      },
+    })
+  ).current;
+
+  return (
+    <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.Image
+        source={{ uri }}
+        style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT, transform: [{ scale }, { translateX: tx }, { translateY: ty }] }}
+        resizeMode="contain"
+        {...panResponder.panHandlers}
+      />
+    </View>
+  );
+};
+
+// =====================================================================
+// Full-Screen Photo Viewer Modal
+// =====================================================================
+interface PhotoViewerProps {
+  visible: boolean;
+  photos: string[];
+  initialIndex: number;
+  onClose: () => void;
+}
+
+const PhotoViewerModal: React.FC<PhotoViewerProps> = ({ visible, photos, initialIndex, onClose }) => {
+  const scrollRef = useRef<ScrollView>(null);
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setCurrentIndex(initialIndex);
+      setScrollEnabled(true);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: initialIndex * SCREEN_WIDTH, animated: false });
+      }, 50);
+    } else {
+      fadeAnim.setValue(0);
+    }
+  }, [visible, initialIndex]);
+
+  return (
+    <Modal visible={visible} transparent statusBarTranslucent animationType="none" onRequestClose={onClose}>
+      <StatusBar hidden />
+      <Animated.View style={[viewerStyles.overlay, { opacity: fadeAnim }]}>
+        <TouchableOpacity style={viewerStyles.closeBtn} onPress={onClose} activeOpacity={0.8}>
+          <Text style={viewerStyles.closeTxt}>✕</Text>
+        </TouchableOpacity>
+        <View style={viewerStyles.countBadge}>
+          <Text style={viewerStyles.countTxt}>{currentIndex + 1} / {photos.length}</Text>
+        </View>
+        <ScrollView
+          ref={scrollRef}
+          horizontal pagingEnabled
+          scrollEnabled={scrollEnabled}
+          showsHorizontalScrollIndicator={false}
+          onScroll={(e) => setCurrentIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH))}
+          scrollEventThrottle={16}
+          style={{ flex: 1 }}
+        >
+          {photos.map((uri, i) => (
+            <ZoomableImage key={i} uri={uri} onZoomChange={(zoomed) => setScrollEnabled(!zoomed)} />
+          ))}
+        </ScrollView>
+        {photos.length > 1 && scrollEnabled && (
+          <View style={viewerStyles.dotRow}>
+            {photos.map((_, i) => (
+              <View key={i} style={[viewerStyles.dot, i === currentIndex && viewerStyles.dotActive]} />
+            ))}
+          </View>
+        )}
+      </Animated.View>
+    </Modal>
+  );
+};
+
+const viewerStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: '#000' },
+  closeBtn: {
+    position: 'absolute', top: 52, right: 20, zIndex: 10,
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  closeTxt: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  countBadge: {
+    position: 'absolute', top: 56, left: 20, zIndex: 10,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99,
+  },
+  countTxt: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  dotRow: {
+    position: 'absolute', bottom: 40, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', gap: 6,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  dotActive: { backgroundColor: '#fff', width: 18, borderRadius: 3 },
+});
+
+// =====================================================================
+// Room Detail Bottom Sheet  (whole_house only)
+// =====================================================================
 interface RoomDetailSheetProps {
   visible: boolean;
   room: PropertyRoom | null;
@@ -29,6 +219,8 @@ interface RoomDetailSheetProps {
 
 const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, propertyName, onClose }) => {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [viewerInitIdx, setViewerInitIdx] = useState(0);
 
   useEffect(() => {
     if (visible) {
@@ -40,33 +232,40 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
 
   if (!room) return null;
 
+  const roomPhotos = room.photos && room.photos.length > 0 ? room.photos : [];
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={sheetStyles.overlay} activeOpacity={1} onPress={onClose}>
-        <Animated.View
-          style={[sheetStyles.container, { transform: [{ translateY: slideAnim }] }]}
-        >
-          <TouchableOpacity activeOpacity={1}>
-            {/* Handle Bar */}
-            <View style={sheetStyles.handleBar} />
+    <>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <TouchableOpacity style={sheetStyles.overlay} activeOpacity={1} onPress={onClose}>
+          <Animated.View style={[sheetStyles.container, { transform: [{ translateY: slideAnim }] }]}>
+            <TouchableOpacity activeOpacity={1}>
+              <View style={sheetStyles.handleBar} />
+              <View style={sheetStyles.header}>
+                <Text style={sheetStyles.roomName}>{room.name}</Text>
+                <Text style={sheetStyles.propertyName}>🏠 {propertyName}</Text>
+              </View>
 
-            {/* Room Title */}
-            <View style={sheetStyles.header}>
-              <Text style={sheetStyles.roomName}>{room.name}</Text>
-              <Text style={sheetStyles.propertyName}>🏠 {propertyName}</Text>
-            </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={sheetStyles.photoScroll}>
+                {roomPhotos.length > 0 ? roomPhotos.map((photo, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={sheetStyles.photoCard}
+                    activeOpacity={0.88}
+                    onPress={() => { setViewerInitIdx(idx); setShowPhotoViewer(true); }}
+                  >
+                    <Image source={{ uri: photo }} style={sheetStyles.photoImg} resizeMode="cover" />
+                    <View style={sheetStyles.photoZoomHint}>
+                      <Text style={{ color: '#fff', fontSize: 10 }}>🔍</Text>
+                    </View>
+                  </TouchableOpacity>
+                )) : (
+                  <View style={sheetStyles.photoCard}>
+                    <Text style={sheetStyles.photoIcon}>📷</Text>
+                  </View>
+                )}
+              </ScrollView>
 
-            {/* Room Photos (simulated) */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={sheetStyles.photoScroll}>
-              {(room.photos && room.photos.length > 0 ? room.photos : [null]).map((photo, idx) => (
-                <View key={idx} style={sheetStyles.photoCard}>
-                  <Text style={sheetStyles.photoIcon}>{photo ? '🖼️' : '📷'}</Text>
-                  <Text style={sheetStyles.photoLabel}>Ảnh {idx + 1}</Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            {/* Room Info */}
             <View style={sheetStyles.infoRow}>
               <View style={sheetStyles.infoPill}>
                 <Text style={sheetStyles.infoPillIcon}>📐</Text>
@@ -77,14 +276,13 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
                 <Text style={sheetStyles.infoPillText}>Tầng {room.floor}</Text>
               </View>
               {room.price > 0 && (
-                <View style={[sheetStyles.infoPill, { backgroundColor: Colors.errorLight }]}>
+                <View style={[sheetStyles.infoPill, { backgroundColor: '#FEF2F2' }]}>
                   <Text style={sheetStyles.infoPillIcon}>💰</Text>
                   <Text style={[sheetStyles.infoPillText, { color: Colors.error }]}>{formatCurrency(room.price)}</Text>
                 </View>
               )}
             </View>
 
-            {/* Room Description */}
             {room.description && (
               <View style={sheetStyles.section}>
                 <Text style={sheetStyles.sectionTitle}>📝 Mô tả</Text>
@@ -92,41 +290,37 @@ const RoomDetailSheet: React.FC<RoomDetailSheetProps> = ({ visible, room, proper
               </View>
             )}
 
-            {/* Room Equipments */}
             {room.equipments && room.equipments.length > 0 && (
               <View style={sheetStyles.section}>
                 <Text style={sheetStyles.sectionTitle}>🪑 Nội thất trong phòng</Text>
                 <View style={sheetStyles.equipmentGrid}>
                   {room.equipments.map((eq, idx) => (
                     <View key={idx} style={sheetStyles.equipmentChip}>
-                      <Text style={sheetStyles.equipmentIcon}>✅</Text>
-                      <Text style={sheetStyles.equipmentText}>{eq}</Text>
+                      <Text style={sheetStyles.equipmentText}>✅ {eq}</Text>
                     </View>
                   ))}
                 </View>
               </View>
             )}
+            </TouchableOpacity>
+          </Animated.View>
+        </TouchableOpacity>
+      </Modal>
 
-            {(room.equipments === undefined || room.equipments.length === 0) && (
-              <View style={sheetStyles.section}>
-                <Text style={sheetStyles.sectionTitle}>🪑 Nội thất trong phòng</Text>
-                <Text style={sheetStyles.emptyText}>Phòng trống, không có nội thất sẵn.</Text>
-              </View>
-            )}
-
-          </TouchableOpacity>
-        </Animated.View>
-      </TouchableOpacity>
-    </Modal>
+      {roomPhotos.length > 0 && (
+        <PhotoViewerModal
+          visible={showPhotoViewer}
+          photos={roomPhotos}
+          initialIndex={viewerInitIdx}
+          onClose={() => setShowPhotoViewer(false)}
+        />
+      )}
+    </>
   );
 };
 
 const sheetStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: Colors.overlay,
-    justifyContent: 'flex-end',
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   container: {
     backgroundColor: Colors.white,
     borderTopLeftRadius: 24,
@@ -135,350 +329,201 @@ const sheetStyles = StyleSheet.create({
     paddingBottom: 40,
   },
   handleBar: {
-    width: 40,
-    height: 4,
-    backgroundColor: Colors.border,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 8,
+    width: 40, height: 4, backgroundColor: Colors.divider,
+    borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 8,
   },
   header: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
+    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  roomName: {
-    ...Typography.h2,
-    fontSize: 20,
-    marginBottom: 4,
-  },
-  propertyName: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  photoScroll: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-  },
+  roomName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
+  propertyName: { fontSize: 14, color: Colors.textSecondary },
+  photoScroll: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md },
   photoCard: {
-    width: 140,
-    height: 100,
-    backgroundColor: Colors.primaryBg,
-    borderRadius: BorderRadius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.primaryLight,
+    width: 160, height: 110, backgroundColor: Colors.primaryBg,
+    borderRadius: 12, marginRight: Spacing.sm, overflow: 'hidden',
+    alignItems: 'center', justifyContent: 'center',
   },
-  photoIcon: {
-    fontSize: 32,
-    marginBottom: 4,
+  photoImg: { width: '100%', height: '100%' },
+  photoIcon: { fontSize: 36 },
+  photoZoomHint: {
+    position: 'absolute', bottom: 4, right: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 10, paddingHorizontal: 5, paddingVertical: 2,
   },
-  photoLabel: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
+  infoRow: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.sm, marginBottom: Spacing.md },
   infoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.full,
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.background, paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs, borderRadius: BorderRadius.full, gap: 4,
   },
-  infoPillIcon: {
-    fontSize: 14,
-  },
-  infoPillText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  section: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.md,
-  },
-  sectionTitle: {
-    ...Typography.h4,
-    marginBottom: Spacing.sm,
-  },
-  descText: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: Colors.textSecondary,
-  },
-  equipmentGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-  },
+  infoPillIcon: { fontSize: 14 },
+  infoPillText: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  section: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.md },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  descText: { fontSize: 14, lineHeight: 22, color: Colors.textSecondary },
+  equipmentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   equipmentChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.successLight,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.md,
-    gap: 4,
+    backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: BorderRadius.sm,
   },
-  equipmentIcon: {
-    fontSize: 12,
-  },
-  equipmentText: {
-    fontSize: 12,
-    color: Colors.textPrimary,
-    fontWeight: '500',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-  },
+  equipmentText: { fontSize: 12, color: Colors.textPrimary, fontWeight: '500' },
 });
 
-// ==================== Expandable Room Accordion ====================
+// =====================================================================
+// Expandable Room Accordion  (whole_house only)
+// =====================================================================
 interface ExpandableRoomProps {
   room: PropertyRoom;
   onPress: () => void;
-  isWholeHouse: boolean;
 }
 
-const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress, isWholeHouse }) => {
+const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
   const [expanded, setExpanded] = useState(false);
   const animHeight = useRef(new Animated.Value(0)).current;
 
-  const toggleExpand = () => {
-    if (isWholeHouse) {
-      // For whole house, use accordion expand
-      const toValue = expanded ? 0 : 1;
-      Animated.timing(animHeight, { toValue, duration: 300, useNativeDriver: false }).start();
-      setExpanded(!expanded);
-    } else {
-      // For apartments, open the bottom sheet
-      onPress();
-    }
+  const toggle = () => {
+    const next = !expanded;
+    Animated.timing(animHeight, { toValue: next ? 1 : 0, duration: 280, useNativeDriver: false }).start();
+    setExpanded(next);
   };
 
-  const maxExpandHeight = animHeight.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 200],
-  });
+  const maxH = animHeight.interpolate({ inputRange: [0, 1], outputRange: [0, 200] });
 
   return (
     <View style={accordionStyles.container}>
-      <TouchableOpacity style={accordionStyles.header} onPress={toggleExpand} activeOpacity={0.7}>
+      <TouchableOpacity style={accordionStyles.header} onPress={toggle} activeOpacity={0.75}>
         <View style={accordionStyles.headerLeft}>
-          <View style={[accordionStyles.statusDot, room.status === 'available' ? accordionStyles.dotAvailable : accordionStyles.dotOccupied]} />
+          <View style={[accordionStyles.dot, room.status === 'available' ? accordionStyles.dotGreen : accordionStyles.dotGray]} />
           <View>
-            <Text style={accordionStyles.roomName}>{room.name}</Text>
-            <Text style={accordionStyles.roomMeta}>
-              Tầng {room.floor} • {room.area}m²
-              {room.status === 'available' ? ' • 🟢 Sẵn sàng' : ' • 🔴 Đã thuê'}
-            </Text>
+            <Text style={accordionStyles.name}>{room.name}</Text>
+            <Text style={accordionStyles.meta}>Tầng {room.floor} · {room.area}m² · {room.status === 'available' ? '🟢 Trống' : '🔴 Đã thuê'}</Text>
           </View>
         </View>
         <View style={accordionStyles.headerRight}>
-          {room.price > 0 && <Text style={accordionStyles.roomPrice}>{formatCurrency(room.price)}</Text>}
-          <Text style={accordionStyles.chevron}>{isWholeHouse ? (expanded ? '▲' : '▼') : '→'}</Text>
+          {room.price > 0 && <Text style={accordionStyles.price}>{formatCurrency(room.price)}</Text>}
+          <Text style={accordionStyles.chevron}>{expanded ? '▲' : '▼'}</Text>
         </View>
       </TouchableOpacity>
 
-      {isWholeHouse && (
-        <Animated.View style={[accordionStyles.expandBody, { maxHeight: maxExpandHeight, opacity: animHeight }]}>
-          {room.description && (
-            <Text style={accordionStyles.expandDesc}>{room.description}</Text>
-          )}
-          {room.equipments && room.equipments.length > 0 ? (
-            <View style={accordionStyles.expandEquipments}>
-              {room.equipments.map((eq, i) => (
-                <View key={i} style={accordionStyles.eqChip}>
-                  <Text style={accordionStyles.eqChipText}>✅ {eq}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <Text style={accordionStyles.expandEmpty}>Phòng trống, không có nội thất.</Text>
-          )}
-          {/* Tap to see full detail */}
-          <TouchableOpacity style={accordionStyles.seeMoreBtn} onPress={onPress}>
-            <Text style={accordionStyles.seeMoreText}>📸 Xem ảnh & chi tiết đầy đủ →</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
+      <Animated.View style={[accordionStyles.body, { maxHeight: maxH, opacity: animHeight }]}>
+        {room.description && <Text style={accordionStyles.desc}>{room.description}</Text>}
+        {room.equipments && room.equipments.length > 0 ? (
+          <View style={accordionStyles.eqWrap}>
+            {room.equipments.map((eq, i) => (
+              <View key={i} style={accordionStyles.eqChip}>
+                <Text style={accordionStyles.eqTxt}>✅ {eq}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={accordionStyles.empty}>Phòng trống, không có nội thất.</Text>
+        )}
+        <TouchableOpacity style={accordionStyles.moreBtn} onPress={onPress}>
+          <Text style={accordionStyles.moreTxt}>📸 Xem ảnh & chi tiết đầy đủ →</Text>
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 };
 
 const accordionStyles = StyleSheet.create({
   container: {
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
+    backgroundColor: Colors.white, borderRadius: 14,
+    marginBottom: Spacing.sm, borderWidth: 1,
+    borderColor: Colors.divider, overflow: 'hidden',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: Spacing.md,
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.md },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: Spacing.sm },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  dotGreen: { backgroundColor: Colors.success },
+  dotGray: { backgroundColor: Colors.textMuted },
+  name: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
+  meta: { fontSize: 12, color: Colors.textSecondary },
+  headerRight: { alignItems: 'flex-end', gap: 4 },
+  price: { fontSize: 15, fontWeight: '700', color: Colors.error },
+  chevron: { fontSize: 14, color: Colors.textMuted },
+  body: {
+    paddingHorizontal: Spacing.md, paddingBottom: Spacing.md,
+    borderTopWidth: 1, borderTopColor: Colors.divider, overflow: 'hidden',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: Spacing.sm,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  dotAvailable: {
-    backgroundColor: Colors.success,
-  },
-  dotOccupied: {
-    backgroundColor: Colors.textMuted,
-  },
-  roomName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 2,
-  },
-  roomMeta: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  headerRight: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  roomPrice: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.error,
-  },
-  chevron: {
-    fontSize: 12,
-    color: Colors.textMuted,
-  },
-  expandBody: {
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-    overflow: 'hidden',
-  },
-  expandDesc: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: Colors.textSecondary,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.sm,
-  },
-  expandEquipments: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  eqChip: {
-    backgroundColor: Colors.successLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.sm,
-  },
-  eqChipText: {
-    fontSize: 11,
-    color: Colors.textPrimary,
-    fontWeight: '500',
-  },
-  expandEmpty: {
-    fontSize: 13,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-    marginTop: Spacing.sm,
-  },
-  seeMoreBtn: {
-    marginTop: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  seeMoreText: {
-    fontSize: 13,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
+  desc: { fontSize: 13, lineHeight: 20, color: Colors.textSecondary, marginTop: Spacing.sm, marginBottom: Spacing.sm },
+  eqWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  eqChip: { backgroundColor: '#F0FDF4', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  eqTxt: { fontSize: 11, color: Colors.textPrimary, fontWeight: '500' },
+  empty: { fontSize: 13, color: Colors.textMuted, fontStyle: 'italic', marginTop: Spacing.sm },
+  moreBtn: { marginTop: Spacing.sm },
+  moreTxt: { fontSize: 13, color: Colors.primary, fontWeight: '600' },
 });
 
-// ==================== Main Property Detail Screen ====================
+
+// =====================================================================
+// Availability Badge  (apartment only)
+// =====================================================================
+const AvailabilityBadge: React.FC<{ available: boolean }> = ({ available }) => {
+  if (!available) return null;
+  return (
+    <View style={[availStyles.badge, availStyles.badgeGreen]}>
+      <View style={availStyles.dotGreen} />
+      <Text style={[availStyles.text, availStyles.textGreen]}>Còn trống</Text>
+    </View>
+  );
+};
+
+const availStyles = StyleSheet.create({
+  badge: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99,
+    marginBottom: Spacing.lg, gap: 6,
+  },
+  badgeGreen: { backgroundColor: Colors.successLight },
+  badgeRed: { backgroundColor: Colors.errorLight },
+  dot: { width: 7, height: 7, borderRadius: 3.5 },
+  dotGreen: { backgroundColor: Colors.success },
+  dotRed: { backgroundColor: Colors.error },
+  text: { fontSize: 12, fontWeight: '700' },
+  textGreen: { color: Colors.success },
+  textRed: { color: Colors.error },
+});
+
+// =====================================================================
+// Main Screen
+// =====================================================================
 export const PropertyDetailScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const { propertyId } = route.params;
 
   const [property, setProperty] = useState<PropertyListing | null>(null);
-  const [similarProperties, setSimilarProperties] = useState<PropertyListing[]>([]);
+  const [similar, setSimilar] = useState<PropertyListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRoom, setSelectedRoom] = useState<PropertyRoom | null>(null);
   const [showRoomDetail, setShowRoomDetail] = useState(false);
-  const [showStickyAddress, setShowStickyAddress] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const [viewerInitIndex, setViewerInitIndex] = useState(0);
 
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    loadData();
-  }, [propertyId]);
+  useEffect(() => { loadData(); }, [propertyId]);
 
   const loadData = async () => {
     try {
-      const [data, similar] = await Promise.all([
+      const [data, sim] = await Promise.all([
         searchService.getPropertyDetail(propertyId),
         searchService.getSimilarProperties(propertyId, 3),
       ]);
       setProperty(data);
-      setSimilarProperties(similar);
-    } catch (error) {
-      console.error(error);
+      setSimilar(sim);
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenRoomDetail = (room: PropertyRoom) => {
-    setSelectedRoom(room);
-    setShowRoomDetail(true);
-  };
-
-  const handleContact = () => {
-    Alert.alert(
-      'Yêu cầu đăng nhập',
-      'Vui lòng đăng nhập để có thể liên hệ và đặt căn hộ với chủ nhà.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        { text: 'Đăng nhập', onPress: () => navigation.navigate('Login') }
-      ]
-    );
-  };
-
-  const handleScroll = (event: any) => {
-    const offsetY = event.nativeEvent.contentOffset.y;
-    setShowStickyAddress(offsetY > 300);
-  };
-
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
@@ -486,171 +531,215 @@ export const PropertyDetailScreen: React.FC = () => {
 
   if (!property) {
     return (
-      <View style={styles.centerContainer}>
-        <Text>Không tìm thấy thông tin căn hộ.</Text>
+      <View style={styles.center}>
+        <Text style={styles.notFound}>Không tìm thấy thông tin bất động sản.</Text>
       </View>
     );
   }
 
   const isWholeHouse = property.propertyType === 'whole_house';
-  const availableRooms = property.rooms.filter(r => r.status === 'available');
+  const typeLabel = isWholeHouse ? 'Thuê nguyên căn' : 'Phòng trọ';
+  const availableRooms = property.rooms.filter((r) => r.status === 'available');
+  const isAvailable = property.availableRooms > 0;
+  const DESC_LIMIT = 160;
+  const longDesc = property.description && property.description.length > DESC_LIMIT;
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
-      {/* Fixed Header with Back + Favorite */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
-          <Text style={styles.iconBtnText}>←</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={handleContact}>
-          <Text style={styles.iconBtnText}>♡</Text>
+    <View style={styles.root}>
+      {/* ── Floating back button ──────────────────────────────────────── */}
+      <View style={styles.floatBar}>
+        <TouchableOpacity style={styles.floatBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+          <Text style={styles.floatBtnTxt}>←</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Sticky Address Bar (shows on scroll) */}
-      {showStickyAddress && (
-        <View style={styles.stickyAddress}>
-          <Text style={styles.stickyAddressText} numberOfLines={1}>
-            📍 {property.address}, {property.ward}
-          </Text>
-        </View>
-      )}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-      <ScrollView style={styles.container} onScroll={handleScroll} scrollEventThrottle={16}>
-        {/* Photo Carousel (Simulated) */}
-        <View style={styles.photoContainer}>
-          <View style={styles.photoPlaceholder}>
-            <Text style={styles.photoIcon}>🏠</Text>
-            <Text style={styles.photoCount}>1/{property.photos.length || 1}</Text>
-          </View>
-          {/* Property type badge */}
-          <View style={[styles.typeBadge, isWholeHouse && styles.typeBadgeHouse]}>
-            <Text style={styles.typeBadgeText}>
-              {isWholeHouse ? '🏡 Nhà nguyên căn' : '🏢 Căn hộ dịch vụ'}
-            </Text>
+        {/* ── Photo Carousel ───────────────────────────────────────────── */}
+        <View style={styles.photoWrap}>
+          {property.photos.length > 0 ? (
+            <ScrollView
+              horizontal pagingEnabled showsHorizontalScrollIndicator={false}
+              onScroll={(e) => setPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH))}
+              scrollEventThrottle={16}
+            >
+              {property.photos.map((uri, i) => (
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.92}
+                  onPress={() => { setViewerInitIndex(i); setShowPhotoViewer(true); }}
+                >
+                  <Image source={{ uri }} style={styles.photo} resizeMode="cover" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={styles.photoFallback}>
+              <Text style={{ fontSize: 56 }}>🏠</Text>
+            </View>
+          )}
+
+          {property.photos.length > 1 && (
+            <View style={styles.dotRow}>
+              {property.photos.map((_, i) => (
+                <View key={i} style={[styles.dot, i === photoIndex && styles.dotActive]} />
+              ))}
+            </View>
+          )}
+          {property.photos.length > 1 && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countTxt}>{photoIndex + 1} / {property.photos.length}</Text>
+            </View>
+          )}
+          <View style={[styles.typeBadge, isWholeHouse && styles.typeBadgeGreen]}>
+            <Text style={styles.typeBadgeTxt}>{isWholeHouse ? '🏡 ' : '🏢 '}{typeLabel}</Text>
           </View>
         </View>
 
-        <View style={styles.content}>
-          {/* Title & Address */}
+        {/* ── Content card ─────────────────────────────────────────────── */}
+        <View style={styles.card}>
+
+          {/* Title + address */}
           <Text style={styles.title}>{property.name}</Text>
-          <Text style={styles.address}>📍 {property.address}, {property.ward}, {property.city}</Text>
+          <Text style={styles.addr}>📍 {property.address}, {property.ward}, {property.city}</Text>
 
-          {/* Cost Breakdown */}
-          <Card style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>💰 Chi phí</Text>
-            
-            <View style={styles.costRow}>
-              <Text style={styles.costLabel}>{isWholeHouse ? 'Thuê nhà' : 'Thuê căn hộ'}</Text>
-              <Text style={styles.costValue}>
-                {property.priceFrom === property.priceTo 
-                  ? formatCurrency(property.priceFrom)
-                  : `${formatCurrency(property.priceFrom)} - ${formatCurrency(property.priceTo)}`
-                }
-              </Text>
-            </View>
-            <View style={styles.costDivider} />
-            
-            <View style={styles.costRow}>
-              <Text style={styles.costLabel}>Tiền điện</Text>
-              <Text style={styles.costValue}>{formatCurrency(property.electricityRate)} / kWh</Text>
-            </View>
-            <View style={styles.costDivider} />
-            
-            <View style={styles.costRow}>
-              <Text style={styles.costLabel}>Tiền nước</Text>
-              <Text style={styles.costValue}>{formatCurrency(property.waterRate)} / khối</Text>
-            </View>
-            <View style={styles.costDivider} />
-            
-            <View style={styles.costRow}>
-              <Text style={styles.costLabel}>Tiền cọc</Text>
-              <Text style={styles.costValue}>{property.depositMonths} tháng</Text>
-            </View>
-            <View style={styles.costDivider} />
+          {/* Availability badge — apartment only */}
+          {!isWholeHouse && <AvailabilityBadge available={isAvailable} />}
 
-            {property.serviceFee > 0 && (
-              <>
-                <View style={styles.costRow}>
-                  <Text style={styles.costLabel}>Phí dịch vụ</Text>
-                  <Text style={styles.costValue}>{formatCurrency(property.serviceFee)} / tháng</Text>
+          {/* ── Price card ─────────────────────────────────────────────── */}
+          <View style={styles.priceCard}>
+            <View style={styles.priceMain}>
+              <Text style={styles.priceLabel}>{isWholeHouse ? 'Giá thuê' : 'Giá thuê từ'}</Text>
+              <Text style={styles.priceValue}>{formatCurrency(property.priceFrom)}</Text>
+              <Text style={styles.priceUnit}>/tháng</Text>
+            </View>
+            <View style={styles.priceDivider} />
+            <View style={styles.priceExtras}>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceExtraLabel}>⚡ Tiền điện</Text>
+                <Text style={styles.priceExtraValue}>{formatCurrency(property.electricityRate)}/kWh</Text>
+              </View>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceExtraLabel}>💧 Tiền nước</Text>
+                <Text style={styles.priceExtraValue}>{formatCurrency(property.waterRate)}/khối</Text>
+              </View>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceExtraLabel}>🔒 Đặt cọc</Text>
+                <Text style={styles.priceExtraValue}>{property.depositMonths} tháng</Text>
+              </View>
+              {property.serviceFee > 0 && (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceExtraLabel}>🏢 Phí dịch vụ</Text>
+                  <Text style={styles.priceExtraValue}>{formatCurrency(property.serviceFee)}/tháng</Text>
                 </View>
-                <View style={styles.costDivider} />
+              )}
+            </View>
+          </View>
+
+          {/* ── Quick Info 2×2 grid ──────────────────────────────────── */}
+          <View style={styles.factsGrid}>
+            {/* Cell 1: Area — common */}
+            <View style={styles.factCell}>
+              <Text style={styles.factIcon}>📐</Text>
+              <Text style={styles.factValue}>{property.area}m²</Text>
+              <Text style={styles.factLabel}>Diện tích</Text>
+            </View>
+
+            {/* Cell 2: Property type — common */}
+            <View style={styles.factCell}>
+              <Text style={styles.factIcon}>{isWholeHouse ? '🏠' : '🛏'}</Text>
+              <Text style={[styles.factValue, { fontSize: 13 }]}>{typeLabel}</Text>
+              <Text style={styles.factLabel}>Loại hình</Text>
+            </View>
+
+            {isWholeHouse ? (
+              // Whole house: show room count + availability
+              <>
+                <View style={styles.factCell}>
+                  <Text style={styles.factIcon}>🚪</Text>
+                  <Text style={styles.factValue}>{property.totalRooms}</Text>
+                  <Text style={styles.factLabel}>Số phòng ngủ</Text>
+                </View>
+                <View style={styles.factCell}>
+                  <Text style={styles.factIcon}>✅</Text>
+                  <Text style={[styles.factValue, { color: availableRooms.length > 0 ? Colors.success : Colors.error }]}>
+                    {availableRooms.length > 0 ? 'Còn trống' : 'Đã thuê'}
+                  </Text>
+                  <Text style={styles.factLabel}>Trạng thái</Text>
+                </View>
+              </>
+            ) : (
+              // Room rental: show private room + private bathroom indicators
+              <>
+                <View style={styles.factCell}>
+                  <Text style={styles.factIcon}>🚿</Text>
+                  <Text style={[styles.factValue, { fontSize: 13 }]}>
+                    {property.amenities.some((a) => /tắm riêng|wc riêng|toilet riêng|nhà vệ sinh riêng/i.test(a))
+                      ? 'Riêng' : 'Chung'}
+                  </Text>
+                  <Text style={styles.factLabel}>Nhà vệ sinh</Text>
+                </View>
+                <View style={styles.factCell}>
+                  <Text style={styles.factIcon}>🚪</Text>
+                  <Text style={[styles.factValue, { fontSize: 13 }]}>Phòng riêng</Text>
+                  <Text style={styles.factLabel}>Không gian</Text>
+                </View>
               </>
             )}
-            
-            <View style={styles.costRow}>
-              <Text style={styles.costLabel}>Hình thức thanh toán</Text>
-              <Text style={[styles.costValue, { color: Colors.primary }]}>{property.paymentNote || 'Trả đầu tháng'}</Text>
-            </View>
-          </Card>
-
-          {/* Amenities */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🏠 Tiện ích {isWholeHouse ? 'nhà' : 'tòa nhà'}</Text>
-            <View pointerEvents="none">
-              <FilterChips
-                options={property.amenities.map(a => ({ id: a, label: a }))}
-                selected={property.amenities}
-                onToggle={() => {}}
-                multiSelect={true}
-              />
-            </View>
           </View>
 
-          {/* House Equipment (for whole house only) */}
-          {isWholeHouse && property.houseEquipments && property.houseEquipments.length > 0 && (
+          {/* ── Amenity chips ──────────────────────────────────────────── */}
+          {property.amenities.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🪑 Nội thất chung toàn nhà</Text>
-              <View style={styles.houseEquipGrid}>
-                {property.houseEquipments.map((eq, idx) => (
-                  <View key={idx} style={styles.houseEquipChip}>
-                    <Text style={styles.houseEquipIcon}>✅</Text>
-                    <Text style={styles.houseEquipText}>{eq}</Text>
+              <Text style={styles.sectionTitle}>✨ Tiện ích</Text>
+              <View style={styles.amenWrap}>
+                {property.amenities.map((am, i) => (
+                  <View key={i} style={styles.amenChip}>
+                    <Text style={styles.amenTxt}>{am}</Text>
                   </View>
                 ))}
               </View>
             </View>
           )}
 
-          {/* Rooms Section */}
+          {/* ── Collapsible description ────────────────────────────────── */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {isWholeHouse 
-                ? `🏡 Cấu trúc phòng trong nhà (${property.rooms.length} phòng)` 
-                : `🚪 Căn hộ trống (${availableRooms.length}/${property.totalRooms})`}
+            <Text style={styles.sectionTitle}>📝 Mô tả</Text>
+            <Text style={styles.descTxt} numberOfLines={descExpanded ? undefined : 4}>
+              {property.description}
             </Text>
-            
-            {isWholeHouse && (
-              <View style={styles.wholeHouseNote}>
-                <Text style={styles.wholeHouseNoteText}>
-                  💡 Bấm vào từng phòng để xem nội thất chi tiết bên trong
+            {longDesc && (
+              <TouchableOpacity onPress={() => setDescExpanded((v) => !v)} style={styles.descToggle}>
+                <Text style={styles.descToggleTxt}>
+                  {descExpanded ? 'Thu gọn ▲' : 'Xem thêm ▼'}
                 </Text>
-              </View>
+              </TouchableOpacity>
             )}
-
-            {(isWholeHouse ? property.rooms : availableRooms).map(room => (
-              <ExpandableRoom
-                key={room.id}
-                room={room}
-                isWholeHouse={isWholeHouse}
-                onPress={() => handleOpenRoomDetail(room)}
-              />
-            ))}
           </View>
 
-          {/* Description */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📝 Mô tả chi tiết</Text>
-            <Text style={styles.descriptionText}>{property.description}</Text>
-          </View>
-
-          {/* Similar Properties */}
-          {similarProperties.length > 0 && (
+          {/* ── Whole house: room structure ───────────────────────────── */}
+          {isWholeHouse && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🔍 Căn hộ tương tự</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {similarProperties.map(sp => (
+              <Text style={styles.sectionTitle}>🏡 Cấu trúc phòng ngủ ({property.rooms.length} phòng)</Text>
+              <View style={styles.hintBox}>
+                <Text style={styles.hintTxt}>💡 Nhấn vào phòng để xem nội thất chi tiết</Text>
+              </View>
+              {property.rooms.map((room) => (
+                <ExpandableRoom
+                  key={room.id}
+                  room={room}
+                  onPress={() => { setSelectedRoom(room); setShowRoomDetail(true); }}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* ── Similar Properties ────────────────────────────────────── */}
+          {similar.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>🔍 Bất động sản tương tự</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 0 }}>
+                {similar.map((sp) => (
                   <PropertyCard
                     key={sp.id}
                     property={sp}
@@ -661,250 +750,131 @@ export const PropertyDetailScreen: React.FC = () => {
               </ScrollView>
             </View>
           )}
-          
-          <View style={{ height: Spacing['4xl'] }} />
+
+          <View style={{ height: 100 }} />
         </View>
       </ScrollView>
 
-      {/* Footer CTA */}
-      <View style={styles.footer}>
-        <Text style={styles.footerNote}>💡 Đăng nhập để liên hệ và đặt {isWholeHouse ? 'nhà' : 'căn hộ'}</Text>
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={handleContact}>
-            <Text style={styles.secondaryBtnText}>💬 Nhắn tin</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleContact}>
-            <Text style={styles.primaryBtnText}>📞 Liên hệ ngay</Text>
-          </TouchableOpacity>
-        </View>
+      {/* ── Sticky Contact Bar ───────────────────────────────────────── */}
+      <View style={styles.stickyWrap}>
+        <StickyContactBar propertyName={property.name} />
       </View>
 
-      {/* Room Detail Bottom Sheet */}
-      <RoomDetailSheet
-        visible={showRoomDetail}
-        room={selectedRoom}
-        propertyName={property.name}
-        onClose={() => setShowRoomDetail(false)}
-      />
-    </SafeAreaView>
+      {/* ── Room Detail Sheet (whole_house only) ─────────────────────── */}
+      {isWholeHouse && (
+        <RoomDetailSheet
+          visible={showRoomDetail}
+          room={selectedRoom}
+          propertyName={property.name}
+          onClose={() => setShowRoomDetail(false)}
+        />
+      )}
+
+      {/* ── Full-screen Photo Viewer ─────────────────────────────────── */}
+      {property.photos.length > 0 && (
+        <PhotoViewerModal
+          visible={showPhotoViewer}
+          photos={property.photos}
+          initialIndex={viewerInitIndex}
+          onClose={() => setShowPhotoViewer(false)}
+        />
+      )}
+    </View>
   );
 };
 
+// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.white,
+  root: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  notFound: { fontSize: 15, color: Colors.textSecondary },
+
+  floatBar: {
+    position: 'absolute', top: 50, left: Spacing.base, right: Spacing.base,
+    flexDirection: 'row', justifyContent: 'space-between', zIndex: 20,
   },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  floatBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center', justifyContent: 'center',
+    ...Shadow.md,
   },
-  header: {
-    position: 'absolute',
-    top: 40,
-    left: Spacing.base,
-    right: Spacing.base,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    zIndex: 10,
+  floatBtnTxt: { fontSize: 20, color: Colors.textPrimary },
+
+  scroll: { flex: 1 },
+  scrollContent: {},
+
+  photoWrap: { height: 290, backgroundColor: Colors.primaryBg, overflow: 'hidden' },
+  photo: { width: SCREEN_WIDTH, height: 290 },
+  photoFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  dotRow: {
+    position: 'absolute', bottom: 14, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'center', gap: 5,
   },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadow.sm,
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  dotActive: { backgroundColor: Colors.white, width: 18 },
+  countBadge: {
+    position: 'absolute', bottom: 14, right: Spacing.md,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 99,
+    paddingHorizontal: Spacing.sm, paddingVertical: 3,
   },
-  iconBtnText: {
-    fontSize: 20,
-    color: Colors.textPrimary,
-  },
-  stickyAddress: {
-    position: 'absolute',
-    top: 90,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    paddingVertical: 8,
-    paddingHorizontal: Spacing.lg,
-    zIndex: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-    ...Shadow.sm,
-  },
-  stickyAddressText: {
-    fontSize: 13,
-    color: Colors.primaryDark,
-    fontWeight: '600',
-  },
-  container: {
-    flex: 1,
-  },
-  photoContainer: {
-    height: 280,
-  },
-  photoPlaceholder: {
-    flex: 1,
-    backgroundColor: Colors.primaryBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  photoIcon: {
-    fontSize: 64,
-  },
-  photoCount: {
-    position: 'absolute',
-    bottom: Spacing.md,
-    right: Spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    color: Colors.white,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.full,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  countTxt: { color: Colors.white, fontSize: 11, fontWeight: '600' },
   typeBadge: {
-    position: 'absolute',
-    top: Spacing.md,
-    right: Spacing.md,
-    backgroundColor: 'rgba(79, 70, 229, 0.9)',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.full,
+    position: 'absolute', top: 14, right: Spacing.md,
+    backgroundColor: 'rgba(79,70,229,0.9)',
+    paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: 99,
   },
-  typeBadgeHouse: {
-    backgroundColor: 'rgba(16, 185, 129, 0.9)',
-  },
-  typeBadgeText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  content: {
-    padding: Spacing.lg,
-    paddingTop: Spacing.xl,
+  typeBadgeGreen: { backgroundColor: 'rgba(16,185,129,0.9)' },
+  typeBadgeTxt: { color: Colors.white, fontSize: 12, fontWeight: '700' },
+
+  card: {
     backgroundColor: Colors.background,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-    marginTop: -20,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    marginTop: -20, padding: Spacing.base, paddingTop: Spacing.xl,
   },
-  title: {
-    ...Typography.h2,
-    marginBottom: Spacing.xs,
+  title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.4, marginBottom: Spacing.xs },
+  addr: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.md, lineHeight: 18 },
+
+  priceCard: {
+    backgroundColor: Colors.white, borderRadius: 20,
+    padding: Spacing.base, marginBottom: Spacing.xl, ...Shadow.md,
   },
-  address: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.xl,
+  priceMain: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: Spacing.md },
+  priceLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: '500' },
+  priceValue: { fontSize: 28, fontWeight: '800', color: Colors.primary, letterSpacing: -0.5 },
+  priceUnit: { fontSize: 14, color: Colors.textSecondary },
+  priceDivider: { height: 1, backgroundColor: Colors.divider, marginBottom: Spacing.md },
+  priceExtras: { gap: Spacing.xs },
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  priceExtraLabel: { fontSize: 13, color: Colors.textSecondary },
+  priceExtraValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+
+  factsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.xl },
+  factCell: {
+    width: (SCREEN_WIDTH - Spacing.base * 2 - Spacing.sm) / 2,
+    backgroundColor: Colors.white, borderRadius: 14,
+    padding: Spacing.md, alignItems: 'center', ...Shadow.sm,
   },
-  section: {
-    marginBottom: Spacing.xl,
+  factIcon: { fontSize: 24, marginBottom: 4 },
+  factValue: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
+  factLabel: { fontSize: 11, color: Colors.textSecondary },
+
+  section: { marginBottom: Spacing.xl },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },
+
+  amenWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  amenChip: {
+    backgroundColor: Colors.primaryBg, borderWidth: 1, borderColor: Colors.primaryLight,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99,
   },
-  sectionCard: {
-    marginBottom: Spacing.xl,
-  },
-  sectionTitle: {
-    ...Typography.h4,
-    marginBottom: Spacing.md,
-  },
-  costRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.sm,
-  },
-  costLabel: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-  },
-  costValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  costDivider: {
-    height: 1,
-    backgroundColor: Colors.divider,
-  },
-  houseEquipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.xs,
-  },
-  houseEquipChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.infoLight,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.md,
-    gap: 4,
-  },
-  houseEquipIcon: {
-    fontSize: 12,
-  },
-  houseEquipText: {
-    fontSize: 12,
-    color: Colors.textPrimary,
-    fontWeight: '500',
-  },
-  wholeHouseNote: {
-    backgroundColor: Colors.warningLight,
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
-  },
-  wholeHouseNoteText: {
-    fontSize: 13,
-    color: Colors.warning,
-    fontWeight: '500',
-  },
-  descriptionText: {
-    fontSize: 14,
-    lineHeight: 22,
-    color: Colors.textPrimary,
-  },
-  footer: {
-    backgroundColor: Colors.white,
-    padding: Spacing.base,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-    ...Shadow.lg,
-  },
-  footerNote: {
-    textAlign: 'center',
-    fontSize: 12,
-    color: Colors.warning,
-    fontWeight: '500',
-    marginBottom: Spacing.sm,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-  },
-  primaryBtn: {
-    flex: 1,
-    backgroundColor: Colors.primary,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-  },
-  primaryBtnText: {
-    color: Colors.white,
-    ...Typography.button,
-  },
-  secondaryBtn: {
-    flex: 1,
-    backgroundColor: Colors.primaryBg,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-  },
-  secondaryBtnText: {
-    color: Colors.primaryDark,
-    ...Typography.button,
-  }
+  amenTxt: { fontSize: 12, color: Colors.primary, fontWeight: '500' },
+
+  descTxt: { fontSize: 14, lineHeight: 22, color: Colors.textPrimary },
+  descToggle: { marginTop: Spacing.sm },
+  descToggleTxt: { fontSize: 14, color: Colors.primary, fontWeight: '600' },
+
+  hintBox: { backgroundColor: '#FFFBEB', borderRadius: 10, padding: Spacing.sm, marginBottom: Spacing.md },
+  hintTxt: { fontSize: 13, color: '#92400E', fontWeight: '500' },
+
+  stickyWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
 });

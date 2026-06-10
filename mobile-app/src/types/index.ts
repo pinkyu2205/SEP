@@ -594,6 +594,7 @@ export type PropertyType = 'apartment' | 'whole_house';
 
 export interface SearchFilters {
   keyword?: string;
+  propertyType?: 'apartment' | 'whole_house';
   cityId?: string;
   wardIds?: string[];
   priceMin?: number;
