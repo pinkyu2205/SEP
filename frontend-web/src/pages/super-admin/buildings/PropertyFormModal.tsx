@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, MapPin, Building } from 'lucide-react';
-import type { PropertyCreateRequest, PropertyResponse, ZoneResponse } from '../../../types/api.types';
+import { X, MapPin, Building, Layers, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
+import type { PropertyDraftRequest, PropertyResponse, ZoneResponse } from '../../../types/api.types';
 import { propertyService } from '../../../services/property.service';
 import { zoneService } from '../../../services/zone.service';
-import { userService } from '../../../services/user.service';
-import type { UserResponse } from '../../../types/api.types';
+import { uploadToCloudinary } from '../../../services/upload.service';
 
 interface PropertyFormModalProps {
   initialData?: PropertyResponse | null;
@@ -18,47 +17,81 @@ export const PropertyFormModal = ({ initialData, onClose, onSuccess }: PropertyF
   const [error, setError] = useState('');
 
   const [zones, setZones] = useState<ZoneResponse[]>([]);
-  const [managers, setManagers] = useState<UserResponse[]>([]);
-  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
+  const [isUploading, setIsUploading] = useState(false);
   
-  const [formData, setFormData] = useState<PropertyCreateRequest>({
+  // Hàm lấy userId từ JWT token
+  const getUserIdFromToken = (): number => {
+    try {
+      const token = localStorage.getItem('access_token');
+      if (!token) return 1;
+      const base64Payload = token.split('.')[1];
+      const payloadStr = atob(base64Payload);
+      const payload = JSON.parse(payloadStr);
+      // Nếu userId trong JWT là UUID (chuỗi), ép kiểu sang số sẽ bị NaN, lúc này fallback về 1
+      const id = Number(payload.userId);
+      return isNaN(id) ? 1 : id;
+    } catch (e) {
+      return 1;
+    }
+  };
+  
+  const [formData, setFormData] = useState<PropertyDraftRequest>({
     propertyName: initialData?.propertyName || '',
     address: initialData?.shortAddress || '',
     descriptions: initialData?.descriptions || '',
     zoneId: initialData?.zoneId || '',
-    wholeHouse: initialData?.wholeHouse || false,
     areaSize: initialData?.areaSize || 0,
-    totalRooms: initialData?.totalRooms || 0,
-    managedBy: 1, // Defaulting to 1 to prevent backend NOT NULL constraint error
+    floorCount: initialData?.floorCount || 1,
+    roomsPerFloor: initialData?.roomsPerFloor || 1,
+    createdBy: getUserIdFromToken(), 
+    imageUrls: [],
   });
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchZones = async () => {
       try {
-        const [rootZones, allUsers] = await Promise.all([
-          zoneService.getRootZones(),
-          userService.getAllUsers()
-        ]);
+        const rootZones = await zoneService.getRootZones();
         setZones(rootZones);
-        const mgrs = allUsers.filter(u => u.role === 'ROLE_MANAGER' && u.status === 'ACTIVE');
-        setManagers(mgrs);
-        if (mgrs.length > 0) {
-          setSelectedManagerId(mgrs[0].id);
-        }
       } catch (err) {
-        console.error('Failed to fetch data', err);
+        console.error('Failed to fetch zones', err);
       }
     };
-    fetchData();
+    fetchZones();
   }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : 
-              type === 'number' ? Number(value) : value
+      [name]: type === 'number' ? Number(value) : value
     }));
+  };
+
+  const totalRooms = (formData.floorCount || 1) * (formData.roomsPerFloor || 1);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    setIsUploading(true);
+    try {
+      const newUrls = [...(formData.imageUrls || [])];
+      for (let i = 0; i < files.length; i++) {
+        const url = await uploadToCloudinary(files[i]);
+        newUrls.push(url);
+      }
+      setFormData(prev => ({ ...prev, imageUrls: newUrls }));
+    } catch (err) {
+      alert('Lỗi tải ảnh lên');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    const newUrls = [...(formData.imageUrls || [])];
+    newUrls.splice(index, 1);
+    setFormData(prev => ({ ...prev, imageUrls: newUrls }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -67,18 +100,16 @@ export const PropertyFormModal = ({ initialData, onClose, onSuccess }: PropertyF
     setLoading(true);
 
     try {
-      // Vì backend requires managedBy as Long, ta hash id (UUID) thành 1 số dương để pass qua validation
-      const hashCode = (s: string) => Math.abs(s.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)) || 1;
-      
+      // Đảm bảo descriptions không bị rỗng (để vượt qua @NotBlank của BE)
       const payload = {
         ...formData,
-        managedBy: selectedManagerId ? hashCode(selectedManagerId) : 1
+        descriptions: (formData.descriptions || '').trim() === '' ? 'Không có mô tả' : formData.descriptions
       };
 
       if (isUpdate) {
         await propertyService.updateProperty(initialData.id, payload);
       } else {
-        await propertyService.createProperty(payload);
+        await propertyService.createDraft(payload);
       }
       onSuccess();
     } catch (err: any) {
@@ -138,41 +169,62 @@ export const PropertyFormModal = ({ initialData, onClose, onSuccess }: PropertyF
             </label>
 
             <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Quản lý bởi (ROLE_MANAGER) *</span>
-              <select required value={selectedManagerId} onChange={(e) => setSelectedManagerId(e.target.value)} className="input-field">
-                <option value="">-- Chọn Quản lý --</option>
-                {managers.map(m => (
-                  <option key={m.id} value={m.id}>{m.username} ({m.phoneNumber})</option>
-                ))}
-              </select>
+              <span className="mb-1.5 block text-sm font-bold text-slate-700">Diện tích (m²)</span>
+              <input type="number" name="areaSize" value={formData.areaSize} onChange={handleChange} className="input-field" placeholder="Ví dụ: 120" />
             </label>
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 transition-colors hover:bg-indigo-50">
-              <input type="checkbox" name="wholeHouse" checked={formData.wholeHouse} onChange={handleChange} className="h-5 w-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-600" />
-              <div>
-                <p className="font-bold text-indigo-900">Cho thuê nhà nguyên căn</p>
-                <p className="text-xs text-indigo-700">Áp dụng một mức giá chung cho toàn bộ nhà</p>
-              </div>
-            </label>
+            <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 pt-2">
+              <Layers className="h-5 w-5 text-indigo-500" /> Cấu trúc nhà
+            </h3>
 
-            {!formData.wholeHouse && (
+            <div className="grid grid-cols-2 gap-4">
               <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Tổng số phòng dự kiến</span>
-                <input type="number" name="totalRooms" value={formData.totalRooms} onChange={handleChange} className="input-field" placeholder="Ví dụ: 10" />
+                <span className="mb-1.5 block text-sm font-bold text-slate-700">Số tầng</span>
+                <input type="number" min={1} name="floorCount" value={formData.floorCount} onChange={handleChange} className="input-field" />
               </label>
-            )}
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-bold text-slate-700">Phòng/tầng</span>
+                <input type="number" min={1} name="roomsPerFloor" value={formData.roomsPerFloor} onChange={handleChange} className="input-field" />
+              </label>
+            </div>
 
-            {formData.wholeHouse && (
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Diện tích sử dụng (m2)</span>
-                <input type="number" name="areaSize" value={formData.areaSize} onChange={handleChange} className="input-field" placeholder="Ví dụ: 100" />
-              </label>
-            )}
+            <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-4 text-center">
+              <p className="text-sm font-semibold text-indigo-700">Tổng phòng dự kiến</p>
+              <p className="text-2xl font-black text-indigo-900">{totalRooms}</p>
+              <p className="text-xs text-indigo-600 mt-1">= {formData.floorCount || 1} tầng × {formData.roomsPerFloor || 1} phòng/tầng</p>
+            </div>
 
             <label className="block">
               <span className="mb-1.5 block text-sm font-bold text-slate-700">Mô tả</span>
               <textarea name="descriptions" value={formData.descriptions} onChange={handleChange} className="input-field min-h-[80px]" placeholder="Tiện ích, lưu ý..." />
             </label>
+
+            <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 pt-2">
+              <ImageIcon className="h-5 w-5 text-indigo-500" /> Hình ảnh Tòa nhà
+            </h3>
+            
+            <div className="block">
+              <label className="cursor-pointer bg-slate-50 hover:bg-slate-100 text-slate-700 p-4 rounded-xl text-sm font-semibold flex flex-col items-center justify-center border-2 border-dashed border-slate-300 transition">
+                <Upload className="w-6 h-6 mb-2 text-slate-400" /> 
+                {isUploading ? 'Đang tải lên...' : 'Bấm để chọn ảnh (Có thể chọn nhiều)'}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} disabled={isUploading} />
+              </label>
+
+              {(formData.imageUrls && formData.imageUrls.length > 0) && (
+                <div className="mt-4 grid grid-cols-4 gap-3">
+                  {formData.imageUrls.map((url, idx) => (
+                    <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-200 group">
+                      <img src={url} alt={`img-${idx}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                        <button type="button" onClick={() => removeImage(idx)} className="p-1.5 bg-white text-rose-500 rounded-full hover:bg-rose-50">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </form>
         </div>
 

@@ -1,33 +1,211 @@
 import api from './api';
 import type {
-  PropertyCreateRequest,
+  PropertyDraftRequest,
   PropertyResponse,
+  PropertyCreateRequest,
   Page,
+  ManifestRequest,
+  ManifestItemResponse,
+  InboundContractRequest,
+  InboundContractResponse,
+  OnboardingOptionsRequest,
+  StructureUpdateRequest,
+  RenovationLineRequest,
+  RenovationLineResponse,
+  RenovationScheduleRequest,
+  AddRoomRequest,
+  RoomResponse,
+  EquipmentAssignRequest,
+  EquipmentAssignmentResponse,
+  PricingResponse,
+  OnboardingSummaryResponse,
+  HostConfirmRequest,
+  HostConfirmResponse,
 } from '../types/api.types';
 
+const BASE = '/api/v1/properties';
+
 export const propertyService = {
-  /** POST /api/v1/properties — Tạo property mới (DRAFT) */
+  // =========================================================================
+  // CRUD cơ bản
+  // =========================================================================
+
+  /** POST /properties/draft — Tạo nháp property (Inbound v2) */
+  createDraft: (data: PropertyDraftRequest): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/draft`, data);
+  },
+
+  /** POST /properties — Legacy: Tạo property kiểu cũ */
   createProperty: (data: PropertyCreateRequest): Promise<PropertyResponse> => {
-    return api.post('/api/v1/properties', data);
+    return api.post(BASE, data);
   },
 
-  /** GET /api/v1/properties/{id} — Chi tiết 1 property */
+  /** GET /properties/{id} */
   getPropertyById: (id: number): Promise<PropertyResponse> => {
-    return api.get(`/api/v1/properties/${id}`);
+    return api.get(`${BASE}/${id}`);
   },
 
-  /** GET /api/v1/properties — Danh sách property phân trang */
+  /** GET /properties — Phân trang */
   getProperties: (page: number = 0, size: number = 10): Promise<Page<PropertyResponse>> => {
-    return api.get('/api/v1/properties', { params: { page, size } });
+    return api.get(BASE, { params: { page, size } });
   },
 
-  /** PUT /api/v1/properties/{id} — Cập nhật property */
-  updateProperty: (id: number, data: PropertyCreateRequest): Promise<PropertyResponse> => {
-    return api.put(`/api/v1/properties/${id}`, data);
+  /** PUT /properties/{id} — Cập nhật thông tin cơ bản */
+  updateProperty: (id: number, data: PropertyCreateRequest | PropertyDraftRequest): Promise<PropertyResponse> => {
+    return api.put(`${BASE}/${id}`, data);
   },
 
-  /** DELETE /api/v1/properties/{id} — Xóa property */
+  /** DELETE /properties/{id} */
   deleteProperty: (id: number): Promise<void> => {
-    return api.delete(`/api/v1/properties/${id}`);
+    return api.delete(`${BASE}/${id}`);
+  },
+
+  // =========================================================================
+  // Bước 1B — Equipment Manifest
+  // =========================================================================
+
+  /** PUT /properties/{id}/equipment-manifest — Ghi đè manifest (gửi full list) */
+  putManifest: (id: number, data: ManifestRequest): Promise<ManifestItemResponse[]> => {
+    return api.put(`${BASE}/${id}/equipment-manifest`, data);
+  },
+
+  /** GET /properties/{id}/equipment-manifest */
+  getManifest: (id: number): Promise<ManifestItemResponse[]> => {
+    return api.get(`${BASE}/${id}/equipment-manifest`);
+  },
+
+  // =========================================================================
+  // Bước 1C — Inbound Contract
+  // =========================================================================
+
+  /** POST /properties/{id}/inbound-contract */
+  createInboundContract: (id: number, data: InboundContractRequest): Promise<InboundContractResponse> => {
+    return api.post(`${BASE}/${id}/inbound-contract`, data);
+  },
+
+  /** GET /properties/{id}/inbound-contract */
+  getInboundContract: (id: number): Promise<InboundContractResponse> => {
+    return api.get(`${BASE}/${id}/inbound-contract`);
+  },
+
+  // =========================================================================
+  // Bước 2A — Onboarding Options
+  // =========================================================================
+
+  /** POST /properties/{id}/onboarding-options */
+  setOnboardingOptions: (id: number, data: OnboardingOptionsRequest): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/onboarding-options`, data);
+  },
+
+  // =========================================================================
+  // Bước 2B — Cập nhật cấu trúc
+  // =========================================================================
+
+  /** PUT /properties/{id}/structure */
+  updateStructure: (id: number, data: StructureUpdateRequest): Promise<PropertyResponse> => {
+    return api.put(`${BASE}/${id}/structure`, data);
+  },
+
+  // =========================================================================
+  // Bước 2C — Renovation Lines & Schedule
+  // =========================================================================
+
+  /** POST /properties/{id}/renovation-lines — Thêm 1 dòng */
+  addRenovationLine: (id: number, data: RenovationLineRequest): Promise<RenovationLineResponse> => {
+    return api.post(`${BASE}/${id}/renovation-lines`, data);
+  },
+
+  /** GET /properties/{id}/renovation-lines */
+  getRenovationLines: (id: number): Promise<RenovationLineResponse[]> => {
+    return api.get(`${BASE}/${id}/renovation-lines`);
+  },
+
+  /** PUT /properties/{id}/renovation-schedule */
+  setRenovationSchedule: (id: number, data: RenovationScheduleRequest): Promise<void> => {
+    return api.put(`${BASE}/${id}/renovation-schedule`, data);
+  },
+
+  // =========================================================================
+  // Bước 2D — Rooms (chia phòng)
+  // =========================================================================
+
+  /** POST /properties/{id}/rooms */
+  addRoom: (id: number, data: AddRoomRequest): Promise<RoomResponse> => {
+    return api.post(`${BASE}/${id}/rooms`, data);
+  },
+
+  /** GET /properties/{id}/rooms */
+  getRooms: (id: number): Promise<RoomResponse[]> => {
+    return api.get(`${BASE}/${id}/rooms`);
+  },
+
+  /** GET /properties/{id}/rooms/{roomId} */
+  getRoomById: (id: number, roomId: number): Promise<RoomResponse> => {
+    return api.get(`${BASE}/${id}/rooms/${roomId}`);
+  },
+
+  // =========================================================================
+  // Bước 2E — Equipment Assignment
+  // =========================================================================
+
+  /** POST /properties/{id}/equipments/assign */
+  assignEquipment: (id: number, data: EquipmentAssignRequest): Promise<EquipmentAssignmentResponse> => {
+    return api.post(`${BASE}/${id}/equipments/assign`, data);
+  },
+
+  /** GET /properties/{id}/equipments */
+  getAssignedEquipments: (id: number): Promise<EquipmentAssignmentResponse[]> => {
+    return api.get(`${BASE}/${id}/equipments`);
+  },
+
+  // =========================================================================
+  // Bước 3 — Depreciation & Submit to Host
+  // =========================================================================
+
+  /** POST /properties/{id}/depreciation/calculate — Preview giá */
+  calculateDepreciation: (id: number): Promise<PricingResponse> => {
+    return api.post(`${BASE}/${id}/depreciation/calculate`, {});
+  },
+
+  /** GET /properties/{id}/depreciation */
+  getDepreciation: (id: number): Promise<PricingResponse> => {
+    return api.get(`${BASE}/${id}/depreciation`);
+  },
+
+  /** POST /properties/{id}/submit-to-host — Admin gửi cho Host */
+  submitToHost: (id: number): Promise<OnboardingSummaryResponse> => {
+    return api.post(`${BASE}/${id}/submit-to-host`);
+  },
+
+  // =========================================================================
+  // Bước 3B — Hoàn tất Cải tạo
+  // =========================================================================
+
+  /** POST /properties/{id}/renovation/complete */
+  completeRenovation: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/renovation/complete`);
+  },
+
+  // =========================================================================
+  // Bước 4 — Host Confirm
+  // =========================================================================
+
+  /** GET /properties/{id}/onboarding-summary — Tổng hợp cho Host xem */
+  getOnboardingSummary: (id: number): Promise<OnboardingSummaryResponse> => {
+    return api.get(`${BASE}/${id}/onboarding-summary`);
+  },
+
+  /** POST /properties/{id}/host-confirm */
+  hostConfirm: (id: number, data: HostConfirmRequest): Promise<HostConfirmResponse> => {
+    return api.post(`${BASE}/${id}/host-confirm`, data);
+  },
+
+  // =========================================================================
+  // Vô hiệu hóa
+  // =========================================================================
+
+  /** POST /properties/{id}/disable */
+  disableProperty: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/disable`);
   },
 };

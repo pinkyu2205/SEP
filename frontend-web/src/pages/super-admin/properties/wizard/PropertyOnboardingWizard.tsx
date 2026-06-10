@@ -1,146 +1,136 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Building2, CheckCircle2 } from 'lucide-react';
-import type { PropertyResponse } from '../../../../types/api.types';
+import { ArrowLeft, Building, Settings2, Send } from 'lucide-react';
 import { propertyService } from '../../../../services/property.service';
-
+import type { PropertyResponse } from '../../../../types/api.types';
 import { StepPropertyInfo } from './StepPropertyInfo';
-import { StepRooms } from './StepRooms';
-import { StepEquipments } from './StepEquipments';
-import { StepRenovations } from './StepRenovations';
-import { StepInboundContract } from './StepInboundContract';
-import { StepDepreciation } from './StepDepreciation';
-import { StepConfirmPrice } from './StepConfirmPrice';
+import { StepOnboardingOptions } from './StepOnboardingOptions';
+import { StepSubmitToHost } from './StepSubmitToHost';
 
-const STEPS = [
-  { id: 1, label: 'Thông tin cơ bản' },
-  { id: 2, label: 'Danh sách phòng' },
-  { id: 3, label: 'Thiết bị' },
-  { id: 4, label: 'Cải tạo' },
-  { id: 5, label: 'Hợp đồng gốc' },
-  { id: 6, label: 'Tính khấu hao' },
-  { id: 7, label: 'Kích hoạt Giá' },
+const steps = [
+  { id: 1, title: 'Thông tin & Hợp đồng', icon: Building },
+  { id: 2, title: 'Cấu hình chi tiết', icon: Settings2 },
+  { id: 3, title: 'Xem giá & Gửi Host', icon: Send },
 ];
 
 export const PropertyOnboardingWizard = () => {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  
   const [currentStep, setCurrentStep] = useState(1);
   const [property, setProperty] = useState<PropertyResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    if (id && id !== 'new') {
-      fetchProperty(Number(id));
-    }
+    const fetchProperty = async () => {
+      setLoading(true);
+      try {
+        const data = await propertyService.getPropertyById(Number(id));
+        setProperty(data);
+        
+        // Auto-advance logic based on what's already completed
+        // This makes resuming onboarding easier
+        if (data.status !== 'DRAFT') {
+          setCurrentStep(3); // Already submitted or active
+        } else if (data.wholeHouse !== null) {
+          setCurrentStep(2); // Options were set, likely resuming step 2
+        }
+      } catch (err: any) {
+        setError('Không thể tải dữ liệu tòa nhà');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (id) fetchProperty();
   }, [id]);
 
-  const fetchProperty = async (propId: number) => {
-    setLoading(true);
-    try {
-      const data = await propertyService.getPropertyById(propId);
-      setProperty(data);
-    } catch (err) {
-      console.error(err);
-      alert('Không tìm thấy Tòa nhà');
-      navigate('/super-admin/buildings');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleNext = () => setCurrentStep(prev => Math.min(steps.length, prev + 1));
+  const handleBack = () => setCurrentStep(prev => Math.max(1, prev - 1));
 
-  const handleNext = () => {
-    if (currentStep === 1 && property?.wholeHouse) {
-      // Bỏ qua bước Phòng nếu là nhà nguyên căn
-      setCurrentStep(3);
-    } else if (currentStep < 7) {
-      setCurrentStep(prev => prev + 1);
-    } else {
-      navigate('/super-admin/buildings');
-    }
-  };
-
-  const handleBack = () => {
-    if (currentStep === 3 && property?.wholeHouse) {
-      setCurrentStep(1);
-    } else if (currentStep > 1) {
-      setCurrentStep(prev => prev - 1);
-    }
-  };
+  if (loading) return <div className="py-32 text-center text-slate-500 font-semibold">Đang tải cấu hình tòa nhà...</div>;
+  if (error || !property) return <div className="py-32 text-center text-rose-500 font-bold">{error}</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/super-admin/buildings')} className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition">
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-            <div>
-              <h1 className="text-xl font-black text-slate-900 flex items-center gap-2">
-                <Building2 className="w-6 h-6 text-indigo-600" />
-                {property ? property.propertyName : 'Tạo mới Tòa nhà (Onboarding)'}
-              </h1>
-              <p className="text-sm text-slate-500 font-medium">Quy trình thiết lập & cấu hình chi tiết trước khi cho thuê</p>
-            </div>
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      {/* Header & Navigation */}
+      <div className="mb-10">
+        <button 
+          onClick={() => navigate('/super-admin/buildings')}
+          className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-indigo-600 transition"
+        >
+          <ArrowLeft className="h-4 w-4" /> Quay về danh sách Tòa nhà
+        </button>
+        
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Onboarding Tòa nhà mới</h1>
+            <p className="text-slate-500 mt-1 font-medium">{property.propertyName} • {property.fullAddress || property.shortAddress}</p>
           </div>
-          {property && (
-            <div className={`px-3 py-1 rounded-full text-sm font-bold ${property.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
-              Trạng thái: {property.status}
-            </div>
-          )}
+          <span className="bg-indigo-50 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-bold">
+            Trạng thái: {property.status}
+          </span>
         </div>
-      </div>
 
-      {/* Progress Bar */}
-      <div className="max-w-5xl mx-auto mt-8 px-6">
-        <div className="flex items-center justify-between relative">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0"></div>
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-indigo-500 rounded-full z-0 transition-all duration-500" style={{ width: `${((currentStep - 1) / (7 - 1)) * 100}%` }}></div>
-          
-          {STEPS.map(step => {
-            const isHidden = property?.wholeHouse && step.id === 2;
-            if (isHidden) return null;
-
-            const isActive = step.id === currentStep;
-            const isCompleted = step.id < currentStep;
-
-            return (
-              <div key={step.id} className="relative z-10 flex flex-col items-center gap-2">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all shadow-sm ${isActive ? 'bg-indigo-600 text-white ring-4 ring-indigo-100' : isCompleted ? 'bg-indigo-500 text-white' : 'bg-white text-slate-400 border-2 border-slate-200'}`}>
-                  {isCompleted ? <CheckCircle2 className="w-5 h-5" /> : step.id}
+        {/* Progress Bar */}
+        <div className="relative">
+          <div className="absolute top-1/2 left-0 right-0 h-1 bg-slate-100 -translate-y-1/2 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-indigo-500 transition-all duration-500 ease-out"
+              style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}
+            />
+          </div>
+          <div className="relative flex justify-between">
+            {steps.map((step) => {
+              const Icon = step.icon;
+              const isActive = currentStep === step.id;
+              const isCompleted = currentStep > step.id;
+              
+              return (
+                <div key={step.id} className="flex flex-col items-center gap-3">
+                  <div className={`
+                    w-12 h-12 rounded-full flex items-center justify-center border-4 shadow-sm transition-all duration-300
+                    ${isActive ? 'bg-indigo-600 border-indigo-100 text-white shadow-indigo-200' : 
+                      isCompleted ? 'bg-emerald-500 border-emerald-100 text-white' : 
+                      'bg-white border-slate-100 text-slate-400'}
+                  `}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  <span className={`text-sm font-bold ${isActive ? 'text-indigo-900' : isCompleted ? 'text-slate-700' : 'text-slate-400'}`}>
+                    Bước {step.id}: {step.title}
+                  </span>
                 </div>
-                <span className={`text-xs font-bold absolute -bottom-6 w-24 text-center ${isActive ? 'text-indigo-900' : isCompleted ? 'text-indigo-600' : 'text-slate-400'}`}>{step.label}</span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="max-w-4xl mx-auto mt-16 px-6">
-        {loading ? (
-          <div className="text-center py-20 text-slate-400 font-semibold">Đang tải dữ liệu...</div>
-        ) : (
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-            {currentStep === 1 && (
-              <StepPropertyInfo 
-                property={property} 
-                onSaved={(p) => { 
-                  setProperty(p); 
-                  if (!property) navigate(`/super-admin/properties/onboarding/${p.id}`, { replace: true });
-                  handleNext(); 
-                }} 
-              />
-            )}
-            {currentStep === 2 && !property?.wholeHouse && property && <StepRooms property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 3 && property && <StepEquipments property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 4 && property && <StepRenovations property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 5 && property && <StepInboundContract property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 6 && property && <StepDepreciation property={property} onNext={handleNext} onBack={handleBack} />}
-            {currentStep === 7 && property && <StepConfirmPrice property={property} onNext={handleNext} onBack={handleBack} onSuccess={() => fetchProperty(property.id)} />}
-          </div>
+      {/* Step Content */}
+      <div className="min-h-[500px]">
+        {currentStep === 1 && (
+          <StepPropertyInfo 
+            property={property} 
+            onNext={handleNext} 
+          />
+        )}
+        
+        {currentStep === 2 && (
+          <StepOnboardingOptions 
+            property={property} 
+            onNext={handleNext} 
+            onBack={handleBack} 
+            onPropertyUpdated={setProperty}
+          />
+        )}
+        
+        {currentStep === 3 && (
+          <StepSubmitToHost 
+            property={property} 
+            onBack={handleBack}
+            onSuccess={() => navigate('/super-admin/buildings')}
+          />
         )}
       </div>
     </div>

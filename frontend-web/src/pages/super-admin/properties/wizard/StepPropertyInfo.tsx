@@ -1,188 +1,312 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Building, ArrowRight } from 'lucide-react';
-import type { PropertyCreateRequest, PropertyResponse, ZoneResponse } from '../../../../types/api.types';
+import { Building, Package, FileText, Plus, Trash2, Check, Upload, Save, AlertCircle } from 'lucide-react';
+import type { 
+  PropertyResponse, 
+  ManifestItem, 
+  InboundContractRequest, 
+  InboundContractResponse, 
+  EquipmentCatalogItem 
+} from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
-import { zoneService } from '../../../../services/zone.service';
-import { userService } from '../../../../services/user.service';
-import type { UserResponse } from '../../../../types/api.types';
+import { catalogService } from '../../../../services/catalog.service';
+import { uploadToCloudinary } from '../../../../services/upload.service';
 
 interface StepPropertyInfoProps {
-  property: PropertyResponse | null;
-  onSaved: (property: PropertyResponse) => void;
+  property: PropertyResponse;
+  onNext: () => void;
 }
 
-export const StepPropertyInfo = ({ property, onSaved }: StepPropertyInfoProps) => {
-  const isUpdate = !!property;
+export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [zones, setZones] = useState<ZoneResponse[]>([]);
-  const [managers, setManagers] = useState<UserResponse[]>([]);
-  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
   
-  const [formData, setFormData] = useState<PropertyCreateRequest>({
-    propertyName: property?.propertyName || '',
-    address: property?.shortAddress || '',
-    descriptions: property?.descriptions || '',
-    zoneId: property?.zoneId || '',
-    wholeHouse: property?.wholeHouse || false,
-    areaSize: property?.areaSize || 0,
-    totalRooms: property?.totalRooms || 0,
-    managedBy: 1, // Mặc định để pass NOT NULL backend
-  });
+  // Manifest State
+  const [catalog, setCatalog] = useState<EquipmentCatalogItem[]>([]);
+  const [manifestItems, setManifestItems] = useState<ManifestItem[]>([]);
+  const [manifestSaved, setManifestSaved] = useState(false);
+  const [isSavingManifest, setIsSavingManifest] = useState(false);
 
+  // Contract State
+  const [contract, setContract] = useState<InboundContractResponse | null>(null);
+  const [contractForm, setContractForm] = useState<InboundContractRequest>({
+    contractCode: '', ownerName: '', totalRentAmount: 0, startDate: '', endDate: '', contractScanUrl: ''
+  });
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSavingContract, setIsSavingContract] = useState(false);
+
+  // Load Data
   useEffect(() => {
-    const fetchData = async () => {
+    const initData = async () => {
+      setLoading(true);
       try {
-        const [rootZones, allUsers] = await Promise.all([
-          zoneService.getRootZones(),
-          userService.getAllUsers()
+        const [catalogData, manifestData, contractData] = await Promise.allSettled([
+          catalogService.getEquipmentCatalog(),
+          propertyService.getManifest(property.id),
+          propertyService.getInboundContract(property.id)
         ]);
-        setZones(rootZones);
-        const mgrs = allUsers.filter(u => u.role === 'ROLE_MANAGER' && u.status === 'ACTIVE');
-        setManagers(mgrs);
-        if (mgrs.length > 0) {
-          setSelectedManagerId(mgrs[0].id);
+
+        if (catalogData.status === 'fulfilled') setCatalog(catalogData.value);
+        
+        if (manifestData.status === 'fulfilled' && manifestData.value.length > 0) {
+          setManifestItems(manifestData.value.map(m => ({
+            catalogId: m.catalogId, quantity: m.quantity, status: m.status
+          })));
+          setManifestSaved(true);
+        } else {
+          // Initialize empty if no manifest
+          setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW' }]);
         }
-      } catch (err) {
-        console.error('Failed to fetch data', err);
+
+        if (contractData.status === 'fulfilled' && contractData.value) {
+          setContract(contractData.value);
+          setContractForm({
+            contractCode: contractData.value.contractCode,
+            ownerName: contractData.value.ownerName,
+            totalRentAmount: contractData.value.totalRentAmount,
+            startDate: contractData.value.startDate,
+            endDate: contractData.value.endDate,
+            contractScanUrl: contractData.value.contractScanUrl || ''
+          });
+        }
+      } catch (error) {
+        console.error('Failed to init step 1', error);
+      } finally {
+        setLoading(false);
       }
     };
-    fetchData();
-  }, []);
+    initData();
+  }, [property.id]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : 
-              type === 'number' ? Number(value) : value
-    }));
+  // Manifest Handlers
+  const handleAddManifestRow = () => {
+    setManifestItems(prev => [...prev, { catalogId: 0, quantity: 1, status: 'NEW' }]);
+    setManifestSaved(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
+  const handleRemoveManifestRow = (index: number) => {
+    setManifestItems(prev => prev.filter((_, i) => i !== index));
+    setManifestSaved(false);
+  };
 
+  const updateManifestRow = (index: number, field: keyof ManifestItem, value: any) => {
+    const updated = [...manifestItems];
+    updated[index] = { ...updated[index], [field]: value };
+    setManifestItems(updated);
+    setManifestSaved(false);
+  };
+
+  const saveManifest = async () => {
+    // Validate
+    const validItems = manifestItems.filter(i => i.catalogId > 0 && i.quantity > 0);
+    if (manifestItems.length > 0 && validItems.length !== manifestItems.length) {
+      alert('Vui lòng điền đầy đủ thông tin thiết bị (chọn thiết bị và số lượng > 0)');
+      return;
+    }
+
+    setIsSavingManifest(true);
     try {
-      // Vì backend requires managedBy as Long, ta hash id (UUID) thành 1 số dương để pass qua validation
-      const hashCode = (s: string) => Math.abs(s.split('').reduce((a, b) => { a = ((a << 5) - a) + b.charCodeAt(0); return a & a }, 0)) || 1;
-      
-      const payload = {
-        ...formData,
-        managedBy: selectedManagerId ? hashCode(selectedManagerId) : 1
-      };
-
-      let savedProperty: PropertyResponse;
-      if (isUpdate && property) {
-        savedProperty = await propertyService.updateProperty(property.id, payload);
-      } else {
-        savedProperty = await propertyService.createProperty(payload);
-      }
-      onSaved(savedProperty);
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Có lỗi xảy ra khi lưu thông tin tòa nhà.');
+      await propertyService.putManifest(property.id, { items: validItems });
+      setManifestSaved(true);
+      setManifestItems(validItems.length > 0 ? validItems : [{ catalogId: 0, quantity: 1, status: 'NEW' }]);
+    } catch (err) {
+      alert('Lỗi lưu manifest');
     } finally {
-      setLoading(false);
+      setIsSavingManifest(false);
     }
   };
 
+  // Contract Handlers
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      setContractForm(prev => ({ ...prev, contractScanUrl: url }));
+    } catch (err) {
+      alert('Lỗi tải file lên');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const saveContract = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingContract(true);
+    try {
+      const res = await propertyService.createInboundContract(property.id, contractForm);
+      setContract(res);
+    } catch (err) {
+      alert('Lỗi lưu hợp đồng');
+    } finally {
+      setIsSavingContract(false);
+    }
+  };
+
+  const isFormComplete = manifestSaved && contract !== null;
+
+  if (loading) return <div className="py-20 text-center text-slate-500">Đang tải dữ liệu...</div>;
+
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-black text-slate-900">Thông tin cơ bản</h2>
-        <p className="text-sm font-medium text-slate-500 mt-1">
-          Khởi tạo tòa nhà / nhà nguyên căn mới để hệ thống theo dõi
-        </p>
-      </div>
-
-      <form id="property-info-form" onSubmit={handleSubmit} className="space-y-6">
-        {error && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
-            {error}
+    <div className="space-y-8 pb-12">
+      {/* 1A: Tóm tắt thông tin */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center gap-2">
+          <Building className="h-5 w-5 text-indigo-500" />
+          <h3 className="font-bold text-slate-800">Thông tin cơ bản</h3>
+        </div>
+        <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Tên Tòa nhà</p>
+            <p className="font-bold text-slate-900">{property.propertyName}</p>
           </div>
-        )}
-
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="space-y-5">
-            <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 border-b border-slate-100 pb-2">
-              <Building className="h-5 w-5 text-indigo-500" /> Nhận diện
-            </h3>
-            
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Tên tòa nhà / Căn nhà *</span>
-              <input required name="propertyName" value={formData.propertyName} onChange={handleChange} className="input-field" placeholder="Ví dụ: UrbanNest Quận 1" />
-            </label>
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ *</span>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input required name="address" value={formData.address} onChange={handleChange} className="input-field pl-9" placeholder="Số nhà, đường..." />
-              </div>
-            </label>
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Khu vực (Zone) *</span>
-              <select required name="zoneId" value={formData.zoneId} onChange={handleChange} className="input-field">
-                <option value="">-- Chọn khu vực --</option>
-                {zones.map(z => (
-                  <option key={z.id} value={z.id}>{z.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Quản lý bởi (ROLE_MANAGER) *</span>
-              <select required value={selectedManagerId} onChange={(e) => setSelectedManagerId(e.target.value)} className="input-field">
-                <option value="">-- Chọn Quản lý --</option>
-                {managers.map(m => (
-                  <option key={m.id} value={m.id}>{m.username} ({m.phoneNumber})</option>
-                ))}
-              </select>
-            </label>
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Địa chỉ</p>
+            <p className="font-bold text-slate-900 line-clamp-1">{property.fullAddress || property.shortAddress}</p>
           </div>
-
-          <div className="space-y-5">
-            <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 border-b border-slate-100 pb-2">
-              <Building className="h-5 w-5 text-indigo-500" /> Cấu trúc nhà
-            </h3>
-
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 transition-colors hover:bg-indigo-50">
-              <div className="pt-1">
-                <input type="checkbox" name="wholeHouse" checked={formData.wholeHouse} onChange={handleChange} className="h-5 w-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-600" />
-              </div>
-              <div>
-                <p className="font-bold text-indigo-900">Nhà nguyên căn</p>
-                <p className="text-xs text-indigo-700 mt-1">Áp dụng một mức giá chung cho toàn bộ nhà (không chia phòng trọ)</p>
-              </div>
-            </label>
-
-            {!formData.wholeHouse ? (
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Tổng số phòng dự kiến</span>
-                <input type="number" name="totalRooms" value={formData.totalRooms} onChange={handleChange} className="input-field" placeholder="Ví dụ: 10" />
-              </label>
-            ) : (
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Diện tích sử dụng (m2)</span>
-                <input type="number" name="areaSize" value={formData.areaSize} onChange={handleChange} className="input-field" placeholder="Ví dụ: 100" />
-              </label>
-            )}
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Mô tả thêm</span>
-              <textarea name="descriptions" value={formData.descriptions} onChange={handleChange} className="input-field min-h-[100px]" placeholder="Tiện ích, lưu ý..." />
-            </label>
+          <div>
+            <p className="text-slate-500 mb-1">Khu vực</p>
+            <p className="font-bold text-slate-900">{property.zoneName}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Diện tích</p>
+            <p className="font-bold text-slate-900">{property.areaSize || 0} m²</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Số tầng</p>
+            <p className="font-bold text-slate-900">{property.floorCount || 0}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Tổng phòng</p>
+            <p className="font-bold text-slate-900">{property.totalRooms}</p>
           </div>
         </div>
+      </section>
 
-        <div className="flex justify-end pt-6 border-t border-slate-100 mt-8">
-          <button type="submit" disabled={loading} className="btn-primary rounded-xl px-8 py-3 flex items-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50">
-            {loading ? 'Đang lưu...' : (isUpdate ? 'Lưu & Tiếp tục' : 'Tạo mới & Tiếp tục')}
-            {!loading && <ArrowRight className="w-5 h-5" />}
+      {/* 1B: Manifest */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-indigo-500" />
+            <h3 className="font-bold text-slate-800">Khai báo Thiết bị có sẵn (Manifest)</h3>
+            {manifestSaved && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
+          </div>
+          <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
+            {isSavingManifest ? 'Đang lưu...' : <><Save className="w-4 h-4" /> Lưu Thiết bị</>}
           </button>
         </div>
-      </form>
+        <div className="p-5">
+          <table className="w-full text-sm text-left">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500">
+                <th className="pb-2 font-semibold">Tên Thiết bị</th>
+                <th className="pb-2 font-semibold w-24">Số lượng</th>
+                <th className="pb-2 font-semibold w-32">Tình trạng</th>
+                <th className="pb-2 font-semibold w-12 text-center">Xóa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {manifestItems.map((item, idx) => (
+                <tr key={idx} className="border-b border-slate-100">
+                  <td className="py-2 pr-2">
+                    <select value={item.catalogId} onChange={e => updateManifestRow(idx, 'catalogId', Number(e.target.value))} className="input-field py-1.5 text-sm">
+                      <option value={0}>-- Chọn thiết bị --</option>
+                      {catalog.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input type="number" min={1} value={item.quantity} onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))} className="input-field py-1.5 text-sm" />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
+                      <option value="NEW">Mới 100%</option>
+                      <option value="GOOD">Đang dùng tốt</option>
+                    </select>
+                  </td>
+                  <td className="py-2 text-center">
+                    <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={handleAddManifestRow} className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+            <Plus className="w-4 h-4" /> Thêm dòng
+          </button>
+        </div>
+      </section>
+
+      {/* 1C: Hợp đồng */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-indigo-500" />
+            <h3 className="font-bold text-slate-800">Hợp đồng Inbound (Với chủ nhà)</h3>
+            {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
+          </div>
+        </div>
+        <form onSubmit={saveContract} className="p-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
+              <input required value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field" placeholder="VD: HD-001" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
+              <input required value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field" placeholder="Nguyễn Văn A" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê/tháng *</span>
+              <input type="number" required value={contractForm.totalRentAmount} onChange={e => setContractForm({...contractForm, totalRentAmount: Number(e.target.value)})} className="input-field" placeholder="VD: 15000000" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Ngày bắt đầu *</span>
+              <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Ngày kết thúc *</span>
+              <input type="date" required value={contractForm.endDate} onChange={e => setContractForm({...contractForm, endDate: e.target.value})} className="input-field" />
+            </label>
+            <div className="block col-span-2 md:col-span-1">
+              <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition flex-1 justify-center border border-slate-300">
+                  <Upload className="w-4 h-4" /> {isUploading ? 'Đang tải lên...' : 'Chọn File'}
+                  <input type="file" accept=".pdf,image/*,.doc,.docx" className="hidden" onChange={handleUpload} disabled={isUploading} />
+                </label>
+              </div>
+              {contractForm.contractScanUrl && (
+                <a href={contractForm.contractScanUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs text-indigo-600 hover:underline block truncate">
+                  Đã tải file: Xem hợp đồng
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
+              {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Navigation */}
+      <div className="mt-8 flex justify-end pt-4 border-t border-slate-200">
+        {!isFormComplete && (
+          <p className="text-sm font-semibold text-amber-600 flex items-center gap-1 mr-4">
+            <AlertCircle className="w-4 h-4" /> Vui lòng Lưu Thiết bị và Lưu Hợp đồng trước khi tiếp tục
+          </p>
+        )}
+        <button 
+          onClick={onNext} 
+          disabled={!isFormComplete}
+          className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Tiếp tục cấu hình →
+        </button>
+      </div>
     </div>
   );
 };
