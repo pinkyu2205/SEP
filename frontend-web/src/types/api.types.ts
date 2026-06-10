@@ -1,8 +1,16 @@
 // =============================================================================
-// ENUMS — khớp 100% với Backend enums
+// ENUMS — khớp 100% với Backend enums (Inbound Onboarding v2)
 // =============================================================================
 
-export type PropertyStatus = 'DRAFT' | 'ACTIVE' | 'MAINTENANCE' | 'INACTIVE';
+export type PropertyStatus =
+  | 'DRAFT'
+  | 'UNDER_RENOVATION'
+  | 'PENDING_HOST_REVIEW'
+  | 'ACTIVE'
+  | 'DISABLED'
+  // Legacy (giữ lại cho tương thích)
+  | 'MAINTENANCE'
+  | 'INACTIVE';
 
 export type RoomStatus = 'DRAFT' | 'AVAILABLE' | 'RENTED' | 'MAINTENANCE';
 
@@ -14,6 +22,9 @@ export type EquipmentSource = 'INITIAL_HANDOVER' | 'PURCHASED';
 
 export type EquipmentStatus = 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
 
+/** Trạng thái thiết bị khi khai báo manifest inbound (chỉ 2 giá trị) */
+export type ManifestEquipmentStatus = 'NEW' | 'GOOD';
+
 export type ContractStatus = 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 
 export type UserRole = 'ROLE_ADMIN' | 'ROLE_OWNER' | 'ROLE_MANAGER' | 'ROLE_TENANT';
@@ -23,6 +34,16 @@ export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'DISABLE';
 export type PhotoType = 'BEFORE' | 'AFTER';
 
 export type UtilityType = 'ELECTRIC' | 'WATER';
+
+/** Khu vực trong nhà nguyên căn — dùng khi gán thiết bị */
+export type HouseArea =
+  | 'LIVING_ROOM'
+  | 'BEDROOM'
+  | 'KITCHEN'
+  | 'BATHROOM'
+  | 'BALCONY'
+  | 'GARAGE'
+  | 'OTHER';
 
 // =============================================================================
 // AUTH
@@ -63,14 +84,69 @@ export interface ZoneResponse {
 }
 
 // =============================================================================
-// PROPERTY
+// MASTER DATA — Equipment Catalog & Renovation Categories
 // =============================================================================
 
+export interface EquipmentCatalogItem {
+  id: number;
+  name: string;
+  description?: string;
+}
+
+export interface RenovationCategory {
+  id: number;
+  code: string;       // e.g. 'PAINTING', 'EQUIPMENT'
+  name: string;       // e.g. 'Sơn sửa'
+  description?: string;
+}
+
+// =============================================================================
+// PROPERTY — Draft & Response (Inbound Onboarding v2)
+// =============================================================================
+
+/** Request tạo nháp property — POST /properties/draft */
+export interface PropertyDraftRequest {
+  propertyName: string;
+  address: string;
+  descriptions?: string;
+  zoneId: string;       // UUID
+  areaSize?: number;
+  floorCount?: number;
+  roomsPerFloor?: number;
+  createdBy?: number;
+  imageUrls?: string[];
+}
+
+/** Response từ tất cả endpoint property */
+export interface PropertyResponse {
+  id: number;
+  propertyName: string;
+  shortAddress: string;
+  fullAddress: string;
+  descriptions?: string;
+  zoneId: string;        // UUID
+  zoneName: string;
+  areaSize?: number;
+  wholeHouse: boolean | null;
+  hasRenovation: boolean | null;
+  floorCount?: number;
+  roomsPerFloor?: number;
+  totalRooms: number;
+  status: string;        // PropertyStatus
+  price?: number;
+  createdBy?: number;
+  operationManagerId?: number;
+  renovationCompleted: boolean;
+  // Legacy fields (giữ tương thích)
+  deposit?: number;
+}
+
+/** Legacy — giữ lại cho PropertyFormModal cũ */
 export interface PropertyCreateRequest {
   propertyName: string;
   address: string;
   descriptions?: string;
-  zoneId: string; // UUID
+  zoneId: string;
   wholeHouse: boolean;
   areaSize?: number;
   totalRooms?: number;
@@ -78,20 +154,110 @@ export interface PropertyCreateRequest {
   imageUrls?: string[];
 }
 
-export interface PropertyResponse {
+// =============================================================================
+// EQUIPMENT MANIFEST — Khai báo thiết bị có sẵn
+// =============================================================================
+
+export interface ManifestItem {
+  catalogId: number;
+  quantity: number;
+  status: ManifestEquipmentStatus;
+}
+
+export interface ManifestRequest {
+  items: ManifestItem[];
+}
+
+export interface ManifestItemResponse {
   id: number;
-  propertyName: string;
-  shortAddress: string;
-  fullAddress: string;
-  descriptions?: string;
-  zoneId: string; // UUID
-  zoneName: string;
-  areaSize?: number;
+  catalogId: number;
+  catalogName: string;
+  quantity: number;
+  status: ManifestEquipmentStatus;
+  assignedCount: number;
+}
+
+// =============================================================================
+// INBOUND CONTRACT
+// =============================================================================
+
+/** Request tạo/cập nhật HĐ inbound — POST /properties/{id}/inbound-contract */
+export interface InboundContractRequest {
+  contractCode: string;
+  ownerName: string;
+  totalRentAmount: number;
+  startDate: string;  // ISO date: '2026-01-01'
+  endDate: string;
+  contractScanUrl?: string;
+}
+
+export interface InboundContractResponse {
+  id: number;
+  propertyId: number;
+  contractCode: string;
+  ownerName: string;
+  totalRentAmount: number;
+  startDate: string;
+  endDate: string;
+  contractScanUrl?: string;
+  status: ContractStatus;
+}
+
+// Legacy — giữ tương thích
+export interface CreateInboundContractRequest {
+  contractCode: string;
+  ownerName: string;
+  baseRentPrice: number;
+  depositAmount: number;
+  startDate: string;
+  endDate: string;
+  contractScanUrl?: string;
+}
+
+// =============================================================================
+// ONBOARDING OPTIONS — Chọn loại hình & cải tạo
+// =============================================================================
+
+export interface OnboardingOptionsRequest {
   wholeHouse: boolean;
-  totalRooms: number;
-  status: string; // PropertyStatus
-  price?: number;    // BigDecimal → number
-  deposit?: number;  // BigDecimal → number
+  hasRenovation: boolean;
+}
+
+// =============================================================================
+// STRUCTURE UPDATE — Cập nhật cấu trúc sau cải tạo
+// =============================================================================
+
+export interface StructureUpdateRequest {
+  floorCount: number;
+  roomsPerFloor: number;
+}
+
+// =============================================================================
+// RENOVATION LINES — Chi phí cải tạo
+// =============================================================================
+
+export interface RenovationLineRequest {
+  categoryId: number;
+  cost: number;
+  note?: string;
+}
+
+export interface RenovationLineResponse {
+  id: number;
+  categoryId: number;
+  categoryCode: string;
+  categoryName: string;
+  cost: number;
+  note?: string;
+}
+
+// =============================================================================
+// RENOVATION SCHEDULE
+// =============================================================================
+
+export interface RenovationScheduleRequest {
+  startDate: string;  // ISO date
+  endDate: string;
 }
 
 // =============================================================================
@@ -100,15 +266,16 @@ export interface PropertyResponse {
 
 export interface AddRoomRequest {
   roomNumber: string;
-  price?: number;
-  deposit?: number;
   area: number;
   maxOccupants?: number;
+  propertyType: PropertyType;
   structureDescription?: string;
   imageUrls?: string;
-  propertyType: PropertyType;
   electricMeterCode?: string;
   waterMeterCode?: string;
+  // Legacy fields
+  price?: number;
+  deposit?: number;
 }
 
 export interface RoomResponse {
@@ -129,7 +296,143 @@ export interface RoomResponse {
 }
 
 // =============================================================================
-// EQUIPMENT
+// EQUIPMENT ASSIGNMENT — Gán thiết bị vào vị trí
+// =============================================================================
+
+export interface EquipmentAssignRequest {
+  catalogId: number;
+  quantity: number;
+  status: ManifestEquipmentStatus;
+  source: EquipmentSource;
+  roomId?: number;        // Dùng khi chia phòng
+  houseArea?: HouseArea;  // Dùng khi nhà nguyên căn
+}
+
+export interface EquipmentAssignmentResponse {
+  id: number;
+  catalogId: number;
+  catalogName: string;
+  quantity: number;
+  status: string;
+  roomId?: number;
+  roomNumber?: string;
+  houseArea?: HouseArea;
+}
+
+// =============================================================================
+// DEPRECIATION / PRICING — Giá đề xuất
+// =============================================================================
+
+export interface DepreciationRoomResult {
+  roomId: number;
+  roomNumber: string;
+  totalRentAmount: number;
+  totalRenovationCost: number;
+  totalEquipmentCost: number;
+  totalInvestment: number;
+  contractMonths: number;
+  monthlyBreakEven: number;
+  suggestedMinPrice: number;
+  calculatedAt: string;
+}
+
+export interface DepreciationWholeHouseResult {
+  totalRentAmount: number;
+  totalRenovationCost: number;
+  totalEquipmentCost: number;
+  totalInvestment: number;
+  contractMonths: number;
+  monthlyBreakEven: number;
+  suggestedMinPrice: number;
+  calculatedAt: string;
+}
+
+export interface PricingResponse {
+  propertyId: number;
+  pricingScope: PricingScope;
+  wholeHouseResult?: DepreciationWholeHouseResult;
+  roomResults?: DepreciationRoomResult[];
+}
+
+// =============================================================================
+// ONBOARDING SUMMARY — Tổng hợp cho Host xem
+// =============================================================================
+
+export interface OnboardingSummaryResponse {
+  propertyId: number;
+  propertyName: string;
+  status: string;
+  wholeHouse: boolean;
+  hasRenovation: boolean;
+  floorCount: number;
+  roomsPerFloor: number;
+  totalRooms: number;
+  renovationCompleted: boolean;
+  renovationStartDate?: string;
+  renovationEndDate?: string;
+  submittedToHostAt?: string;
+  equipmentManifest: ManifestItemResponse[];
+  renovationLines: RenovationLineResponse[];
+  totalRenovationCost: number;
+  inboundContract: InboundContractResponse;
+  pricing: PricingResponse;
+}
+
+// =============================================================================
+// HOST CONFIRM — Host xác nhận giá & kích hoạt
+// =============================================================================
+
+export interface HostRoomPrice {
+  roomId: number;
+  price: number;
+}
+
+export interface HostConfirmRequest {
+  contingencyPercent: number;
+  operationManagerId: number;
+  propertyPrice?: number;          // Nhà nguyên căn (ghi đè tay)
+  roomPrices?: HostRoomPrice[];    // Nhà chia phòng
+}
+
+export interface HostConfirmRoomResult {
+  roomId: number;
+  roomNumber: string;
+  price: number;
+  adminSuggestedPrice: number;
+  status: RoomStatus;
+}
+
+export interface HostConfirmResponse {
+  propertyId: number;
+  pricingScope: PricingScope;
+  propertyStatus: string;
+  hostContingencyPercent: number;
+  operationManagerId: number;
+  propertyPrice?: number;
+  rooms?: HostConfirmRoomResult[];
+}
+
+// =============================================================================
+// USER
+// =============================================================================
+
+export interface UserResponse {
+  id: string; // UUID
+  username: string;
+  phoneNumber?: string;
+  role: string;
+  status: UserStatus;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  phoneNumber?: string;
+  role: string;
+}
+
+// =============================================================================
+// LEGACY TYPES — Giữ lại để tránh lỗi build ở các trang cũ
 // =============================================================================
 
 export interface AddEquipmentRequest {
@@ -152,10 +455,6 @@ export interface EquipmentResponse {
   note?: string;
 }
 
-// =============================================================================
-// RENOVATION
-// =============================================================================
-
 export interface AddRenovationRequest {
   roomId?: number;
   description: string;
@@ -171,37 +470,6 @@ export interface RenovationResponse {
   cost?: number;
   completed: boolean;
 }
-
-// =============================================================================
-// INBOUND CONTRACT
-// =============================================================================
-
-export interface CreateInboundContractRequest {
-  contractCode: string;
-  ownerName: string;
-  baseRentPrice: number;
-  depositAmount: number;
-  startDate: string; // ISO date: '2026-01-01'
-  endDate: string;
-  contractScanUrl?: string;
-}
-
-export interface InboundContractResponse {
-  id: number;
-  propertyId: number;
-  contractCode: string;
-  ownerName: string;
-  baseRentPrice: number;
-  depositAmount: number;
-  startDate: string;
-  endDate: string;
-  contractScanUrl?: string;
-  status: ContractStatus;
-}
-
-// =============================================================================
-// DEPRECIATION
-// =============================================================================
 
 export interface CalculateDepreciationRequest {
   monthlyOperatingCost?: number;
@@ -233,10 +501,6 @@ export interface DepreciationCalculationResponse {
   roomResults?: DepreciationResultResponse[];
 }
 
-// =============================================================================
-// PROPERTY ACTIVATION (CONFIRM GIÁ)
-// =============================================================================
-
 export interface RoomPriceConfirm {
   roomId: number;
   price: number;
@@ -244,9 +508,9 @@ export interface RoomPriceConfirm {
 }
 
 export interface ConfirmPropertyActivationRequest {
-  propertyPrice?: number;        // Nhà nguyên căn
-  propertyDeposit?: number;      // Nhà nguyên căn
-  roomPrices?: RoomPriceConfirm[]; // Nhà chia phòng
+  propertyPrice?: number;
+  propertyDeposit?: number;
+  roomPrices?: RoomPriceConfirm[];
   hasOngoingRenovation?: boolean;
 }
 
@@ -267,25 +531,6 @@ export interface PropertyActivationResponse {
   propertyDeposit?: number;
   suggestedMinPrice?: number;
   rooms?: ActivatedRoom[];
-}
-
-// =============================================================================
-// USER
-// =============================================================================
-
-export interface UserResponse {
-  id: string; // UUID
-  username: string;
-  phoneNumber?: string;
-  role: string;
-  status: UserStatus;
-}
-
-export interface CreateUserRequest {
-  username: string;
-  password: string;
-  phoneNumber?: string;
-  role: string;
 }
 
 // =============================================================================

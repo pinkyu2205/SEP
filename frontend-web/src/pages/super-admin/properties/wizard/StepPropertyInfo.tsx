@@ -1,454 +1,312 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Building, FileText, Home, MapPin, PackageCheck, Upload } from 'lucide-react';
-import type {
-  AddEquipmentRequest,
-  CreateInboundContractRequest,
-  EquipmentResponse,
-  PropertyCreateRequest,
-  PropertyResponse,
-  ZoneResponse,
+import { useState, useEffect } from 'react';
+import { Building, Package, FileText, Plus, Trash2, Check, Upload, Save, AlertCircle } from 'lucide-react';
+import type { 
+  PropertyResponse, 
+  ManifestItem, 
+  InboundContractRequest, 
+  InboundContractResponse, 
+  EquipmentCatalogItem 
 } from '../../../../types/api.types';
-import { adminOnboardingDraftService } from '../../../../services/admin-onboarding-draft.service';
-import { equipmentService } from '../../../../services/equipment.service';
-import { inboundContractService } from '../../../../services/inbound-contract.service';
 import { propertyService } from '../../../../services/property.service';
-import { zoneService } from '../../../../services/zone.service';
+import { catalogService } from '../../../../services/catalog.service';
+import { uploadToCloudinary } from '../../../../services/upload.service';
 
 interface StepPropertyInfoProps {
-  property: PropertyResponse | null;
-  onSaved: (property: PropertyResponse) => void;
+  property: PropertyResponse;
+  onNext: () => void;
 }
 
-const DEFAULT_ZONE: ZoneResponse = {
-  id: '00000000-0000-0000-0000-000000000001',
-  name: 'TP Hồ Chí Minh',
-  level: 1,
-  fullName: 'TP Hồ Chí Minh',
-};
-
-const EQUIPMENT_TEMPLATES = [
-  'Máy lạnh',
-  'Máy nước nóng',
-  'Tủ lạnh',
-  'Máy giặt',
-  'Giường',
-  'Nệm',
-  'Tủ quần áo',
-  'Bàn ghế',
-  'Bếp điện',
-  'Camera',
-  'Bình chữa cháy',
-  'Router wifi',
-];
-
-const INTERIOR_TEMPLATES = [
-  'Rèm cửa',
-  'Kệ bếp',
-  'Tủ giày',
-  'Sofa',
-  'Đèn trang trí',
-  'Gương phòng tắm',
-];
-
-const hashId = (value: string) =>
-  Math.abs(value.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0)) || 1;
-
-export const StepPropertyInfo = ({ property, onSaved }: StepPropertyInfoProps) => {
-  const isUpdate = !!property;
+export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [zones, setZones] = useState<ZoneResponse[]>([DEFAULT_ZONE]);
-  const [pdfFileName, setPdfFileName] = useState('');
-  const [savedEquipments, setSavedEquipments] = useState<EquipmentResponse[]>([]);
-  const [selectedEquipments, setSelectedEquipments] = useState<string[]>([]);
-  const [selectedInteriors, setSelectedInteriors] = useState<string[]>([]);
-  const [customEquipment, setCustomEquipment] = useState('');
+  
+  // Manifest State
+  const [catalog, setCatalog] = useState<EquipmentCatalogItem[]>([]);
+  const [manifestItems, setManifestItems] = useState<ManifestItem[]>([]);
+  const [manifestSaved, setManifestSaved] = useState(false);
+  const [isSavingManifest, setIsSavingManifest] = useState(false);
 
-  const [formData, setFormData] = useState<PropertyCreateRequest>({
-    propertyName: property?.propertyName || '',
-    address: property?.shortAddress || property?.fullAddress || '',
-    descriptions: property?.descriptions || '',
-    zoneId: property?.zoneId || DEFAULT_ZONE.id,
-    wholeHouse: property?.wholeHouse ?? true,
-    areaSize: property?.areaSize || 0,
-    totalRooms: property?.totalRooms || 1,
-    managedBy: 1,
+  // Contract State
+  const [contract, setContract] = useState<InboundContractResponse | null>(null);
+  const [contractForm, setContractForm] = useState<InboundContractRequest>({
+    contractCode: '', ownerName: '', totalRentAmount: 0, startDate: '', endDate: '', contractScanUrl: ''
   });
+  const [isUploading, setIsUploading] = useState(false);
+  const [isSavingContract, setIsSavingContract] = useState(false);
 
-  const [contractData, setContractData] = useState<CreateInboundContractRequest>({
-    contractCode: '',
-    ownerName: '',
-    baseRentPrice: 0,
-    depositAmount: 0,
-    startDate: '',
-    endDate: '',
-    contractScanUrl: '',
-  });
-
+  // Load Data
   useEffect(() => {
-    const fetchZones = async () => {
+    const initData = async () => {
+      setLoading(true);
       try {
-        const data = await zoneService.getRootZones();
-        setZones(data.length > 0 ? data : [DEFAULT_ZONE]);
-        if (!property?.zoneId && data[0]?.id) {
-          setFormData(prev => ({ ...prev, zoneId: data[0].id }));
+        const [catalogData, manifestData, contractData] = await Promise.allSettled([
+          catalogService.getEquipmentCatalog(),
+          propertyService.getManifest(property.id),
+          propertyService.getInboundContract(property.id)
+        ]);
+
+        if (catalogData.status === 'fulfilled') setCatalog(catalogData.value);
+        
+        if (manifestData.status === 'fulfilled' && manifestData.value.length > 0) {
+          setManifestItems(manifestData.value.map(m => ({
+            catalogId: m.catalogId, quantity: m.quantity, status: m.status
+          })));
+          setManifestSaved(true);
+        } else {
+          // Initialize empty if no manifest
+          setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW' }]);
         }
-      } catch {
-        setZones([DEFAULT_ZONE]);
+
+        if (contractData.status === 'fulfilled' && contractData.value) {
+          setContract(contractData.value);
+          setContractForm({
+            contractCode: contractData.value.contractCode,
+            ownerName: contractData.value.ownerName,
+            totalRentAmount: contractData.value.totalRentAmount,
+            startDate: contractData.value.startDate,
+            endDate: contractData.value.endDate,
+            contractScanUrl: contractData.value.contractScanUrl || ''
+          });
+        }
+      } catch (error) {
+        console.error('Failed to init step 1', error);
+      } finally {
+        setLoading(false);
       }
     };
+    initData();
+  }, [property.id]);
 
-    fetchZones();
-  }, [property?.zoneId]);
-
-  useEffect(() => {
-    if (!property) return;
-
-    setFormData({
-      propertyName: property.propertyName || '',
-      address: property.shortAddress || property.fullAddress || '',
-      descriptions: property.descriptions || '',
-      zoneId: property.zoneId || DEFAULT_ZONE.id,
-      wholeHouse: property.wholeHouse,
-      areaSize: property.areaSize || 0,
-      totalRooms: property.totalRooms || 1,
-      managedBy: 1,
-    });
-
-    const fetchLinkedData = async () => {
-      const draftContract = adminOnboardingDraftService.getContractDraft(property.id);
-      if (draftContract.contract) {
-        setContractData({
-          contractCode: draftContract.contract.contractCode,
-          ownerName: draftContract.contract.ownerName,
-          baseRentPrice: draftContract.contract.baseRentPrice,
-          depositAmount: draftContract.contract.depositAmount,
-          startDate: draftContract.contract.startDate,
-          endDate: draftContract.contract.endDate,
-          contractScanUrl: draftContract.contract.contractScanUrl,
-        });
-      }
-      setPdfFileName(draftContract.pdfFileName || '');
-
-      try {
-        const contract = await inboundContractService.getContractByProperty(property.id);
-        setContractData({
-          contractCode: contract.contractCode,
-          ownerName: contract.ownerName,
-          baseRentPrice: contract.baseRentPrice,
-          depositAmount: contract.depositAmount,
-          startDate: contract.startDate,
-          endDate: contract.endDate,
-          contractScanUrl: contract.contractScanUrl,
-        });
-      } catch {
-        // Chưa có hợp đồng thật, dùng draft local nếu có.
-      }
-
-      try {
-        const apiEquipments = await equipmentService.getEquipmentsByProperty(property.id);
-        const draftEquipments = adminOnboardingDraftService.getEquipmentDraft(property.id);
-        const merged = [...apiEquipments, ...draftEquipments].filter(
-          (item, index, arr) => arr.findIndex(other => other.name === item.name) === index
-        );
-        setSavedEquipments(merged);
-        setSelectedEquipments(merged.filter(item => EQUIPMENT_TEMPLATES.includes(item.name)).map(item => item.name));
-        setSelectedInteriors(merged.filter(item => INTERIOR_TEMPLATES.includes(item.name)).map(item => item.name));
-      } catch {
-        const draftEquipments = adminOnboardingDraftService.getEquipmentDraft(property.id);
-        setSavedEquipments(draftEquipments);
-        setSelectedEquipments(draftEquipments.filter(item => EQUIPMENT_TEMPLATES.includes(item.name)).map(item => item.name));
-        setSelectedInteriors(draftEquipments.filter(item => INTERIOR_TEMPLATES.includes(item.name)).map(item => item.name));
-      }
-    };
-
-    fetchLinkedData();
-  }, [property]);
-
-  const selectedNames = useMemo(
-    () => [...selectedEquipments, ...selectedInteriors, ...customEquipment.split(',').map(item => item.trim()).filter(Boolean)],
-    [customEquipment, selectedEquipments, selectedInteriors]
-  );
-
-  const toggleSelection = (name: string, group: 'equipment' | 'interior') => {
-    const setValue = group === 'equipment' ? setSelectedEquipments : setSelectedInteriors;
-    setValue(prev => prev.includes(name) ? prev.filter(item => item !== name) : [...prev, name]);
+  // Manifest Handlers
+  const handleAddManifestRow = () => {
+    setManifestItems(prev => [...prev, { catalogId: 0, quantity: 1, status: 'NEW' }]);
+    setManifestSaved(false);
   };
 
-  const handleChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value, type } = event.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? (event.target as HTMLInputElement).checked : type === 'number' ? Number(value) : value,
-    }));
+  const handleRemoveManifestRow = (index: number) => {
+    setManifestItems(prev => prev.filter((_, i) => i !== index));
+    setManifestSaved(false);
   };
 
-  const saveEquipments = async (propertyId: number) => {
-    const existingNames = new Set(savedEquipments.map(item => item.name));
-    const newNames = selectedNames.filter(name => !existingNames.has(name));
-    const localCreated: EquipmentResponse[] = [];
-
-    for (const name of newNames) {
-      const payload: AddEquipmentRequest = {
-        name,
-        source: 'INITIAL_HANDOVER',
-        status: 'GOOD',
-        note: INTERIOR_TEMPLATES.includes(name) ? 'Nội thất kèm theo nếu có trong hợp đồng' : 'Thiết bị bàn giao ban đầu',
-      };
-
-      try {
-        await equipmentService.addEquipment(propertyId, payload);
-      } catch {
-        localCreated.push({
-          id: -hashId(`${propertyId}-${name}`),
-          propertyId,
-          name,
-          source: payload.source,
-          status: payload.status,
-          note: payload.note,
-        });
-      }
-    }
-
-    if (localCreated.length > 0) {
-      adminOnboardingDraftService.saveEquipmentDraft(propertyId, [
-        ...adminOnboardingDraftService.getEquipmentDraft(propertyId),
-        ...localCreated,
-      ]);
-    }
+  const updateManifestRow = (index: number, field: keyof ManifestItem, value: any) => {
+    const updated = [...manifestItems];
+    updated[index] = { ...updated[index], [field]: value };
+    setManifestItems(updated);
+    setManifestSaved(false);
   };
 
-  const saveContract = async (propertyId: number) => {
-    const payload: CreateInboundContractRequest = {
-      ...contractData,
-      contractScanUrl: pdfFileName ? `local://${pdfFileName}` : contractData.contractScanUrl,
-    };
-
-    if (!payload.contractCode || !payload.ownerName || !payload.startDate || !payload.endDate) {
+  const saveManifest = async () => {
+    // Validate
+    const validItems = manifestItems.filter(i => i.catalogId > 0 && i.quantity > 0);
+    if (manifestItems.length > 0 && validItems.length !== manifestItems.length) {
+      alert('Vui lòng điền đầy đủ thông tin thiết bị (chọn thiết bị và số lượng > 0)');
       return;
     }
 
+    setIsSavingManifest(true);
     try {
-      const contract = await inboundContractService.signContract(propertyId, payload);
-      adminOnboardingDraftService.saveContractDraft(propertyId, { contract, pdfFileName });
-    } catch {
-      adminOnboardingDraftService.saveContractDraft(propertyId, {
-        pdfFileName,
-        contract: {
-          id: -hashId(`${propertyId}-${payload.contractCode}`),
-          propertyId,
-          ...payload,
-          contractScanUrl: payload.contractScanUrl,
-          status: 'ACTIVE',
-        },
-      });
-    }
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError('');
-    setLoading(true);
-
-    try {
-      const payload: PropertyCreateRequest = {
-        ...formData,
-        totalRooms: formData.wholeHouse ? Number(formData.totalRooms || 1) : Number(formData.totalRooms || 0),
-        managedBy: formData.managedBy || 1,
-      };
-
-      const savedProperty = isUpdate && property
-        ? await propertyService.updateProperty(property.id, payload)
-        : await propertyService.createProperty(payload);
-
-      await saveContract(savedProperty.id);
-      await saveEquipments(savedProperty.id);
-      onSaved(savedProperty);
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Có lỗi xảy ra khi lưu thông tin căn nhà.');
+      await propertyService.putManifest(property.id, { items: validItems });
+      setManifestSaved(true);
+      setManifestItems(validItems.length > 0 ? validItems : [{ catalogId: 0, quantity: 1, status: 'NEW' }]);
+    } catch (err) {
+      alert('Lỗi lưu manifest');
     } finally {
-      setLoading(false);
+      setIsSavingManifest(false);
     }
   };
+
+  // Contract Handlers
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsUploading(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      setContractForm(prev => ({ ...prev, contractScanUrl: url }));
+    } catch (err) {
+      alert('Lỗi tải file lên');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const saveContract = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingContract(true);
+    try {
+      const res = await propertyService.createInboundContract(property.id, contractForm);
+      setContract(res);
+    } catch (err) {
+      alert('Lỗi lưu hợp đồng');
+    } finally {
+      setIsSavingContract(false);
+    }
+  };
+
+  const isFormComplete = manifestSaved && contract !== null;
+
+  if (loading) return <div className="py-20 text-center text-slate-500">Đang tải dữ liệu...</div>;
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-xl font-black text-slate-900">1. Nhập thông tin nhà thuê từ chủ sở hữu</h2>
-        <p className="mt-1 text-sm font-medium text-slate-500">
-          Admin nhập lại dữ liệu cơ bản theo hợp đồng Hoàng Bình Land đã ký: cấu trúc nhà, số phòng, thiết bị bàn giao và file hợp đồng PDF.
-        </p>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {error && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">
-            {error}
-          </div>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-5">
-            <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2 text-base font-bold text-slate-800">
-              <Building className="h-5 w-5 text-indigo-500" /> Thông tin căn nhà
-            </h3>
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Tên tòa nhà / căn nhà *</span>
-              <input required name="propertyName" value={formData.propertyName} onChange={handleChange} className="input-field" placeholder="Ví dụ: Nhà Nguyễn Duy Trinh" />
-            </label>
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ *</span>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input required name="address" value={formData.address} onChange={handleChange} className="input-field pl-9" placeholder="Số nhà, đường, phường/xã..." />
-              </div>
-            </label>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Khu vực *</span>
-                <select required name="zoneId" value={formData.zoneId} onChange={handleChange} className="input-field">
-                  {zones.map(zone => (
-                    <option key={zone.id} value={zone.id}>{zone.fullName || zone.name}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Diện tích sử dụng (m2)</span>
-                <input type="number" name="areaSize" value={formData.areaSize || ''} onChange={handleChange} className="input-field" placeholder="65" />
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
-                <input type="checkbox" name="wholeHouse" checked={formData.wholeHouse} onChange={handleChange} className="mt-1 h-5 w-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-600" />
-                <span>
-                  <span className="block font-bold text-indigo-950">Nhà nguyên căn</span>
-                  <span className="mt-1 block text-xs text-indigo-700">Admin có thể đổi sang cho thuê theo phòng ở bước 3.</span>
-                </span>
-              </label>
-
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Số phòng theo hợp đồng *</span>
-                <input required min={1} type="number" name="totalRooms" value={formData.totalRooms || ''} onChange={handleChange} className="input-field" placeholder="Ví dụ: 8" />
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">Ghi chú cấu trúc</span>
-              <textarea name="descriptions" value={formData.descriptions} onChange={handleChange} className="input-field min-h-[104px]" placeholder="Số tầng, khu bếp, sân thượng, tình trạng bàn giao..." />
-            </label>
-          </section>
-
-          <section className="space-y-5">
-            <h3 className="flex items-center gap-2 border-b border-slate-100 pb-2 text-base font-bold text-slate-800">
-              <FileText className="h-5 w-5 text-indigo-500" /> Hợp đồng gốc
-            </h3>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Mã hợp đồng *</span>
-                <input required value={contractData.contractCode} onChange={event => setContractData(prev => ({ ...prev, contractCode: event.target.value }))} className="input-field" placeholder="HDG-001" />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Chủ sở hữu gốc *</span>
-                <input required value={contractData.ownerName} onChange={event => setContractData(prev => ({ ...prev, ownerName: event.target.value }))} className="input-field" placeholder="Nguyễn Văn A" />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Giá thuê gốc/tháng *</span>
-                <input required type="number" value={contractData.baseRentPrice || ''} onChange={event => setContractData(prev => ({ ...prev, baseRentPrice: Number(event.target.value) }))} className="input-field" placeholder="15000000" />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Tiền cọc gốc *</span>
-                <input required type="number" value={contractData.depositAmount || ''} onChange={event => setContractData(prev => ({ ...prev, depositAmount: Number(event.target.value) }))} className="input-field" placeholder="30000000" />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Ngày bắt đầu *</span>
-                <input required type="date" value={contractData.startDate} onChange={event => setContractData(prev => ({ ...prev, startDate: event.target.value }))} className="input-field" />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Ngày kết thúc *</span>
-                <input required type="date" value={contractData.endDate} onChange={event => setContractData(prev => ({ ...prev, endDate: event.target.value }))} className="input-field" />
-              </label>
-            </div>
-
-            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:bg-indigo-50">
-              <Upload className="h-5 w-5 text-indigo-500" />
-              <span className="flex-1 truncate">{pdfFileName || 'Thêm hợp đồng PDF để lưu trữ'}</span>
-              <input
-                type="file"
-                accept="application/pdf"
-                className="hidden"
-                onChange={event => setPdfFileName(event.target.files?.[0]?.name || '')}
-              />
-            </label>
-          </section>
+    <div className="space-y-8 pb-12">
+      {/* 1A: Tóm tắt thông tin */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center gap-2">
+          <Building className="h-5 w-5 text-indigo-500" />
+          <h3 className="font-bold text-slate-800">Thông tin cơ bản</h3>
         </div>
-
-        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="flex items-center gap-2 text-base font-bold text-slate-800">
-                <PackageCheck className="h-5 w-5 text-indigo-500" /> Trang thiết bị bàn giao
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">Chọn nhiều mục có sẵn theo hợp đồng. Nội thất là phần nếu có, không bắt buộc.</p>
-            </div>
-            <div className="hidden rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-500 sm:block">
-              Đã chọn {selectedNames.length} mục
-            </div>
+        <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Tên Tòa nhà</p>
+            <p className="font-bold text-slate-900">{property.propertyName}</p>
           </div>
-
-          <div className="grid gap-5 lg:grid-cols-2">
-            <div>
-              <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Thiết bị chính</p>
-              <div className="flex flex-wrap gap-2">
-                {EQUIPMENT_TEMPLATES.map(name => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => toggleSelection(name, 'equipment')}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-bold transition ${selectedEquipments.includes(name) ? 'border-indigo-500 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300'}`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Nội thất nếu có</p>
-              <div className="flex flex-wrap gap-2">
-                {INTERIOR_TEMPLATES.map(name => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => toggleSelection(name, 'interior')}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-bold transition ${selectedInteriors.includes(name) ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'}`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-
-              <label className="mt-4 block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Thiết bị khác</span>
-                <input value={customEquipment} onChange={event => setCustomEquipment(event.target.value)} className="input-field" placeholder="Nhập nhiều mục, cách nhau bằng dấu phẩy" />
-              </label>
-            </div>
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Địa chỉ</p>
+            <p className="font-bold text-slate-900 line-clamp-1">{property.fullAddress || property.shortAddress}</p>
           </div>
-        </section>
+          <div>
+            <p className="text-slate-500 mb-1">Khu vực</p>
+            <p className="font-bold text-slate-900">{property.zoneName}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Diện tích</p>
+            <p className="font-bold text-slate-900">{property.areaSize || 0} m²</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Số tầng</p>
+            <p className="font-bold text-slate-900">{property.floorCount || 0}</p>
+          </div>
+          <div>
+            <p className="text-slate-500 mb-1">Tổng phòng</p>
+            <p className="font-bold text-slate-900">{property.totalRooms}</p>
+          </div>
+        </div>
+      </section>
 
-        <div className="flex justify-end border-t border-slate-100 pt-6">
-          <button type="submit" disabled={loading} className="btn-primary flex items-center gap-2 rounded-xl px-8 py-3 shadow-lg shadow-indigo-500/20">
-            <Home className="h-5 w-5" />
-            {loading ? 'Đang lưu...' : 'Lưu thông tin và qua cải tạo'}
-            {!loading && <ArrowRight className="h-5 w-5" />}
+      {/* 1B: Manifest */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-indigo-500" />
+            <h3 className="font-bold text-slate-800">Khai báo Thiết bị có sẵn (Manifest)</h3>
+            {manifestSaved && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
+          </div>
+          <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
+            {isSavingManifest ? 'Đang lưu...' : <><Save className="w-4 h-4" /> Lưu Thiết bị</>}
           </button>
         </div>
-      </form>
+        <div className="p-5">
+          <table className="w-full text-sm text-left">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500">
+                <th className="pb-2 font-semibold">Tên Thiết bị</th>
+                <th className="pb-2 font-semibold w-24">Số lượng</th>
+                <th className="pb-2 font-semibold w-32">Tình trạng</th>
+                <th className="pb-2 font-semibold w-12 text-center">Xóa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {manifestItems.map((item, idx) => (
+                <tr key={idx} className="border-b border-slate-100">
+                  <td className="py-2 pr-2">
+                    <select value={item.catalogId} onChange={e => updateManifestRow(idx, 'catalogId', Number(e.target.value))} className="input-field py-1.5 text-sm">
+                      <option value={0}>-- Chọn thiết bị --</option>
+                      {catalog.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input type="number" min={1} value={item.quantity} onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))} className="input-field py-1.5 text-sm" />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
+                      <option value="NEW">Mới 100%</option>
+                      <option value="GOOD">Đang dùng tốt</option>
+                    </select>
+                  </td>
+                  <td className="py-2 text-center">
+                    <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={handleAddManifestRow} className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+            <Plus className="w-4 h-4" /> Thêm dòng
+          </button>
+        </div>
+      </section>
+
+      {/* 1C: Hợp đồng */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-indigo-500" />
+            <h3 className="font-bold text-slate-800">Hợp đồng Inbound (Với chủ nhà)</h3>
+            {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
+          </div>
+        </div>
+        <form onSubmit={saveContract} className="p-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
+              <input required value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field" placeholder="VD: HD-001" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
+              <input required value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field" placeholder="Nguyễn Văn A" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê/tháng *</span>
+              <input type="number" required value={contractForm.totalRentAmount} onChange={e => setContractForm({...contractForm, totalRentAmount: Number(e.target.value)})} className="input-field" placeholder="VD: 15000000" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Ngày bắt đầu *</span>
+              <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Ngày kết thúc *</span>
+              <input type="date" required value={contractForm.endDate} onChange={e => setContractForm({...contractForm, endDate: e.target.value})} className="input-field" />
+            </label>
+            <div className="block col-span-2 md:col-span-1">
+              <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition flex-1 justify-center border border-slate-300">
+                  <Upload className="w-4 h-4" /> {isUploading ? 'Đang tải lên...' : 'Chọn File'}
+                  <input type="file" accept=".pdf,image/*,.doc,.docx" className="hidden" onChange={handleUpload} disabled={isUploading} />
+                </label>
+              </div>
+              {contractForm.contractScanUrl && (
+                <a href={contractForm.contractScanUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs text-indigo-600 hover:underline block truncate">
+                  Đã tải file: Xem hợp đồng
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
+              {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* Navigation */}
+      <div className="mt-8 flex justify-end pt-4 border-t border-slate-200">
+        {!isFormComplete && (
+          <p className="text-sm font-semibold text-amber-600 flex items-center gap-1 mr-4">
+            <AlertCircle className="w-4 h-4" /> Vui lòng Lưu Thiết bị và Lưu Hợp đồng trước khi tiếp tục
+          </p>
+        )}
+        <button 
+          onClick={onNext} 
+          disabled={!isFormComplete}
+          className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Tiếp tục cấu hình →
+        </button>
+      </div>
     </div>
   );
 };

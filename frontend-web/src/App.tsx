@@ -28,6 +28,7 @@ import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TenantList } from './pages/tenants/TenantList';
+import { HostPropertyReview } from './pages/host/HostPropertyReview';
 
 // Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
 const HomePage = lazy(() => import('./pages/public/HomePage'));
@@ -68,6 +69,7 @@ function App() {
             <Route path="/super-admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/super-admin/settings" element={<SystemConfiguration />} />
             <Route path="/super-admin/security" element={<ActivityLogsSecurity />} />
+            <Route path="/host/review/:id" element={<HostPropertyReview />} />
           </Route>
         </Route>
 
