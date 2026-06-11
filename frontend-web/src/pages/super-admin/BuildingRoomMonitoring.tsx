@@ -124,9 +124,9 @@ export const BuildingRoomMonitoring = () => {
     switch (building.status) {
       case 'DRAFT':
         return (
-          <button onClick={(e) => { e.stopPropagation(); navigate(`/super-admin/properties/onboarding/${building.id}`); }}
+          <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${building.id}`); }}
             className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition-colors rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-            Tiếp tục Onboarding <TrendingUp className="w-4 h-4" />
+            Tiếp tục Cấu hình <TrendingUp className="w-4 h-4" />
           </button>
         );
       case 'UNDER_RENOVATION':
@@ -214,7 +214,7 @@ export const BuildingRoomMonitoring = () => {
                   {/* Action buttons (hover) */}
                   <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 flex gap-1.5 transition-opacity bg-white/80 p-1 rounded-lg backdrop-blur-sm z-10">
                     {building.status === 'DRAFT' && (
-                      <button onClick={(e) => { e.stopPropagation(); navigate(`/super-admin/properties/onboarding/${building.id}`); }} title="Chỉnh sửa" className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md">
+                      <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${building.id}`); }} title="Cấu hình" className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md">
                         <Pencil className="w-4 h-4" />
                       </button>
                     )}

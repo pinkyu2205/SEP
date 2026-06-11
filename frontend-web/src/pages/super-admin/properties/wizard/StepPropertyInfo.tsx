@@ -14,9 +14,10 @@ import { uploadToCloudinary } from '../../../../services/upload.service';
 interface StepPropertyInfoProps {
   property: PropertyResponse;
   onNext: () => void;
+  nextLabel?: string;
 }
 
-export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) => {
+export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →' }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
   
   // Manifest State
@@ -32,6 +33,13 @@ export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) =>
   });
   const [isUploading, setIsUploading] = useState(false);
   const [isSavingContract, setIsSavingContract] = useState(false);
+  const [rentAmountDisplay, setRentAmountDisplay] = useState('');
+
+  const formatVND = (value: number) =>
+    value > 0 ? value.toLocaleString('vi-VN') : '';
+
+  const parseVND = (str: string) =>
+    Number(str.replace(/\./g, '').replace(/,/g, '')) || 0;
 
   // Load Data
   useEffect(() => {
@@ -66,6 +74,7 @@ export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) =>
             endDate: contractData.value.endDate,
             contractScanUrl: contractData.value.contractScanUrl || ''
           });
+          setRentAmountDisplay(formatVND(contractData.value.totalRentAmount));
         }
       } catch (error) {
         console.error('Failed to init step 1', error);
@@ -183,12 +192,110 @@ export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) =>
         </div>
       </section>
 
-      {/* 1B: Manifest */}
+      {/* 1B: Hợp đồng */}
+      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-indigo-500" />
+            <h3 className="font-bold text-slate-800">Hợp đồng Inbound (Với chủ nhà)</h3>
+            {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
+          </div>
+        </div>
+        <form onSubmit={saveContract} className="p-5">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
+              <input required value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field" placeholder="VD: HD-001" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
+              <input required value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field" placeholder="Nguyễn Văn A" />
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê *</span>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={rentAmountDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
+                    if (!/^\d*$/.test(raw)) return;
+                    setRentAmountDisplay(raw ? Number(raw).toLocaleString('vi-VN') : '');
+                    setContractForm(prev => ({ ...prev, totalRentAmount: parseVND(raw) }));
+                  }}
+                  className="input-field pr-8"
+                  placeholder="VD: 15.000.000"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium pointer-events-none">đ</span>
+              </div>
+            </label>
+            <label className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày bắt đầu *</span>
+              <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
+            </label>
+            <div className="block">
+              <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày kết thúc *</span>
+              <input
+                type="date"
+                required
+                value={contractForm.endDate}
+                onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })}
+                className="input-field mb-2"
+              />
+              <div className="flex rounded-xl border border-slate-200 overflow-hidden divide-x divide-slate-200">
+                {[1, 2, 3, 4, 5].map(y => {
+                  const base = contractForm.startDate || new Date().toISOString().slice(0, 10);
+                  const d = new Date(base);
+                  d.setFullYear(d.getFullYear() + y);
+                  const val = d.toISOString().slice(0, 10);
+                  const active = contractForm.endDate === val;
+                  return (
+                    <button
+                      key={y}
+                      type="button"
+                      onClick={() => setContractForm(prev => ({ ...prev, endDate: val }))}
+                      className={`flex-1 py-2 text-xs font-semibold transition-all ${
+                        active
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'
+                      }`}
+                    >
+                      {y} năm
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="block col-span-2 md:col-span-1">
+              <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition flex-1 justify-center border border-slate-300">
+                  <Upload className="w-4 h-4" /> {isUploading ? 'Đang tải lên...' : 'Chọn File'}
+                  <input type="file" accept=".pdf,image/*,.doc,.docx" className="hidden" onChange={handleUpload} disabled={isUploading} />
+                </label>
+              </div>
+              {contractForm.contractScanUrl && (
+                <a href={contractForm.contractScanUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs text-indigo-600 hover:underline block truncate">
+                  Đã tải file: Xem hợp đồng
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
+              {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* 1C: Manifest */}
       <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
         <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-indigo-500" />
-            <h3 className="font-bold text-slate-800">Khai báo Thiết bị có sẵn (Manifest)</h3>
+            <h3 className="font-bold text-slate-800">Khai báo trang thiết bị có sẵn</h3>
             {manifestSaved && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
           <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
@@ -233,63 +340,9 @@ export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) =>
             </tbody>
           </table>
           <button onClick={handleAddManifestRow} className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
-            <Plus className="w-4 h-4" /> Thêm dòng
+            <Plus className="w-4 h-4" /> Thêm thiết bị
           </button>
         </div>
-      </section>
-
-      {/* 1C: Hợp đồng */}
-      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-indigo-500" />
-            <h3 className="font-bold text-slate-800">Hợp đồng Inbound (Với chủ nhà)</h3>
-            {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
-          </div>
-        </div>
-        <form onSubmit={saveContract} className="p-5">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
-            <label className="block">
-              <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
-              <input required value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field" placeholder="VD: HD-001" />
-            </label>
-            <label className="block">
-              <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
-              <input required value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field" placeholder="Nguyễn Văn A" />
-            </label>
-            <label className="block">
-              <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê/tháng *</span>
-              <input type="number" required value={contractForm.totalRentAmount} onChange={e => setContractForm({...contractForm, totalRentAmount: Number(e.target.value)})} className="input-field" placeholder="VD: 15000000" />
-            </label>
-            <label className="block">
-              <span className="mb-1 text-sm font-bold text-slate-700">Ngày bắt đầu *</span>
-              <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
-            </label>
-            <label className="block">
-              <span className="mb-1 text-sm font-bold text-slate-700">Ngày kết thúc *</span>
-              <input type="date" required value={contractForm.endDate} onChange={e => setContractForm({...contractForm, endDate: e.target.value})} className="input-field" />
-            </label>
-            <div className="block col-span-2 md:col-span-1">
-              <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition flex-1 justify-center border border-slate-300">
-                  <Upload className="w-4 h-4" /> {isUploading ? 'Đang tải lên...' : 'Chọn File'}
-                  <input type="file" accept=".pdf,image/*,.doc,.docx" className="hidden" onChange={handleUpload} disabled={isUploading} />
-                </label>
-              </div>
-              {contractForm.contractScanUrl && (
-                <a href={contractForm.contractScanUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs text-indigo-600 hover:underline block truncate">
-                  Đã tải file: Xem hợp đồng
-                </a>
-              )}
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
-              {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
-            </button>
-          </div>
-        </form>
       </section>
 
       {/* Navigation */}
@@ -304,7 +357,7 @@ export const StepPropertyInfo = ({ property, onNext }: StepPropertyInfoProps) =>
           disabled={!isFormComplete}
           className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Tiếp tục cấu hình →
+          {nextLabel}
         </button>
       </div>
     </div>

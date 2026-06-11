@@ -30,9 +30,9 @@ api.interceptors.response.use(
   (error) => {
     const message = error.response?.data?.message || error.message || 'Lỗi kết nối đến máy chủ';
     
-    // Bỏ qua toast lỗi cho một số trường hợp cụ thể nếu cần
-    if (error.response?.status !== 401) {
-       toast.error(message);
+    const status = error.response?.status;
+    if (status !== 401 && status !== 403 && status !== 404) {
+      toast.error(message);
     }
     
     if (error.response?.status === 401) {

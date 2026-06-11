@@ -4,7 +4,7 @@ import { ProtectedRoute, PublicOnlyRoute } from './auth/WebAuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { PublicLayout } from './layouts/PublicLayout';
 import { HostLayout } from './layouts/HostLayout';
-import { SuperAdminLayout } from './layouts/SuperAdminLayout';
+import { AdminLayout } from './layouts/SuperAdminLayout';
 import { WebLogin } from './pages/auth/WebLogin';
 import { ContractList } from './pages/contracts/ContractList';
 import { Dashboard } from './pages/dashboard/Dashboard';
@@ -18,7 +18,7 @@ import { PropertyList } from './pages/properties/PropertyList';
 import { ReportsAnalytics } from './pages/reports/ReportsAnalytics';
 import { ActivityLogsSecurity } from './pages/super-admin/ActivityLogsSecurity';
 import { BillingPaymentMonitoring } from './pages/super-admin/BillingPaymentMonitoring';
-import { BuildingRoomMonitoring } from './pages/super-admin/BuildingRoomMonitoring';
+import { NhaThueLanding } from './pages/super-admin/nha-thue/NhaThueLanding';
 import { ContractMonitoring } from './pages/super-admin/ContractMonitoring';
 import { HostManagement } from './pages/super-admin/HostManagement';
 import { MaintenanceEquipmentMonitoring } from './pages/super-admin/MaintenanceEquipmentMonitoring';
@@ -27,6 +27,9 @@ import { SystemConfiguration } from './pages/super-admin/SystemConfiguration';
 import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
+import { TaoDraftPage } from './pages/super-admin/nha-thue/TaoDraftPage';
+import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
+import { DinhGiaPheDuyetPage } from './pages/super-admin/nha-thue/DinhGiaPheDuyetPage';
 import { TenantList } from './pages/tenants/TenantList';
 import { HostPropertyReview } from './pages/host/HostPropertyReview';
 
@@ -56,26 +59,31 @@ function App() {
         </Route>
 
         {/* ─── Dashboard Super Admin ─── */}
-        <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
-          <Route element={<SuperAdminLayout />}>
-            <Route path="/super-admin" element={<SuperAdminOverview />} />
-            <Route path="/super-admin/users" element={<UserRoleManagement />} />
-            <Route path="/super-admin/hosts" element={<HostManagement />} />
-            <Route path="/super-admin/buildings" element={<BuildingRoomMonitoring />} />
-            <Route path="/super-admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
-            <Route path="/super-admin/billing" element={<BillingPaymentMonitoring />} />
-            <Route path="/super-admin/contracts" element={<ContractMonitoring />} />
-            <Route path="/super-admin/zones" element={<ZoneManagement />} />
-            <Route path="/super-admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
-            <Route path="/super-admin/settings" element={<SystemConfiguration />} />
-            <Route path="/super-admin/security" element={<ActivityLogsSecurity />} />
-            <Route path="/host/review/:id" element={<HostPropertyReview />} />
+        <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin" element={<SuperAdminOverview />} />
+            <Route path="/admin/users" element={<UserRoleManagement />} />
+            <Route path="/admin/hosts" element={<HostManagement />} />
+            <Route path="/admin/buildings" element={<NhaThueLanding />} />
+            <Route path="/admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
+            <Route path="/admin/buildings/draft" element={<TaoDraftPage />} />
+            <Route path="/admin/buildings/configuration" element={<CauHinhKhaiThacPage />} />
+            <Route path="/admin/buildings/configuration/:id" element={<CauHinhKhaiThacPage />} />
+            <Route path="/admin/buildings/pricing-approval" element={<DinhGiaPheDuyetPage />} />
+            <Route path="/admin/buildings/pricing-approval/:id" element={<DinhGiaPheDuyetPage />} />
+            <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
+            <Route path="/admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/admin/zones" element={<ZoneManagement />} />
+            <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
+            <Route path="/admin/settings" element={<SystemConfiguration />} />
+            <Route path="/admin/security" element={<ActivityLogsSecurity />} />
           </Route>
         </Route>
 
         {/* ─── Dashboard Host (Admin System) — prefix /host ─── */}
-        <Route element={<ProtectedRoute allowedRoles={['host', 'super_admin']} />}>
+        <Route element={<ProtectedRoute allowedRoles={['host', 'admin']} />}>
           <Route element={<HostLayout />}>
+            <Route path="/host/review/:id" element={<HostPropertyReview />} />
             <Route path="/host" element={<Dashboard />} />
             <Route path="/host/properties" element={<PropertyList />} />
             <Route path="/host/properties/:id" element={<PropertyDetail />} />

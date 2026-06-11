@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import api from '../services/api';
 
-export type WebRole = 'super_admin' | 'host';
+export type WebRole = 'admin' | 'host' | 'manager';
 
 export interface WebAuthUser {
   id: string;
@@ -23,11 +23,11 @@ const storage = sessionStorage;
 
 const DEMO_ACCOUNTS: Array<WebAuthUser & { password: string }> = [
   {
-    id: 'web-super-admin',
-    fullName: 'Super Admin',
-    username: 'superadmin',
+    id: 'web-admin',
+    fullName: 'Admin',
+    username: 'admin',
     password: '123456',
-    role: 'super_admin',
+    role: 'admin',
   },
   {
     id: 'web-host',
@@ -43,7 +43,20 @@ const WebAuthContext = createContext<WebAuthContextValue | null>(null);
 const readStoredUser = (): WebAuthUser | null => {
   try {
     const raw = storage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) as WebAuthUser : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WebAuthUser;
+    // Migrate stale 'super_admin' role from before the rename
+    if ((parsed.role as string) === 'super_admin') {
+      const migrated: WebAuthUser = { ...parsed, role: 'admin' };
+      storage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    }
+    // Discard sessions with unrecognised roles
+    if (parsed.role !== 'admin' && parsed.role !== 'host' && parsed.role !== 'manager') {
+      storage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     storage.removeItem(STORAGE_KEY);
     return null;
@@ -67,9 +80,12 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
           // Lưu JWT Token thực tế vào localStorage để API interceptor tự động đính kèm Bearer token
           localStorage.setItem('access_token', response.token);
 
-          // Ánh xạ Role từ Backend (ROLE_ADMIN, ROLE_MANAGER...) sang Frontend WebRole
-          const backendRole = response.role; // e.g., 'ROLE_ADMIN'
-          const webRole: WebRole = backendRole === 'ROLE_ADMIN' ? 'super_admin' : 'host';
+          // Ánh xạ Role từ Backend sang Frontend WebRole
+          const backendRole = response.role; // e.g., 'ROLE_ADMIN', 'ROLE_OWNER', 'ROLE_MANAGER'
+          const webRole: WebRole =
+            backendRole === 'ROLE_ADMIN'   ? 'admin'   :
+            backendRole === 'ROLE_OWNER'   ? 'host'    :
+            backendRole === 'ROLE_MANAGER' ? 'manager' : 'manager';
 
           const nextUser: WebAuthUser = {
             id: response.username || username,
@@ -135,8 +151,9 @@ export const useWebAuth = () => {
 };
 
 const defaultPathByRole: Record<WebRole, string> = {
-  super_admin: '/super-admin',
+  admin: '/admin',
   host: '/host',
+  manager: '/host',
 };
 
 export const ProtectedRoute = ({ allowedRoles }: { allowedRoles: WebRole[] }) => {

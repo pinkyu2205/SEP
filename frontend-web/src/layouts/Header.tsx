@@ -32,10 +32,10 @@ export const Header = () => {
   const location = useLocation();
   const { user, logout } = useWebAuth();
   const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;
-  const [currentTime, setCurrentTime] = useState(new Date('2026-05-15T08:00:00'));
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(prev => new Date(prev.getTime() + 1000)), 1000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -113,11 +113,11 @@ export const Header = () => {
 
         <div className="flex items-center gap-2.5 group">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-            {user?.role === 'super_admin' ? 'SA' : 'UN'}
+            {user?.role === 'admin' ? 'A' : 'UN'}
           </div>
           <div className="hidden sm:block">
             <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'UrbanNest Host'}</p>
-            <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'super_admin' ? 'Super Admin' : 'Cổng quản lý Host'}</p>
+            <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'admin' ? 'Admin' : 'Cổng quản lý Host'}</p>
           </div>
         </div>
 

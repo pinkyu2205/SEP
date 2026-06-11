@@ -57,7 +57,7 @@ export const PropertyOnboardingWizard = () => {
       {/* Header & Navigation */}
       <div className="mb-10">
         <button 
-          onClick={() => navigate('/super-admin/buildings')}
+          onClick={() => navigate('/admin/buildings')}
           className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-indigo-600 transition"
         >
           <ArrowLeft className="h-4 w-4" /> Quay về danh sách Tòa nhà
@@ -129,7 +129,7 @@ export const PropertyOnboardingWizard = () => {
           <StepSubmitToHost 
             property={property} 
             onBack={handleBack}
-            onSuccess={() => navigate('/super-admin/buildings')}
+            onSuccess={() => navigate('/admin/buildings')}
           />
         )}
       </div>

@@ -144,6 +144,11 @@ export const propertyService = {
     return api.get(`${BASE}/${id}/rooms/${roomId}`);
   },
 
+  /** PATCH /properties/{id}/rooms/{roomId}/status */
+  updateRoomStatus: (id: number, roomId: number, status: string): Promise<RoomResponse> => {
+    return api.patch(`${BASE}/${id}/rooms/${roomId}/status`, { status });
+  },
+
   // =========================================================================
   // Bước 2E — Equipment Assignment
   // =========================================================================
@@ -198,6 +203,15 @@ export const propertyService = {
   /** POST /properties/{id}/host-confirm */
   hostConfirm: (id: number, data: HostConfirmRequest): Promise<HostConfirmResponse> => {
     return api.post(`${BASE}/${id}/host-confirm`, data);
+  },
+
+  // =========================================================================
+  // Gán quản lý vận hành
+  // =========================================================================
+
+  /** PATCH /properties/{id}/operation-manager */
+  assignOperationManager: (id: number, operationManagerId: number): Promise<PropertyResponse> => {
+    return api.patch(`${BASE}/${id}/operation-manager`, { operationManagerId });
   },
 
   // =========================================================================

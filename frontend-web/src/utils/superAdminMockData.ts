@@ -21,9 +21,9 @@ export const SUPER_ADMIN_PERMISSIONS: Record<PlatformRole, {
   scope: string;
   permissions: SuperAdminPermission[];
 }> = {
-  super_admin: {
+  admin: {
     rank: 1,
-    label: 'Super Admin',
+    label: 'Admin',
     scope: 'Toàn hệ thống web, toàn bộ dữ liệu và cấu hình nền tảng',
     permissions: [
       'users.manage',
@@ -151,10 +151,10 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
 export const PLATFORM_USERS: PlatformUser[] = [
   {
     id: 'sa-1',
-    fullName: 'Super Admin',
+    fullName: 'Admin',
     email: 'superadmin@urbannest.vn',
     phone: '0900000000',
-    role: 'super_admin',
+    role: 'admin',
     status: 'active',
     assignedScope: 'Toàn nền tảng',
     lastLoginAt: '2026-05-18 09:32',
@@ -292,7 +292,7 @@ export const PLATFORM_CONTRACTS: PlatformContractRow[] = [
     buildingName: 'Huy House Thủ Đức',
     tenantOrManager: 'Lâm Mỹ Duyên',
     status: 'rejected',
-    approvalHistory: 'Super Admin ghi nhận Host từ chối do thiếu CCCD',
+    approvalHistory: 'Admin ghi nhận Host từ chối do thiếu CCCD',
     createdAt: '2026-05-11',
     endDate: '2027-05-11',
   },
@@ -381,11 +381,11 @@ export const PLATFORM_MAINTENANCE_REQUESTS = [
 ];
 
 export const AUDIT_LOGS: AuditLog[] = [
-  { id: 'log-1', actor: 'Super Admin', role: 'super_admin', action: 'Đổi trạng thái Host', target: 'MaiStay Rentals: suspended', ipAddress: '118.69.12.45', severity: 'warning', createdAt: '2026-05-18 09:20' },
+  { id: 'log-1', actor: 'Admin', role: 'admin', action: 'Đổi trạng thái Host', target: 'MaiStay Rentals: suspended', ipAddress: '118.69.12.45', severity: 'warning', createdAt: '2026-05-18 09:20' },
   { id: 'log-2', actor: 'Nguyễn Minh Khôi', role: 'host', action: 'Phê duyệt hợp đồng', target: 'HD-MT-2026-PA-001', ipAddress: '113.161.88.21', severity: 'normal', createdAt: '2026-05-18 08:58' },
   { id: 'log-3', actor: 'Trần Thị Quản', role: 'manager', action: 'Cập nhật bảo trì', target: 'MR-2026-006', ipAddress: '14.241.33.10', severity: 'normal', createdAt: '2026-05-18 08:31' },
   { id: 'log-4', actor: 'Unknown device', role: 'host', action: 'Đăng nhập thất bại 5 lần', target: 'ops@anhouse.vn', ipAddress: '45.77.88.91', severity: 'critical', createdAt: '2026-05-18 07:46' },
-  { id: 'log-5', actor: 'Super Admin', role: 'super_admin', action: 'Cập nhật chính sách mật khẩu', target: 'Account Policy', ipAddress: '118.69.12.45', severity: 'normal', createdAt: '2026-05-17 17:05' },
+  { id: 'log-5', actor: 'Admin', role: 'admin', action: 'Cập nhật chính sách mật khẩu', target: 'Account Policy', ipAddress: '118.69.12.45', severity: 'normal', createdAt: '2026-05-17 17:05' },
   { id: 'log-6', actor: 'Lê Thanh Mai', role: 'host', action: 'Xuất báo cáo tài chính', target: 'MaiStay Rentals - T05/2026', ipAddress: '171.244.10.20', severity: 'warning', createdAt: '2026-05-17 16:22' },
 ];
 

@@ -17,7 +17,6 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
   const [pricing, setPricing] = useState<PricingResponse | null>(null);
   const [error, setError] = useState('');
   const [successStatus, setSuccessStatus] = useState<'UNDER_RENOVATION' | 'PENDING_HOST_REVIEW' | null>(null);
-  const [contingencyPercent, setContingencyPercent] = useState<number>(110);
 
   useEffect(() => {
     const fetchPricing = async () => {
@@ -36,14 +35,18 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
 
   const handleSubmit = async () => {
     if (!window.confirm('Bạn có chắc chắn muốn chốt quy trình Onboarding và gửi cho Host duyệt?')) return;
-    
+
     setSubmitting(true);
     setError('');
     try {
       const summary = await propertyService.submitToHost(property.id);
       setSuccessStatus(summary.status as 'UNDER_RENOVATION' | 'PENDING_HOST_REVIEW');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Lỗi khi gửi cho Host');
+      const data = err.response?.data;
+      const msg = data?.message || data?.error || (typeof data === 'string' ? data : null)
+        || `Lỗi ${err.response?.status ?? ''} khi gửi cho Host`;
+      setError(msg);
+      console.error('submit-to-host error:', data);
     } finally {
       setSubmitting(false);
     }
@@ -133,25 +136,6 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
                   <p className="text-xl font-bold text-slate-600">{formatVND(pricing.wholeHouseResult.suggestedMinPrice)}</p>
                 </div>
 
-                <div className="col-span-2 bg-indigo-50/50 rounded-xl p-5 border border-indigo-100 flex justify-between items-center mt-2">
-                  <div>
-                    <p className="text-sm font-bold text-indigo-900">Giá bán dự kiến (Bao gồm dự phòng)</p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs text-indigo-600 font-semibold">% Dự phòng:</span>
-                      <input 
-                        type="number" 
-                        min={100} 
-                        value={contingencyPercent} 
-                        onChange={(e) => setContingencyPercent(Number(e.target.value))} 
-                        className="w-20 px-2 py-1 text-sm border border-indigo-200 rounded text-indigo-900" 
-                      />
-                      <span className="text-xs text-indigo-600">%</span>
-                    </div>
-                  </div>
-                  <p className="text-3xl font-black text-indigo-600">
-                    {formatVND(pricing.wholeHouseResult.suggestedMinPrice * (contingencyPercent / 100))}
-                  </p>
-                </div>
               </div>
             </div>
           )}
@@ -171,7 +155,6 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
                       <th className="py-3 px-6 text-left">Phòng</th>
                       <th className="py-3 px-6 text-right">Khấu hao</th>
                       <th className="py-3 px-6 text-right text-slate-600">Giá sàn</th>
-                      <th className="py-3 px-6 text-right text-indigo-900">Giá dự kiến (Sau % DP)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -183,24 +166,10 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
                           <span className="text-xs text-slate-400">+ {formatVND(r.totalEquipmentCost / (r.contractMonths || 1))} (TB)</span>
                         </td>
                         <td className="py-3 px-6 text-right font-semibold text-slate-600">{formatVND(r.suggestedMinPrice)}</td>
-                        <td className="py-3 px-6 text-right font-black text-indigo-600">
-                          {formatVND(r.suggestedMinPrice * (contingencyPercent / 100))}
-                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
-              <div className="bg-indigo-50/30 px-6 py-4 border-t border-indigo-100 flex justify-end items-center gap-3">
-                <span className="text-sm font-bold text-indigo-900">% Chi phí dự phòng:</span>
-                <input 
-                  type="number" 
-                  min={100} 
-                  value={contingencyPercent} 
-                  onChange={(e) => setContingencyPercent(Number(e.target.value))} 
-                  className="w-24 px-3 py-1.5 text-sm border border-indigo-200 rounded-lg text-indigo-900 font-semibold" 
-                />
-                <span className="text-sm font-bold text-indigo-900">%</span>
               </div>
             </div>
           )}

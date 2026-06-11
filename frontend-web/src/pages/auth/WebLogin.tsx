@@ -7,7 +7,7 @@ export const WebLogin = () => {
   const { login } = useWebAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [username, setUsername] = useState('superadmin');
+  const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('123456');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -21,9 +21,9 @@ export const WebLogin = () => {
     try {
       const user = await login(username, password);
       const from = (location.state as { from?: string } | null)?.from;
-      const defaultPath = user.role === 'super_admin' ? '/super-admin' : '/host';
+      const defaultPath = user.role === 'admin' ? '/admin' : '/host';
       const validFrom = from && from !== '/login' && (
-        user.role === 'super_admin' ? from.startsWith('/super-admin') : !from.startsWith('/super-admin')
+        user.role === 'admin' ? from.startsWith('/admin') : !from.startsWith('/admin')
       );
       navigate(validFrom ? from : defaultPath, { replace: true });
     } catch (err) {
@@ -33,9 +33,9 @@ export const WebLogin = () => {
     }
   };
 
-  const fillDemo = (role: 'super_admin' | 'host') => {
-    if (role === 'super_admin') {
-      setUsername('superadmin');
+  const fillDemo = (role: 'admin' | 'host') => {
+    if (role === 'admin') {
+      setUsername('admin');
       setPassword('123456');
     } else {
       setUsername('hoangge');
@@ -62,13 +62,13 @@ export const WebLogin = () => {
           <div className="mt-20 max-w-2xl">
             <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-cyan-100">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Super Admin & Host/Admin System
+              Admin & Host/Admin System
             </p>
             <h1 className="text-4xl font-black tracking-tight md:text-5xl">
               Đăng nhập đúng vai trò để vào đúng cổng quản trị.
             </h1>
             <p className="mt-5 max-w-xl text-sm leading-6 text-slate-300">
-              Super Admin quản trị toàn hệ thống web. Host/Admin System chỉ quản lý dữ liệu thuộc phạm vi được gán.
+              Admin quản trị toàn hệ thống web. Host/Admin System chỉ quản lý dữ liệu thuộc phạm vi được gán.
             </p>
           </div>
         </div>
@@ -85,11 +85,11 @@ export const WebLogin = () => {
           <div className="mb-5 grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => fillDemo('super_admin')}
+              onClick={() => fillDemo('admin')}
               className="rounded-2xl border border-cyan-200 bg-cyan-50 p-3 text-left hover:bg-cyan-100"
             >
-              <p className="text-sm font-black text-cyan-900">Super Admin</p>
-              <p className="mt-1 text-xs text-cyan-700">superadmin</p>
+              <p className="text-sm font-black text-cyan-900">Admin</p>
+              <p className="mt-1 text-xs text-cyan-700">admin</p>
             </button>
             <button
               type="button"
@@ -155,7 +155,7 @@ export const WebLogin = () => {
 
           <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-xs text-slate-600">
             <p className="font-bold text-slate-800">Tài khoản demo</p>
-            <p className="mt-1">Super Admin: superadmin / 123456</p>
+            <p className="mt-1">Admin: admin / 123456</p>
             <p>Host: hoangge / mysecretpassword</p>
           </div>
         </div>

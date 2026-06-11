@@ -15,8 +15,8 @@ export const ROUTES = {
   HOST_ROOT: '/host',
   HOST_PROPERTIES: '/host/properties',
 
-  // Dashboard - Super Admin
-  SUPER_ADMIN_ROOT: '/super-admin',
+  // Dashboard - Admin
+  ADMIN_ROOT: '/admin',
 } as const;
 
 /** Tạo đường dẫn chi tiết bất động sản công khai */
@@ -24,6 +24,6 @@ export const propertyDetailPath = (id: string) => `/properties/${id}`;
 
 /** Đường dẫn mặc định sau khi đăng nhập theo vai trò */
 export const DEFAULT_PATH_BY_ROLE = {
-  super_admin: ROUTES.SUPER_ADMIN_ROOT,
+  admin: ROUTES.ADMIN_ROOT,
   host: ROUTES.HOST_ROOT,
 } as const;

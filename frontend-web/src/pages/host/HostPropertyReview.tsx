@@ -8,22 +8,25 @@ import {
   Hammer,
   DollarSign,
   CheckCircle2,
-  Users,
   Percent,
   AlertCircle,
   Send,
 } from 'lucide-react';
 import { propertyService } from '../../services/property.service';
-import { userService } from '../../services/user.service';
 import type {
   OnboardingSummaryResponse,
   HostConfirmRequest,
   HostRoomPrice,
-  UserResponse,
 } from '../../types/api.types';
 
 const formatVND = (n: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(n);
+
+const formatDate = (d?: string) => {
+  if (!d) return '';
+  const [y, m, day] = d.split('-');
+  return `${day}/${m}/${y}`;
+};
 
 export const HostPropertyReview = () => {
   const { id } = useParams<{ id: string }>();
@@ -42,26 +45,14 @@ export const HostPropertyReview = () => {
   const [useManualPrice, setUseManualPrice] = useState(false);
   const [roomPrices, setRoomPrices] = useState<Record<number, number>>({});
 
-  // Operation managers
-  const [managers, setManagers] = useState<UserResponse[]>([]);
-  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [summaryData, allUsers] = await Promise.all([
-          propertyService.getOnboardingSummary(propertyId),
-          userService.getAllUsers(),
-        ]);
+        // Fetch summary — bắt buộc, nếu lỗi thì dừng
+        const summaryData = await propertyService.getOnboardingSummary(propertyId);
         setSummary(summaryData);
-
-        // Filter operation managers (ROLE_MANAGER + ACTIVE)
-        const mgrs = (allUsers || []).filter(
-          (u) => u.role === 'ROLE_MANAGER' && u.status === 'ACTIVE'
-        );
-        setManagers(mgrs);
-        if (mgrs.length > 0) setSelectedManagerId(mgrs[0].id);
 
         // Pre-populate room prices from suggested prices
         if (summaryData.pricing?.roomResults) {
@@ -76,6 +67,7 @@ export const HostPropertyReview = () => {
       } finally {
         setLoading(false);
       }
+
     };
     fetchData();
   }, [propertyId]);
@@ -96,24 +88,14 @@ export const HostPropertyReview = () => {
 
   const canConfirm =
     summary?.status === 'PENDING_HOST_REVIEW' &&
-    selectedManagerId &&
     contingencyPercent >= 100;
 
   const handleConfirm = async () => {
     if (!canConfirm || !summary) return;
 
-    // Hash UUID to Long for operationManagerId
-    const hashCode = (s: string) =>
-      Math.abs(
-        s.split('').reduce((a, b) => {
-          a = (a << 5) - a + b.charCodeAt(0);
-          return a & a;
-        }, 0)
-      ) || 1;
-
     const payload: HostConfirmRequest = {
       contingencyPercent,
-      operationManagerId: hashCode(selectedManagerId),
+      operationManagerId: 0,
     };
 
     if (isRoomScope) {
@@ -165,10 +147,10 @@ export const HostPropertyReview = () => {
           Tòa nhà đã chuyển sang trạng thái <span className="font-bold text-emerald-600">ACTIVE</span> và sẵn sàng kinh doanh.
         </p>
         <button
-          onClick={() => navigate('/super-admin/buildings')}
+          onClick={() => navigate(`/host/properties/${propertyId}`)}
           className="btn-primary mt-8 rounded-xl px-8 py-3"
         >
-          Quay về danh sách tòa nhà
+          Xem chi tiết tòa nhà
         </button>
       </div>
     );
@@ -265,7 +247,7 @@ export const HostPropertyReview = () => {
                 </div>
                 <div>
                   <p className="text-slate-500">Thời hạn</p>
-                  <p className="font-bold text-slate-900">{summary.inboundContract.startDate} → {summary.inboundContract.endDate}</p>
+                  <p className="font-bold text-slate-900">{formatDate(summary.inboundContract.startDate)} → {formatDate(summary.inboundContract.endDate)}</p>
                 </div>
               </div>
             ) : (
@@ -333,7 +315,7 @@ export const HostPropertyReview = () => {
               </div>
               {summary.renovationStartDate && (
                 <p className="mt-3 text-xs text-slate-500">
-                  Lịch CT: {summary.renovationStartDate} → {summary.renovationEndDate}
+                  Lịch CT: {formatDate(summary.renovationStartDate)} → {formatDate(summary.renovationEndDate)}
                   {summary.renovationCompleted && <span className="ml-2 text-emerald-600 font-bold">✓ Đã hoàn tất</span>}
                 </p>
               )}
@@ -343,127 +325,167 @@ export const HostPropertyReview = () => {
 
         {/* Right: Pricing + Confirm */}
         <div className="space-y-6">
-          {/* Pricing */}
-          <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 p-6">
-            <h3 className="flex items-center gap-2 text-base font-bold text-indigo-900 mb-4">
-              <DollarSign className="h-5 w-5 text-indigo-600" /> Giá đề xuất
-            </h3>
-
-            {!isRoomScope && wholeHouseResult && (
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Tổng đầu tư</span>
-                  <span className="font-bold">{formatVND(wholeHouseResult.totalInvestment)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Số tháng HĐ</span>
-                  <span className="font-bold">{wholeHouseResult.contractMonths}</span>
-                </div>
-                <div className="border-t border-indigo-200 pt-3 flex justify-between">
-                  <span className="font-bold text-indigo-900">Giá hoàn vốn/tháng</span>
-                  <span className="font-black text-indigo-700">{formatVND(wholeHouseResult.suggestedMinPrice)}</span>
-                </div>
-              </div>
-            )}
-
-            {isRoomScope && summary.pricing?.roomResults && (
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {summary.pricing.roomResults.map((r) => (
-                  <div key={r.roomId} className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm">
-                    <span className="font-semibold text-slate-900">{r.roomNumber}</span>
-                    <span className="font-bold text-indigo-700">{formatVND(r.suggestedMinPrice)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Host Input */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-4">
+          {/* Unified pricing card */}
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white p-6 space-y-5">
             <h3 className="flex items-center gap-2 text-base font-bold text-slate-800">
-              <Percent className="h-5 w-5 text-indigo-500" /> Xác nhận giá
+              <DollarSign className="h-5 w-5 text-indigo-600" /> Đặt giá cho thuê
             </h3>
 
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-bold text-slate-700">% Dự phòng (contingency)</span>
-              <input
-                type="number"
-                min={100}
-                value={contingencyPercent}
-                onChange={(e) => setContingencyPercent(Number(e.target.value))}
-                className="input-field"
-                placeholder="110"
-              />
-              <p className="mt-1 text-xs text-slate-500">VD: 110 = giá gợi ý × 1.1</p>
-            </label>
+            {/* Suggested price reference */}
+            {!isRoomScope && wholeHouseResult && (
+              <div className="rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3">
+                <p className="text-xs text-indigo-500 font-semibold mb-1">Giá hệ thống đề xuất</p>
+                <p className="text-xl font-black text-indigo-700">
+                  {formatVND(wholeHouseResult.suggestedMinPrice)}
+                  <span className="text-xs font-medium text-indigo-500">/tháng</span>
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  {formatVND(wholeHouseResult.totalInvestment)} / {wholeHouseResult.contractMonths} tháng HĐ
+                </p>
+              </div>
+            )}
 
+            {/* Whole house: price mode selector */}
             {!isRoomScope && (
-              <>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useManualPrice}
-                    onChange={(e) => setUseManualPrice(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600"
-                  />
-                  <span className="text-sm font-semibold text-slate-700">Ghi đè giá thủ công</span>
-                </label>
+              <div className="space-y-3">
+                <p className="text-sm font-bold text-slate-700">Cách tính giá cho thuê</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setUseManualPrice(false)}
+                    className={`flex flex-col items-center gap-1 rounded-xl border-2 py-3 px-2 text-sm font-semibold transition ${
+                      !useManualPrice
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <Percent className="h-4 w-4" />
+                    Theo % tăng thêm
+                  </button>
+                  <button
+                    onClick={() => setUseManualPrice(true)}
+                    className={`flex flex-col items-center gap-1 rounded-xl border-2 py-3 px-2 text-sm font-semibold transition ${
+                      useManualPrice
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <DollarSign className="h-4 w-4" />
+                    Tự nhập giá
+                  </button>
+                </div>
 
-                {useManualPrice && (
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-bold text-slate-700">Giá cho thuê/tháng</span>
-                    <input
-                      type="number"
-                      value={manualPrice}
-                      onChange={(e) => setManualPrice(Number(e.target.value))}
-                      className="input-field"
-                      placeholder="12000000"
-                    />
-                  </label>
+                {!useManualPrice ? (
+                  <div className="space-y-2">
+                    <label className="block">
+                      <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                        Tăng thêm so với giá đề xuất
+                      </span>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={100}
+                          value={contingencyPercent}
+                          onChange={(e) => setContingencyPercent(Number(e.target.value))}
+                          className="input-field pr-10"
+                          placeholder="110"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">%</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        100% = giữ nguyên · 110% = tăng thêm 10% · 120% = tăng thêm 20%
+                      </p>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <span className="block text-sm font-semibold text-slate-700">Giá cho thuê mỗi tháng</span>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={manualPrice === '' ? '' : Number(manualPrice).toLocaleString('vi-VN')}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\./g, '').replace(/[^0-9]/g, '');
+                          setManualPrice(raw === '' ? '' : Number(raw));
+                        }}
+                        className="input-field pr-14"
+                        placeholder="0"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium">đ</span>
+                    </div>
+                    {manualPrice !== '' && Number(manualPrice) > 0 && (
+                      <p className="text-xs text-slate-400">
+                        = <span className="font-semibold text-indigo-600">{formatVND(Number(manualPrice))}</span>
+                      </p>
+                    )}
+                  </div>
                 )}
 
-                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
-                  <p className="text-xs font-semibold text-emerald-600">Giá cuối cùng</p>
-                  <p className="text-xl font-black text-emerald-800">{formatVND(calculatedPrice)}</p>
-                </div>
-              </>
-            )}
-
-            {isRoomScope && summary.pricing?.roomResults && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-500 uppercase">Giá từng phòng (tùy chỉnh)</p>
-                {summary.pricing.roomResults.map((r) => (
-                  <div key={r.roomId} className="flex items-center gap-3">
-                    <span className="w-16 text-sm font-bold text-slate-700">{r.roomNumber}</span>
-                    <input
-                      type="number"
-                      value={roomPrices[r.roomId] || 0}
-                      onChange={(e) => handleUpdateRoomPrice(r.roomId, Number(e.target.value))}
-                      className="input-field flex-1"
-                    />
+                {/* Final price */}
+                <div className="rounded-xl bg-emerald-50 border-2 border-emerald-200 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-emerald-600 mb-1">Giá cho thuê sẽ áp dụng</p>
+                      <p className="text-2xl font-black text-emerald-800">
+                        {formatVND(calculatedPrice)}
+                        <span className="text-sm font-medium text-emerald-600">/tháng</span>
+                      </p>
+                      {!useManualPrice && wholeHouseResult && (
+                        <p className="text-xs text-emerald-600 mt-1">
+                          = {formatVND(wholeHouseResult.suggestedMinPrice)} × {contingencyPercent}%
+                        </p>
+                      )}
+                    </div>
+                    {!useManualPrice && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rounded = Math.ceil(Number(calculatedPrice) / 1_000_000) * 1_000_000;
+                          setUseManualPrice(true);
+                          setManualPrice(rounded);
+                        }}
+                        title="Làm tròn lên triệu gần nhất"
+                        className="shrink-0 flex items-center gap-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs font-bold px-2.5 py-1.5 transition"
+                      >
+                        ↑ Làm tròn
+                      </button>
+                    )}
                   </div>
-                ))}
+                </div>
               </div>
             )}
-          </div>
 
-          {/* Operation Manager */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6">
-            <h3 className="flex items-center gap-2 text-base font-bold text-slate-800 mb-4">
-              <Users className="h-5 w-5 text-indigo-500" /> Gán Quản lý Vận hành
-            </h3>
-            <select
-              value={selectedManagerId}
-              onChange={(e) => setSelectedManagerId(e.target.value)}
-              className="input-field"
-            >
-              <option value="">-- Chọn Quản lý --</option>
-              {managers.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.username} ({m.phoneNumber})
-                </option>
-              ))}
-            </select>
+            {/* Room scope: price per room */}
+            {isRoomScope && summary.pricing?.roomResults && (
+              <div className="space-y-3">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Giá từng phòng</p>
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {summary.pricing.roomResults.map((r) => (
+                    <div key={r.roomId} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-bold text-slate-800">{r.roomNumber}</span>
+                        <span className="text-xs text-indigo-600 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full">
+                          Đề xuất: {formatVND(r.suggestedMinPrice)}
+                        </span>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={roomPrices[r.roomId] || 0}
+                          onChange={(e) => handleUpdateRoomPrice(r.roomId, Number(e.target.value))}
+                          className="input-field text-sm pr-12"
+                          placeholder="Nhập giá..."
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">đ/tháng</span>
+                      </div>
+                      {roomPrices[r.roomId] > 0 && (
+                        <p className="mt-1 text-xs text-emerald-600 font-semibold">{formatVND(roomPrices[r.roomId])}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Submit */}

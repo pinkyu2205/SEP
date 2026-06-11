@@ -2,12 +2,12 @@
 //  TYPES - Host Management Portal (UrbanNest Sub-leasing Model)
 // ==========================================
 
-export type PlatformRole = 'super_admin' | 'host' | 'manager' | 'tenant';
+export type PlatformRole = 'admin' | 'host' | 'manager' | 'tenant';
 
-export const ROLE_HIERARCHY: PlatformRole[] = ['super_admin', 'host', 'manager', 'tenant'];
+export const ROLE_HIERARCHY: PlatformRole[] = ['admin', 'host', 'manager', 'tenant'];
 
 export const ROLE_SCOPE_RULES: Record<PlatformRole, string> = {
-  super_admin: 'Full access to every web module and all platform data',
+  admin: 'Full access to every web module and all platform data',
   host: 'Manage only assigned buildings, managers, contracts, billing, and reports',
   manager: 'Manage only assigned buildings, rooms, tenants, maintenance, and bills',
   tenant: 'Access only personal information and tenant app services',

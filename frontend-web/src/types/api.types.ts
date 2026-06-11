@@ -136,7 +136,9 @@ export interface PropertyResponse {
   price?: number;
   createdBy?: number;
   operationManagerId?: number;
+  operationManagerName?: string;
   renovationCompleted: boolean;
+  imageUrls?: string[];
   // Legacy fields (giữ tương thích)
   deposit?: number;
 }

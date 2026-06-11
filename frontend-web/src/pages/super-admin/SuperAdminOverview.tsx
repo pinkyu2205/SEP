@@ -59,7 +59,7 @@ export const SuperAdminOverview = () => {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-800">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Super Admin web-only access
+              Admin web-only access
             </div>
             <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">
               Quản trị toàn hệ thống UrbanNest
@@ -69,15 +69,15 @@ export const SuperAdminOverview = () => {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link to="/super-admin/users" className="btn-primary flex items-center gap-2">
+            <Link to="/admin/users" className="btn-primary flex items-center gap-2">
               <Users className="h-4 w-4" />
               Tạo tài khoản
             </Link>
-            <Link to="/super-admin/hosts" className="btn-secondary flex items-center gap-2">
+            <Link to="/admin/hosts" className="btn-secondary flex items-center gap-2">
               <ShieldCheck className="h-4 w-4" />
               Duyệt Host mới
             </Link>
-            <Link to="/super-admin/settings" className="btn-secondary flex items-center gap-2">
+            <Link to="/admin/settings" className="btn-secondary flex items-center gap-2">
               <ServerCog className="h-4 w-4" />
               Cấu hình hệ thống
             </Link>

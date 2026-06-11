@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
   Activity,
+  BadgeDollarSign,
   BarChart3,
   Bell,
-  Building2,
   CreditCard,
   FileText,
+  FilePlus,
   LogOut,
   MapPin,
   Menu,
   Search,
   Settings,
+  Settings2,
   ShieldCheck,
   Users,
   Wrench,
@@ -21,17 +23,40 @@ import clsx from 'clsx';
 import { useWebAuth } from '../auth/WebAuthContext';
 import { AUDIT_LOGS, PLATFORM_HOSTS, PLATFORM_MAINTENANCE_REQUESTS } from '../utils/superAdminMockData';
 
-const navItems = [
-  { path: '/super-admin', label: 'Tổng quan', icon: BarChart3, end: true },
-  { path: '/super-admin/users', label: 'Người dùng & RBAC', icon: Users },
-  { path: '/super-admin/hosts', label: 'Host/Admin System', icon: ShieldCheck, badge: PLATFORM_HOSTS.filter(host => host.status === 'pending_approval').length },
-  { path: '/super-admin/buildings', label: 'Nhà thuê Admin', icon: Building2 },
-  { path: '/super-admin/billing', label: 'Thanh toán', icon: CreditCard },
-  { path: '/super-admin/zones', label: 'Quản lý khu vực', icon: MapPin },
-  { path: '/super-admin/contracts', label: 'Hợp đồng', icon: FileText },
-  { path: '/super-admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(item => item.status !== 'resolved').length },
-  { path: '/super-admin/settings', label: 'Cấu hình hệ thống', icon: Settings },
-  { path: '/super-admin/security', label: 'Nhật ký & bảo mật', icon: Activity, badge: AUDIT_LOGS.filter(log => log.severity === 'critical').length },
+type SidebarSection = { type: 'section'; label: string };
+type SidebarLink = { type?: 'link'; path: string; label: string; icon: React.ElementType; end?: boolean; badge?: number };
+type SidebarItem = SidebarSection | SidebarLink;
+
+const navItems: SidebarItem[] = [
+  // ── TỔNG QUAN ────────────────────────────────────────────────────
+  { type: 'section', label: 'Tổng quan' },
+  { path: '/admin', label: 'Bảng điều hành', icon: BarChart3, end: true },
+
+  // ── QUẢN TRỊ ─────────────────────────────────────────────────────
+  { type: 'section', label: 'Quản trị' },
+  { path: '/admin/users', label: 'Người dùng & RBAC', icon: Users },
+  { path: '/admin/hosts', label: 'Host/Admin System', icon: ShieldCheck, badge: PLATFORM_HOSTS.filter(h => h.status === 'pending_approval').length },
+
+  // ── QUY TRÌNH TIẾP NHẬN NHÀ ──────────────────────────────────────
+  { type: 'section', label: 'Quy trình tiếp nhận nhà' },
+  { path: '/admin/buildings/draft', label: 'Khởi tạo tòa nhà', icon: FilePlus },
+  { path: '/admin/buildings/configuration', label: 'Cấu hình khai thác', icon: Settings2 },
+  { path: '/admin/buildings/pricing-approval', label: 'Định giá & Phê duyệt', icon: BadgeDollarSign },
+
+  // ── TÀI CHÍNH & HỢP ĐỒNG ─────────────────────────────────────────
+  { type: 'section', label: 'Tài chính & Hợp đồng' },
+  { path: '/admin/billing', label: 'Thanh toán', icon: CreditCard },
+  { path: '/admin/contracts', label: 'Hợp đồng', icon: FileText },
+
+  // ── VẬN HÀNH ─────────────────────────────────────────────────────
+  { type: 'section', label: 'Vận hành' },
+  { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
+  { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
+
+  // ── HỆ THỐNG ─────────────────────────────────────────────────────
+  { type: 'section', label: 'Hệ thống' },
+  { path: '/admin/settings', label: 'Cấu hình hệ thống', icon: Settings },
+  { path: '/admin/security', label: 'Nhật ký & bảo mật', icon: Activity, badge: AUDIT_LOGS.filter(l => l.severity === 'critical').length },
 ];
 
 const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
@@ -43,46 +68,59 @@ const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
         </div>
         <div className="min-w-0">
           <p className="text-sm font-extrabold leading-tight text-white">UrbanNest</p>
-          <p className="text-[10px] font-semibold leading-tight text-cyan-200/80">Bảng điều khiển Admin</p>
+          <p className="text-[10px] font-semibold leading-tight text-cyan-200/80">Admin Portal</p>
         </div>
       </div>
     </div>
 
-    <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-      {navItems.map(item => (
-        <NavLink
-          key={item.path}
-          to={item.path}
-          end={item.end}
-          onClick={onNavigate}
-          className={({ isActive }) => clsx(
-            'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors',
-            isActive
-              ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-950/20'
-              : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-          )}
-        >
-          {({ isActive }) => (
-            <>
-              <item.icon className={clsx('h-4 w-4', isActive ? 'text-white' : 'text-slate-500 group-hover:text-cyan-300')} />
-              <span className="flex-1 truncate">{item.label}</span>
-              {!!item.badge && (
-                <span className={clsx(
-                  'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold',
-                  isActive ? 'bg-white text-cyan-700' : 'bg-cyan-500 text-white'
-                )}>
-                  {item.badge > 9 ? '9+' : item.badge}
-                </span>
-              )}
-            </>
-          )}
-        </NavLink>
-      ))}
+    <nav className="flex-1 overflow-y-auto px-3 py-4">
+      {navItems.map((item, idx) => {
+        if (item.type === 'section') {
+          return (
+            <p key={idx} className="mt-5 mb-1 px-3 text-[10px] font-black uppercase tracking-widest text-slate-500 first:mt-0">
+              {item.label}
+            </p>
+          );
+        }
+        const link = item as SidebarLink;
+        return (
+          <NavLink
+            key={link.path}
+            to={link.path}
+            end={link.end}
+            onClick={onNavigate}
+            className={({ isActive }) => clsx(
+              'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors',
+              isActive
+                ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-950/20'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+            )}
+          >
+            {({ isActive }) => (
+              <>
+                <link.icon className={clsx(
+                  'h-4 w-4',
+                  isActive ? 'text-white' : 'text-slate-500 group-hover:text-cyan-300'
+                )} />
+                <span className="flex-1 truncate">{link.label}</span>
+                {!!link.badge && (
+                  <span className={clsx(
+                    'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold',
+                    isActive ? 'bg-white text-cyan-700' : 'bg-cyan-500 text-white'
+                  )}>
+                    {link.badge > 9 ? '9+' : link.badge}
+                  </span>
+                )}
+              </>
+            )}
+          </NavLink>
+        );
+      })}
     </nav>
   </>
 );
 
-export const SuperAdminLayout = () => {
+export const AdminLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, logout } = useWebAuth();
 

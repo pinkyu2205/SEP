@@ -1,228 +1,288 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, MapPin, User, Plus, ChevronRight, Home, Search } from 'lucide-react';
-import type { Property } from '../../types';
-import { MOCK_PROPERTIES } from '../../utils/mockData';
-import { formatCurrency, roomStatusMap } from '../../utils';
-import { PropertyFormModal } from './PropertyFormModal';
+import {
+  Building2, MapPin, User, Home, Search,
+  Clock, CheckCircle2, ChevronRight, RefreshCw,
+} from 'lucide-react';
+import { propertyService } from '../../services/property.service';
+import type { PropertyResponse } from '../../types/api.types';
+
+const statusBadge: Record<string, { label: string; cls: string }> = {
+  PENDING_HOST_REVIEW: { label: 'Chờ phê duyệt', cls: 'bg-amber-100 text-amber-800' },
+  ACTIVE:              { label: 'Đang hoạt động', cls: 'bg-emerald-100 text-emerald-800' },
+  UNDER_RENOVATION:    { label: 'Đang cải tạo',   cls: 'bg-blue-100 text-blue-800' },
+  DRAFT:               { label: 'Nháp',            cls: 'bg-slate-100 text-slate-600' },
+  DISABLED:            { label: 'Đã vô hiệu',      cls: 'bg-rose-100 text-rose-700' },
+};
+
+const PAGE_SIZE = 6;
+type Tab = 'pending' | 'active';
 
 export const PropertyList = () => {
   const navigate = useNavigate();
-  const [properties, setProperties] = useState<Property[]>(MOCK_PROPERTIES);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [properties, setProperties] = useState<PropertyResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<Tab>('pending');
+  const [page, setPage] = useState(0);
 
-  const filtered = properties.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.address.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const handleSave = (data: Partial<Property>) => {
-    if (editingProperty) {
-      // Cập nhật
-      setProperties((prev) =>
-        prev.map((p) => (p.id === editingProperty.id ? { ...p, ...data } : p))
-      );
-    } else {
-      // Thêm mới
-      const newProp: Property = {
-        id: `prop-${Date.now()}`,
-        name: data.name || '',
-        address: data.address || '',
-        totalFloors: data.totalFloors || 1,
-        totalRooms: data.totalRooms || 4,
-        monthlyLeaseCost: data.monthlyLeaseCost || 0,
-        deposit: data.deposit || 0,
-        rooms: [],
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setProperties((prev) => [...prev, newProp]);
-    }
-    setShowModal(false);
-    setEditingProperty(null);
+  const fetchProperties = async () => {
+    setLoading(true);
+    try {
+      const res = await propertyService.getProperties(0, 100);
+      setProperties(res.content);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Bạn có chắc chắn muốn xóa căn nhà này? Tất cả dữ liệu phòng bên trong cũng sẽ bị xóa.')) {
-      setProperties((prev) => prev.filter((p) => p.id !== id));
-    }
-  };
+  useEffect(() => { fetchProperties(); }, []);
+
+  const pending = useMemo(() =>
+    properties.filter(p => p.status === 'PENDING_HOST_REVIEW'), [properties]);
+
+  const active = useMemo(() =>
+    properties.filter(p => p.status !== 'PENDING_HOST_REVIEW'), [properties]);
+
+  const filtered = useMemo(() => {
+    const list = tab === 'pending' ? pending : active;
+    const kw = search.trim().toLowerCase();
+    if (!kw) return list;
+    return list.filter(p =>
+      [p.propertyName, p.shortAddress, p.fullAddress, p.zoneName]
+        .some(v => v?.toLowerCase().includes(kw))
+    );
+  }, [tab, pending, active, search]);
+
+  // Reset về trang 0 khi đổi tab hoặc search
+  useEffect(() => { setPage(0); }, [tab, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Lazy-load images for visible cards (list endpoint may omit imageUrls)
+  const fetchedImagesRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const needImages = paginated.filter(
+      p => !p.imageUrls?.length && !fetchedImagesRef.current.has(p.id)
+    );
+    if (needImages.length === 0) return;
+    needImages.forEach(p => fetchedImagesRef.current.add(p.id));
+    Promise.allSettled(
+      needImages.map(p =>
+        propertyService.getPropertyById(p.id)
+          .then(detail => {
+            if (detail.imageUrls?.length) {
+              setProperties(prev =>
+                prev.map(prop => prop.id === p.id ? { ...prop, imageUrls: detail.imageUrls } : prop)
+              );
+            }
+          })
+          .catch(() => {})
+      )
+    );
+  }, [paginated]);
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Bất động sản</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {properties.length} bất động sản trong danh mục UrbanNest
+            {pending.length} chờ duyệt · {active.length} đang quản lý
           </p>
         </div>
-        <button
-          onClick={() => {
-            setEditingProperty(null);
-            setShowModal(true);
-          }}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Thêm bất động sản
+        <button onClick={fetchProperties}
+          className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">
+          <RefreshCw className="w-4 h-4" /> Làm mới
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 w-fit">
+        <button onClick={() => setTab('pending')}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${
+            tab === 'pending' ? 'bg-white shadow text-amber-700' : 'text-slate-500 hover:text-slate-700'
+          }`}>
+          <Clock className="w-4 h-4" />
+          Chờ phê duyệt
+          {pending.length > 0 && (
+            <span className="rounded-full bg-amber-100 text-amber-700 text-xs font-black px-2 py-0.5">
+              {pending.length}
+            </span>
+          )}
+        </button>
+        <button onClick={() => setTab('active')}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${
+            tab === 'active' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'
+          }`}>
+          <CheckCircle2 className="w-4 h-4" />
+          Đang quản lý
+          {active.length > 0 && (
+            <span className="rounded-full bg-emerald-100 text-emerald-700 text-xs font-black px-2 py-0.5">
+              {active.length}
+            </span>
+          )}
         </button>
       </div>
 
       {/* Search */}
       <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input
-          type="text"
           placeholder="Tìm theo tên hoặc địa chỉ..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="input-field pl-10"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="input-field pl-9"
         />
       </div>
 
-      {/* Property Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {filtered.map((property) => {
-          const occupied = property.rooms.filter((r) => r.status === 'occupied').length;
-          const available = property.rooms.filter((r) => r.status === 'available').length;
-          const maintenance = property.rooms.filter((r) => r.status === 'maintenance').length;
-          const totalRooms = property.rooms.length;
-          const occupancyRate = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
-          const monthlyRevenue = property.rooms
-            .filter((r) => r.status === 'occupied')
-            .reduce((sum, r) => sum + r.rentPrice, 0);
+      {/* Cards */}
+      {loading ? (
+        <div className="py-20 text-center text-slate-400">Đang tải dữ liệu...</div>
+      ) : filtered.length === 0 ? (
+        <div className="py-20 text-center text-slate-400">
+          <Home className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="text-sm font-semibold">
+            {tab === 'pending'
+              ? 'Chưa có tòa nhà nào chờ phê duyệt.'
+              : 'Chưa có tòa nhà nào đang quản lý.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+          {paginated.map(p => {
+            const badge = statusBadge[p.status] ?? statusBadge.DRAFT;
+            const isPending = p.status === 'PENDING_HOST_REVIEW';
+            return (
+              <div key={p.id}
+                className="group flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-primary-300 hover:shadow-md transition cursor-pointer overflow-hidden"
+                onClick={() => navigate(isPending ? `/host/review/${p.id}` : `/host/properties/${p.id}`)}>
 
-          return (
-            <div
-              key={property.id}
-              className="card hover:shadow-md transition-shadow duration-200 cursor-pointer group"
-              onClick={() => navigate(`/host/properties/${property.id}`)}
-            >
-              {/* Card Header */}
-              <div className="p-5 border-b border-slate-100">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-primary-50 rounded-xl">
-                      <Building2 className="w-6 h-6 text-primary-600" />
+                {/* Thumbnail ảnh */}
+                {p.imageUrls && p.imageUrls.length > 0 ? (
+                  <div className="relative h-36 w-full overflow-hidden bg-slate-100">
+                    <img src={p.imageUrls[0]} alt={p.propertyName}
+                      className="h-full w-full object-cover group-hover:scale-105 transition duration-300" />
+                    {p.imageUrls.length > 1 && (
+                      <span className="absolute bottom-2 right-2 rounded-full bg-black/50 text-white text-xs font-semibold px-2 py-0.5">
+                        +{p.imageUrls.length - 1}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-36 w-full bg-slate-50 flex items-center justify-center border-b border-slate-100">
+                    <Building2 className="w-10 h-10 text-slate-200" />
+                  </div>
+                )}
+
+                {/* Top */}
+                <div className="flex items-start justify-between gap-3 p-5 border-b border-slate-100">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`shrink-0 p-2.5 rounded-xl ${isPending ? 'bg-amber-50' : 'bg-primary-50'}`}>
+                      <Building2 className={`w-5 h-5 ${isPending ? 'text-amber-600' : 'text-primary-600'}`} />
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900 group-hover:text-primary-600 transition-colors">
-                        {property.name}
-                      </h3>
-                      <p className="text-sm text-slate-500 flex items-center gap-1 mt-0.5">
-                        <MapPin className="w-3.5 h-3.5" />
-                        {property.address}
+                    <div className="min-w-0">
+                      <p className="font-bold text-slate-900 truncate group-hover:text-primary-600 transition">
+                        {p.propertyName}
                       </p>
+                      <div className="flex items-center gap-1 text-xs text-slate-500 mt-0.5">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{p.fullAddress || p.shortAddress}</span>
+                      </div>
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-primary-500 transition-colors" />
-                </div>
-              </div>
-
-              {/* Card Body */}
-              <div className="p-5 space-y-4">
-                {/* Room Status Summary */}
-                <div className="flex items-center gap-3">
-                  {[
-                    { count: available, ...roomStatusMap.available },
-                    { count: occupied, ...roomStatusMap.occupied },
-                    { count: maintenance, ...roomStatusMap.maintenance },
-                  ].map((s, i) => (
-                    <span
-                      key={i}
-                      className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${s.color}`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-                      {s.count} {s.label}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-black ${badge.cls}`}>
+                      {badge.label}
                     </span>
-                  ))}
+                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-primary-400 transition" />
+                  </div>
                 </div>
 
                 {/* Stats */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs text-slate-500">Tỷ lệ lấp đầy</p>
-                    <p className="text-lg font-bold text-slate-900 mt-0.5">{occupancyRate}%</p>
-                    <div className="w-full bg-slate-200 rounded-full h-1.5 mt-2">
-                      <div
-                        className="bg-primary-600 rounded-full h-1.5 transition-all"
-                        style={{ width: `${occupancyRate}%` }}
-                      />
-                    </div>
+                <div className="grid grid-cols-3 gap-3 p-5 text-center text-xs flex-1">
+                  <div className="rounded-xl bg-slate-50 py-3">
+                    <p className="font-black text-lg text-slate-800 leading-tight">{p.totalRooms || 0}</p>
+                    <p className="text-slate-500 mt-0.5">Tổng phòng</p>
                   </div>
-                  <div className="bg-slate-50 rounded-lg p-3">
-                    <p className="text-xs text-slate-500">Doanh thu/tháng</p>
-                    <p className="text-lg font-bold text-emerald-600 mt-0.5">
-                      {formatCurrency(monthlyRevenue)}
+                  <div className="rounded-xl bg-slate-50 py-3">
+                    <p className="font-black text-lg text-slate-800 leading-tight">{p.floorCount || '—'}</p>
+                    <p className="text-slate-500 mt-0.5">Số tầng</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 py-3">
+                    <p className="font-black text-sm text-slate-800 leading-tight">
+                      {p.wholeHouse === null ? '—' : p.wholeHouse ? 'Nguyên căn' : 'Chia phòng'}
                     </p>
+                    <p className="text-slate-500 mt-0.5">Loại hình</p>
                   </div>
                 </div>
 
-                {/* Manager */}
-                <div className="flex items-center justify-between text-sm text-slate-500 pt-2 border-t border-slate-100">
-                  <span className="flex items-center gap-1.5">
-                    <User className="w-4 h-4" />
-                    {property.managerName || 'Chưa có quản lý'}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <Home className="w-4 h-4" />
-                    {property.totalRooms} phòng (dự kiến)
-                  </span>
+                {/* Footer */}
+                <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 rounded-b-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <MapPin className="w-3.5 h-3.5" />
+                      {p.zoneName || 'Chưa rõ khu vực'}
+                    </span>
+                    {isPending ? (
+                      <span className="text-xs font-bold text-amber-600 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" /> Bấm để phê duyệt
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Đang hoạt động
+                      </span>
+                    )}
+                  </div>
+                  {!isPending && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      {p.operationManagerName ? (
+                        <span className="font-semibold text-slate-700">{p.operationManagerName}</span>
+                      ) : (
+                        <span className="font-semibold text-rose-500">Chưa có quản lý</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {/* Card Footer - Actions */}
-              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center gap-3">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingProperty(property);
-                    setShowModal(true);
-                  }}
-                  className="text-sm font-medium text-primary-600 hover:text-primary-700"
-                >
-                  Chỉnh sửa
-                </button>
-                <span className="text-slate-300">|</span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(property.id);
-                  }}
-                  className="text-sm font-medium text-rose-500 hover:text-rose-600"
-                >
-                  Xóa
-                </button>
-                <span className="ml-auto text-xs text-slate-400">
-                  {totalRooms} phòng · {property.totalFloors} tầng
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {filtered.length === 0 && (
-        <div className="text-center py-16">
-          <Home className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">Không tìm thấy bất động sản nào.</p>
+            );
+          })}
         </div>
       )}
 
-      {/* Modal */}
-      {showModal && (
-        <PropertyFormModal
-          property={editingProperty}
-          onSave={handleSave}
-          onClose={() => {
-            setShowModal(false);
-            setEditingProperty(null);
-          }}
-        />
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            ← Trước
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i}
+              onClick={() => setPage(i)}
+              className={`w-8 h-8 rounded-lg text-sm font-bold transition ${
+                i === page
+                  ? 'bg-primary-600 text-white shadow'
+                  : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+            disabled={page === totalPages - 1}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+          >
+            Sau →
+          </button>
+        </div>
       )}
     </div>
   );

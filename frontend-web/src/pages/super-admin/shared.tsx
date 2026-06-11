@@ -13,7 +13,7 @@ export const formatShortVnd = (value: number) => `${Math.round(value / 1_000_000
 export const moneyTooltip = (value: any) => (typeof value === 'number' ? formatVnd(value) : String(value));
 
 export const roleConfig: Record<PlatformRole, { label: string; color: string }> = {
-  super_admin: { label: 'Super Admin', color: 'bg-slate-950 text-white' },
+  admin: { label: 'Admin', color: 'bg-slate-950 text-white' },
   host: { label: 'Host/Admin System', color: 'bg-cyan-100 text-cyan-800' },
   manager: { label: 'Manager', color: 'bg-indigo-100 text-indigo-700' },
   tenant: { label: 'Tenant', color: 'bg-emerald-100 text-emerald-700' },
