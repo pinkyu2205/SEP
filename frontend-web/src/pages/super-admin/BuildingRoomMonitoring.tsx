@@ -257,12 +257,12 @@ export const BuildingRoomMonitoring = () => {
                         <span className="text-slate-500">{building.areaSize} m²</span>
                       </>
                     )}
-                    {building.floorCount && (
+                    {(building.totalFloor ?? building.floorCount) ? (
                       <>
                         <span className="text-slate-400">·</span>
-                        <span className="text-slate-500">{building.floorCount} tầng</span>
+                        <span className="text-slate-500">{building.totalFloor ?? building.floorCount} tầng</span>
                       </>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Stats */}

@@ -138,10 +138,13 @@ export const TaoDraftPage = () => {
     setFormError('');
     setSubmitting(true);
     try {
+      const floorCount = Number(formData.floorCount) || 1;
       const payload = {
         ...formData,
         descriptions: (formData.descriptions || '').trim() || 'Không có mô tả',
-        totalFloor: formData.floorCount || 1,
+        floorCount,
+        totalFloor: floorCount,
+        roomsPerFloor: Number(formData.roomsPerFloor) || 1,
         totalRooms: totalRoomsInput,
       };
       const created = await propertyService.createDraft(payload as any);
@@ -239,18 +242,12 @@ export const TaoDraftPage = () => {
             <p className="mt-0.5 text-xs font-semibold text-blue-600">Tổng phòng</p>
           </div>
           <div className="rounded-xl bg-indigo-50 p-4 text-center">
-            <p className="text-xl font-black text-indigo-700">{selectedBuilding.floorCount || '—'}</p>
+            <p className="text-xl font-black text-indigo-700">{selectedBuilding.totalFloor ?? selectedBuilding.floorCount ?? '—'}</p>
             <p className="mt-0.5 text-xs font-semibold text-indigo-600">Số tầng</p>
           </div>
           <div className="rounded-xl bg-slate-50 p-4 text-center">
             <p className="text-xl font-black text-slate-700">{selectedBuilding.areaSize ? `${selectedBuilding.areaSize} m²` : '—'}</p>
             <p className="mt-0.5 text-xs font-semibold text-slate-500">Diện tích</p>
-          </div>
-          <div className="rounded-xl bg-emerald-50 p-4 text-center">
-            <p className="text-xl font-black text-emerald-700">
-              {selectedBuilding.price ? Number(selectedBuilding.price).toLocaleString('vi-VN') : '—'}
-            </p>
-            <p className="mt-0.5 text-xs font-semibold text-emerald-600">Giá thuê</p>
           </div>
         </div>
 
@@ -390,18 +387,51 @@ export const TaoDraftPage = () => {
             </h3>
 
             <div className="grid grid-cols-2 gap-4">
-              <label className="block">
+              {/* Số tầng */}
+              <div>
                 <span className="mb-1.5 block text-sm font-bold text-slate-700">Số tầng</span>
-                <input type="number" min={1} name="floorCount" value={formData.floorCount}
-                  onChange={handleChange} className="input-field" />
-              </label>
-              <label className="block">
+                <div className="flex items-center rounded-xl border border-slate-200 bg-white overflow-hidden focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(s => ({ ...s, floorCount: Math.max(1, (s.floorCount ?? 1) - 1) }))}
+                    className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 text-xl font-bold transition-colors select-none shrink-0"
+                  >−</button>
+                  <input
+                    type="number" min={1} value={formData.floorCount ?? 1}
+                    onChange={e => setFormData(s => ({ ...s, floorCount: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="flex-1 h-11 text-center text-base font-bold text-slate-900 bg-transparent border-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setFormData(s => ({ ...s, floorCount: (s.floorCount ?? 1) + 1 }))}
+                    className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 text-xl font-bold transition-colors select-none shrink-0"
+                  >+</button>
+                </div>
+              </div>
+
+              {/* Tổng phòng */}
+              <div>
                 <span className="mb-1.5 block text-sm font-bold text-slate-700">Tổng phòng</span>
-                <input type="number" min={1} value={totalRoomsInput}
-                  onChange={e => setTotalRoomsInput(Math.max(1, Number(e.target.value)))}
-                  className="input-field" placeholder="VD: 12" />
+                <div className="flex items-center rounded-xl border border-slate-200 bg-white overflow-hidden focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+                  <button
+                    type="button"
+                    onClick={() => setTotalRoomsInput(v => Math.max(1, v - 1))}
+                    className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 text-xl font-bold transition-colors select-none shrink-0"
+                  >−</button>
+                  <input
+                    type="number" min={1} value={totalRoomsInput}
+                    onChange={e => setTotalRoomsInput(Math.max(1, Number(e.target.value)))}
+                    placeholder="VD: 12"
+                    className="flex-1 h-11 text-center text-base font-bold text-slate-900 bg-transparent border-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none placeholder:font-normal placeholder:text-slate-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTotalRoomsInput(v => v + 1)}
+                    className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 text-xl font-bold transition-colors select-none shrink-0"
+                  >+</button>
+                </div>
                 <p className="mt-1 text-xs text-slate-400">Xác nhận lại chính xác ở Bước 2</p>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -560,12 +590,12 @@ export const TaoDraftPage = () => {
 
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
                   <div className="rounded-lg bg-blue-50 py-2 text-blue-700">
-                    <p className="font-black text-base leading-tight">{b.totalRooms || 0}</p>
+                    <p className="font-black text-base leading-tight">{b.totalRooms || '—'}</p>
                     <p className="mt-0.5">Tổng phòng</p>
                   </div>
-                  <div className="rounded-lg bg-emerald-50 py-2 text-emerald-700">
-                    <p className="font-black text-sm leading-tight">{b.price ? Number(b.price).toLocaleString('vi-VN') : '—'}</p>
-                    <p className="mt-0.5">Giá thuê</p>
+                  <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
+                    <p className="font-black text-base leading-tight">{b.totalFloor ?? b.floorCount ?? '—'}</p>
+                    <p className="mt-0.5">Số tầng</p>
                   </div>
                   <div className="rounded-lg bg-amber-50 py-2 text-amber-700">
                     <p className="font-black text-base leading-tight">

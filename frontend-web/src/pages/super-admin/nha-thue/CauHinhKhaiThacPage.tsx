@@ -176,7 +176,7 @@ export const CauHinhKhaiThacPage = () => {
                     <p className="mt-0.5">Tổng phòng</p>
                   </div>
                   <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
-                    <p className="font-black text-base leading-tight">{b.floorCount || '—'}</p>
+                    <p className="font-black text-base leading-tight">{b.totalFloor ?? b.floorCount ?? '—'}</p>
                     <p className="mt-0.5">Số tầng</p>
                   </div>
                   <div className="rounded-lg bg-amber-50 py-2 text-amber-700">

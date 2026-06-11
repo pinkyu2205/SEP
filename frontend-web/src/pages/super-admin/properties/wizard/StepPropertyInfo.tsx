@@ -183,7 +183,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           </div>
           <div>
             <p className="text-slate-500 mb-1">Số tầng</p>
-            <p className="font-bold text-slate-900">{property.floorCount || 0}</p>
+            <p className="font-bold text-slate-900">{property.totalFloor ?? property.floorCount ?? 0}</p>
           </div>
           <div>
             <p className="text-slate-500 mb-1">Tổng phòng</p>
@@ -197,7 +197,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
         <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileText className="h-5 w-5 text-indigo-500" />
-            <h3 className="font-bold text-slate-800">Hợp đồng Inbound (Với chủ nhà)</h3>
+            <h3 className="font-bold text-slate-800">Hợp đồng với chủ nhà</h3>
             {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
         </div>

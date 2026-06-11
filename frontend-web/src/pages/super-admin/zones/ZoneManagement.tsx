@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronRight, ChevronDown, MapPin, Plus, Trash2, Layers } from 'lucide-react';
+import { ChevronRight, ChevronDown, MapPin, Plus, Trash2, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { zoneService } from '../../../services/zone.service';
 import type { ZoneResponse, ZoneRequest } from '../../../types/api.types';
@@ -15,94 +15,89 @@ const ZoneNode: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
 
   const handleToggle = async () => {
-    if (zone.level >= 3) return; // Không có con cho cấp Phường/Xã
-    
     if (!isExpanded && children.length === 0) {
       setIsLoading(true);
       try {
         const data = await zoneService.getChildrenZones(zone.id);
         setChildren(data);
-      } catch (error) {
+      } catch {
         toast.error('Lỗi khi tải khu vực con');
       } finally {
         setIsLoading(false);
       }
     }
-    setIsExpanded(!isExpanded);
+    setIsExpanded(v => !v);
   };
 
-  const isLevel3 = zone.level === 3;
-
   return (
-    <div className="w-full">
-      <div 
-        className={`flex items-center group py-3 px-4 hover:bg-slate-50 border-b border-slate-100 transition-colors ${
-          zone.level === 1 ? 'bg-white' : zone.level === 2 ? 'bg-slate-50/50' : 'bg-slate-50/80'
-        }`}
-        style={{ paddingLeft: `${(zone.level - 1) * 2 + 1}rem` }}
-      >
-        <button 
+    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+      {/* Level 1 header */}
+      <div className="flex items-center gap-4 px-5 py-4 bg-gradient-to-r from-indigo-50 to-white group">
+        <button
           onClick={handleToggle}
-          className={`p-1 mr-2 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors ${isLevel3 ? 'invisible' : ''}`}
+          className="w-8 h-8 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-indigo-500 hover:bg-indigo-50 hover:border-indigo-300 transition-all shadow-sm shrink-0"
         >
-          {isLoading ? (
-            <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-cyan-600 animate-spin" />
-          ) : isExpanded ? (
-            <ChevronDown className="w-4 h-4" />
-          ) : (
-            <ChevronRight className="w-4 h-4" />
-          )}
+          {isLoading
+            ? <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-200 border-t-indigo-500 animate-spin" />
+            : isExpanded
+              ? <ChevronDown className="w-4 h-4" />
+              : <ChevronRight className="w-4 h-4" />}
         </button>
 
-        <div className="flex-1 flex items-center gap-3 min-w-0">
-          <div className={`p-2 rounded-lg ${zone.level === 1 ? 'bg-indigo-100 text-indigo-600' : zone.level === 2 ? 'bg-cyan-100 text-cyan-600' : 'bg-emerald-100 text-emerald-600'}`}>
-            {zone.level === 1 ? <MapPin className="w-4 h-4" /> : <Layers className="w-4 h-4" />}
-          </div>
-          <div className="truncate">
-            <h3 className="text-sm font-semibold text-slate-800 truncate">{zone.name}</h3>
-            {zone.description && <p className="text-xs text-slate-500 truncate">{zone.description}</p>}
-          </div>
+        <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
+          <MapPin className="w-4 h-4 text-indigo-600" />
         </div>
 
-        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          {!isLevel3 && (
-            <button
-              onClick={() => onAddChild(zone)}
-              className="p-2 text-xs font-medium text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Thêm {zone.level === 1 ? 'Quận/Huyện' : 'Phường/Xã'}
-            </button>
-          )}
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-slate-900 text-base">{zone.name}</p>
+          {zone.description && <p className="text-xs text-slate-400 truncate">{zone.description}</p>}
+        </div>
+
+        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
           <button
-            onClick={() => {
-              if (window.confirm(`Bạn có chắc chắn muốn xóa ${zone.name}?`)) {
-                onDelete(zone.id);
-              }
-            }}
-            className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
-            title="Xóa khu vực"
+            onClick={() => onAddChild(zone)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Thêm Quận/Huyện
+          </button>
+          <button
+            onClick={() => { if (window.confirm(`Xóa ${zone.name}?`)) onDelete(zone.id); }}
+            className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
           >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {isExpanded && children.length > 0 && (
-        <div className="w-full border-l-2 border-slate-100 ml-6">
-          {children.map(child => (
-            <ZoneNode 
-              key={child.id} 
-              zone={child} 
-              onAddChild={(z) => {
-                onAddChild(z);
-                // Sau khi thêm, cần reload lại chilren, phần này xử lý đơn giản bằng cách yêu cầu reload cả trang, 
-                // hoặc truyền callback xuống. Để tối ưu, ta đẩy state quản lý lên trên.
-                // Ở đây ta cứ truyền thẳng onAddChild của cha
-              }}
-              onDelete={onDelete}
-            />
-          ))}
+      {/* Level 2 children grid */}
+      {isExpanded && (
+        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/50">
+          {children.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4">Chưa có Quận/Huyện nào</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {children.map(child => (
+                <div
+                  key={child.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2.5 bg-white border border-slate-200 rounded-xl group/child hover:border-cyan-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-cyan-50 flex items-center justify-center shrink-0">
+                      <Building2 className="w-3.5 h-3.5 text-cyan-500" />
+                    </div>
+                    <span className="text-sm font-medium text-slate-700 truncate">{child.name}</span>
+                  </div>
+                  <button
+                    onClick={() => { if (window.confirm(`Xóa ${child.name}?`)) onDelete(child.id); }}
+                    className="opacity-0 group-hover/child:opacity-100 w-6 h-6 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-all shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -112,8 +107,7 @@ const ZoneNode: React.FC<{
 export const ZoneManagement = () => {
   const [rootZones, setRootZones] = useState<ZoneResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Modal State
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalConfig, setModalConfig] = useState<{
     level: number;
@@ -126,29 +120,21 @@ export const ZoneManagement = () => {
     try {
       const data = await zoneService.getRootZones();
       setRootZones(data);
-    } catch (error) {
+    } catch {
       toast.error('Lỗi khi tải danh sách Tỉnh/Thành phố');
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchRootZones();
-  }, []);
+  useEffect(() => { fetchRootZones(); }, []);
 
   const handleCreateZone = async (data: ZoneRequest) => {
     try {
       await zoneService.createZone(data);
       toast.success('Thêm khu vực thành công!');
-      // Reload lại trang cho nhanh, hoặc reload root
-      if (data.level === 1) {
-        fetchRootZones();
-      } else {
-        // Tạm thời reload nguyên trang để update cây
-        // TODO: Update state cục bộ để mượt hơn
-        window.location.reload();
-      }
+      if (data.level === 1) fetchRootZones();
+      else window.location.reload();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Lỗi khi thêm khu vực');
       throw error;
@@ -165,65 +151,49 @@ export const ZoneManagement = () => {
     }
   };
 
-  const openAddRootModal = () => {
-    setModalConfig({ level: 1, parentId: null });
-    setIsModalOpen(true);
-  };
-
-  const openAddChildModal = (parentZone: ZoneResponse) => {
-    setModalConfig({ 
-      level: parentZone.level + 1, 
-      parentId: parentZone.id,
-      parentName: parentZone.name
-    });
-    setIsModalOpen(true);
-  };
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Quản lý Khu vực (Zone)</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Quản lý Khu vực</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Thiết lập danh sách Tỉnh/TP, Quận/Huyện, Phường/Xã cho hệ thống.
+            Thiết lập danh sách Tỉnh/TP và Quận/Huyện cho hệ thống.
           </p>
         </div>
         <button
-          onClick={openAddRootModal}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-semibold rounded-xl shadow-sm shadow-cyan-600/20 transition-all active:scale-95"
+          onClick={() => { setModalConfig({ level: 1, parentId: null }); setIsModalOpen(true); }}
+          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-semibold rounded-xl shadow-sm shadow-indigo-500/30 transition-all"
         >
           <Plus className="w-4 h-4" />
           Thêm Tỉnh/Thành phố
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {isLoading ? (
-          <div className="flex flex-col items-center justify-center p-12 text-slate-400">
-            <div className="w-8 h-8 border-4 border-slate-100 border-t-cyan-500 rounded-full animate-spin mb-4" />
-            <p>Đang tải dữ liệu...</p>
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <div className="w-8 h-8 border-4 border-slate-100 border-t-indigo-500 rounded-full animate-spin mb-4" />
+          <p className="text-sm">Đang tải dữ liệu...</p>
+        </div>
+      ) : rootZones.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4">
+            <MapPin className="w-8 h-8 text-indigo-300" />
           </div>
-        ) : rootZones.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-slate-400 text-center">
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-              <MapPin className="w-8 h-8 text-slate-300" />
-            </div>
-            <p className="text-slate-600 font-medium">Chưa có dữ liệu khu vực nào</p>
-            <p className="text-sm mt-1">Hãy bắt đầu bằng cách thêm Tỉnh/Thành phố mới.</p>
-          </div>
-        ) : (
-          <div className="flex flex-col w-full">
-            {rootZones.map(zone => (
-              <ZoneNode 
-                key={zone.id} 
-                zone={zone} 
-                onAddChild={openAddChildModal} 
-                onDelete={handleDeleteZone}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+          <p className="font-semibold text-slate-600">Chưa có dữ liệu khu vực nào</p>
+          <p className="text-sm text-slate-400 mt-1">Hãy bắt đầu bằng cách thêm Tỉnh/Thành phố mới.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rootZones.map(zone => (
+            <ZoneNode
+              key={zone.id}
+              zone={zone}
+              onAddChild={z => { setModalConfig({ level: z.level + 1, parentId: z.id, parentName: z.name }); setIsModalOpen(true); }}
+              onDelete={handleDeleteZone}
+            />
+          ))}
+        </div>
+      )}
 
       <ZoneFormModal
         isOpen={isModalOpen}
