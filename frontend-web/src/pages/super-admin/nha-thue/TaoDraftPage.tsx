@@ -141,9 +141,10 @@ export const TaoDraftPage = () => {
       const payload = {
         ...formData,
         descriptions: (formData.descriptions || '').trim() || 'Không có mô tả',
-        roomsPerFloor: Math.max(1, Math.round(totalRoomsInput / (formData.floorCount || 1))),
+        totalFloor: formData.floorCount || 1,
+        totalRooms: totalRoomsInput,
       };
-      const created = await propertyService.createDraft(payload);
+      const created = await propertyService.createDraft(payload as any);
       setNewProperty(created);
       setView('step-info');
     } catch (err: any) {
