@@ -130,7 +130,7 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
                 
                 <div className="col-span-2 bg-slate-50 rounded-xl p-5 border border-slate-200 flex justify-between items-center mt-2">
                   <div>
-                    <p className="text-sm font-bold text-slate-700">Giá sàn / tháng (Break-even)</p>
+                    <p className="text-sm font-bold text-slate-700">Giá hoà vốn / tháng (Break-even)</p>
                     <p className="text-xs text-slate-500 mt-1">Bao gồm khấu hao thiết bị & cải tạo</p>
                   </div>
                   <p className="text-xl font-bold text-slate-600">{formatVND(pricing.wholeHouseResult.suggestedMinPrice)}</p>
@@ -145,7 +145,7 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
               <div className="bg-indigo-50 px-6 py-4 border-b border-indigo-100 flex justify-between items-center">
                 <h3 className="font-bold text-indigo-900 text-lg">Chia phòng ({pricing.roomResults.length} phòng)</h3>
                 <span className="text-sm font-semibold text-indigo-700 bg-indigo-100 px-3 py-1 rounded-full">
-                  Tổng giá sàn: {formatVND(pricing.roomResults.reduce((sum, r) => sum + r.suggestedMinPrice, 0))}
+                  Tổng giá hoà vốn: {formatVND(pricing.roomResults.reduce((sum, r) => sum + r.suggestedMinPrice, 0))}
                 </span>
               </div>
               <div className="p-0">
@@ -154,7 +154,7 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                       <th className="py-3 px-6 text-left">Phòng</th>
                       <th className="py-3 px-6 text-right">Khấu hao</th>
-                      <th className="py-3 px-6 text-right text-slate-600">Giá sàn</th>
+                      <th className="py-3 px-6 text-right text-slate-600">Giá hoà vốn</th>
                     </tr>
                   </thead>
                   <tbody>

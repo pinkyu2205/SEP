@@ -129,13 +129,14 @@ export interface PropertyResponse {
   areaSize?: number;
   wholeHouse: boolean | null;
   hasRenovation: boolean | null;
-  floorCount?: number;
+  totalFloor?: number;   // field thực từ BE
+  floorCount?: number;   // alias cũ, giữ tương thích
   roomsPerFloor?: number;
   totalRooms: number;
   status: string;        // PropertyStatus
   price?: number;
   createdBy?: number;
-  operationManagerId?: number;
+  operationManagerId?: string;
   operationManagerName?: string;
   renovationCompleted: boolean;
   imageUrls?: string[];
@@ -366,7 +367,8 @@ export interface OnboardingSummaryResponse {
   status: string;
   wholeHouse: boolean;
   hasRenovation: boolean;
-  floorCount: number;
+  floorCount?: number;
+  totalFloor?: number;
   roomsPerFloor: number;
   totalRooms: number;
   renovationCompleted: boolean;
@@ -391,7 +393,7 @@ export interface HostRoomPrice {
 
 export interface HostConfirmRequest {
   contingencyPercent: number;
-  operationManagerId: number;
+  operationManagerId: string;
   propertyPrice?: number;          // Nhà nguyên căn (ghi đè tay)
   roomPrices?: HostRoomPrice[];    // Nhà chia phòng
 }

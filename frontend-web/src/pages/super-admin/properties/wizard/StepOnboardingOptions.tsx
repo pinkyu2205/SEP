@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { 
-  Home, LayoutGrid, Hammer, DoorOpen, Package, 
-  Check, AlertCircle, Settings2
+import {
+  Home, LayoutGrid, Hammer, DoorOpen, Package,
+  Check, AlertCircle, Settings2, ChevronDown, ChevronRight, Layers
 } from 'lucide-react';
 import type { 
   PropertyResponse, RenovationCategory, RenovationLineResponse, 
@@ -54,6 +54,11 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
   const [manifest, setManifest] = useState<ManifestItemResponse[]>([]);
   const [assignments, setAssignments] = useState<EquipmentAssignmentResponse[]>([]);
   const [newAssign, setNewAssign] = useState({ catalogId: 0, quantity: 1, status: 'NEW' as any, source: 'INITIAL_HANDOVER' as EquipmentSource, houseArea: 'LIVING_ROOM' as HouseArea, roomId: 0 });
+
+  // Floor navigation & per-room equipment
+  const [selectedFloor, setSelectedFloor] = useState(1);
+  const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
+  const [roomAssignForm, setRoomAssignForm] = useState({ catalogId: 0, quantity: 1, source: 'INITIAL_HANDOVER' as EquipmentSource });
 
   // Data Loading
   useEffect(() => {
@@ -166,33 +171,38 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
     }
   };
 
-  const addRoom = async () => {
-    if (!newRoom.roomNumber || newRoom.area <= 0) return;
-    try {
-      const res = await propertyService.addRoom(property.id, newRoom);
-      setRooms([...rooms, res]);
-      setNewRoom({ roomNumber: '', area: 0, maxOccupants: 2, propertyType: 'INDIVIDUAL_ROOM' });
-    } catch (err: any) { alert(err.response?.data?.message || 'Lỗi thêm phòng'); }
-  };
-
   const addAssignment = async () => {
     if (newAssign.catalogId === 0 || newAssign.quantity <= 0) return;
     try {
-      const req: any = { 
-        catalogId: newAssign.catalogId, 
-        quantity: newAssign.quantity, 
+      const req: any = {
+        catalogId: newAssign.catalogId,
+        quantity: newAssign.quantity,
         status: newAssign.status,
-        source: newAssign.source 
+        source: newAssign.source
       };
       if (property.wholeHouse) req.houseArea = newAssign.houseArea;
       else req.roomId = newAssign.roomId;
-
       const res = await propertyService.assignEquipment(property.id, req);
-      setAssignments([...assignments, res]);
-
-      // Refresh manifest to get updated assignedCount
+      setAssignments(prev => [...prev, res]);
       const mft = await propertyService.getManifest(property.id);
       setManifest(mft);
+    } catch (err: any) { alert(err.response?.data?.message || 'Lỗi gán thiết bị'); }
+  };
+
+  const addAssignmentToRoom = async (roomId: number) => {
+    if (roomAssignForm.catalogId === 0) return;
+    try {
+      const res = await propertyService.assignEquipment(property.id, {
+        catalogId: roomAssignForm.catalogId,
+        quantity: roomAssignForm.quantity,
+        status: 'NEW',
+        source: roomAssignForm.source,
+        roomId,
+      });
+      setAssignments(prev => [...prev, res]);
+      const mft = await propertyService.getManifest(property.id);
+      setManifest(mft);
+      setRoomAssignForm({ catalogId: 0, quantity: 1, source: 'INITIAL_HANDOVER' });
     } catch (err: any) { alert(err.response?.data?.message || 'Lỗi gán thiết bị'); }
   };
 
@@ -433,39 +443,215 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
         </section>
       )}
 
-      {/* 2C: Tạo Phòng (Chỉ hiện nếu chia phòng) */}
-      {optionsSaved && property.wholeHouse === false && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <DoorOpen className="h-5 w-5 text-indigo-500" />
-              <h3 className="font-bold text-slate-800">Chia Phòng ({rooms.length}/{property.totalRooms})</h3>
-              {isRoomsComplete && <Check className="h-4 w-4 text-emerald-500" />}
-            </div>
-          </div>
+      {/* 2C+2D: Chia phòng theo tầng & Gán thiết bị */}
+      {optionsSaved && property.wholeHouse === false && (() => {
+        const totalFloors = property.totalFloor ?? property.floorCount ?? 1;
+        const expectedPerFloor = Math.max(1, Math.ceil(property.totalRooms / totalFloors));
+        const getRoomsOnFloor = (f: number) => rooms.slice((f - 1) * expectedPerFloor, f * expectedPerFloor);
+        const floorRooms = getRoomsOnFloor(selectedFloor);
+        const isFloorFull = floorRooms.length >= expectedPerFloor;
+        const suggestNumber = () => `P.${selectedFloor}${String(floorRooms.length + 1).padStart(2, '0')}`;
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-100">
-            <input placeholder="Mã phòng (P.101)" value={newRoom.roomNumber} onChange={e => setNewRoom({...newRoom, roomNumber: e.target.value})} className="input-field text-sm" />
-            <input type="number" placeholder="Diện tích (m²)" value={newRoom.area || ''} onChange={e => setNewRoom({...newRoom, area: Number(e.target.value)})} className="input-field text-sm" />
-            <input type="number" placeholder="Số người tối đa" value={newRoom.maxOccupants} onChange={e => setNewRoom({...newRoom, maxOccupants: Number(e.target.value)})} className="input-field text-sm" />
-            <button onClick={addRoom} disabled={isRoomsComplete} className="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-50">Thêm phòng</button>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {rooms.map(r => (
-              <div key={r.id} className="p-3 border border-slate-200 rounded-xl text-sm flex justify-between items-center bg-white shadow-sm">
-                <span className="font-bold text-slate-800">{r.roomNumber}</span>
-                <span className="text-slate-500 text-xs">{r.area}m²</span>
+        return (
+          <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            {/* Header */}
+            <div className="border-b border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <DoorOpen className="h-5 w-5 text-indigo-500" />
+                <h3 className="font-bold text-slate-800">Chia Phòng & Gán Thiết bị</h3>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isRoomsComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                  {rooms.length}/{property.totalRooms} phòng
+                </span>
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${isManifestFullyAssigned ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                Thiết bị: {manifest.filter(m => m.assignedCount === m.quantity).length}/{manifest.length} loại xong
+              </span>
+            </div>
 
-      {/* 2D: Phân bổ thiết bị */}
-      {optionsSaved && (
+            {/* Floor tabs */}
+            <div className="flex gap-2 px-6 pt-4 overflow-x-auto pb-1">
+              {Array.from({ length: totalFloors }, (_, i) => i + 1).map(floor => {
+                const flr = getRoomsOnFloor(floor);
+                const done = flr.length >= expectedPerFloor;
+                return (
+                  <button
+                    key={floor}
+                    onClick={() => setSelectedFloor(floor)}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${
+                      selectedFloor === floor
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-200'
+                        : done
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Tầng {floor}
+                    <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${selectedFloor === floor ? 'bg-white/20 text-white' : done ? 'bg-emerald-200 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {flr.length}/{expectedPerFloor}
+                    </span>
+                    {done && selectedFloor !== floor && <Check className="w-3 h-3" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Floor content */}
+            <div className="p-6 space-y-4">
+              {/* Add room form */}
+              {!isFloorFull && (
+                <div className="flex flex-wrap gap-3 items-end bg-indigo-50/50 border border-indigo-100 rounded-xl p-4">
+                  <div className="flex flex-col gap-1 flex-1 min-w-[120px]">
+                    <span className="text-xs font-semibold text-slate-600">Mã phòng</span>
+                    <input
+                      placeholder={suggestNumber()}
+                      value={newRoom.roomNumber}
+                      onChange={e => setNewRoom({ ...newRoom, roomNumber: e.target.value })}
+                      className="input-field text-sm"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 w-32">
+                    <span className="text-xs font-semibold text-slate-600">Diện tích (m²)</span>
+                    <input type="number" placeholder="25" value={newRoom.area || ''} onChange={e => setNewRoom({ ...newRoom, area: Number(e.target.value) })} className="input-field text-sm" />
+                  </div>
+                  <div className="flex flex-col gap-1 w-32">
+                    <span className="text-xs font-semibold text-slate-600">Sức chứa</span>
+                    <input type="number" min={1} value={newRoom.maxOccupants} onChange={e => setNewRoom({ ...newRoom, maxOccupants: Number(e.target.value) })} className="input-field text-sm" />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const roomNum = newRoom.roomNumber || suggestNumber();
+                      if (!roomNum || newRoom.area <= 0) return;
+                      try {
+                        const res = await propertyService.addRoom(property.id, { ...newRoom, roomNumber: roomNum });
+                        setRooms(prev => [...prev, res]);
+                        setNewRoom(prev => ({ ...prev, roomNumber: '', area: 0 }));
+                        setExpandedRoomId(res.id);
+                      } catch (err: any) { alert(err.response?.data?.message || 'Lỗi thêm phòng'); }
+                    }}
+                    className="h-[42px] px-5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all self-end"
+                  >
+                    + Thêm phòng
+                  </button>
+                </div>
+              )}
+              {isFloorFull && !isRoomsComplete && (
+                <p className="text-xs text-slate-400 text-center py-1">
+                  Tầng {selectedFloor} đã đủ {expectedPerFloor} phòng — chuyển sang tầng tiếp theo
+                </p>
+              )}
+
+              {/* Room cards */}
+              {floorRooms.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <DoorOpen className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">Chưa có phòng nào trên tầng {selectedFloor}</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {floorRooms.map(room => {
+                    const roomAssigns = assignments.filter(a => a.roomId === room.id);
+                    const unassigned = manifest.filter(m => m.assignedCount < m.quantity);
+                    const isExpanded = expandedRoomId === room.id;
+                    return (
+                      <div key={room.id} className={`rounded-xl border-2 transition-all ${isExpanded ? 'border-indigo-300 shadow-sm' : 'border-slate-200 hover:border-indigo-200'}`}>
+                        {/* Room header */}
+                        <button
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                          onClick={() => setExpandedRoomId(isExpanded ? null : room.id)}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                            <DoorOpen className="w-4 h-4 text-indigo-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-slate-900 text-sm">{room.roomNumber}</p>
+                            <p className="text-xs text-slate-400">{room.area} m² · {room.maxOccupants} người</p>
+                          </div>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${roomAssigns.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-400'}`}>
+                            {roomAssigns.length} thiết bị
+                          </span>
+                          {isExpanded
+                            ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                            : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
+                        </button>
+
+                        {/* Expanded: equipment */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-4 space-y-3">
+                            {/* Assigned list */}
+                            {roomAssigns.length > 0 && (
+                              <div className="space-y-1.5">
+                                {roomAssigns.map(a => (
+                                  <div key={a.id} className="flex items-center justify-between px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                                    <span className="font-semibold text-slate-700">{a.catalogName}</span>
+                                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">×{a.quantity}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Quick assign form */}
+                            {unassigned.length > 0 ? (
+                              <div className="flex flex-wrap gap-2 items-end pt-1">
+                                <div className="flex-1 min-w-[160px]">
+                                  <span className="mb-1 block text-xs font-semibold text-slate-500">Thiết bị</span>
+                                  <select
+                                    value={roomAssignForm.catalogId}
+                                    onChange={e => setRoomAssignForm(f => ({ ...f, catalogId: Number(e.target.value) }))}
+                                    className="input-field text-sm"
+                                  >
+                                    <option value={0}>-- Chọn --</option>
+                                    {unassigned.map(m => (
+                                      <option key={m.catalogId} value={m.catalogId}>{m.catalogName} (còn {m.quantity - m.assignedCount})</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="w-20">
+                                  <span className="mb-1 block text-xs font-semibold text-slate-500">Số lượng</span>
+                                  <input
+                                    type="number" min={1} value={roomAssignForm.quantity}
+                                    onChange={e => setRoomAssignForm(f => ({ ...f, quantity: Number(e.target.value) }))}
+                                    className="input-field text-sm"
+                                  />
+                                </div>
+                                <div className="w-40">
+                                  <span className="mb-1 block text-xs font-semibold text-slate-500">Nguồn</span>
+                                  <select
+                                    value={roomAssignForm.source}
+                                    onChange={e => setRoomAssignForm(f => ({ ...f, source: e.target.value as EquipmentSource }))}
+                                    className="input-field text-sm"
+                                  >
+                                    <option value="INITIAL_HANDOVER">Có sẵn</option>
+                                    <option value="PURCHASED">Mua mới</option>
+                                  </select>
+                                </div>
+                                <button
+                                  onClick={() => addAssignmentToRoom(room.id)}
+                                  className="h-[42px] px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold transition-colors self-end"
+                                >
+                                  Gán
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-emerald-600 font-semibold text-center py-1">
+                                ✓ Tất cả thiết bị đã được gán xong
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* 2D: Phân bổ thiết bị (chỉ dùng cho nhà nguyên căn) */}
+      {optionsSaved && property.wholeHouse === true && (
         <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-          {/* Header */}
           <div className="border-b border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Package className="h-5 w-5 text-indigo-500" />
@@ -475,35 +661,26 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
               {manifest.filter(m => m.assignedCount === m.quantity).length}/{manifest.length} loại đã gán xong
             </span>
           </div>
-
-          <div className="p-6 space-y-6">
-            {/* Manifest progress list */}
+          <div className="p-6 space-y-4">
             {manifest.length > 0 && (
               <div className="space-y-2">
                 {manifest.map(m => {
                   const done = m.assignedCount === m.quantity;
                   const pct = m.quantity > 0 ? Math.round((m.assignedCount / m.quantity) * 100) : 0;
                   return (
-                    <div key={m.id} className={`flex items-center gap-4 px-4 py-3 rounded-xl border text-sm transition-colors ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${done ? 'bg-emerald-500' : 'bg-slate-200'}`}>
-                        {done
-                          ? <Check className="w-4 h-4 text-white" />
-                          : <span className="text-xs font-bold text-slate-500">{m.assignedCount}</span>
-                        }
+                    <div key={m.id} className={`flex items-center gap-4 px-4 py-3 rounded-xl border text-sm ${done ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${done ? 'bg-emerald-500' : 'bg-slate-200'}`}>
+                        {done ? <Check className="w-4 h-4 text-white" /> : <span className="text-xs font-bold text-slate-500">{m.assignedCount}</span>}
                       </div>
                       <span className={`font-semibold flex-1 ${done ? 'text-emerald-800' : 'text-slate-700'}`}>{m.catalogName}</span>
-                      <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="flex items-center gap-3 shrink-0">
                         <div className="w-24 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${done ? 'bg-emerald-500' : 'bg-indigo-400'}`} style={{ width: `${pct}%` }} />
+                          <div className={`h-full rounded-full ${done ? 'bg-emerald-500' : 'bg-indigo-400'}`} style={{ width: `${pct}%` }} />
                         </div>
                         <span className={`text-xs font-bold w-10 text-right ${done ? 'text-emerald-700' : 'text-slate-500'}`}>{m.assignedCount}/{m.quantity}</span>
                         {!done && (
-                          <button
-                            onClick={() => setNewAssign(prev => ({ ...prev, catalogId: m.catalogId }))}
-                            className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors"
-                          >
-                            Gán →
-                          </button>
+                          <button onClick={() => setNewAssign(prev => ({ ...prev, catalogId: m.catalogId }))}
+                            className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg">Gán →</button>
                         )}
                       </div>
                     </div>
@@ -511,72 +688,45 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                 })}
               </div>
             )}
-
-            {/* Form gán */}
             {!isManifestFullyAssigned && (
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Thêm lượt gán</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <span className="mb-1 block text-xs font-bold text-slate-600">Thiết bị cần gán</span>
-                    <select value={newAssign.catalogId} onChange={e => setNewAssign({...newAssign, catalogId: Number(e.target.value)})} className="input-field text-sm">
+                    <select value={newAssign.catalogId} onChange={e => setNewAssign({ ...newAssign, catalogId: Number(e.target.value) })} className="input-field text-sm">
                       <option value={0}>-- Chọn thiết bị --</option>
                       {manifest.filter(m => m.assignedCount < m.quantity).map(m => (
-                        <option key={m.catalogId} value={m.catalogId}>{m.catalogName} (còn {m.quantity - m.assignedCount} chưa gán)</option>
+                        <option key={m.catalogId} value={m.catalogId}>{m.catalogName} (còn {m.quantity - m.assignedCount})</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <span className="mb-1 block text-xs font-bold text-slate-600">Vị trí {property.wholeHouse ? 'khu vực' : 'phòng'}</span>
-                    {property.wholeHouse ? (
-                      <select value={newAssign.houseArea} onChange={e => setNewAssign({...newAssign, houseArea: e.target.value as any})} className="input-field text-sm">
-                        <option value="LIVING_ROOM">Phòng khách</option>
-                        <option value="BEDROOM">Phòng ngủ</option>
-                        <option value="KITCHEN">Bếp</option>
-                        <option value="BATHROOM">Phòng tắm (WC)</option>
-                        <option value="BALCONY">Ban công</option>
-                        <option value="GARAGE">Nhà xe</option>
-                        <option value="OTHER">Khu vực khác</option>
-                      </select>
-                    ) : (
-                      <select value={newAssign.roomId} onChange={e => setNewAssign({...newAssign, roomId: Number(e.target.value)})} className="input-field text-sm">
-                        <option value={0}>-- Chọn phòng --</option>
-                        {rooms.map(r => <option key={r.id} value={r.id}>{r.roomNumber}</option>)}
-                      </select>
-                    )}
-                  </div>
-                  <div>
-                    <span className="mb-1 block text-xs font-bold text-slate-600">Nguồn gốc</span>
-                    <select value={newAssign.source} onChange={e => setNewAssign({...newAssign, source: e.target.value as EquipmentSource})} className="input-field text-sm">
-                      <option value="INITIAL_HANDOVER">Thiết bị có sẵn (từ manifest)</option>
-                      <option value="PURCHASED">Mua mới trong đợt cải tạo</option>
+                    <span className="mb-1 block text-xs font-bold text-slate-600">Khu vực</span>
+                    <select value={newAssign.houseArea} onChange={e => setNewAssign({ ...newAssign, houseArea: e.target.value as any })} className="input-field text-sm">
+                      <option value="LIVING_ROOM">Phòng khách</option>
+                      <option value="BEDROOM">Phòng ngủ</option>
+                      <option value="KITCHEN">Bếp</option>
+                      <option value="BATHROOM">Phòng tắm</option>
+                      <option value="BALCONY">Ban công</option>
+                      <option value="GARAGE">Nhà xe</option>
+                      <option value="OTHER">Khác</option>
                     </select>
                   </div>
                   <div>
-                    <span className="mb-1 block text-xs font-bold text-slate-600">Số lượng gán</span>
+                    <span className="mb-1 block text-xs font-bold text-slate-600">Nguồn gốc</span>
+                    <select value={newAssign.source} onChange={e => setNewAssign({ ...newAssign, source: e.target.value as EquipmentSource })} className="input-field text-sm">
+                      <option value="INITIAL_HANDOVER">Có sẵn (từ manifest)</option>
+                      <option value="PURCHASED">Mua mới</option>
+                    </select>
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-xs font-bold text-slate-600">Số lượng</span>
                     <div className="flex gap-2">
-                      <input type="number" min={1} value={newAssign.quantity} onChange={e => setNewAssign({...newAssign, quantity: Number(e.target.value)})} className="input-field text-sm flex-1" />
+                      <input type="number" min={1} value={newAssign.quantity} onChange={e => setNewAssign({ ...newAssign, quantity: Number(e.target.value) })} className="input-field text-sm flex-1" />
                       <button onClick={addAssignment} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 rounded-xl text-sm font-bold">Gán</button>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Danh sách đã gán */}
-            {assignments.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Lịch sử gán</p>
-                <div className="space-y-1.5">
-                  {assignments.map(a => (
-                    <div key={a.id} className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-lg text-sm border border-slate-100">
-                      <span className="font-semibold text-slate-700">{a.catalogName}</span>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span>×{a.quantity}</span>
-                        <span className="font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">{a.roomNumber || a.houseArea}</span>
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}

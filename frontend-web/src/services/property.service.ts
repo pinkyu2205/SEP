@@ -21,6 +21,7 @@ import type {
   OnboardingSummaryResponse,
   HostConfirmRequest,
   HostConfirmResponse,
+  PropertyActivationResponse,
 } from '../types/api.types';
 
 const BASE = '/api/v1/properties';
@@ -205,12 +206,17 @@ export const propertyService = {
     return api.post(`${BASE}/${id}/host-confirm`, data);
   },
 
+  /** GET /api/v1/user/managers — danh sách operation managers */
+  getManagers: (): Promise<{ id: string; fullName: string; username: string }[]> => {
+    return api.get('/api/v1/user/managers');
+  },
+
   // =========================================================================
   // Gán quản lý vận hành
   // =========================================================================
 
   /** PATCH /properties/{id}/operation-manager */
-  assignOperationManager: (id: number, operationManagerId: number): Promise<PropertyResponse> => {
+  assignOperationManager: (id: number, operationManagerId: string): Promise<PropertyActivationResponse> => {
     return api.patch(`${BASE}/${id}/operation-manager`, { operationManagerId });
   },
 
