@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
   Zap, Droplets, RefreshCw, Home, UserCog, X, CheckCircle2,
-  Wrench, CircleCheck, CircleDot, Layers, BadgeDollarSign,
+  Wrench, CircleCheck, Layers, BadgeDollarSign,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '../../services/property.service';

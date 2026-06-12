@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Building, Package, FileText, Plus, Trash2, Check, Upload, Save, AlertCircle } from 'lucide-react';
+import { Building, Package, FileText, Plus, Trash2, Check, Upload, Save, AlertCircle, Lock } from 'lucide-react';
 import type { 
   PropertyResponse, 
   ManifestItem, 
@@ -25,6 +25,9 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   const [manifestItems, setManifestItems] = useState<ManifestItem[]>([]);
   const [manifestSaved, setManifestSaved] = useState(false);
   const [isSavingManifest, setIsSavingManifest] = useState(false);
+  // Autocomplete cho dòng thiết bị đang nhập (chỉ dòng cuối được sửa tên)
+  const [manifestSearch, setManifestSearch] = useState('');
+  const [showSuggest, setShowSuggest] = useState(false);
 
   // Contract State
   const [contract, setContract] = useState<InboundContractResponse | null>(null);
@@ -40,6 +43,10 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
   const parseVND = (str: string) =>
     Number(str.replace(/\./g, '').replace(/,/g, '')) || 0;
+
+  // So khớp không phân biệt hoa thường & dấu tiếng Việt
+  const normalizeText = (s: string) =>
+    s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase();
 
   // Load Data
   useEffect(() => {
@@ -59,6 +66,11 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             catalogId: m.catalogId, quantity: m.quantity, status: m.status
           })));
           setManifestSaved(true);
+          // Dòng cuối là dòng đang sửa — đổ sẵn tên thiết bị vào ô autocomplete
+          if (catalogData.status === 'fulfilled') {
+            const last = manifestData.value[manifestData.value.length - 1];
+            setManifestSearch(catalogData.value.find(c => c.id === last.catalogId)?.name || '');
+          }
         } else {
           // Initialize empty if no manifest
           setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW' }]);
@@ -86,13 +98,23 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   }, [property.id]);
 
   // Manifest Handlers
+  // Xuống dòng mới: dòng hiện tại phải hợp lệ, các dòng trên sẽ tự khoá (chỉ dòng cuối được sửa tên)
+  const lastManifestRow = manifestItems[manifestItems.length - 1];
+  const canAddManifestRow = !lastManifestRow || (lastManifestRow.catalogId > 0 && lastManifestRow.quantity > 0);
+
   const handleAddManifestRow = () => {
+    if (!canAddManifestRow) return;
     setManifestItems(prev => [...prev, { catalogId: 0, quantity: 1, status: 'NEW' }]);
+    setManifestSearch('');
     setManifestSaved(false);
   };
 
   const handleRemoveManifestRow = (index: number) => {
-    setManifestItems(prev => prev.filter((_, i) => i !== index));
+    const next = manifestItems.filter((_, i) => i !== index);
+    setManifestItems(next);
+    // Nếu dòng đang sửa thay đổi (xoá dòng cuối) → đổ tên thiết bị của dòng cuối mới vào ô autocomplete
+    const newLast = next[next.length - 1];
+    setManifestSearch(newLast ? (catalog.find(c => c.id === newLast.catalogId)?.name || '') : '');
     setManifestSaved(false);
   };
 
@@ -234,39 +256,16 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày bắt đầu *</span>
               <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
             </label>
-            <div className="block">
+            <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày kết thúc *</span>
               <input
                 type="date"
                 required
                 value={contractForm.endDate}
                 onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })}
-                className="input-field mb-2"
+                className="input-field"
               />
-              <div className="flex rounded-xl border border-slate-200 overflow-hidden divide-x divide-slate-200">
-                {[1, 2, 3, 4, 5].map(y => {
-                  const base = contractForm.startDate || new Date().toISOString().slice(0, 10);
-                  const d = new Date(base);
-                  d.setFullYear(d.getFullYear() + y);
-                  const val = d.toISOString().slice(0, 10);
-                  const active = contractForm.endDate === val;
-                  return (
-                    <button
-                      key={y}
-                      type="button"
-                      onClick={() => setContractForm(prev => ({ ...prev, endDate: val }))}
-                      className={`flex-1 py-2 text-xs font-semibold transition-all ${
-                        active
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-white text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'
-                      }`}
-                    >
-                      {y} năm
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            </label>
             <div className="block col-span-2 md:col-span-1">
               <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
               <div className="flex items-center gap-2">
@@ -313,33 +312,86 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               </tr>
             </thead>
             <tbody>
-              {manifestItems.map((item, idx) => (
-                <tr key={idx} className="border-b border-slate-100">
-                  <td className="py-2 pr-2">
-                    <select value={item.catalogId} onChange={e => updateManifestRow(idx, 'catalogId', Number(e.target.value))} className="input-field py-1.5 text-sm">
-                      <option value={0}>-- Chọn thiết bị --</option>
-                      {catalog.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input type="number" min={1} value={item.quantity} onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))} className="input-field py-1.5 text-sm" />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
-                      <option value="NEW">Mới 100%</option>
-                      <option value="GOOD">Đang dùng tốt</option>
-                    </select>
-                  </td>
-                  <td className="py-2 text-center">
-                    <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {manifestItems.map((item, idx) => {
+                // Chỉ dòng cuối được sửa tên/tình trạng — các dòng trên khoá lại, chỉ sửa SL và xoá
+                const isLocked = idx < manifestItems.length - 1;
+                const suggestions = catalog.filter(c => normalizeText(c.name).includes(normalizeText(manifestSearch)));
+                return (
+                  <tr key={idx} className="border-b border-slate-100">
+                    <td className="py-2 pr-2 relative">
+                      {isLocked ? (
+                        <span className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg">
+                          <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                          {catalog.find(c => c.id === item.catalogId)?.name || '—'}
+                        </span>
+                      ) : (
+                        <>
+                          <input
+                            value={manifestSearch}
+                            onChange={e => {
+                              setManifestSearch(e.target.value);
+                              setShowSuggest(true);
+                              if (item.catalogId !== 0) updateManifestRow(idx, 'catalogId', 0);
+                            }}
+                            onFocus={() => setShowSuggest(true)}
+                            onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
+                            placeholder="Gõ tên thiết bị để tìm..."
+                            className={`input-field py-1.5 text-sm ${item.catalogId > 0 ? 'border-emerald-400' : ''}`}
+                          />
+                          {showSuggest && (
+                            <div className="absolute z-20 left-0 right-2 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                              {suggestions.length === 0 ? (
+                                <p className="px-3 py-2 text-xs text-slate-400">Không tìm thấy thiết bị phù hợp</p>
+                              ) : suggestions.map(c => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onMouseDown={() => {
+                                    updateManifestRow(idx, 'catalogId', c.id);
+                                    setManifestSearch(c.name);
+                                    setShowSuggest(false);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium"
+                                >
+                                  {c.name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input type="number" min={1} value={item.quantity} onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))} className="input-field py-1.5 text-sm" />
+                    </td>
+                    <td className="py-2 pr-2">
+                      {isLocked ? (
+                        <span className="block px-3 py-1.5 text-sm text-slate-500">
+                          {item.status === 'NEW' ? 'Mới 100%' : 'Đang dùng tốt'}
+                        </span>
+                      ) : (
+                        <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
+                          <option value="NEW">Mới 100%</option>
+                          <option value="GOOD">Đang dùng tốt</option>
+                        </select>
+                      )}
+                    </td>
+                    <td className="py-2 text-center">
+                      <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-          <button onClick={handleAddManifestRow} className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+          <button
+            onClick={handleAddManifestRow}
+            disabled={!canAddManifestRow}
+            className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            title={canAddManifestRow ? '' : 'Hoàn thành dòng hiện tại trước (chọn thiết bị và số lượng > 0)'}
+          >
             <Plus className="w-4 h-4" /> Thêm thiết bị
           </button>
         </div>

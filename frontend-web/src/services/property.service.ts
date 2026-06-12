@@ -164,6 +164,11 @@ export const propertyService = {
     return api.get(`${BASE}/${id}/equipments`);
   },
 
+  /** DELETE /properties/{id}/equipments/{equipmentId} — Xoá 1 lượt gán thiết bị */
+  unassignEquipment: (id: number, equipmentId: number): Promise<void> => {
+    return api.delete(`${BASE}/${id}/equipments/${equipmentId}`);
+  },
+
   // =========================================================================
   // Bước 3 — Depreciation & Submit to Host
   // =========================================================================

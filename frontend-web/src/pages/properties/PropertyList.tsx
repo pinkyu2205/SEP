@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Building2, MapPin, Search, Clock, CheckCircle2,
+  Building2, MapPin, Search,
   RefreshCw, Home, User, DoorOpen, Layers,
   AlertCircle, ArrowRight, ChevronRight, Bell,
 } from 'lucide-react';

@@ -231,8 +231,8 @@ export interface OnboardingOptionsRequest {
 // =============================================================================
 
 export interface StructureUpdateRequest {
-  floorCount: number;
-  roomsPerFloor: number;
+  totalFloor: number;
+  totalRooms: number;
 }
 
 // =============================================================================
