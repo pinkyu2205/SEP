@@ -25,9 +25,11 @@ export const LoginScreen: React.FC = () => {
 
   const validate = (): boolean => {
     const newErrors: { phone?: string; password?: string } = {};
-    if (!phone.trim()) {
-      newErrors.phone = 'Vui lòng nhập số điện thoại';
-    } else if (!/^[0-9]{10}$/.test(phone.trim())) {
+    const id = phone.trim();
+    if (!id) {
+      newErrors.phone = 'Vui lòng nhập số điện thoại hoặc tài khoản';
+    } else if (/^[0-9]+$/.test(id) && id.length !== 10) {
+      // Nếu nhập toàn số -> coi là SĐT, bắt buộc 10 số. Ngược lại coi là username.
       newErrors.phone = 'Số điện thoại không hợp lệ (10 số)';
     }
     if (!password.trim()) {
@@ -73,9 +75,9 @@ export const LoginScreen: React.FC = () => {
 
         {/* Demo Credentials Info */}
         <View style={styles.demoBox}>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager:</Text> 0909876543 / manager123</Text>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant cũ:</Text> 0901234567 / tenant123</Text>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant mới:</Text> 0888888888 / 123456</Text>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager (API thật):</Text> long2 / 123456</Text>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager (mock):</Text> 0909876543 / manager123</Text>
+          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant mock:</Text> 0901234567 / tenant123</Text>
         </View>
 
         {/* Login Form */}
@@ -83,11 +85,10 @@ export const LoginScreen: React.FC = () => {
           <Text style={styles.formTitle}>Đăng nhập</Text>
 
           <Input
-            label="Số điện thoại"
-            placeholder="090..."
+            label="Số điện thoại / Tài khoản"
+            placeholder="090... hoặc long2"
             value={phone}
             onChangeText={setPhone}
-            keyboardType="phone-pad"
             autoCapitalize="none"
             error={errors.phone}
           />
