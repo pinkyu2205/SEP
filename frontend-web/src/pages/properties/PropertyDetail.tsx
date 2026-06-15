@@ -195,10 +195,17 @@ export const PropertyDetail = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [prop, roomList] = await Promise.all([
+      const [prop, roomList, mgrs] = await Promise.all([
         propertyService.getPropertyById(Number(id)),
         propertyService.getRooms(Number(id)),
+        propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
       ]);
+      // Patch tên manager nếu BE chưa trả (mục 6 NOTE-CHO-TEAM-BE.md)
+      if (prop.operationManagerId && !prop.operationManagerName) {
+        const mgr = mgrs.find(m => m.id === prop.operationManagerId);
+        if (mgr) prop.operationManagerName = mgr.fullName || mgr.username;
+      }
+      setManagers(mgrs);
       setProperty(prop);
       setRooms(roomList);
     } catch (e) {
@@ -283,9 +290,6 @@ export const PropertyDetail = () => {
   const rented      = rooms.filter(r => r.status === 'RENTED').length;
   const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
   const propStatus  = propertyStatusLabel[property.status] ?? propertyStatusLabel.DRAFT;
-  const currentManager = property.operationManagerId
-    ? managers.find(m => m.id === property.operationManagerId)
-    : null;
 
   const FILTER_TABS = [
     { value: 'all',         label: 'Tất cả',    count: rooms.length },
@@ -329,7 +333,7 @@ export const PropertyDetail = () => {
                   {property.operationManagerId ? (
                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/20 text-white px-2.5 py-1 rounded-full">
                       <UserCog className="w-3.5 h-3.5" />
-                      Quản lý: {currentManager?.username || 'Đã gán'}
+                      Quản lý: {property.operationManagerName || 'Đã gán'}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium bg-white/10 text-indigo-100 px-2.5 py-1 rounded-full">
@@ -342,32 +346,21 @@ export const PropertyDetail = () => {
 
             {/* Action buttons */}
             <div className="flex items-center gap-2 shrink-0">
-              {property.status === 'PENDING_OPERATION_MANAGER' ? (
+              {(['ACTIVE', 'PENDING_OPERATION_MANAGER', 'PENDING_HOST_REVIEW'].includes(property.status)) ? (
                 <button onClick={openAssignModal}
-                  className="flex items-center gap-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 border border-indigo-400 px-4 py-2 text-sm font-semibold text-white transition">
+                  className="flex items-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 px-4 py-2 text-sm font-semibold text-white transition">
                   <UserCog className="w-4 h-4" />
-                  Gán quản lý
+                  {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
                 </button>
-              ) : property.operationManagerId ? (
-                <div className="group relative">
-                  <button disabled
-                    className="flex items-center gap-2 rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm font-semibold text-white/50 cursor-not-allowed">
-                    <UserCog className="w-4 h-4" />
-                    Đổi quản lý
-                  </button>
-                  <div className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-slate-900 text-slate-200 text-xs p-3 shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-10">
-                    Tính năng đổi quản lý đang được phát triển.
-                  </div>
-                </div>
               ) : (
                 <div className="group relative">
                   <button disabled
                     className="flex items-center gap-2 rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm font-semibold text-white/50 cursor-not-allowed">
                     <UserCog className="w-4 h-4" />
-                    Gán quản lý
+                    {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
                   </button>
                   <div className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-slate-900 text-slate-200 text-xs p-3 shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-10">
-                    Chỉ gán được khi nhà ở trạng thái "Chờ gán quản lý".
+                    Không thể thay đổi quản lý ở trạng thái hiện tại.
                   </div>
                 </div>
               )}
@@ -430,13 +423,15 @@ export const PropertyDetail = () => {
             const st = roomStatusMap[room.status] ?? roomStatusMap.DRAFT;
             return (
               <div key={room.id} onClick={() => {
-                if (room.status === 'RENTED') {
+                if (!['DRAFT', 'ACTIVE'].includes(property.status)) {
+                  toast.error(`Tòa nhà đang ${propStatus.label.toLowerCase()} — không thể đổi trạng thái phòng.`);
+                } else if (room.status === 'RENTED') {
                   toast.error('Phòng đang cho thuê — không thể đổi trạng thái!');
                 } else {
                   setSelectedRoom(room);
                 }
               }}
-                className={`bg-white rounded-2xl border-2 ${st.border} p-4 ${room.status === 'RENTED' ? 'cursor-not-allowed opacity-90' : 'cursor-pointer hover:shadow-md'} transition-all group`}>
+                className={`bg-white rounded-2xl border-2 ${st.border} p-4 ${!['DRAFT', 'ACTIVE'].includes(property.status) || room.status === 'RENTED' ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:shadow-md'} transition-all group`}>
                 {/* Room header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">

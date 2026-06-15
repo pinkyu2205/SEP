@@ -150,6 +150,16 @@ export const propertyService = {
     return api.patch(`${BASE}/${id}/rooms/${roomId}/status`, { status });
   },
 
+  /** PUT /properties/{id}/rooms/{roomId} — sửa thông tin phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
+  updateRoom: (id: number, roomId: number, data: Partial<AddRoomRequest>): Promise<RoomResponse> => {
+    return api.put(`${BASE}/${id}/rooms/${roomId}`, data);
+  },
+
+  /** DELETE /properties/{id}/rooms/{roomId} — xoá phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
+  deleteRoom: (id: number, roomId: number): Promise<void> => {
+    return api.delete(`${BASE}/${id}/rooms/${roomId}`);
+  },
+
   // =========================================================================
   // Bước 2E — Equipment Assignment
   // =========================================================================
@@ -195,6 +205,16 @@ export const propertyService = {
   /** POST /properties/{id}/renovation/complete */
   completeRenovation: (id: number): Promise<PropertyResponse> => {
     return api.post(`${BASE}/${id}/renovation/complete`);
+  },
+
+  /** POST /properties/{id}/renovation/start — Bắt đầu cải tạo lại từ trạng thái ACTIVE */
+  startRenovation: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/renovation/start`);
+  },
+
+  /** GET /properties/{id}/renovation/sessions — Lịch sử cải tạo nhóm theo đợt (BE mục 10) */
+  getRenovationSessions: (id: number): Promise<import('../types/api.types').RenovationSession[]> => {
+    return api.get(`${BASE}/${id}/renovation/sessions`);
   },
 
   // =========================================================================

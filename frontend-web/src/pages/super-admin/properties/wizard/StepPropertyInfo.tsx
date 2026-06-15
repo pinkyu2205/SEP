@@ -1,23 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Building, Package, FileText, Plus, Trash2, Check, Upload, Save, AlertCircle, Lock } from 'lucide-react';
-import type { 
-  PropertyResponse, 
-  ManifestItem, 
-  InboundContractRequest, 
-  InboundContractResponse, 
-  EquipmentCatalogItem 
+import { Building, Package, FileText, Plus, Trash2, Check, Download, Save, AlertCircle, Lock } from 'lucide-react';
+import type {
+  PropertyResponse,
+  ManifestItem,
+  InboundContractRequest,
+  InboundContractResponse,
+  EquipmentCatalogItem
 } from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
 import { catalogService } from '../../../../services/catalog.service';
-import { uploadToCloudinary } from '../../../../services/upload.service';
 
 interface StepPropertyInfoProps {
   property: PropertyResponse;
   onNext: () => void;
   nextLabel?: string;
+  prefillContract?: Partial<InboundContractRequest>;
 }
 
-export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →' }: StepPropertyInfoProps) => {
+export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →', prefillContract }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
   
   // Manifest State
@@ -34,7 +34,6 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   const [contractForm, setContractForm] = useState<InboundContractRequest>({
     contractCode: '', ownerName: '', totalRentAmount: 0, startDate: '', endDate: '', contractScanUrl: ''
   });
-  const [isUploading, setIsUploading] = useState(false);
   const [isSavingContract, setIsSavingContract] = useState(false);
   const [rentAmountDisplay, setRentAmountDisplay] = useState('');
 
@@ -63,7 +62,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
         
         if (manifestData.status === 'fulfilled' && manifestData.value.length > 0) {
           setManifestItems(manifestData.value.map(m => ({
-            catalogId: m.catalogId, quantity: m.quantity, status: m.status
+            catalogId: m.catalogId, quantity: m.quantity, status: m.status, source: (m as any).source ?? 'INITIAL_HANDOVER'
           })));
           setManifestSaved(true);
           // Dòng cuối là dòng đang sửa — đổ sẵn tên thiết bị vào ô autocomplete
@@ -73,7 +72,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           }
         } else {
           // Initialize empty if no manifest
-          setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW' }]);
+          setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW', source: 'INITIAL_HANDOVER' }]);
         }
 
         if (contractData.status === 'fulfilled' && contractData.value) {
@@ -87,6 +86,11 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             contractScanUrl: contractData.value.contractScanUrl || ''
           });
           setRentAmountDisplay(formatVND(contractData.value.totalRentAmount));
+        } else if (prefillContract) {
+          setContractForm(prev => ({ ...prev, ...prefillContract }));
+          if (prefillContract.totalRentAmount) {
+            setRentAmountDisplay(formatVND(prefillContract.totalRentAmount));
+          }
         }
       } catch (error) {
         console.error('Failed to init step 1', error);
@@ -95,6 +99,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
       }
     };
     initData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [property.id]);
 
   // Manifest Handlers
@@ -104,7 +109,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
   const handleAddManifestRow = () => {
     if (!canAddManifestRow) return;
-    setManifestItems(prev => [...prev, { catalogId: 0, quantity: 1, status: 'NEW' }]);
+    setManifestItems(prev => [...prev, { catalogId: 0, quantity: 1, status: 'NEW', source: 'INITIAL_HANDOVER' }]);
     setManifestSearch('');
     setManifestSaved(false);
   };
@@ -137,29 +142,17 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
     try {
       await propertyService.putManifest(property.id, { items: validItems });
       setManifestSaved(true);
-      setManifestItems(validItems.length > 0 ? validItems : [{ catalogId: 0, quantity: 1, status: 'NEW' }]);
-    } catch (err) {
-      alert('Lỗi lưu manifest');
+      setManifestItems(validItems.length > 0 ? validItems : [{ catalogId: 0, quantity: 1, status: 'NEW', source: 'INITIAL_HANDOVER' }]);
+    } catch (err: any) {
+      const d = err.response?.data;
+      alert(d?.error || d?.message || d?.fieldErrors
+        ? JSON.stringify(d.fieldErrors)
+        : 'Lỗi lưu manifest');
     } finally {
       setIsSavingManifest(false);
     }
   };
 
-  // Contract Handlers
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    setIsUploading(true);
-    try {
-      const url = await uploadToCloudinary(file);
-      setContractForm(prev => ({ ...prev, contractScanUrl: url }));
-    } catch (err) {
-      alert('Lỗi tải file lên');
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   const saveContract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,20 +259,15 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                 className="input-field"
               />
             </label>
-            <div className="block col-span-2 md:col-span-1">
-              <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng (Scan/PDF)</span>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition flex-1 justify-center border border-slate-300">
-                  <Upload className="w-4 h-4" /> {isUploading ? 'Đang tải lên...' : 'Chọn File'}
-                  <input type="file" accept=".pdf,image/*,.doc,.docx" className="hidden" onChange={handleUpload} disabled={isUploading} />
-                </label>
-              </div>
-              {contractForm.contractScanUrl && (
-                <a href={contractForm.contractScanUrl} target="_blank" rel="noreferrer" className="mt-2 text-xs text-indigo-600 hover:underline block truncate">
-                  Đã tải file: Xem hợp đồng
+            {contractForm.contractScanUrl && (
+              <div className="block col-span-2 md:col-span-1">
+                <span className="mb-1 text-sm font-bold text-slate-700">File Hợp đồng</span>
+                <a href={contractForm.contractScanUrl} download target="_blank" rel="noreferrer"
+                  className="mt-1 flex items-center gap-2 text-xs text-indigo-600 hover:underline truncate">
+                  <Download className="w-3.5 h-3.5 shrink-0" /> Tải xuống hợp đồng
                 </a>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <div className="flex justify-end">
             <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
@@ -290,8 +278,8 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
       </section>
 
       {/* 1C: Manifest */}
-      <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between">
+      <section className="rounded-2xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 bg-slate-50 px-5 py-4 flex items-center justify-between rounded-t-2xl">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-indigo-500" />
             <h3 className="font-bold text-slate-800">Khai báo trang thiết bị có sẵn</h3>
@@ -302,90 +290,95 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           </button>
         </div>
         <div className="p-5">
-          <table className="w-full text-sm text-left">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-500">
-                <th className="pb-2 font-semibold">Tên Thiết bị</th>
-                <th className="pb-2 font-semibold w-24">Số lượng</th>
-                <th className="pb-2 font-semibold w-32">Tình trạng</th>
-                <th className="pb-2 font-semibold w-12 text-center">Xóa</th>
-              </tr>
-            </thead>
-            <tbody>
-              {manifestItems.map((item, idx) => {
-                // Chỉ dòng cuối được sửa tên/tình trạng — các dòng trên khoá lại, chỉ sửa SL và xoá
-                const isLocked = idx < manifestItems.length - 1;
-                const suggestions = catalog.filter(c => normalizeText(c.name).includes(normalizeText(manifestSearch)));
-                return (
-                  <tr key={idx} className="border-b border-slate-100">
-                    <td className="py-2 pr-2 relative">
-                      {isLocked ? (
-                        <span className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg">
-                          <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                          {catalog.find(c => c.id === item.catalogId)?.name || '—'}
-                        </span>
-                      ) : (
-                        <>
-                          <input
-                            value={manifestSearch}
-                            onChange={e => {
-                              setManifestSearch(e.target.value);
-                              setShowSuggest(true);
-                              if (item.catalogId !== 0) updateManifestRow(idx, 'catalogId', 0);
-                            }}
-                            onFocus={() => setShowSuggest(true)}
-                            onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
-                            placeholder="Gõ tên thiết bị để tìm..."
-                            className={`input-field py-1.5 text-sm ${item.catalogId > 0 ? 'border-emerald-400' : ''}`}
-                          />
-                          {showSuggest && (
-                            <div className="absolute z-20 left-0 right-2 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                              {suggestions.length === 0 ? (
-                                <p className="px-3 py-2 text-xs text-slate-400">Không tìm thấy thiết bị phù hợp</p>
-                              ) : suggestions.map(c => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onMouseDown={() => {
-                                    updateManifestRow(idx, 'catalogId', c.id);
-                                    setManifestSearch(c.name);
-                                    setShowSuggest(false);
-                                  }}
-                                  className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium"
-                                >
-                                  {c.name}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </td>
-                    <td className="py-2 pr-2">
-                      <input type="number" min={1} value={item.quantity} onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))} className="input-field py-1.5 text-sm" />
-                    </td>
-                    <td className="py-2 pr-2">
-                      {isLocked ? (
-                        <span className="block px-3 py-1.5 text-sm text-slate-500">
-                          {item.status === 'NEW' ? 'Mới 100%' : 'Đang dùng tốt'}
-                        </span>
-                      ) : (
-                        <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
-                          <option value="NEW">Mới 100%</option>
-                          <option value="GOOD">Đang dùng tốt</option>
-                        </select>
-                      )}
-                    </td>
-                    <td className="py-2 text-center">
-                      <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {/* Header */}
+          <div className="grid grid-cols-[1fr_96px_128px_48px] gap-2 pb-2 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <span>Tên Thiết bị</span>
+            <span>Số lượng</span>
+            <span>Tình trạng</span>
+            <span className="text-center">Xóa</span>
+          </div>
+
+          {/* Rows */}
+          <div className="space-y-2 mt-2">
+            {manifestItems.map((item, idx) => {
+              const isLocked = idx < manifestItems.length - 1;
+              const suggestions = catalog.filter(c => normalizeText(c.name).includes(normalizeText(manifestSearch)));
+              return (
+                <div key={idx} className="grid grid-cols-[1fr_96px_128px_48px] gap-2 items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                  {/* Tên thiết bị */}
+                  <div className="relative">
+                    {isLocked ? (
+                      <span className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg">
+                        <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                        {catalog.find(c => c.id === item.catalogId)?.name || '—'}
+                      </span>
+                    ) : (
+                      <>
+                        <input
+                          value={manifestSearch}
+                          onChange={e => {
+                            setManifestSearch(e.target.value);
+                            setShowSuggest(true);
+                            if (item.catalogId !== 0) updateManifestRow(idx, 'catalogId', 0);
+                          }}
+                          onFocus={() => setShowSuggest(true)}
+                          onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
+                          placeholder="Gõ tên thiết bị để tìm..."
+                          className={`input-field py-1.5 text-sm ${item.catalogId > 0 ? 'border-emerald-400' : ''}`}
+                        />
+                        {showSuggest && (
+                          <div className="absolute z-30 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                            {suggestions.length === 0 ? (
+                              <p className="px-3 py-2 text-xs text-slate-400">Không tìm thấy thiết bị phù hợp</p>
+                            ) : suggestions.map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onMouseDown={() => {
+                                  updateManifestRow(idx, 'catalogId', c.id);
+                                  setManifestSearch(c.name);
+                                  setShowSuggest(false);
+                                }}
+                                className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-medium"
+                              >
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Số lượng */}
+                  <input
+                    type="number" min={1} value={item.quantity}
+                    onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))}
+                    className="input-field py-1.5 text-sm"
+                  />
+
+                  {/* Tình trạng */}
+                  {isLocked ? (
+                    <span className="px-3 py-1.5 text-sm text-slate-500">
+                      {item.status === 'NEW' ? 'Mới 100%' : 'Đang dùng tốt'}
+                    </span>
+                  ) : (
+                    <select value={item.status} onChange={e => updateManifestRow(idx, 'status', e.target.value)} className="input-field py-1.5 text-sm">
+                      <option value="NEW">Mới 100%</option>
+                      <option value="GOOD">Đang dùng tốt</option>
+                    </select>
+                  )}
+
+                  {/* Xóa */}
+                  <div className="flex justify-center">
+                    <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
           <button
             onClick={handleAddManifestRow}
             disabled={!canAddManifestRow}

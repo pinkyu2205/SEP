@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Home, LayoutGrid, Hammer, DoorOpen, Package,
   Check, AlertCircle, Settings2, ChevronDown, ChevronRight, Layers, X,
-  CalendarDays, Plus, Trash2
+  CalendarDays, Plus, Trash2, Pencil
 } from 'lucide-react';
 import type {
   PropertyResponse, RenovationCategory, RenovationLineResponse,
@@ -10,7 +10,8 @@ import type {
 } from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
 import { catalogService } from '../../../../services/catalog.service';
-import type { EquipmentSource, EquipmentCatalogItem } from '../../../../types/api.types';
+import { ConfirmDialog } from '../../../../components/ConfirmDialog';
+import type { EquipmentSource, ManifestEquipmentStatus, PropertyType } from '../../../../types/api.types';
 
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
 const fmtDate = (d: string) => (d ? d.split('-').reverse().join('/') : '');
@@ -21,9 +22,11 @@ interface StepOnboardingOptionsProps {
   onBack: () => void;
   onPropertyUpdated: (p: PropertyResponse) => void;
   nextLabel?: string;
+  /** Chế độ cải tạo lại: chỉ hiện bước 1 (Chọn cấu trúc) và bước 2 (Cải tạo), bỏ bước Gán thiết bị */
+  renovationOnly?: boolean;
 }
 
-export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpdated, nextLabel = 'Tiếp tục Xem giá →' }: StepOnboardingOptionsProps) => {
+export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpdated, nextLabel = 'Tiếp tục Xem giá →', renovationOnly = false }: StepOnboardingOptionsProps) => {
   const [loading, setLoading] = useState(false);
 
   // Sub-step nội bộ: 1 = Chọn cấu trúc, 2 = Cải tạo (chỉ khi có cải tạo), 3 = Gán thiết bị
@@ -36,8 +39,12 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
 
   // 2B: Renovation State
   const [categories, setCategories] = useState<RenovationCategory[]>([]);
-  const [catalogs, setCatalogs] = useState<EquipmentCatalogItem[]>([]);
   const [renoLines, setRenoLines] = useState<RenovationLineResponse[]>([]);
+  /** Snapshot lúc load = hạng mục từ đợt cải tạo trước (chỉ dùng khi renovationOnly) */
+  const [baseLines, setBaseLines] = useState<RenovationLineResponse[]>([]);
+  /** Hạng mục thêm MỚI trong đợt cải tạo lần này (chỉ dùng khi renovationOnly) */
+  const [currentSessionLines, setCurrentSessionLines] = useState<RenovationLineResponse[]>([]);
+  const [showPrevSession, setShowPrevSession] = useState(false);
   const [newRenoLine, setNewRenoLine] = useState({ categoryId: 0, cost: 0, note: '' });
   const [renoCostDisplay, setRenoCostDisplay] = useState('');
   const [schedule, setSchedule] = useState({ startDate: '', endDate: '' });
@@ -45,16 +52,19 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
   
   // 2B.1: Structure Update
   const [showStructureUpdate, setShowStructureUpdate] = useState(false);
-  const [structure, setStructure] = useState({ floorCount: property.floorCount || 1, roomsPerFloor: property.roomsPerFloor || 1 });
+  const [structure, setStructure] = useState(() => {
+    const floors = property.totalFloor ?? property.floorCount ?? 1;
+    const rooms  = property.totalRooms ?? 0;
+    return { floorCount: floors, roomsPerFloor: floors > 0 && rooms > 0 ? Math.ceil(rooms / floors) : 1 };
+  });
   
-  // 2B.2: Purchase New Equipment (unitPrice = đơn giá, thành tiền = quantity × unitPrice)
-  type PurchaseRow = { catalogId: number; quantity: number; unitPrice: number; unitPriceDisplay: string };
-  const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([{ catalogId: 0, quantity: 1, unitPrice: 0, unitPriceDisplay: '' }]);
-  const [isSavingPurchase, setIsSavingPurchase] = useState(false);
-
   // 2C: Rooms State
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [newRoom, setNewRoom] = useState({ roomNumber: '', area: 0, maxOccupants: 2, propertyType: 'INDIVIDUAL_ROOM' as const });
+  const [editingRoomId, setEditingRoomId] = useState<number | null>(null);
+  const [editRoom, setEditRoom] = useState({ roomNumber: '', area: 0, maxOccupants: 2, propertyType: 'INDIVIDUAL_ROOM' as PropertyType });
+  const [roomToDelete, setRoomToDelete] = useState<RoomResponse | null>(null);
+  const [deletingRoom, setDeletingRoom] = useState(false);
 
   // 2D: Equipment State
   const [manifest, setManifest] = useState<ManifestItemResponse[]>([]);
@@ -64,6 +74,8 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
   const [selectedFloor, setSelectedFloor] = useState(1);
   const [expandedRoomId, setExpandedRoomId] = useState<number | null>(null);
   const [roomAssignForm, setRoomAssignForm] = useState({ manifestId: 0, quantity: 1, source: 'INITIAL_HANDOVER' as EquipmentSource });
+  const [editingEquipId, setEditingEquipId] = useState<number | null>(null);
+  const [editEquipForm, setEditEquipForm] = useState({ quantity: 1, source: 'INITIAL_HANDOVER' as EquipmentSource });
 
   // Data Loading
   useEffect(() => {
@@ -75,18 +87,17 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
           setHasRenovation(property.hasRenovation || false);
         }
 
-        const [cats, eqCats, lines, rms, mft, asg] = await Promise.all([
-          catalogService.getRenovationCategories(),
-          catalogService.getEquipmentCatalog(),
-          property.hasRenovation ? propertyService.getRenovationLines(property.id) : Promise.resolve([]),
-          property.wholeHouse === false ? propertyService.getRooms(property.id) : Promise.resolve([]),
-          propertyService.getManifest(property.id),
-          propertyService.getAssignedEquipments(property.id),
+        const [cats, lines, rms, mft, asg] = await Promise.all([
+          catalogService.getRenovationCategories().catch(() => [] as RenovationCategory[]),
+          property.hasRenovation ? propertyService.getRenovationLines(property.id).catch(() => [] as RenovationLineResponse[]) : Promise.resolve([] as RenovationLineResponse[]),
+          property.wholeHouse === false ? propertyService.getRooms(property.id).catch(() => [] as RoomResponse[]) : Promise.resolve([] as RoomResponse[]),
+          propertyService.getManifest(property.id).catch(() => [] as ManifestItemResponse[]),
+          propertyService.getAssignedEquipments(property.id).catch(() => [] as EquipmentAssignmentResponse[]),
         ]);
 
         setCategories(cats);
-        setCatalogs(eqCats);
         setRenoLines(lines);
+        if (renovationOnly) setBaseLines(lines); // snapshot đợt cũ
         setRooms(rms);
         setManifest(mft);
         setAssignments(asg);
@@ -105,8 +116,8 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
       const p = await propertyService.setOnboardingOptions(property.id, { wholeHouse, hasRenovation });
       setOptionsSaved(true);
       onPropertyUpdated(p);
-      // Có cải tạo → sang bước 2, không cải tạo → nhảy thẳng bước 3
-      setSubStep(p.hasRenovation ? 2 : 3);
+      // renovationOnly: luôn sang bước 2. Thường: có cải tạo → 2, không → 3
+      setSubStep(renovationOnly ? 2 : (p.hasRenovation ? 2 : 3));
     } catch (err) {
       alert('Lỗi lưu tùy chọn');
     }
@@ -116,7 +127,8 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
     if (newRenoLine.categoryId === 0 || newRenoLine.cost <= 0) return;
     try {
       const res = await propertyService.addRenovationLine(property.id, newRenoLine);
-      setRenoLines([...renoLines, res]);
+      setRenoLines(prev => [...prev, res]);
+      if (renovationOnly) setCurrentSessionLines(prev => [...prev, res]);
       setNewRenoLine({ categoryId: 0, cost: 0, note: '' });
     } catch (err) { alert('Lỗi thêm cải tạo'); }
   };
@@ -138,52 +150,6 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
       alert('Cập nhật cấu trúc số phòng thành công!');
       onPropertyUpdated(p);
     } catch (err: any) { alert(err.response?.data?.message || 'Lỗi cập nhật cấu trúc'); }
-  };
-
-  const purchaseAllEquipment = async () => {
-    const validRows = purchaseRows.filter(r => r.catalogId > 0 && r.quantity > 0 && r.unitPrice > 0);
-    if (validRows.length === 0) return alert('Vui lòng điền đầy đủ thông tin ít nhất 1 thiết bị');
-
-    // BE chỉ cho ghi chi phí (renovation line) khi tòa nhà có cải tạo
-    const canRecordCost = !!property.hasRenovation;
-    let renoCatId: number | undefined;
-    if (canRecordCost) {
-      const eqCat = categories.find(c => c.code === 'EQUIPMENT' || c.name.toLowerCase().includes('thiết bị'));
-      renoCatId = eqCat ? eqCat.id : categories[0]?.id;
-      if (!renoCatId) return alert('Chưa có danh mục thiết bị trong hệ thống');
-    }
-
-    setIsSavingPurchase(true);
-    try {
-      const updatedManifestItems = manifest.map(m => ({ catalogId: m.catalogId, quantity: m.quantity, status: m.status }));
-      const newRenoResults: RenovationLineResponse[] = [];
-
-      for (const row of validRows) {
-        if (canRecordCost && renoCatId) {
-          const catalogName = catalogs.find(c => c.id === row.catalogId)?.name || 'Thiết bị';
-          const renoRes = await propertyService.addRenovationLine(property.id, {
-            categoryId: renoCatId,
-            cost: row.unitPrice * row.quantity,
-            note: `Mua thêm ${row.quantity} ${catalogName} (đơn giá ${row.unitPrice.toLocaleString('vi-VN')}đ)`
-          });
-          newRenoResults.push(renoRes);
-        }
-
-        const existingIdx = updatedManifestItems.findIndex(m => m.catalogId === row.catalogId && m.status === 'NEW');
-        if (existingIdx >= 0) updatedManifestItems[existingIdx].quantity += row.quantity;
-        else updatedManifestItems.push({ catalogId: row.catalogId, quantity: row.quantity, status: 'NEW' });
-      }
-
-      await propertyService.putManifest(property.id, { items: updatedManifestItems });
-      const mft = await propertyService.getManifest(property.id);
-      setManifest(mft);
-      setRenoLines(prev => [...prev, ...newRenoResults]);
-      setPurchaseRows([{ catalogId: 0, quantity: 1, unitPrice: 0, unitPriceDisplay: '' }]);
-    } catch (err) {
-      alert('Lỗi lưu thiết bị mua mới');
-    } finally {
-      setIsSavingPurchase(false);
-    }
   };
 
   const refreshEquipmentData = async () => {
@@ -208,33 +174,101 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
       });
       await refreshEquipmentData();
       setRoomAssignForm({ manifestId: 0, quantity: 1, source: 'INITIAL_HANDOVER' });
-    } catch (err: any) { alert(err.response?.data?.message || 'Lỗi gán thiết bị'); }
+    } catch (err: any) { alert(err.response?.data?.error || err.response?.data?.message || 'Lỗi gán thiết bị'); }
   };
 
   const removeAssignment = async (equipmentId: number) => {
     try {
       await propertyService.unassignEquipment(property.id, equipmentId);
       await refreshEquipmentData();
-    } catch (err: any) { alert(err.response?.data?.message || 'Lỗi xoá thiết bị đã gán'); }
+    } catch (err: any) { alert(err.response?.data?.error || err.response?.data?.message || 'Lỗi xoá thiết bị đã gán'); }
+  };
+
+  const startEditEquip = (a: EquipmentAssignmentResponse) => {
+    setEditingEquipId(a.id);
+    setEditEquipForm({ quantity: a.quantity, source: (a as any).source ?? 'INITIAL_HANDOVER' });
+  };
+
+  const saveEditEquipment = async (a: EquipmentAssignmentResponse, roomId: number) => {
+    if (editEquipForm.quantity <= 0) return;
+    try {
+      await propertyService.unassignEquipment(property.id, a.id);
+      await propertyService.assignEquipment(property.id, {
+        catalogId: a.catalogId,
+        quantity: editEquipForm.quantity,
+        status: a.status as ManifestEquipmentStatus,
+        source: editEquipForm.source,
+        roomId,
+      });
+      await refreshEquipmentData();
+      setEditingEquipId(null);
+    } catch (err: any) {
+      alert(err.response?.data?.error || err.response?.data?.message || 'Không sửa được thiết bị');
+    }
+  };
+
+  const startEditRoom = (room: RoomResponse) => {
+    setEditingRoomId(room.id);
+    setEditRoom({
+      roomNumber: room.roomNumber,
+      area: room.area,
+      maxOccupants: room.maxOccupants ?? 2,
+      propertyType: room.propertyType,
+    });
+  };
+
+  const saveEditRoom = async (roomId: number) => {
+    if (!editRoom.roomNumber.trim() || editRoom.area <= 0) return;
+    try {
+      const updated = await propertyService.updateRoom(property.id, roomId, editRoom);
+      setRooms(prev => prev.map(r => (r.id === roomId ? updated : r)));
+      setEditingRoomId(null);
+    } catch (err: any) {
+      const d = err.response?.data;
+      const msg = d?.fieldErrors
+        ? Object.entries(d.fieldErrors).map(([f, m]) => `${f}: ${m}`).join('\n')
+        : (d?.error || d?.message || 'Không sửa được phòng — vui lòng thử lại');
+      alert(msg);
+    }
+  };
+
+  const handleDeleteRoom = async () => {
+    if (!roomToDelete) return;
+    setDeletingRoom(true);
+    try {
+      await propertyService.deleteRoom(property.id, roomToDelete.id);
+      setRooms(prev => prev.filter(r => r.id !== roomToDelete.id));
+      setRoomToDelete(null);
+    } catch (err: any) {
+      setRoomToDelete(null);
+      alert(err.response?.data?.error || err.response?.data?.message || 'Không xoá được phòng — vui lòng thử lại');
+    } finally {
+      setDeletingRoom(false);
+    }
   };
 
   // Validation to enable Next button
   const isManifestFullyAssigned = manifest.length > 0 && manifest.every(m => m.assignedCount === m.quantity);
   // Nhà nguyên căn: BE không cho gán thiết bị vào phòng — chỉ nhà chia phòng mới cần gán đủ
-  const isEquipmentComplete = property.wholeHouse === true || isManifestFullyAssigned;
-  const isRoomsComplete = property.wholeHouse === true || rooms.length === property.totalRooms;
+  // Cải tạo lại (renovationOnly): không cần gán thiết bị, chỉ cần tạo đủ phòng
+  const isEquipmentComplete = renovationOnly || property.wholeHouse === true || isManifestFullyAssigned;
+  const isRoomsComplete = property.wholeHouse === true || rooms.length >= property.totalRooms;
   const isRenoComplete = !property.hasRenovation || renoLines.length > 0;
 
   const canProceed = optionsSaved && isRoomsComplete && isRenoComplete && isEquipmentComplete;
 
   if (loading) return <div className="py-20 text-center">Đang tải cấu hình...</div>;
 
-  // Các bước hiển thị trên thanh chỉ báo (ẩn bước Cải tạo nếu không chọn cải tạo)
+  // Các bước hiển thị trên thanh chỉ báo
   const renoEnabled = optionsSaved ? !!property.hasRenovation : hasRenovation;
+  // Cải tạo lại nhà chia phòng vẫn cần bước tạo/đặt tên phòng (khi đổi số tầng/phòng)
+  const renoNeedsRooms = renovationOnly && property.wholeHouse === false;
   const stepDefs: { id: 1 | 2 | 3; label: string }[] = [
     { id: 1, label: 'Chọn cấu trúc' },
-    ...(renoEnabled ? [{ id: 2 as const, label: 'Cải tạo' }] : []),
-    { id: 3, label: 'Gán thiết bị' },
+    ...(renoEnabled || renovationOnly ? [{ id: 2 as const, label: 'Cải tạo' }] : []),
+    ...(renovationOnly
+      ? (renoNeedsRooms ? [{ id: 3 as const, label: 'Chia phòng' }] : [])
+      : [{ id: 3 as const, label: 'Gán thiết bị' }]),
   ];
 
   return (
@@ -314,21 +348,67 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
       </section>
       )}
 
-      {/* ═══ BƯỚC 2: Cải tạo (chỉ khi chọn có cải tạo) ═══ */}
-      {subStep === 2 && optionsSaved && property.hasRenovation && (
+      {/* ═══ BƯỚC 2: Cải tạo ═══ */}
+      {subStep === 2 && optionsSaved && (property.hasRenovation || renovationOnly) && (() => {
+        const baseCost = baseLines.reduce((s, l) => s + l.cost, 0);
+        const newCost  = currentSessionLines.reduce((s, l) => s + l.cost, 0);
+        const totalCost = renovationOnly ? (baseCost + newCost) : renoLines.reduce((s, l) => s + l.cost, 0);
+
+        /** Form thêm hạng mục — dùng lại ở cả hai mode */
+        const addForm = (
+          <div className="flex gap-3 items-end bg-amber-50/60 border border-dashed border-amber-300 rounded-xl p-4">
+            <div className="flex-1">
+              <span className="mb-1 block text-xs font-bold text-slate-600">Loại hạng mục</span>
+              <select value={newRenoLine.categoryId} onChange={e => setNewRenoLine({...newRenoLine, categoryId: Number(e.target.value)})} className="input-field text-sm bg-white">
+                <option value={0}>-- Chọn hạng mục --</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="w-48">
+              <span className="mb-1 block text-xs font-bold text-slate-600">Chi phí dự kiến</span>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={renoCostDisplay}
+                  onChange={e => {
+                    const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
+                    if (!/^\d*$/.test(raw)) return;
+                    setRenoCostDisplay(raw ? Number(raw).toLocaleString('vi-VN') : '');
+                    setNewRenoLine(prev => ({ ...prev, cost: Number(raw) || 0 }));
+                  }}
+                  className="input-field text-sm bg-white pr-8"
+                  placeholder="VD: 5.000.000"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-medium pointer-events-none">đ</span>
+              </div>
+            </div>
+            <button
+              onClick={() => { addRenoLine(); setRenoCostDisplay(''); }}
+              disabled={newRenoLine.categoryId === 0 || newRenoLine.cost <= 0}
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2 rounded-xl text-sm font-bold h-[42px] whitespace-nowrap transition"
+            >
+              <Plus className="w-4 h-4" /> Thêm hạng mục
+            </button>
+          </div>
+        );
+
+        return (
         <div className="space-y-5">
           {/* Tổng quan cải tạo */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-5">
-              <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wide mb-1.5">Tổng chi phí cải tạo</p>
-              <p className="text-2xl font-black text-amber-600 leading-tight">
-                {formatVND(renoLines.reduce((s, l) => s + l.cost, 0))}
+              <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wide mb-1.5">
+                {renovationOnly ? 'Tổng tích lũy (tất cả đợt)' : 'Tổng chi phí cải tạo'}
               </p>
+              <p className="text-2xl font-black text-amber-600 leading-tight">{formatVND(totalCost)}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Hạng mục cải tạo</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">
+                {renovationOnly ? 'Hạng mục lần này' : 'Hạng mục cải tạo'}
+              </p>
               <p className="text-2xl font-black text-slate-800 leading-tight">
-                {renoLines.length} <span className="text-sm font-semibold text-slate-400">hạng mục</span>
+                {renovationOnly ? currentSessionLines.length : renoLines.length}{' '}
+                <span className="text-sm font-semibold text-slate-400">hạng mục</span>
               </p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -343,7 +423,86 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
             </div>
           </div>
 
-          {/* Card 1: Hạng mục cải tạo */}
+          {renovationOnly ? (
+            <>
+              {/* ── Lịch sử đợt trước (read-only, thu gọn) ── */}
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <button
+                  onClick={() => setShowPrevSession(o => !o)}
+                  className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50 border-b border-slate-100 text-left hover:bg-slate-100 transition"
+                >
+                  {showPrevSession
+                    ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                    : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
+                  <Hammer className="h-4 w-4 text-slate-400 shrink-0" />
+                  <span className="font-bold text-slate-600">Lần cải tạo trước</span>
+                  <span className="text-xs text-slate-400 ml-1">({baseLines.length} hạng mục)</span>
+                  <span className="ml-auto font-bold text-slate-500">{formatVND(baseCost)}</span>
+                </button>
+                {showPrevSession && (
+                  <div className="p-5">
+                    {baseLines.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-4">Chưa có hạng mục nào từ đợt trước</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {baseLines.map((line, i) => (
+                          <div key={line.id} className="flex justify-between items-center px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-500 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                              <span className="font-semibold text-slate-500">{line.categoryName}</span>
+                              {line.note && <span className="text-slate-400 text-xs truncate">({line.note})</span>}
+                            </div>
+                            <span className="font-bold text-slate-400 shrink-0">{formatVND(line.cost)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Hạng mục lần cải tạo này (editable) ── */}
+              <section className="rounded-2xl border-2 border-amber-300 bg-white overflow-hidden">
+                <div className="border-b border-amber-100 bg-amber-50 px-6 py-4 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <Hammer className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-slate-800">Hạng mục lần cải tạo này</h3>
+                    <p className="text-xs text-slate-400">Thêm các đầu việc cho đợt cải tạo mới này</p>
+                  </div>
+                  <span className="font-black text-amber-700 shrink-0">{formatVND(newCost)}</span>
+                </div>
+                <div className="p-6 space-y-4">
+                  {currentSessionLines.length === 0 ? (
+                    <div className="text-center py-4 text-slate-400">
+                      <Hammer className="w-8 h-8 mx-auto mb-2 opacity-25" />
+                      <p className="text-sm">Chưa có hạng mục mới — thêm bên dưới</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {currentSessionLines.map((line, i) => (
+                        <div key={line.id} className="flex justify-between items-center px-4 py-2.5 rounded-xl border border-amber-200 bg-amber-50/40 text-sm">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                            <span className="font-semibold text-slate-700">{line.categoryName}</span>
+                            {line.note && <span className="text-slate-400 text-xs truncate">({line.note})</span>}
+                          </div>
+                          <span className="font-bold text-amber-600 shrink-0">{formatVND(line.cost)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between items-center px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-sm">
+                        <span className="font-bold text-amber-800">Tổng lần này</span>
+                        <span className="font-black text-amber-700">{formatVND(newCost)}</span>
+                      </div>
+                    </div>
+                  )}
+                  {addForm}
+                </div>
+              </section>
+            </>
+          ) : (
+          /* ── Flat list (chế độ cài lần đầu) ── */
           <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
             <div className="border-b border-slate-100 bg-slate-50 px-6 py-4 flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
@@ -375,44 +534,10 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                   ))}
                 </div>
               )}
-
-              {/* Form thêm hạng mục */}
-              <div className="flex gap-3 items-end bg-amber-50/60 border border-dashed border-amber-300 rounded-xl p-4">
-                <div className="flex-1">
-                  <span className="mb-1 block text-xs font-bold text-slate-600">Loại hạng mục</span>
-                  <select value={newRenoLine.categoryId} onChange={e => setNewRenoLine({...newRenoLine, categoryId: Number(e.target.value)})} className="input-field text-sm bg-white">
-                    <option value={0}>-- Chọn hạng mục --</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div className="w-48">
-                  <span className="mb-1 block text-xs font-bold text-slate-600">Chi phí dự kiến</span>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={renoCostDisplay}
-                      onChange={e => {
-                        const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
-                        if (!/^\d*$/.test(raw)) return;
-                        setRenoCostDisplay(raw ? Number(raw).toLocaleString('vi-VN') : '');
-                        setNewRenoLine(prev => ({ ...prev, cost: Number(raw) || 0 }));
-                      }}
-                      className="input-field text-sm bg-white pr-8"
-                      placeholder="VD: 5.000.000"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-medium pointer-events-none">đ</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => { addRenoLine(); setRenoCostDisplay(''); }}
-                  disabled={newRenoLine.categoryId === 0 || newRenoLine.cost <= 0}
-                  className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2 rounded-xl text-sm font-bold h-[42px] whitespace-nowrap transition"
-                >
-                  <Plus className="w-4 h-4" /> Thêm hạng mục
-                </button>
-              </div>
+              {addForm}
             </div>
           </section>
+          )}
 
           {/* Card 2: Lịch thi công */}
           <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
@@ -472,86 +597,8 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
             )}
           </section>
         </div>
-      )}
-
-      {/* ═══ BƯỚC 3: Mua thêm thiết bị mới (nhập kho trước khi gán) ═══ */}
-      {subStep === 3 && optionsSaved && (
-        <section className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-          <div className="border-b border-slate-100 bg-slate-50 px-6 py-4 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
-              <Package className="h-5 w-5 text-indigo-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-bold text-slate-800">Mua thêm thiết bị mới</h3>
-              <p className="text-xs text-slate-400">
-                Nhập vào kho để gán bên dưới · thành tiền = SL × đơn giá, tính chung vào tổng chi phí
-              </p>
-            </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 shrink-0">Tùy chọn</span>
-          </div>
-          <div className="p-5 space-y-2">
-            {/* Rows */}
-            {purchaseRows.map((row, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <select
-                  value={row.catalogId}
-                  onChange={e => setPurchaseRows(prev => prev.map((r, i) => i === idx ? { ...r, catalogId: Number(e.target.value) } : r))}
-                  className="w-72 bg-white border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                >
-                  <option value={0}>-- Chọn thiết bị --</option>
-                  {catalogs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <input
-                  type="number" min={1} value={row.quantity}
-                  title="Số lượng"
-                  onChange={e => setPurchaseRows(prev => prev.map((r, i) => i === idx ? { ...r, quantity: Number(e.target.value) } : r))}
-                  className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                />
-                <div className="relative w-36">
-                  <input
-                    type="text"
-                    value={row.unitPriceDisplay}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
-                      if (!/^\d*$/.test(raw)) return;
-                      setPurchaseRows(prev => prev.map((r, i) => i === idx ? { ...r, unitPrice: Number(raw) || 0, unitPriceDisplay: raw ? Number(raw).toLocaleString('vi-VN') : '' } : r));
-                    }}
-                    placeholder="Đơn giá"
-                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-2 pr-6 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  />
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">đ</span>
-                </div>
-                <span className="w-32 text-right text-sm font-bold text-indigo-600 shrink-0">
-                  {row.unitPrice > 0 ? `= ${(row.unitPrice * row.quantity).toLocaleString('vi-VN')}đ` : ''}
-                </span>
-                <button
-                  onClick={() => setPurchaseRows(prev => prev.length === 1 ? [{ catalogId: 0, quantity: 1, unitPrice: 0, unitPriceDisplay: '' }] : prev.filter((_, i) => i !== idx))}
-                  className="flex items-center justify-center w-8 h-8 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors shrink-0"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-
-            {/* Add row + Save */}
-            <div className="flex items-center justify-between pt-1.5">
-              <button
-                onClick={() => setPurchaseRows(prev => [...prev, { catalogId: 0, quantity: 1, unitPrice: 0, unitPriceDisplay: '' }])}
-                className="flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition"
-              >
-                <Plus className="w-4 h-4" /> Thêm dòng
-              </button>
-              <button
-                onClick={purchaseAllEquipment}
-                disabled={isSavingPurchase || !purchaseRows.some(r => r.catalogId > 0)}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2 rounded-lg text-sm font-bold"
-              >
-                {isSavingPurchase ? 'Đang lưu...' : 'Lưu thiết bị'}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
+      );
+      })()}
 
       {/* ═══ BƯỚC 3: Chia phòng theo tầng & Gán thiết bị ═══ */}
       {subStep === 3 && optionsSaved && property.wholeHouse === false && (() => {
@@ -568,14 +615,16 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
             <div className="border-b border-slate-100 bg-slate-50 px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <DoorOpen className="h-5 w-5 text-indigo-500" />
-                <h3 className="font-bold text-slate-800">Chia Phòng & Gán Thiết bị</h3>
+                <h3 className="font-bold text-slate-800">{renovationOnly ? 'Chia phòng & đặt tên phòng' : 'Chia Phòng & Gán Thiết bị'}</h3>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isRoomsComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
                   {rooms.length}/{property.totalRooms} phòng
                 </span>
               </div>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${isManifestFullyAssigned ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                Thiết bị: {manifest.filter(m => m.assignedCount === m.quantity).length}/{manifest.length} loại xong
-              </span>
+              {!renovationOnly && (
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${isManifestFullyAssigned ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  Thiết bị: {manifest.filter(m => m.assignedCount === m.quantity).length}/{manifest.length} loại xong
+                </span>
+              )}
             </div>
 
             {/* Floor tabs */}
@@ -637,7 +686,18 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                         setRooms(prev => [...prev, res]);
                         setNewRoom(prev => ({ ...prev, roomNumber: '', area: 0 }));
                         setExpandedRoomId(res.id);
-                      } catch (err: any) { alert(err.response?.data?.message || 'Lỗi thêm phòng'); }
+                      } catch (err: any) {
+                        const d = err.response?.data;
+                        const extractErrors = (arr: any[]) => arr.map((v: any) => v.defaultMessage ?? v.message ?? v).join('; ');
+                        const msg = (typeof d === 'string' ? d.slice(0, 300) : null)
+                          ?? d?.message
+                          ?? (Array.isArray(d?.errors) ? extractErrors(d.errors) : null)
+                          ?? (Array.isArray(d?.violations) ? extractErrors(d.violations) : null)
+                          ?? d?.detail ?? d?.error
+                          ?? `Lỗi thêm phòng (HTTP ${err.response?.status ?? 'unknown'})`;
+                        console.error('[addRoom] response body:', JSON.stringify(d));
+                        alert(msg);
+                      }
                     }}
                     className="h-[42px] px-5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all self-end"
                   >
@@ -662,28 +722,72 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                   {floorRooms.map(room => {
                     const roomAssigns = assignments.filter(a => a.roomId === room.id);
                     const unassigned = manifest.filter(m => m.assignedCount < m.quantity);
-                    const isExpanded = expandedRoomId === room.id;
+                    const isExpanded = !renovationOnly && expandedRoomId === room.id;
                     return (
                       <div key={room.id} className={`rounded-xl border-2 transition-all ${isExpanded ? 'border-indigo-300 shadow-sm' : 'border-slate-200 hover:border-indigo-200'}`}>
                         {/* Room header */}
-                        <button
-                          className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                          onClick={() => setExpandedRoomId(isExpanded ? null : room.id)}
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
-                            <DoorOpen className="w-4 h-4 text-indigo-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-slate-900 text-sm">{room.roomNumber}</p>
-                            <p className="text-xs text-slate-400">{room.area} m² · {room.maxOccupants} người</p>
-                          </div>
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${roomAssigns.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-400'}`}>
-                            {roomAssigns.length} thiết bị
-                          </span>
-                          {isExpanded
-                            ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                            : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
-                        </button>
+                        {renovationOnly ? (
+                          editingRoomId === room.id ? (
+                            /* Inline edit form (chờ BE endpoint PUT — xem note mục 11) */
+                            <div className="flex flex-wrap gap-2 items-end px-4 py-3 bg-indigo-50/40 rounded-xl">
+                              <div className="flex flex-col gap-1 flex-1 min-w-[110px]">
+                                <span className="text-xs font-semibold text-slate-600">Mã phòng</span>
+                                <input value={editRoom.roomNumber} onChange={e => setEditRoom({ ...editRoom, roomNumber: e.target.value })} className="input-field text-sm" />
+                              </div>
+                              <div className="flex flex-col gap-1 w-24">
+                                <span className="text-xs font-semibold text-slate-600">DT (m²)</span>
+                                <input type="number" value={editRoom.area || ''} onChange={e => setEditRoom({ ...editRoom, area: Number(e.target.value) })} className="input-field text-sm" />
+                              </div>
+                              <div className="flex flex-col gap-1 w-24">
+                                <span className="text-xs font-semibold text-slate-600">Sức chứa</span>
+                                <input type="number" min={1} value={editRoom.maxOccupants} onChange={e => setEditRoom({ ...editRoom, maxOccupants: Number(e.target.value) })} className="input-field text-sm" />
+                              </div>
+                              <button onClick={() => saveEditRoom(room.id)} className="h-[42px] px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold flex items-center gap-1.5">
+                                <Check className="w-4 h-4" /> Lưu
+                              </button>
+                              <button onClick={() => setEditingRoomId(null)} className="h-[42px] px-3 text-slate-500 hover:bg-slate-100 rounded-xl text-sm font-bold">
+                                Huỷ
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-full flex items-center gap-3 px-4 py-3">
+                              <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                                <DoorOpen className="w-4 h-4 text-indigo-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-slate-900 text-sm">{room.roomNumber}</p>
+                                <p className="text-xs text-slate-400">{room.area} m² · {room.maxOccupants} người</p>
+                              </div>
+                              <button onClick={() => startEditRoom(room)} title="Sửa phòng"
+                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition">
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => setRoomToDelete(room)} title="Xoá phòng"
+                                className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <button
+                            className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                            onClick={() => setExpandedRoomId(isExpanded ? null : room.id)}
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
+                              <DoorOpen className="w-4 h-4 text-indigo-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-slate-900 text-sm">{room.roomNumber}</p>
+                              <p className="text-xs text-slate-400">{room.area} m² · {room.maxOccupants} người</p>
+                            </div>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${roomAssigns.length > 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-400'}`}>
+                              {roomAssigns.length} thiết bị
+                            </span>
+                            {isExpanded
+                              ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+                              : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
+                          </button>
+                        )}
 
                         {/* Expanded: equipment */}
                         {isExpanded && (
@@ -692,15 +796,55 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                             {roomAssigns.length > 0 && (
                               <div className="space-y-1.5">
                                 {roomAssigns.map(a => (
-                                  <div key={a.id} className="flex items-center justify-between px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
-                                    <span className="font-semibold text-slate-700">{a.catalogName}</span>
-                                    <button
-                                      onClick={() => removeAssignment(a.id)}
-                                      title="Xoá thiết bị đã gán"
-                                      className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
+                                  <div key={a.id} className="bg-white border border-slate-200 rounded-lg text-sm overflow-hidden">
+                                    {editingEquipId === a.id ? (
+                                      /* ── Inline edit form ── */
+                                      <div className="flex flex-wrap gap-2 items-center px-3 py-2">
+                                        <span className="font-semibold text-slate-700 shrink-0">{a.catalogName}</span>
+                                        <input
+                                          type="number" min={1} value={editEquipForm.quantity}
+                                          onChange={e => setEditEquipForm(f => ({ ...f, quantity: Number(e.target.value) }))}
+                                          className="input-field text-sm w-20"
+                                        />
+                                        <select
+                                          value={editEquipForm.source}
+                                          onChange={e => setEditEquipForm(f => ({ ...f, source: e.target.value as EquipmentSource }))}
+                                          className="input-field text-sm w-36"
+                                        >
+                                          <option value="INITIAL_HANDOVER">Có sẵn</option>
+                                          <option value="PURCHASED">Mua mới</option>
+                                        </select>
+                                        <button
+                                          onClick={() => saveEditEquipment(a, room.id)}
+                                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                                        >Lưu</button>
+                                        <button
+                                          onClick={() => setEditingEquipId(null)}
+                                          className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
+                                        >Huỷ</button>
+                                      </div>
+                                    ) : (
+                                      /* ── Normal row ── */
+                                      <div className="flex items-center justify-between px-3 py-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="font-semibold text-slate-700 truncate">{a.catalogName}</span>
+                                          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 shrink-0">x{a.quantity}</span>
+                                          <span className="text-xs text-slate-400 shrink-0">{a.status === 'NEW' ? 'Mới' : 'Tốt'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                          <button
+                                            onClick={() => startEditEquip(a)}
+                                            title="Sửa số lượng / nguồn"
+                                            className="p-1 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-md transition-colors"
+                                          ><Pencil className="w-3.5 h-3.5" /></button>
+                                          <button
+                                            onClick={() => removeAssignment(a.id)}
+                                            title="Xoá thiết bị đã gán"
+                                            className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                                          ><X className="w-4 h-4" /></button>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
@@ -806,7 +950,7 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
           </button>
         ) : (
           <button
-            onClick={() => setSubStep(subStep === 3 && property.hasRenovation ? 2 : 1)}
+            onClick={() => setSubStep(subStep === 3 && (property.hasRenovation || renovationOnly) ? 2 : 1)}
             className="rounded-xl px-6 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100"
           >
             ← Quay lại
@@ -822,7 +966,7 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                 </span>
               )}
               <button
-                onClick={() => setSubStep(property.hasRenovation ? 2 : 3)}
+                onClick={() => setSubStep(renovationOnly ? 2 : (property.hasRenovation ? 2 : 3))}
                 disabled={!optionsSaved}
                 className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -839,11 +983,11 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
                 </span>
               )}
               <button
-                onClick={() => setSubStep(3)}
+                onClick={renovationOnly ? (renoNeedsRooms ? () => setSubStep(3) : onNext) : () => setSubStep(3)}
                 disabled={!isRenoComplete}
                 className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Tiếp tục: Gán thiết bị →
+                {renovationOnly ? (renoNeedsRooms ? 'Tiếp tục: Chia phòng →' : nextLabel) : 'Tiếp tục: Gán thiết bị →'}
               </button>
             </>
           )}
@@ -866,6 +1010,22 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!roomToDelete}
+        tone="danger"
+        title="Xoá phòng này?"
+        message={roomToDelete && (
+          <>
+            Xoá phòng <b className="text-slate-700">{roomToDelete.roomNumber}</b> khỏi tòa nhà?
+            Hành động này không thể hoàn tác.
+          </>
+        )}
+        confirmText="Xoá phòng"
+        loading={deletingRoom}
+        onConfirm={handleDeleteRoom}
+        onCancel={() => setRoomToDelete(null)}
+      />
     </div>
   );
 };

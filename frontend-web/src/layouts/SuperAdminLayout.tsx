@@ -11,6 +11,7 @@ import {
   LogOut,
   MapPin,
   Menu,
+  Package,
   Search,
   Settings,
   Settings2,
@@ -52,6 +53,7 @@ const navItems: SidebarItem[] = [
   { type: 'section', label: 'Vận hành' },
   { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
   { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
+  { path: '/admin/equipments', label: 'Danh mục thiết bị', icon: Package },
 
   // ── HỆ THỐNG ─────────────────────────────────────────────────────
   { type: 'section', label: 'Hệ thống' },

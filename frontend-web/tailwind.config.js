@@ -57,7 +57,8 @@ export default {
           '100%': { transform: 'rotate(360deg) scale(1)' },
         },
         shimmer: {
-          '100%': { transform: 'translateX(100%)' },
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
         },
         'gradient-x': {
           '0%, 100%': { backgroundPosition: '0% 50%' },
@@ -70,6 +71,7 @@ export default {
         float: 'float 6s ease-in-out infinite',
         'blob-spin': 'blob-spin 22s linear infinite',
         'gradient-x': 'gradient-x 6s ease infinite',
+        shimmer: 'shimmer 1.5s linear infinite',
       },
     },
   },

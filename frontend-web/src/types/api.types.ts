@@ -161,10 +161,14 @@ export interface PropertyCreateRequest {
 // EQUIPMENT MANIFEST — Khai báo thiết bị có sẵn
 // =============================================================================
 
+export type ManifestEquipmentSource = 'INITIAL_HANDOVER' | 'PURCHASED';
+
 export interface ManifestItem {
   catalogId: number;
   quantity: number;
   status: ManifestEquipmentStatus;
+  source: ManifestEquipmentSource;
+  price?: number;
 }
 
 export interface ManifestRequest {
@@ -255,6 +259,18 @@ export interface RenovationLineResponse {
 }
 
 // =============================================================================
+// RENOVATION SESSION (BE mục 10 — grouped renovation history)
+// =============================================================================
+
+export interface RenovationSession {
+  sessionNumber: number;
+  startDate?: string;   // ISO date, may be null while in progress
+  endDate?: string;     // ISO date, null if current session
+  totalCost: number;
+  lines: RenovationLineResponse[];
+}
+
+// =============================================================================
 // RENOVATION SCHEDULE
 // =============================================================================
 
@@ -313,10 +329,14 @@ export interface EquipmentAssignRequest {
 
 export interface EquipmentAssignmentResponse {
   id: number;
+  propertyId?: number;
   catalogId: number;
   catalogName: string;
   quantity: number;
-  status: string;
+  source: EquipmentSource;   // INITIAL_HANDOVER | PURCHASED — từ BE EquipmentResponse
+  status: EquipmentStatus;   // NEW | GOOD | DAMAGED | BROKEN
+  price?: number;            // giá thiết bị (mới mua)
+  note?: string;
   roomId?: number;
   roomNumber?: string;
   houseArea?: HouseArea;
@@ -393,7 +413,7 @@ export interface HostRoomPrice {
 
 export interface HostConfirmRequest {
   contingencyPercent: number;
-  operationManagerId: string;
+  operationManagerId?: string;     // Optional — host tự gán sau từ trang chi tiết
   propertyPrice?: number;          // Nhà nguyên căn (ghi đè tay)
   roomPrices?: HostRoomPrice[];    // Nhà chia phòng
 }

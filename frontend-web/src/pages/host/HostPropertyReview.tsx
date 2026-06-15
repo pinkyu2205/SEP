@@ -22,20 +22,6 @@ import type {
 const formatVND = (n: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(n);
 
-const getUserUUID = (): string => {
-  try {
-    const token = localStorage.getItem('access_token');
-    if (!token) return crypto.randomUUID();
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    for (const val of Object.values(payload)) {
-      if (typeof val === 'string' && uuidRe.test(val)) return val;
-    }
-    return crypto.randomUUID();
-  } catch {
-    return crypto.randomUUID();
-  }
-};
 
 const formatDate = (d?: string) => {
   if (!d) return '';
@@ -65,16 +51,15 @@ export const HostPropertyReview = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [summaryData, propertyData, managers] = await Promise.all([
+        const [summaryData, propertyData] = await Promise.all([
           propertyService.getOnboardingSummary(propertyId),
           propertyService.getPropertyById(propertyId),
-          propertyService.getManagers(),
         ]);
         setSummary(summaryData);
-        const mgr = propertyData.operationManagerId
-          ? String(propertyData.operationManagerId)
-          : managers?.[0]?.id ?? '';
-        setOperationManagerId(mgr);
+        // Chỉ giữ lại manager nếu đã được gán từ trước — không tự chọn
+        if (propertyData.operationManagerId) {
+          setOperationManagerId(String(propertyData.operationManagerId));
+        }
 
         // Pre-populate room prices from suggested prices
         if (summaryData.pricing?.roomResults) {
@@ -117,7 +102,8 @@ export const HostPropertyReview = () => {
 
     const payload: HostConfirmRequest = {
       contingencyPercent,
-      operationManagerId: operationManagerId || getUserUUID(),
+      // Chỉ gửi operationManagerId nếu host đã chọn — không auto-gán
+      ...(operationManagerId ? { operationManagerId } : {}),
     };
 
     if (isRoomScope) {
@@ -135,15 +121,9 @@ export const HostPropertyReview = () => {
     setSubmitting(true);
     setError('');
     try {
-      const res = await propertyService.hostConfirm(propertyId, payload);
-      if (res.propertyStatus === 'ACTIVE') {
-        setSuccess(true);
-      } else if (res.propertyStatus === 'PENDING_OPERATION_MANAGER') {
-        await propertyService.assignOperationManager(propertyId, payload.operationManagerId);
-        setSuccess(true);
-      } else {
-        setSuccess(true);
-      }
+      await propertyService.hostConfirm(propertyId, payload);
+      // Manager assignment là bước riêng — host tự gán từ trang chi tiết
+      setSuccess(true);
     } catch (err: any) {
       setError(err.response?.data?.error || err.response?.data?.message || err.message || 'Lỗi khi xác nhận');
     } finally {

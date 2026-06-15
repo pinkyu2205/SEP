@@ -94,6 +94,8 @@ function ActiveCard({ p, onClick }: { p: PropertyResponse; onClick: () => void }
             <User className="w-3.5 h-3.5 text-slate-300 shrink-0" />
             {p.operationManagerName ? (
               <span className="font-semibold text-slate-600 truncate">{p.operationManagerName}</span>
+            ) : p.operationManagerId ? (
+              <span className="font-semibold text-slate-500 truncate">Đã gán quản lý</span>
             ) : (
               <span className="font-semibold text-rose-400 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3" /> Chưa có quản lý
@@ -160,8 +162,18 @@ export const PropertyList = () => {
   const fetchProperties = async () => {
     setLoading(true);
     try {
-      const res = await propertyService.getProperties(0, 100);
-      setProperties(res.content);
+      const [res, mgrs] = await Promise.all([
+        propertyService.getProperties(0, 100),
+        propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
+      ]);
+      // Patch operationManagerName nếu BE chưa trả (mục 6 NOTE-CHO-TEAM-BE.md)
+      const mgrsMap = new Map(mgrs.map(m => [m.id, m.fullName || m.username]));
+      const content = res.content.map(p =>
+        p.operationManagerId && !p.operationManagerName
+          ? { ...p, operationManagerName: mgrsMap.get(p.operationManagerId) }
+          : p
+      );
+      setProperties(content);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
