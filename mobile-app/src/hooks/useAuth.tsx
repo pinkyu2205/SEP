@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext } from 'react';
 import { User, UserRole } from '../types';
 import { authService } from '../services/authService';
 import { realAuthService } from '../services/realAuthService';
+import { registerPushToken } from '../services/pushToken';
 
 /**
  * Auth Context - Quản lý trạng thái đăng nhập toàn ứng dụng.
@@ -105,6 +106,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         createdAt: new Date().toISOString(),
       });
+      // Tenant: đăng ký push token (FCM) để nhận thông báo — best-effort
+      if (role === 'tenant') {
+        registerPushToken();
+      }
     } catch (err: any) {
       const msg =
         err?.response?.data?.error ||

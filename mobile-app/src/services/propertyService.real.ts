@@ -21,6 +21,7 @@ export interface ApiRoom {
   price?: number;
   deposit?: number;
   area?: number;
+  maxOccupants?: number;
   status: string; // DRAFT | AVAILABLE | RENTED | MAINTENANCE
 }
 
