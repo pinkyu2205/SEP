@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Image,
@@ -7,7 +7,45 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { DatePickerField } from '../../components/common/DatePickerField';
-import { MANAGED_PROPERTIES, getBuildingOps } from '../../data/managedProperties';
+import { realPropertyService, ApiProperty, ApiRoom } from '../../services/propertyService.real';
+import { realTenantService, OnboardTenantRequest } from '../../services/tenantService.real';
+
+// ===== Adapter giữa dữ liệu backend thật và UI wizard hiện có =====
+type UiProperty = {
+  id: string;
+  name: string;
+  address: string;
+  propertyType: 'MULTI_ROOM' | 'WHOLE_HOUSE';
+  available: number;
+  rentalStatus: 'vacant' | 'occupied';
+  monthlyRent: number;
+};
+type UiRoom = { id: string; code: string; area: number; rentPrice: number; status: 'available' };
+
+const mapProperty = (p: ApiProperty): UiProperty => ({
+  id: String(p.id),
+  name: p.propertyName,
+  address: p.fullAddress || p.shortAddress || '',
+  propertyType: p.wholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
+  available: p.totalRooms ?? 0,
+  rentalStatus: 'vacant', // backend chặn trùng HĐ active nên không cần tính trước ở client
+  monthlyRent: p.price ?? 0,
+});
+const mapRoom = (r: ApiRoom): UiRoom => ({
+  id: String(r.id),
+  code: r.roomNumber,
+  area: r.area ?? 0,
+  rentPrice: r.price ?? 0,
+  status: 'available',
+});
+
+const toIsoDate = (ddmmyyyy: string): string => {
+  const [d, m, y] = (ddmmyyyy || '').split('/');
+  if (!d || !m || !y) return new Date().toISOString().slice(0, 10);
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+};
+const readErr = (err: any, fallback: string): string =>
+  err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;
 
 type RentalMode = 'room' | 'whole_house';
 
@@ -59,20 +97,36 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [inspectionNotes, setInspectionNotes] = useState('');
   const [otp, setOtp] = useState('');
 
-  const roomProperties = useMemo(
-    () => MANAGED_PROPERTIES.filter(property => property.propertyType === 'MULTI_ROOM'),
-    []
-  );
-  const wholeHouseProperties = useMemo(
-    () => MANAGED_PROPERTIES.filter(property => property.propertyType === 'WHOLE_HOUSE'),
-    []
-  );
-  const availableRooms = useMemo(
-    () => selectedBuildingId
-      ? getBuildingOps(selectedBuildingId).rooms.filter(room => room.status === 'available')
-      : [],
-    [selectedBuildingId]
-  );
+  const [properties, setProperties] = useState<UiProperty[]>([]);
+  const [availableRooms, setAvailableRooms] = useState<UiRoom[]>([]);
+
+  // Load danh sách bất động sản thật khi mở màn hình
+  useEffect(() => {
+    realPropertyService
+      .getProperties()
+      .then(list => setProperties(list.map(mapProperty)))
+      .catch(err =>
+        Alert.alert(
+          'Lỗi tải dữ liệu',
+          readErr(err, 'Không tải được danh sách bất động sản. Kiểm tra đăng nhập và kết nối backend.')
+        )
+      );
+  }, []);
+
+  // Load phòng trống khi chọn toà (chế độ theo phòng)
+  useEffect(() => {
+    if (!selectedBuildingId) {
+      setAvailableRooms([]);
+      return;
+    }
+    realPropertyService
+      .getRooms(Number(selectedBuildingId))
+      .then(rooms => setAvailableRooms(rooms.filter(r => r.status === 'AVAILABLE').map(mapRoom)))
+      .catch(() => setAvailableRooms([]));
+  }, [selectedBuildingId]);
+
+  const roomProperties = properties.filter(property => property.propertyType === 'MULTI_ROOM');
+  const wholeHouseProperties = properties.filter(property => property.propertyType === 'WHOLE_HOUSE');
   const selectedBuilding = roomProperties.find(property => property.id === selectedBuildingId);
   const selectedRoom = availableRooms.find(room => room.id === selectedRoomId);
   const selectedWholeHouse = wholeHouseProperties.find(property => property.id === selectedWholeHouseId);
@@ -182,43 +236,45 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
-  const verifyOTPAndSubmit = () => {
+  const verifyOTPAndSubmit = async () => {
     if (otp !== '123456') {
-      return Alert.alert('Lỗi', 'Mã OTP không hợp lệ. Vui lòng thử lại (Mock: 123456).');
+      return Alert.alert('Lỗi', 'Mã OTP không hợp lệ. Vui lòng thử lại (demo: 123456).');
     }
 
-    const payload = rentalMode === 'whole_house'
-      ? {
-          rentalMode,
-          propertyId: selectedWholeHouseId,
-          roomId: null,
-          tenantInfo,
-          householdMembers: householdMembers.filter(member => member.name.trim()),
-          initialMeters: meters,
-          roomInspection: {
-            inspectionType: 'check_in',
-            images: conditionPhotos,
-            notes: inspectionNotes,
-          },
-        }
-      : {
-          rentalMode,
-          propertyId: selectedBuildingId,
-          roomId: selectedRoomId,
-          tenantInfo,
-          initialMeters: meters,
-          roomInspection: {
-            inspectionType: 'check_in',
-            images: conditionPhotos,
-            notes: inspectionNotes,
-          },
-        };
-
-    Alert.alert(
-      'Thành công 🎉',
-      `Đã tạo hồ sơ ${rentalMode === 'whole_house' ? 'thuê nguyên căn' : 'thuê phòng'} cho ${tenantInfo.fullName}.\n\nPayload mock: ${JSON.stringify(payload)}`,
-      [{ text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }]
+    const rentVal = Number(
+      tenantInfo.monthlyRent ||
+      (rentalMode === 'whole_house' ? selectedWholeHouse?.monthlyRent : selectedRoom?.rentPrice) ||
+      0
     );
+    const payload: OnboardTenantRequest = {
+      fullName: tenantInfo.fullName.trim(),
+      cccd: tenantInfo.cccd.trim(),
+      phoneNumber: tenantInfo.phone.trim(),
+      moveInDate: toIsoDate(tenantInfo.startDate),
+      rentAmount: rentVal,
+      deposit: Number(tenantInfo.deposit || 0),
+      equipmentSnapshot: inspectionNotes?.trim() || undefined,
+    };
+
+    try {
+      const res = rentalMode === 'whole_house'
+        ? await realTenantService.onboardWholeHouseTenant(Number(selectedWholeHouseId), payload)
+        : await realTenantService.onboardRoomTenant(
+            Number(selectedBuildingId),
+            Number(selectedRoomId),
+            payload
+          );
+
+      Alert.alert(
+        'Thành công 🎉',
+        `Đã tạo hợp đồng ${res.contractCode} cho ${res.tenantFullName}` +
+        (res.roomNumber ? ` (phòng ${res.roomNumber}).` : '.') +
+        `\n\nTài khoản khách thuê: t${payload.phoneNumber} / 123456`,
+        [{ text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }]
+      );
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không tạo được hợp đồng. Vui lòng thử lại.'));
+    }
   };
 
   const renderModeStep = () => (
@@ -271,7 +327,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
               <View style={styles.propertyCardTop}>
                 <Text style={[styles.propertyName, selected && styles.propertyNameActive]}>{property.name}</Text>
                 <Text style={[styles.countPill, selected && styles.countPillActive]}>
-                  {property.available} phòng trống
+                  {property.available} phòng
                 </Text>
               </View>
               <Text style={[styles.propertyMeta, selected && styles.propertyMetaActive]}>{property.address}</Text>

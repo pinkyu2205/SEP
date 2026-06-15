@@ -551,3 +551,38 @@ export interface Page<T> {
   last: boolean;
   empty: boolean;
 }
+
+// =============================================================================
+// TENANT ONBOARDING — Khách thuê + Hợp đồng thuê
+// =============================================================================
+
+export interface OnboardTenantRequest {
+  fullName: string;
+  cccd: string;
+  phoneNumber: string;
+  moveInDate: string;        // ISO date (yyyy-MM-dd)
+  rentAmount: number;
+  deposit: number;
+  endDate?: string;          // optional
+  equipmentSnapshot?: string;
+  roomConditionUrl?: string;
+}
+
+export interface TenantContractResponse {
+  id: number;
+  propertyId: number;
+  roomId?: number;
+  roomNumber?: string;
+  tenantUserId: string;      // UUID
+  tenantFullName: string;
+  tenantPhone: string;
+  tenantCccd?: string;
+  contractCode: string;
+  rentAmount: number;
+  deposit: number;
+  moveInDate: string;
+  startDate: string;
+  endDate?: string;
+  status: ContractStatus;
+  equipmentSnapshot?: string;
+}

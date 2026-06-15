@@ -236,7 +236,7 @@ export const PropertyDetail = () => {
       setSelectedRoom(null);
       setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: status as RoomResponse['status'] } : r));
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || 'Cập nhật thất bại, vui lòng thử lại.');
+      toast.error(e?.response?.data?.error || e?.response?.data?.message || 'Cập nhật thất bại, vui lòng thử lại.');
     }
   };
 
@@ -429,8 +429,14 @@ export const PropertyDetail = () => {
           {filteredRooms.map(room => {
             const st = roomStatusMap[room.status] ?? roomStatusMap.DRAFT;
             return (
-              <div key={room.id} onClick={() => setSelectedRoom(room)}
-                className={`bg-white rounded-2xl border-2 ${st.border} p-4 cursor-pointer transition-all hover:shadow-md group`}>
+              <div key={room.id} onClick={() => {
+                if (room.status === 'RENTED') {
+                  toast.error('Phòng đang cho thuê — không thể đổi trạng thái!');
+                } else {
+                  setSelectedRoom(room);
+                }
+              }}
+                className={`bg-white rounded-2xl border-2 ${st.border} p-4 ${room.status === 'RENTED' ? 'cursor-not-allowed opacity-90' : 'cursor-pointer hover:shadow-md'} transition-all group`}>
                 {/* Room header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">

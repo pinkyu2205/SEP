@@ -135,10 +135,17 @@ export const HostPropertyReview = () => {
     setSubmitting(true);
     setError('');
     try {
-      await propertyService.hostConfirm(propertyId, payload);
-      setSuccess(true);
+      const res = await propertyService.hostConfirm(propertyId, payload);
+      if (res.propertyStatus === 'ACTIVE') {
+        setSuccess(true);
+      } else if (res.propertyStatus === 'PENDING_OPERATION_MANAGER') {
+        await propertyService.assignOperationManager(propertyId, payload.operationManagerId);
+        setSuccess(true);
+      } else {
+        setSuccess(true);
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Lỗi khi xác nhận');
+      setError(err.response?.data?.error || err.response?.data?.message || err.message || 'Lỗi khi xác nhận');
     } finally {
       setSubmitting(false);
     }

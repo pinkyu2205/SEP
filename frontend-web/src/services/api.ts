@@ -28,7 +28,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    const message = error.response?.data?.message || error.message || 'Lỗi kết nối đến máy chủ';
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Lỗi kết nối đến máy chủ';
     
     const status = error.response?.status;
     if (status !== 401 && status !== 403 && status !== 404) {

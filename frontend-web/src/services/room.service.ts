@@ -12,8 +12,12 @@ export const roomService = {
     return api.get(`/api/v1/properties/${propertyId}/rooms`);
   },
 
-  /** GET /api/v1/properties/{propertyId}/rooms/{roomId} — Chi tiết 1 phòng */
   getRoomById: (propertyId: number, roomId: number): Promise<RoomResponse> => {
     return api.get(`/api/v1/properties/${propertyId}/rooms/${roomId}`);
+  },
+
+  /** PATCH /api/v1/properties/{propertyId}/rooms/{roomId}/status — Đổi trạng thái phòng */
+  updateRoomStatus: (propertyId: number, roomId: number, status: string): Promise<RoomResponse> => {
+    return api.patch(`/api/v1/properties/${propertyId}/rooms/${roomId}/status`, { status });
   },
 };
