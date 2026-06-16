@@ -13,6 +13,7 @@ export interface ApiProperty {
   price?: number;
   status: string;
   operationManagerId?: string;
+  rentalAvailable?: boolean;
 }
 
 export interface ApiRoom {
@@ -35,6 +36,12 @@ export const realPropertyService = {
       params: { page: 0, size: 200 },
     });
     return data.content ?? [];
+  },
+
+  // BĐS còn cho thuê được (nhà nguyên căn chưa có khách / nhà chia phòng còn phòng trống)
+  getRentableProperties: async (): Promise<ApiProperty[]> => {
+    const { data } = await realApiClient.get<ApiProperty[]>('/api/v1/properties/rentable');
+    return data ?? [];
   },
 
   getRooms: async (propertyId: number): Promise<ApiRoom[]> => {

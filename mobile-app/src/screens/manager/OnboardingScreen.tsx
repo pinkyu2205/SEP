@@ -119,7 +119,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
-    realPropertyService.getProperties()
+    // Chỉ lấy BĐS còn cho thuê được (BE đã lọc: nguyên căn chưa có khách / chia phòng còn phòng trống)
+    realPropertyService.getRentableProperties()
       .then(list => setProperties(list.map(mapProperty)))
       .catch(err => Alert.alert('Lỗi tải dữ liệu', readErr(err, 'Không tải được danh sách bất động sản.')));
   }, []);
