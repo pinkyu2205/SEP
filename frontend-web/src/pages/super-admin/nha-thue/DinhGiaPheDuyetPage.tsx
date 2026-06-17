@@ -9,12 +9,10 @@ import type { PropertyResponse } from '../../../types/api.types';
 import { StepSubmitToHost } from '../properties/wizard/StepSubmitToHost';
 import { KpiCard } from '../shared';
 
-const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Nháp', cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
+const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
+  if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
+  if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
+  return { label: 'Đang chờ định giá', cls: 'bg-orange-100 text-orange-800' };
 };
 
 export const DinhGiaPheDuyetPage = () => {
@@ -112,7 +110,7 @@ export const DinhGiaPheDuyetPage = () => {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard title="Tổng tòa nhà" value={String(kpi.total)} icon={Building2} color="bg-blue-50 text-blue-700" />
         <KpiCard title="Sẵn sàng định giá" value={String(kpi.ready)} icon={BadgeDollarSign} color="bg-indigo-50 text-indigo-700" />
-        <KpiCard title="Chờ Host duyệt" value={String(kpi.pending)} icon={Clock} color="bg-blue-50 text-blue-700" />
+        <KpiCard title="Đang chờ định giá" value={String(kpi.pending)} icon={Clock} color="bg-orange-50 text-orange-700" />
         <KpiCard title="Đang kinh doanh" value={String(kpi.active)} icon={CheckCircle2} color="bg-emerald-50 text-emerald-700" />
       </div>
 
@@ -124,9 +122,9 @@ export const DinhGiaPheDuyetPage = () => {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp (DRAFT)</option>
-          <option value="UNDER_RENOVATION">Đang cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
+          <option value="DRAFT">Đang chờ định giá (Nháp)</option>
+          <option value="UNDER_RENOVATION">Đang chờ định giá (Cải tạo)</option>
+          <option value="PENDING_HOST_REVIEW">Đang chờ định giá (Chờ duyệt)</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
         </select>
@@ -142,7 +140,7 @@ export const DinhGiaPheDuyetPage = () => {
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           {filtered.map(b => {
-            const badge = statusBadge[b.status] ?? statusBadge.DRAFT;
+            const badge = getStatusBadge(b);
             const isReady = b.status === 'DRAFT' && b.wholeHouse !== null;
             return (
               <div key={b.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition">
@@ -205,8 +203,8 @@ export const DinhGiaPheDuyetPage = () => {
                     </button>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
+                    <div className="w-full py-2 text-center text-xs font-semibold text-orange-600 bg-orange-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" /> Đang chờ định giá
                     </div>
                   )}
                   {b.status === 'ACTIVE' && (

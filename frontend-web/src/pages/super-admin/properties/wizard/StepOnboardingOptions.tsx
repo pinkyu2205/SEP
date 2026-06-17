@@ -16,6 +16,22 @@ import type { EquipmentSource, ManifestEquipmentStatus, PropertyType } from '../
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
 const fmtDate = (d: string) => (d ? d.split('-').reverse().join('/') : '');
 
+// ─── Giới hạn lịch thi công ───────────────────────────────────────────────
+// Ngày bắt đầu: không trước hôm nay. Ngày kết thúc: tối đa 50 năm kể từ ngày
+// bắt đầu. Dùng cho min/max → khoá luôn date picker.
+const fmtDateInput = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+const TODAY_STR = fmtDateInput(new Date());
+const addYearsStr = (base: string, years: number) => {
+  const d = base ? new Date(base) : new Date();
+  d.setFullYear(d.getFullYear() + years);
+  return fmtDateInput(d);
+};
+
 interface StepOnboardingOptionsProps {
   property: PropertyResponse;
   onNext: () => void;
@@ -554,11 +570,35 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
             <div className="p-6 flex gap-4 items-end">
               <label className="block flex-1">
                 <span className="mb-1 block text-xs font-bold text-slate-700">Ngày bắt đầu</span>
-                <input type="date" value={schedule.startDate} onChange={e => { setSchedule({...schedule, startDate: e.target.value}); setScheduleSaved(false); }} className="input-field text-sm" />
+                <input
+                  type="date"
+                  min={TODAY_STR}
+                  value={schedule.startDate}
+                  onChange={e => {
+                    const startDate = e.target.value;
+                    setSchedule(prev => ({
+                      ...prev,
+                      startDate,
+                      // Ngày kết thúc vượt 50 năm theo ngày bắt đầu mới → cắt lại
+                      endDate: prev.endDate && startDate && prev.endDate > addYearsStr(startDate, 50)
+                        ? addYearsStr(startDate, 50) : prev.endDate,
+                    }));
+                    setScheduleSaved(false);
+                  }}
+                  className="input-field text-sm"
+                />
               </label>
               <label className="block flex-1">
                 <span className="mb-1 block text-xs font-bold text-slate-700">Ngày kết thúc dự kiến</span>
-                <input type="date" value={schedule.endDate} onChange={e => { setSchedule({...schedule, endDate: e.target.value}); setScheduleSaved(false); }} className="input-field text-sm" />
+                <input
+                  type="date"
+                  min={schedule.startDate || TODAY_STR}
+                  max={addYearsStr(schedule.startDate || TODAY_STR, 50)}
+                  disabled={!schedule.startDate}
+                  value={schedule.endDate}
+                  onChange={e => { setSchedule({...schedule, endDate: e.target.value}); setScheduleSaved(false); }}
+                  className="input-field text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                />
               </label>
               <button
                 onClick={saveSchedule}

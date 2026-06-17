@@ -10,6 +10,22 @@ import type {
 import { propertyService } from '../../../../services/property.service';
 import { catalogService } from '../../../../services/catalog.service';
 
+// ─── Giới hạn lịch hợp đồng ───────────────────────────────────────────────
+// Ngày bắt đầu: không được trước hôm nay. Ngày kết thúc: tối đa 50 năm kể từ
+// ngày bắt đầu. Dùng cho thuộc tính min/max → khoá luôn trên date picker.
+const fmtDateInput = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+const TODAY_STR = fmtDateInput(new Date());
+const addYearsStr = (base: string, years: number) => {
+  const d = base ? new Date(base) : new Date();
+  d.setFullYear(d.getFullYear() + years);
+  return fmtDateInput(d);
+};
+
 interface StepPropertyInfoProps {
   property: PropertyResponse;
   onNext: () => void;
@@ -87,10 +103,17 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           });
           setRentAmountDisplay(formatVND(contractData.value.totalRentAmount));
         } else if (prefillContract) {
-          setContractForm(prev => ({ ...prev, ...prefillContract }));
+          setContractForm(prev => ({
+            ...prev,
+            ...prefillContract,
+            startDate: prefillContract.startDate || prev.startDate || TODAY_STR,
+          }));
           if (prefillContract.totalRentAmount) {
             setRentAmountDisplay(formatVND(prefillContract.totalRentAmount));
           }
+        } else {
+          // Chưa có hợp đồng → mặc định ngày bắt đầu là hôm nay
+          setContractForm(prev => ({ ...prev, startDate: prev.startDate || TODAY_STR }));
         }
       } catch (error) {
         console.error('Failed to init step 1', error);
@@ -156,6 +179,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
   const saveContract = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (property.status === 'ACTIVE') return; // tòa nhà đang kinh doanh → khóa sửa hợp đồng
     setIsSavingContract(true);
     try {
       const res = await propertyService.createInboundContract(property.id, contractForm);
@@ -168,6 +192,8 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   };
 
   const isFormComplete = manifestSaved && contract !== null;
+  // Hợp đồng chỉ sửa được khi tòa nhà CHƯA đang kinh doanh (ACTIVE)
+  const contractLocked = property.status === 'ACTIVE';
 
   if (loading) return <div className="py-20 text-center text-slate-500">Đang tải dữ liệu...</div>;
 
@@ -215,16 +241,27 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <h3 className="font-bold text-slate-800">Hợp đồng với chủ nhà</h3>
             {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
+          {contractLocked && (
+            <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-700">
+              <Lock className="h-3.5 w-3.5" /> Đang kinh doanh — khóa chỉnh sửa
+            </span>
+          )}
         </div>
+        {contractLocked && (
+          <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>Tòa nhà đã ở trạng thái <b>Đang kinh doanh</b> nên hợp đồng được khóa, không thể chỉnh sửa.</span>
+          </div>
+        )}
         <form onSubmit={saveContract} className="p-5">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
-              <input required value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field" placeholder="VD: HD-001" />
+              <input required disabled={contractLocked} value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="VD: HD-001" />
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
-              <input required value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field" placeholder="Nguyễn Văn A" />
+              <input required disabled={contractLocked} value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="Nguyễn Văn A" />
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê *</span>
@@ -232,6 +269,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                 <input
                   type="text"
                   required
+                  disabled={contractLocked}
                   value={rentAmountDisplay}
                   onChange={e => {
                     const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
@@ -239,7 +277,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                     setRentAmountDisplay(raw ? Number(raw).toLocaleString('vi-VN') : '');
                     setContractForm(prev => ({ ...prev, totalRentAmount: parseVND(raw) }));
                   }}
-                  className="input-field pr-8"
+                  className="input-field pr-8 disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="VD: 15.000.000"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium pointer-events-none">đ</span>
@@ -247,16 +285,36 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày bắt đầu *</span>
-              <input type="date" required value={contractForm.startDate} onChange={e => setContractForm({...contractForm, startDate: e.target.value})} className="input-field" />
+              <input
+                type="date"
+                required
+                disabled={contractLocked}
+                min={TODAY_STR}
+                value={contractForm.startDate}
+                onChange={e => {
+                  const startDate = e.target.value;
+                  setContractForm(prev => ({
+                    ...prev,
+                    startDate,
+                    // Nếu ngày kết thúc đã vượt giới hạn 50 năm theo ngày bắt đầu mới → cắt lại
+                    endDate: prev.endDate && startDate && prev.endDate > addYearsStr(startDate, 50)
+                      ? addYearsStr(startDate, 50) : prev.endDate,
+                  }));
+                }}
+                className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
+              />
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700 block">Ngày kết thúc *</span>
               <input
                 type="date"
                 required
+                min={contractForm.startDate || TODAY_STR}
+                max={addYearsStr(contractForm.startDate || TODAY_STR, 50)}
+                disabled={contractLocked || !contractForm.startDate}
                 value={contractForm.endDate}
                 onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })}
-                className="input-field"
+                className="input-field disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </label>
             {contractForm.contractScanUrl && (
@@ -269,11 +327,13 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               </div>
             )}
           </div>
-          <div className="flex justify-end">
-            <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
-              {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
-            </button>
-          </div>
+          {!contractLocked && (
+            <div className="flex justify-end">
+              <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
+                {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
+              </button>
+            </div>
+          )}
         </form>
       </section>
 

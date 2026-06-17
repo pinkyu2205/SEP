@@ -294,12 +294,17 @@ const RenovateRestartPanel = ({ property, onDone }: { property: PropertyResponse
   );
 };
 
-const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Nháp', cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
+const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | null => {
+  if (b.status === 'DRAFT') {
+    return b.hasRenovation
+      ? { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' }
+      : null;
+  }
+  if (b.status === 'UNDER_RENOVATION') return { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' };
+  if (b.status === 'PENDING_HOST_REVIEW') return { label: 'Đã cải tạo xong', cls: 'bg-teal-100 text-teal-800' };
+  if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
+  if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
+  return null;
 };
 
 export const CauHinhKhaiThacPage = () => {
@@ -475,9 +480,8 @@ export const CauHinhKhaiThacPage = () => {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp (DRAFT)</option>
           <option value="UNDER_RENOVATION">Đang cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
+          <option value="PENDING_HOST_REVIEW">Đã cải tạo xong</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
         </select>
@@ -493,7 +497,7 @@ export const CauHinhKhaiThacPage = () => {
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           {filtered.map(b => {
-            const badge = statusBadge[b.status] ?? statusBadge.DRAFT;
+            const badge = getStatusBadge(b);
             return (
               <div key={b.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition">
                 <div className="flex items-start justify-between gap-3">
@@ -504,9 +508,11 @@ export const CauHinhKhaiThacPage = () => {
                       <span className="line-clamp-1">{b.fullAddress || b.shortAddress}</span>
                     </div>
                   </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-black ${badge.cls}`}>
-                    {badge.label}
-                  </span>
+                  {badge && (
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-black ${badge.cls}`}>
+                      {badge.label}
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">

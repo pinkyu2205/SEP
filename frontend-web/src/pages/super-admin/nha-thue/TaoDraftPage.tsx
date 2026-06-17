@@ -14,11 +14,31 @@ import { KpiCard } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 
 const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Nháp', cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
+  DRAFT:               { label: 'Nháp',            cls: 'bg-slate-100 text-slate-700' },
+  UNDER_RENOVATION:    { label: 'Đang cải tạo',    cls: 'bg-amber-100 text-amber-800' },
+  PENDING_HOST_REVIEW: { label: 'Chờ duyệt',       cls: 'bg-blue-100 text-blue-800' },
+  ACTIVE:              { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
+  DISABLED:            { label: 'Đã vô hiệu',      cls: 'bg-rose-100 text-rose-800' },
+};
+
+// ─── "Đã hoàn tất khởi tạo" — đánh dấu FE-side ──────────────────────────────
+// BE chưa có endpoint chuyển DRAFT → PENDING_HOST_REVIEW khi hoàn tất bước khởi
+// tạo (xem doc/NOTE-CHO-TEAM-BE.md). Tạm lưu localStorage: draft nào đã bấm
+// "Xác nhận & Quay về danh sách" sẽ hiển thị "Chờ duyệt" thay vì "Nháp".
+const SUBMITTED_DRAFTS_KEY = 'urbannest_submitted_drafts';
+
+const readSubmittedDrafts = (): number[] => {
+  try {
+    const raw = localStorage.getItem(SUBMITTED_DRAFTS_KEY);
+    return raw ? (JSON.parse(raw) as number[]) : [];
+  } catch { return []; }
+};
+
+const markDraftSubmitted = (id: number) => {
+  const cur = readSubmittedDrafts();
+  if (!cur.includes(id)) {
+    localStorage.setItem(SUBMITTED_DRAFTS_KEY, JSON.stringify([...cur, id]));
+  }
 };
 
 const getUserIdFromToken = (): number => {
@@ -51,6 +71,15 @@ export const TaoDraftPage = () => {
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [submittedDrafts, setSubmittedDrafts] = useState<number[]>(() => readSubmittedDrafts());
+
+  // Badge: DRAFT đã hoàn tất khởi tạo → "Chờ duyệt", còn lại → "Nháp"
+  const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
+    if (b.status === 'DRAFT' && submittedDrafts.includes(b.id)) {
+      return statusBadge.PENDING_HOST_REVIEW;
+    }
+    return statusBadge[b.status] ?? statusBadge.DRAFT;
+  };
 
   // ─── create form ──────────────────────────────────────────────────
   const [zones, setZones] = useState<ZoneResponse[]>([]);
@@ -86,22 +115,25 @@ export const TaoDraftPage = () => {
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => ({
       total: acc.total + 1,
-      draft: acc.draft + (b.status === 'DRAFT' ? 1 : 0),
+      draft: acc.draft + (b.status === 'DRAFT' && !submittedDrafts.includes(b.id) ? 1 : 0),
       active: acc.active + (b.status === 'ACTIVE' ? 1 : 0),
       rooms: acc.rooms + (b.totalRooms || 0),
     }),
     { total: 0, draft: 0, active: 0, rooms: 0 }
-  ), [buildings]);
+  ), [buildings, submittedDrafts]);
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return buildings.filter(b => {
-      const matchStatus = statusFilter === 'all' || b.status === statusFilter;
+      // Draft đã hoàn tất khởi tạo coi như "Chờ duyệt" khi lọc
+      const effectiveStatus = b.status === 'DRAFT' && submittedDrafts.includes(b.id)
+        ? 'PENDING_HOST_REVIEW' : b.status;
+      const matchStatus = statusFilter === 'all' || effectiveStatus === statusFilter;
       const matchSearch = !kw || [b.propertyName, b.shortAddress, b.fullAddress, b.zoneName]
         .some(v => v?.toLowerCase().includes(kw));
       return matchStatus && matchSearch;
     });
-  }, [buildings, statusFilter, search]);
+  }, [buildings, statusFilter, search, submittedDrafts]);
 
   // ─── form handlers ────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -251,6 +283,13 @@ export const TaoDraftPage = () => {
     setView('detail');
   };
 
+  // Bấm "Xác nhận & Quay về danh sách" → đánh dấu draft đã hoàn tất khởi tạo
+  const handleFinishOnboarding = (id: number) => {
+    markDraftSubmitted(id);
+    setSubmittedDrafts(readSubmittedDrafts());
+    backToList();
+  };
+
 
   // ═══════════════════════════════════════════════════════════════════
   // VIEW: StepPropertyInfo (hợp đồng + thiết bị) sau khi tạo draft
@@ -271,7 +310,7 @@ export const TaoDraftPage = () => {
         </div>
         <StepPropertyInfo
           property={newProperty}
-          onNext={backToList}
+          onNext={() => handleFinishOnboarding(newProperty.id)}
           nextLabel="Xác nhận & Quay về danh sách"
           prefillContract={prefillContract ?? undefined}
         />
@@ -283,7 +322,7 @@ export const TaoDraftPage = () => {
   // VIEW: Chi tiết tòa nhà
   // ═══════════════════════════════════════════════════════════════════
   if (view === 'detail' && selectedBuilding) {
-    const badge = statusBadge[selectedBuilding.status] ?? statusBadge.DRAFT;
+    const badge = getStatusBadge(selectedBuilding);
     return (
       <div className="mx-auto max-w-4xl px-4 py-8">
         <button onClick={backToList}
@@ -332,7 +371,7 @@ export const TaoDraftPage = () => {
           </div>
         )}
 
-        <StepPropertyInfo property={selectedBuilding} onNext={backToList} nextLabel="Xác nhận & Quay về danh sách" />
+        <StepPropertyInfo property={selectedBuilding} onNext={() => handleFinishOnboarding(selectedBuilding.id)} nextLabel="Xác nhận & Quay về danh sách" />
       </div>
     );
   }
@@ -713,9 +752,9 @@ export const TaoDraftPage = () => {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp (DRAFT)</option>
+          <option value="DRAFT">Nháp</option>
           <option value="UNDER_RENOVATION">Đang cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
+          <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
         </select>
@@ -735,7 +774,8 @@ export const TaoDraftPage = () => {
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           {filtered.map(b => {
-            const badge = statusBadge[b.status] ?? statusBadge.DRAFT;
+            const badge = getStatusBadge(b);
+            const isSubmittedDraft = b.status === 'DRAFT' && submittedDrafts.includes(b.id);
             const canDelete = b.status === 'DRAFT' || b.status === 'DISABLED';
             return (
               <div key={b.id} onClick={() => openDetail(b)} className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition relative group">
@@ -800,6 +840,11 @@ export const TaoDraftPage = () => {
                       className="w-full py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
                       <Hammer className="w-4 h-4" /> Hoàn tất Cải tạo
                     </button>
+                  )}
+                  {isSubmittedDraft && (
+                    <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" /> Đã hoàn tất khởi tạo — chờ duyệt
+                    </div>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
                     <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">

@@ -477,6 +477,22 @@ ALTER TABLE rooms
 
 ---
 
+## 15. Thiếu endpoint "Hoàn tất khởi tạo" (DRAFT → PENDING_HOST_REVIEW)
+
+**Phát hiện:** 16/06/2026 — màn Khởi tạo tòa nhà (`/admin/buildings/draft`).
+
+**Vấn đề:** Sau khi bấm **"Xác nhận & Quay về danh sách"** ở bước Hợp đồng + Khai báo thiết bị (đã lưu xong cả 2), property **vẫn ở trạng thái `DRAFT`** → badge vẫn hiện "Nháp". Không có cách phân biệt giữa:
+- Draft bị bỏ dở giữa chừng (chưa nhập hợp đồng/thiết bị) → đúng là "Nháp".
+- Draft đã hoàn tất bước khởi tạo, sẵn sàng cho bước cấu hình → nên hiện "Chờ duyệt".
+
+**Nguyên nhân:** Không có endpoint nào chuyển `DRAFT → PENDING_HOST_REVIEW` ở bước khởi tạo. `POST /renovation/complete` thuộc luồng cấu hình/cải tạo (gọi trên DRAFT chưa cấu hình sẽ lỗi), `POST /submit-to-host` yêu cầu đã định giá.
+
+**Đề xuất BE:** Thêm endpoint kiểu `POST /properties/{id}/finish-onboarding` (hoặc tái dùng một transition hợp lệ) để đánh dấu draft đã hoàn tất bước 1, set status sang `PENDING_HOST_REVIEW` (hoặc một status trung gian riêng nếu cần phân biệt với "đã cải tạo xong").
+
+**FE đã workaround (16/06/2026):** Lưu localStorage key `urbannest_submitted_drafts` (mảng `propertyId`) khi bấm "Xác nhận & Quay về danh sách". Badge ở `TaoDraftPage.tsx`: DRAFT + nằm trong danh sách này → hiển thị "Chờ duyệt". **Hạn chế:** chỉ lưu theo trình duyệt, mất khi xoá storage / đổi máy — cần BE để lưu trạng thái thật.
+
+---
+
 ## Tóm tắt trạng thái FE hiện tại
 
 | Tính năng FE | Trạng thái | Phụ thuộc BE |
@@ -494,3 +510,4 @@ ALTER TABLE rooms
 | Trang quản lý Danh mục thiết bị (CRUD) | ⏳ Chờ BE | **Mục 12** — GET đã có, cần POST/PUT/DELETE |
 | Hiển thị nguồn gốc + giá thiết bị đã gán | ✅ FE đã sửa type | **Mục 13** — không cần BE thay đổi |
 | `GET /properties/{id}/rooms` trả 400 (nhà chia phòng) | ⏳ Chờ BE migration | **Mục 14** — thiếu cột `is_deleted` trong bảng `rooms` |
+| "Hoàn tất khởi tạo" đổi DRAFT → "Chờ duyệt" | ⚠️ FE workaround localStorage | **Mục 15** — cần endpoint chuyển `DRAFT → PENDING_HOST_REVIEW` |
