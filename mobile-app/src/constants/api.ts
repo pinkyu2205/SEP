@@ -4,6 +4,11 @@
  */
 export const API_CONFIG = {
   BASE_URL: 'http://localhost:3000/api', // TODO: Thay bằng URL backend thật
+  // Backend Spring thật (dùng cho luồng manager onboarding đã nối API).
+  // - Web/iOS simulator: http://localhost:8080
+  // - Android emulator:  http://10.0.2.2:8080
+  // - Thiết bị thật:     http://<LAN-IP-máy-chạy-BE>:8080
+  REAL_BASE_URL: 'http://localhost:8080',
   TIMEOUT: 15000, // 15 seconds
   ENDPOINTS: {
     // Auth

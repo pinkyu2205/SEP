@@ -174,10 +174,16 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
   const addAssignment = async () => {
     if (newAssign.catalogId === 0 || newAssign.quantity <= 0) return;
     try {
+      let assignStatus = newAssign.status;
+      if (newAssign.source === 'INITIAL_HANDOVER') {
+        const mItem = manifest.find(m => m.catalogId === newAssign.catalogId && m.assignedCount < m.quantity);
+        if (mItem) assignStatus = mItem.status;
+      }
+
       const req: any = {
         catalogId: newAssign.catalogId,
         quantity: newAssign.quantity,
-        status: newAssign.status,
+        status: assignStatus,
         source: newAssign.source
       };
       if (property.wholeHouse) req.houseArea = newAssign.houseArea;
@@ -192,10 +198,16 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
   const addAssignmentToRoom = async (roomId: number) => {
     if (roomAssignForm.catalogId === 0) return;
     try {
+      let assignStatus: any = 'NEW';
+      if (roomAssignForm.source === 'INITIAL_HANDOVER') {
+        const mItem = manifest.find(m => m.catalogId === roomAssignForm.catalogId && m.assignedCount < m.quantity);
+        if (mItem) assignStatus = mItem.status;
+      }
+
       const res = await propertyService.assignEquipment(property.id, {
         catalogId: roomAssignForm.catalogId,
         quantity: roomAssignForm.quantity,
-        status: 'NEW',
+        status: assignStatus,
         source: roomAssignForm.source,
         roomId,
       });
