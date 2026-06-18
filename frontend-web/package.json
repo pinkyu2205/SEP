@@ -19,6 +19,7 @@
     "vite": "^6.4.2"
   },
   "dependencies": {
+    "@goongmaps/goong-js": "^1.0.9",
     "axios": "^1.16.1",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",

@@ -22,6 +22,7 @@ import type {
   HostConfirmRequest,
   HostConfirmResponse,
   PropertyActivationResponse,
+  PropertyPurgeResponse,
 } from '../types/api.types';
 
 const BASE = '/api/v1/properties';
@@ -56,9 +57,14 @@ export const propertyService = {
     return api.put(`${BASE}/${id}`, data);
   },
 
-  /** DELETE /properties/{id} */
+  /** DELETE /properties/{id} — xóa cứng căn nhà + toàn bộ dữ liệu con (BE bulk delete). Trả 204. */
   deleteProperty: (id: number): Promise<void> => {
     return api.delete(`${BASE}/${id}`);
+  },
+
+  /** DELETE /properties/{id}/purge — như deleteProperty nhưng trả số bản ghi đã xóa (ADMIN). */
+  purgeProperty: (id: number): Promise<PropertyPurgeResponse> => {
+    return api.delete(`${BASE}/${id}/purge`);
   },
 
   // =========================================================================
@@ -252,5 +258,13 @@ export const propertyService = {
   /** POST /properties/{id}/disable */
   disableProperty: (id: number): Promise<PropertyResponse> => {
     return api.post(`${BASE}/${id}/disable`);
+  },
+
+  /**
+   * POST /properties/{id}/enable — Kích hoạt lại tòa nhà từ trạng thái DISABLED.
+   * ⚠️ BE CHƯA CÓ endpoint này (xem doc/BE-import-excel-status-constraint.md).
+   */
+  enableProperty: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/enable`);
   },
 };

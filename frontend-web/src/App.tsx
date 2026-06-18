@@ -28,6 +28,7 @@ import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TaoDraftPage } from './pages/super-admin/nha-thue/TaoDraftPage';
+import { ImportExcelPage } from './pages/super-admin/nha-thue/ImportExcelPage';
 import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
 import { DinhGiaPheDuyetPage } from './pages/super-admin/nha-thue/DinhGiaPheDuyetPage';
 import { TenantList } from './pages/tenants/TenantList';
@@ -66,6 +67,7 @@ function App() {
             <Route path="/admin/hosts" element={<HostManagement />} />
             <Route path="/admin/buildings" element={<NhaThueLanding />} />
             <Route path="/admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
+            <Route path="/admin/buildings/import" element={<ImportExcelPage />} />
             <Route path="/admin/buildings/draft" element={<TaoDraftPage />} />
             <Route path="/admin/buildings/configuration" element={<CauHinhKhaiThacPage />} />
             <Route path="/admin/buildings/configuration/:id" element={<CauHinhKhaiThacPage />} />

@@ -6,6 +6,7 @@ import {
   BarChart3,
   Bell,
   CreditCard,
+  FileSpreadsheet,
   FileText,
   FilePlus,
   LogOut,
@@ -40,6 +41,7 @@ const navItems: SidebarItem[] = [
 
   // ── QUY TRÌNH TIẾP NHẬN NHÀ ──────────────────────────────────────
   { type: 'section', label: 'Quy trình tiếp nhận nhà' },
+  { path: '/admin/buildings/import', label: 'Nhập nhà hàng loạt', icon: FileSpreadsheet },
   { path: '/admin/buildings/draft', label: 'Khởi tạo tòa nhà', icon: FilePlus },
   { path: '/admin/buildings/configuration', label: 'Cấu hình khai thác', icon: Settings2 },
   { path: '/admin/buildings/pricing-approval', label: 'Định giá & Phê duyệt', icon: BadgeDollarSign },

@@ -301,6 +301,7 @@ const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | n
       : null;
   }
   if (b.status === 'UNDER_RENOVATION') return { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' };
+  if (b.status === 'RENOVATION_COMPLETED') return { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' };
   if (b.status === 'PENDING_HOST_REVIEW') return { label: 'Đã cải tạo xong', cls: 'bg-teal-100 text-teal-800' };
   if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
   if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
@@ -481,6 +482,7 @@ export const CauHinhKhaiThacPage = () => {
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
           <option value="UNDER_RENOVATION">Đang cải tạo</option>
+          <option value="RENOVATION_COMPLETED">Đã hoàn tất cải tạo</option>
           <option value="PENDING_HOST_REVIEW">Đã cải tạo xong</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
@@ -559,6 +561,20 @@ export const CauHinhKhaiThacPage = () => {
                         className="w-full py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
                         <CheckCircle2 className="w-4 h-4" /> Xác nhận hoàn thành cải tạo
                       </button>
+                    </div>
+                  )}
+                  {b.status === 'RENOVATION_COMPLETED' && (
+                    <div className="flex flex-col gap-2">
+                      <button onClick={() => openConfig(b)}
+                        className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                        <Settings2 className="w-4 h-4" /> Xem / cập nhật cấu hình
+                      </button>
+                      {(b.hasRenovation || b.renovationCompleted) && (
+                        <button onClick={() => openHistory(b)}
+                          className="w-full py-2 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-xs flex justify-center items-center gap-1.5">
+                          <History className="w-3.5 h-3.5" /> Xem lịch sử cải tạo
+                        </button>
+                      )}
                     </div>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (

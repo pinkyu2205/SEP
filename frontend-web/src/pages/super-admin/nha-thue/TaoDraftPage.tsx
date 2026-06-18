@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen,
-  FileText, Hammer, Image as ImageIcon, Layers, MapPin, Plus, Search,
+  FileText, Hammer, Image as ImageIcon, Layers, MapPin, Plus, Power, Search,
   TrendingUp, Trash2, Upload, XCircle,
 } from 'lucide-react';
 import { propertyService } from '../../../services/property.service';
@@ -12,13 +13,16 @@ import type { InboundContractRequest, PropertyDraftRequest, PropertyResponse, Zo
 import { StepPropertyInfo } from '../properties/wizard/StepPropertyInfo';
 import { KpiCard } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { AddressAutocomplete } from '../../../components/AddressAutocomplete';
+import { PropertyMap } from '../../../components/PropertyMap';
 
 const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT:               { label: 'Nháp',            cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION:    { label: 'Đang cải tạo',    cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ duyệt',       cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE:              { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED:            { label: 'Đã vô hiệu',      cls: 'bg-rose-100 text-rose-800' },
+  DRAFT:                { label: 'Nháp',                cls: 'bg-slate-100 text-slate-700' },
+  UNDER_RENOVATION:     { label: 'Đang cải tạo',        cls: 'bg-amber-100 text-amber-800' },
+  RENOVATION_COMPLETED: { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' },
+  PENDING_HOST_REVIEW:  { label: 'Chờ duyệt',           cls: 'bg-blue-100 text-blue-800' },
+  ACTIVE:               { label: 'Đang kinh doanh',     cls: 'bg-emerald-100 text-emerald-800' },
+  DISABLED:             { label: 'Đã vô hiệu',          cls: 'bg-rose-100 text-rose-800' },
 };
 
 // ─── "Đã hoàn tất khởi tạo" — đánh dấu FE-side ──────────────────────────────
@@ -73,10 +77,10 @@ export const TaoDraftPage = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [submittedDrafts, setSubmittedDrafts] = useState<number[]>(() => readSubmittedDrafts());
 
-  // Badge: DRAFT đã hoàn tất khởi tạo → "Chờ duyệt", còn lại → "Nháp"
+  // Badge: DRAFT đã bấm "Xác nhận" bước cuối → "Đã khởi tạo", DRAFT đang tạo dở → "Nháp"
   const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
     if (b.status === 'DRAFT' && submittedDrafts.includes(b.id)) {
-      return statusBadge.PENDING_HOST_REVIEW;
+      return { label: 'Đã khởi tạo', cls: 'bg-indigo-100 text-indigo-800' };
     }
     return statusBadge[b.status] ?? statusBadge.DRAFT;
   };
@@ -125,9 +129,9 @@ export const TaoDraftPage = () => {
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return buildings.filter(b => {
-      // Draft đã hoàn tất khởi tạo coi như "Chờ duyệt" khi lọc
+      // Draft đã bấm "Xác nhận" bước cuối → nhóm lọc riêng "Đã khởi tạo" (FE-side, không phải status BE)
       const effectiveStatus = b.status === 'DRAFT' && submittedDrafts.includes(b.id)
-        ? 'PENDING_HOST_REVIEW' : b.status;
+        ? 'INITIALIZED' : b.status;
       const matchStatus = statusFilter === 'all' || effectiveStatus === statusFilter;
       const matchSearch = !kw || [b.propertyName, b.shortAddress, b.fullAddress, b.zoneName]
         .some(v => v?.toLowerCase().includes(kw));
@@ -250,9 +254,38 @@ export const TaoDraftPage = () => {
 
   const handleDeleteBuilding = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Xác nhận xóa tòa nhà?')) return;
-    try { await propertyService.deleteProperty(id); fetchBuildings(); }
-    catch { alert('Lỗi khi xóa'); }
+    if (!window.confirm('Xác nhận xóa tòa nhà? Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của căn này sẽ bị xóa.')) return;
+    try {
+      await propertyService.deleteProperty(id);
+      toast.success('Đã xóa căn nhà');
+      fetchBuildings();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        // Đã bị xóa trước đó → coi như thành công, làm mới danh sách
+        toast.success('Căn nhà đã được xóa trước đó');
+        fetchBuildings();
+      } else if (status === 403) {
+        toast.error('Bạn cần quyền ADMIN để xóa căn nhà này');
+      }
+      // 422 (ACTIVE / đã có chỉ số điện nước) & 400: api interceptor đã hiển thị message từ BE
+    }
+  };
+
+  const handleEnableBuilding = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Kích hoạt lại tòa nhà này?')) return;
+    try {
+      await propertyService.enableProperty(id);
+      toast.success('Đã kích hoạt lại tòa nhà');
+      fetchBuildings();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404 || status === 405) {
+        toast.error('BE chưa hỗ trợ kích hoạt lại (POST /properties/{id}/enable) — đã ghi yêu cầu cho BE');
+      }
+      // các lỗi khác: api interceptor đã toast
+    }
   };
 
   const handleCompleteRenovation = async (id: number, e: React.MouseEvent) => {
@@ -313,6 +346,7 @@ export const TaoDraftPage = () => {
           onNext={() => handleFinishOnboarding(newProperty.id)}
           nextLabel="Xác nhận & Quay về danh sách"
           prefillContract={prefillContract ?? undefined}
+          confirmBeforeNext
         />
       </div>
     );
@@ -371,7 +405,15 @@ export const TaoDraftPage = () => {
           </div>
         )}
 
-        <StepPropertyInfo property={selectedBuilding} onNext={() => handleFinishOnboarding(selectedBuilding.id)} nextLabel="Xác nhận & Quay về danh sách" />
+        {/* Bản đồ vị trí (Goong) */}
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-500">
+            <MapPin className="h-4 w-4 text-indigo-500" /> Vị trí trên bản đồ
+          </h3>
+          <PropertyMap address={selectedBuilding.fullAddress || selectedBuilding.shortAddress} />
+        </div>
+
+        <StepPropertyInfo property={selectedBuilding} onNext={() => handleFinishOnboarding(selectedBuilding.id)} nextLabel="Xác nhận & Quay về danh sách" confirmBeforeNext />
       </div>
     );
   }
@@ -493,18 +535,20 @@ export const TaoDraftPage = () => {
                   className="input-field" placeholder="VD: UrbanNest Quận 3 — tên nội bộ để nhận diện" />
               </label>
 
-              <label className="block">
+              <div className="block">
                 <span className="mb-1.5 block text-sm font-bold text-slate-700">
                   Địa chỉ <span className="text-rose-500">*</span>
                 </span>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input required name="address" value={formData.address} onChange={handleChange}
-                    className="input-field pl-9"
-                    placeholder="Số nhà, tên đường" />
-                </div>
-                <p className="mt-1 text-xs text-slate-400">Nhập đủ để hệ thống có thể định vị và hiển thị đúng trên bản đồ</p>
-              </label>
+                <AddressAutocomplete
+                  required
+                  name="address"
+                  value={formData.address}
+                  onChange={(v) => setFormData(prev => ({ ...prev, address: v }))}
+                  onSelect={(sel) => setFormData(prev => ({ ...prev, address: sel.address }))}
+                  placeholder="Gõ địa chỉ để gợi ý — VD: 18 Cầu Giấy, Hà Nội"
+                />
+                <p className="mt-1 text-xs text-slate-400">Chọn từ gợi ý của Goong để định vị chính xác trên bản đồ</p>
+              </div>
 
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -753,7 +797,9 @@ export const TaoDraftPage = () => {
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
           <option value="DRAFT">Nháp</option>
+          <option value="INITIALIZED">Đã khởi tạo</option>
           <option value="UNDER_RENOVATION">Đang cải tạo</option>
+          <option value="RENOVATION_COMPLETED">Đã hoàn tất cải tạo</option>
           <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
@@ -776,25 +822,42 @@ export const TaoDraftPage = () => {
           {filtered.map(b => {
             const badge = getStatusBadge(b);
             const isSubmittedDraft = b.status === 'DRAFT' && submittedDrafts.includes(b.id);
-            const canDelete = b.status === 'DRAFT' || b.status === 'DISABLED';
             return (
               <div key={b.id} onClick={() => openDetail(b)} className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition relative group">
                 <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity bg-white/80 p-1 rounded-lg backdrop-blur-sm z-10">
-                  {b.status !== 'ACTIVE' && b.status !== 'DISABLED' && (
-                    <button onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!window.confirm('Vô hiệu hóa tòa nhà này?')) return;
-                      try { await propertyService.disableProperty(b.id); fetchBuildings(); }
-                      catch { alert('Lỗi'); }
-                    }} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                  )}
-                  {canDelete && (
-                    <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa"
-                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {b.status === 'DISABLED' ? (
+                    <>
+                      {/* Đã vô hiệu → cho phép kích hoạt lại hoặc xóa vĩnh viễn */}
+                      <button onClick={(e) => handleEnableBuilding(b.id, e)} title="Kích hoạt lại"
+                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
+                        <Power className="w-4 h-4" />
+                      </button>
+                      <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa vĩnh viễn"
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* Bước 1: vô hiệu hóa (chưa ACTIVE mới cho vô hiệu) */}
+                      {b.status !== 'ACTIVE' && (
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm('Vô hiệu hóa tòa nhà này?')) return;
+                          try { await propertyService.disableProperty(b.id); toast.success('Đã vô hiệu hóa'); fetchBuildings(); }
+                          catch { /* api interceptor đã toast lỗi */ }
+                        }} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/* Nháp: cho xóa trực tiếp (chưa từng vận hành) */}
+                      {b.status === 'DRAFT' && (
+                        <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa nháp"
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -842,8 +905,13 @@ export const TaoDraftPage = () => {
                     </button>
                   )}
                   {isSubmittedDraft && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" /> Đã hoàn tất khởi tạo — chờ duyệt
+                    <div className="w-full py-2 text-center text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã khởi tạo — sang Cấu hình khai thác
+                    </div>
+                  )}
+                  {b.status === 'RENOVATION_COMPLETED' && (
+                    <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — sang Định giá để gửi Host
                     </div>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (

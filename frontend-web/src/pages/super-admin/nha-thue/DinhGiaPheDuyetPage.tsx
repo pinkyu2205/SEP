@@ -24,6 +24,8 @@ export const DinhGiaPheDuyetPage = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Giá phòng đã resolve cho nhà chia phòng (property.price rỗng vì giá nằm ở từng phòng)
+  const [roomPrices, setRoomPrices] = useState<Record<number, { min: number; max: number }>>({});
 
   const fetchList = async () => {
     setLoading(true);
@@ -44,10 +46,51 @@ export const DinhGiaPheDuyetPage = () => {
     }
   }, [id, buildings]);
 
+  // Nhà chia phòng: lấy giá thật từ các phòng (min/max) vì property.price rỗng
+  useEffect(() => {
+    const roomTypes = buildings.filter(b => b.wholeHouse === false);
+    if (roomTypes.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(
+      roomTypes.map(async b => {
+        const rooms = await propertyService.getRooms(b.id);
+        const prices = rooms.map(r => r.price ?? 0).filter(v => v > 0);
+        return prices.length ? { id: b.id, min: Math.min(...prices), max: Math.max(...prices) } : null;
+      })
+    ).then(results => {
+      if (cancelled) return;
+      const map: Record<number, { min: number; max: number }> = {};
+      results.forEach(r => {
+        if (r.status === 'fulfilled' && r.value) map[r.value.id] = { min: r.value.min, max: r.value.max };
+      });
+      setRoomPrices(map);
+    });
+    return () => { cancelled = true; };
+  }, [buildings]);
+
+  // Render ô "Giá thuê": nguyên căn → property.price; chia phòng → giá phòng (từ min)
+  const renderRentPrice = (b: PropertyResponse) => {
+    if (b.wholeHouse === false) {
+      const rp = roomPrices[b.id];
+      if (rp && rp.min > 0) {
+        return (
+          <p className="font-black text-sm leading-tight">
+            {rp.min !== rp.max && <span className="text-[10px] font-medium text-emerald-600/70">từ </span>}
+            {rp.min.toLocaleString('vi-VN')}
+          </p>
+        );
+      }
+      return <p className="font-bold text-[11px] leading-tight text-emerald-600/70">Chưa định giá</p>;
+    }
+    return b.price
+      ? <p className="font-black text-sm leading-tight">{Number(b.price).toLocaleString('vi-VN')}</p>
+      : <p className="font-bold text-[11px] leading-tight text-emerald-600/70">Chưa định giá</p>;
+  };
+
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => ({
       total: acc.total + 1,
-      ready: acc.ready + (b.status === 'DRAFT' && b.wholeHouse !== null ? 1 : 0),
+      ready: acc.ready + ((b.status === 'DRAFT' && b.wholeHouse !== null) || b.status === 'RENOVATION_COMPLETED' ? 1 : 0),
       pending: acc.pending + (b.status === 'PENDING_HOST_REVIEW' ? 1 : 0),
       active: acc.active + (b.status === 'ACTIVE' ? 1 : 0),
     }),
@@ -124,6 +167,7 @@ export const DinhGiaPheDuyetPage = () => {
           <option value="all">Tất cả trạng thái</option>
           <option value="DRAFT">Đang chờ định giá (Nháp)</option>
           <option value="UNDER_RENOVATION">Đang chờ định giá (Cải tạo)</option>
+          <option value="RENOVATION_COMPLETED">Đang chờ định giá (Đã cải tạo xong)</option>
           <option value="PENDING_HOST_REVIEW">Đang chờ định giá (Chờ duyệt)</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
@@ -173,9 +217,7 @@ export const DinhGiaPheDuyetPage = () => {
                     <p className="mt-0.5">Tổng phòng</p>
                   </div>
                   <div className="rounded-lg bg-emerald-50 py-2 text-emerald-700">
-                    <p className="font-black text-sm leading-tight">
-                      {b.price ? Number(b.price).toLocaleString('vi-VN') : '—'}
-                    </p>
+                    {renderRentPrice(b)}
                     <p className="mt-0.5">Giá thuê</p>
                   </div>
                   <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
@@ -200,6 +242,12 @@ export const DinhGiaPheDuyetPage = () => {
                     <button onClick={() => setSelected(b)}
                       className="w-full py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
                       <Hammer className="w-4 h-4" /> Xem định giá & hoàn tất
+                    </button>
+                  )}
+                  {b.status === 'RENOVATION_COMPLETED' && (
+                    <button onClick={() => setSelected(b)}
+                      className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                      <BadgeDollarSign className="w-4 h-4" /> Định giá & gửi Host →
                     </button>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (

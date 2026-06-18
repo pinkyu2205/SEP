@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Building, Package, FileText, Plus, Trash2, Check, Download, Save, AlertCircle, Lock } from 'lucide-react';
 import type {
   PropertyResponse,
@@ -9,6 +9,7 @@ import type {
 } from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
 import { catalogService } from '../../../../services/catalog.service';
+import { ConfirmDialog } from '../../../../components/ConfirmDialog';
 
 // ─── Giới hạn lịch hợp đồng ───────────────────────────────────────────────
 // Ngày bắt đầu: không được trước hôm nay. Ngày kết thúc: tối đa 50 năm kể từ
@@ -31,10 +32,15 @@ interface StepPropertyInfoProps {
   onNext: () => void;
   nextLabel?: string;
   prefillContract?: Partial<InboundContractRequest>;
+  /** Bật hộp thoại xác nhận lần 2 trước khi chạy onNext (dùng cho nút "Xác nhận & Quay về danh sách") */
+  confirmBeforeNext?: boolean;
+  confirmTitle?: string;
+  confirmMessage?: ReactNode;
 }
 
-export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →', prefillContract }: StepPropertyInfoProps) => {
+export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →', prefillContract, confirmBeforeNext = false, confirmTitle, confirmMessage }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
+  const [confirmNextOpen, setConfirmNextOpen] = useState(false);
   
   // Manifest State
   const [catalog, setCatalog] = useState<EquipmentCatalogItem[]>([]);
@@ -277,7 +283,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                     setRentAmountDisplay(raw ? Number(raw).toLocaleString('vi-VN') : '');
                     setContractForm(prev => ({ ...prev, totalRentAmount: parseVND(raw) }));
                   }}
-                  className="input-field pr-8 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="input-field pr-8 text-right disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="VD: 15.000.000"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium pointer-events-none">đ</span>
@@ -353,7 +359,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           {/* Header */}
           <div className="grid grid-cols-[1fr_96px_128px_48px] gap-2 pb-2 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
             <span>Tên Thiết bị</span>
-            <span>Số lượng</span>
+            <span className="text-right">Số lượng</span>
             <span>Tình trạng</span>
             <span className="text-center">Xóa</span>
           </div>
@@ -414,7 +420,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                   <input
                     type="number" min={1} value={item.quantity}
                     onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))}
-                    className="input-field py-1.5 text-sm"
+                    className="input-field py-1.5 text-sm text-right"
                   />
 
                   {/* Tình trạng */}
@@ -457,14 +463,31 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <AlertCircle className="w-4 h-4" /> Vui lòng Lưu Thiết bị và Lưu Hợp đồng trước khi tiếp tục
           </p>
         )}
-        <button 
-          onClick={onNext} 
+        <button
+          onClick={() => (confirmBeforeNext ? setConfirmNextOpen(true) : onNext())}
           disabled={!isFormComplete}
           className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {nextLabel}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmNextOpen}
+        tone="primary"
+        title={confirmTitle ?? 'Xác nhận hoàn tất khởi tạo?'}
+        message={confirmMessage ?? (
+          <>
+            Bạn chắc chắn đã nhập đúng và đầy đủ <b className="text-slate-700">hợp đồng</b> và{' '}
+            <b className="text-slate-700">thiết bị</b> cho tòa nhà{' '}
+            <b className="text-slate-700">{property.propertyName}</b>? Sau khi xác nhận, tòa nhà sẽ
+            được đánh dấu <b className="text-slate-700">Đã khởi tạo</b> và quay về danh sách.
+          </>
+        )}
+        confirmText="Xác nhận"
+        onConfirm={() => { setConfirmNextOpen(false); onNext(); }}
+        onCancel={() => setConfirmNextOpen(false)}
+      />
     </div>
   );
 };
