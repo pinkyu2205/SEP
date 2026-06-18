@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useTickets } from '../../store/maintenanceStore';
+import { useTickets, MaintenanceTicket } from '../../store/maintenanceStore';
 import { getPropertyById } from '../../data/managedProperties';
+import { realMaintenanceService } from '../../services/maintenanceService.real';
+import { dtoToTicket } from '../../services/maintenanceMappers';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -34,7 +36,21 @@ const daysBetween = (from: string) => {
 
 export const MaintenanceManagerScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const tickets = useTickets();
+  const mockTickets = useTickets();
+  const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
+
+  // Lấy danh sách thật cho OM; lỗi → fallback store mock.
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      realMaintenanceService.listForManager()
+        .then(page => { if (active) setRemote(page.content.map(dtoToTicket)); })
+        .catch(() => { if (active) setRemote(null); });
+      return () => { active = false; };
+    }, []),
+  );
+
+  const tickets = remote ?? mockTickets;
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();

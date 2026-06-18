@@ -26,7 +26,7 @@ export const API_CONFIG = {
     ROOMS: '/rooms',
     ROOM_DETAIL: (id: string) => `/rooms/${id}`,
 
-    // Maintenance (Bảo trì / Sửa chữa)
+    // Maintenance (Bảo trì / Sửa chữa) — legacy mock endpoints
     MAINTENANCE: '/maintenance-requests',
     MAINTENANCE_DETAIL: (id: string) => `/maintenance-requests/${id}`,
     MAINTENANCE_UPDATE_STATUS: (id: string) => `/maintenance-requests/${id}/status`,

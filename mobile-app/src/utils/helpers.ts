@@ -139,6 +139,95 @@ export const getMaintenancePriorityColor = (priority: string): string => {
   return colors[priority] || '#94A3B8';
 };
 
+// ===== Real API enums (UPPERCASE, theo Maintenance_BE_Contract.md) =====
+
+/** Map mọi trạng thái BE (kể cả ASSIGNED/WAITING_PARTS) về 4 trạng thái spec */
+export const normalizeReqStatus = (
+  s: string | undefined,
+): 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' => {
+  switch ((s ?? '').toUpperCase()) {
+    case 'PENDING':
+    case 'OPEN':
+      return 'PENDING';
+    case 'ASSIGNED':
+    case 'ACCEPTED':
+    case 'IN_PROGRESS':
+    case 'WAITING_PARTS':
+      return 'IN_PROGRESS';
+    case 'RESOLVED':
+    case 'DONE':
+    case 'COMPLETED':
+      return 'RESOLVED';
+    case 'CANCELLED':
+    case 'CANCELED':
+    case 'REJECTED':
+      return 'CANCELLED';
+    default:
+      return 'PENDING';
+  }
+};
+
+export const getReqStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    PENDING: 'Chờ xử lý',
+    IN_PROGRESS: 'Đang xử lý',
+    RESOLVED: 'Đã hoàn thành',
+    CANCELLED: 'Đã hủy',
+  };
+  return labels[normalizeReqStatus(status)];
+};
+
+export const getReqStatusColor = (status: string): string => {
+  const colors: Record<string, string> = {
+    PENDING: '#EF4444',
+    IN_PROGRESS: '#3B82F6',
+    RESOLVED: '#10B981',
+    CANCELLED: '#94A3B8',
+  };
+  return colors[normalizeReqStatus(status)];
+};
+
+export const getReqPriorityLabel = (priority: string): string => {
+  const labels: Record<string, string> = {
+    LOW: 'Thấp',
+    MEDIUM: 'Trung bình',
+    HIGH: 'Cao',
+    URGENT: 'Khẩn cấp',
+  };
+  return labels[(priority ?? '').toUpperCase()] || priority;
+};
+
+export const getReqPriorityColor = (priority: string): string => {
+  const colors: Record<string, string> = {
+    LOW: '#10B981',
+    MEDIUM: '#F59E0B',
+    HIGH: '#EF4444',
+    URGENT: '#7C3AED',
+  };
+  return colors[(priority ?? '').toUpperCase()] || '#94A3B8';
+};
+
+export const getReqCategoryLabel = (category: string): string => {
+  const labels: Record<string, string> = {
+    ELECTRICAL: 'Điện',
+    PLUMBING: 'Nước',
+    FURNITURE: 'Nội thất',
+    APPLIANCE: 'Thiết bị',
+    OTHER: 'Khác',
+  };
+  return labels[(category ?? '').toUpperCase()] || category;
+};
+
+export const getEquipmentLifecycleLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    GOOD: 'Hoạt động tốt',
+    MAINTENANCE: 'Đang bảo trì',
+    BROKEN: 'Đang hỏng',
+    DISPOSED: 'Đã thanh lý',
+  };
+  return labels[(status ?? '').toUpperCase()] || status;
+};
+
 export const getNotificationTypeEmoji = (type: string): string => {
   const map: Record<string, string> = {
     new_bill: '📄',
