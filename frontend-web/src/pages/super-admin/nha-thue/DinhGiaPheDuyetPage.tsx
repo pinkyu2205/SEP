@@ -9,12 +9,10 @@ import type { PropertyResponse } from '../../../types/api.types';
 import { StepSubmitToHost } from '../properties/wizard/StepSubmitToHost';
 import { KpiCard } from '../shared';
 
-const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Nháp', cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
+const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
+  if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
+  if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
+  return { label: 'Đang chờ định giá', cls: 'bg-orange-100 text-orange-800' };
 };
 
 export const DinhGiaPheDuyetPage = () => {
@@ -26,6 +24,8 @@ export const DinhGiaPheDuyetPage = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Giá phòng đã resolve cho nhà chia phòng (property.price rỗng vì giá nằm ở từng phòng)
+  const [roomPrices, setRoomPrices] = useState<Record<number, { min: number; max: number }>>({});
 
   const fetchList = async () => {
     setLoading(true);
@@ -46,10 +46,51 @@ export const DinhGiaPheDuyetPage = () => {
     }
   }, [id, buildings]);
 
+  // Nhà chia phòng: lấy giá thật từ các phòng (min/max) vì property.price rỗng
+  useEffect(() => {
+    const roomTypes = buildings.filter(b => b.wholeHouse === false);
+    if (roomTypes.length === 0) return;
+    let cancelled = false;
+    Promise.allSettled(
+      roomTypes.map(async b => {
+        const rooms = await propertyService.getRooms(b.id);
+        const prices = rooms.map(r => r.price ?? 0).filter(v => v > 0);
+        return prices.length ? { id: b.id, min: Math.min(...prices), max: Math.max(...prices) } : null;
+      })
+    ).then(results => {
+      if (cancelled) return;
+      const map: Record<number, { min: number; max: number }> = {};
+      results.forEach(r => {
+        if (r.status === 'fulfilled' && r.value) map[r.value.id] = { min: r.value.min, max: r.value.max };
+      });
+      setRoomPrices(map);
+    });
+    return () => { cancelled = true; };
+  }, [buildings]);
+
+  // Render ô "Giá thuê": nguyên căn → property.price; chia phòng → giá phòng (từ min)
+  const renderRentPrice = (b: PropertyResponse) => {
+    if (b.wholeHouse === false) {
+      const rp = roomPrices[b.id];
+      if (rp && rp.min > 0) {
+        return (
+          <p className="font-black text-sm leading-tight">
+            {rp.min !== rp.max && <span className="text-[10px] font-medium text-emerald-600/70">từ </span>}
+            {rp.min.toLocaleString('vi-VN')}
+          </p>
+        );
+      }
+      return <p className="font-bold text-[11px] leading-tight text-emerald-600/70">Chưa định giá</p>;
+    }
+    return b.price
+      ? <p className="font-black text-sm leading-tight">{Number(b.price).toLocaleString('vi-VN')}</p>
+      : <p className="font-bold text-[11px] leading-tight text-emerald-600/70">Chưa định giá</p>;
+  };
+
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => ({
       total: acc.total + 1,
-      ready: acc.ready + (b.status === 'DRAFT' && b.wholeHouse !== null ? 1 : 0),
+      ready: acc.ready + ((b.status === 'DRAFT' && b.wholeHouse !== null) || b.status === 'RENOVATION_COMPLETED' ? 1 : 0),
       pending: acc.pending + (b.status === 'PENDING_HOST_REVIEW' ? 1 : 0),
       active: acc.active + (b.status === 'ACTIVE' ? 1 : 0),
     }),
@@ -112,7 +153,7 @@ export const DinhGiaPheDuyetPage = () => {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard title="Tổng tòa nhà" value={String(kpi.total)} icon={Building2} color="bg-blue-50 text-blue-700" />
         <KpiCard title="Sẵn sàng định giá" value={String(kpi.ready)} icon={BadgeDollarSign} color="bg-indigo-50 text-indigo-700" />
-        <KpiCard title="Chờ Host duyệt" value={String(kpi.pending)} icon={Clock} color="bg-blue-50 text-blue-700" />
+        <KpiCard title="Đang chờ định giá" value={String(kpi.pending)} icon={Clock} color="bg-orange-50 text-orange-700" />
         <KpiCard title="Đang kinh doanh" value={String(kpi.active)} icon={CheckCircle2} color="bg-emerald-50 text-emerald-700" />
       </div>
 
@@ -124,9 +165,10 @@ export const DinhGiaPheDuyetPage = () => {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp (DRAFT)</option>
-          <option value="UNDER_RENOVATION">Đang cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
+          <option value="DRAFT">Đang chờ định giá (Nháp)</option>
+          <option value="UNDER_RENOVATION">Đang chờ định giá (Cải tạo)</option>
+          <option value="RENOVATION_COMPLETED">Đang chờ định giá (Đã cải tạo xong)</option>
+          <option value="PENDING_HOST_REVIEW">Đang chờ định giá (Chờ duyệt)</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
         </select>
@@ -142,7 +184,7 @@ export const DinhGiaPheDuyetPage = () => {
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           {filtered.map(b => {
-            const badge = statusBadge[b.status] ?? statusBadge.DRAFT;
+            const badge = getStatusBadge(b);
             const isReady = b.status === 'DRAFT' && b.wholeHouse !== null;
             return (
               <div key={b.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition">
@@ -175,9 +217,7 @@ export const DinhGiaPheDuyetPage = () => {
                     <p className="mt-0.5">Tổng phòng</p>
                   </div>
                   <div className="rounded-lg bg-emerald-50 py-2 text-emerald-700">
-                    <p className="font-black text-sm leading-tight">
-                      {b.price ? Number(b.price).toLocaleString('vi-VN') : '—'}
-                    </p>
+                    {renderRentPrice(b)}
                     <p className="mt-0.5">Giá thuê</p>
                   </div>
                   <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
@@ -204,9 +244,15 @@ export const DinhGiaPheDuyetPage = () => {
                       <Hammer className="w-4 h-4" /> Xem định giá & hoàn tất
                     </button>
                   )}
+                  {b.status === 'RENOVATION_COMPLETED' && (
+                    <button onClick={() => setSelected(b)}
+                      className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                      <BadgeDollarSign className="w-4 h-4" /> Định giá & gửi Host →
+                    </button>
+                  )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
+                    <div className="w-full py-2 text-center text-xs font-semibold text-orange-600 bg-orange-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" /> Đang chờ định giá
                     </div>
                   )}
                   {b.status === 'ACTIVE' && (

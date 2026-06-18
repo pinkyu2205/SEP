@@ -21,8 +21,12 @@ export const tenantService = {
     return api.post(`${BASE}/${propertyId}/tenant-contract`, data);
   },
 
-  /** GET /properties/{propertyId}/tenant-contracts — DS hợp đồng thuê của tòa */
-  listByProperty: (propertyId: number): Promise<TenantContractResponse[]> => {
-    return api.get(`${BASE}/${propertyId}/tenant-contracts`);
+  /** GET /properties/{propertyId}/tenant-contracts — DS hợp đồng thuê của tòa.
+   *  `silent`: tắt toast lỗi tự động của interceptor (caller tự xử lý). */
+  listByProperty: (propertyId: number, opts?: { silent?: boolean }): Promise<TenantContractResponse[]> => {
+    return api.get(
+      `${BASE}/${propertyId}/tenant-contracts`,
+      opts?.silent ? ({ skipErrorToast: true } as never) : undefined,
+    );
   },
 };

@@ -6,11 +6,13 @@ import {
   BarChart3,
   Bell,
   CreditCard,
+  FileSpreadsheet,
   FileText,
   FilePlus,
   LogOut,
   MapPin,
   Menu,
+  Package,
   Search,
   Settings,
   Settings2,
@@ -39,6 +41,7 @@ const navItems: SidebarItem[] = [
 
   // ── QUY TRÌNH TIẾP NHẬN NHÀ ──────────────────────────────────────
   { type: 'section', label: 'Quy trình tiếp nhận nhà' },
+  { path: '/admin/buildings/import', label: 'Nhập nhà hàng loạt', icon: FileSpreadsheet },
   { path: '/admin/buildings/draft', label: 'Khởi tạo tòa nhà', icon: FilePlus },
   { path: '/admin/buildings/configuration', label: 'Cấu hình khai thác', icon: Settings2 },
   { path: '/admin/buildings/pricing-approval', label: 'Định giá & Phê duyệt', icon: BadgeDollarSign },
@@ -52,6 +55,7 @@ const navItems: SidebarItem[] = [
   { type: 'section', label: 'Vận hành' },
   { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
   { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
+  { path: '/admin/equipments', label: 'Danh mục thiết bị', icon: Package },
 
   // ── HỆ THỐNG ─────────────────────────────────────────────────────
   { type: 'section', label: 'Hệ thống' },

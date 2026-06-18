@@ -8,7 +8,7 @@ import { AdminLayout } from './layouts/SuperAdminLayout';
 import { WebLogin } from './pages/auth/WebLogin';
 import { ContractList } from './pages/contracts/ContractList';
 import { Dashboard } from './pages/dashboard/Dashboard';
-import { EquipmentList } from './pages/equipments/EquipmentList';
+import { EquipmentCatalogPage } from './pages/super-admin/EquipmentCatalogPage';
 import { FinancialManagement } from './pages/financial/FinancialManagement';
 import { MaintenanceList } from './pages/maintenance/MaintenanceList';
 import { ManagerList } from './pages/managers/ManagerList';
@@ -28,6 +28,7 @@ import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TaoDraftPage } from './pages/super-admin/nha-thue/TaoDraftPage';
+import { ImportExcelPage } from './pages/super-admin/nha-thue/ImportExcelPage';
 import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
 import { DinhGiaPheDuyetPage } from './pages/super-admin/nha-thue/DinhGiaPheDuyetPage';
 import { TenantList } from './pages/tenants/TenantList';
@@ -66,6 +67,7 @@ function App() {
             <Route path="/admin/hosts" element={<HostManagement />} />
             <Route path="/admin/buildings" element={<NhaThueLanding />} />
             <Route path="/admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
+            <Route path="/admin/buildings/import" element={<ImportExcelPage />} />
             <Route path="/admin/buildings/draft" element={<TaoDraftPage />} />
             <Route path="/admin/buildings/configuration" element={<CauHinhKhaiThacPage />} />
             <Route path="/admin/buildings/configuration/:id" element={<CauHinhKhaiThacPage />} />
@@ -75,6 +77,7 @@ function App() {
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
+            <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/settings" element={<SystemConfiguration />} />
             <Route path="/admin/security" element={<ActivityLogsSecurity />} />
           </Route>
@@ -93,7 +96,6 @@ function App() {
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
-            <Route path="/host/equipments" element={<EquipmentList />} />
             <Route path="/host/reports" element={<ReportsAnalytics />} />
             <Route path="/host/notifications" element={<NotificationCenter />} />
             <Route

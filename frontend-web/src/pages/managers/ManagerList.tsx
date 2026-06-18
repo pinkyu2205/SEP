@@ -1,50 +1,61 @@
-import { useState } from 'react';
-import { Search, Plus, Phone, UserCog, Mail, Edit2, Building2, Users, Wrench } from 'lucide-react';
-import type { Manager } from '../../types';
-import { MOCK_MANAGERS, MOCK_PROPERTIES, MOCK_MAINTENANCE_REQUESTS } from '../../utils/mockData';
-import { managerStatusMap } from '../../utils';
-import { ManagerFormModal } from './ManagerFormModal';
+import { useState, useEffect } from 'react';
+import { Search, UserCog, Building2, Users, Wrench, RefreshCw, Phone } from 'lucide-react';
+import { propertyService } from '../../services/property.service';
+import { userService } from '../../services/user.service';
+import type { PropertyResponse, UserResponse } from '../../types/api.types';
+
+type ManagerItem = { id: string; fullName: string; username: string };
+
+const statusCls: Record<string, { label: string; color: string; dot: string }> = {
+  ACTIVE:   { label: 'Hoạt động',       color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  INACTIVE: { label: 'Ngừng hoạt động', color: 'bg-rose-100 text-rose-600',       dot: 'bg-rose-400' },
+  DISABLE:  { label: 'Đã vô hiệu',      color: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
+  PENDING:  { label: 'Chờ duyệt',       color: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
+};
 
 export const ManagerList = () => {
-  const [managers, setManagers] = useState<Manager[]>(MOCK_MANAGERS);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showFormModal, setShowFormModal] = useState(false);
-  const [editingManager, setEditingManager] = useState<Manager | null>(null);
+  const [managers, setManagers]     = useState<ManagerItem[]>([]);
+  const [properties, setProperties] = useState<PropertyResponse[]>([]);
+  const [userMap, setUserMap]       = useState<Map<string, UserResponse>>(new Map());
+  const [loading, setLoading]       = useState(true);
+  const [search, setSearch]         = useState('');
 
-  const filtered = managers.filter(m =>
-    m.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.phone.includes(searchTerm)
-  );
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [mgrs, propsRes] = await Promise.all([
+        propertyService.getManagers(),
+        propertyService.getProperties(0, 100),
+      ]);
+      setManagers(mgrs);
+      setProperties(propsRes.content);
 
-  const getManagerStats = (managerId: string) => {
-    const assignedProps = MOCK_PROPERTIES.filter(p => p.managerId === managerId);
-    const activeTenants = assignedProps.flatMap(p => p.rooms.filter(r => r.status === 'occupied')).length;
-    const openMaintenance = MOCK_MAINTENANCE_REQUESTS.filter(
-      m => m.assignedManagerId === managerId && (m.status === 'open' || m.status === 'in_progress')
-    ).length;
-    return { assignedProps, activeTenants, openMaintenance };
+      // Thử lấy phone/status — host có thể không có quyền, bỏ qua nếu lỗi
+      try {
+        const users = await userService.getAllUsers();
+        const map = new Map<string, UserResponse>();
+        users.filter(u => u.role === 'ROLE_MANAGER').forEach(u => map.set(u.id, u));
+        setUserMap(map);
+      } catch { /* ignore */ }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
-  const handleSave = (data: Partial<Manager>) => {
-    if (editingManager) {
-      setManagers(prev => prev.map(m => m.id === editingManager.id ? { ...m, ...data } : m));
-    } else {
-      const newManager: Manager = {
-        id: `m-${Date.now()}`,
-        fullName: data.fullName || '',
-        phone: data.phone || '',
-        cccd: data.cccd || '',
-        email: data.email || '',
-        role: 'manager',
-        status: data.status || 'active',
-        assignedPropertyIds: data.assignedPropertyIds || [],
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setManagers(prev => [newManager, ...prev]);
-    }
-    setShowFormModal(false);
-    setEditingManager(null);
-  };
+  useEffect(() => { fetchData(); }, []);
+
+  const filtered = managers.filter(m => {
+    const kw = search.trim().toLowerCase();
+    if (!kw) return true;
+    const user = userMap.get(m.id);
+    return (
+      (m.fullName || m.username).toLowerCase().includes(kw) ||
+      user?.phoneNumber?.includes(kw) ||
+      m.username.toLowerCase().includes(kw)
+    );
+  });
+
+  const getAssignedProps = (mgId: string) =>
+    properties.filter(p => p.operationManagerId === mgId);
 
   return (
     <div className="space-y-6">
@@ -56,9 +67,9 @@ export const ManagerList = () => {
             {managers.length} quản lý vận hành đang giám sát các bất động sản UrbanNest
           </p>
         </div>
-        <button onClick={() => { setEditingManager(null); setShowFormModal(true); }} className="btn-primary flex items-center gap-2">
-          <Plus className="w-5 h-5" />
-          Thêm quản lý
+        <button onClick={fetchData}
+          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition shadow-sm self-start">
+          <RefreshCw className="w-4 h-4" /> Làm mới
         </button>
       </div>
 
@@ -66,7 +77,7 @@ export const ManagerList = () => {
       <div className="relative w-full max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
         <input type="text" placeholder="Tìm theo tên hoặc số điện thoại..."
-          value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="input-field pl-10" />
+          value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-10" />
       </div>
 
       {/* Table */}
@@ -81,44 +92,64 @@ export const ManagerList = () => {
                 <th className="px-6 py-4">Khách thuê</th>
                 <th className="px-6 py-4">Bảo trì chờ xử lý</th>
                 <th className="px-6 py-4">Trạng thái</th>
-                <th className="px-6 py-4 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map(manager => {
-                const statusInfo = managerStatusMap[manager.status as keyof typeof managerStatusMap] ?? managerStatusMap.active;
-                const { assignedProps, activeTenants, openMaintenance } = getManagerStats(manager.id);
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-16 text-center">
+                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600 mb-3" />
+                    <p className="text-sm text-slate-400">Đang tải...</p>
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                    <UserCog className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có quản lý nào.'}
+                  </td>
+                </tr>
+              ) : filtered.map(mgr => {
+                const user        = userMap.get(mgr.id);
+                const assignedProps = getAssignedProps(mgr.id);
+                const displayName = mgr.fullName || mgr.username;
+                const statusKey   = user?.status ?? 'ACTIVE';
+                const st          = statusCls[statusKey] ?? statusCls.ACTIVE;
+
                 return (
-                  <tr key={manager.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={mgr.id} className="hover:bg-slate-50 transition-colors">
+                    {/* Tên */}
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                          {manager.fullName.charAt(0).toUpperCase()}
+                          {displayName.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <p className="font-semibold text-slate-900">{manager.fullName}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">Từ {manager.createdAt}</p>
+                          <p className="font-semibold text-slate-900">{displayName}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">@{mgr.username}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <Phone className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="font-medium text-slate-900">{manager.phone}</span>
-                      </div>
-                      {manager.email && (
-                        <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <Mail className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{manager.email}</span>
+
+                    {/* Liên hệ */}
+                    <td className="px-6 py-4">
+                      {user?.phoneNumber ? (
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="font-medium text-slate-900">{user.phoneNumber}</span>
                         </div>
+                      ) : (
+                        <span className="text-slate-300 italic text-xs">Chưa có</span>
                       )}
                     </td>
+
+                    {/* Nhà phụ trách */}
                     <td className="px-6 py-4">
                       {assignedProps.length > 0 ? (
                         <div className="flex flex-col gap-1">
                           {assignedProps.map(p => (
                             <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
-                              <Building2 className="w-3 h-3" />{p.name}
+                              <Building2 className="w-3 h-3" />{p.propertyName}
                             </span>
                           ))}
                         </div>
@@ -126,54 +157,41 @@ export const ManagerList = () => {
                         <span className="text-slate-400 italic text-xs">Chưa phân công</span>
                       )}
                     </td>
+
+                    {/* Khách thuê */}
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <div className="p-1.5 bg-blue-50 rounded-lg">
-                          <Users className="w-4 h-4 text-blue-600" />
+                          <Users className="w-4 h-4 text-blue-400" />
                         </div>
-                        <span className="font-semibold text-blue-700">{activeTenants}</span>
+                        <span className="font-semibold text-slate-400">—</span>
                       </div>
                     </td>
+
+                    {/* Bảo trì */}
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        <div className={`p-1.5 rounded-lg ${openMaintenance > 0 ? 'bg-rose-50' : 'bg-slate-50'}`}>
-                          <Wrench className={`w-4 h-4 ${openMaintenance > 0 ? 'text-rose-600' : 'text-slate-400'}`} />
+                        <div className="p-1.5 bg-slate-50 rounded-lg">
+                          <Wrench className="w-4 h-4 text-slate-400" />
                         </div>
-                        <span className={`font-semibold ${openMaintenance > 0 ? 'text-rose-600' : 'text-slate-500'}`}>{openMaintenance}</span>
+                        <span className="font-semibold text-slate-400">—</span>
                       </div>
                     </td>
+
+                    {/* Trạng thái */}
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${statusInfo.color}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
-                        {statusInfo.label}
+                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${st.color}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                        {st.label}
                       </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button onClick={() => { setEditingManager(manager); setShowFormModal(true); }}
-                        className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors" title="Chỉnh sửa">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
                     </td>
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
-                    <UserCog className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    Không tìm thấy quản lý nào.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
       </div>
-
-      {showFormModal && (
-        <ManagerFormModal manager={editingManager} onSave={handleSave}
-          onClose={() => { setShowFormModal(false); setEditingManager(null); }} />
-      )}
     </div>
   );
 };

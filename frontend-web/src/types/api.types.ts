@@ -5,6 +5,7 @@
 export type PropertyStatus =
   | 'DRAFT'
   | 'UNDER_RENOVATION'
+  | 'RENOVATION_COMPLETED'   // căn import từ Excel dừng ở đây — đã cải tạo xong, chờ định giá & gửi Host
   | 'PENDING_HOST_REVIEW'
   | 'ACTIVE'
   | 'DISABLED'
@@ -161,10 +162,14 @@ export interface PropertyCreateRequest {
 // EQUIPMENT MANIFEST — Khai báo thiết bị có sẵn
 // =============================================================================
 
+export type ManifestEquipmentSource = 'INITIAL_HANDOVER' | 'PURCHASED';
+
 export interface ManifestItem {
   catalogId: number;
   quantity: number;
   status: ManifestEquipmentStatus;
+  source: ManifestEquipmentSource;
+  price?: number;
 }
 
 export interface ManifestRequest {
@@ -231,8 +236,8 @@ export interface OnboardingOptionsRequest {
 // =============================================================================
 
 export interface StructureUpdateRequest {
-  floorCount: number;
-  roomsPerFloor: number;
+  totalFloor: number;
+  totalRooms: number;
 }
 
 // =============================================================================
@@ -252,6 +257,18 @@ export interface RenovationLineResponse {
   categoryName: string;
   cost: number;
   note?: string;
+}
+
+// =============================================================================
+// RENOVATION SESSION (BE mục 10 — grouped renovation history)
+// =============================================================================
+
+export interface RenovationSession {
+  sessionNumber: number;
+  startDate?: string;   // ISO date, may be null while in progress
+  endDate?: string;     // ISO date, null if current session
+  totalCost: number;
+  lines: RenovationLineResponse[];
 }
 
 // =============================================================================
@@ -313,10 +330,14 @@ export interface EquipmentAssignRequest {
 
 export interface EquipmentAssignmentResponse {
   id: number;
+  propertyId?: number;
   catalogId: number;
   catalogName: string;
   quantity: number;
-  status: string;
+  source: EquipmentSource;   // INITIAL_HANDOVER | PURCHASED — từ BE EquipmentResponse
+  status: EquipmentStatus;   // NEW | GOOD | DAMAGED | BROKEN
+  price?: number;            // giá thiết bị (mới mua)
+  note?: string;
   roomId?: number;
   roomNumber?: string;
   houseArea?: HouseArea;
@@ -393,7 +414,7 @@ export interface HostRoomPrice {
 
 export interface HostConfirmRequest {
   contingencyPercent: number;
-  operationManagerId: string;
+  operationManagerId?: string;     // Optional — host tự gán sau từ trang chi tiết
   propertyPrice?: number;          // Nhà nguyên căn (ghi đè tay)
   roomPrices?: HostRoomPrice[];    // Nhà chia phòng
 }
@@ -585,4 +606,53 @@ export interface TenantContractResponse {
   endDate?: string;
   status: ContractStatus;
   equipmentSnapshot?: string;
+}
+
+// =============================================================================
+// BULK IMPORT — Import onboarding hàng loạt từ Excel
+// POST /api/v1/import/onboarding-excel  (xem doc excel-import-frontend.md)
+// =============================================================================
+
+/** 1 lỗi validate trong file Excel (sheet / dòng / cột / message) */
+export interface BulkImportError {
+  sheet: string;             // VD: "1. Hop_Dong_Thue"
+  rowNumber: number;         // số dòng Excel (1-based, gồm header)
+  contractCode: string | null;
+  field: string | null;
+  message: string;
+}
+
+/** Kết quả 1 căn nhà được import (chỉ có khi dryRun=false) */
+export interface BulkImportContractResult {
+  contractCode: string;
+  propertyId: number;
+  propertyName: string;
+  finalStatus: string;       // "RENOVATION_COMPLETED" khi import thật
+}
+
+/** Response HTTP 200 của endpoint import (cả dry-run lẫn import thật) */
+export interface BulkImportResponse {
+  dryRun: boolean;
+  contractsProcessed: number;
+  renovationLinesImported: number;
+  equipmentRowsImported: number;
+  results: BulkImportContractResult[];
+  errors: BulkImportError[]; // luôn [] khi HTTP 200
+}
+
+/**
+ * Response khi xóa cứng 1 căn nhà — endpoint `/purge` hoặc rollback theo contractCode.
+ * (DELETE /properties/{id} thường chỉ trả 204 No Content, không có body này.)
+ */
+export interface PropertyPurgeResponse {
+  propertyId: number;
+  propertyName: string;
+  contractCode: string | null;
+  equipmentsDeleted: number;
+  equipmentManifestsDeleted: number;
+  renovationLinesDeleted: number;
+  renovationSessionsDeleted: number;
+  roomsDeleted: number;
+  depreciationResultsDeleted: number;
+  monthlyReadingsDeleted: number;
 }

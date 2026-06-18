@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Send, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { PropertyResponse, PricingResponse } from '../../../../types/api.types';
 import { propertyService } from '../../../../services/property.service';
+import { ConfirmDialog } from '../../../../components/ConfirmDialog';
 
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
 
@@ -16,6 +17,7 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
   const [submitting, setSubmitting] = useState(false);
   const [pricing, setPricing] = useState<PricingResponse | null>(null);
   const [error, setError] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [successStatus, setSuccessStatus] = useState<'UNDER_RENOVATION' | 'PENDING_HOST_REVIEW' | null>(null);
 
   useEffect(() => {
@@ -34,18 +36,18 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
   }, [property.id]);
 
   const handleSubmit = async () => {
-    if (!window.confirm('Bạn có chắc chắn muốn chốt quy trình Onboarding và gửi cho Host duyệt?')) return;
-
     setSubmitting(true);
     setError('');
     try {
       const summary = await propertyService.submitToHost(property.id);
+      setConfirmOpen(false);
       setSuccessStatus(summary.status as 'UNDER_RENOVATION' | 'PENDING_HOST_REVIEW');
     } catch (err: any) {
       const data = err.response?.data;
       const msg = data?.message || data?.error || (typeof data === 'string' ? data : null)
         || `Lỗi ${err.response?.status ?? ''} khi gửi cho Host`;
       setError(msg);
+      setConfirmOpen(false);
       console.error('submit-to-host error:', data);
     } finally {
       setSubmitting(false);
@@ -181,14 +183,30 @@ export const StepSubmitToHost = ({ property, onBack, onSuccess }: StepSubmitToHo
         <button onClick={onBack} className="rounded-xl px-6 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100">
           ← Quay lại sửa
         </button>
-        <button 
-          onClick={handleSubmit} 
+        <button
+          onClick={() => setConfirmOpen(true)}
           disabled={submitting || !pricing}
           className="flex items-center gap-2 rounded-xl bg-emerald-600 px-8 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {submitting ? 'Đang xử lý...' : <><Send className="w-4 h-4" /> Gửi Onboarding cho Host</>}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        tone="success"
+        title="Gửi Onboarding cho Host?"
+        message={
+          <>
+            Bạn chắc chắn muốn chốt quy trình Onboarding của <b className="text-slate-700">{property.propertyName}</b> và
+            gửi bảng giá cho Host phê duyệt? Sau khi gửi sẽ không thể chỉnh sửa cho đến khi Host phản hồi.
+          </>
+        }
+        confirmText="Gửi cho Host"
+        loading={submitting}
+        onConfirm={handleSubmit}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   );
 };

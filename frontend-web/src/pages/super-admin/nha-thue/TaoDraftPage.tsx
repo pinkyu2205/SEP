@@ -1,22 +1,48 @@
 import { useState, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen,
-  Hammer, Image as ImageIcon, Layers, MapPin, Plus, Search,
+  FileText, Hammer, Image as ImageIcon, Layers, MapPin, Plus, Power, Search,
   TrendingUp, Trash2, Upload, XCircle,
 } from 'lucide-react';
 import { propertyService } from '../../../services/property.service';
 import { zoneService } from '../../../services/zone.service';
 import { uploadToCloudinary } from '../../../services/upload.service';
-import type { PropertyDraftRequest, PropertyResponse, ZoneResponse } from '../../../types/api.types';
+import { extractContractData } from '../../../utils/pdfExtract';
+import type { InboundContractRequest, PropertyDraftRequest, PropertyResponse, ZoneResponse } from '../../../types/api.types';
 import { StepPropertyInfo } from '../properties/wizard/StepPropertyInfo';
 import { KpiCard } from '../shared';
+import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { AddressAutocomplete } from '../../../components/AddressAutocomplete';
+import { PropertyMap } from '../../../components/PropertyMap';
 
 const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Nháp', cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
+  DRAFT:                { label: 'Nháp',                cls: 'bg-slate-100 text-slate-700' },
+  UNDER_RENOVATION:     { label: 'Đang cải tạo',        cls: 'bg-amber-100 text-amber-800' },
+  RENOVATION_COMPLETED: { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' },
+  PENDING_HOST_REVIEW:  { label: 'Chờ duyệt',           cls: 'bg-blue-100 text-blue-800' },
+  ACTIVE:               { label: 'Đang kinh doanh',     cls: 'bg-emerald-100 text-emerald-800' },
+  DISABLED:             { label: 'Đã vô hiệu',          cls: 'bg-rose-100 text-rose-800' },
+};
+
+// ─── "Đã hoàn tất khởi tạo" — đánh dấu FE-side ──────────────────────────────
+// BE chưa có endpoint chuyển DRAFT → PENDING_HOST_REVIEW khi hoàn tất bước khởi
+// tạo (xem doc/NOTE-CHO-TEAM-BE.md). Tạm lưu localStorage: draft nào đã bấm
+// "Xác nhận & Quay về danh sách" sẽ hiển thị "Chờ duyệt" thay vì "Nháp".
+const SUBMITTED_DRAFTS_KEY = 'urbannest_submitted_drafts';
+
+const readSubmittedDrafts = (): number[] => {
+  try {
+    const raw = localStorage.getItem(SUBMITTED_DRAFTS_KEY);
+    return raw ? (JSON.parse(raw) as number[]) : [];
+  } catch { return []; }
+};
+
+const markDraftSubmitted = (id: number) => {
+  const cur = readSubmittedDrafts();
+  if (!cur.includes(id)) {
+    localStorage.setItem(SUBMITTED_DRAFTS_KEY, JSON.stringify([...cur, id]));
+  }
 };
 
 const getUserIdFromToken = (): number => {
@@ -49,6 +75,15 @@ export const TaoDraftPage = () => {
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [submittedDrafts, setSubmittedDrafts] = useState<number[]>(() => readSubmittedDrafts());
+
+  // Badge: DRAFT đã bấm "Xác nhận" bước cuối → "Đã khởi tạo", DRAFT đang tạo dở → "Nháp"
+  const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
+    if (b.status === 'DRAFT' && submittedDrafts.includes(b.id)) {
+      return { label: 'Đã khởi tạo', cls: 'bg-indigo-100 text-indigo-800' };
+    }
+    return statusBadge[b.status] ?? statusBadge.DRAFT;
+  };
 
   // ─── create form ──────────────────────────────────────────────────
   const [zones, setZones] = useState<ZoneResponse[]>([]);
@@ -59,7 +94,13 @@ export const TaoDraftPage = () => {
   const [formData, setFormData] = useState<PropertyDraftRequest>(emptyForm());
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [confirmCreateOpen, setConfirmCreateOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [prefillContract, setPrefillContract] = useState<Partial<InboundContractRequest> | null>(null);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfExtracting, setPdfExtracting] = useState(false);
 
   const fetchBuildings = async () => {
     setListLoading(true);
@@ -78,22 +119,25 @@ export const TaoDraftPage = () => {
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => ({
       total: acc.total + 1,
-      draft: acc.draft + (b.status === 'DRAFT' ? 1 : 0),
+      draft: acc.draft + (b.status === 'DRAFT' && !submittedDrafts.includes(b.id) ? 1 : 0),
       active: acc.active + (b.status === 'ACTIVE' ? 1 : 0),
       rooms: acc.rooms + (b.totalRooms || 0),
     }),
     { total: 0, draft: 0, active: 0, rooms: 0 }
-  ), [buildings]);
+  ), [buildings, submittedDrafts]);
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return buildings.filter(b => {
-      const matchStatus = statusFilter === 'all' || b.status === statusFilter;
+      // Draft đã bấm "Xác nhận" bước cuối → nhóm lọc riêng "Đã khởi tạo" (FE-side, không phải status BE)
+      const effectiveStatus = b.status === 'DRAFT' && submittedDrafts.includes(b.id)
+        ? 'INITIALIZED' : b.status;
+      const matchStatus = statusFilter === 'all' || effectiveStatus === statusFilter;
       const matchSearch = !kw || [b.propertyName, b.shortAddress, b.fullAddress, b.zoneName]
         .some(v => v?.toLowerCase().includes(kw));
       return matchStatus && matchSearch;
     });
-  }, [buildings, statusFilter, search]);
+  }, [buildings, statusFilter, search, submittedDrafts]);
 
   // ─── form handlers ────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -119,12 +163,19 @@ export const TaoDraftPage = () => {
     const files = e.target.files;
     if (!files?.length) return;
     setIsUploading(true);
+    setUploadProgress({ done: 0, total: files.length });
     try {
       const urls = [...(formData.imageUrls || [])];
-      for (let i = 0; i < files.length; i++) urls.push(await uploadToCloudinary(files[i]));
-      setFormData(prev => ({ ...prev, imageUrls: urls }));
+      for (let i = 0; i < files.length; i++) {
+        urls.push(await uploadToCloudinary(files[i]));
+        setUploadProgress({ done: i + 1, total: files.length });
+        setFormData(prev => ({ ...prev, imageUrls: [...urls] }));
+      }
     } catch { alert('Lỗi tải ảnh'); }
-    finally { setIsUploading(false); }
+    finally {
+      setIsUploading(false);
+      setUploadProgress({ done: 0, total: 0 });
+    }
   };
 
   const removeImage = (idx: number) => {
@@ -133,8 +184,52 @@ export const TaoDraftPage = () => {
     setFormData(prev => ({ ...prev, imageUrls: urls }));
   };
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfFile(file);
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    setPdfBlobUrl(URL.createObjectURL(file));
+    setPdfExtracting(true);
+    const isOldDoc = file.name.toLowerCase().endsWith('.doc') &&
+      !file.name.toLowerCase().endsWith('.docx');
+    try {
+      if (isOldDoc) {
+        // .doc binary cũ — chỉ upload, không parse được phía browser
+        const scanUrl = await uploadToCloudinary(file, 'raw');
+        setPrefillContract({ contractScanUrl: scanUrl });
+      } else {
+        // PDF hoặc .docx — extract + upload song song
+        const [extracted, scanUrl] = await Promise.all([
+          extractContractData(file),
+          uploadToCloudinary(file, 'raw'),
+        ]);
+        if (extracted.address) setFormData(prev => ({ ...prev, address: extracted.address }));
+        if (extracted.areaSize > 0) setFormData(prev => ({ ...prev, areaSize: extracted.areaSize }));
+        setPrefillContract({
+          contractCode: extracted.contractCode,
+          ownerName: extracted.ownerName,
+          startDate: extracted.startDate,
+          endDate: extracted.endDate,
+          totalRentAmount: extracted.totalRentAmount,
+          contractScanUrl: scanUrl,
+        });
+      }
+    } catch {
+      alert('Không thể xử lý file — kiểm tra lại định dạng');
+    } finally {
+      setPdfExtracting(false);
+    }
+  };
+
+  // Submit form → chỉ mở hộp xác nhận lần 2 (native validation đã chạy trước khi tới đây)
+  const requestCreate = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
+    setConfirmCreateOpen(true);
+  };
+
+  const handleCreateSubmit = async () => {
     setFormError('');
     setSubmitting(true);
     try {
@@ -148,18 +243,49 @@ export const TaoDraftPage = () => {
         totalRooms: totalRoomsInput,
       };
       const created = await propertyService.createDraft(payload as any);
+      setConfirmCreateOpen(false);
       setNewProperty(created);
       setView('step-info');
     } catch (err: any) {
+      setConfirmCreateOpen(false);
       setFormError(err.response?.data?.message || err.message || 'Có lỗi xảy ra');
     } finally { setSubmitting(false); }
   };
 
   const handleDeleteBuilding = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Xác nhận xóa tòa nhà?')) return;
-    try { await propertyService.deleteProperty(id); fetchBuildings(); }
-    catch { alert('Lỗi khi xóa'); }
+    if (!window.confirm('Xác nhận xóa tòa nhà? Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của căn này sẽ bị xóa.')) return;
+    try {
+      await propertyService.deleteProperty(id);
+      toast.success('Đã xóa căn nhà');
+      fetchBuildings();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) {
+        // Đã bị xóa trước đó → coi như thành công, làm mới danh sách
+        toast.success('Căn nhà đã được xóa trước đó');
+        fetchBuildings();
+      } else if (status === 403) {
+        toast.error('Bạn cần quyền ADMIN để xóa căn nhà này');
+      }
+      // 422 (ACTIVE / đã có chỉ số điện nước) & 400: api interceptor đã hiển thị message từ BE
+    }
+  };
+
+  const handleEnableBuilding = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Kích hoạt lại tòa nhà này?')) return;
+    try {
+      await propertyService.enableProperty(id);
+      toast.success('Đã kích hoạt lại tòa nhà');
+      fetchBuildings();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404 || status === 405) {
+        toast.error('BE chưa hỗ trợ kích hoạt lại (POST /properties/{id}/enable) — đã ghi yêu cầu cho BE');
+      }
+      // các lỗi khác: api interceptor đã toast
+    }
   };
 
   const handleCompleteRenovation = async (id: number, e: React.MouseEvent) => {
@@ -178,12 +304,23 @@ export const TaoDraftPage = () => {
     setParentZoneId('');
     setChildZones([]);
     setTotalRoomsInput(1);
+    setPrefillContract(null);
+    setPdfFile(null);
+    if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    setPdfBlobUrl(null);
     fetchBuildings();
   };
 
   const openDetail = (b: PropertyResponse) => {
     setSelectedBuilding(b);
     setView('detail');
+  };
+
+  // Bấm "Xác nhận & Quay về danh sách" → đánh dấu draft đã hoàn tất khởi tạo
+  const handleFinishOnboarding = (id: number) => {
+    markDraftSubmitted(id);
+    setSubmittedDrafts(readSubmittedDrafts());
+    backToList();
   };
 
 
@@ -206,8 +343,10 @@ export const TaoDraftPage = () => {
         </div>
         <StepPropertyInfo
           property={newProperty}
-          onNext={backToList}
+          onNext={() => handleFinishOnboarding(newProperty.id)}
           nextLabel="Xác nhận & Quay về danh sách"
+          prefillContract={prefillContract ?? undefined}
+          confirmBeforeNext
         />
       </div>
     );
@@ -217,7 +356,7 @@ export const TaoDraftPage = () => {
   // VIEW: Chi tiết tòa nhà
   // ═══════════════════════════════════════════════════════════════════
   if (view === 'detail' && selectedBuilding) {
-    const badge = statusBadge[selectedBuilding.status] ?? statusBadge.DRAFT;
+    const badge = getStatusBadge(selectedBuilding);
     return (
       <div className="mx-auto max-w-4xl px-4 py-8">
         <button onClick={backToList}
@@ -266,7 +405,15 @@ export const TaoDraftPage = () => {
           </div>
         )}
 
-        <StepPropertyInfo property={selectedBuilding} onNext={backToList} nextLabel="Xác nhận & Quay về danh sách" />
+        {/* Bản đồ vị trí (Goong) */}
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-500">
+            <MapPin className="h-4 w-4 text-indigo-500" /> Vị trí trên bản đồ
+          </h3>
+          <PropertyMap address={selectedBuilding.fullAddress || selectedBuilding.shortAddress} />
+        </div>
+
+        <StepPropertyInfo property={selectedBuilding} onNext={() => handleFinishOnboarding(selectedBuilding.id)} nextLabel="Xác nhận & Quay về danh sách" confirmBeforeNext />
       </div>
     );
   }
@@ -302,7 +449,77 @@ export const TaoDraftPage = () => {
           </div>
         )}
 
-        <form onSubmit={handleCreateSubmit} className="space-y-5">
+        {/* ── PDF Contract Upload ── */}
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5 mb-5 shadow-sm">
+          <h3 className="mb-3 flex items-center gap-2.5 text-sm font-black uppercase tracking-widest text-indigo-600">
+            <FileText className="h-4 w-4" /> Scan hợp đồng đầu vào (tuỳ chọn)
+          </h3>
+          <p className="mb-4 text-xs text-slate-500 leading-relaxed">
+            Upload file PDF hợp đồng để tự động điền địa chỉ, diện tích và các thông tin hợp đồng vào form phía dưới.
+          </p>
+          <label className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed px-4 py-3 transition-all ${
+            pdfExtracting
+              ? 'border-indigo-400 bg-white cursor-not-allowed animate-pulse'
+              : pdfFile
+              ? 'border-emerald-400 bg-emerald-50'
+              : 'border-indigo-200 bg-white hover:border-indigo-400 hover:bg-indigo-50'
+          }`}>
+            {pdfExtracting ? (
+              <>
+                <svg className="animate-spin h-5 w-5 text-indigo-500 shrink-0" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-sm font-semibold text-indigo-600">Đang đọc & upload hợp đồng...</span>
+              </>
+            ) : pdfFile ? (
+              <>
+                <FileText className="h-5 w-5 text-emerald-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-emerald-700 truncate">{pdfFile.name}</p>
+                  <p className="text-xs text-emerald-600">
+                    {prefillContract
+                      ? (prefillContract.contractCode
+                          ? '✓ Đã trích xuất thông tin — form bên dưới đã được điền sẵn'
+                          : '✓ Đã upload — điền thông tin hợp đồng thủ công ở bước tiếp theo')
+                      : 'Đang xử lý...'}
+                  </p>
+                  {pdfBlobUrl && (
+                    <a href={pdfBlobUrl} target="_blank" rel="noreferrer"
+                      className="mt-0.5 text-xs text-indigo-600 hover:underline font-semibold inline-block">
+                      Xem lại hợp đồng →
+                    </a>
+                  )}
+                </div>
+                <button type="button" onClick={() => { setPdfFile(null); setPrefillContract(null); if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }}
+                  className="text-xs text-rose-500 hover:text-rose-700 font-semibold shrink-0">
+                  Xoá
+                </button>
+              </>
+            ) : (
+              <>
+                <Upload className="h-5 w-5 text-indigo-400 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-500">Chọn file hợp đồng</p>
+                  <p className="text-xs text-slate-400">PDF · DOCX (tự điền form) · DOC (chỉ lưu file)</p>
+                </div>
+              </>
+            )}
+            <input type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden" onChange={handlePdfUpload} disabled={pdfExtracting} />
+          </label>
+          {prefillContract && (
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              {prefillContract.contractCode && <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2"><span className="text-slate-400">Số HĐ:</span> <span className="font-bold text-slate-700">{prefillContract.contractCode}</span></div>}
+              {prefillContract.ownerName && <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2"><span className="text-slate-400">Chủ nhà:</span> <span className="font-bold text-slate-700">{prefillContract.ownerName}</span></div>}
+              {prefillContract.startDate && <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2"><span className="text-slate-400">Bắt đầu:</span> <span className="font-bold text-slate-700">{prefillContract.startDate}</span></div>}
+              {prefillContract.endDate && <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2"><span className="text-slate-400">Kết thúc:</span> <span className="font-bold text-slate-700">{prefillContract.endDate}</span></div>}
+              {prefillContract.totalRentAmount ? <div className="rounded-lg bg-white border border-emerald-200 px-3 py-2 col-span-2"><span className="text-slate-400">Giá thuê:</span> <span className="font-bold text-slate-700">{prefillContract.totalRentAmount.toLocaleString('vi-VN')} VNĐ/tháng</span></div> : null}
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={requestCreate} className="space-y-5">
           {/* ── Section 1: Định danh ── */}
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-5 flex items-center gap-2.5 text-sm font-black uppercase tracking-widest text-slate-500">
@@ -318,18 +535,20 @@ export const TaoDraftPage = () => {
                   className="input-field" placeholder="VD: UrbanNest Quận 3 — tên nội bộ để nhận diện" />
               </label>
 
-              <label className="block">
+              <div className="block">
                 <span className="mb-1.5 block text-sm font-bold text-slate-700">
                   Địa chỉ <span className="text-rose-500">*</span>
                 </span>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input required name="address" value={formData.address} onChange={handleChange}
-                    className="input-field pl-9"
-                    placeholder="Số nhà, tên đường" />
-                </div>
-                <p className="mt-1 text-xs text-slate-400">Nhập đủ để hệ thống có thể định vị và hiển thị đúng trên bản đồ</p>
-              </label>
+                <AddressAutocomplete
+                  required
+                  name="address"
+                  value={formData.address}
+                  onChange={(v) => setFormData(prev => ({ ...prev, address: v }))}
+                  onSelect={(sel) => setFormData(prev => ({ ...prev, address: sel.address }))}
+                  placeholder="Gõ địa chỉ để gợi ý — VD: 18 Cầu Giấy, Hà Nội"
+                />
+                <p className="mt-1 text-xs text-slate-400">Chọn từ gợi ý của Goong để định vị chính xác trên bản đồ</p>
+              </div>
 
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -373,8 +592,11 @@ export const TaoDraftPage = () => {
 
               <label className="block">
                 <span className="mb-1.5 block text-sm font-bold text-slate-700">Tổng diện tích sàn (m²)</span>
-                <input type="number" min={0} name="areaSize" value={formData.areaSize} onChange={handleChange}
-                  className="input-field" placeholder="VD: 250" />
+                <div className="flex items-center gap-3">
+                  <input type="number" min={0} name="areaSize" value={formData.areaSize} onChange={handleChange}
+                    className="input-field w-36" placeholder="VD: 250" />
+                  <span className="text-sm text-slate-500">m²</span>
+                </div>
                 <p className="mt-1 text-xs text-slate-400">Dùng để tính khấu hao & định giá</p>
               </label>
             </div>
@@ -451,15 +673,41 @@ export const TaoDraftPage = () => {
 
             <label className="block">
               <span className="mb-1.5 block text-sm font-bold text-slate-700">Ảnh tòa nhà</span>
-              <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-6 text-center hover:border-indigo-300 hover:bg-indigo-50/50 transition">
-                <Upload className="h-7 w-7 text-slate-300" />
-                <span className="text-sm font-semibold text-slate-500">
-                  {isUploading ? 'Đang tải lên...' : 'Bấm để chọn ảnh hoặc kéo thả vào đây'}
-                </span>
-                <span className="text-xs text-slate-400">PNG, JPG — dùng cho hồ sơ nội bộ</span>
+              <label className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-all ${
+                isUploading
+                  ? 'border-indigo-400 bg-indigo-50 animate-pulse cursor-not-allowed'
+                  : 'border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50/50'
+              }`}>
+                {isUploading ? (
+                  <>
+                    <div className="relative h-8 w-8">
+                      <svg className="animate-spin h-8 w-8 text-indigo-500" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    </div>
+                    <span className="text-sm font-bold text-indigo-600">
+                      Đang tải {uploadProgress.done}/{uploadProgress.total} ảnh...
+                    </span>
+                    <div className="w-48 h-1.5 bg-indigo-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                        style={{ width: `${uploadProgress.total ? (uploadProgress.done / uploadProgress.total) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-7 w-7 text-slate-300" />
+                    <span className="text-sm font-semibold text-slate-500">Bấm để chọn ảnh hoặc kéo thả vào đây</span>
+                    <span className="text-xs text-slate-400">PNG, JPG — dùng cho hồ sơ nội bộ</span>
+                  </>
+                )}
                 <input type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} disabled={isUploading} />
               </label>
-              {(formData.imageUrls?.length ?? 0) > 0 && (
+
+              {/* Grid ảnh + skeleton cho ảnh đang upload */}
+              {((formData.imageUrls?.length ?? 0) > 0 || isUploading) && (
                 <div className="mt-3 grid grid-cols-5 gap-2">
                   {formData.imageUrls!.map((url, idx) => (
                     <div key={idx} className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200">
@@ -470,6 +718,13 @@ export const TaoDraftPage = () => {
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
+                    </div>
+                  ))}
+                  {/* Skeleton placeholders cho ảnh chưa xong */}
+                  {isUploading && Array.from({ length: uploadProgress.total - uploadProgress.done }).map((_, i) => (
+                    <div key={`sk-${i}`} className="relative aspect-square rounded-lg border border-slate-200 overflow-hidden bg-slate-100">
+                      <div className="absolute inset-0 animate-shimmer"
+                        style={{ background: 'linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%)', backgroundSize: '200% 100%' }} />
                     </div>
                   ))}
                 </div>
@@ -489,6 +744,23 @@ export const TaoDraftPage = () => {
             </button>
           </div>
         </form>
+
+        <ConfirmDialog
+          open={confirmCreateOpen}
+          tone="primary"
+          title="Khởi tạo tòa nhà này?"
+          message={
+            <>
+              Tạo hồ sơ tòa nhà <b className="text-slate-700">{formData.propertyName || '(chưa đặt tên)'}</b> với{' '}
+              <b className="text-slate-700">{formData.floorCount || 1} tầng · {totalRoomsInput} phòng</b>?
+              Sau khi tạo bạn sẽ tiếp tục bổ sung hợp đồng & thiết bị.
+            </>
+          }
+          confirmText="Khởi tạo"
+          loading={submitting}
+          onConfirm={handleCreateSubmit}
+          onCancel={() => setConfirmCreateOpen(false)}
+        />
       </div>
     );
   }
@@ -524,9 +796,11 @@ export const TaoDraftPage = () => {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
           <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp (DRAFT)</option>
+          <option value="DRAFT">Nháp</option>
+          <option value="INITIALIZED">Đã khởi tạo</option>
           <option value="UNDER_RENOVATION">Đang cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
+          <option value="RENOVATION_COMPLETED">Đã hoàn tất cải tạo</option>
+          <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
         </select>
@@ -546,26 +820,44 @@ export const TaoDraftPage = () => {
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
           {filtered.map(b => {
-            const badge = statusBadge[b.status] ?? statusBadge.DRAFT;
-            const canDelete = b.status === 'DRAFT' || b.status === 'DISABLED';
+            const badge = getStatusBadge(b);
+            const isSubmittedDraft = b.status === 'DRAFT' && submittedDrafts.includes(b.id);
             return (
               <div key={b.id} onClick={() => openDetail(b)} className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition relative group">
                 <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity bg-white/80 p-1 rounded-lg backdrop-blur-sm z-10">
-                  {b.status !== 'ACTIVE' && b.status !== 'DISABLED' && (
-                    <button onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!window.confirm('Vô hiệu hóa tòa nhà này?')) return;
-                      try { await propertyService.disableProperty(b.id); fetchBuildings(); }
-                      catch { alert('Lỗi'); }
-                    }} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                  )}
-                  {canDelete && (
-                    <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa"
-                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {b.status === 'DISABLED' ? (
+                    <>
+                      {/* Đã vô hiệu → cho phép kích hoạt lại hoặc xóa vĩnh viễn */}
+                      <button onClick={(e) => handleEnableBuilding(b.id, e)} title="Kích hoạt lại"
+                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
+                        <Power className="w-4 h-4" />
+                      </button>
+                      <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa vĩnh viễn"
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {/* Bước 1: vô hiệu hóa (chưa ACTIVE mới cho vô hiệu) */}
+                      {b.status !== 'ACTIVE' && (
+                        <button onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm('Vô hiệu hóa tòa nhà này?')) return;
+                          try { await propertyService.disableProperty(b.id); toast.success('Đã vô hiệu hóa'); fetchBuildings(); }
+                          catch { /* api interceptor đã toast lỗi */ }
+                        }} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/* Nháp: cho xóa trực tiếp (chưa từng vận hành) */}
+                      {b.status === 'DRAFT' && (
+                        <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa nháp"
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -611,6 +903,16 @@ export const TaoDraftPage = () => {
                       className="w-full py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
                       <Hammer className="w-4 h-4" /> Hoàn tất Cải tạo
                     </button>
+                  )}
+                  {isSubmittedDraft && (
+                    <div className="w-full py-2 text-center text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã khởi tạo — sang Cấu hình khai thác
+                    </div>
+                  )}
+                  {b.status === 'RENOVATION_COMPLETED' && (
+                    <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — sang Định giá để gửi Host
+                    </div>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
                     <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
