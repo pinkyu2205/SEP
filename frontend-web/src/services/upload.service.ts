@@ -1,6 +1,9 @@
 import imageCompression from 'browser-image-compression';
 
-export const uploadToCloudinary = async (file: File): Promise<string> => {
+export const uploadToCloudinary = async (
+  file: File,
+  resourceType: 'auto' | 'raw' | 'image' = 'auto',
+): Promise<string> => {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
@@ -18,15 +21,15 @@ export const uploadToCloudinary = async (file: File): Promise<string> => {
         maxWidthOrHeight: 1920, // Tối đa kích thước Full HD
         useWebWorker: true,
       };
-      
+
       const compressedBlob = await imageCompression(file, options);
-      
+
       // Chuyển lại từ Blob sang File giữ nguyên tên
       fileToUpload = new File([compressedBlob], file.name, {
         type: compressedBlob.type,
         lastModified: Date.now(),
       });
-      
+
     } catch (error) {
       console.warn('Lỗi khi nén ảnh, sẽ tiến hành upload ảnh gốc:', error);
     }
@@ -37,8 +40,7 @@ export const uploadToCloudinary = async (file: File): Promise<string> => {
   formData.append('file', fileToUpload);
   formData.append('upload_preset', uploadPreset);
 
-  // Cloudinary URL cho phép upload (hỗ trợ cả raw/pdf và image nhờ tag 'auto')
-  const url = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+  const url = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
 
   try {
     const response = await fetch(url, {

@@ -22,6 +22,7 @@ import type {
   HostConfirmRequest,
   HostConfirmResponse,
   PropertyActivationResponse,
+  PropertyPurgeResponse,
 } from '../types/api.types';
 
 const BASE = '/api/v1/properties';
@@ -56,9 +57,14 @@ export const propertyService = {
     return api.put(`${BASE}/${id}`, data);
   },
 
-  /** DELETE /properties/{id} */
+  /** DELETE /properties/{id} — xóa cứng căn nhà + toàn bộ dữ liệu con (BE bulk delete). Trả 204. */
   deleteProperty: (id: number): Promise<void> => {
     return api.delete(`${BASE}/${id}`);
+  },
+
+  /** DELETE /properties/{id}/purge — như deleteProperty nhưng trả số bản ghi đã xóa (ADMIN). */
+  purgeProperty: (id: number): Promise<PropertyPurgeResponse> => {
+    return api.delete(`${BASE}/${id}/purge`);
   },
 
   // =========================================================================
@@ -150,6 +156,16 @@ export const propertyService = {
     return api.patch(`${BASE}/${id}/rooms/${roomId}/status`, { status });
   },
 
+  /** PUT /properties/{id}/rooms/{roomId} — sửa thông tin phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
+  updateRoom: (id: number, roomId: number, data: Partial<AddRoomRequest>): Promise<RoomResponse> => {
+    return api.put(`${BASE}/${id}/rooms/${roomId}`, data);
+  },
+
+  /** DELETE /properties/{id}/rooms/{roomId} — xoá phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
+  deleteRoom: (id: number, roomId: number): Promise<void> => {
+    return api.delete(`${BASE}/${id}/rooms/${roomId}`);
+  },
+
   // =========================================================================
   // Bước 2E — Equipment Assignment
   // =========================================================================
@@ -162,6 +178,11 @@ export const propertyService = {
   /** GET /properties/{id}/equipments */
   getAssignedEquipments: (id: number): Promise<EquipmentAssignmentResponse[]> => {
     return api.get(`${BASE}/${id}/equipments`);
+  },
+
+  /** DELETE /properties/{id}/equipments/{equipmentId} — Xoá 1 lượt gán thiết bị */
+  unassignEquipment: (id: number, equipmentId: number): Promise<void> => {
+    return api.delete(`${BASE}/${id}/equipments/${equipmentId}`);
   },
 
   // =========================================================================
@@ -190,6 +211,16 @@ export const propertyService = {
   /** POST /properties/{id}/renovation/complete */
   completeRenovation: (id: number): Promise<PropertyResponse> => {
     return api.post(`${BASE}/${id}/renovation/complete`);
+  },
+
+  /** POST /properties/{id}/renovation/start — Bắt đầu cải tạo lại từ trạng thái ACTIVE */
+  startRenovation: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/renovation/start`);
+  },
+
+  /** GET /properties/{id}/renovation/sessions — Lịch sử cải tạo nhóm theo đợt (BE mục 10) */
+  getRenovationSessions: (id: number): Promise<import('../types/api.types').RenovationSession[]> => {
+    return api.get(`${BASE}/${id}/renovation/sessions`);
   },
 
   // =========================================================================
@@ -227,5 +258,13 @@ export const propertyService = {
   /** POST /properties/{id}/disable */
   disableProperty: (id: number): Promise<PropertyResponse> => {
     return api.post(`${BASE}/${id}/disable`);
+  },
+
+  /**
+   * POST /properties/{id}/enable — Kích hoạt lại tòa nhà từ trạng thái DISABLED.
+   * ⚠️ BE CHƯA CÓ endpoint này (xem doc/BE-import-excel-status-constraint.md).
+   */
+  enableProperty: (id: number): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/enable`);
   },
 };

@@ -5,6 +5,7 @@
 export type PropertyStatus =
   | 'DRAFT'
   | 'UNDER_RENOVATION'
+  | 'RENOVATION_COMPLETED'   // căn import từ Excel dừng ở đây — đã cải tạo xong, chờ định giá & gửi Host
   | 'PENDING_HOST_REVIEW'
   | 'ACTIVE'
   | 'DISABLED'
@@ -161,10 +162,14 @@ export interface PropertyCreateRequest {
 // EQUIPMENT MANIFEST — Khai báo thiết bị có sẵn
 // =============================================================================
 
+export type ManifestEquipmentSource = 'INITIAL_HANDOVER' | 'PURCHASED';
+
 export interface ManifestItem {
   catalogId: number;
   quantity: number;
   status: ManifestEquipmentStatus;
+  source: ManifestEquipmentSource;
+  price?: number;
 }
 
 export interface ManifestRequest {
@@ -231,8 +236,8 @@ export interface OnboardingOptionsRequest {
 // =============================================================================
 
 export interface StructureUpdateRequest {
-  floorCount: number;
-  roomsPerFloor: number;
+  totalFloor: number;
+  totalRooms: number;
 }
 
 // =============================================================================
@@ -252,6 +257,18 @@ export interface RenovationLineResponse {
   categoryName: string;
   cost: number;
   note?: string;
+}
+
+// =============================================================================
+// RENOVATION SESSION (BE mục 10 — grouped renovation history)
+// =============================================================================
+
+export interface RenovationSession {
+  sessionNumber: number;
+  startDate?: string;   // ISO date, may be null while in progress
+  endDate?: string;     // ISO date, null if current session
+  totalCost: number;
+  lines: RenovationLineResponse[];
 }
 
 // =============================================================================
@@ -313,10 +330,14 @@ export interface EquipmentAssignRequest {
 
 export interface EquipmentAssignmentResponse {
   id: number;
+  propertyId?: number;
   catalogId: number;
   catalogName: string;
   quantity: number;
-  status: string;
+  source: EquipmentSource;   // INITIAL_HANDOVER | PURCHASED — từ BE EquipmentResponse
+  status: EquipmentStatus;   // NEW | GOOD | DAMAGED | BROKEN
+  price?: number;            // giá thiết bị (mới mua)
+  note?: string;
   roomId?: number;
   roomNumber?: string;
   houseArea?: HouseArea;
@@ -393,7 +414,7 @@ export interface HostRoomPrice {
 
 export interface HostConfirmRequest {
   contingencyPercent: number;
-  operationManagerId: string;
+  operationManagerId?: string;     // Optional — host tự gán sau từ trang chi tiết
   propertyPrice?: number;          // Nhà nguyên căn (ghi đè tay)
   roomPrices?: HostRoomPrice[];    // Nhà chia phòng
 }
@@ -585,88 +606,4 @@ export interface TenantContractResponse {
   endDate?: string;
   status: ContractStatus;
   equipmentSnapshot?: string;
-}
-
-// =============================================================================
-// MAINTENANCE — Bảo trì / Sửa chữa (theo Maintenance_BE_Contract.md)
-// =============================================================================
-
-export type MaintenanceRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
-export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-export type MaintenanceRequestCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
-
-export interface MaintenanceTimelineEntry {
-  oldStatus?: MaintenanceRequestStatus;
-  newStatus: MaintenanceRequestStatus;
-  note?: string;
-  changedBy?: string;
-  changedByName?: string;
-  changedAt: string;
-}
-
-export interface MaintenanceRequestResponse {
-  id: number;
-  requestCode: string;
-  status: MaintenanceRequestStatus;
-  category: MaintenanceRequestCategory;
-  priority: MaintenanceRequestPriority;
-  description: string;
-  tenantId: number;
-  tenantName: string;
-  tenantPhone?: string;
-  roomId: number;
-  roomName: string;
-  propertyId: number;
-  propertyName: string;
-  equipmentId?: number;
-  equipmentName?: string;
-  assignedManagerId?: number;
-  assignedManagerName?: string;
-  scheduledDate?: string;
-  repairCost?: number;
-  resolutionNote?: string;
-  resolvedAt?: string;
-  images: string[];
-  timeline: MaintenanceTimelineEntry[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface MaintenanceDashboardResponse {
-  total: number;
-  pending: number;
-  inProgress: number;
-  resolved: number;
-  cancelled: number;
-  totalRepairCost: number;
-}
-
-// --- Equipment (lifecycle + maintenance history) ---
-
-export type EquipmentLifecycleStatus = 'GOOD' | 'MAINTENANCE' | 'BROKEN' | 'DISPOSED';
-
-export interface MaintenanceEquipmentResponse {
-  id: number;
-  equipmentName: string;
-  category: string;
-  qrCode?: string;
-  status: EquipmentLifecycleStatus;
-  roomId?: number;
-  roomName?: string;
-  propertyId: number;
-  installationDate: string;
-  warrantyExpiredDate?: string;
-  maintenanceCount: number;
-  lastMaintenanceDate?: string;
-}
-
-export interface EquipmentMaintenanceHistoryResponse {
-  id: number;
-  equipmentId: number;
-  maintenanceRequestId: number;
-  requestCode: string;
-  maintenanceDate: string;
-  repairCost?: number;
-  note?: string;
 }

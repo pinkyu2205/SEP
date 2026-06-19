@@ -35,7 +35,9 @@ api.interceptors.response.use(
       'Lỗi kết nối đến máy chủ';
     
     const status = error.response?.status;
-    if (status !== 401 && status !== 403 && status !== 404) {
+    // Cho phép call chủ động tắt toast lỗi (truyền config { skipErrorToast: true })
+    const skip = (error.config as { skipErrorToast?: boolean } | undefined)?.skipErrorToast;
+    if (status !== 401 && status !== 403 && status !== 404 && !skip) {
       toast.error(message);
     }
     

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
-  Wrench, DollarSign, Package, BarChart3, Bell, Settings,
+  Wrench, DollarSign, BarChart3, Bell, Settings,
   ChevronRight,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -54,8 +54,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Giám sát & Tài sản',
     items: [
-      { name: 'Giám sát bảo trì',    path: '/host/maintenance', icon: Wrench },
-      { name: 'Danh mục tài sản', path: '/host/equipments',  icon: Package },
+      { name: 'Giám sát bảo trì', path: '/host/maintenance', icon: Wrench },
     ],
   },
   {

@@ -4,10 +4,10 @@
 import api from './api';
 import type { Paginated } from '../types/common';
 import type { PropertyFilter, PublicProperty } from '../types/property';
-import type { PropertyResponse } from '../types/api.types';
+import type { PropertyResponse, RoomResponse } from '../types/api.types';
 import { PROPERTIES_PER_PAGE } from '../utils/constants';
 
-function mapToPublicProperty(p: PropertyResponse): PublicProperty {
+function mapToPublicProperty(p: PropertyResponse, pricing: { price: number; area: number }): PublicProperty {
   const isWholeHouse = p.wholeHouse === true;
   const summary = p.descriptions
     ? p.descriptions.slice(0, 120) + (p.descriptions.length > 120 ? '…' : '')
@@ -20,8 +20,8 @@ function mapToPublicProperty(p: PropertyResponse): PublicProperty {
     description: p.descriptions || '',
     address: p.fullAddress || p.shortAddress,
     district: p.zoneName,
-    price: p.price ?? 0,
-    area: p.areaSize ?? 0,
+    price: pricing.price,
+    area: pricing.area,
     type: isWholeHouse ? 'WHOLE_HOUSE' : 'ROOM',
     status: 'AVAILABLE',
     images: p.imageUrls ?? [],
@@ -32,14 +32,37 @@ function mapToPublicProperty(p: PropertyResponse): PublicProperty {
   };
 }
 
+/**
+ * Giá + diện tích hiển thị công khai.
+ * - Nhà nguyên căn: giá & diện tích của cả căn (areaSize).
+ * - Nhà chia phòng: lấy theo PHÒNG đại diện (phòng có giá cao nhất) — diện tích là
+ *   diện tích PHÒNG đó, KHÔNG phải diện tích tổng toà nhà.
+ */
+async function resolvePricing(p: PropertyResponse): Promise<{ price: number; area: number }> {
+  if (p.wholeHouse !== false) return { price: p.price ?? 0, area: p.areaSize ?? 0 };
+
+  try {
+    const rooms: RoomResponse[] = await api.get(`/api/v1/properties/${p.id}/rooms`);
+    const priced = rooms.filter(r => (r.price ?? 0) > 0);
+    if (priced.length > 0) {
+      const rep = priced.reduce((a, b) => ((b.price ?? 0) > (a.price ?? 0) ? b : a));
+      return { price: rep.price ?? 0, area: rep.area ?? p.areaSize ?? 0 };
+    }
+    // Chưa có giá phòng → vẫn ưu tiên diện tích phòng nếu có
+    const withArea = rooms.find(r => (r.area ?? 0) > 0);
+    return { price: p.price ?? 0, area: withArea?.area ?? p.areaSize ?? 0 };
+  } catch {
+    return { price: p.price ?? 0, area: p.areaSize ?? 0 };
+  }
+}
+
 async function fetchActiveProperties(): Promise<PublicProperty[]> {
   try {
     const res: { content: PropertyResponse[] } = await api.get('/api/v1/properties', {
       params: { page: 0, size: 200 },
     });
-    return res.content
-      .filter(p => p.status === 'ACTIVE' && p.operationManagerId != null)
-      .map(mapToPublicProperty);
+    const active = res.content.filter(p => p.status === 'ACTIVE' && p.operationManagerId != null);
+    return Promise.all(active.map(async p => mapToPublicProperty(p, await resolvePricing(p))));
   } catch {
     return [];
   }
@@ -103,7 +126,7 @@ export async function getPropertyById(id: string): Promise<PublicProperty | null
   try {
     const p: PropertyResponse = await api.get(`/api/v1/properties/${id}`);
     if (p.status !== 'ACTIVE' || p.operationManagerId == null) return null;
-    return mapToPublicProperty(p);
+    return mapToPublicProperty(p, await resolvePricing(p));
   } catch {
     return null;
   }
