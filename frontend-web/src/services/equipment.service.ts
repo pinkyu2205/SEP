@@ -13,8 +13,13 @@ export const equipmentService = {
     return api.post(`/api/v1/properties/${propertyId}/equipments`, data);
   },
 
-  /** GET /api/v1/properties/{propertyId}/equipments — Danh sách thiết bị */
+  /** GET /api/v1/properties/{propertyId}/equipments — Danh sách thiết bị (legacy type) */
   getEquipmentsByProperty: (propertyId: number): Promise<EquipmentResponse[]> => {
+    return api.get(`/api/v1/properties/${propertyId}/equipments`);
+  },
+
+  /** GET /api/v1/properties/{propertyId}/equipments — full DTO (cho trang QR) */
+  getPropertyEquipment: (propertyId: number): Promise<MaintenanceEquipmentResponse[]> => {
     return api.get(`/api/v1/properties/${propertyId}/equipments`);
   },
 

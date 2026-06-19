@@ -11,6 +11,7 @@ import { Dashboard } from './pages/dashboard/Dashboard';
 import { EquipmentCatalogPage } from './pages/super-admin/EquipmentCatalogPage';
 import { FinancialManagement } from './pages/financial/FinancialManagement';
 import { MaintenanceList } from './pages/maintenance/MaintenanceList';
+import { EquipmentQrManager } from './pages/equipments/EquipmentQrManager';
 import { ManagerList } from './pages/managers/ManagerList';
 import { NotificationCenter } from './pages/notifications/NotificationCenter';
 import { PropertyDetail } from './pages/properties/PropertyDetail';
@@ -95,6 +96,7 @@ function App() {
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />
+            <Route path="/host/equipments" element={<EquipmentQrManager />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
             <Route path="/host/reports" element={<ReportsAnalytics />} />
             <Route path="/host/notifications" element={<NotificationCenter />} />

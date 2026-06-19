@@ -607,3 +607,139 @@ export interface TenantContractResponse {
   status: ContractStatus;
   equipmentSnapshot?: string;
 }
+
+// =============================================================================
+// BULK IMPORT — Import onboarding hàng loạt từ Excel
+// POST /api/v1/import/onboarding-excel  (xem doc excel-import-frontend.md)
+// =============================================================================
+
+/** 1 lỗi validate trong file Excel (sheet / dòng / cột / message) */
+export interface BulkImportError {
+  sheet: string;             // VD: "1. Hop_Dong_Thue"
+  rowNumber: number;         // số dòng Excel (1-based, gồm header)
+  contractCode: string | null;
+  field: string | null;
+  message: string;
+}
+
+/** Kết quả 1 căn nhà được import (chỉ có khi dryRun=false) */
+export interface BulkImportContractResult {
+  contractCode: string;
+  propertyId: number;
+  propertyName: string;
+  finalStatus: string;       // "RENOVATION_COMPLETED" khi import thật
+}
+
+/** Response HTTP 200 của endpoint import (cả dry-run lẫn import thật) */
+export interface BulkImportResponse {
+  dryRun: boolean;
+  contractsProcessed: number;
+  renovationLinesImported: number;
+  equipmentRowsImported: number;
+  results: BulkImportContractResult[];
+  errors: BulkImportError[]; // luôn [] khi HTTP 200
+}
+
+/**
+ * Response khi xóa cứng 1 căn nhà — endpoint `/purge` hoặc rollback theo contractCode.
+ * (DELETE /properties/{id} thường chỉ trả 204 No Content, không có body này.)
+ */
+export interface PropertyPurgeResponse {
+  propertyId: number;
+  propertyName: string;
+  contractCode: string | null;
+  equipmentsDeleted: number;
+  equipmentManifestsDeleted: number;
+  renovationLinesDeleted: number;
+  renovationSessionsDeleted: number;
+  roomsDeleted: number;
+  depreciationResultsDeleted: number;
+  monthlyReadingsDeleted: number;
+}
+
+// =============================================================================
+// MAINTENANCE — Bảo trì / Sửa chữa (theo Maintenance_BE_Contract.md)
+// =============================================================================
+
+export type MaintenanceRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
+export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type MaintenanceRequestCategory =
+  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
+
+export interface MaintenanceTimelineEntry {
+  oldStatus?: MaintenanceRequestStatus;
+  newStatus: MaintenanceRequestStatus;
+  note?: string;
+  changedBy?: string;
+  changedByName?: string;
+  changedAt: string;
+}
+
+export interface MaintenanceRequestResponse {
+  id: number;
+  requestCode: string;
+  status: MaintenanceRequestStatus;
+  category: MaintenanceRequestCategory;
+  priority: MaintenanceRequestPriority;
+  description: string;
+  tenantId: number;
+  tenantName: string;
+  tenantPhone?: string;
+  roomId: number;
+  roomName: string;
+  propertyId: number;
+  propertyName: string;
+  equipmentId?: number;
+  equipmentName?: string;
+  assignedManagerId?: number;
+  assignedManagerName?: string;
+  scheduledDate?: string;
+  repairCost?: number;
+  resolutionNote?: string;
+  resolvedAt?: string;
+  images: string[];
+  timeline: MaintenanceTimelineEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaintenanceDashboardResponse {
+  total: number;
+  pending: number;
+  inProgress: number;
+  resolved: number;
+  cancelled: number;
+  totalRepairCost: number;
+}
+
+// --- Equipment (lifecycle + maintenance history) ---
+
+export type EquipmentLifecycleStatus = 'GOOD' | 'MAINTENANCE' | 'BROKEN' | 'DISPOSED';
+
+export interface MaintenanceEquipmentResponse {
+  id: number;
+  equipmentName?: string;     // có thể null — fallback sang catalogName
+  catalogName?: string;
+  category?: string;
+  houseArea?: string;
+  source?: string;
+  qrCode?: string;
+  status: string;             // EquipmentStatus: NEW|GOOD|MAINTENANCE|BROKEN|DISPOSED
+  roomId?: number;
+  roomName?: string;
+  propertyId: number;
+  installationDate?: string;
+  warrantyExpiredDate?: string;
+  maintenanceCount: number;
+  lastMaintenanceDate?: string;
+}
+
+export interface EquipmentMaintenanceHistoryResponse {
+  id: number;
+  equipmentId: number;
+  maintenanceRequestId: number;
+  requestCode: string;
+  maintenanceDate: string;
+  repairCost?: number;
+  note?: string;
+}
