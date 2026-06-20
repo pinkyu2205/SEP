@@ -10,6 +10,14 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Goong REST (autocomplete/geocode/place detail) bị CORS khi gọi thẳng từ
+      // browser → proxy qua dev server cho cùng origin. Xem goong.service.ts.
+      '/goong-rest': {
+        target: 'https://rsapi.goong.io',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (p) => p.replace(/^\/goong-rest/, ''),
+      },
     },
   },
 });

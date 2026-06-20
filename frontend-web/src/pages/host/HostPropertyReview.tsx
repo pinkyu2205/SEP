@@ -450,11 +450,11 @@ export const HostPropertyReview = () => {
                       <button
                         type="button"
                         onClick={() => {
-                          const rounded = Math.ceil(Number(calculatedPrice) / 1_000_000) * 1_000_000;
+                          const rounded = Math.ceil(Number(calculatedPrice) / 100_000) * 100_000;
                           setUseManualPrice(true);
                           setManualPrice(rounded);
                         }}
-                        title="Làm tròn lên triệu gần nhất"
+                        title="Làm tròn lên trăm nghìn gần nhất"
                         className="shrink-0 flex items-center gap-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-xs font-bold px-2.5 py-1.5 transition"
                       >
                         ↑ Làm tròn
@@ -553,8 +553,9 @@ export const HostPropertyReview = () => {
                           </div>
                           <button
                             type="button"
+                            title="Làm tròn lên trăm nghìn gần nhất"
                             onClick={() => {
-                              const rounded = Math.ceil(computedPrice / 1_000_000) * 1_000_000;
+                              const rounded = Math.ceil(computedPrice / 100_000) * 100_000;
                               setUseManualPrice(true);
                               handleUpdateRoomPrice(r.roomId, rounded);
                             }}
