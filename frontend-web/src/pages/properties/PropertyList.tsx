@@ -9,12 +9,28 @@ import { propertyService } from '../../services/property.service';
 import type { PropertyResponse } from '../../types/api.types';
 
 const statusBadge: Record<string, { label: string; cls: string; dot: string }> = {
-  PENDING_HOST_REVIEW:  { label: 'Chờ phê duyệt',    cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
-  ACTIVE:               { label: 'Hoạt động',        cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
-  UNDER_RENOVATION:     { label: 'Đang cải tạo',     cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
-  RENOVATION_COMPLETED: { label: 'Đã cải tạo xong',  cls: 'bg-teal-100 text-teal-700',       dot: 'bg-teal-500' },
-  DRAFT:                { label: 'Nháp',              cls: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
-  DISABLED:             { label: 'Vô hiệu',           cls: 'bg-rose-100 text-rose-600',       dot: 'bg-rose-400' },
+  PENDING_HOST_REVIEW:      { label: 'Chờ phê duyệt',    cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
+  PENDING_OPERATION_MANAGER:{ label: 'Chờ gán quản lý',  cls: 'bg-violet-100 text-violet-700',   dot: 'bg-violet-500' },
+  ACTIVE:                   { label: 'Hoạt động',        cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  UNDER_RENOVATION:         { label: 'Đang cải tạo',     cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
+  RENOVATION_COMPLETED:     { label: 'Đã cải tạo xong',  cls: 'bg-teal-100 text-teal-700',       dot: 'bg-teal-500' },
+  DRAFT:                    { label: 'Nháp',              cls: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
+  DISABLED:                 { label: 'Vô hiệu',           cls: 'bg-rose-100 text-rose-600',       dot: 'bg-rose-400' },
+};
+
+/**
+ * Nhà đã được Host duyệt thành công (chỉ những căn này mới hiện ở màn Bất động sản của Host).
+ * - ACTIVE / PENDING_OPERATION_MANAGER: chắc chắn đã qua host-confirm.
+ * - UNDER_RENOVATION / DISABLED: chỉ tính nếu đã từng được duyệt (đã có giá thuê hoặc đã gán quản lý)
+ *   → loại các căn admin đang onboarding (cải tạo lần đầu / nháp bị vô hiệu) chưa gửi Host.
+ * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Host"), PENDING_HOST_REVIEW (đang chờ duyệt).
+ */
+const isHostApproved = (p: PropertyResponse): boolean => {
+  if (p.status === 'ACTIVE' || p.status === 'PENDING_OPERATION_MANAGER') return true;
+  if (p.status === 'UNDER_RENOVATION' || p.status === 'DISABLED') {
+    return (p.price ?? 0) > 0 || !!p.operationManagerId;
+  }
+  return false;
 };
 
 // Tile KPI tổng quan theo loại hình
@@ -196,7 +212,8 @@ export const PropertyList = () => {
   useEffect(() => { fetchProperties(); }, []);
 
   const pending = useMemo(() => properties.filter(p => p.status === 'PENDING_HOST_REVIEW'), [properties]);
-  const active  = useMemo(() => properties.filter(p => p.status !== 'PENDING_HOST_REVIEW'), [properties]);
+  // Chỉ hiện nhà Host đã duyệt thành công — xem isHostApproved().
+  const active  = useMemo(() => properties.filter(isHostApproved), [properties]);
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
@@ -334,9 +351,8 @@ export const PropertyList = () => {
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-300">
               <option value="all">Mọi trạng thái</option>
               <option value="ACTIVE">Hoạt động</option>
+              <option value="PENDING_OPERATION_MANAGER">Chờ gán quản lý</option>
               <option value="UNDER_RENOVATION">Đang cải tạo</option>
-              <option value="RENOVATION_COMPLETED">Đã cải tạo xong</option>
-              <option value="DRAFT">Nháp</option>
               <option value="DISABLED">Vô hiệu</option>
             </select>
             <div className="relative flex-1 lg:w-64">

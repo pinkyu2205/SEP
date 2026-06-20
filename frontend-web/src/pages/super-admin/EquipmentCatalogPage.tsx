@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AlertCircle, Building2, ChevronRight, Download,
-  Info, Loader2, Package, Plus, Printer, QrCode, Search, X,
+  Info, Loader2, MapPin, Package, Plus, Printer, QrCode, Search, X,
 } from 'lucide-react';
 import type {
-  EquipmentAssignmentResponse, ManifestItemResponse, PropertyResponse,
+  EquipmentAssignmentResponse, HouseArea, ManifestItemResponse, PropertyResponse,
 } from '../../types/api.types';
 import { catalogService } from '../../services/catalog.service';
 import { propertyService } from '../../services/property.service';
@@ -16,9 +16,21 @@ type Tab = 'available' | 'purchased';
 interface PropertyData {
   property: PropertyResponse;
   manifests: ManifestItemResponse[];
-  /** Loaded for cross-referencing assignment status (source=PURCHASED) */
-  purchased: EquipmentAssignmentResponse[];
+  /** Tất cả lượt gán thiết bị của tòa (mọi nguồn) — dùng để biết từng cái nằm ở phòng nào */
+  assignments: EquipmentAssignmentResponse[];
   expanded: boolean;
+}
+
+/** 1 đơn vị thiết bị riêng lẻ (tách từ số lượng) — mỗi cái 1 mã QR + vị trí riêng */
+interface EquipmentUnit {
+  key: string;
+  catalogName: string;
+  status: string;
+  /** null = chưa gán, còn trong kho */
+  location: string | null;
+  /** "2/3" khi cùng loại có nhiều cái; '' khi chỉ 1 */
+  unitLabel: string;
+  qrData: string;
 }
 
 /** Thiết bị mới mua — chờ gán vào toà nhà/phòng ở Cấu hình khai thác */
@@ -31,11 +43,79 @@ interface PurchasedPoolItem {
   createdAt: string;
 }
 
+/** Mô tả 1 mã QR cần hiển thị — dùng chung cho cả thiết bị có sẵn (manifest) lẫn mới mua */
+interface QrTarget {
+  title: string;
+  subtitle: string;
+  qrData: string;
+  downloadName: string;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const getPoolQrData = (item: PurchasedPoolItem) => {
   const id = item.catalogId ?? item.localId;
   return `URBANNEST-EQ-${id}-${item.name.replace(/\s+/g, '_').toUpperCase()}`;
+};
+
+const HOUSE_AREA_LABEL: Record<HouseArea, string> = {
+  LIVING_ROOM: 'Phòng khách', BEDROOM: 'Phòng ngủ', KITCHEN: 'Bếp',
+  BATHROOM: 'Nhà tắm', BALCONY: 'Ban công', GARAGE: 'Gara', OTHER: 'Khác',
+};
+
+const slug = (s: string) => s.replace(/\s+/g, '_').toUpperCase();
+
+/**
+ * Tách 1 tòa thành danh sách thiết bị riêng lẻ (mỗi cái 1 QR):
+ *  - Từ assignments (INITIAL_HANDOVER): mỗi cái biết phòng/khu vực đang nằm.
+ *  - Phần còn lại của manifest chưa gán: liệt kê là "trong kho".
+ * QR nhúng sẵn mã vị trí để quét ra là biết nằm ở đâu.
+ */
+const buildUnits = (data: PropertyData): EquipmentUnit[] => {
+  const propertyId = data.property.id;
+  const handover = data.assignments.filter(a => a.source === 'INITIAL_HANDOVER');
+  const units: EquipmentUnit[] = [];
+
+  // 1) Đã gán vào phòng / khu vực
+  for (const a of handover) {
+    const loc = a.roomNumber
+      ? `Phòng ${a.roomNumber}`
+      : a.houseArea ? HOUSE_AREA_LABEL[a.houseArea] : 'Đã gán';
+    const locCode = a.roomNumber ? `R${slug(a.roomNumber)}` : a.houseArea ?? 'GAN';
+    for (let i = 1; i <= a.quantity; i++) {
+      units.push({
+        key: `a${a.id}-u${i}`,
+        catalogName: a.catalogName,
+        status: a.status,
+        location: loc,
+        unitLabel: a.quantity > 1 ? `${i}/${a.quantity}` : '',
+        qrData: `URBANNEST-EQ-P${propertyId}-${locCode}-${slug(a.catalogName)}-A${a.id}U${i}`,
+      });
+    }
+  }
+
+  // 2) Chưa gán — còn trong kho (số lượng manifest trừ đi phần đã gán)
+  for (const m of data.manifests) {
+    const assignedQty = handover
+      .filter(a => a.catalogId === m.catalogId)
+      .reduce((s, a) => s + a.quantity, 0);
+    const remain = Math.max(0, m.quantity - assignedQty);
+    for (let i = 1; i <= remain; i++) {
+      units.push({
+        key: `m${m.id}-u${i}`,
+        catalogName: m.catalogName,
+        status: m.status,
+        location: null,
+        unitLabel: remain > 1 ? `${i}/${remain}` : '',
+        qrData: `URBANNEST-EQ-P${propertyId}-KHO-${slug(m.catalogName)}-M${m.id}U${assignedQty + i}`,
+      });
+    }
+  }
+
+  return units.sort((x, y) =>
+    x.catalogName.localeCompare(y.catalogName) ||
+    (x.location ?? 'zzz').localeCompare(y.location ?? 'zzz')
+  );
 };
 
 const getQrUrl = (data: string, size = 180) =>
@@ -94,9 +174,8 @@ const AssignBadge = ({ info }: { info: { propertyName: string; roomNumber?: stri
 
 // ─── QR Modal ────────────────────────────────────────────────────────────────
 
-const QrModal = ({ item, onClose }: { item: PurchasedPoolItem; onClose: () => void }) => {
-  const qrData = getPoolQrData(item);
-  const qrUrl  = getQrUrl(qrData, 220);
+const QrModal = ({ title, subtitle, qrData, downloadName, onClose }: QrTarget & { onClose: () => void }) => {
+  const qrUrl = getQrUrl(qrData, 220);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -107,10 +186,8 @@ const QrModal = ({ item, onClose }: { item: PurchasedPoolItem; onClose: () => vo
               <QrCode className="w-3.5 h-3.5 text-slate-400" />
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Mã QR thiết bị</span>
             </div>
-            <h3 className="font-bold text-slate-900 text-sm">{item.name}</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {item.quantity > 1 ? `x${item.quantity}` : 'Chưa gán vào vị trí nào'}
-            </p>
+            <h3 className="font-bold text-slate-900 text-sm">{title}</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
             <X className="w-4 h-4" />
@@ -126,7 +203,7 @@ const QrModal = ({ item, onClose }: { item: PurchasedPoolItem; onClose: () => vo
           <div className="grid grid-cols-2 gap-2 w-full">
             <a
               href={qrUrl}
-              download={`QR-EQ-${item.localId}.png`}
+              download={downloadName}
               className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
             >
               <Download className="w-3.5 h-3.5" />
@@ -309,15 +386,17 @@ const PropertyAccordion = ({
   data,
   search,
   onToggle,
+  onShowQr,
 }: {
   data: PropertyData;
   search: string;
   onToggle: () => void;
+  onShowQr: (target: QrTarget) => void;
 }) => {
   const q = search.toLowerCase();
-  const items = data.manifests.filter(m =>
-    !q || m.catalogName.toLowerCase().includes(q)
-  );
+  const allUnits = useMemo(() => buildUnits(data), [data]);
+  const units = q ? allUnits.filter(u => u.catalogName.toLowerCase().includes(q)) : allUnits;
+  const assignedCount = allUnits.filter(u => u.location).length;
 
   return (
     <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm overflow-hidden">
@@ -334,14 +413,14 @@ const PropertyAccordion = ({
           <p className="text-xs text-slate-400 mt-0.5 truncate">{data.property.shortAddress}</p>
         </div>
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 flex-shrink-0">
-          {data.manifests.length} thiết bị
+          {allUnits.length} thiết bị
         </span>
         <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${data.expanded ? 'rotate-90' : ''}`} />
       </button>
 
       {data.expanded && (
         <div className="border-t border-slate-100">
-          {items.length === 0 ? (
+          {units.length === 0 ? (
             <div className="px-5 py-8 text-center">
               <p className="text-xs text-slate-400">
                 {search ? 'Không tìm thấy thiết bị phù hợp.' : 'Không có thiết bị nào được khai báo khi nhận nhà.'}
@@ -349,28 +428,59 @@ const PropertyAccordion = ({
             </div>
           ) : (
             <div>
-              <div className="px-5 py-2 bg-slate-50/60 border-b border-slate-100 grid grid-cols-[1fr_80px_80px_120px] gap-3">
-                {['Tên thiết bị', 'Số lượng', 'Đã gán', 'Trạng thái'].map(h => (
+              <div className="px-5 py-2 bg-slate-50/60 border-b border-slate-100 flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  {allUnits.length} thiết bị riêng lẻ
+                </p>
+                <p className="text-[10px] font-bold text-slate-400">
+                  <span className="text-emerald-600">{assignedCount} đã gán</span>
+                  {' · '}
+                  <span>{allUnits.length - assignedCount} trong kho</span>
+                </p>
+              </div>
+              <div className="px-5 py-2 bg-slate-50/30 border-b border-slate-100 grid grid-cols-[1fr_150px_104px_72px] gap-3">
+                {['Thiết bị', 'Vị trí', 'Trạng thái', 'Mã QR'].map(h => (
                   <p key={h} className="text-[10px] font-black uppercase tracking-widest text-slate-400">{h}</p>
                 ))}
               </div>
               <div className="divide-y divide-slate-100">
-                {items.map(m => (
-                  <div key={m.id} className="px-5 py-3 grid grid-cols-[1fr_80px_80px_120px] gap-3 items-center hover:bg-slate-50/40 transition-colors">
+                {units.map(u => (
+                  <div key={u.key} className="px-5 py-3 grid grid-cols-[1fr_150px_104px_72px] gap-3 items-center hover:bg-slate-50/40 transition-colors">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-6 h-6 rounded bg-violet-50 flex items-center justify-center flex-shrink-0">
                         <Package className="w-3 h-3 text-violet-500" />
                       </div>
-                      <p className="text-sm font-semibold text-slate-900 truncate">{m.catalogName}</p>
+                      <p className="text-sm font-semibold text-slate-900 truncate">
+                        {u.catalogName}
+                        {u.unitLabel && <span className="ml-1.5 text-[10px] font-mono text-slate-400">#{u.unitLabel}</span>}
+                      </p>
                     </div>
-                    <p className="text-sm font-bold text-slate-700">x{m.quantity}</p>
-                    <p className="text-sm text-slate-500">
-                      {m.assignedCount > 0
-                        ? <span className="font-semibold text-emerald-700">{m.assignedCount} phòng</span>
-                        : <span className="text-slate-300">Chưa gán</span>
-                      }
-                    </p>
-                    <ManifestStatusBadge status={m.status} />
+                    <div className="min-w-0">
+                      {u.location ? (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 max-w-full truncate">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{u.location}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-50 text-slate-500 border-slate-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                          Trong kho
+                        </span>
+                      )}
+                    </div>
+                    <ManifestStatusBadge status={u.status} />
+                    <button
+                      onClick={() => onShowQr({
+                        title: u.catalogName + (u.unitLabel ? ` #${u.unitLabel}` : ''),
+                        subtitle: `${data.property.propertyName} · ${u.location ?? 'Chưa gán — trong kho'}`,
+                        qrData: u.qrData,
+                        downloadName: `QR-${u.qrData}.png`,
+                      })}
+                      className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-colors"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      QR
+                    </button>
                   </div>
                 ))}
               </div>
@@ -400,7 +510,7 @@ export const EquipmentCatalogPage = () => {
   const [fetchError,    setFetchError]    = useState<string | null>(null);
   const [searchAvail,   setSearchAvail]   = useState('');
   const [searchBuy,     setSearchBuy]     = useState('');
-  const [qrModal,       setQrModal]       = useState<PurchasedPoolItem | null>(null);
+  const [qrModal,       setQrModal]       = useState<QrTarget | null>(null);
   const [showAdd,       setShowAdd]       = useState(false);
 
   const load = useCallback(async () => {
@@ -409,7 +519,7 @@ export const EquipmentCatalogPage = () => {
     try {
       const propPage = await propertyService.getProperties(0, 100);
       const props = propPage.content;
-      setPropertyData(props.map(p => ({ property: p, manifests: [], purchased: [], expanded: false })));
+      setPropertyData(props.map(p => ({ property: p, manifests: [], assignments: [], expanded: false })));
 
       if (props.length > 0) {
         setLoadingData(true);
@@ -419,18 +529,14 @@ export const EquipmentCatalogPage = () => {
               propertyService.getManifest(p.id).catch(() => [] as ManifestItemResponse[]),
               propertyService.getAssignedEquipments(p.id).catch(() => [] as EquipmentAssignmentResponse[]),
             ]);
-            return {
-              id: p.id,
-              manifests,
-              purchased: assignments.filter(a => a.source === 'PURCHASED'),
-            };
+            return { id: p.id, manifests, assignments };
           })
         );
         setPropertyData(prev =>
           prev.map(d => {
             const hit = results.find(r => r.status === 'fulfilled' && r.value.id === d.property.id);
             if (!hit || hit.status !== 'fulfilled') return d;
-            return { ...d, manifests: hit.value.manifests, purchased: hit.value.purchased };
+            return { ...d, manifests: hit.value.manifests, assignments: hit.value.assignments };
           })
         );
         setLoadingData(false);
@@ -460,19 +566,19 @@ export const EquipmentCatalogPage = () => {
     setShowAdd(false);
   };
 
-  /** Cross-reference: tìm xem catalogId này đang được gán ở đâu */
+  /** Cross-reference: tìm xem catalogId (mới mua) này đang được gán ở đâu */
   const getAssignment = useCallback((catalogId?: number) => {
     if (!catalogId) return null;
     for (const d of propertyData) {
-      const a = d.purchased.find(p => p.catalogId === catalogId);
+      const a = d.assignments.find(p => p.source === 'PURCHASED' && p.catalogId === catalogId);
       if (a) return { propertyName: d.property.propertyName, roomNumber: a.roomNumber ?? undefined };
     }
     return null;
   }, [propertyData]);
 
-  // Stats
+  // Stats — đếm theo từng thiết bị riêng lẻ (đã tách số lượng)
   const totalAvailable = useMemo(
-    () => propertyData.reduce((sum, d) => sum + d.manifests.length, 0),
+    () => propertyData.reduce((sum, d) => sum + buildUnits(d).length, 0),
     [propertyData]
   );
   const totalPurchased = purchasedPool.length;
@@ -652,15 +758,17 @@ export const EquipmentCatalogPage = () => {
                     data={data}
                     search={searchAvail}
                     onToggle={() => toggleProperty(data.property.id)}
+                    onShowQr={setQrModal}
                   />
                 ))
               )}
               <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 mt-1">
                 <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Đây là thiết bị được khai báo trong bước <strong>Manifest</strong> khi nhận nhà từ chủ sở hữu.
-                  Số <strong>"Đã gán"</strong> cho biết thiết bị này đã được phân bổ vào bao nhiêu phòng.
-                  Click vào tòa nhà để xem chi tiết.
+                  Đây là thiết bị khai báo khi nhận nhà từ chủ sở hữu (bao gồm thiết bị nhập từ <strong>Nhập nhà hàng loạt</strong>),
+                  đã được <strong>tách thành từng cái riêng lẻ</strong>. Mỗi cái có <strong>mã QR riêng</strong> nhúng sẵn vị trí —
+                  quét vào là biết thiết bị đang ở <strong>phòng/khu vực</strong> nào, hoặc còn <strong>trong kho</strong> (chưa gán).
+                  Phòng được gán ở bước <strong>Cấu hình khai thác</strong>; bấm <strong>QR</strong> để tải / in tem dán lên thiết bị.
                 </p>
               </div>
             </div>
@@ -722,7 +830,14 @@ export const EquipmentCatalogPage = () => {
                             </td>
                             <td className="px-4 py-3">
                               <button
-                                onClick={() => setQrModal(item)}
+                                onClick={() => setQrModal({
+                                  title: item.name,
+                                  subtitle: assignInfo
+                                    ? `${assignInfo.propertyName}${assignInfo.roomNumber ? ` / Phòng ${assignInfo.roomNumber}` : ''} · x${item.quantity}`
+                                    : `Chưa gán · x${item.quantity}`,
+                                  qrData: getPoolQrData(item),
+                                  downloadName: `QR-EQ-${item.localId}.png`,
+                                })}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-cyan-50 hover:border-cyan-200 hover:text-cyan-700 transition-colors"
                               >
                                 <QrCode className="w-3.5 h-3.5" />
@@ -747,7 +862,7 @@ export const EquipmentCatalogPage = () => {
       </div>
 
       {/* Modals */}
-      {qrModal && <QrModal item={qrModal} onClose={() => setQrModal(null)} />}
+      {qrModal && <QrModal {...qrModal} onClose={() => setQrModal(null)} />}
       {showAdd && (
         <AddPurchasedModal
           onClose={() => setShowAdd(false)}
