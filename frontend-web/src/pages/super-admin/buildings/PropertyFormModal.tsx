@@ -147,7 +147,7 @@ export const PropertyFormModal = ({ initialData, onClose, onSuccess }: PropertyF
             
             <label className="block">
               <span className="mb-1.5 block text-sm font-bold text-slate-700">Tên tòa nhà / Căn nhà *</span>
-              <input required name="propertyName" value={formData.propertyName} onChange={handleChange} className="input-field" placeholder="Ví dụ: UrbanNest Quận 1" />
+              <input required name="propertyName" value={formData.propertyName} onChange={handleChange} className="input-field" placeholder="Ví dụ: Hoàng Bình Land Quận 1" />
             </label>
 
             <label className="block">

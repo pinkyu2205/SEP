@@ -1,14 +1,52 @@
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
 /**
  * API configuration.
- * Thay đổi BASE_URL khi backend API được triển khai.
  */
+
+// Cổng backend Spring. Đổi nếu BE chạy cổng khác.
+const BACKEND_PORT = 8080;
+
+/**
+ * Lấy IP LAN của máy đang chạy dev server (Metro + backend) — suy ra từ hostUri
+ * mà Expo Go dùng để tải bundle. VD hostUri = "192.168.1.5:8081" -> "192.168.1.5".
+ * Nhờ vậy thiết bị thật gọi được backend trên máy dev mà KHÔNG phải sửa IP tay.
+ */
+function getDevServerHost(): string | null {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    // @ts-ignore - các bản Expo cũ
+    (Constants as any).expoGoConfig?.debuggerHost ||
+    // @ts-ignore
+    (Constants as any).manifest2?.extra?.expoGo?.developer?.host ||
+    // @ts-ignore
+    (Constants as any).manifest?.debuggerHost;
+  if (!hostUri) return null;
+  return String(hostUri).split('://').pop()!.split(':')[0] || null;
+}
+
+/**
+ * Base URL backend Spring thật, tự suy theo nền tảng:
+ * - web: '' (cùng origin, đi qua dev proxy của Metro — xem metro.config.js)
+ * - thiết bị thật / Expo Go: http://<LAN-IP-máy-dev>:8080
+ * - Android emulator: http://10.0.2.2:8080 · iOS simulator: http://localhost:8080
+ */
+function resolveRealBaseUrl(): string {
+  if (Platform.OS === 'web') return '';
+  const host = getDevServerHost();
+  if (host) return `http://${host}:${BACKEND_PORT}`;
+  return Platform.OS === 'android'
+    ? `http://10.0.2.2:${BACKEND_PORT}`
+    : `http://localhost:${BACKEND_PORT}`;
+}
+
+export const REAL_BASE_URL = resolveRealBaseUrl();
+
 export const API_CONFIG = {
   BASE_URL: 'http://localhost:3000/api', // TODO: Thay bằng URL backend thật
-  // Backend Spring thật (dùng cho luồng manager onboarding đã nối API).
-  // - Web/iOS simulator: http://localhost:8080
-  // - Android emulator:  http://10.0.2.2:8080
-  // - Thiết bị thật:     http://<LAN-IP-máy-chạy-BE>:8080
-  REAL_BASE_URL: 'http://localhost:8080',
+  // Backend Spring thật (đã tự suy ra IP LAN cho thiết bị thật, xem resolveRealBaseUrl).
+  REAL_BASE_URL,
   TIMEOUT: 15000, // 15 seconds
   ENDPOINTS: {
     // Auth

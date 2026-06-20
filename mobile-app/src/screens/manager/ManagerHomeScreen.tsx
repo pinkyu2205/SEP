@@ -1,15 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { useAuth } from '../../hooks';
 import {
-  MANAGED_PROPERTIES, getPropPriority, getPriorityMeta, getIssueCount,
+  ManagedProperty, getPropPriority, getPriorityMeta, getIssueCount,
 } from '../../data/managedProperties';
+import { managerPropertyService } from '../../services/managerPropertyService';
 
 // ── Mock data ──────────────────────────────────────────────────────────────
 
@@ -32,41 +33,56 @@ const QUICK_ACTIONS = [
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info,          badge: 2 },
 ] as const;
 
-const MOCK_STATS = {
-  totalRooms: 20,
-  occupied: 16,
-  available: 3,
-  maintenance: 1,
-  totalDebt: 12500000,
-  unreadNotifications: 6,
-};
-
-// Overview card — system-wide aggregates (separate from MOCK_STATS room counts)
-const OV = {
-  totalBuildings:     MANAGED_PROPERTIES.length,
-  multiRoomTotal:     20,
-  multiRoomOccupied:  16,
-  wholeHouseTotal:    2,
-  wholeHouseOccupied: 2,
-  totalTenants:       18,
-  totalDebt:          12_500_000,
-  unpaidInvoices:     8,
-};
-const fmtM = (n: number) => `${(n / 1_000_000).toFixed(1)}tr`;
-const multiRate    = Math.round((OV.multiRoomOccupied  / OV.multiRoomTotal)  * 100);
-const wholeRate    = Math.round((OV.wholeHouseOccupied / OV.wholeHouseTotal) * 100);
+const UNREAD_NOTIFICATIONS = 6; // TODO: nối API thông báo
 
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const ManagerHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
-  const stats = MOCK_STATS;
-  const occupancyRate = Math.round((stats.occupied / stats.totalRooms) * 100);
+
+  const [properties, setProperties] = useState<ManagedProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await managerPropertyService.getManagedProperties();
+      setProperties(data);
+    } catch {
+      // Lỗi đã được xử lý/log ở service; giữ dữ liệu cũ.
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const onRefresh = () => { setRefreshing(true); load(); };
+
+  // Số liệu tổng hợp từ nhà của manager (API thật, đã lọc theo quyền).
+  const m = useMemo(() => {
+    const multi = properties.filter(p => p.propertyType === 'MULTI_ROOM');
+    const whole = properties.filter(p => p.propertyType === 'WHOLE_HOUSE');
+    const roomsTotal = multi.reduce((s, p) => s + p.totalRooms, 0);
+    const roomsOccupied = multi.reduce((s, p) => s + p.occupied, 0);
+    const roomsAvailable = multi.reduce((s, p) => s + p.available, 0);
+    const maintenance = properties.reduce((s, p) => s + p.maintenance, 0);
+    const wholeOccupied = whole.filter(p => p.rentalStatus === 'rented' || p.rentalStatus === 'expiring').length;
+    return {
+      totalBuildings: properties.length,
+      multiCount: multi.length,
+      wholeCount: whole.length,
+      roomsTotal, roomsOccupied, roomsAvailable, maintenance, wholeOccupied,
+      tenants: roomsOccupied + wholeOccupied,
+      multiRate: roomsTotal > 0 ? Math.round((roomsOccupied / roomsTotal) * 100) : 0,
+      wholeRate: whole.length > 0 ? Math.round((wholeOccupied / whole.length) * 100) : 0,
+    };
+  }, [properties]);
 
   const attentionBuildings = useMemo(
-    () => [...MANAGED_PROPERTIES].sort((a, b) => getPropPriority(a) - getPropPriority(b)).slice(0, 3),
-    [],
+    () => [...properties].sort((a, b) => getPropPriority(a) - getPropPriority(b)).slice(0, 3),
+    [properties],
   );
 
   const activeItems    = PRIORITY_ITEMS.filter(p => p.count > 0);
@@ -87,7 +103,13 @@ export const ManagerHomeScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} tintColor={Colors.primary} />
+        }
+      >
 
         {/* ── Header ─────────────────────────────────────────────────── */}
         <View style={s.header}>
@@ -97,10 +119,10 @@ export const ManagerHomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
             <Text style={s.notifIcon}>🔔</Text>
-            {stats.unreadNotifications > 0 && (
+            {UNREAD_NOTIFICATIONS > 0 && (
               <View style={s.notifBadge}>
                 <Text style={s.notifBadgeText}>
-                  {stats.unreadNotifications > 9 ? '9+' : stats.unreadNotifications}
+                  {UNREAD_NOTIFICATIONS > 9 ? '9+' : UNREAD_NOTIFICATIONS}
                 </Text>
               </View>
             )}
@@ -113,9 +135,9 @@ export const ManagerHomeScreen: React.FC = () => {
           {/* Header row */}
           <View style={s.ovCardHdr}>
             <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={s.ovCardTitle}>Tổng quan hệ thống</Text>
+              <Text style={s.ovCardTitle}>Tổng quan của bạn</Text>
               <Text style={s.ovCardSub} numberOfLines={1}>
-                {OV.totalBuildings} tòa nhà • {OV.multiRoomTotal} phòng lẻ • {OV.wholeHouseTotal} nhà nguyên căn
+                {m.totalBuildings} tòa nhà • {m.roomsTotal} phòng lẻ • {m.wholeCount} nhà nguyên căn
               </Text>
             </View>
             {urgentTotal > 0 && (
@@ -125,15 +147,15 @@ export const ManagerHomeScreen: React.FC = () => {
             )}
           </View>
 
-          {/* 3 KPI metrics — icon circle on left, value stack on right */}
+          {/* 3 KPI phòng — số liệu thật từ nhà của manager */}
           <View style={s.ovKpiRow}>
-            {/* Tenant */}
+            {/* Khách thuê đang ở */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.primaryBg }]}>
                 <MaterialIcons name="perm-identity" size={22} color={Colors.primary} />
               </View>
               <View style={s.ovKpiTexts}>
-                <Text style={[s.ovKpiVal, { color: Colors.primary }]}>{OV.totalTenants}</Text>
+                <Text style={[s.ovKpiVal, { color: Colors.primary }]}>{m.tenants}</Text>
                 <Text style={s.ovKpiLbl}>Khách thuê</Text>
                 <Text style={s.ovKpiNote}>Đang ở</Text>
               </View>
@@ -141,29 +163,29 @@ export const ManagerHomeScreen: React.FC = () => {
 
             <View style={s.ovKpiSep} />
 
-            {/* Debt */}
+            {/* Phòng trống */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.successLight }]}>
-                <MaterialIcons name="account-balance-wallet" size={22} color={Colors.success} />
+                <MaterialIcons name="meeting-room" size={22} color={Colors.success} />
               </View>
               <View style={s.ovKpiTexts}>
-                <Text style={[s.ovKpiVal, { color: Colors.success }]}>{fmtM(OV.totalDebt)}</Text>
-                <Text style={s.ovKpiLbl}>Cần thu</Text>
-                <Text style={s.ovKpiNote}>Công nợ quá hạn</Text>
+                <Text style={[s.ovKpiVal, { color: Colors.success }]}>{m.roomsAvailable}</Text>
+                <Text style={s.ovKpiLbl}>Phòng trống</Text>
+                <Text style={s.ovKpiNote}>Sẵn cho thuê</Text>
               </View>
             </View>
 
             <View style={s.ovKpiSep} />
 
-            {/* Invoices */}
+            {/* Bảo trì */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.warningLight }]}>
-                <MaterialIcons name="description" size={22} color={Colors.warning} />
+                <MaterialIcons name="build" size={20} color={Colors.warning} />
               </View>
               <View style={s.ovKpiTexts}>
-                <Text style={[s.ovKpiVal, { color: Colors.warning }]}>{OV.unpaidInvoices}</Text>
-                <Text style={s.ovKpiLbl}>Hóa đơn</Text>
-                <Text style={s.ovKpiNote}>Chưa thanh toán</Text>
+                <Text style={[s.ovKpiVal, { color: Colors.warning }]}>{m.maintenance}</Text>
+                <Text style={s.ovKpiLbl}>Bảo trì</Text>
+                <Text style={s.ovKpiNote}>Phòng cần xử lý</Text>
               </View>
             </View>
           </View>
@@ -178,9 +200,9 @@ export const ManagerHomeScreen: React.FC = () => {
               <View style={{ flex: 1 }}>
                 <Text style={[s.ovRentalLabel, { color: Colors.primary }]}>Phòng lẻ</Text>
                 <Text style={s.ovRentalValue}>
-                  {OV.multiRoomOccupied}/{OV.multiRoomTotal} đang thuê
+                  {m.roomsOccupied}/{m.roomsTotal} đang thuê
                   {'  '}
-                  <Text style={{ color: Colors.primary, fontWeight: '700' }}>{multiRate}%</Text>
+                  <Text style={{ color: Colors.primary, fontWeight: '700' }}>{m.multiRate}%</Text>
                 </Text>
               </View>
             </View>
@@ -193,9 +215,9 @@ export const ManagerHomeScreen: React.FC = () => {
               <View style={{ flex: 1 }}>
                 <Text style={[s.ovRentalLabel, { color: Colors.success }]}>Nhà nguyên căn</Text>
                 <Text style={s.ovRentalValue}>
-                  {OV.wholeHouseOccupied}/{OV.wholeHouseTotal} đang thuê
+                  {m.wholeOccupied}/{m.wholeCount} đang thuê
                   {'  '}
-                  <Text style={{ color: Colors.success, fontWeight: '700' }}>{wholeRate}%</Text>
+                  <Text style={{ color: Colors.success, fontWeight: '700' }}>{m.wholeRate}%</Text>
                 </Text>
               </View>
             </View>
@@ -320,7 +342,11 @@ export const ManagerHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {attentionBuildings.map(prop => {
+        {loading && properties.length === 0 ? (
+          <View style={s.homeLoading}><ActivityIndicator color={Colors.primary} /></View>
+        ) : attentionBuildings.length === 0 ? (
+          <View style={s.clearCard}><Text style={s.clearText}>Chưa có toà nhà nào được phân quyền cho bạn</Text></View>
+        ) : attentionBuildings.map(prop => {
           const isWholeHouse = prop.propertyType === 'WHOLE_HOUSE';
           const occ = isWholeHouse || prop.totalRooms === 0 ? 0 : Math.round((prop.occupied / prop.totalRooms) * 100);
           const { severity, color: borderColor } = getPriorityMeta(prop);
@@ -334,7 +360,7 @@ export const ManagerHomeScreen: React.FC = () => {
             <TouchableOpacity
               key={prop.id}
               style={[s.buildingCard, { borderLeftColor: borderColor ?? Colors.border }]}
-              onPress={() => navigation.navigate(isWholeHouse ? 'WholeHouseDetail' : 'BuildingDetail', { propertyId: prop.id })}
+              onPress={() => navigation.navigate(isWholeHouse ? 'WholeHouseDetail' : 'BuildingDetail', { propertyId: prop.id, property: prop })}
               activeOpacity={0.7}
             >
               <View style={s.buildingInfo}>
@@ -370,7 +396,7 @@ export const ManagerHomeScreen: React.FC = () => {
           onPress={() => navigation.navigate('BuildingList')}
           activeOpacity={0.8}
         >
-          <Text style={s.viewAllText}>🏢  Quản lý tất cả toà nhà ({MANAGED_PROPERTIES.length})</Text>
+          <Text style={s.viewAllText}>🏢  Quản lý tất cả toà nhà ({m.totalBuildings})</Text>
           <Text style={s.viewAllArrow}>→</Text>
         </TouchableOpacity>
 
@@ -558,7 +584,8 @@ const s = StyleSheet.create({
     paddingVertical: Spacing.md, alignItems: 'center',
     marginBottom: Spacing.xs,
   },
-  clearText: { fontSize: 13, color: Colors.textSecondary },
+  clearText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center' },
+  homeLoading: { paddingVertical: Spacing.xl, alignItems: 'center' },
 
   // ── Priority center: featured (critical) cards ────────────────────
   // Two-column grid; each card gets flex:1 so a single card fills full width.

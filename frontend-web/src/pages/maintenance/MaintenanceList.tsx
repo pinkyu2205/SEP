@@ -249,7 +249,7 @@ export const MaintenanceList = () => {
             <h1 className="text-xl font-bold text-slate-900">Giám sát bảo trì</h1>
           </div>
           <p className="text-sm text-slate-500 ml-3.5">
-            Theo dõi tình trạng xử lý bảo trì trên toàn bộ bất động sản UrbanNest
+            Theo dõi tình trạng xử lý bảo trì trên toàn bộ bất động sản Hoàng Bình Land
           </p>
         </div>
 

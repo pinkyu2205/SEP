@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import {
-  getPropertyById, getBuildingOps, getBuildingHealth, RoomStatus,
+  getPropertyById, getBuildingOps, getBuildingHealth, RoomStatus, ManagedProperty,
 } from '../../data/managedProperties';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
@@ -31,7 +31,8 @@ interface IssueItem {
 
 export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
-  const prop = getPropertyById(propertyId);
+  // Ưu tiên property được truyền từ danh sách (dữ liệu API thật); fallback mock theo id.
+  const prop = (route?.params?.property as ManagedProperty | undefined) ?? getPropertyById(propertyId);
 
   if (!prop) {
     return (

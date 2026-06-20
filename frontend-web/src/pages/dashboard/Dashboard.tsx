@@ -165,7 +165,7 @@ export const Dashboard = () => {
             <h1 className="text-xl font-bold text-slate-900">Trang tổng quan</h1>
           </div>
           <p className="text-sm text-slate-500 ml-3.5">
-            Bảng điều hành vận hành bất động sản UrbanNest — Tháng 5/2026
+            Bảng điều hành vận hành bất động sản Hoàng Bình Land — Tháng 5/2026
           </p>
         </div>
         <div className="flex items-center gap-3">

@@ -55,7 +55,7 @@ interface QrTarget {
 
 const getPoolQrData = (item: PurchasedPoolItem) => {
   const id = item.catalogId ?? item.localId;
-  return `URBANNEST-EQ-${id}-${item.name.replace(/\s+/g, '_').toUpperCase()}`;
+  return `HOANGBINHLAND-EQ-${id}-${item.name.replace(/\s+/g, '_').toUpperCase()}`;
 };
 
 const HOUSE_AREA_LABEL: Record<HouseArea, string> = {
@@ -89,7 +89,7 @@ const buildUnits = (data: PropertyData): EquipmentUnit[] => {
         status: a.status,
         location: loc,
         unitLabel: a.quantity > 1 ? `${i}/${a.quantity}` : '',
-        qrData: `URBANNEST-EQ-P${propertyId}-${locCode}-${slug(a.catalogName)}-A${a.id}U${i}`,
+        qrData: `HOANGBINHLAND-EQ-P${propertyId}-${locCode}-${slug(a.catalogName)}-A${a.id}U${i}`,
       });
     }
   }
@@ -107,7 +107,7 @@ const buildUnits = (data: PropertyData): EquipmentUnit[] => {
         status: m.status,
         location: null,
         unitLabel: remain > 1 ? `${i}/${remain}` : '',
-        qrData: `URBANNEST-EQ-P${propertyId}-KHO-${slug(m.catalogName)}-M${m.id}U${assignedQty + i}`,
+        qrData: `HOANGBINHLAND-EQ-P${propertyId}-KHO-${slug(m.catalogName)}-M${m.id}U${assignedQty + i}`,
       });
     }
   }
@@ -239,8 +239,8 @@ const AddPurchasedModal = ({
   const [error,    setError]    = useState<string | null>(null);
 
   const previewQrData = name.trim()
-    ? `URBANNEST-EQ-NEW-${name.trim().replace(/\s+/g, '_').toUpperCase()}`
-    : 'URBANNEST-EQ-PREVIEW';
+    ? `HOANGBINHLAND-EQ-NEW-${name.trim().replace(/\s+/g, '_').toUpperCase()}`
+    : 'HOANGBINHLAND-EQ-PREVIEW';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

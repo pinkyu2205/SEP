@@ -116,7 +116,7 @@ export const Header = () => {
             {user?.role === 'admin' ? 'A' : 'UN'}
           </div>
           <div className="hidden sm:block">
-            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'UrbanNest Host'}</p>
+            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'Hoàng Bình Land'}</p>
             <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'admin' ? 'Admin' : 'Cổng quản lý Host'}</p>
           </div>
         </div>

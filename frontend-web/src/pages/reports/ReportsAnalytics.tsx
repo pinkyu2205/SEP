@@ -68,7 +68,7 @@ export const ReportsAnalytics = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Báo cáo & Phân tích</h1>
-          <p className="text-sm text-slate-500 mt-1">Tổng quan hiệu suất hoạt động và tài chính của UrbanNest</p>
+          <p className="text-sm text-slate-500 mt-1">Tổng quan hiệu suất hoạt động và tài chính của Hoàng Bình Land</p>
         </div>
         <div className="flex gap-2">
           <button

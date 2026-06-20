@@ -1,14 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import {
-  MANAGED_PROPERTIES, ManagedProperty, WholeHouseRentalStatus,
+  ManagedProperty, WholeHouseRentalStatus,
   getPropPriority, getPriorityMeta, getIssueCount,
 } from '../../data/managedProperties';
+import { managerPropertyService } from '../../services/managerPropertyService';
 
 const FILTERS = [
   { id: 'all', label: 'Tất cả' },
@@ -33,8 +35,31 @@ export const BuildingListScreen: React.FC = () => {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<string>('all');
 
-  const multiRoomProps = MANAGED_PROPERTIES.filter(p => p.propertyType === 'MULTI_ROOM');
-  const wholeHouseProps = MANAGED_PROPERTIES.filter(p => p.propertyType === 'WHOLE_HOUSE');
+  const [properties, setProperties] = useState<ManagedProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await managerPropertyService.getManagedProperties();
+      setProperties(data);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Không tải được danh sách bất động sản');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Tải lại mỗi khi màn được focus (vd quay lại sau khi onboard khách).
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const onRefresh = () => { setRefreshing(true); load(); };
+
+  const multiRoomProps = properties.filter(p => p.propertyType === 'MULTI_ROOM');
+  const wholeHouseProps = properties.filter(p => p.propertyType === 'WHOLE_HOUSE');
   const totalRooms = multiRoomProps.reduce((sum, prop) => sum + prop.totalRooms, 0);
   const totalOccupied = multiRoomProps.reduce((sum, prop) => sum + prop.occupied, 0);
   const avgOcc = totalRooms > 0 ? Math.round((totalOccupied / totalRooms) * 100) : 0;
@@ -45,7 +70,7 @@ export const BuildingListScreen: React.FC = () => {
   };
 
   const filtered = useMemo(() => {
-    let list = [...MANAGED_PROPERTIES].sort((a, b) => getPropPriority(a) - getPropPriority(b));
+    let list = [...properties].sort((a, b) => getPropPriority(a) - getPropPriority(b));
 
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -83,17 +108,24 @@ export const BuildingListScreen: React.FC = () => {
       default:
         return list;
     }
-  }, [filter, search]);
+  }, [filter, search, properties]);
 
   const openProperty = (prop: ManagedProperty) => {
     navigation.navigate(prop.propertyType === 'WHOLE_HOUSE' ? 'WholeHouseDetail' : 'BuildingDetail', {
       propertyId: prop.id,
+      property: prop,
     });
   };
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[Colors.primary]} tintColor={Colors.primary} />
+        }
+      >
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={handleBack}>
             <Text style={s.backBtnText}>‹</Text>
@@ -150,13 +182,28 @@ export const BuildingListScreen: React.FC = () => {
         </ScrollView>
 
         <Text style={s.resultCount}>
-          {filtered.length}/{MANAGED_PROPERTIES.length} bất động sản
+          {filtered.length}/{properties.length} bất động sản
         </Text>
 
-        {filtered.length === 0 ? (
+        {loading && !refreshing ? (
+          <View style={s.emptyState}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={[s.emptyText, { marginTop: Spacing.md }]}>Đang tải dữ liệu...</Text>
+          </View>
+        ) : error ? (
+          <View style={s.emptyState}>
+            <Text style={s.emptyIcon}>⚠️</Text>
+            <Text style={s.emptyText}>{error}</Text>
+            <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); load(); }}>
+              <Text style={s.retryBtnText}>Thử lại</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filtered.length === 0 ? (
           <View style={s.emptyState}>
             <Text style={s.emptyIcon}>🏢</Text>
-            <Text style={s.emptyText}>Không tìm thấy bất động sản phù hợp</Text>
+            <Text style={s.emptyText}>
+              {properties.length === 0 ? 'Chưa có bất động sản nào' : 'Không tìm thấy bất động sản phù hợp'}
+            </Text>
           </View>
         ) : filtered.map(prop => (
           prop.propertyType === 'WHOLE_HOUSE'
@@ -340,7 +387,12 @@ const s = StyleSheet.create({
   resultCount: { fontSize: 12, color: Colors.textMuted, fontWeight: '600', marginBottom: Spacing.sm },
   emptyState: { alignItems: 'center', paddingVertical: Spacing['3xl'] },
   emptyIcon: { fontSize: 40, marginBottom: Spacing.sm },
-  emptyText: { fontSize: 14, color: Colors.textMuted },
+  emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
+  retryBtn: {
+    marginTop: Spacing.md, backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  },
+  retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 
   card: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,

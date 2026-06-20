@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { getPropertyById, WholeHouseRentalStatus } from '../../data/managedProperties';
+import { getPropertyById, ManagedProperty, WholeHouseRentalStatus } from '../../data/managedProperties';
 import { useBills } from '../../store/billsStore';
 import { useTickets } from '../../store/maintenanceStore';
 
@@ -17,7 +17,8 @@ const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
 export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
-  const prop = getPropertyById(propertyId);
+  // Ưu tiên property truyền từ danh sách (dữ liệu API thật); fallback mock theo id.
+  const prop = (route?.params?.property as ManagedProperty | undefined) ?? getPropertyById(propertyId);
   const allBills = useBills();
   const allTickets = useTickets(prop?.id);
 

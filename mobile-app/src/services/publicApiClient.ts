@@ -1,9 +1,10 @@
 import axios from 'axios';
+import { REAL_BASE_URL } from '../constants/api';
 
-const PUBLIC_API_BASE = 'http://localhost:3000/api/public';
-
+// Trỏ về backend Spring thật (tự suy IP theo nền tảng — xem constants/api.ts).
+// Endpoint public hiện dùng trong guestPropertyService là /api/v1/public/properties.
 const publicApiClient = axios.create({
-  baseURL: PUBLIC_API_BASE,
+  baseURL: REAL_BASE_URL,
   timeout: 15000,
   headers: { 'Content-Type': 'application/json' },
 });

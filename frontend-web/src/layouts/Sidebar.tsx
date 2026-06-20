@@ -89,7 +89,7 @@ export const Sidebar = () => {
             <Building2 className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-extrabold text-white leading-tight tracking-tight">UrbanNest</p>
+            <p className="text-sm font-extrabold text-white leading-tight tracking-tight">Hoàng Bình Land</p>
             <p className="text-[10px] text-slate-400 leading-tight font-medium">Cổng Quản lý Host</p>
           </div>
         </div>
@@ -146,8 +146,8 @@ export const Sidebar = () => {
             UN
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-white truncate leading-tight">UrbanNest Host</p>
-            <p className="text-[10px] text-slate-400 truncate leading-tight">host@urbannest.vn</p>
+            <p className="text-xs font-bold text-white truncate leading-tight">Hoàng Bình Land</p>
+            <p className="text-[10px] text-slate-400 truncate leading-tight">host@hoangbinhland.vn</p>
           </div>
           <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 shadow-lg shadow-emerald-900/50" title="Đang hoạt động" />
         </div>

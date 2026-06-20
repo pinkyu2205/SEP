@@ -77,8 +77,8 @@ export const PLATFORM_HOSTS: PlatformHostAccount[] = [
   {
     id: 'host-1',
     ownerName: 'Nguyễn Minh Khôi',
-    businessName: 'UrbanNest Host',
-    email: 'host@urbannest.vn',
+    businessName: 'Hoàng Bình Land',
+    email: 'host@hoangbinhland.vn',
     phone: '0909000001',
     status: 'active',
     buildings: 3,
@@ -152,7 +152,7 @@ export const PLATFORM_USERS: PlatformUser[] = [
   {
     id: 'sa-1',
     fullName: 'Admin',
-    email: 'superadmin@urbannest.vn',
+    email: 'superadmin@hoangbinhland.vn',
     phone: '0900000000',
     role: 'admin',
     status: 'active',
@@ -177,12 +177,12 @@ export const PLATFORM_USERS: PlatformUser[] = [
   ...MOCK_USERS.map(user => ({
     id: user.id,
     fullName: user.fullName,
-    email: user.email ?? `${user.phone}@urbannest.local`,
+    email: user.email ?? `${user.phone}@hoangbinhland.local`,
     phone: user.phone,
     role: user.role,
     status: user.status === 'moved_out' ? 'inactive' as PlatformAccountStatus : 'active' as PlatformAccountStatus,
     hostId: 'host-1',
-    hostName: 'UrbanNest Host',
+    hostName: 'Hoàng Bình Land',
     assignedScope: user.role === 'manager' ? 'Quận 1, Quận 3' : 'Cá nhân',
     lastLoginAt: user.role === 'manager' ? '2026-05-18 08:15' : '2026-05-17 21:04',
     createdAt: user.createdAt,
@@ -226,12 +226,12 @@ export const PLATFORM_ACTIVITY_CHART = [
 ];
 
 export const PLATFORM_BILLS: PlatformBill[] = [
-  { id: 'INV-2026-0518-001', hostName: 'UrbanNest Host', buildingName: 'Nhà Nguyễn Trãi', tenantName: 'Lê Thị B', amount: 5500000, status: 'overdue', paymentMethod: 'qr', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
-  { id: 'INV-2026-0518-002', hostName: 'UrbanNest Host', buildingName: 'Nhà Lê Văn Sỹ', tenantName: 'Hoàng Văn E', amount: 7200000, status: 'paid', paymentMethod: 'bank_transfer', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
+  { id: 'INV-2026-0518-001', hostName: 'Hoàng Bình Land', buildingName: 'Nhà Nguyễn Trãi', tenantName: 'Lê Thị B', amount: 5500000, status: 'overdue', paymentMethod: 'qr', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
+  { id: 'INV-2026-0518-002', hostName: 'Hoàng Bình Land', buildingName: 'Nhà Lê Văn Sỹ', tenantName: 'Hoàng Văn E', amount: 7200000, status: 'paid', paymentMethod: 'bank_transfer', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
   { id: 'INV-2026-0518-003', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', tenantName: 'Đỗ Minh Tâm', amount: 6400000, status: 'pending', paymentMethod: 'card', issuedAt: '2026-05-05', dueDate: '2026-05-15' },
   { id: 'INV-2026-0518-004', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', tenantName: 'Võ Thị Linh', amount: 8100000, status: 'unpaid', paymentMethod: 'cash', issuedAt: '2026-05-08', dueDate: '2026-05-18' },
   { id: 'INV-2026-0518-005', hostName: 'MaiStay Rentals', buildingName: 'Mai Studio B', tenantName: 'Nguyễn Gia Bảo', amount: 4900000, status: 'overdue', paymentMethod: 'bank_transfer', issuedAt: '2026-05-03', dueDate: '2026-05-12' },
-  { id: 'INV-2026-0518-006', hostName: 'UrbanNest Host', buildingName: 'Nhà Cách Mạng Tháng 8', tenantName: 'Bùi Văn H', amount: 4600000, status: 'paid', paymentMethod: 'qr', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
+  { id: 'INV-2026-0518-006', hostName: 'Hoàng Bình Land', buildingName: 'Nhà Cách Mạng Tháng 8', tenantName: 'Bùi Văn H', amount: 4600000, status: 'paid', paymentMethod: 'qr', issuedAt: '2026-05-01', dueDate: '2026-05-10' },
   { id: 'INV-2026-0518-007', hostName: 'Huy Residence', buildingName: 'Huy House Thủ Đức', tenantName: 'Phan Bảo Ngọc', amount: 5900000, status: 'unpaid', paymentMethod: 'bank_transfer', issuedAt: '2026-05-05', dueDate: '2026-05-20' },
   { id: 'INV-2026-0518-008', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 2', tenantName: 'Trần Hải Nam', amount: 9300000, status: 'pending', paymentMethod: 'card', issuedAt: '2026-05-09', dueDate: '2026-05-19' },
 ];
@@ -257,7 +257,7 @@ export const PLATFORM_CONTRACTS: PlatformContractRow[] = [
   ...ALL_CONTRACTS.map(contract => ({
     id: contract.id,
     code: contract.code,
-    hostName: 'UrbanNest Host',
+    hostName: 'Hoàng Bình Land',
     creatorName: contract.lessorName,
     creatorRole: contract.type === 'admin_manager' ? 'Host' as const : 'Manager' as const,
     contractType: contract.type === 'admin_manager' ? 'Host/Admin System - Manager' : 'Manager - Tenant',
@@ -303,7 +303,7 @@ const extractDistrict = (address: string) => address.split(', ')[1] ?? '';
 export const PLATFORM_BUILDINGS = [
   ...MOCK_PROPERTIES.map(property => ({
     id: property.id,
-    hostName: 'UrbanNest Host',
+    hostName: 'Hoàng Bình Land',
     ownerName: 'Nguyễn Minh Khôi',
     buildingName: property.name,
     address: property.address,
@@ -328,21 +328,21 @@ export const PLATFORM_EQUIPMENT_ROWS = [
     id: equipment.id,
     code: equipment.code,
     name: equipment.name,
-    hostName: 'UrbanNest Host',
+    hostName: 'Hoàng Bình Land',
     buildingName: equipment.propertyName,
     roomCode: equipment.roomCode ?? 'Khu chung',
     status: equipment.status,
-    qrPayload: `urbannest://equipment/${equipment.code}`,
+    qrPayload: `hoangbinhland://equipment/${equipment.code}`,
     lastUpdatedAt: equipment.createdAt,
   })),
-  { id: 'eq-sys-1', code: 'EQ-MAI-CAM-02', name: 'Camera hành lang tầng 2', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', roomCode: 'Khu chung', status: 'maintenance', qrPayload: 'urbannest://equipment/EQ-MAI-CAM-02', lastUpdatedAt: '2026-05-12' },
-  { id: 'eq-sys-2', code: 'EQ-HUY-PUMP-01', name: 'Máy bơm nước chính', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', roomCode: 'Kỹ thuật', status: 'good', qrPayload: 'urbannest://equipment/EQ-HUY-PUMP-01', lastUpdatedAt: '2026-05-01' },
+  { id: 'eq-sys-1', code: 'EQ-MAI-CAM-02', name: 'Camera hành lang tầng 2', hostName: 'MaiStay Rentals', buildingName: 'Mai Tower 1', roomCode: 'Khu chung', status: 'maintenance', qrPayload: 'hoangbinhland://equipment/EQ-MAI-CAM-02', lastUpdatedAt: '2026-05-12' },
+  { id: 'eq-sys-2', code: 'EQ-HUY-PUMP-01', name: 'Máy bơm nước chính', hostName: 'Huy Residence', buildingName: 'Huy Residence Q7', roomCode: 'Kỹ thuật', status: 'good', qrPayload: 'hoangbinhland://equipment/EQ-HUY-PUMP-01', lastUpdatedAt: '2026-05-01' },
 ];
 
 export const PLATFORM_MAINTENANCE_REQUESTS = [
   ...MOCK_MAINTENANCE_REQUESTS.map(request => ({
     ...request,
-    hostName: 'UrbanNest Host',
+    hostName: 'Hoàng Bình Land',
   })),
   {
     id: 'mr-sys-1',

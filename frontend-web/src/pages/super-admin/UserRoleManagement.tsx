@@ -4,13 +4,23 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Contact,
   Eye,
   EyeOff,
+  Fingerprint,
+  Info,
+  Lock,
+  Mail,
+  Phone,
   Plus,
   Search,
+  ShieldCheck,
+  User,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   EmptyState,
   PAGE_SIZE,
@@ -34,11 +44,54 @@ const statusMap: Record<string, { label: string; color: string; dot: string }> =
   'DISABLE': { label: 'Vô hiệu hóa', color: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
 };
 
+// Hồ sơ bổ sung hiển thị theo từng vai trò khi admin tạo tài khoản.
+type ExtraField = 'fullName' | 'email' | 'cccd';
+
+const ROLE_EXTRA_FIELDS: Record<string, ExtraField[]> = {
+  ROLE_ADMIN: ['fullName', 'email'],
+  ROLE_MANAGER: ['fullName', 'email'],
+  ROLE_OWNER: ['fullName', 'email'],
+  ROLE_TENANT: ['fullName', 'cccd', 'email'],
+};
+
+const EXTRA_FIELD_CONFIG: Record<ExtraField, { label: string; placeholder: string; type: string; icon: LucideIcon }> = {
+  fullName: { label: 'Họ và tên', placeholder: 'VD: Nguyễn Văn A', type: 'text', icon: Contact },
+  email: { label: 'Email', placeholder: 'email@example.com', type: 'email', icon: Mail },
+  cccd: { label: 'CCCD / CMND', placeholder: '079xxxxxxxxx', type: 'text', icon: Fingerprint },
+};
+
+// Input có icon ở đầu, dùng chung cho form tạo tài khoản.
+const IconField = ({
+  label,
+  required,
+  icon: Icon,
+  className = '',
+  ...rest
+}: {
+  label: string;
+  required?: boolean;
+  icon: LucideIcon;
+} & React.InputHTMLAttributes<HTMLInputElement>) => (
+  <label className={`block ${className}`}>
+    <span className="mb-1.5 block text-sm font-bold text-slate-700">
+      {label}
+      {required && <span className="text-rose-500"> *</span>}
+    </span>
+    <div className="relative">
+      <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <input {...rest} className="input-field pl-10" />
+    </div>
+  </label>
+);
+
 const EMPTY_FORM: CreateUserRequest = {
   username: '',
   password: '',
   phoneNumber: '',
   role: 'ROLE_MANAGER',
+  fullName: '',
+  email: '',
+  cccd: '',
 };
 
 export const UserRoleManagement = () => {
@@ -105,7 +158,19 @@ export const UserRoleManagement = () => {
     setIsSubmitting(true);
     setCreateError('');
     try {
-      await userService.createUser(createForm);
+      // Chỉ gửi các field hồ sơ phù hợp với vai trò đang chọn (và có nhập).
+      const extras = ROLE_EXTRA_FIELDS[createForm.role] || [];
+      const payload: CreateUserRequest = {
+        username: createForm.username.trim(),
+        password: createForm.password,
+        phoneNumber: createForm.phoneNumber?.trim(),
+        role: createForm.role,
+      };
+      if (extras.includes('fullName') && createForm.fullName?.trim()) payload.fullName = createForm.fullName.trim();
+      if (extras.includes('email') && createForm.email?.trim()) payload.email = createForm.email.trim();
+      if (extras.includes('cccd') && createForm.cccd?.trim()) payload.cccd = createForm.cccd.trim();
+
+      await userService.createUser(payload);
       setShowCreateModal(false);
       fetchUsers();
     } catch (err: any) {
@@ -256,83 +321,140 @@ export const UserRoleManagement = () => {
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button aria-label="Đóng modal" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={() => setShowCreateModal(false)} />
-          <div className="relative w-full max-w-lg rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 p-6">
-              <div>
-                <h3 className="text-lg font-black text-slate-950">Tạo tài khoản mới</h3>
-                <p className="text-sm text-slate-500 font-medium">Thêm Quản lý (Manager) hoặc Chủ nhà</p>
+          <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 bg-gradient-to-br from-indigo-50 via-white to-white p-6">
+              <div className="flex items-start gap-3.5">
+                <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-lg shadow-indigo-500/30">
+                  <UserPlus className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-950">Tạo tài khoản mới</h3>
+                  <p className="mt-0.5 text-sm font-medium text-slate-500">Tạo tài khoản cho mọi vai trò trong hệ thống</p>
+                </div>
               </div>
-              <button onClick={() => setShowCreateModal(false)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition">
+              <button onClick={() => setShowCreateModal(false)} className="rounded-xl p-2 text-slate-400 transition hover:bg-white hover:text-slate-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleCreateSubmit} className="space-y-5 p-6">
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Tên đăng nhập (Username) *</span>
-                <input
-                  value={createForm.username}
-                  onChange={e => setCreateForm(prev => ({ ...prev, username: e.target.value }))}
-                  className="input-field"
-                  placeholder="manager01"
-                />
-              </label>
 
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Số điện thoại *</span>
-                <input
-                  value={createForm.phoneNumber || ''}
-                  onChange={e => setCreateForm(prev => ({ ...prev, phoneNumber: e.target.value }))}
-                  className="input-field"
-                  placeholder="0901234567"
-                  type="tel"
-                />
-              </label>
+            {/* Body (cuộn được) */}
+            <form id="create-user-form" onSubmit={handleCreateSubmit} className="flex-1 space-y-6 overflow-y-auto p-6">
+              {/* Nhóm: Thông tin đăng nhập */}
+              <div className="space-y-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Thông tin đăng nhập</p>
 
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Mật khẩu *</span>
-                <div className="relative">
-                  <input
-                    value={createForm.password}
-                    onChange={e => setCreateForm(prev => ({ ...prev, password: e.target.value }))}
-                    className="input-field pr-10"
-                    placeholder="Ít nhất 6 ký tự"
-                    type={showPassword ? 'text' : 'password'}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <IconField
+                    label="Tên đăng nhập"
+                    required
+                    icon={User}
+                    value={createForm.username}
+                    onChange={e => setCreateForm(prev => ({ ...prev, username: e.target.value }))}
+                    placeholder="manager01"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(prev => !prev)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+                  <IconField
+                    label="Số điện thoại"
+                    required
+                    icon={Phone}
+                    type="tel"
+                    value={createForm.phoneNumber || ''}
+                    onChange={e => setCreateForm(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                    placeholder="0901234567"
+                  />
                 </div>
-              </label>
 
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-bold text-slate-700">Phân quyền (Vai trò) *</span>
-                <select
-                  value={createForm.role}
-                  onChange={e => setCreateForm(prev => ({ ...prev, role: e.target.value }))}
-                  className="input-field"
-                >
-                  {Object.entries(roleMap).map(([role, cfg]) => <option key={role} value={role}>{cfg.label}</option>)}
-                </select>
-              </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-bold text-slate-700">Mật khẩu <span className="text-rose-500">*</span></span>
+                  <div className="relative">
+                    <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={createForm.password}
+                      onChange={e => setCreateForm(prev => ({ ...prev, password: e.target.value }))}
+                      className="input-field pl-10 pr-10"
+                      placeholder="Ít nhất 6 ký tự"
+                      type={showPassword ? 'text' : 'password'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(prev => !prev)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </label>
+              </div>
+
+              {/* Nhóm: Phân quyền & hồ sơ */}
+              <div className="space-y-4 border-t border-slate-100 pt-5">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Phân quyền & hồ sơ</p>
+
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-bold text-slate-700">Vai trò <span className="text-rose-500">*</span></span>
+                  <div className="relative">
+                    <ShieldCheck className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <select
+                      value={createForm.role}
+                      onChange={e => setCreateForm(prev => ({ ...prev, role: e.target.value }))}
+                      className="input-field pl-10"
+                    >
+                      {Object.entries(roleMap).map(([role, cfg]) => <option key={role} value={role}>{cfg.label}</option>)}
+                    </select>
+                  </div>
+                  <span className="mt-2 inline-block">
+                    <StatusPill
+                      label={roleMap[createForm.role]?.label || createForm.role}
+                      color={roleMap[createForm.role]?.color || 'bg-slate-100 text-slate-700'}
+                    />
+                  </span>
+                </label>
+
+                {/* Hồ sơ bổ sung theo vai trò đang chọn */}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {(ROLE_EXTRA_FIELDS[createForm.role] || []).map(field => {
+                    const cfg = EXTRA_FIELD_CONFIG[field];
+                    return (
+                      <IconField
+                        key={field}
+                        label={cfg.label}
+                        icon={cfg.icon}
+                        type={cfg.type}
+                        value={createForm[field] || ''}
+                        onChange={e => setCreateForm(prev => ({ ...prev, [field]: e.target.value }))}
+                        placeholder={cfg.placeholder}
+                        className={field === 'fullName' ? 'sm:col-span-2' : ''}
+                      />
+                    );
+                  })}
+                </div>
+
+                {createForm.role === 'ROLE_TENANT' && (
+                  <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <Info className="h-5 w-5 flex-shrink-0 text-amber-500" />
+                    <p>
+                      Đây là tài khoản đăng nhập độc lập. Để gắn khách thuê vào phòng kèm hợp đồng (giá thuê, cọc, ngày vào ở),
+                      hãy dùng chức năng <strong>Onboarding khách thuê</strong> ở phần Quản lý nhà.
+                    </p>
+                  </div>
+                )}
+              </div>
 
               {createError && (
                 <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
                   {createError}
                 </div>
               )}
-
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-xl px-5 py-2.5 font-bold text-slate-600 hover:bg-slate-100">Hủy</button>
-                <button type="submit" disabled={isSubmitting} className="btn-primary rounded-xl px-6 py-2.5 flex items-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50">
-                  <Plus className="h-5 w-5" />
-                  {isSubmitting ? 'Đang lưu...' : 'Tạo tài khoản'}
-                </button>
-              </div>
             </form>
+
+            {/* Footer (cố định) */}
+            <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 p-4">
+              <button type="button" onClick={() => setShowCreateModal(false)} className="rounded-xl px-5 py-2.5 font-bold text-slate-600 transition hover:bg-slate-200/60">Hủy</button>
+              <button type="submit" form="create-user-form" disabled={isSubmitting} className="btn-primary flex items-center gap-2 rounded-xl px-6 py-2.5 shadow-lg shadow-indigo-500/20 disabled:opacity-50">
+                <Plus className="h-5 w-5" />
+                {isSubmitting ? 'Đang lưu...' : 'Tạo tài khoản'}
+              </button>
+            </div>
           </div>
         </div>
       )}

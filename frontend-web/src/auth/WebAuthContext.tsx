@@ -31,7 +31,7 @@ const DEMO_ACCOUNTS: Array<WebAuthUser & { password: string }> = [
   },
   {
     id: 'web-host',
-    fullName: 'UrbanNest Host',
+    fullName: 'Hoàng Bình Land',
     username: 'hoangge',
     password: 'mysecretpassword',
     role: 'host',

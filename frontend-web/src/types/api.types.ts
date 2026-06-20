@@ -487,6 +487,11 @@ export interface CreateUserRequest {
   password: string;
   phoneNumber?: string;
   role: string;
+  // Thông tin hồ sơ bổ sung theo từng vai trò (FE gửi kèm khi tạo).
+  // LƯU Ý: BE /api/v1/user hiện chỉ lưu username/phoneNumber/role — xem doc/ để biết phần BE cần bổ sung.
+  fullName?: string;
+  email?: string;
+  cccd?: string;
 }
 
 // =============================================================================

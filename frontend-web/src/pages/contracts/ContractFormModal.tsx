@@ -75,7 +75,7 @@ export const ContractFormModal = ({ contract, mode, onSave, onClose }: Props) =>
     onSave({
       ...form,
       lessorId: 'host',
-      lessorName: 'UrbanNest Host',
+      lessorName: 'Hoàng Bình Land',
       lesseeId: form.lesseeId,
       lesseeName: lessee?.fullName || '',
       lesseeCccd: lessee?.cccd,

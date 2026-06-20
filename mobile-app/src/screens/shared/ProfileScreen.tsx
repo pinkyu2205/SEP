@@ -66,7 +66,7 @@ export const ProfileScreen: React.FC = () => {
     Alert.alert('Đổi mật khẩu', 'Chức năng đổi mật khẩu sẽ gửi OTP về số điện thoại đăng ký.');
 
   const handleHelp = () =>
-    Alert.alert('Hỗ trợ', 'Liên hệ hỗ trợ qua email: support@urbannest.vn\nHotline: 1800 1234');
+    Alert.alert('Hỗ trợ', 'Liên hệ hỗ trợ qua email: support@hoangbinhland.vn\nHotline: 1800 1234');
 
   const handleLogout = () =>
     Alert.alert('Đăng xuất', 'Bạn có chắc muốn đăng xuất?', [

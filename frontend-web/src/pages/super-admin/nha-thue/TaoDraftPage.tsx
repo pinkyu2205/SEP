@@ -567,7 +567,7 @@ export const TaoDraftPage = () => {
                   Tên tòa nhà <span className="text-rose-500">*</span>
                 </span>
                 <input required name="propertyName" value={formData.propertyName} onChange={handleChange}
-                  className="input-field" placeholder="VD: UrbanNest Quận 3 — tên nội bộ để nhận diện" />
+                  className="input-field" placeholder="VD: Hoàng Bình Land Quận 3 — tên nội bộ để nhận diện" />
               </label>
 
               <div className="block">
