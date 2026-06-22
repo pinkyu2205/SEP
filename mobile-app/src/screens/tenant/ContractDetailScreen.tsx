@@ -1,13 +1,47 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
-  TextInput, Alert, Linking,
+  TextInput, Alert, Linking, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { Contract } from '../../types';
-import { formatDate, getContractStatusLabel, getContractStatusColor } from '../../utils';
+import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '../../utils';
+import {
+  realTenantSelfService, ContractDetailDto, mapBeContractStatus,
+} from '../../services/tenantSelfService.real';
+
+// Map DTO chi tiết từ BE -> Contract dùng cho UI
+const mapDetail = (d: ContractDetailDto): Contract => {
+  const daysUntilExpiry = d.endDate ? getDaysUntil(d.endDate) : undefined;
+  return {
+    id: String(d.id),
+    code: d.code,
+    type: 'manager_tenant',
+    lessorName: d.lessorName ?? '',
+    lessorPhone: d.lessorPhone,
+    lesseeName: d.lesseeName ?? '',
+    lesseeCccd: d.lesseeCccd ?? '',
+    lesseePhone: d.lesseePhone ?? '',
+    propertyName: d.propertyName ?? '',
+    roomCode: d.roomCode,
+    startDate: d.startDate,
+    endDate: d.endDate,
+    depositAmount: d.depositAmount,
+    rentAmount: d.rentAmount,
+    status: mapBeContractStatus(d.status, daysUntilExpiry),
+    equipmentList: (d.equipmentList ?? []).map(e => ({
+      id: String(e.id), name: e.name, quantity: e.quantity ?? 1, condition: e.condition ?? '',
+    })),
+    notes: d.notes,
+    signedAt: d.signedAt,
+    terminatedAt: d.terminatedAt,
+    terminationReason: d.terminationReason,
+    pdfUrl: d.pdfUrl,
+    daysUntilExpiry,
+  };
+};
 
 const SectionCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <View style={styles.sectionCard}>
@@ -26,7 +60,24 @@ const InfoRow: React.FC<{ label: string; value: string; highlight?: boolean }> =
 export const ContractDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { contract } = route.params as { contract: Contract };
+  const { contractId, contract: passedContract } = route.params as {
+    contractId?: number | string;
+    contract?: Contract;
+  };
+
+  const [contract, setContract] = useState<Contract | null>(passedContract ?? null);
+  const [loading, setLoading] = useState(!passedContract);
+
+  useEffect(() => {
+    if (!contractId) return;
+    let active = true;
+    setLoading(true);
+    realTenantSelfService.getContractDetail(contractId)
+      .then(d => { if (active) setContract(mapDetail(d)); })
+      .catch(() => { if (active) Alert.alert('Lỗi', 'Không tải được chi tiết hợp đồng.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [contractId]);
 
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
@@ -36,6 +87,23 @@ export const ContractDetailScreen: React.FC = () => {
   const [renewNote, setRenewNote] = useState('');
   const [terminateReason, setTerminateReason] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+
+  if (loading || !contract) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>← Quay lại</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Chi tiết hợp đồng</Text>
+          <View style={{ width: 80 }} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const statusColor = getContractStatusColor(contract.status);
 

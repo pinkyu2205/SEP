@@ -2,6 +2,7 @@ import { useState, useEffect, createContext, useContext } from 'react';
 import { User, UserRole } from '../types';
 import { authService } from '../services/authService';
 import { realAuthService } from '../services/realAuthService';
+import { realTenantSelfService } from '../services/tenantSelfService.real';
 import { registerPushToken, unregisterPushToken } from '../services/pushToken';
 
 /**
@@ -98,11 +99,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await realAuthService.login(id, password);
       const role: UserRole = res.role && res.role.includes('TENANT') ? 'tenant' : 'manager';
+
+      // Lấy hồ sơ đầy đủ từ /auth/me (fullName, phone, id thật...) — token đã được lưu ở bước login.
+      // Nếu /auth/me chưa sẵn sàng thì fallback về dữ liệu tối thiểu từ response login.
+      let profile: Partial<User> = {};
+      try {
+        const me = await realTenantSelfService.getMe();
+        profile = {
+          id: me.id ?? res.username,
+          email: me.email ?? '',
+          fullName: me.fullName || me.username || res.username,
+          phone: me.phone ?? (/^[0-9]{10}$/.test(id) ? id : ''),
+        };
+      } catch {
+        profile = {
+          id: res.username,
+          email: '',
+          fullName: res.username,
+          phone: /^[0-9]{10}$/.test(id) ? id : '',
+        };
+      }
+
       setUser({
-        id: res.username,
-        email: '',
-        fullName: res.username,
-        phone: /^[0-9]{10}$/.test(id) ? id : '',
+        id: profile.id!,
+        email: profile.email ?? '',
+        fullName: profile.fullName!,
+        phone: profile.phone ?? '',
         role,
         createdAt: new Date().toISOString(),
       });
