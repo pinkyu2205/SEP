@@ -23,7 +23,7 @@ function mapToPublicProperty(p: PropertyResponse, pricing: { price: number; area
     price: pricing.price,
     area: pricing.area,
     type: isWholeHouse ? 'WHOLE_HOUSE' : 'ROOM',
-    status: 'AVAILABLE',
+    status: p.status === 'RENTED' ? 'RENTED' : 'AVAILABLE',
     images: p.imageUrls ?? [],
     amenities: [],
     bedrooms: isWholeHouse ? (p.totalRooms || undefined) : undefined,
@@ -61,7 +61,7 @@ async function fetchActiveProperties(): Promise<PublicProperty[]> {
     const res: { content: PropertyResponse[] } = await api.get('/api/v1/properties', {
       params: { page: 0, size: 200 },
     });
-    const active = res.content.filter(p => p.status === 'ACTIVE' && p.operationManagerId != null);
+    const active = res.content.filter(p => (p.status === 'ACTIVE' || p.status === 'RENTED') && p.operationManagerId != null);
     return Promise.all(active.map(async p => mapToPublicProperty(p, await resolvePricing(p))));
   } catch {
     return [];
@@ -125,7 +125,7 @@ export async function getFeaturedProperties(limit = 6): Promise<PublicProperty[]
 export async function getPropertyById(id: string): Promise<PublicProperty | null> {
   try {
     const p: PropertyResponse = await api.get(`/api/v1/properties/${id}`);
-    if (p.status !== 'ACTIVE' || p.operationManagerId == null) return null;
+    if ((p.status !== 'ACTIVE' && p.status !== 'RENTED') || p.operationManagerId == null) return null;
     return mapToPublicProperty(p, await resolvePricing(p));
   } catch {
     return null;

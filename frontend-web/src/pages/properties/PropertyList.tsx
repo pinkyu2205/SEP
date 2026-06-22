@@ -11,6 +11,7 @@ import type { PropertyResponse } from '../../types/api.types';
 const statusBadge: Record<string, { label: string; cls: string; dot: string }> = {
   PENDING_HOST_REVIEW:  { label: 'Chờ phê duyệt',    cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
   ACTIVE:               { label: 'Hoạt động',        cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  RENTED:               { label: 'Đã cho thuê',      cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
   UNDER_RENOVATION:     { label: 'Đang cải tạo',     cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
   RENOVATION_COMPLETED: { label: 'Đã cải tạo xong',  cls: 'bg-teal-100 text-teal-700',       dot: 'bg-teal-500' },
   DRAFT:                { label: 'Nháp',              cls: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
@@ -334,6 +335,7 @@ export const PropertyList = () => {
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-300">
               <option value="all">Mọi trạng thái</option>
               <option value="ACTIVE">Hoạt động</option>
+              <option value="RENTED">Đã cho thuê</option>
               <option value="UNDER_RENOVATION">Đang cải tạo</option>
               <option value="RENOVATION_COMPLETED">Đã cải tạo xong</option>
               <option value="DRAFT">Nháp</option>

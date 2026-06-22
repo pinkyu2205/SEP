@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, BedDouble, Maximize, MapPin } from 'lucide-react';
 import type { PublicProperty } from '../../types/property';
-import { PROPERTY_TYPE_LABEL } from '../../utils/constants';
+import { PROPERTY_TYPE_LABEL, PROPERTY_STATUS_META } from '../../utils/constants';
 import { formatArea, formatMonthlyPrice } from '../../utils/helpers';
 import { propertyDetailPath } from '../../utils/routes';
 
@@ -29,6 +29,12 @@ export const PropertyCard = ({ property }: PropertyCardProps) => {
         <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-bold text-primary-700 shadow-sm backdrop-blur">
           {PROPERTY_TYPE_LABEL[property.type]}
         </span>
+
+        {property.status === 'RENTED' && (
+          <span className={`absolute right-3 top-3 rounded-full px-3 py-1 text-xs font-bold shadow-sm backdrop-blur ${PROPERTY_STATUS_META.RENTED.className}`}>
+            {PROPERTY_STATUS_META.RENTED.label}
+          </span>
+        )}
 
         {/* price on image */}
         <div className="absolute bottom-3 left-3">

@@ -8,6 +8,7 @@ export type PropertyStatus =
   | 'RENOVATION_COMPLETED'   // căn import từ Excel dừng ở đây — đã cải tạo xong, chờ định giá & gửi Host
   | 'PENDING_HOST_REVIEW'
   | 'ACTIVE'
+  | 'RENTED'                  // nguyên căn đã được cho thuê — đang có HĐ tenant hiệu lực
   | 'DISABLED'
   // Legacy (giữ lại cho tương thích)
   | 'MAINTENANCE'

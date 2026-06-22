@@ -2,7 +2,7 @@ import { useState, useEffect, createContext, useContext } from 'react';
 import { User, UserRole } from '../types';
 import { authService } from '../services/authService';
 import { realAuthService } from '../services/realAuthService';
-import { registerPushToken } from '../services/pushToken';
+import { registerPushToken, unregisterPushToken } from '../services/pushToken';
 
 /**
  * Auth Context - Quản lý trạng thái đăng nhập toàn ứng dụng.
@@ -106,10 +106,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role,
         createdAt: new Date().toISOString(),
       });
-      // Tenant: đăng ký push token (FCM) để nhận thông báo — best-effort
-      if (role === 'tenant') {
-        registerPushToken();
-      }
+      // Đăng ký Expo push token để nhận thông báo (cả tenant lẫn manager) — best-effort
+      registerPushToken();
     } catch (err: any) {
       const msg =
         err?.response?.data?.error ||
@@ -120,6 +118,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    // Gỡ push token TRƯỚC khi xoá accessToken (cần còn auth để gọi BE) — best-effort
+    await unregisterPushToken();
     if (!USE_MOCK) {
       await authService.logout();
     }

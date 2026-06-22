@@ -24,6 +24,7 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
 
 const propertyStatusLabel: Record<string, { label: string; cls: string }> = {
   ACTIVE:                    { label: 'Đang hoạt động',    cls: 'bg-emerald-500 text-white' },
+  RENTED:                    { label: 'Đã cho thuê',       cls: 'bg-blue-500 text-white' },
   PENDING_HOST_REVIEW:       { label: 'Chờ phê duyệt',     cls: 'bg-amber-400 text-white' },
   PENDING_OPERATION_MANAGER: { label: 'Chờ gán quản lý',   cls: 'bg-violet-500 text-white' },
   DRAFT:                     { label: 'Nháp',               cls: 'bg-slate-400 text-white' },

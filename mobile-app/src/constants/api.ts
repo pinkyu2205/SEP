@@ -1,14 +1,27 @@
 /**
  * API configuration.
- * Thay đổi BASE_URL khi backend API được triển khai.
+ *
+ * URL được cấu hình qua biến môi trường EXPO_PUBLIC_* (xem mobile-app/.env và .env.example).
+ * Khi deploy chỉ cần đổi giá trị trong .env, KHÔNG sửa code ở đây.
+ * Nếu không khai báo env thì rơi về giá trị dev mặc định (localhost) bên dưới.
+ *
+ * Gợi ý giá trị REAL_BASE_URL theo môi trường chạy:
+ *   - Web / iOS simulator: http://localhost:8080
+ *   - Android emulator:    http://10.0.2.2:8080
+ *   - Thiết bị thật (LAN): http://<LAN-IP-máy-chạy-BE>:8080
+ *   - Deploy thật:         https://api.<domain-cua-ban>
  */
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:3000/api', // TODO: Thay bằng URL backend thật
+  // Backend mock/legacy (giữ nguyên để tương thích code cũ).
+  BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api',
   // Backend Spring thật (dùng cho luồng manager onboarding đã nối API).
-  // - Web/iOS simulator: http://localhost:8080
-  // - Android emulator:  http://10.0.2.2:8080
-  // - Thiết bị thật:     http://<LAN-IP-máy-chạy-BE>:8080
-  REAL_BASE_URL: 'http://localhost:8080',
+  REAL_BASE_URL: process.env.EXPO_PUBLIC_REAL_API_BASE_URL ?? 'http://localhost:8080',
+  // Backend public (không cần auth).
+  PUBLIC_BASE_URL:
+    process.env.EXPO_PUBLIC_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/public',
+  // EAS projectId — BẮT BUỘC để lấy Expo Push Token (getExpoPushTokenAsync).
+  // Lấy sau khi chạy `eas init`. Để trống khi chưa cấu hình push.
+  EAS_PROJECT_ID: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
   TIMEOUT: 15000, // 15 seconds
   ENDPOINTS: {
     // Auth

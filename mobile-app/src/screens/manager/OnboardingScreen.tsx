@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, Image, ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import QRCode from 'react-native-qrcode-svg';
@@ -63,6 +65,16 @@ const toIsoDate = (ddmmyyyy: string): string => {
   if (!d || !m || !y) return new Date().toISOString().slice(0, 10);
   return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
 };
+// Parse dd/MM/yyyy -> Date (đầu ngày), null nếu không hợp lệ
+const parseDmy = (s: string): Date | null => {
+  const [d, m, y] = (s || '').split('/').map(Number);
+  if (!d || !m || !y) return null;
+  const dt = new Date(y, m - 1, d);
+  return isNaN(dt.getTime()) ? null : dt;
+};
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+// Thời hạn cho thuê tối đa (năm)
+const MAX_LEASE_YEARS = 5;
 const readErr = (err: any, fallback: string): string => {
   const d = err?.response?.data;
   if (d?.fieldErrors) return Object.values(d.fieldErrors).join(', ');
@@ -77,6 +89,15 @@ const formatVnd = (v: string | number) => {
   return n ? n.toLocaleString('vi-VN') : '';
 };
 
+// Validate định dạng SĐT VN (10 số, đầu 0) và CCCD (12 số)
+const isValidVnPhone = (s: string) => /^0\d{9}$/.test(onlyDigits(s));
+const isValidCccd = (s: string) => /^\d{12}$/.test(onlyDigits(s));
+
+type DepositMethod = 'payos' | 'cash';
+
+// Khoá lưu nháp onboarding (1 phiên đón khách dở dang)
+const DRAFT_KEY = 'onboarding_draft_v1';
+
 export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [step, setStep] = useState(0);
   const [rentalMode, setRentalMode] = useState<RentalMode | null>(null);
@@ -87,12 +108,20 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
   const [tenantInfo, setTenantInfo] = useState({
     fullName: '', phone: '', cccd: '',
-    startDate: new Date().toLocaleDateString('en-GB'), // dd/MM/yyyy
+    startDate: new Date().toLocaleDateString('en-GB'), // dd/MM/yyyy — ngày hợp đồng hiệu lực (= hôm nay)
     monthlyRent: '', // chỉ chứa số
   });
+  const [endDate, setEndDate] = useState(''); // dd/MM/yyyy — ngày kết thúc hợp đồng
   const [depositMonths, setDepositMonths] = useState(1);
+  const [depositMethod, setDepositMethod] = useState<DepositMethod>('payos'); // PayOS hoặc thu tiền mặt
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMemberForm[]>([]);
   const [lookupFound, setLookupFound] = useState(false);
+  const [lookupChecked, setLookupChecked] = useState(false); // đã lookup xong cho SĐT hợp lệ
+  const [lookupRole, setLookupRole] = useState<string | null>(null); // role tài khoản đã có (BE trả về)
+
+  // Lưu nháp: chỉ bắt đầu lưu sau khi đã load xong draft; đánh dấu hoàn tất để bỏ qua cảnh báo thoát
+  const draftLoadedRef = useRef(false);
+  const completedRef = useRef(false);
 
   // Điện nước + ảnh đồng hồ
   const [meters, setMeters] = useState({ elec: '', water: '' });
@@ -118,12 +147,16 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [paid, setPaid] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  useEffect(() => {
-    // Chỉ lấy BĐS còn cho thuê được (BE đã lọc: nguyên căn chưa có khách / chia phòng còn phòng trống)
-    realPropertyService.getRentableProperties()
-      .then(list => setProperties(list.map(mapProperty)))
-      .catch(err => Alert.alert('Lỗi tải dữ liệu', readErr(err, 'Không tải được danh sách bất động sản.')));
-  }, []);
+  // Tải lại danh sách BĐS mỗi khi màn hình được focus -> sau khi đón khách xong
+  // (căn nguyên căn chuyển RENTED / phòng vừa cho thuê) thì danh sách luôn cập nhật.
+  useFocusEffect(
+    useCallback(() => {
+      // Chỉ lấy BĐS còn cho thuê được (BE đã lọc: nguyên căn chưa có khách / chia phòng còn phòng trống)
+      realPropertyService.getRentableProperties()
+        .then(list => setProperties(list.filter(p => p.status === 'ACTIVE').map(mapProperty)))
+        .catch(err => Alert.alert('Lỗi tải dữ liệu', readErr(err, 'Không tải được danh sách bất động sản.')));
+    }, []),
+  );
 
   useEffect(() => {
     if (!selectedBuildingId) { setAvailableRooms([]); return; }
@@ -147,12 +180,13 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   // Tự tra cứu khách thuê đã có theo SĐT -> tự điền tên + CCCD
   useEffect(() => {
     const phone = tenantInfo.phone.trim();
-    if (phone.length < 9) { setLookupFound(false); return; }
+    if (phone.length < 9) { setLookupFound(false); setLookupChecked(false); setLookupRole(null); return; }
     const t = setTimeout(async () => {
       try {
         const r = await realTenantService.lookupByPhone(phone);
         if (r.exists) {
           setLookupFound(true);
+          setLookupRole(r.role ?? null);
           setTenantInfo(prev => ({
             ...prev,
             fullName: r.fullName || prev.fullName,
@@ -160,9 +194,13 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
           }));
         } else {
           setLookupFound(false);
+          setLookupRole(null);
         }
       } catch {
         setLookupFound(false);
+        setLookupRole(null);
+      } finally {
+        setLookupChecked(true);
       }
     }, 600);
     return () => clearTimeout(t);
@@ -170,6 +208,11 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
   const rentValue = parseNum(tenantInfo.monthlyRent);
   const depositValue = rentValue * depositMonths;
+
+  // Ngày hợp đồng hiệu lực = hôm nay (khoá cứng). Ngày kết thúc: sau hôm nay, tối đa MAX_LEASE_YEARS năm.
+  const todayStr = new Date().toLocaleDateString('en-GB'); // dd/MM/yyyy
+  const minEndDate = (() => { const t = startOfDay(new Date()); t.setDate(t.getDate() + 1); return t; })();
+  const maxEndDate = (() => { const t = startOfDay(new Date()); t.setFullYear(t.getFullYear() + MAX_LEASE_YEARS); return t; })();
 
   // Giới hạn số người ở cùng (chỉ áp dụng thuê theo phòng, dựa trên maxOccupants của phòng)
   const occupantLimit = rentalMode === 'room' ? (selectedRoom?.maxOccupants ?? 0) : 0; // 0 = không giới hạn
@@ -193,6 +236,91 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     return () => clearInterval(timer);
   }, [currentLabel, contract, paid]);
 
+  // ===== Lưu nháp (draft) =====
+  // Có tiến trình đáng kể để cảnh báo khi thoát / để lưu nháp
+  const hasMeaningfulProgress =
+    !!rentalMode &&
+    (!!tenantInfo.fullName.trim() || !!tenantInfo.phone.trim() ||
+      !!selectedRoomId || !!selectedWholeHouseId || !!contract);
+
+  const restoreDraft = (d: any) => {
+    setStep(d.step ?? 0);
+    setRentalMode(d.rentalMode ?? null);
+    setSelectedBuildingId(d.selectedBuildingId ?? null);
+    setSelectedRoomId(d.selectedRoomId ?? null);
+    setSelectedWholeHouseId(d.selectedWholeHouseId ?? null);
+    if (d.tenantInfo) setTenantInfo(d.tenantInfo);
+    setEndDate(d.endDate ?? '');
+    setDepositMonths(d.depositMonths ?? 1);
+    setDepositMethod(d.depositMethod ?? 'payos');
+    setHouseholdMembers(d.householdMembers ?? []);
+    setMeters(d.meters ?? { elec: '', water: '' });
+    setElecMeterUrl(d.elecMeterUrl ?? '');
+    setWaterMeterUrl(d.waterMeterUrl ?? '');
+    setConditionPhotos(d.conditionPhotos ?? []);
+    setInspectionNotes(d.inspectionNotes ?? '');
+    setContract(d.contract ?? null);
+    setPaid(d.paid ?? false);
+  };
+
+  // Load nháp 1 lần khi mở màn hình -> hỏi tiếp tục / làm mới
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(DRAFT_KEY);
+        const d = raw ? JSON.parse(raw) : null;
+        if (d && d.rentalMode) {
+          await new Promise<void>(resolve => {
+            Alert.alert(
+              'Tiếp tục đón khách?',
+              'Có một phiên đón khách đang dở. Bạn muốn tiếp tục hay làm mới?',
+              [
+                { text: 'Làm mới', style: 'destructive', onPress: () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); resolve(); } },
+                { text: 'Tiếp tục', onPress: () => { restoreDraft(d); resolve(); } },
+              ],
+              { cancelable: false },
+            );
+          });
+        }
+      } catch { /* ignore */ }
+      draftLoadedRef.current = true;
+    })();
+  }, []);
+
+  // Tự lưu nháp khi dữ liệu thay đổi (debounce)
+  useEffect(() => {
+    if (!draftLoadedRef.current || completedRef.current) return;
+    const snapshot = {
+      step, rentalMode, selectedBuildingId, selectedRoomId, selectedWholeHouseId,
+      tenantInfo, endDate, depositMonths, depositMethod, householdMembers,
+      meters, elecMeterUrl, waterMeterUrl, conditionPhotos, inspectionNotes,
+      contract, paid,
+    };
+    const t = setTimeout(() => { AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)).catch(() => {}); }, 500);
+    return () => clearTimeout(t);
+  }, [step, rentalMode, selectedBuildingId, selectedRoomId, selectedWholeHouseId,
+    tenantInfo, endDate, depositMonths, depositMethod, householdMembers,
+    meters, elecMeterUrl, waterMeterUrl, conditionPhotos, inspectionNotes, contract, paid]);
+
+  const clearDraft = () => { AsyncStorage.removeItem(DRAFT_KEY).catch(() => {}); };
+
+  // Cảnh báo khi thoát giữa chừng (nếu đã có tiến trình & chưa hoàn tất)
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e: any) => {
+      if (completedRef.current || !hasMeaningfulProgress) return;
+      e.preventDefault();
+      Alert.alert(
+        'Thoát đón khách?',
+        'Tiến trình đã nhập sẽ được lưu nháp để tiếp tục sau.',
+        [
+          { text: 'Ở lại', style: 'cancel' },
+          { text: 'Thoát', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
+        ],
+      );
+    });
+    return unsub;
+  }, [navigation, hasMeaningfulProgress]);
+
   const setMode = (mode: RentalMode) => {
     setRentalMode(mode);
     setSelectedBuildingId(null);
@@ -203,7 +331,10 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     setConditionPhotos([]);
     setInspectionNotes('');
     setOtp('');
+    setEndDate('');
     setContract(null); setPaid(false);
+    setLookupFound(false); setLookupChecked(false); setLookupRole(null);
+    setDepositMethod('payos');
   };
 
   const updateTenantInfo = (key: keyof typeof tenantInfo, value: string) =>
@@ -227,6 +358,15 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       case 'Khách thuê':
       case 'Khách thuê chính':
         if (!hasRequiredTenantInfo()) return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT, CCCD và giá thuê.');
+        if (!isValidVnPhone(tenantInfo.phone)) return Alert.alert('SĐT không hợp lệ', 'Số điện thoại phải gồm 10 chữ số và bắt đầu bằng số 0.');
+        if (!isValidCccd(tenantInfo.cccd)) return Alert.alert('CCCD không hợp lệ', 'Số căn cước công dân phải gồm đúng 12 chữ số.');
+        {
+          const end = parseDmy(endDate);
+          if (!end) return Alert.alert('Thiếu ngày kết thúc', 'Vui lòng chọn ngày kết thúc hợp đồng.');
+          const endSod = startOfDay(end);
+          if (endSod < minEndDate) return Alert.alert('Ngày kết thúc không hợp lệ', 'Ngày kết thúc hợp đồng phải sau ngày hợp đồng hiệu lực (hôm nay).');
+          if (endSod > maxEndDate) return Alert.alert('Vượt thời hạn cho thuê', `Thời hạn thuê tối đa là ${MAX_LEASE_YEARS} năm. Vui lòng chọn ngày kết thúc trước ${maxEndDate.toLocaleDateString('en-GB')}.`);
+        }
         break;
       case 'Điện nước':
         if (!hasRequiredMeters()) return Alert.alert('Lỗi', 'Vui lòng ghi nhận chỉ số điện nước ban đầu.');
@@ -320,7 +460,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     fullName: tenantInfo.fullName.trim(),
     cccd: tenantInfo.cccd.trim(),
     phoneNumber: tenantInfo.phone.trim(),
-    moveInDate: toIsoDate(tenantInfo.startDate),
+    moveInDate: toIsoDate(todayStr), // ngày hợp đồng hiệu lực = hôm nay
+    endDate: toIsoDate(endDate),     // ngày kết thúc hợp đồng
     rentAmount: rentValue,
     deposit: depositValue,
     depositMonths,
@@ -334,7 +475,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       fullName: m.name.trim(), relation: m.relation, phone: m.phone,
       dateOfBirth: m.dateOfBirth ? toIsoDate(m.dateOfBirth) : undefined, cccd: m.cccd,
     })),
-    requireDepositPayment: true,
+    requireDepositPayment: depositMethod === 'payos',
   });
 
   const createContractAndPayment = async () => {
@@ -346,7 +487,14 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         ? await realTenantService.onboardWholeHouseTenant(Number(selectedWholeHouseId), payload)
         : await realTenantService.onboardRoomTenant(Number(selectedBuildingId), Number(selectedRoomId), payload);
 
-      // Tạo link thanh toán cọc
+      if (depositMethod === 'cash') {
+        // Thu cọc tiền mặt -> bỏ qua tạo link PayOS, vào bước xác nhận thu cọc thủ công
+        setContract(created);
+        setStep(prev => prev + 1);
+        return;
+      }
+
+      // Tạo link thanh toán cọc qua PayOS
       const withPay = await realTenantService.createDepositPayment(created.id);
       setContract(withPay);
       setStep(prev => prev + 1); // sang bước Thanh toán cọc
@@ -373,14 +521,19 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     if (!contract) return;
     try {
       setConfirming(true);
-      const res = await realTenantService.confirmContract(contract.id);
-      Alert.alert(
-        'Thành công 🎉',
-        `Đã hoàn tất hợp đồng ${res.contractCode} cho ${res.tenantFullName}` +
-        (res.roomNumber ? ` (phòng ${res.roomNumber}).` : '.') +
-        `\n\nTài khoản khách: t${tenantInfo.phone} / 123456`,
-        [{ text: 'Hoàn tất', onPress: () => navigation.navigate('ManagerTabs') }]
-      );
+      const res = await realTenantService.confirmContract(contract.id, { otp });
+      completedRef.current = true; // bỏ qua cảnh báo thoát
+      clearDraft();
+      // Ưu tiên field từ BE (xem MD work/Onboarding.md); fallback suy luận từ kết quả lookup ở bước nhập thông tin.
+      navigation.navigate('OnboardingSuccess', {
+        contractCode: res.contractCode,
+        tenantFullName: res.tenantFullName,
+        roomNumber: res.roomNumber,
+        phone: tenantInfo.phone,
+        username: res.tenantUsername ?? tenantInfo.phone,
+        accountCreated: res.tenantAccountCreated ?? !lookupFound,
+        rolePromoted: res.tenantRolePromoted ?? (lookupFound && lookupRole === 'ROLE_USER'),
+      });
     } catch (err: any) {
       Alert.alert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'));
     } finally {
@@ -481,14 +634,23 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       </View>
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Số điện thoại *</Text>
-        <TextInput style={styles.input} value={tenantInfo.phone} onChangeText={v => updateTenantInfo('phone', v)} keyboardType="phone-pad" placeholder="090..." placeholderTextColor={Colors.textMuted} />
-        {lookupFound && (
-          <Text style={styles.foundHint}>✓ Đã tìm thấy khách thuê trong hệ thống — tự điền tên & CCCD.</Text>
+        <TextInput style={styles.input} value={tenantInfo.phone} onChangeText={v => updateTenantInfo('phone', onlyDigits(v))} keyboardType="phone-pad" maxLength={10} placeholder="090..." placeholderTextColor={Colors.textMuted} />
+        {lookupFound && lookupRole === 'ROLE_USER' && (
+          <Text style={styles.foundHint}>✓ Đã có tài khoản app — tự điền tên & CCCD, khách sẽ được cấp quyền Tenant sau khi xác nhận.</Text>
+        )}
+        {lookupFound && lookupRole === 'ROLE_TENANT' && (
+          <Text style={styles.foundHint}>✓ Khách đã là người thuê trong hệ thống — sẽ liên kết hợp đồng mới này cho khách.</Text>
+        )}
+        {lookupFound && lookupRole !== 'ROLE_USER' && lookupRole !== 'ROLE_TENANT' && (
+          <Text style={styles.warnHint}>⚠️ SĐT này đang là tài khoản nội bộ ({lookupRole || 'không rõ vai trò'}). Hãy kiểm tra lại trước khi tiếp tục.</Text>
+        )}
+        {lookupChecked && !lookupFound && (
+          <Text style={styles.newAccountHint}>ℹ️ Số này chưa có tài khoản — hệ thống sẽ tạo tài khoản mới (mật khẩu mặc định 123456) sau khi xác nhận OTP.</Text>
         )}
       </View>
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Căn cước công dân *</Text>
-        <TextInput style={styles.input} value={tenantInfo.cccd} onChangeText={v => updateTenantInfo('cccd', v)} keyboardType="number-pad" placeholder="Nhập số CCCD..." placeholderTextColor={Colors.textMuted} />
+        <TextInput style={styles.input} value={tenantInfo.cccd} onChangeText={v => updateTenantInfo('cccd', onlyDigits(v))} keyboardType="number-pad" maxLength={12} placeholder="Nhập 12 số CCCD..." placeholderTextColor={Colors.textMuted} />
       </View>
 
       <View style={styles.inputGroup}>
@@ -519,8 +681,26 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       </View>
 
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Ngày bắt đầu tính tiền</Text>
-        <DatePickerField value={tenantInfo.startDate} onChange={v => updateTenantInfo('startDate', v)} />
+        <Text style={styles.label}>Ngày hợp đồng hiệu lực</Text>
+        <View style={styles.readonlyField}>
+          <Text style={styles.readonlyText}>{todayStr}</Text>
+          <Text style={styles.readonlyIcon}>📅</Text>
+        </View>
+        <Text style={styles.hintSmall}>Hợp đồng có hiệu lực từ hôm nay (không thể thay đổi).</Text>
+      </View>
+
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>Ngày kết thúc hợp đồng *</Text>
+        <DatePickerField
+          value={endDate}
+          onChange={setEndDate}
+          minDate={minEndDate}
+          maxDate={maxEndDate}
+          placeholder="Chọn ngày kết thúc hợp đồng"
+        />
+        <Text style={styles.hintSmall}>
+          Phải sau ngày hiệu lực, thời hạn thuê tối đa {MAX_LEASE_YEARS} năm (đến {maxEndDate.toLocaleDateString('en-GB')}).
+        </Text>
       </View>
     </ScrollView>
   );
@@ -660,6 +840,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         <Text style={styles.summaryValue}>{tenantInfo.fullName || 'Chưa nhập'} · {tenantInfo.phone}</Text>
         <Text style={styles.summaryLabel}>Giá thuê / Cọc</Text>
         <Text style={styles.summaryValue}>{formatVnd(rentValue)} đ/tháng · cọc {formatVnd(depositValue)} đ ({depositMonths} tháng)</Text>
+        <Text style={styles.summaryLabel}>Thời hạn hợp đồng</Text>
+        <Text style={styles.summaryValue}>{todayStr} → {endDate || 'Chưa chọn'}</Text>
         <Text style={styles.summaryLabel}>Điện nước đầu kỳ</Text>
         <Text style={styles.summaryValue}>Điện {meters.elec || '-'} kWh · Nước {meters.water || '-'} m³</Text>
         <Text style={styles.summaryLabel}>Ảnh hiện trạng</Text>
@@ -671,11 +853,53 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
           </>
         )}
       </View>
-      <Text style={styles.hint}>Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán tiền cọc.</Text>
+
+      <Text style={[styles.label, { marginTop: Spacing.base }]}>Hình thức thu cọc</Text>
+      <View style={styles.methodRow}>
+        <TouchableOpacity
+          style={[styles.methodChip, depositMethod === 'payos' && styles.methodChipActive]}
+          onPress={() => setDepositMethod('payos')}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.methodChipText, depositMethod === 'payos' && styles.methodChipTextActive]}>💳 Chuyển khoản (PayOS)</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.methodChip, depositMethod === 'cash' && styles.methodChipActive]}
+          onPress={() => setDepositMethod('cash')}
+          activeOpacity={0.85}
+        >
+          <Text style={[styles.methodChipText, depositMethod === 'cash' && styles.methodChipTextActive]}>💵 Tiền mặt</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.hint}>
+        {depositMethod === 'payos'
+          ? 'Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.'
+          : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng rồi xác nhận đã thu cọc.'}
+      </Text>
     </ScrollView>
   );
 
-  const renderPaymentStep = () => (
+  const renderCashDepositStep = () => (
+    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+      <Text style={styles.sectionTitle}>Thu cọc tiền mặt</Text>
+      <Text style={styles.hint}>Xác nhận đã nhận đủ tiền cọc {formatVnd(depositValue)} đ bằng tiền mặt từ khách. Sau đó sang bước xác thực OTP.</Text>
+      {paid ? (
+        <View style={styles.paidBox}>
+          <Text style={styles.paidIcon}>✅</Text>
+          <Text style={styles.paidText}>Đã xác nhận thu cọc tiền mặt!</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.payBtn} onPress={() => setPaid(true)}>
+          <Text style={styles.payBtnText}>💵 Xác nhận đã thu cọc tiền mặt</Text>
+        </TouchableOpacity>
+      )}
+    </ScrollView>
+  );
+
+  const renderPaymentStep = () => {
+    if (depositMethod === 'cash') return renderCashDepositStep();
+    return (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Thanh toán tiền cọc</Text>
       <Text style={styles.hint}>Khách chuyển khoản tiền cọc {formatVnd(depositValue)} đ qua PayOS. Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.</Text>
@@ -719,7 +943,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         </>
       )}
     </ScrollView>
-  );
+    );
+  };
 
   const renderConfirmationStep = () => (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
@@ -820,6 +1045,14 @@ const styles = StyleSheet.create({
   hint: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19, marginBottom: Spacing.lg },
   hintSmall: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
 
+  readonlyField: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: 12,
+  },
+  readonlyText: { fontSize: 14, color: Colors.textSecondary, fontWeight: '600', flex: 1 },
+  readonlyIcon: { fontSize: 16, opacity: 0.5 },
+
   modeGrid: { gap: Spacing.md },
   modeCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, backgroundColor: Colors.white, borderRadius: BorderRadius.lg, borderWidth: 2, borderColor: Colors.border, padding: Spacing.lg, ...Shadow.sm },
   modeCardActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
@@ -861,6 +1094,11 @@ const styles = StyleSheet.create({
   monthChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
   monthChipText: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary },
   monthChipTextActive: { color: Colors.primary },
+  methodRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
+  methodChip: { flex: 1, paddingHorizontal: Spacing.sm, paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white, alignItems: 'center' },
+  methodChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  methodChipText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  methodChipTextActive: { color: Colors.primary },
   depositBox: { flex: 1, alignItems: 'flex-end' },
   depositValue: { fontSize: 16, fontWeight: '800', color: Colors.primary },
 
@@ -873,6 +1111,8 @@ const styles = StyleSheet.create({
   occupantBannerFull: { backgroundColor: '#FEF2F2' },
   occupantBannerText: { fontSize: 13, color: Colors.textPrimary, fontWeight: '600' },
   foundHint: { fontSize: 12, color: Colors.success, marginTop: 6, fontWeight: '600' },
+  newAccountHint: { fontSize: 12, color: Colors.textSecondary, marginTop: 6, fontWeight: '500' },
+  warnHint: { fontSize: 12, color: Colors.warning, marginTop: 6, fontWeight: '600' },
   memberCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, padding: Spacing.base, marginBottom: Spacing.md },
   memberHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.md },
   memberTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
