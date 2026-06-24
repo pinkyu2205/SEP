@@ -8,17 +8,32 @@ import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { MOCK_EQUIPMENT_DB } from '../../store/equipmentStore';
 
-// Parse both formats:
-//   slms://tenant/maintenance-report?assetId=eq1&qr=EQ-101-AC  (web QR)
-//   EQ-101-AC  (raw code, fallback)
+const parseParams = (raw: string): Record<string, string> => {
+  try {
+    const qs = raw.split('?')[1] ?? '';
+    return Object.fromEntries(
+      qs.split('&').filter(Boolean).map(p => {
+        const [k, v = ''] = p.split('=');
+        return [k, decodeURIComponent(v)];
+      }),
+    );
+  } catch { return {}; }
+};
+
+// QR tem thiết bị (web sinh):
+//   slms://maintenance/new?equipmentId=123&roomId=45&name=...&cat=...
+// → mở thẳng màn tạo yêu cầu bảo trì với phòng + thiết bị điền sẵn.
+const parseMaintenanceQr = (raw: string): { equipmentId: string; roomId?: string; name?: string; cat?: string } | null => {
+  if (!raw.startsWith('slms://maintenance/new')) return null;
+  const p = parseParams(raw);
+  if (!p['equipmentId']) return null;
+  return { equipmentId: p['equipmentId'], roomId: p['roomId'], name: p['name'], cat: p['cat'] };
+};
+
+// Định dạng cũ (mock):
+//   slms://tenant/maintenance-report?assetId=eq1&qr=EQ-101-AC  hoặc  EQ-101-AC
 const resolveEquipmentCode = (raw: string): string => {
-  if (raw.startsWith('slms://')) {
-    try {
-      const qs = raw.split('?')[1] ?? '';
-      const params = Object.fromEntries(qs.split('&').map(p => p.split('=')));
-      return decodeURIComponent(params['qr'] ?? '');
-    } catch { return ''; }
-  }
+  if (raw.startsWith('slms://')) return parseParams(raw)['qr'] ?? '';
   return raw;
 };
 
@@ -49,6 +64,21 @@ export const ScanScreen: React.FC = () => {
     if (scannedCode) return;
     setScannedCode(data);
 
+    // 1) QR tem thiết bị thật → mở màn tạo yêu cầu bảo trì (điền sẵn phòng + thiết bị)
+    const mqr = parseMaintenanceQr(data);
+    if (mqr) {
+      navigation.replace('MaintenanceCreate', {
+        equipment: {
+          id: mqr.equipmentId,
+          roomId: mqr.roomId,
+          name: mqr.name || 'Thiết bị',
+          category: mqr.cat || mqr.name || 'Khác',
+        },
+      });
+      return;
+    }
+
+    // 2) Định dạng cũ (mock) → mở chi tiết thiết bị demo
     const code = resolveEquipmentCode(data);
     const found = MOCK_EQUIPMENT_DB[code];
     if (found) {

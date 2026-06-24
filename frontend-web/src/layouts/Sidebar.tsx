@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   Wrench, DollarSign, BarChart3, Bell, Settings,
-  ChevronRight,
+  ChevronRight, QrCode,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { MOCK_NOTIFICATIONS, ALL_CONTRACTS } from '../utils/mockData';
@@ -55,6 +55,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Giám sát & Tài sản',
     items: [
       { name: 'Giám sát bảo trì', path: '/host/maintenance', icon: Wrench },
+      { name: 'Thiết bị & Mã QR', path: '/host/equipments', icon: QrCode },
     ],
   },
   {

@@ -48,6 +48,68 @@ export const maintenanceStatusMap = {
   cancelled:   { label: 'Đã hủy',      color: 'bg-slate-100 text-slate-500' },
 };
 
+// =============================================================================
+// Maintenance Module (real API, theo Maintenance_BE_Contract.md)
+// Enum UPPERCASE khớp BE: PENDING / IN_PROGRESS / RESOLVED / CANCELLED
+// =============================================================================
+
+type Badge = { label: string; color: string; dot: string };
+
+export const maintenanceReqStatusMap: Record<string, Badge> = {
+  PENDING:     { label: 'Chờ xử lý',     color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
+  IN_PROGRESS: { label: 'Đang xử lý',    color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
+  RESOLVED:    { label: 'Đã hoàn thành', color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
+  CANCELLED:   { label: 'Đã hủy',        color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
+};
+
+export const maintenanceReqPriorityMap: Record<string, Badge> = {
+  URGENT: { label: 'Khẩn cấp',   color: 'bg-rose-100 text-rose-700 border border-rose-200',       dot: 'bg-rose-600' },
+  HIGH:   { label: 'Cao',        color: 'bg-orange-100 text-orange-700 border border-orange-200', dot: 'bg-orange-500' },
+  MEDIUM: { label: 'Trung bình', color: 'bg-amber-100 text-amber-700 border border-amber-200',    dot: 'bg-amber-500' },
+  LOW:    { label: 'Thấp',       color: 'bg-slate-100 text-slate-600 border border-slate-200',    dot: 'bg-slate-400' },
+};
+
+export const maintenanceCategoryMap: Record<string, string> = {
+  ELECTRICAL: 'Điện',
+  PLUMBING:   'Nước',
+  FURNITURE:  'Nội thất',
+  APPLIANCE:  'Thiết bị',
+  OTHER:      'Khác',
+};
+
+export const equipmentLifecycleMap: Record<string, Badge> = {
+  GOOD:        { label: 'Hoạt động tốt', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  MAINTENANCE: { label: 'Đang bảo trì',  color: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500' },
+  BROKEN:      { label: 'Đang hỏng',     color: 'bg-rose-100 text-rose-700',       dot: 'bg-rose-500' },
+  DISPOSED:    { label: 'Đã thanh lý',   color: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
+};
+
+/** Map mọi trạng thái BE (kể cả ASSIGNED/WAITING_PARTS nếu có) về 4 trạng thái spec */
+export function normalizeMaintenanceStatus(
+  s: string | undefined,
+): 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' {
+  switch ((s ?? '').toUpperCase()) {
+    case 'PENDING':
+    case 'OPEN':
+      return 'PENDING';
+    case 'ASSIGNED':
+    case 'ACCEPTED':
+    case 'IN_PROGRESS':
+    case 'WAITING_PARTS':
+      return 'IN_PROGRESS';
+    case 'RESOLVED':
+    case 'DONE':
+    case 'COMPLETED':
+      return 'RESOLVED';
+    case 'CANCELLED':
+    case 'CANCELED':
+    case 'REJECTED':
+      return 'CANCELLED';
+    default:
+      return 'PENDING';
+  }
+}
+
 export const notificationTypeConfig = {
   contract_expiry:   { label: 'Hợp đồng hết hạn',   bgColor: 'bg-amber-50',  textColor: 'text-amber-600' },
   unpaid_invoice:    { label: 'Hóa đơn chưa thu',   bgColor: 'bg-rose-50',   textColor: 'text-rose-600' },

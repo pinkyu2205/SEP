@@ -7,9 +7,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { MaintenanceCategory, MaintenancePriority, Equipment } from '../../types';
+import {
+  MaintenanceCategory, MaintenancePriority, Equipment,
+  CreateMaintenanceRequestDto, MaintenanceReqCategory, MaintenanceReqPriority,
+} from '../../types';
 import { formatDate } from '../../utils';
 import { tenantMaintenanceStore } from '../../store/maintenanceStore';
+import { realMaintenanceService } from '../../services/maintenanceService.real';
+import { uploadImageToCloudinary } from '../../services/cloudinary';
 
 const CATEGORIES: { key: MaintenanceCategory; label: string; emoji: string }[] = [
   { key: 'electrical', label: 'Điện', emoji: '⚡' },
@@ -68,7 +73,39 @@ export const MaintenanceCreateScreen: React.FC = () => {
     if (!category) { Alert.alert('Lỗi', 'Vui lòng chọn loại sự cố.'); return; }
 
     setSubmitting(true);
-    await new Promise(r => setTimeout(r, 1200));
+
+    // 1) Thử gọi real API (Maintenance_BE_Contract.md). Cần roomId dạng số.
+    const roomIdNum = Number(equipment?.roomId);
+    const equipmentIdNum = Number(equipment?.id);
+    if (Number.isFinite(roomIdNum) && roomIdNum > 0) {
+      try {
+        const uploaded: string[] = [];
+        for (const uri of images) {
+          try { uploaded.push(await uploadImageToCloudinary(uri)); } catch { /* bỏ ảnh lỗi */ }
+        }
+        const body: CreateMaintenanceRequestDto = {
+          roomId: roomIdNum,
+          equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
+          category: category!.toUpperCase() as MaintenanceReqCategory,
+          priority: priority.toUpperCase() as MaintenanceReqPriority,
+          description: `${title.trim()} — ${description.trim()}`,
+          images: uploaded,
+        };
+        await realMaintenanceService.createRequest(body);
+        setSubmitting(false);
+        Alert.alert(
+          '🔧 Gửi yêu cầu thành công!',
+          'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý vận hành sẽ tiếp nhận và phản hồi sớm nhất.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }],
+        );
+        return;
+      } catch {
+        // BE chưa sẵn sàng → fallback lưu cục bộ để demo không gián đoạn.
+      }
+    }
+
+    // 2) Fallback: lưu vào store cục bộ (hành vi cũ).
+    await new Promise(r => setTimeout(r, 600));
     setSubmitting(false);
 
     const now = new Date();

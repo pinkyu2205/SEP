@@ -1,10 +1,9 @@
 import axios from 'axios';
-
-const PUBLIC_API_BASE = 'http://localhost:3000/api/public';
+import { API_CONFIG } from '../constants/api';
 
 const publicApiClient = axios.create({
-  baseURL: PUBLIC_API_BASE,
-  timeout: 15000,
+  baseURL: API_CONFIG.PUBLIC_BASE_URL,
+  timeout: API_CONFIG.TIMEOUT,
   headers: { 'Content-Type': 'application/json' },
 });
 

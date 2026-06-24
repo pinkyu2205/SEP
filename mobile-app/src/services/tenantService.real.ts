@@ -54,6 +54,11 @@ export interface TenantContractResponse {
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+
+  // Sau khi confirm: thông tin tài khoản tenant (BE bổ sung — xem MD work/Onboarding.md)
+  tenantUsername?: string;
+  tenantAccountCreated?: boolean; // true nếu vừa tạo mới tài khoản
+  tenantRolePromoted?: boolean;   // true nếu vừa nâng ROLE_USER -> ROLE_TENANT
 }
 
 export interface OcrMeterResponse {
@@ -62,11 +67,18 @@ export interface OcrMeterResponse {
   rawText: string;
 }
 
+// Body cho POST /tenant-contracts/{id}/confirm (BE: ConfirmContractRequest).
+// ⚠️ Tên field 'otp' suy ra từ DTO BE — nếu BE đặt tên khác (vd otpCode) thì đổi lại cho khớp.
+export interface ConfirmContractRequest {
+  otp: string;
+}
+
 export interface TenantLookupResponse {
   exists: boolean;
   fullName?: string;
   phoneNumber?: string;
   cccd?: string;
+  role?: string; // BE (khuyến nghị) trả role để FE hiển thị hint chính xác
 }
 
 export const realTenantService = {
@@ -138,10 +150,15 @@ export const realTenantService = {
     return data;
   },
 
-  // Hoàn tất HĐ sau khi đã thanh toán cọc + OTP
-  confirmContract: async (contractId: number): Promise<TenantContractResponse> => {
+  // Hoàn tất HĐ sau khi đã thanh toán cọc + OTP.
+  // BE: confirm(Long id, @RequestBody ConfirmContractRequest) -> BẮT BUỘC có body (chứa mã OTP).
+  confirmContract: async (
+    contractId: number,
+    body: ConfirmContractRequest,
+  ): Promise<TenantContractResponse> => {
     const { data } = await realApiClient.post<TenantContractResponse>(
-      `/api/v1/tenant-contracts/${contractId}/confirm`
+      `/api/v1/tenant-contracts/${contractId}/confirm`,
+      body,
     );
     return data;
   },

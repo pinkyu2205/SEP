@@ -165,6 +165,99 @@ export interface CreateMaintenanceRequest {
   equipmentId?: string;
 }
 
+// ===== Real API DTOs (theo Maintenance_BE_Contract.md) — enum UPPERCASE khớp BE =====
+export type MaintenanceReqStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
+export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type MaintenanceReqCategory =
+  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
+
+export interface MaintenanceTimelineDto {
+  oldStatus?: MaintenanceReqStatus;
+  newStatus: MaintenanceReqStatus;
+  note?: string;
+  changedBy?: string;
+  changedByName?: string;
+  changedAt: string;
+}
+
+export interface MaintenanceRequestDto {
+  id: number;
+  requestCode: string;
+  status: MaintenanceReqStatus;
+  category: MaintenanceReqCategory;
+  priority: MaintenanceReqPriority;
+  description: string;
+  tenantId: number;
+  tenantName: string;
+  tenantPhone?: string;
+  roomId: number;
+  roomName: string;
+  propertyId: number;
+  propertyName: string;
+  equipmentId?: number;
+  equipmentName?: string;
+  assignedManagerId?: number;
+  assignedManagerName?: string;
+  scheduledDate?: string;
+  repairCost?: number;
+  resolutionNote?: string;
+  resolvedAt?: string;
+  images: string[];
+  timeline: MaintenanceTimelineDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateMaintenanceRequestDto {
+  roomId: number;
+  equipmentId?: number;
+  category: MaintenanceReqCategory;
+  priority: MaintenanceReqPriority;
+  description: string;
+  images: string[];
+}
+
+export interface ResolveMaintenanceRequestDto {
+  repairCost: number;
+  resolutionNote?: string;
+}
+
+export interface MaintenanceDashboardDto {
+  total: number;
+  pending: number;
+  inProgress: number;
+  resolved: number;
+  cancelled: number;
+  totalRepairCost: number;
+}
+
+export type EquipmentLifecycleStatus = 'GOOD' | 'MAINTENANCE' | 'BROKEN' | 'DISPOSED';
+
+export interface EquipmentDto {
+  id: number;
+  equipmentName: string;
+  category: string;
+  qrCode?: string;
+  status: EquipmentLifecycleStatus;
+  roomId?: number;
+  roomName?: string;
+  propertyId: number;
+  installationDate: string;
+  warrantyExpiredDate?: string;
+  maintenanceCount: number;
+  lastMaintenanceDate?: string;
+}
+
+export interface EquipmentMaintenanceHistoryDto {
+  id: number;
+  equipmentId: number;
+  maintenanceRequestId: number;
+  requestCode: string;
+  maintenanceDate: string;
+  repairCost?: number;
+  note?: string;
+}
+
 // ======================== METER READING (Chỉ số điện nước) ========================
 export type MeterType = 'electricity' | 'water';
 

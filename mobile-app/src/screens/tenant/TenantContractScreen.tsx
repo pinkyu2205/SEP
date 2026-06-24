@@ -1,66 +1,48 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { Contract, ContractStatus } from '../../types';
 import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '../../utils';
+import {
+  realTenantSelfService, MyContractListItem, mapBeContractStatus,
+} from '../../services/tenantSelfService.real';
 
-const MOCK_CONTRACTS: Contract[] = [
-  {
-    id: '1',
-    code: 'HD-MT-2025-001',
+// Card mở rộng: thêm nhãn mô tả phạm vi thuê (toàn nhà / phòng)
+type CardContract = Contract & { isWholeHouse: boolean; scopeLabel: string };
+
+// Map item danh sách từ BE -> shape Contract dùng cho card
+const toCardContract = (it: MyContractListItem): CardContract => {
+  const daysUntilExpiry = getDaysUntil(it.endDate);
+  const isWholeHouse = (it.type || '').toUpperCase() === 'WHOLE_HOUSE';
+  const roomLabel = it.roomCode || it.roomNumber;
+  const scopeLabel = isWholeHouse
+    ? 'Thuê toàn nhà'
+    : roomLabel ? `Phòng ${roomLabel}` : 'Thuê phòng';
+  return {
+    id: String(it.id),
+    code: it.code,
     type: 'manager_tenant',
-    lessorName: 'Trần Văn Minh (Quản lý)',
-    lessorPhone: '0901234567',
-    lesseeName: 'Nguyễn Văn A',
-    lesseeCccd: '012345678901',
-    lesseePhone: '0987654321',
-    propertyName: 'Nhà 15 Nguyễn Trãi',
-    roomCode: 'P201',
-    roomId: 'r1',
-    startDate: '2026-01-01',
-    endDate: '2026-12-31',
-    depositAmount: 6000000,
-    rentAmount: 3000000,
-    status: 'active',
-    equipmentList: [
-      { id: 'e1', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Tốt' },
-      { id: 'e2', name: 'Giường đôi 1m6', quantity: 1, condition: 'Tốt' },
-      { id: 'e3', name: 'Tủ quần áo 3 cánh', quantity: 1, condition: 'Khá' },
-      { id: 'e4', name: 'Bàn học + ghế', quantity: 1, condition: 'Tốt' },
-    ],
-    otpVerified: true,
-    signedAt: '2026-01-01',
-    daysUntilExpiry: getDaysUntil('2026-12-31'),
-    pdfUrl: 'https://example.com/contracts/HD-MT-2025-001.pdf',
-    notes: 'Thanh toán trước ngày 5 hàng tháng. Tiền điện nước tính riêng theo chỉ số thực tế.',
-  },
-  {
-    id: '2',
-    code: 'HD-MT-2024-008',
-    type: 'manager_tenant',
-    lessorName: 'Trần Văn Minh (Quản lý)',
-    lessorPhone: '0901234567',
-    lesseeName: 'Nguyễn Văn A',
-    lesseeCccd: '012345678901',
-    lesseePhone: '0987654321',
-    propertyName: 'Nhà 15 Nguyễn Trãi',
-    roomCode: 'P201',
-    roomId: 'r1',
-    startDate: '2025-01-01',
-    endDate: '2025-12-31',
-    depositAmount: 6000000,
-    rentAmount: 2800000,
-    status: 'expired',
+    lessorName: it.lessorName || 'Ban Quản Lý',
+    lesseeName: '',
+    lesseeCccd: '',
+    lesseePhone: '',
+    propertyName: it.propertyName,
+    roomCode: roomLabel ?? undefined,
+    startDate: it.startDate,
+    endDate: it.endDate,
+    depositAmount: it.depositAmount ?? it.deposit ?? 0,
+    rentAmount: it.rentAmount ?? 0,
+    status: mapBeContractStatus(it.status, daysUntilExpiry),
     equipmentList: [],
-    otpVerified: true,
-    signedAt: '2025-01-01',
-    daysUntilExpiry: -120,
-  },
-];
+    daysUntilExpiry,
+    isWholeHouse,
+    scopeLabel,
+  };
+};
 
 const statusFilterList: { key: 'all' | ContractStatus; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
@@ -84,14 +66,27 @@ const ContractStatusBadge: React.FC<{ status: ContractStatus }> = ({ status }) =
 export const TenantContractScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<'all' | ContractStatus>('all');
+  const [contracts, setContracts] = useState<CardContract[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      realTenantSelfService.getMyContracts()
+        .then(list => { if (active) setContracts(list.map(toCardContract)); })
+        .catch(() => { if (active) setContracts([]); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
+    }, []),
+  );
 
   const filtered = filter === 'all'
-    ? MOCK_CONTRACTS
-    : MOCK_CONTRACTS.filter(c => c.status === filter);
+    ? contracts
+    : contracts.filter(c => c.status === filter);
 
-  const activeContract = MOCK_CONTRACTS.find(c => c.status === 'active');
+  const activeContract = contracts.find(c => c.status === 'active' || c.status === 'expiring_soon');
 
-  const renderContract = ({ item }: { item: Contract }) => {
+  const renderContract = ({ item }: { item: CardContract }) => {
     const isActive = item.status === 'active';
     const isExpiringSoon = item.status === 'expiring_soon';
     const canSign = item.status === 'waiting_sign';
@@ -99,7 +94,7 @@ export const TenantContractScreen: React.FC = () => {
     return (
       <TouchableOpacity
         style={[styles.card, isActive && styles.cardActive]}
-        onPress={() => navigation.navigate('ContractDetail', { contract: item })}
+        onPress={() => navigation.navigate('ContractDetail', { contractId: item.id })}
         activeOpacity={0.7}
       >
         {isActive && <View style={styles.activeIndicator} />}
@@ -107,7 +102,7 @@ export const TenantContractScreen: React.FC = () => {
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.contractCode}>{item.code}</Text>
-            <Text style={styles.propertyName}>{item.propertyName} · Phòng {item.roomCode}</Text>
+            <Text style={styles.propertyName}>{item.propertyName} · {item.scopeLabel}</Text>
           </View>
           <ContractStatusBadge status={item.status} />
         </View>
@@ -122,7 +117,7 @@ export const TenantContractScreen: React.FC = () => {
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Tiền thuê</Text>
             <Text style={[styles.infoValue, { color: Colors.primary, fontWeight: '700' }]}>
-              {item.rentAmount.toLocaleString('vi-VN')} đ/tháng
+              {(item.rentAmount ?? 0).toLocaleString('vi-VN')} đ/tháng
             </Text>
           </View>
           <View style={styles.infoItem}>
@@ -131,7 +126,7 @@ export const TenantContractScreen: React.FC = () => {
           </View>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Đặt cọc</Text>
-            <Text style={styles.infoValue}>{item.depositAmount.toLocaleString('vi-VN')} đ</Text>
+            <Text style={styles.infoValue}>{(item.depositAmount ?? 0).toLocaleString('vi-VN')} đ</Text>
           </View>
         </View>
 
@@ -154,7 +149,7 @@ export const TenantContractScreen: React.FC = () => {
         <View style={styles.cardActions}>
           <TouchableOpacity
             style={styles.actionBtnOutline}
-            onPress={() => navigation.navigate('ContractDetail', { contract: item })}
+            onPress={() => navigation.navigate('ContractDetail', { contractId: item.id })}
           >
             <Text style={styles.actionBtnOutlineText}>Xem chi tiết</Text>
           </TouchableOpacity>
@@ -162,7 +157,7 @@ export const TenantContractScreen: React.FC = () => {
           {canSign && (
             <TouchableOpacity
               style={styles.actionBtnPrimary}
-              onPress={() => navigation.navigate('ContractDetail', { contract: item, autoScrollSign: true })}
+              onPress={() => navigation.navigate('ContractDetail', { contractId: item.id, autoScrollSign: true })}
             >
               <Text style={styles.actionBtnPrimaryText}>✍️ Ký hợp đồng</Text>
             </TouchableOpacity>
@@ -171,7 +166,7 @@ export const TenantContractScreen: React.FC = () => {
           {isActive && (
             <TouchableOpacity
               style={styles.actionBtnPrimary}
-              onPress={() => navigation.navigate('ContractDetail', { contract: item })}
+              onPress={() => navigation.navigate('ContractDetail', { contractId: item.id })}
             >
               <Text style={styles.actionBtnPrimaryText}>Gia hạn / Chấm dứt</Text>
             </TouchableOpacity>
@@ -202,7 +197,7 @@ export const TenantContractScreen: React.FC = () => {
           <View style={styles.summaryLeft}>
             <Text style={styles.summaryEmoji}>✅</Text>
             <View>
-              <Text style={styles.summaryTitle}>Đang thuê · {activeContract.roomCode}</Text>
+              <Text style={styles.summaryTitle}>Đang thuê · {activeContract.scopeLabel}</Text>
               <Text style={styles.summaryDesc}>{activeContract.propertyName}</Text>
             </View>
           </View>
@@ -232,15 +227,19 @@ export const TenantContractScreen: React.FC = () => {
         ))}
       </ScrollView>
 
-      <FlatList
-        data={filtered}
-        renderItem={renderContract}
-        keyExtractor={c => c.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
-        ListEmptyComponent={<EmptyState />}
-      />
+      {loading ? (
+        <View style={styles.loadingWrap}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      ) : (
+        <FlatList
+          data={filtered}
+          renderItem={renderContract}
+          keyExtractor={c => c.id}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
+          ListEmptyComponent={<EmptyState />}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -283,6 +282,7 @@ const styles = StyleSheet.create({
   filterTextActive: { color: Colors.white },
 
   list: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   card: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,

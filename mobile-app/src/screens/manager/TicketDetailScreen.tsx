@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Alert, TextInput,
@@ -7,9 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import {
-  useTickets, maintenanceStore,
+  useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, PhotoEvidence, CostPaidBy, TimelineEntry,
 } from '../../store/maintenanceStore';
+import { realMaintenanceService } from '../../services/maintenanceService.real';
+import { dtoToTicket } from '../../services/maintenanceMappers';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -176,9 +178,31 @@ export const TicketDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route      = useRoute<any>();
   const { ticketId } = route.params as { ticketId: string };
+  const idNum = Number(ticketId);
+  const isRealId = Number.isFinite(idNum) && idNum > 0;
 
   const allTickets = useTickets();
-  const ticket     = allTickets.find(t => t.id === ticketId);
+  const storeTicket = allTickets.find(t => t.id === ticketId);
+  const [realTicket, setRealTicket] = useState<MaintenanceTicket | undefined>(undefined);
+  const isReal = !!realTicket;
+  const ticket = realTicket ?? storeTicket;
+
+  // Lấy chi tiết thật từ BE; lỗi → giữ ticket mock từ store.
+  useEffect(() => {
+    if (!isRealId) return;
+    let active = true;
+    realMaintenanceService.getDetail(idNum)
+      .then(dto => { if (active) setRealTicket(dtoToTicket(dto)); })
+      .catch(() => { /* giữ store mock */ });
+    return () => { active = false; };
+  }, [idNum, isRealId]);
+
+  const refreshReal = async () => {
+    try {
+      const dto = await realMaintenanceService.getDetail(idNum);
+      setRealTicket(dtoToTicket(dto));
+    } catch { /* bỏ qua */ }
+  };
 
   const [assignInput,   setAssignInput]   = useState(ticket?.assignedTo || '');
   const [costInput,     setCostInput]     = useState(
@@ -220,10 +244,21 @@ export const TicketDetailScreen: React.FC = () => {
     );
   };
 
-  const handleAdvance = () => {
+  const handleAdvance = async () => {
     if (!nextStatus) return;
     if (nextStatus === 'resolved') { setShowCostInput(true); return; }
     const note = noteInput.trim() || `Cập nhật: ${STATUS_CONFIG[nextStatus].label}`;
+    // Real API: spec chỉ có IN_PROGRESS giữa PENDING và RESOLVED.
+    if (isReal) {
+      try {
+        await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', note);
+        await refreshReal();
+        setNoteInput('');
+      } catch {
+        Alert.alert('Lỗi', 'Không thể cập nhật trạng thái. Vui lòng thử lại.');
+      }
+      return;
+    }
     maintenanceStore.updateTicket(ticket.id, {
       status:     nextStatus,
       assignedTo: assignInput || ticket.assignedTo,
@@ -234,11 +269,23 @@ export const TicketDetailScreen: React.FC = () => {
     setNoteInput('');
   };
 
-  const handleResolve = () => {
+  const handleResolve = async () => {
     const cost = parseInt(costInput.replace(/\D/g, ''), 10);
     if (isNaN(cost)) { Alert.alert('Lỗi', 'Nhập chi phí sửa chữa (0 nếu miễn phí).'); return; }
     const payerLabel = costPaidBy === 'host' ? 'chủ nhà trả' : 'khách thuê trả';
     const note = noteInput.trim() || `Hoàn tất. Chi phí: ${fmt(cost)} — ${payerLabel}`;
+    // Real API: gửi repairCost + resolutionNote (BE tự tạo expense + update equipment).
+    if (isReal) {
+      try {
+        await realMaintenanceService.resolve(idNum, { repairCost: cost, resolutionNote: note });
+        await refreshReal();
+        setShowCostInput(false);
+        Alert.alert('✅ Hoàn tất!', `Ticket ${ticket.ticketCode} đã đóng.\nChi phí: ${fmt(cost)}`);
+      } catch {
+        Alert.alert('Lỗi', 'Không thể lưu kết quả. Vui lòng thử lại.');
+      }
+      return;
+    }
     maintenanceStore.updateTicket(ticket.id, {
       status:     'resolved',
       repairCost: cost,
@@ -254,7 +301,16 @@ export const TicketDetailScreen: React.FC = () => {
   const handleCancel = () => {
     Alert.alert('Hủy yêu cầu?', 'Bạn có chắc muốn hủy ticket này?', [
       { text: 'Không', style: 'cancel' },
-      { text: 'Hủy ticket', style: 'destructive', onPress: () => {
+      { text: 'Hủy ticket', style: 'destructive', onPress: async () => {
+        if (isReal) {
+          try {
+            await realMaintenanceService.updateStatus(idNum, 'CANCELLED', 'Đã hủy yêu cầu');
+            await refreshReal();
+          } catch {
+            Alert.alert('Lỗi', 'Không thể hủy yêu cầu. Vui lòng thử lại.');
+          }
+          return;
+        }
         maintenanceStore.updateTicket(ticket.id, {
           status:    'cancelled',
           updatedAt: new Date().toISOString().split('T')[0],

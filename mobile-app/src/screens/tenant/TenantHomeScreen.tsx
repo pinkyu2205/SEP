@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
 import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
+import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
 
 // ── Mock data ──────────────────────────────────────────────
 const BUILDING_INFO = {
@@ -50,9 +51,66 @@ const QUICK_ACTIONS = [
 export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
-  const data = DASHBOARD_DATA;
   const [actionsExpanded, setActionsExpanded] = useState(false);
   const allBills = useBills('Nguyễn Văn A');
+
+  // ── Dashboard thật (GET /tenant/me/dashboard) ──
+  const [dash, setDash] = useState<TenantDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      realTenantSelfService.getDashboard()
+        .then(d => { if (active) setDash(d); })
+        .catch(() => { if (active) setDash(null); })
+        .finally(() => { if (active) setLoading(false); });
+      return () => { active = false; };
+    }, []),
+  );
+
+  // Có hợp đồng/phòng đang hiệu lực hay không (BE trả null khi chưa có)
+  const hasRoom = !!dash?.contract;
+
+  // Phân biệt 2 dạng thuê: toàn nhà (WHOLE_HOUSE) hay theo phòng (ROOM)
+  // Ưu tiên type từ hợp đồng; fallback: không có roomNumber → coi như thuê toàn nhà
+  const isWholeHouse =
+    (dash?.contract?.type || '').toUpperCase() === 'WHOLE_HOUSE'
+    || (!!dash?.contract && !dash?.room?.roomNumber);
+
+  // Map dữ liệu API -> shape UI (fallback mock khi chưa tải xong / chưa có data)
+  const b = dash?.building;
+  const buildingInfo = {
+    name: b?.name ?? BUILDING_INFO.name,
+    address: b?.address ?? BUILDING_INFO.address,
+    totalFloors: b?.totalFloors ?? BUILDING_INFO.totalFloors,
+    electricityRate: b?.electricityRate ?? BUILDING_INFO.electricityRate,
+    waterRate: b?.waterRate ?? BUILDING_INFO.waterRate,
+    serviceCharge: b?.serviceCharge ?? BUILDING_INFO.serviceCharge,
+    hostName: b?.hostName ?? BUILDING_INFO.hostName,
+    hostPhone: b?.hostPhone ?? BUILDING_INFO.hostPhone,
+  };
+  const data = {
+    room: {
+      // Toàn nhà: hiển thị tên tòa nhà; Theo phòng: hiển thị "Phòng {số}"
+      name: isWholeHouse
+        ? (b?.name ?? DASHBOARD_DATA.room.property)
+        : (dash?.room?.roomNumber ? `Phòng ${dash.room.roomNumber}` : DASHBOARD_DATA.room.name),
+      property: b?.name ?? DASHBOARD_DATA.room.property,
+      floor: dash?.room?.floor ?? DASHBOARD_DATA.room.floor,
+      area: dash?.room?.area ?? DASHBOARD_DATA.room.area,
+    },
+    contract: {
+      code: dash?.contract?.code ?? DASHBOARD_DATA.contract.code,
+      daysLeft: dash?.contract?.daysLeft ?? DASHBOARD_DATA.contract.daysLeft,
+    },
+    depositAmount: dash?.room?.depositAmount ?? DASHBOARD_DATA.depositAmount,
+    maintenance: {
+      pending: dash?.summary?.maintenancePending ?? 0,
+      inProgress: dash?.summary?.maintenanceInProgress ?? 0,
+    },
+    unreadNotifications: dash?.summary?.unreadNotifications ?? 0,
+  };
 
   const unpaidBills = allBills.filter(b => b.status === 'pending' || b.status === 'overdue');
   const overdueInvoices = allBills.filter(b => b.status === 'overdue');
@@ -74,6 +132,16 @@ export const TenantHomeScreen: React.FC = () => {
     contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                               route: 'TenantContracts', color: Colors.info    },
   ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -94,16 +162,26 @@ export const TenantHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {!hasRoom ? (
+          <View style={styles.emptyRoomCard}>
+            <Text style={styles.emptyRoomIcon}>🏠</Text>
+            <Text style={styles.emptyRoomTitle}>Bạn chưa có phòng đang thuê</Text>
+            <Text style={styles.emptyRoomText}>
+              Khi hợp đồng của bạn có hiệu lực, thông tin phòng và tòa nhà sẽ hiển thị tại đây.
+            </Text>
+          </View>
+        ) : (
+        <>
         {/* Room Banner */}
         <View style={styles.roomCard}>
           <View style={styles.roomTop}>
             <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.roomLabel}>PHÒNG CỦA BẠN</Text>
+              <Text style={styles.roomLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
               <Text style={styles.roomName}>{data.room.name}</Text>
               <Text style={styles.roomProperty}>{data.room.property}</Text>
               <View style={styles.addressRow}>
                 <Text style={styles.addressIcon}>📍</Text>
-                <Text style={styles.addressText} numberOfLines={2}>{BUILDING_INFO.address}</Text>
+                <Text style={styles.addressText} numberOfLines={2}>{buildingInfo.address}</Text>
               </View>
             </View>
             <View style={styles.roomStats}>
@@ -113,13 +191,16 @@ export const TenantHomeScreen: React.FC = () => {
                   <Text style={styles.roomStatLabel}>Diện tích</Text>
                 </View>
                 <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
-                  <Text style={styles.roomStatLabel}>Vị trí</Text>
+                  {/* Toàn nhà: số tầng của nhà; Theo phòng: tầng phòng nằm */}
+                  <Text style={styles.roomStatValue}>
+                    {isWholeHouse ? `${buildingInfo.totalFloors} tầng` : `Tầng ${data.room.floor}`}
+                  </Text>
+                  <Text style={styles.roomStatLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
                 </View>
               </View>
               <View style={[styles.roomStatRow, { marginTop: 8 }]}>
                 <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>{BUILDING_INFO.totalFloors} tầng</Text>
+                  <Text style={styles.roomStatValue}>{buildingInfo.totalFloors} tầng</Text>
                   <Text style={styles.roomStatLabel}>Tòa nhà</Text>
                 </View>
                 <View style={styles.roomStat}>
@@ -145,33 +226,35 @@ export const TenantHomeScreen: React.FC = () => {
           </View>
           <View style={styles.buildingAddressRow}>
             <Text style={styles.buildingAddressIcon}>📍</Text>
-            <Text style={styles.buildingAddress}>{BUILDING_INFO.address}</Text>
+            <Text style={styles.buildingAddress}>{buildingInfo.address}</Text>
           </View>
           <View style={styles.buildingRatesRow}>
             <View style={styles.buildingRate}>
               <Text style={styles.buildingRateIcon}>⚡</Text>
-              <Text style={styles.buildingRateValue}>{BUILDING_INFO.electricityRate.toLocaleString('vi-VN')}đ</Text>
+              <Text style={styles.buildingRateValue}>{buildingInfo.electricityRate.toLocaleString('vi-VN')}đ</Text>
               <Text style={styles.buildingRateLabel}>/ kWh</Text>
             </View>
             <View style={styles.buildingRateDivider} />
             <View style={styles.buildingRate}>
               <Text style={styles.buildingRateIcon}>💧</Text>
-              <Text style={styles.buildingRateValue}>{BUILDING_INFO.waterRate.toLocaleString('vi-VN')}đ</Text>
+              <Text style={styles.buildingRateValue}>{buildingInfo.waterRate.toLocaleString('vi-VN')}đ</Text>
               <Text style={styles.buildingRateLabel}>/ m³</Text>
             </View>
             <View style={styles.buildingRateDivider} />
             <View style={styles.buildingRate}>
               <Text style={styles.buildingRateIcon}>🏠</Text>
-              <Text style={styles.buildingRateValue}>{(BUILDING_INFO.serviceCharge / 1000).toFixed(0)}k</Text>
+              <Text style={styles.buildingRateValue}>{(buildingInfo.serviceCharge / 1000).toFixed(0)}k</Text>
               <Text style={styles.buildingRateLabel}>Dịch vụ/tháng</Text>
             </View>
           </View>
           <View style={styles.buildingHostRow}>
             <Text style={styles.buildingHostLabel}>Chủ nhà: </Text>
-            <Text style={styles.buildingHostName}>{BUILDING_INFO.hostName}</Text>
-            <Text style={styles.buildingHostPhone}>  {BUILDING_INFO.hostPhone}</Text>
+            <Text style={styles.buildingHostName}>{buildingInfo.hostName}</Text>
+            <Text style={styles.buildingHostPhone}>  {buildingInfo.hostPhone}</Text>
           </View>
         </View>
+        </>
+        )}
 
         {/* Alert pills */}
         {alerts.length > 0 && (
@@ -317,6 +400,16 @@ export const TenantHomeScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing['3xl'] },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  // Empty state (chưa có phòng/hợp đồng)
+  emptyRoomCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.xl,
+    alignItems: 'center', marginTop: Spacing.md, marginBottom: Spacing.md, ...Shadow.sm,
+  },
+  emptyRoomIcon: { fontSize: 40, marginBottom: Spacing.sm },
+  emptyRoomTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.xs },
+  emptyRoomText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.lg },
