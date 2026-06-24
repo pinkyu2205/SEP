@@ -39,6 +39,7 @@ export interface DashboardRoom {
 export interface DashboardContract {
   id: number;
   code: string;
+  type?: string;            // WHOLE_HOUSE | ROOM
   startDate: string;
   endDate: string;
   daysLeft: number;
@@ -73,13 +74,18 @@ export interface TenantDashboard {
 export interface MyContractListItem {
   id: number;
   code: string;
-  type: string;
+  type: string;                 // WHOLE_HOUSE | ROOM
   propertyName: string;
-  roomCode?: string;
+  roomCode?: string | null;
+  roomNumber?: string | null;
+  lessorName?: string;
+  lessorPhone?: string;
   startDate: string;
   endDate: string;
-  rentAmount: number;
-  depositAmount: number;
+  rentAmount?: number;
+  // BE list trả về `deposit`; detail trả về `depositAmount` → chấp nhận cả 2
+  deposit?: number;
+  depositAmount?: number;
   status: string;
 }
 

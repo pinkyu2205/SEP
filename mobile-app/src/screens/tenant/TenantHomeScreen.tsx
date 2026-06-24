@@ -72,6 +72,12 @@ export const TenantHomeScreen: React.FC = () => {
   // Có hợp đồng/phòng đang hiệu lực hay không (BE trả null khi chưa có)
   const hasRoom = !!dash?.contract;
 
+  // Phân biệt 2 dạng thuê: toàn nhà (WHOLE_HOUSE) hay theo phòng (ROOM)
+  // Ưu tiên type từ hợp đồng; fallback: không có roomNumber → coi như thuê toàn nhà
+  const isWholeHouse =
+    (dash?.contract?.type || '').toUpperCase() === 'WHOLE_HOUSE'
+    || (!!dash?.contract && !dash?.room?.roomNumber);
+
   // Map dữ liệu API -> shape UI (fallback mock khi chưa tải xong / chưa có data)
   const b = dash?.building;
   const buildingInfo = {
@@ -86,7 +92,10 @@ export const TenantHomeScreen: React.FC = () => {
   };
   const data = {
     room: {
-      name: dash?.room?.roomNumber ? `Phòng ${dash.room.roomNumber}` : (b?.name ?? DASHBOARD_DATA.room.name),
+      // Toàn nhà: hiển thị tên tòa nhà; Theo phòng: hiển thị "Phòng {số}"
+      name: isWholeHouse
+        ? (b?.name ?? DASHBOARD_DATA.room.property)
+        : (dash?.room?.roomNumber ? `Phòng ${dash.room.roomNumber}` : DASHBOARD_DATA.room.name),
       property: b?.name ?? DASHBOARD_DATA.room.property,
       floor: dash?.room?.floor ?? DASHBOARD_DATA.room.floor,
       area: dash?.room?.area ?? DASHBOARD_DATA.room.area,
@@ -167,7 +176,7 @@ export const TenantHomeScreen: React.FC = () => {
         <View style={styles.roomCard}>
           <View style={styles.roomTop}>
             <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.roomLabel}>PHÒNG CỦA BẠN</Text>
+              <Text style={styles.roomLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
               <Text style={styles.roomName}>{data.room.name}</Text>
               <Text style={styles.roomProperty}>{data.room.property}</Text>
               <View style={styles.addressRow}>
@@ -182,8 +191,11 @@ export const TenantHomeScreen: React.FC = () => {
                   <Text style={styles.roomStatLabel}>Diện tích</Text>
                 </View>
                 <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>Tầng {data.room.floor}</Text>
-                  <Text style={styles.roomStatLabel}>Vị trí</Text>
+                  {/* Toàn nhà: số tầng của nhà; Theo phòng: tầng phòng nằm */}
+                  <Text style={styles.roomStatValue}>
+                    {isWholeHouse ? `${buildingInfo.totalFloors} tầng` : `Tầng ${data.room.floor}`}
+                  </Text>
+                  <Text style={styles.roomStatLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
                 </View>
               </View>
               <View style={[styles.roomStatRow, { marginTop: 8 }]}>
