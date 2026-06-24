@@ -3,6 +3,14 @@ import { Platform } from 'react-native';
 
 /**
  * API configuration.
+ *
+ * URL có thể cấu hình qua biến môi trường EXPO_PUBLIC_* (xem mobile-app/.env và .env.example).
+ * Khi deploy chỉ cần đổi giá trị trong .env, KHÔNG sửa code ở đây.
+ * Nếu không khai báo env thì REAL_BASE_URL tự suy theo nền tảng (xem resolveRealBaseUrl):
+ *   - Web / iOS simulator: http://localhost:8080
+ *   - Android emulator:    http://10.0.2.2:8080
+ *   - Thiết bị thật (LAN): http://<LAN-IP-máy-chạy-BE>:8080 (tự dò qua Expo hostUri)
+ *   - Deploy thật:         đặt EXPO_PUBLIC_REAL_API_BASE_URL=https://api.<domain-cua-ban>
  */
 
 // Cổng backend Spring. Đổi nếu BE chạy cổng khác.
@@ -44,9 +52,17 @@ function resolveRealBaseUrl(): string {
 export const REAL_BASE_URL = resolveRealBaseUrl();
 
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:3000/api', // TODO: Thay bằng URL backend thật
-  // Backend Spring thật (đã tự suy ra IP LAN cho thiết bị thật, xem resolveRealBaseUrl).
-  REAL_BASE_URL,
+  // Backend mock/legacy (giữ nguyên để tương thích code cũ).
+  BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api',
+  // Backend Spring thật: ưu tiên env, nếu không có thì dùng URL tự suy theo nền tảng
+  // (đã tự dò IP LAN cho thiết bị thật — xem resolveRealBaseUrl ở trên).
+  REAL_BASE_URL: process.env.EXPO_PUBLIC_REAL_API_BASE_URL ?? REAL_BASE_URL,
+  // Backend public (không cần auth).
+  PUBLIC_BASE_URL:
+    process.env.EXPO_PUBLIC_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/public',
+  // EAS projectId — BẮT BUỘC để lấy Expo Push Token (getExpoPushTokenAsync).
+  // Lấy sau khi chạy `eas init`. Để trống khi chưa cấu hình push.
+  EAS_PROJECT_ID: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
   TIMEOUT: 15000, // 15 seconds
   ENDPOINTS: {
     // Auth
@@ -64,7 +80,7 @@ export const API_CONFIG = {
     ROOMS: '/rooms',
     ROOM_DETAIL: (id: string) => `/rooms/${id}`,
 
-    // Maintenance (Bảo trì / Sửa chữa)
+    // Maintenance (Bảo trì / Sửa chữa) — legacy mock endpoints
     MAINTENANCE: '/maintenance-requests',
     MAINTENANCE_DETAIL: (id: string) => `/maintenance-requests/${id}`,
     MAINTENANCE_UPDATE_STATUS: (id: string) => `/maintenance-requests/${id}/status`,

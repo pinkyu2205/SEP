@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch,
+  Modal, TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
+import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
 
 const ROLE_CONFIG = {
   manager: { label: 'Quản lý vận hành', color: Colors.primary,   bg: Colors.primaryBg   },
@@ -13,7 +15,6 @@ const ROLE_CONFIG = {
 };
 
 const MOCK_MANAGER_STATS = { properties: 2, tenants: 10, activeContracts: 3 };
-const MOCK_TENANT_STATS  = { room: 'P101', building: 'Nhà Nguyễn Trãi', contractEnd: '15/03/2027' };
 
 // ── Row item ──────────────────────────────────────────────
 const MenuItem: React.FC<{
@@ -57,13 +58,89 @@ const SectionHeader: React.FC<{ title: string }> = ({ title }) => (
 
 // ── Main ──────────────────────────────────────────────────
 export const ProfileScreen: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigation = useNavigation<any>();
   const [notifEnabled, setNotifEnabled] = useState(true);
   const roleCfg = ROLE_CONFIG[user?.role ?? 'tenant'];
 
-  const handleChangePassword = () =>
-    Alert.alert('Đổi mật khẩu', 'Chức năng đổi mật khẩu sẽ gửi OTP về số điện thoại đăng ký.');
+  // Thông tin phòng/hợp đồng thật cho tenant (GET /tenant/me/dashboard)
+  const [dash, setDash] = useState<TenantDashboard | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.role !== 'tenant') return;
+      let active = true;
+      realTenantSelfService.getDashboard()
+        .then(d => { if (active) setDash(d); })
+        .catch(() => { if (active) setDash(null); });
+      return () => { active = false; };
+    }, [user?.role]),
+  );
+
+  const tenantRoom = dash?.room?.roomNumber
+    ? `Phòng ${dash.room.roomNumber}${dash.building?.name ? ` · ${dash.building.name}` : ''}`
+    : (dash?.building?.name ?? '—');
+  const tenantContractEnd = dash?.contract?.endDate ?? '—';
+
+  // ── Đổi mật khẩu (POST /api/v1/auth/change-password) ──
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [changing, setChanging] = useState(false);
+
+  const resetPwdForm = () => { setOldPwd(''); setNewPwd(''); setConfirmPwd(''); };
+
+  const handleChangePassword = () => { resetPwdForm(); setShowPwdModal(true); };
+
+  const submitChangePassword = async () => {
+    if (!oldPwd || !newPwd) return Alert.alert('Thiếu thông tin', 'Vui lòng nhập đủ mật khẩu cũ và mới.');
+    if (newPwd.length < 6) return Alert.alert('Mật khẩu yếu', 'Mật khẩu mới tối thiểu 6 ký tự.');
+    if (newPwd !== confirmPwd) return Alert.alert('Không khớp', 'Xác nhận mật khẩu mới không khớp.');
+    try {
+      setChanging(true);
+      await realTenantSelfService.changePassword({ oldPassword: oldPwd, newPassword: newPwd });
+      setShowPwdModal(false);
+      resetPwdForm();
+      Alert.alert('Thành công', 'Đổi mật khẩu thành công.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.response?.data?.error || 'Đổi mật khẩu thất bại. Kiểm tra lại mật khẩu cũ.';
+      Alert.alert('Lỗi', msg);
+    } finally {
+      setChanging(false);
+    }
+  };
+
+  // ── Cập nhật hồ sơ (PUT /api/v1/users/me) ──
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleEditProfile = () => {
+    setEditName(user?.fullName ?? '');
+    setEditEmail(user?.email ?? '');
+    setShowEditModal(true);
+  };
+
+  const submitEditProfile = async () => {
+    if (!editName.trim()) return Alert.alert('Thiếu thông tin', 'Vui lòng nhập họ tên.');
+    try {
+      setSaving(true);
+      const me = await realTenantSelfService.updateProfile({
+        fullName: editName.trim(),
+        email: editEmail.trim() || undefined,
+      });
+      // Đồng bộ lại user trong context để UI cập nhật ngay
+      updateUser({ fullName: me.fullName, email: me.email ?? '' });
+      setShowEditModal(false);
+      Alert.alert('Thành công', 'Cập nhật hồ sơ thành công.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.response?.data?.error || 'Cập nhật hồ sơ thất bại.';
+      Alert.alert('Lỗi', msg);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleHelp = () =>
     Alert.alert('Hỗ trợ', 'Liên hệ hỗ trợ qua email: support@hoangbinhland.vn\nHotline: 1800 1234');
@@ -121,9 +198,7 @@ export const ProfileScreen: React.FC = () => {
               <Text style={styles.tenantInfoIcon}>🏠</Text>
               <View>
                 <Text style={styles.tenantInfoLabel}>Phòng đang thuê</Text>
-                <Text style={styles.tenantInfoValue}>
-                  {MOCK_TENANT_STATS.room} · {MOCK_TENANT_STATS.building}
-                </Text>
+                <Text style={styles.tenantInfoValue}>{tenantRoom}</Text>
               </View>
             </View>
             <View style={styles.tenantInfoDivider} />
@@ -131,7 +206,7 @@ export const ProfileScreen: React.FC = () => {
               <Text style={styles.tenantInfoIcon}>📋</Text>
               <View>
                 <Text style={styles.tenantInfoLabel}>Hợp đồng hết hạn</Text>
-                <Text style={styles.tenantInfoValue}>{MOCK_TENANT_STATS.contractEnd}</Text>
+                <Text style={styles.tenantInfoValue}>{tenantContractEnd}</Text>
               </View>
             </View>
           </View>
@@ -145,6 +220,8 @@ export const ProfileScreen: React.FC = () => {
           <MenuItem icon="📞" label="Điện thoại" value={user?.phone ?? '—'} />
           <View style={styles.itemDivider} />
           <MenuItem icon="🗓️" label="Tham gia"   value={user?.createdAt ?? '—'} />
+          <View style={styles.itemDivider} />
+          <MenuItem icon="✏️" label="Chỉnh sửa hồ sơ" onPress={handleEditProfile} />
         </View>
 
         {/* ── Cài đặt ── */}
@@ -193,6 +270,91 @@ export const ProfileScreen: React.FC = () => {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* ===== Modal Đổi mật khẩu ===== */}
+      <Modal visible={showPwdModal} transparent animationType="slide" onRequestClose={() => setShowPwdModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🔒 Đổi mật khẩu</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Mật khẩu hiện tại"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={oldPwd}
+              onChangeText={setOldPwd}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={newPwd}
+              onChangeText={setNewPwd}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Xác nhận mật khẩu mới"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={confirmPwd}
+              onChangeText={setConfirmPwd}
+            />
+            <TouchableOpacity
+              style={[styles.modalBtnPrimary, changing && { opacity: 0.6 }]}
+              onPress={submitChangePassword}
+              disabled={changing}
+            >
+              {changing ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.modalBtnPrimaryText}>Xác nhận</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setShowPwdModal(false)} disabled={changing}>
+              <Text style={styles.modalBtnCancelText}>Hủy</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ===== Modal Chỉnh sửa hồ sơ ===== */}
+      <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>✏️ Chỉnh sửa hồ sơ</Text>
+
+            <Text style={styles.inputLabel}>Họ và tên</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Họ và tên"
+              placeholderTextColor={Colors.textMuted}
+              value={editName}
+              onChangeText={setEditName}
+            />
+
+            <Text style={styles.inputLabel}>Email</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Email (không bắt buộc)"
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={editEmail}
+              onChangeText={setEditEmail}
+            />
+
+            <Text style={styles.modalHint}>Số điện thoại và tên đăng nhập không thể tự đổi tại đây.</Text>
+
+            <TouchableOpacity
+              style={[styles.modalBtnPrimary, saving && { opacity: 0.6 }]}
+              onPress={submitEditProfile}
+              disabled={saving}
+            >
+              {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.modalBtnPrimaryText}>Lưu thay đổi</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setShowEditModal(false)} disabled={saving}>
+              <Text style={styles.modalBtnCancelText}>Hủy</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -274,4 +436,25 @@ const styles = StyleSheet.create({
   menuLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   menuValue: { fontSize: 13, color: Colors.textSecondary },
   menuChevron: { fontSize: 20, color: Colors.textMuted, fontWeight: '400' },
+
+  // Modal đổi mật khẩu
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: {
+    backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: Spacing.lg, paddingBottom: 40,
+  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.lg },
+  inputLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4 },
+  modalHint: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.base, fontStyle: 'italic' },
+  modalInput: {
+    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
+    padding: Spacing.md, fontSize: 16, marginBottom: Spacing.base, color: Colors.textPrimary,
+  },
+  modalBtnPrimary: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.base, alignItems: 'center', marginTop: Spacing.xs,
+  },
+  modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: Colors.white },
+  modalBtnCancel: { alignItems: 'center', paddingVertical: Spacing.md },
+  modalBtnCancelText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
 });

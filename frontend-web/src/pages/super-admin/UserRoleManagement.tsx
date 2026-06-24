@@ -34,7 +34,8 @@ const roleMap: Record<string, { label: string; color: string }> = {
   'ROLE_ADMIN': { label: 'Admin Hệ Thống', color: 'bg-slate-950 text-white' },
   'ROLE_OWNER': { label: 'Chủ Nhà', color: 'bg-cyan-100 text-cyan-800' },
   'ROLE_MANAGER': { label: 'Quản Lý', color: 'bg-indigo-100 text-indigo-700' },
-  'ROLE_TENANT': { label: 'Người Thuê', color: 'bg-emerald-100 text-emerald-700' },
+  'ROLE_TENANT': { label: 'Khách thuê', color: 'bg-emerald-100 text-emerald-700' },
+  'ROLE_USER': { label: 'Khách hàng', color: 'bg-amber-100 text-amber-700' },
 };
 
 const statusMap: Record<string, { label: string; color: string; dot: string }> = {

@@ -6,6 +6,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { realEquipmentService } from '../../services/equipmentService.real';
+import type { EquipmentLifecycleStatus } from '../../types';
 
 // ===================== TYPES =====================
 type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';
@@ -464,8 +466,20 @@ export const EquipmentScreen: React.FC = () => {
     };
   }, [equipments, selectedHouseId]);
 
+  // Map taxonomy UI (5) ↔ contract BE (4 — Maintenance_BE_Contract.md)
+  const toLifecycle = (s: EquipmentStatus): EquipmentLifecycleStatus =>
+    s === 'active' ? 'GOOD'
+    : s === 'repairing' ? 'MAINTENANCE'
+    : s === 'damaged' ? 'BROKEN'
+    : 'DISPOSED'; // replaced | retired
+
   const handleStatusChange = (id: string, status: EquipmentStatus) => {
     setEquipments(prev => prev.map(e => e.id === id ? { ...e, status } : e));
+    // Best-effort gọi BE khi id là số thật; lỗi/không phải id thật → giữ cập nhật cục bộ.
+    const idNum = Number(id);
+    if (Number.isFinite(idNum) && idNum > 0) {
+      realEquipmentService.updateStatus(idNum, toLifecycle(status)).catch(() => { /* fallback cục bộ */ });
+    }
     Alert.alert('✅ Cập nhật thành công', `Trạng thái đã được cập nhật: ${STATUS_CONFIG[status].label}`);
   };
 

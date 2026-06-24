@@ -12,6 +12,7 @@ const statusBadge: Record<string, { label: string; cls: string; dot: string }> =
   PENDING_HOST_REVIEW:      { label: 'Chờ phê duyệt',    cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
   PENDING_OPERATION_MANAGER:{ label: 'Chờ gán quản lý',  cls: 'bg-violet-100 text-violet-700',   dot: 'bg-violet-500' },
   ACTIVE:                   { label: 'Hoạt động',        cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  RENTED:                   { label: 'Đã cho thuê',      cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
   UNDER_RENOVATION:         { label: 'Đang cải tạo',     cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500' },
   RENOVATION_COMPLETED:     { label: 'Đã cải tạo xong',  cls: 'bg-teal-100 text-teal-700',       dot: 'bg-teal-500' },
   DRAFT:                    { label: 'Nháp',              cls: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
@@ -26,7 +27,7 @@ const statusBadge: Record<string, { label: string; cls: string; dot: string }> =
  * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Host"), PENDING_HOST_REVIEW (đang chờ duyệt).
  */
 const isHostApproved = (p: PropertyResponse): boolean => {
-  if (p.status === 'ACTIVE' || p.status === 'PENDING_OPERATION_MANAGER') return true;
+  if (p.status === 'ACTIVE' || p.status === 'RENTED' || p.status === 'PENDING_OPERATION_MANAGER') return true;
   if (p.status === 'UNDER_RENOVATION' || p.status === 'DISABLED') {
     return (p.price ?? 0) > 0 || !!p.operationManagerId;
   }
@@ -351,6 +352,7 @@ export const PropertyList = () => {
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-300">
               <option value="all">Mọi trạng thái</option>
               <option value="ACTIVE">Hoạt động</option>
+              <option value="RENTED">Đã cho thuê</option>
               <option value="PENDING_OPERATION_MANAGER">Chờ gán quản lý</option>
               <option value="UNDER_RENOVATION">Đang cải tạo</option>
               <option value="DISABLED">Vô hiệu</option>

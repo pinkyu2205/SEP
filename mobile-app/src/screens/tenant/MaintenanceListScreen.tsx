@@ -3,13 +3,15 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { MaintenanceRequest, MaintenanceStatus } from '../../types';
 import {
   getMaintenancePriorityLabel, getMaintenancePriorityColor, formatDate,
 } from '../../utils';
 import { useTenantRequests } from '../../store/maintenanceStore';
+import { realMaintenanceService } from '../../services/maintenanceService.real';
+import { dtoToTenantRequest } from '../../services/maintenanceMappers';
 
 // ─── Filter tabs ───────────────────────────────────────────
 const FILTERS: { key: 'all' | MaintenanceStatus; label: string }[] = [
@@ -127,7 +129,21 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
 export const MaintenanceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<'all' | MaintenanceStatus>('all');
-  const all = useTenantRequests();
+  const mockAll = useTenantRequests();
+  const [remote, setRemote] = useState<MaintenanceRequest[] | null>(null);
+
+  // Lấy danh sách thật từ BE; nếu lỗi (BE chưa sẵn sàng) → dùng store mock.
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      realMaintenanceService.getMyRequests()
+        .then(page => { if (active) setRemote(page.content.map(dtoToTenantRequest)); })
+        .catch(() => { if (active) setRemote(null); });
+      return () => { active = false; };
+    }, []),
+  );
+
+  const all = remote ?? mockAll;
 
   const active   = all.filter(r => ACTIVE.includes(r.status as MaintenanceStatus));
   const filtered = filter === 'all' ? active : all.filter(r => r.status === filter);

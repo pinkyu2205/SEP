@@ -26,8 +26,9 @@ function mapToPublicProperty(p: GuestPropertyResponse, pricing: { price: number;
     price: pricing.price,
     area: pricing.area,
     type: isWholeHouse ? 'WHOLE_HOUSE' : 'ROOM',
-    // BE rentalAvailable=false → đã có khách thuê; mặc định coi như còn trống.
-    status: p.rentalAvailable === false ? 'RENTED' : 'AVAILABLE',
+    // RENTED khi BE đánh dấu status='RENTED' hoặc rentalAvailable=false (đã có khách thuê);
+    // còn lại coi như còn trống.
+    status: p.status === 'RENTED' || p.rentalAvailable === false ? 'RENTED' : 'AVAILABLE',
     images: p.imageUrls ?? [],
     amenities: [],
     bedrooms: isWholeHouse ? (p.totalRooms || undefined) : undefined,
@@ -65,8 +66,12 @@ async function fetchActiveProperties(): Promise<PublicProperty[]> {
     const res: { content: GuestPropertyResponse[] } = await api.get(PUBLIC_BASE, {
       params: { page: 0, size: 200 },
     });
-    // BE đã lọc sẵn ACTIVE + đã gán manager ở server, không cần lọc lại phía FE.
-    return Promise.all((res.content ?? []).map(async p => mapToPublicProperty(p, await resolvePricing(p))));
+    // BE đã lọc ACTIVE + đã gán manager ở server; vẫn lọc lại phía FE cho chắc
+    // và để giữ cả property RENTED (đã có khách thuê) hiển thị.
+    const active = (res.content ?? []).filter(
+      p => (p.status === 'ACTIVE' || p.status === 'RENTED') && p.operationManagerId != null,
+    );
+    return Promise.all(active.map(async p => mapToPublicProperty(p, await resolvePricing(p))));
   } catch {
     return [];
   }

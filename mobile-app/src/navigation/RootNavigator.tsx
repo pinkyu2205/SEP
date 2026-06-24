@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GuestStackNavigator } from './GuestStackNavigator';
 import { ChangePasswordScreen } from '../screens/auth/ChangePasswordScreen';
@@ -8,6 +8,7 @@ import { TutorialScreen } from '../screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
 import { OnboardingScreen } from '../screens/manager/OnboardingScreen';
+import { OnboardingSuccessScreen } from '../screens/manager/OnboardingSuccessScreen';
 import { MeterReadingScreen } from '../screens/manager/MeterReadingScreen';
 import { UtilityBillingScreen } from '../screens/manager/UtilityBillingScreen';
 import { RoomManageScreen } from '../screens/manager/RoomManageScreen';
@@ -51,6 +52,14 @@ import { CheckoutDetailScreen } from '../screens/tenant/CheckoutDetailScreen';
 
 import { useAuth } from '../hooks';
 import { Colors } from '../constants';
+import {
+  addNotificationResponseListener,
+  handleInitialNotification,
+  NotificationData,
+} from '../services/notifications';
+
+// Các route nằm trong tab Tenant (cần điều hướng lồng qua 'TenantTabs')
+const TENANT_TAB_ROUTES = ['Home', 'InvoiceList', 'MaintenanceList', 'TenantContracts', 'Profile'];
 
 const Stack = createNativeStackNavigator();
 
@@ -63,6 +72,23 @@ const baseStackOptions = {
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const navRef = useNavigationContainerRef();
+
+  // Điều hướng khi người dùng bấm vào thông báo đẩy (dựa trên payload `data` từ BE)
+  useEffect(() => {
+    const routeFromData = (data: NotificationData) => {
+      if (!data?.screen || !navRef.isReady()) return;
+      const nav = navRef as any;
+      if (TENANT_TAB_ROUTES.includes(data.screen)) {
+        nav.navigate('TenantTabs', { screen: data.screen, params: data.params });
+      } else {
+        nav.navigate(data.screen, data.params);
+      }
+    };
+    const unsub = addNotificationResponseListener(routeFromData);
+    handleInitialNotification(routeFromData); // app mở từ trạng thái tắt hẳn
+    return unsub;
+  }, [navRef]);
 
   if (isLoading) {
     return (
@@ -73,7 +99,7 @@ export const RootNavigator: React.FC = () => {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navRef}>
       <Stack.Navigator screenOptions={baseStackOptions}>
         {!isAuthenticated ? (
           <Stack.Screen name="GuestStack" component={GuestStackNavigator} />
@@ -86,6 +112,7 @@ export const RootNavigator: React.FC = () => {
           <Stack.Group screenOptions={baseStackOptions}>
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} options={{ animation: 'fade' }} />
             <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="OnboardingSuccess" component={OnboardingSuccessScreen} options={{ gestureEnabled: false }} />
             <Stack.Screen name="MeterReading" component={MeterReadingScreen} />
             <Stack.Screen name="UtilityBilling" component={UtilityBillingScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />

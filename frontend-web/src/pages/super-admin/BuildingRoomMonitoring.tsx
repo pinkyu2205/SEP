@@ -25,6 +25,7 @@ const statusBadge: Record<string, { label: string; cls: string }> = {
   UNDER_RENOVATION: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
   PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', cls: 'bg-blue-100 text-blue-800' },
   ACTIVE: { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' },
+  RENTED: { label: 'Đã cho thuê', cls: 'bg-blue-100 text-blue-800' },
   DISABLED: { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' },
   // Legacy
   MAINTENANCE: { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' },
@@ -189,6 +190,7 @@ export const BuildingRoomMonitoring = () => {
             <option value="UNDER_RENOVATION">Đang cải tạo</option>
             <option value="PENDING_HOST_REVIEW">Chờ Host duyệt</option>
             <option value="ACTIVE">Đang kinh doanh</option>
+            <option value="RENTED">Đã cho thuê</option>
             <option value="DISABLED">Đã vô hiệu</option>
           </select>
           <select value={districtFilter} onChange={e => setDistrictFilter(e.target.value)} className="input-field w-44">
@@ -218,7 +220,7 @@ export const BuildingRoomMonitoring = () => {
                         <Pencil className="w-4 h-4" />
                       </button>
                     )}
-                    {building.status !== 'ACTIVE' && building.status !== 'DISABLED' && (
+                    {building.status !== 'ACTIVE' && building.status !== 'RENTED' && building.status !== 'DISABLED' && (
                       <button onClick={(e) => handleDisable(building.id, e)} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
                         <XCircle className="w-4 h-4" />
                       </button>
