@@ -208,7 +208,7 @@ const viewerStyles = StyleSheet.create({
 });
 
 // =====================================================================
-// Room Detail Bottom Sheet  (whole_house only)
+// Room Detail Bottom Sheet  (by-room only)
 // =====================================================================
 interface RoomDetailSheetProps {
   visible: boolean;
@@ -371,7 +371,7 @@ const sheetStyles = StyleSheet.create({
 });
 
 // =====================================================================
-// Expandable Room Accordion  (whole_house only)
+// Expandable Room Accordion  (by-room only)
 // =====================================================================
 interface ExpandableRoomProps {
   room: PropertyRoom;
@@ -397,7 +397,7 @@ const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
           <View style={[accordionStyles.dot, room.status === 'available' ? accordionStyles.dotGreen : accordionStyles.dotGray]} />
           <View>
             <Text style={accordionStyles.name}>{room.name}</Text>
-            <Text style={accordionStyles.meta}>Tầng {room.floor} · {room.area}m² · {room.status === 'available' ? '🟢 Trống' : '🔴 Đã thuê'}</Text>
+            <Text style={accordionStyles.meta}>{room.floor > 0 ? `Tầng ${room.floor} · ` : ''}{room.area}m² · {room.status === 'available' ? '🟢 Còn trống' : '🔴 Đã thuê'}</Text>
           </View>
         </View>
         <View style={accordionStyles.headerRight}>
@@ -417,7 +417,7 @@ const ExpandableRoom: React.FC<ExpandableRoomProps> = ({ room, onPress }) => {
             ))}
           </View>
         ) : (
-          <Text style={accordionStyles.empty}>Phòng trống, không có nội thất.</Text>
+          <Text style={accordionStyles.empty}>Liên hệ chủ nhà để biết chi tiết nội thất phòng.</Text>
         )}
         <TouchableOpacity style={accordionStyles.moreBtn} onPress={onPress}>
           <Text style={accordionStyles.moreTxt}>📸 Xem ảnh & chi tiết đầy đủ →</Text>
@@ -538,9 +538,12 @@ export const PropertyDetailScreen: React.FC = () => {
   }
 
   const isWholeHouse = property.propertyType === 'whole_house';
-  const typeLabel = isWholeHouse ? 'Thuê nguyên căn' : 'Phòng trọ';
+  const typeLabel = isWholeHouse ? 'Nguyên căn' : 'Phòng trọ';
+  // Nhà chia phòng: BE public chỉ trả phòng AVAILABLE → đây là danh sách phòng thuê được.
   const availableRooms = property.rooms.filter((r) => r.status === 'available');
-  const isAvailable = property.availableRooms > 0;
+  // Nguyên căn: còn trống tính theo cả căn (rentalAvailable). Chia phòng: còn ≥1 phòng trống.
+  const isAvailable = isWholeHouse ? property.availableRooms > 0 : availableRooms.length > 0;
+  const hasPriceRange = !isWholeHouse && property.priceTo > property.priceFrom;
   const DESC_LIMIT = 160;
   const longDesc = property.description && property.description.length > DESC_LIMIT;
 
@@ -603,29 +606,38 @@ export const PropertyDetailScreen: React.FC = () => {
           <Text style={styles.title}>{property.name}</Text>
           <Text style={styles.addr}>📍 {property.address}, {property.ward}, {property.city}</Text>
 
-          {/* Availability badge — apartment only */}
-          {!isWholeHouse && <AvailabilityBadge available={isAvailable} />}
+          {/* Availability badge — cả hai loại hình */}
+          <AvailabilityBadge available={isAvailable} />
 
           {/* ── Price card ─────────────────────────────────────────────── */}
           <View style={styles.priceCard}>
             <View style={styles.priceMain}>
-              <Text style={styles.priceLabel}>{isWholeHouse ? 'Giá thuê' : 'Giá thuê từ'}</Text>
+              <Text style={styles.priceLabel}>{isWholeHouse ? 'Giá thuê nguyên căn' : 'Giá thuê phòng từ'}</Text>
               <Text style={styles.priceValue}>{formatCurrency(property.priceFrom)}</Text>
+              {hasPriceRange && (
+                <Text style={styles.priceRangeTo}> – {formatCurrency(property.priceTo)}</Text>
+              )}
               <Text style={styles.priceUnit}>/tháng</Text>
             </View>
             <View style={styles.priceDivider} />
             <View style={styles.priceExtras}>
               <View style={styles.priceRow}>
                 <Text style={styles.priceExtraLabel}>⚡ Tiền điện</Text>
-                <Text style={styles.priceExtraValue}>{formatCurrency(property.electricityRate)}/kWh</Text>
+                <Text style={styles.priceExtraValue}>
+                  {property.electricityRate > 0 ? `${formatCurrency(property.electricityRate)}/kWh` : 'Liên hệ'}
+                </Text>
               </View>
               <View style={styles.priceRow}>
                 <Text style={styles.priceExtraLabel}>💧 Tiền nước</Text>
-                <Text style={styles.priceExtraValue}>{formatCurrency(property.waterRate)}/khối</Text>
+                <Text style={styles.priceExtraValue}>
+                  {property.waterRate > 0 ? `${formatCurrency(property.waterRate)}/khối` : 'Liên hệ'}
+                </Text>
               </View>
               <View style={styles.priceRow}>
                 <Text style={styles.priceExtraLabel}>🔒 Đặt cọc</Text>
-                <Text style={styles.priceExtraValue}>{property.depositMonths} tháng</Text>
+                <Text style={styles.priceExtraValue}>
+                  {property.depositMonths > 0 ? `${property.depositMonths} tháng` : 'Thỏa thuận'}
+                </Text>
               </View>
               {property.serviceFee > 0 && (
                 <View style={styles.priceRow}>
@@ -636,53 +648,52 @@ export const PropertyDetailScreen: React.FC = () => {
             </View>
           </View>
 
-          {/* ── Quick Info 2×2 grid ──────────────────────────────────── */}
+          {/* ── Quick Info 2×2 grid — khác nhau theo loại hình ────────── */}
           <View style={styles.factsGrid}>
-            {/* Cell 1: Area — common */}
+            {/* Cell 1: Diện tích */}
             <View style={styles.factCell}>
               <Text style={styles.factIcon}>📐</Text>
               <Text style={styles.factValue}>{property.area}m²</Text>
-              <Text style={styles.factLabel}>Diện tích</Text>
+              <Text style={styles.factLabel}>{isWholeHouse ? 'Diện tích căn' : 'Diện tích phòng'}</Text>
             </View>
 
-            {/* Cell 2: Property type — common */}
+            {/* Cell 2: Loại hình */}
             <View style={styles.factCell}>
               <Text style={styles.factIcon}>{isWholeHouse ? '🏠' : '🛏'}</Text>
-              <Text style={[styles.factValue, { fontSize: 13 }]}>{typeLabel}</Text>
+              <Text style={[styles.factValue, { fontSize: 14 }]}>{typeLabel}</Text>
               <Text style={styles.factLabel}>Loại hình</Text>
             </View>
 
             {isWholeHouse ? (
-              // Whole house: show room count + availability
+              // Nguyên căn: tổng phòng ngủ + trạng thái cả căn
               <>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🚪</Text>
+                  <Text style={styles.factIcon}>🛏</Text>
                   <Text style={styles.factValue}>{property.totalRooms}</Text>
                   <Text style={styles.factLabel}>Số phòng ngủ</Text>
                 </View>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>✅</Text>
-                  <Text style={[styles.factValue, { color: availableRooms.length > 0 ? Colors.success : Colors.error }]}>
-                    {availableRooms.length > 0 ? 'Còn trống' : 'Đã thuê'}
+                  <Text style={styles.factIcon}>{isAvailable ? '✅' : '🔒'}</Text>
+                  <Text style={[styles.factValue, { fontSize: 14, color: isAvailable ? Colors.success : Colors.error }]}>
+                    {isAvailable ? 'Còn trống' : 'Đã thuê'}
                   </Text>
                   <Text style={styles.factLabel}>Trạng thái</Text>
                 </View>
               </>
             ) : (
-              // Room rental: show private room + private bathroom indicators
+              // Chia phòng: số phòng trống + tổng số phòng
               <>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🚿</Text>
-                  <Text style={[styles.factValue, { fontSize: 13 }]}>
-                    {property.amenities.some((a) => /tắm riêng|wc riêng|toilet riêng|nhà vệ sinh riêng/i.test(a))
-                      ? 'Riêng' : 'Chung'}
+                  <Text style={styles.factIcon}>🚪</Text>
+                  <Text style={[styles.factValue, { color: availableRooms.length > 0 ? Colors.success : Colors.error }]}>
+                    {availableRooms.length}
                   </Text>
-                  <Text style={styles.factLabel}>Nhà vệ sinh</Text>
+                  <Text style={styles.factLabel}>Phòng còn trống</Text>
                 </View>
                 <View style={styles.factCell}>
-                  <Text style={styles.factIcon}>🚪</Text>
-                  <Text style={[styles.factValue, { fontSize: 13 }]}>Phòng riêng</Text>
-                  <Text style={styles.factLabel}>Không gian</Text>
+                  <Text style={styles.factIcon}>🏢</Text>
+                  <Text style={styles.factValue}>{property.totalRooms}</Text>
+                  <Text style={styles.factLabel}>Tổng số phòng</Text>
                 </View>
               </>
             )}
@@ -717,20 +728,49 @@ export const PropertyDetailScreen: React.FC = () => {
             )}
           </View>
 
-          {/* ── Whole house: room structure ───────────────────────────── */}
-          {isWholeHouse && (
+          {/* ── Nguyên căn: bạn nhận được trọn căn ────────────────────── */}
+          {isWholeHouse ? (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🏡 Cấu trúc phòng ngủ ({property.rooms.length} phòng)</Text>
-              <View style={styles.hintBox}>
-                <Text style={styles.hintTxt}>💡 Nhấn vào phòng để xem nội thất chi tiết</Text>
+              <Text style={styles.sectionTitle}>🏡 Thuê trọn nguyên căn</Text>
+              <View style={styles.includeCard}>
+                <View style={styles.includeRow}>
+                  <Text style={styles.includeIcon}>🛏</Text>
+                  <Text style={styles.includeTxt}>Toàn bộ {property.totalRooms} phòng ngủ, sử dụng riêng cho gia đình bạn</Text>
+                </View>
+                <View style={styles.includeRow}>
+                  <Text style={styles.includeIcon}>📐</Text>
+                  <Text style={styles.includeTxt}>{property.area}m² diện tích sử dụng cho cả căn</Text>
+                </View>
+                <View style={styles.includeRow}>
+                  <Text style={styles.includeIcon}>🔑</Text>
+                  <Text style={styles.includeTxt}>Toàn quyền sử dụng, tự do bố trí không gian</Text>
+                </View>
               </View>
-              {property.rooms.map((room) => (
-                <ExpandableRoom
-                  key={room.id}
-                  room={room}
-                  onPress={() => { setSelectedRoom(room); setShowRoomDetail(true); }}
-                />
-              ))}
+            </View>
+          ) : (
+            /* ── Chia phòng: danh sách phòng còn trống (clickable) ────── */
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>🚪 Phòng còn trống ({availableRooms.length})</Text>
+              {availableRooms.length > 0 ? (
+                <>
+                  <View style={styles.hintBox}>
+                    <Text style={styles.hintTxt}>💡 Nhấn vào phòng để xem ảnh & nội thất chi tiết</Text>
+                  </View>
+                  {availableRooms.map((room) => (
+                    <ExpandableRoom
+                      key={room.id}
+                      room={room}
+                      onPress={() => { setSelectedRoom(room); setShowRoomDetail(true); }}
+                    />
+                  ))}
+                </>
+              ) : (
+                <View style={styles.emptyRooms}>
+                  <Text style={styles.emptyRoomsTxt}>
+                    Hiện chưa có phòng trống. Liên hệ chủ nhà để được tư vấn các phòng sắp ra.
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -760,8 +800,8 @@ export const PropertyDetailScreen: React.FC = () => {
         <StickyContactBar propertyName={property.name} />
       </View>
 
-      {/* ── Room Detail Sheet (whole_house only) ─────────────────────── */}
-      {isWholeHouse && (
+      {/* ── Room Detail Sheet (chia phòng) ───────────────────────────── */}
+      {!isWholeHouse && (
         <RoomDetailSheet
           visible={showRoomDetail}
           room={selectedRoom}
@@ -842,6 +882,7 @@ const styles = StyleSheet.create({
   priceMain: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: Spacing.md },
   priceLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: '500' },
   priceValue: { fontSize: 28, fontWeight: '800', color: Colors.primary, letterSpacing: -0.5 },
+  priceRangeTo: { fontSize: 19, fontWeight: '800', color: Colors.primary, letterSpacing: -0.3 },
   priceUnit: { fontSize: 14, color: Colors.textSecondary },
   priceDivider: { height: 1, backgroundColor: Colors.divider, marginBottom: Spacing.md },
   priceExtras: { gap: Spacing.xs },
@@ -875,6 +916,22 @@ const styles = StyleSheet.create({
 
   hintBox: { backgroundColor: '#FFFBEB', borderRadius: 10, padding: Spacing.sm, marginBottom: Spacing.md },
   hintTxt: { fontSize: 13, color: '#92400E', fontWeight: '500' },
+
+  // Nguyên căn — khối "bạn nhận được gì"
+  includeCard: {
+    backgroundColor: Colors.white, borderRadius: 14, padding: Spacing.base,
+    gap: Spacing.md, ...Shadow.sm,
+  },
+  includeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  includeIcon: { fontSize: 20, width: 26, textAlign: 'center' },
+  includeTxt: { flex: 1, fontSize: 14, lineHeight: 20, color: Colors.textPrimary },
+
+  // Chia phòng — trạng thái rỗng
+  emptyRooms: {
+    backgroundColor: Colors.white, borderRadius: 14, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.divider,
+  },
+  emptyRoomsTxt: { fontSize: 14, lineHeight: 21, color: Colors.textSecondary, textAlign: 'center' },
 
   stickyWrap: { position: 'absolute', bottom: 0, left: 0, right: 0 },
 });

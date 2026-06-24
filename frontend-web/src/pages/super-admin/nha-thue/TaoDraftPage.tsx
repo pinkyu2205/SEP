@@ -252,11 +252,32 @@ export const TaoDraftPage = () => {
     } finally { setSubmitting(false); }
   };
 
-  const handleDeleteBuilding = async (id: number, e: React.MouseEvent) => {
+  // Chốt chặn: chỉ cho vô hiệu/xóa nhà ACTIVE khi không còn khách thuê.
+  // - Nhà chia phòng: kiểm tra phòng có status RENTED.
+  // - Nhà nguyên căn: không có phòng lẻ → dựa vào xác nhận thủ công ở hộp thoại.
+  const ensureVacant = async (b: PropertyResponse): Promise<boolean> => {
+    if (b.wholeHouse === false) {
+      try {
+        const rooms = await propertyService.getRooms(b.id);
+        const rented = rooms.filter(r => r.status === 'RENTED');
+        if (rented.length > 0) {
+          toast.error(`Còn ${rented.length} phòng đang có khách thuê — không thể thực hiện. Chờ hết hợp đồng hoặc chuyển khách trước.`);
+          return false;
+        }
+      } catch {
+        // getRooms lỗi (vd BE thiếu migration is_deleted) → để BE quyết định cuối cùng
+      }
+    }
+    return true;
+  };
+
+  const handleDeleteBuilding = async (b: PropertyResponse, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm('Xác nhận xóa tòa nhà? Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của căn này sẽ bị xóa.')) return;
+    if (b.status === 'ACTIVE' && !(await ensureVacant(b))) return;
+    const extra = b.wholeHouse ? ' Hãy chắc chắn nhà hiện KHÔNG còn khách thuê.' : '';
+    if (!window.confirm(`Xác nhận xóa tòa nhà "${b.propertyName}"? Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của căn này sẽ bị xóa.${extra}`)) return;
     try {
-      await propertyService.deleteProperty(id);
+      await propertyService.deleteProperty(b.id);
       toast.success('Đã xóa căn nhà');
       fetchBuildings();
     } catch (err: any) {
@@ -269,6 +290,20 @@ export const TaoDraftPage = () => {
         toast.error('Bạn cần quyền ADMIN để xóa căn nhà này');
       }
       // 422 (ACTIVE / đã có chỉ số điện nước) & 400: api interceptor đã hiển thị message từ BE
+    }
+  };
+
+  const handleDisableBuilding = async (b: PropertyResponse, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (b.status === 'ACTIVE' && !(await ensureVacant(b))) return;
+    const extra = b.wholeHouse ? ' Hãy chắc chắn nhà hiện KHÔNG còn khách thuê.' : '';
+    if (!window.confirm(`Vô hiệu hóa tòa nhà "${b.propertyName}"?${extra}`)) return;
+    try {
+      await propertyService.disableProperty(b.id);
+      toast.success('Đã vô hiệu hóa');
+      fetchBuildings();
+    } catch {
+      // api interceptor đã toast lỗi
     }
   };
 
@@ -832,27 +867,32 @@ export const TaoDraftPage = () => {
                         className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
                         <Power className="w-4 h-4" />
                       </button>
-                      <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa vĩnh viễn"
+                      <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa vĩnh viễn"
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  ) : b.status === 'ACTIVE' ? (
+                    <>
+                      {/* Đang kinh doanh → vô hiệu hóa / xóa, chỉ khi không còn khách thuê */}
+                      <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa (cần phòng trống)"
+                        className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                      <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa (cần phòng trống)"
                         className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </>
                   ) : (
                     <>
-                      {/* Bước 1: vô hiệu hóa (chưa ACTIVE mới cho vô hiệu) */}
-                      {b.status !== 'ACTIVE' && (
-                        <button onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!window.confirm('Vô hiệu hóa tòa nhà này?')) return;
-                          try { await propertyService.disableProperty(b.id); toast.success('Đã vô hiệu hóa'); fetchBuildings(); }
-                          catch { /* api interceptor đã toast lỗi */ }
-                        }} title="Vô hiệu hóa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                      )}
-                      {/* Nháp: cho xóa trực tiếp (chưa từng vận hành) */}
+                      {/* Các trạng thái khác (Nháp/Cải tạo/Chờ duyệt...) → vô hiệu hóa; Nháp cho xóa trực tiếp */}
+                      <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa"
+                        className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                        <XCircle className="w-4 h-4" />
+                      </button>
                       {b.status === 'DRAFT' && (
-                        <button onClick={(e) => handleDeleteBuilding(b.id, e)} title="Xóa nháp"
+                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa nháp"
                           className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
                           <Trash2 className="w-4 h-4" />
                         </button>

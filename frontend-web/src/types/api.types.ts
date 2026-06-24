@@ -146,6 +146,39 @@ export interface PropertyResponse {
   deposit?: number;
 }
 
+/**
+ * Response cho trang guest công khai — GET /api/v1/public/properties[/{id}].
+ * Gồm các field cơ bản giống `PropertyResponse` cộng dữ liệu cho khách thuê.
+ * Các field lat/long, giá điện/nước, cọc, phí dịch vụ CÓ THỂ null khi OM chưa nhập.
+ * (BE: BE-multipart-public-guest-api-2026-06-20.md)
+ */
+export interface GuestPropertyResponse {
+  id: number;
+  propertyName: string;
+  shortAddress: string;
+  fullAddress?: string;
+  descriptions?: string;
+  zoneId: string;        // UUID
+  zoneName: string;
+  areaSize?: number;
+  wholeHouse: boolean | null;
+  totalRooms?: number;
+  status: string;        // PropertyStatus
+  price?: number;
+  operationManagerId?: string;
+  operationManagerName?: string;
+  imageUrls?: string[];
+  // Field riêng cho guest (nullable)
+  latitude?: number | null;
+  longitude?: number | null;
+  amenities?: string[];              // tên catalog thiết bị distinct của nhà
+  electricityUnitPrice?: number | null;
+  waterUnitPrice?: number | null;
+  depositMonths?: number | null;
+  serviceFee?: number | null;
+  rentalAvailable?: boolean;         // còn nhận khách thuê hay không
+}
+
 /** Legacy — giữ lại cho PropertyFormModal cũ */
 export interface PropertyCreateRequest {
   propertyName: string;
@@ -639,6 +672,33 @@ export interface BulkImportResponse {
   equipmentRowsImported: number;
   results: BulkImportContractResult[];
   errors: BulkImportError[]; // luôn [] khi HTTP 200
+}
+
+// =============================================================================
+// BƯỚC 2 — Gắn ảnh hàng loạt từ file ZIP
+// POST /api/v1/import/property-images-zip  (xem import-hang-loat-cach-hoat-dong-va-luu-anh.md)
+// =============================================================================
+
+/** Kết quả gắn ảnh cho 1 căn (theo mã hợp đồng) khi import ZIP */
+export interface BulkImportImageContractResult {
+  /** ATTACHED = đã gán · PREVIEW = dryRun · NOT_FOUND = mã không có trong DB */
+  status: 'ATTACHED' | 'PREVIEW' | 'NOT_FOUND' | 'NO_IMAGES';
+  contractCode: string;
+  propertyId: number | null;
+  propertyName: string | null;
+  imagesAttached: number;
+  message: string | null;
+}
+
+/** Response của POST /api/v1/import/property-images-zip (dry-run lẫn thật) */
+export interface BulkImportImagesResponse {
+  dryRun: boolean;
+  contractsInZip: number;     // số mã hợp đồng (folder con) trong zip
+  contractsMatched: number;   // khớp căn trong DB
+  contractsNotFound: number;  // có trong zip nhưng không có trong DB
+  imagesAttached: number;     // tổng ảnh đã/sẽ gán
+  results: BulkImportImageContractResult[];
+  warnings: string[];
 }
 
 /**
