@@ -4,10 +4,13 @@
 import api from './api';
 import type { Paginated } from '../types/common';
 import type { PropertyFilter, PublicProperty } from '../types/property';
-import type { PropertyResponse, RoomResponse } from '../types/api.types';
+import type { GuestPropertyResponse, RoomResponse } from '../types/api.types';
 import { PROPERTIES_PER_PAGE } from '../utils/constants';
 
-function mapToPublicProperty(p: PropertyResponse, pricing: { price: number; area: number }): PublicProperty {
+// BE (20/06/2026) mở endpoint public GET-only cho guest — không cần token.
+const PUBLIC_BASE = '/api/v1/public/properties';
+
+function mapToPublicProperty(p: GuestPropertyResponse, pricing: { price: number; area: number }): PublicProperty {
   const isWholeHouse = p.wholeHouse === true;
   const summary = p.descriptions
     ? p.descriptions.slice(0, 120) + (p.descriptions.length > 120 ? '…' : '')
@@ -23,7 +26,8 @@ function mapToPublicProperty(p: PropertyResponse, pricing: { price: number; area
     price: pricing.price,
     area: pricing.area,
     type: isWholeHouse ? 'WHOLE_HOUSE' : 'ROOM',
-    status: p.status === 'RENTED' ? 'RENTED' : 'AVAILABLE',
+    // BE rentalAvailable=false → đã có khách thuê; mặc định coi như còn trống.
+    status: p.rentalAvailable === false ? 'RENTED' : 'AVAILABLE',
     images: p.imageUrls ?? [],
     amenities: [],
     bedrooms: isWholeHouse ? (p.totalRooms || undefined) : undefined,
@@ -38,11 +42,11 @@ function mapToPublicProperty(p: PropertyResponse, pricing: { price: number; area
  * - Nhà chia phòng: lấy theo PHÒNG đại diện (phòng có giá cao nhất) — diện tích là
  *   diện tích PHÒNG đó, KHÔNG phải diện tích tổng toà nhà.
  */
-async function resolvePricing(p: PropertyResponse): Promise<{ price: number; area: number }> {
+async function resolvePricing(p: GuestPropertyResponse): Promise<{ price: number; area: number }> {
   if (p.wholeHouse !== false) return { price: p.price ?? 0, area: p.areaSize ?? 0 };
 
   try {
-    const rooms: RoomResponse[] = await api.get(`/api/v1/properties/${p.id}/rooms`);
+    const rooms: RoomResponse[] = await api.get(`${PUBLIC_BASE}/${p.id}/rooms`);
     const priced = rooms.filter(r => (r.price ?? 0) > 0);
     if (priced.length > 0) {
       const rep = priced.reduce((a, b) => ((b.price ?? 0) > (a.price ?? 0) ? b : a));
@@ -58,11 +62,11 @@ async function resolvePricing(p: PropertyResponse): Promise<{ price: number; are
 
 async function fetchActiveProperties(): Promise<PublicProperty[]> {
   try {
-    const res: { content: PropertyResponse[] } = await api.get('/api/v1/properties', {
+    const res: { content: GuestPropertyResponse[] } = await api.get(PUBLIC_BASE, {
       params: { page: 0, size: 200 },
     });
-    const active = res.content.filter(p => (p.status === 'ACTIVE' || p.status === 'RENTED') && p.operationManagerId != null);
-    return Promise.all(active.map(async p => mapToPublicProperty(p, await resolvePricing(p))));
+    // BE đã lọc sẵn ACTIVE + đã gán manager ở server, không cần lọc lại phía FE.
+    return Promise.all((res.content ?? []).map(async p => mapToPublicProperty(p, await resolvePricing(p))));
   } catch {
     return [];
   }
@@ -124,8 +128,8 @@ export async function getFeaturedProperties(limit = 6): Promise<PublicProperty[]
 
 export async function getPropertyById(id: string): Promise<PublicProperty | null> {
   try {
-    const p: PropertyResponse = await api.get(`/api/v1/properties/${id}`);
-    if ((p.status !== 'ACTIVE' && p.status !== 'RENTED') || p.operationManagerId == null) return null;
+    // BE trả 404 nếu không thoả ACTIVE + đã gán manager → catch xuống null.
+    const p: GuestPropertyResponse = await api.get(`${PUBLIC_BASE}/${id}`);
     return mapToPublicProperty(p, await resolvePricing(p));
   } catch {
     return null;

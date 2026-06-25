@@ -1,8 +1,10 @@
 // Goong REST services — Autocomplete / Place Detail / Geocode.
 // Dùng VITE_GOONG_API_KEY (loại "API Key", KHÔNG phải Maptiles Key).
-// Gọi thẳng https://rest.goong.io (domain ngoài, không qua proxy BE).
-
-const REST = 'https://rest.goong.io';
+// Domain REST đúng của Goong là https://rsapi.goong.io (KHÔNG phải rest.goong.io).
+//
+// Khi dev: gọi qua proxy Vite ('/goong-rest' → https://rsapi.goong.io) để tránh CORS.
+// Khi build prod: gọi thẳng (cần cấu hình proxy/CORS ở hạ tầng thật).
+const REST = import.meta.env.DEV ? '/goong-rest' : 'https://rsapi.goong.io';
 const API_KEY = import.meta.env.VITE_GOONG_API_KEY;
 
 export interface GoongPrediction {
