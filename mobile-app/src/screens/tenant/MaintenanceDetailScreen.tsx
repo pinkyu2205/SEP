@@ -1,36 +1,74 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { MaintenanceRequest, MaintenanceStatus } from '../../types';
+import { MaintenanceRequest, MaintenanceStatus, MaintenanceTimeline } from '../../types';
 import {
   formatDate, formatDateTime, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor,
 } from '../../utils';
+import {
+  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
+} from '../../constants/maintenance';
+import { useTenantRequests, tenantMaintenanceStore } from '../../store/maintenanceStore';
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  electrical: '⚡', plumbing: '🚰', furniture: '🪑', appliance: '📺', other: '🔧',
-};
+const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
-const STATUS_META: Record<string, { label: string; color: string; emoji: string }> = {
-  pending: { label: 'Chờ xử lý', color: Colors.warning, emoji: '🕐' },
-  accepted: { label: 'Đã tiếp nhận', color: Colors.info, emoji: '📋' },
-  in_progress: { label: 'Đang xử lý', color: Colors.primary, emoji: '🔧' },
-  resolved: { label: 'Hoàn tất', color: Colors.success, emoji: '✅' },
-  cancelled: { label: 'Đã hủy', color: Colors.textMuted, emoji: '❌' },
-};
+const STATUS_META: Record<string, { label: string; color: string; emoji: string }> =
+  Object.fromEntries(
+    Object.entries(MAINTENANCE_STATUS_META).map(([k, m]) => [
+      k, { label: m.label, color: m.color, emoji: m.icon },
+    ]),
+  );
 
-const ORDERED_STATUSES: MaintenanceStatus[] = ['pending', 'accepted', 'in_progress', 'resolved'];
+const ORDERED_STATUSES = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
+
+const nowIso = () => new Date().toISOString();
+const mkTenantEntry = (status: MaintenanceStatus, note: string): MaintenanceTimeline =>
+  ({ status, note, updatedBy: 'Nguyễn Văn A', updatedAt: nowIso() });
 
 export const MaintenanceDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { request } = route.params as { request: MaintenanceRequest };
+  const { request: routeRequest } = route.params as { request: MaintenanceRequest };
+
+  // Ưu tiên dữ liệu live trong store (mock) để phản ánh thao tác nghiệm thu.
+  const allTenant = useTenantRequests();
+  const live = allTenant.find(r => r.id === routeRequest.id);
+  const isMock = !!live;
+  const request = live ?? routeRequest;
 
   const currentStatusMeta = STATUS_META[request.status] || STATUS_META.pending;
   const currentStatusIdx = ORDERED_STATUSES.indexOf(request.status as MaintenanceStatus);
   const priorityColor = getMaintenancePriorityColor(request.priority);
+
+  const confirmSlot = (slot: string) => {
+    tenantMaintenanceStore.update(request.id, {
+      confirmedSlot: formatDate(slot),
+      estimatedCompletionDate: slot,
+      timeline: [...request.timeline, mkTenantEntry('scheduled', `Khách xác nhận lịch hẹn: ${formatDate(slot)}`)],
+      updatedAt: nowIso().slice(0, 10),
+    });
+  };
+  const confirmDone = () => {
+    tenantMaintenanceStore.update(request.id, {
+      status: 'confirmed',
+      tenantConfirmedAt: nowIso().slice(0, 10),
+      resolvedAt: nowIso().slice(0, 10),
+      timeline: [...request.timeline, mkTenantEntry('confirmed', 'Khách đã nghiệm thu, đồng ý hoàn tất')],
+      updatedAt: nowIso().slice(0, 10),
+    });
+    Alert.alert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+  };
+  const reopen = () => {
+    tenantMaintenanceStore.update(request.id, {
+      status: 'in_progress',
+      timeline: [...request.timeline, mkTenantEntry('in_progress', 'Khách phản hồi chưa đạt — mở lại yêu cầu')],
+      updatedAt: nowIso().slice(0, 10),
+    });
+    Alert.alert('Đã mở lại', 'Yêu cầu đã được mở lại để xử lý tiếp.');
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -123,7 +161,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
               )}
               {request.estimatedCompletionDate && (
                 <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>Dự kiến xong</Text>
+                  <Text style={styles.metaLabel}>Lịch hẹn sửa</Text>
                   <Text style={[styles.metaValue, { color: Colors.primary }]}>
                     {formatDate(request.estimatedCompletionDate)}
                   </Text>
@@ -197,6 +235,34 @@ export const MaintenanceDetailScreen: React.FC = () => {
             })}
           </View>
         </View>
+
+        {/* Xác nhận lịch hẹn (khách chọn khung giờ manager đề xuất) */}
+        {isMock && request.status === 'scheduled' && (request.scheduledSlots?.length ?? 0) > 0 && !request.confirmedSlot && (
+          <View style={styles.actionSection}>
+            <Text style={styles.sectionTitle}>📅 Chọn khung giờ phù hợp</Text>
+            {request.scheduledSlots!.map(slot => (
+              <TouchableOpacity key={slot} style={styles.slotBtn} onPress={() => confirmSlot(slot)}>
+                <Text style={styles.slotBtnText}>Xác nhận: {formatDate(slot)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Nghiệm thu khi đã sửa xong (DONE) */}
+        {isMock && request.status === 'done' && (
+          <View style={styles.actionSection}>
+            <Text style={styles.sectionTitle}>🛠 Thợ báo đã sửa xong</Text>
+            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
+              Vui lòng kiểm tra và xác nhận. Nếu chưa đạt, bạn có thể mở lại yêu cầu.
+            </Text>
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone}>
+              <Text style={styles.confirmBtnText}>✅ Xác nhận đã ổn, hoàn tất</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reopenBtn} onPress={reopen}>
+              <Text style={styles.reopenBtnText}>↩ Chưa đạt — mở lại yêu cầu</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Nút liên hệ nếu đang xử lý */}
         {(request.status === 'pending' || request.status === 'in_progress') && (
@@ -285,4 +351,17 @@ const styles = StyleSheet.create({
   actionSection: { paddingHorizontal: Spacing.base, paddingBottom: 40 },
   helpCard: { backgroundColor: Colors.infoLight, borderRadius: BorderRadius.md, padding: Spacing.md },
   helpText: { fontSize: 13, color: Colors.info, lineHeight: 20 },
+
+  slotBtn: {
+    backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.primary,
+    borderRadius: BorderRadius.md, paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.sm,
+  },
+  slotBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
+  confirmBtn: {
+    backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.sm, ...Shadow.sm,
+  },
+  confirmBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
+  reopenBtn: { alignItems: 'center', paddingVertical: Spacing.md },
+  reopenBtnText: { fontSize: 14, fontWeight: '600', color: Colors.error },
 });

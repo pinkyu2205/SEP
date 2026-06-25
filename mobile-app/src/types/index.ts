@@ -117,7 +117,19 @@ export interface PaymentTransaction {
 }
 
 // ======================== MAINTENANCE (Bảo trì) ========================
-export type MaintenanceStatus = 'pending' | 'accepted' | 'in_progress' | 'resolved' | 'cancelled';
+// Luồng cải thiện (rich). 'accepted' giữ lại như legacy.
+export type MaintenanceStatus =
+  | 'pending'
+  | 'acknowledged'
+  | 'scheduled'
+  | 'in_progress'
+  | 'on_hold'
+  | 'pending_approval'
+  | 'done'
+  | 'confirmed'
+  | 'accepted'
+  | 'resolved'
+  | 'cancelled';
 export type MaintenanceCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'other';
 export type MaintenancePriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -154,6 +166,11 @@ export interface MaintenanceRequest {
   updatedAt: string;
   estimatedCompletionDate?: string;
   actualCompletionDate?: string;
+  // ── Luồng cải thiện ──
+  scheduledSlots?: string[];
+  confirmedSlot?: string;
+  doneAt?: string;
+  tenantConfirmedAt?: string;
 }
 
 export interface CreateMaintenanceRequest {
@@ -220,6 +237,11 @@ export interface CreateMaintenanceRequestDto {
 export interface ResolveMaintenanceRequestDto {
   repairCost: number;
   resolutionNote?: string;
+  /**
+   * Ai chịu chi phí sửa chữa. BE chỉ ghi expense (tính vào chi phí nhà) khi
+   * HOST. Nếu TENANT thì không tạo expense để net profit không bị sai.
+   */
+  costPaidBy?: 'HOST' | 'TENANT';
 }
 
 export interface MaintenanceDashboardDto {

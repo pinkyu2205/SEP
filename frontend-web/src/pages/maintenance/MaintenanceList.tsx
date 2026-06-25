@@ -135,6 +135,12 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
                 {request.repairCost != null ? formatCurrency(request.repairCost) : 'Chưa có'}
               </p>
             </div>
+            {request.costPaidBy && (
+              <p className="text-xs text-emerald-800 mt-1.5">
+                Bên chi trả:{' '}
+                <strong>{request.costPaidBy === 'HOST' ? '🏠 Chủ nhà (tính vào chi phí)' : '👤 Khách thuê'}</strong>
+              </p>
+            )}
             {request.resolutionNote && (
               <p className="text-sm text-emerald-900 mt-2 leading-relaxed">{request.resolutionNote}</p>
             )}

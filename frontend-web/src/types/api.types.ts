@@ -697,6 +697,8 @@ export interface MaintenanceRequestResponse {
   scheduledDate?: string;
   repairCost?: number;
   resolutionNote?: string;
+  /** Ai chịu chi phí: HOST = tính vào expense nhà, TENANT = khách tự trả. */
+  costPaidBy?: 'HOST' | 'TENANT';
   resolvedAt?: string;
   images: string[];
   timeline: MaintenanceTimelineEntry[];

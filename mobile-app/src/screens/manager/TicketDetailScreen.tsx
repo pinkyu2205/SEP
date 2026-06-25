@@ -1,26 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, TextInput,
+  Alert, TextInput, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
-  TicketStatus, PhotoEvidence, CostPaidBy, TimelineEntry,
+  TicketStatus, PhotoEvidence, CostPaidBy, TimelineEntry, DamageCause,
 } from '../../store/maintenanceStore';
 import { realMaintenanceService } from '../../services/maintenanceService.real';
 import { dtoToTicket } from '../../services/maintenanceMappers';
+import {
+  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, StatusMeta,
+  MAINTENANCE_TECHNICIANS, MAINTENANCE_COST_APPROVAL_THRESHOLD,
+  EQUIPMENT_REPLACE_SUGGEST_COUNT,
+} from '../../constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: string; step: number }> = {
-  pending:     { label: 'Chờ tiếp nhận', color: '#F59E0B', bg: '#FFFBEB', icon: '⏳', step: 0 },
-  accepted:    { label: 'Đã tiếp nhận',  color: '#3B82F6', bg: '#EFF6FF', icon: '📋', step: 1 },
-  in_progress: { label: 'Đang xử lý',    color: '#8B5CF6', bg: '#F5F3FF', icon: '🔧', step: 2 },
-  resolved:    { label: 'Hoàn tất',      color: '#10B981', bg: '#F0FDF4', icon: '✅', step: 3 },
-  cancelled:   { label: 'Đã hủy',        color: '#6B7280', bg: '#F3F4F6', icon: '✕',  step: -1 },
+// Luồng cải thiện. 'accepted' (legacy) ánh xạ về 'acknowledged'.
+const STATUS_CONFIG: Record<TicketStatus, StatusMeta> = {
+  ...MAINTENANCE_STATUS_META,
+  accepted: { ...MAINTENANCE_STATUS_META.acknowledged },
 };
 
 const PRIORITY_CONFIG = {
@@ -38,20 +42,31 @@ const CATEGORY_CONFIG = {
   other:      { label: 'Khác',     icon: '🔧' },
 } as const;
 
-const STATUS_FLOW: TicketStatus[] = ['pending', 'accepted', 'in_progress', 'resolved'];
+const STATUS_FLOW = MAINTENANCE_STATUS_FLOW as TicketStatus[];
 
-const NEXT_STATUS: Record<TicketStatus, TicketStatus | null> = {
-  pending: 'accepted', accepted: 'in_progress', in_progress: 'resolved',
-  resolved: null, cancelled: null,
-};
-const NEXT_ACTION_LABEL: Record<TicketStatus, string> = {
-  pending:     '✓ Tiếp nhận yêu cầu',
-  accepted:    '🔧 Bắt đầu xử lý',
-  in_progress: '✅ Đánh dấu hoàn tất',
-  resolved: '', cancelled: '',
-};
+const now = () => new Date().toLocaleString('vi-VN');
+const today = () => new Date().toISOString().split('T')[0];
+const mkEntry = (status: TicketStatus, note: string): TimelineEntry =>
+  ({ status, note, updatedBy: 'Manager', updatedAt: now() });
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+
+// Lịch hẹn sửa nhanh (không cần date-picker native).
+const toISODate = (offsetDays: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().split('T')[0];
+};
+const SCHEDULE_OPTIONS: { label: string; days: number }[] = [
+  { label: 'Hôm nay',      days: 0 },
+  { label: 'Ngày mai',     days: 1 },
+  { label: 'Trong 3 ngày', days: 3 },
+  { label: 'Trong 1 tuần', days: 7 },
+];
+const fmtSchedule = (iso: string): string => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('vi-VN');
+};
 
 // ── Photo Evidence Row ───────────────────────────────────────────────────────
 
@@ -84,9 +99,13 @@ const PhotoEvidenceRow: React.FC<{
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={phs.scrollRow}>
           {filtered.map(photo => (
             <View key={photo.id} style={[phs.photoCard, { borderColor: color + '50' }]}>
-              <View style={[phs.photoPlaceholder, { backgroundColor: color + '15' }]}>
-                <Text style={phs.photoPlaceholderIcon}>{type === 'before' ? '📸' : '🖼️'}</Text>
-              </View>
+              {photo.uri ? (
+                <Image source={{ uri: photo.uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
+              ) : (
+                <View style={[phs.photoPlaceholder, { backgroundColor: color + '15' }]}>
+                  <Text style={phs.photoPlaceholderIcon}>{type === 'before' ? '📸' : '🖼️'}</Text>
+                </View>
+              )}
               {photo.caption && <Text style={phs.photoCaption} numberOfLines={1}>{photo.caption}</Text>}
               <Text style={phs.photoDate}>{photo.capturedAt.split(' ')[0]}</Text>
             </View>
@@ -212,6 +231,9 @@ export const TicketDetailScreen: React.FC = () => {
   const [noteInput,     setNoteInput]     = useState('');
   const [showCostInput, setShowCostInput] = useState(false);
   const [photos,        setPhotos]        = useState<PhotoEvidence[]>(ticket?.photos || []);
+  const [scheduleSlots, setScheduleSlots] = useState<string[]>(ticket?.scheduledSlots || []);
+  const [holdReason,    setHoldReason]    = useState('');
+  const [technicianId,  setTechnicianId]  = useState<string>(ticket?.technicianId || '');
 
   if (!ticket) {
     return (
@@ -226,77 +248,118 @@ export const TicketDetailScreen: React.FC = () => {
     );
   }
 
+  const richMode    = !isReal;   // rich state machine chỉ chạy trên store/mock
   const cfg         = STATUS_CONFIG[ticket.status];
   const priorityCfg = PRIORITY_CONFIG[ticket.priority];
   const catCfg      = CATEGORY_CONFIG[ticket.category];
-  const nextStatus  = NEXT_STATUS[ticket.status];
-  const isEditMode  = ticket.status !== 'resolved' && ticket.status !== 'cancelled';
+  const isTerminal  = ['confirmed', 'resolved', 'cancelled'].includes(ticket.status);
+  const isEditMode  = !isTerminal;
+  const hasPhoto    = (type: 'before' | 'after') => photos.some(p => p.type === type);
 
-  const handleAddPhoto = (type: 'before' | 'after') => {
+  // Cập nhật store + append timeline (đường mock/rich).
+  const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
+    maintenanceStore.updateTicket(ticket.id, {
+      ...updates,
+      photos,
+      timeline: [...ticket.timeline, entry],
+      updatedAt: today(),
+    });
+
+  const selectedTech = MAINTENANCE_TECHNICIANS.find(t => t.id === technicianId);
+
+  const handleAddPhoto = async (type: 'before' | 'after') => {
+    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
+    if (result.canceled || !result.assets[0]) return;
     setPhotos(prev => [...prev, {
-      id: `ph-${Date.now()}`, type, uri: '',
+      id: `ph-${Date.now()}`, type, uri: result.assets[0].uri,
       caption:    type === 'before' ? 'Ảnh hiện trạng' : 'Ảnh sau sửa chữa',
-      capturedAt: new Date().toLocaleString('vi-VN'),
+      capturedAt: now(),
     }]);
-    Alert.alert(
-      type === 'before' ? '📸 Ảnh trước' : '🖼️ Ảnh sau',
-      'Tính năng chụp ảnh sẽ mở camera. (Demo: đã thêm placeholder)',
+  };
+
+  // ── Đường real-API (BE 3 trạng thái) ──────────────────────────────
+  const handleRealStart = async () => {
+    const note = noteInput.trim() || 'Đã tiếp nhận & bắt đầu xử lý';
+    try {
+      await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', note, scheduleSlots[0] || undefined);
+      await refreshReal();
+      setNoteInput('');
+    } catch { Alert.alert('Lỗi', 'Không thể cập nhật trạng thái. Vui lòng thử lại.'); }
+  };
+  const handleRealResolve = async (cost: number, note: string) => {
+    try {
+      await realMaintenanceService.resolve(idNum, {
+        repairCost: cost, resolutionNote: note,
+        costPaidBy: costPaidBy === 'host' ? 'HOST' : 'TENANT',
+      });
+      await refreshReal();
+      setShowCostInput(false);
+      Alert.alert('✅ Hoàn tất!', `Ticket ${ticket.ticketCode} đã đóng.\nChi phí: ${fmt(cost)}`);
+    } catch { Alert.alert('Lỗi', 'Không thể lưu kết quả. Vui lòng thử lại.'); }
+  };
+
+  // ── Đường rich (mock/store) ───────────────────────────────────────
+  const handleAcknowledge = () => {
+    const techNote = selectedTech ? ` · giao ${selectedTech.name}` : '';
+    patchStore(
+      { status: 'acknowledged', acknowledgedAt: today(),
+        assignedTo: selectedTech ? `${selectedTech.name} (${selectedTech.phone})` : assignInput || ticket.assignedTo,
+        technicianId: technicianId || undefined },
+      mkEntry('acknowledged', `Đã tiếp nhận yêu cầu${techNote}`),
     );
   };
-
-  const handleAdvance = async () => {
-    if (!nextStatus) return;
-    if (nextStatus === 'resolved') { setShowCostInput(true); return; }
-    const note = noteInput.trim() || `Cập nhật: ${STATUS_CONFIG[nextStatus].label}`;
-    // Real API: spec chỉ có IN_PROGRESS giữa PENDING và RESOLVED.
-    if (isReal) {
-      try {
-        await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', note);
-        await refreshReal();
-        setNoteInput('');
-      } catch {
-        Alert.alert('Lỗi', 'Không thể cập nhật trạng thái. Vui lòng thử lại.');
-      }
-      return;
-    }
-    maintenanceStore.updateTicket(ticket.id, {
-      status:     nextStatus,
-      assignedTo: assignInput || ticket.assignedTo,
-      timeline:   [...ticket.timeline, { status: nextStatus, note, updatedBy: 'Manager', updatedAt: new Date().toLocaleString('vi-VN') }],
-      photos,
-      updatedAt:  new Date().toISOString().split('T')[0],
-    });
+  const handleProposeSchedule = () => {
+    if (scheduleSlots.length === 0) { Alert.alert('Chọn lịch', 'Hãy chọn ít nhất 1 khung thời gian đề xuất.'); return; }
+    patchStore(
+      { status: 'scheduled', scheduledSlots: scheduleSlots, estimatedDate: fmtSchedule(scheduleSlots[0]) },
+      mkEntry('scheduled', `Đề xuất lịch: ${scheduleSlots.map(fmtSchedule).join(', ')} — chờ khách xác nhận`),
+    );
+  };
+  const handleStart = () => {
+    if (!hasPhoto('before')) { Alert.alert('Thiếu ảnh', 'Cần chụp ít nhất 1 ảnh hiện trạng (trước sửa) để bắt đầu.'); return; }
+    const note = noteInput.trim() || 'Bắt đầu thi công sửa chữa';
+    patchStore({ status: 'in_progress' }, mkEntry('in_progress', note));
     setNoteInput('');
   };
+  const handleHold = () => {
+    if (!holdReason.trim()) { Alert.alert('Lý do', 'Nhập lý do tạm dừng (vd: chờ phụ tùng).'); return; }
+    patchStore({ status: 'on_hold', onHoldReason: holdReason.trim() }, mkEntry('on_hold', `Tạm dừng: ${holdReason.trim()}`));
+    setHoldReason('');
+  };
+  const handleResume = () =>
+    patchStore({ status: 'in_progress', onHoldReason: undefined }, mkEntry('in_progress', 'Tiếp tục xử lý'));
 
-  const handleResolve = async () => {
+  const handleSubmitDone = () => {
+    if (!hasPhoto('after')) { Alert.alert('Thiếu ảnh', 'Cần chụp ảnh sau sửa chữa để hoàn tất.'); return; }
     const cost = parseInt(costInput.replace(/\D/g, ''), 10);
     if (isNaN(cost)) { Alert.alert('Lỗi', 'Nhập chi phí sửa chữa (0 nếu miễn phí).'); return; }
     const payerLabel = costPaidBy === 'host' ? 'chủ nhà trả' : 'khách thuê trả';
-    const note = noteInput.trim() || `Hoàn tất. Chi phí: ${fmt(cost)} — ${payerLabel}`;
-    // Real API: gửi repairCost + resolutionNote (BE tự tạo expense + update equipment).
-    if (isReal) {
-      try {
-        await realMaintenanceService.resolve(idNum, { repairCost: cost, resolutionNote: note });
-        await refreshReal();
-        setShowCostInput(false);
-        Alert.alert('✅ Hoàn tất!', `Ticket ${ticket.ticketCode} đã đóng.\nChi phí: ${fmt(cost)}`);
-      } catch {
-        Alert.alert('Lỗi', 'Không thể lưu kết quả. Vui lòng thử lại.');
-      }
+    const note = noteInput.trim() || `Đã sửa xong. Chi phí: ${fmt(cost)} — ${payerLabel}`;
+
+    // Cổng duyệt chi phí: vượt ngưỡng → chờ Admin duyệt.
+    if (cost > MAINTENANCE_COST_APPROVAL_THRESHOLD) {
+      patchStore(
+        { status: 'pending_approval', approvalStatus: 'pending', repairCost: cost, costPaidBy },
+        mkEntry('pending_approval', `Chi phí ${fmt(cost)} vượt ngưỡng — chờ Admin duyệt`),
+      );
+      setShowCostInput(false);
+      Alert.alert('🧾 Chờ duyệt', `Chi phí ${fmt(cost)} vượt ngưỡng ${fmt(MAINTENANCE_COST_APPROVAL_THRESHOLD)}, cần Admin duyệt trước khi đóng.`);
       return;
     }
-    maintenanceStore.updateTicket(ticket.id, {
-      status:     'resolved',
-      repairCost: cost,
-      costPaidBy,
-      resolvedAt: new Date().toISOString().split('T')[0],
-      timeline:   [...ticket.timeline, { status: 'resolved', note, updatedBy: 'Manager', updatedAt: new Date().toLocaleString('vi-VN') }],
-      photos,
-    });
+    patchStore(
+      { status: 'done', doneAt: today(), repairCost: cost, costPaidBy },
+      mkEntry('done', note),
+    );
     setShowCostInput(false);
-    Alert.alert('✅ Hoàn tất!', `Ticket ${ticket.ticketCode} đã đóng.\nChi phí: ${fmt(cost)} (${payerLabel})`);
+    Alert.alert('🛠 Đã sửa xong', 'Đã gửi cho khách nghiệm thu. Ticket sẽ đóng khi khách xác nhận.');
   };
+
+  const handleApprove = () =>
+    patchStore({ status: 'done', approvalStatus: 'approved', doneAt: today() },
+      mkEntry('done', 'Admin đã duyệt chi phí — chờ khách nghiệm thu'));
+  const handleReject = () =>
+    patchStore({ status: 'in_progress', approvalStatus: 'rejected' },
+      mkEntry('in_progress', 'Admin từ chối chi phí — xử lý lại'));
 
   const handleCancel = () => {
     Alert.alert('Hủy yêu cầu?', 'Bạn có chắc muốn hủy ticket này?', [
@@ -388,42 +451,143 @@ export const TicketDetailScreen: React.FC = () => {
           <Text style={s.descText}>{ticket.description}</Text>
         </View>
 
+        {/* ── Cảnh báo vòng đời thiết bị ───────────────────────────── */}
+        {!!ticket.maintenanceCount && ticket.maintenanceCount >= EQUIPMENT_REPLACE_SUGGEST_COUNT && (
+          <View style={s.replaceAlert}>
+            <Text style={s.replaceAlertText}>
+              ⚠️ Thiết bị này đã sửa {ticket.maintenanceCount} lần — cân nhắc <Text style={{ fontWeight: '800' }}>thay mới</Text> thay vì sửa tiếp.
+            </Text>
+          </View>
+        )}
+
         {/* ── Photos ─────────────────────────────────────────────── */}
         <View style={s.card}>
           <Text style={s.cardSectionTitle}>Hình ảnh / Bằng chứng</Text>
           <PhotoEvidenceRow
             type="before" photos={photos}
             onAdd={() => handleAddPhoto('before')}
-            disabled={!isEditMode && photos.filter(p => p.type === 'before').length === 0}
+            disabled={!isEditMode && !hasPhoto('before')}
           />
-          {(ticket.status === 'in_progress' || ticket.status === 'resolved') && (
+          {['in_progress', 'on_hold', 'pending_approval', 'done', 'confirmed', 'resolved'].includes(ticket.status) && (
             <PhotoEvidenceRow
               type="after" photos={photos}
               onAdd={() => handleAddPhoto('after')}
-              disabled={ticket.status === 'resolved'}
+              disabled={isTerminal}
             />
           )}
         </View>
 
-        {/* ── Assign (edit mode) ──────────────────────────────────── */}
-        {isEditMode && (
+        {/* ── Chọn kỹ thuật viên (rich, trước khi tiếp nhận) ───────── */}
+        {richMode && (ticket.status === 'pending' || ticket.status === 'acknowledged') && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>Người xử lý / Kỹ thuật viên</Text>
-            <TextInput
-              style={s.textInput}
-              value={assignInput}
-              onChangeText={setAssignInput}
-              placeholder="Tên thợ + số điện thoại..."
-              placeholderTextColor={Colors.textMuted}
-            />
+            <Text style={s.cardSectionTitle}>Kỹ thuật viên phụ trách</Text>
+            <View style={s.scheduleRow}>
+              {MAINTENANCE_TECHNICIANS
+                .filter(t => t.skills.includes(ticket.category))
+                .map(t => {
+                  const active = technicianId === t.id;
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[s.scheduleChip, active && s.scheduleChipActive]}
+                      onPress={() => setTechnicianId(active ? '' : t.id)}
+                    >
+                      <Text style={[s.scheduleChipText, active && s.scheduleChipTextActive]}>{t.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+            </View>
+            {selectedTech && <Text style={s.scheduleCurrent}>👷 {selectedTech.name} · {selectedTech.phone}</Text>}
           </View>
         )}
-        {ticket.assignedTo && !isEditMode && (
+        {ticket.assignedTo && (ticket.status !== 'pending') && (
           <View style={s.card}>
             <View style={[s.infoRow, { borderBottomWidth: 0 }]}>
               <Text style={s.infoLabel}>Người xử lý</Text>
               <Text style={s.infoVal}>{ticket.assignedTo}</Text>
             </View>
+          </View>
+        )}
+
+        {/* ── Đề xuất lịch hẹn (rich, status acknowledged) ─────────── */}
+        {richMode && ticket.status === 'acknowledged' && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>Đề xuất khung giờ (khách sẽ chọn)</Text>
+            <View style={s.scheduleRow}>
+              {SCHEDULE_OPTIONS.map(opt => {
+                const iso = toISODate(opt.days);
+                const active = scheduleSlots.includes(iso);
+                return (
+                  <TouchableOpacity
+                    key={opt.label}
+                    style={[s.scheduleChip, active && s.scheduleChipActive]}
+                    onPress={() => setScheduleSlots(prev => active ? prev.filter(x => x !== iso) : [...prev, iso])}
+                  >
+                    <Text style={[s.scheduleChipText, active && s.scheduleChipTextActive]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={s.scheduleCurrent}>
+              {scheduleSlots.length > 0 ? `📅 Đề xuất: ${scheduleSlots.map(fmtSchedule).join(', ')}` : 'Chọn 1–3 khung giờ'}
+            </Text>
+          </View>
+        )}
+        {/* Trạng thái lịch hẹn (đã đề xuất / khách đã chọn) */}
+        {richMode && (ticket.status === 'scheduled' || ticket.confirmedSlot) && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>Lịch hẹn</Text>
+            {ticket.confirmedSlot ? (
+              <Text style={[s.scheduleCurrent, { color: Colors.success }]}>✅ Khách đã chọn: {ticket.confirmedSlot}</Text>
+            ) : (
+              <Text style={s.scheduleCurrent}>⏳ Đã đề xuất, chờ khách xác nhận: {(ticket.scheduledSlots || []).map(fmtSchedule).join(', ')}</Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Tạm dừng / Tiếp tục (rich) ───────────────────────────── */}
+        {richMode && ticket.status === 'in_progress' && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>Tạm dừng (chờ phụ tùng...)</Text>
+            <TextInput
+              style={s.textInput}
+              value={holdReason}
+              onChangeText={setHoldReason}
+              placeholder="Lý do tạm dừng..."
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TouchableOpacity style={[s.secondaryBtn, { marginTop: Spacing.sm }]} onPress={handleHold}>
+              <Text style={s.secondaryBtnText}>⏸ Tạm dừng xử lý</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {richMode && ticket.status === 'on_hold' && ticket.onHoldReason && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>Đang tạm dừng</Text>
+            <Text style={s.descText}>{ticket.onHoldReason}</Text>
+          </View>
+        )}
+
+        {/* ── Cổng duyệt chi phí (rich, pending_approval) ──────────── */}
+        {richMode && ticket.status === 'pending_approval' && (
+          <View style={[s.card, { borderColor: '#EA580C', borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>Chờ Admin duyệt chi phí</Text>
+            <Text style={s.descText}>Chi phí {ticket.repairCost != null ? fmt(ticket.repairCost) : ''} vượt ngưỡng {fmt(MAINTENANCE_COST_APPROVAL_THRESHOLD)}.</Text>
+            <View style={[s.costPaidByRow, { marginTop: Spacing.sm }]}>
+              <TouchableOpacity style={[s.costPaidByBtn, { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={handleApprove}>
+                <Text style={[s.costPaidByText, { color: Colors.white }]}>✓ Duyệt (demo Admin)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.costPaidByBtn, { borderColor: Colors.error }]} onPress={handleReject}>
+                <Text style={[s.costPaidByText, { color: Colors.error }]}>✕ Từ chối</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* ── Chờ khách nghiệm thu (rich, done) ────────────────────── */}
+        {richMode && ticket.status === 'done' && (
+          <View style={[s.card, { backgroundColor: Colors.infoLight }]}>
+            <Text style={[s.descText, { color: Colors.info }]}>⏳ Đã sửa xong — đang chờ khách nghiệm thu. Ticket sẽ tự đóng khi khách xác nhận.</Text>
           </View>
         )}
 
@@ -474,8 +638,8 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Cost display (resolved) ─────────────────────────────── */}
-        {ticket.repairCost !== undefined && ticket.status === 'resolved' && (
+        {/* ── Cost display ────────────────────────────────────────── */}
+        {ticket.repairCost !== undefined && ['done', 'confirmed', 'resolved', 'pending_approval'].includes(ticket.status) && (
           <View style={s.costDisplayRow}>
             <View style={s.costDisplayCard}>
               <Text style={s.costDisplayLabel}>Chi phí sửa chữa</Text>
@@ -503,25 +667,73 @@ export const TicketDetailScreen: React.FC = () => {
         </View>
 
         {/* ── Actions ─────────────────────────────────────────────── */}
-        {nextStatus && !showCostInput && (
-          <TouchableOpacity style={s.advanceBtn} onPress={handleAdvance}>
-            <Text style={s.advanceBtnText}>{NEXT_ACTION_LABEL[ticket.status]}</Text>
-          </TouchableOpacity>
-        )}
-        {showCostInput && (
+        {showCostInput ? (
           <>
-            <TouchableOpacity style={s.resolveBtn} onPress={handleResolve}>
-              <Text style={s.resolveBtnText}>✅ Xác nhận hoàn tất & lưu kết quả</Text>
+            <TouchableOpacity
+              style={s.resolveBtn}
+              onPress={() => {
+                if (isReal) {
+                  const c = parseInt(costInput.replace(/\D/g, ''), 10);
+                  if (isNaN(c)) { Alert.alert('Lỗi', 'Nhập chi phí (0 nếu miễn phí).'); return; }
+                  handleRealResolve(c, noteInput.trim() || `Hoàn tất. Chi phí ${fmt(c)}`);
+                } else {
+                  handleSubmitDone();
+                }
+              }}
+            >
+              <Text style={s.resolveBtnText}>✅ Xác nhận đã sửa xong & lưu</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondaryBtn} onPress={() => setShowCostInput(false)}>
               <Text style={s.secondaryBtnText}>← Quay lại</Text>
             </TouchableOpacity>
           </>
-        )}
-        {isEditMode && !showCostInput && (
-          <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
-            <Text style={s.cancelBtnText}>Hủy yêu cầu này</Text>
-          </TouchableOpacity>
+        ) : (
+          <>
+            {/* Đường real-API (BE 3 trạng thái) */}
+            {isReal && ticket.status === 'pending' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={handleRealStart}>
+                <Text style={s.advanceBtnText}>🔧 Tiếp nhận & bắt đầu xử lý</Text>
+              </TouchableOpacity>
+            )}
+            {isReal && ticket.status === 'in_progress' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={() => setShowCostInput(true)}>
+                <Text style={s.advanceBtnText}>✅ Đánh dấu đã sửa xong</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Đường rich (mock/store) */}
+            {richMode && ticket.status === 'pending' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={handleAcknowledge}>
+                <Text style={s.advanceBtnText}>📋 Tiếp nhận yêu cầu</Text>
+              </TouchableOpacity>
+            )}
+            {richMode && ticket.status === 'acknowledged' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={handleProposeSchedule}>
+                <Text style={s.advanceBtnText}>📅 Đề xuất lịch hẹn</Text>
+              </TouchableOpacity>
+            )}
+            {richMode && ticket.status === 'scheduled' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={handleStart}>
+                <Text style={s.advanceBtnText}>🔧 Bắt đầu xử lý</Text>
+              </TouchableOpacity>
+            )}
+            {richMode && ticket.status === 'in_progress' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={() => setShowCostInput(true)}>
+                <Text style={s.advanceBtnText}>🛠 Đánh dấu đã sửa xong</Text>
+              </TouchableOpacity>
+            )}
+            {richMode && ticket.status === 'on_hold' && (
+              <TouchableOpacity style={s.advanceBtn} onPress={handleResume}>
+                <Text style={s.advanceBtnText}>▶ Tiếp tục xử lý</Text>
+              </TouchableOpacity>
+            )}
+
+            {isEditMode && (
+              <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+                <Text style={s.cancelBtnText}>Hủy yêu cầu này</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
 
         <View style={{ height: 40 }} />
@@ -579,6 +791,16 @@ const s = StyleSheet.create({
   costPaidByBtnTenant:{ backgroundColor: Colors.success, borderColor: Colors.success },
   costPaidByIcon: { fontSize: 16 },
   costPaidByText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+
+  scheduleRow:            { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  scheduleChip:           { paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
+  scheduleChipActive:     { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  scheduleChipText:       { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  scheduleChipTextActive: { color: Colors.primary },
+  scheduleCurrent:        { fontSize: 12, color: Colors.textMuted, marginTop: Spacing.sm },
+
+  replaceAlert:     { backgroundColor: '#FEF2F2', borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.md, borderWidth: 1, borderColor: '#FECACA' },
+  replaceAlertText: { fontSize: 13, color: '#B91C1C', lineHeight: 19 },
 
   costDisplayRow:  { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   costDisplayCard: { flex: 1, backgroundColor: Colors.warningLight, borderRadius: BorderRadius.lg, padding: Spacing.md },
