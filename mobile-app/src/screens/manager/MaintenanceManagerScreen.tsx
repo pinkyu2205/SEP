@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
@@ -7,29 +7,38 @@ import { useTickets, MaintenanceTicket } from '../../store/maintenanceStore';
 import { getPropertyById } from '../../data/managedProperties';
 import { realMaintenanceService } from '../../services/maintenanceService.real';
 import { dtoToTicket } from '../../services/maintenanceMappers';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '../../constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const PRIORITY_CONFIG = {
-  urgent: { label: '🚨 Khẩn cấp', color: '#EF4444', bg: '#FEF2F2' },
-  high:   { label: '🔴 Cao',       color: '#F97316', bg: '#FFF7ED' },
-  medium: { label: '🟡 Trung bình',color: '#F59E0B', bg: '#FFFBEB' },
-  low:    { label: '🟢 Thấp',      color: '#10B981', bg: '#F0FDF4' },
-} as const;
+const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string }> =
+  Object.fromEntries(
+    Object.entries(MAINTENANCE_PRIORITY_META).map(([k, m]) => [k, { label: m.label, color: m.color, bg: m.bg }]),
+  );
 
-const STATUS_CONFIG = {
-  pending:     { label: 'Chờ tiếp nhận', color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  accepted:    { label: 'Đã tiếp nhận',  color: '#3B82F6', bg: '#EFF6FF', icon: '📋' },
-  in_progress: { label: 'Đang xử lý',    color: '#8B5CF6', bg: '#F5F3FF', icon: '🔧' },
-  resolved:    { label: 'Hoàn tất',      color: '#10B981', bg: '#F0FDF4', icon: '✅' },
-  cancelled:   { label: 'Đã hủy',        color: '#6B7280', bg: '#F3F4F6', icon: '✕'  },
-} as const;
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+  ...MAINTENANCE_STATUS_META,
+  accepted: MAINTENANCE_STATUS_META.acknowledged,
+};
 
-const TODAY = '2026-05-21';
+const TODAY = new Date().toISOString().split('T')[0];
 
 const daysBetween = (from: string) => {
   const ms = new Date(TODAY).getTime() - new Date(from).getTime();
   return Math.floor(ms / 86400000);
+};
+
+const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+const TERMINAL = ['resolved', 'confirmed', 'cancelled'];
+// Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
+const isOverdue = (t: { status: string; priority: string; createdAt: string }) =>
+  !TERMINAL.includes(t.status)
+  && daysBetween(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
+
+const monthLabel = () => {
+  const d = new Date();
+  return `Tháng ${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 };
 
 // ── Screen ──────────────────────────────────────────────────────────────────
@@ -38,6 +47,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const mockTickets = useTickets();
   const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
+  const [search, setSearch] = useState('');
 
   // Lấy danh sách thật cho OM; lỗi → fallback store mock.
   useFocusEffect(
@@ -64,10 +74,27 @@ export const MaintenanceManagerScreen: React.FC = () => {
       pendingNew:   tickets.filter(t => t.status === 'pending').length,
       inProgress:   tickets.filter(t => t.status === 'accepted' || t.status === 'in_progress').length,
       resolvedMonth:tickets.filter(t => t.status === 'resolved').length,
-      slaAtRisk:    tickets.filter(t => t.status === 'pending' && daysBetween(t.createdAt) > 3).length,
+      slaAtRisk:    tickets.filter(isOverdue).length,
       totalOpen:    open.length,
     };
   }, [tickets]);
+
+  // Hàng đợi xử lý: ticket đang mở, sắp theo ưu tiên rồi theo thời gian.
+  const openQueue = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return tickets
+      .filter(t => t.status !== 'resolved' && t.status !== 'cancelled')
+      .filter(t => !q
+        || t.title.toLowerCase().includes(q)
+        || t.ticketCode.toLowerCase().includes(q)
+        || t.propertyName.toLowerCase().includes(q)
+        || t.roomName.toLowerCase().includes(q)
+        || (t.tenantName ?? '').toLowerCase().includes(q))
+      .sort((a, b) => {
+        const p = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
+        return p !== 0 ? p : b.updatedAt.localeCompare(a.updatedAt);
+      });
+  }, [tickets, search]);
 
   // Recent activity: last 4 tickets sorted by updatedAt desc
   const recentActivity = useMemo(() =>
@@ -109,7 +136,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
             <Text style={s.backBtnText}>‹</Text>
           </TouchableOpacity>
           <Text style={s.title}>Bảo trì & Sửa chữa</Text>
-          <Text style={s.subtitle}>Tháng 05/2026</Text>
+          <Text style={s.subtitle}>{monthLabel()}</Text>
         </View>
 
         {/* ── Stats row ────────────────────────────────────────────── */}
@@ -144,10 +171,61 @@ export const MaintenanceManagerScreen: React.FC = () => {
           <View style={s.slaBanner}>
             <Text style={s.slaBannerIcon}>⚠️</Text>
             <Text style={s.slaBannerText}>
-              {stats.slaAtRisk} ticket chờ tiếp nhận quá 3 ngày — cần xử lý ngay
+              {stats.slaAtRisk} ticket vượt SLA theo mức ưu tiên — cần xử lý ngay
             </Text>
           </View>
         )}
+
+        {/* ── Hàng đợi xử lý (theo ưu tiên) ────────────────────────── */}
+        <View style={s.section}>
+          <View style={s.sectionHeaderRow}>
+            <Text style={s.sectionTitle}>Hàng đợi xử lý</Text>
+            <Text style={s.sectionCount}>{openQueue.length} đang mở</Text>
+          </View>
+          <TextInput
+            style={s.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Tìm mã ticket, tiêu đề, nhà, phòng, khách..."
+            placeholderTextColor={Colors.textMuted}
+          />
+          <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
+            {openQueue.length === 0 ? (
+              <View style={s.queueEmpty}>
+                <Text style={s.queueEmptyText}>
+                  {search.trim() ? 'Không tìm thấy ticket phù hợp.' : '🎉 Không có ticket nào đang mở.'}
+                </Text>
+              </View>
+            ) : openQueue.slice(0, 8).map((t, i) => {
+              const cfg    = STATUS_CONFIG[t.status];
+              const priCfg = PRIORITY_CONFIG[t.priority];
+              const isLast = i === Math.min(openQueue.length, 8) - 1;
+              const overdue = isOverdue(t);
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[s.activityRow, !isLast && s.activityRowBorder]}
+                  onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
+                  activeOpacity={0.7}
+                >
+                  <View style={[s.activityPriBadge, { backgroundColor: priCfg.bg, marginRight: 2 }]}>
+                    <Text style={[s.activityPriText, { color: priCfg.color }]}>{priCfg.label}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
+                    <Text style={s.activityMeta}>
+                      {t.ticketCode} · {t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn nhà' : t.roomName}
+                      {overdue ? '  ⚠️ quá hạn' : ''}
+                    </Text>
+                  </View>
+                  <View style={[s.activityStatus, { backgroundColor: cfg.bg }]}>
+                    <Text style={[s.activityStatusText, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
         {/* ── Recent Activity ──────────────────────────────────────── */}
         <View style={s.section}>
@@ -199,7 +277,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
             const inProg    = group.tickets.filter(t => t.status === 'in_progress' || t.status === 'accepted');
             const resolved  = group.tickets.filter(t => t.status === 'resolved');
             const pending   = group.tickets.filter(t => t.status === 'pending');
-            const slaRisk   = pending.filter(t => daysBetween(t.createdAt) > 3);
+            const slaRisk   = open.filter(isOverdue);
             const total     = group.tickets.length;
             const doneRate  = total > 0 ? Math.round((resolved.length / total) * 100) : 100;
 
@@ -330,6 +408,14 @@ const s = StyleSheet.create({
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
   sectionTitle:     { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   sectionCount:     { fontSize: 12, color: Colors.textMuted, fontWeight: '500' },
+
+  searchInput: {
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: 10,
+    fontSize: 14, color: Colors.textPrimary,
+  },
+  queueEmpty:     { padding: Spacing.lg, alignItems: 'center' },
+  queueEmptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 
   activityCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,

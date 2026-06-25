@@ -64,7 +64,7 @@ export const ManagerList = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Quản lý vận hành</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {managers.length} quản lý vận hành đang giám sát các bất động sản UrbanNest
+            {managers.length} quản lý vận hành đang giám sát các bất động sản Hoàng Bình Land
           </p>
         </div>
         <button onClick={fetchData}

@@ -7,6 +7,7 @@ import { useAuth } from '../../hooks';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
 import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
+import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
 
 // ── Mock data ──────────────────────────────────────────────
 const BUILDING_INFO = {
@@ -53,6 +54,7 @@ export const TenantHomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [actionsExpanded, setActionsExpanded] = useState(false);
   const allBills = useBills('Nguyễn Văn A');
+  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → fallback mock)
 
   // ── Dashboard thật (GET /tenant/me/dashboard) ──
   const [dash, setDash] = useState<TenantDashboard | null>(null);
@@ -154,9 +156,9 @@ export const TenantHomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('TenantNotifications')}>
             <Text style={{ fontSize: 22 }}>🔔</Text>
-            {data.unreadNotifications > 0 && (
+            {(realUnread ?? data.unreadNotifications) > 0 && (
               <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{data.unreadNotifications}</Text>
+                <Text style={styles.notifBadgeText}>{realUnread ?? data.unreadNotifications}</Text>
               </View>
             )}
           </TouchableOpacity>

@@ -62,7 +62,7 @@ export const SuperAdminOverview = () => {
               Admin web-only access
             </div>
             <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">
-              Quản trị toàn hệ thống UrbanNest
+              Quản trị toàn hệ thống Hoàng Bình Land
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Theo dõi Hosts, Managers, Tenants, buildings, rooms, billing, contracts, bảo trì, thiết bị, audit logs và cấu hình nền tảng từ một dashboard web duy nhất.

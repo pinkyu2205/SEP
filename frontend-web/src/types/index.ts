@@ -1,5 +1,5 @@
 // ==========================================
-//  TYPES - Host Management Portal (UrbanNest Sub-leasing Model)
+//  TYPES - Host Management Portal (Hoàng Bình Land Sub-leasing Model)
 // ==========================================
 
 export type PlatformRole = 'admin' | 'host' | 'manager' | 'tenant';

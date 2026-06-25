@@ -61,7 +61,7 @@ const MOCK_TICKETS: MaintenanceTicket[] = [
     id: 'tk-t3-002', tenantId: 't3', code: 'TK-NT-P201-002',
     title: 'Bóng đèn hành lang bị hỏng',
     description: 'Bóng đèn hành lang trước phòng không sáng. Đã kiểm tra công tắc vẫn không được.',
-    category: 'electrical', priority: 'low', status: 'accepted',
+    category: 'electrical', priority: 'low', status: 'in_progress',
     createdDate: '15/05/2026', updatedDate: '17/05/2026',
     assignedTech: 'Trần Văn Điện',
     propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
@@ -100,7 +100,7 @@ const MOCK_TICKETS: MaintenanceTicket[] = [
     id: 'tk-wh1-001', tenantId: 'wh-1', code: 'TK-NVC-001',
     title: 'Máy nước nóng trung tâm bị hỏng',
     description: 'Hệ thống nước nóng trung tâm không hoạt động. Toàn bộ nhà không có nước nóng.',
-    category: 'plumbing', priority: 'urgent', status: 'accepted',
+    category: 'plumbing', priority: 'urgent', status: 'in_progress',
     createdDate: '19/05/2026', updatedDate: '20/05/2026',
     assignedTech: 'Kỹ thuật Phúc',
     propertyName: 'Nhà Nguyễn Văn Cừ', roomName: 'Nhà nguyên căn',
@@ -155,7 +155,6 @@ const CATEGORY_CFG: Record<TicketCategory, { label: string; icon: string }> = {
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',         label: 'Tất cả' },
   { key: 'pending',     label: 'Chờ xử lý' },
-  { key: 'accepted',    label: 'Đã tiếp nhận' },
   { key: 'in_progress', label: 'Đang xử lý' },
   { key: 'resolved',    label: 'Hoàn thành' },
   { key: 'cancelled',   label: 'Đã hủy' },
@@ -175,7 +174,7 @@ const TicketDetailModal: React.FC<{
   const priorityCfg = PRIORITY_CFG[ticket.priority];
   const catCfg      = CATEGORY_CFG[ticket.category];
 
-  const STEPS: TicketStatus[] = ['pending', 'accepted', 'in_progress', 'resolved'];
+  const STEPS: TicketStatus[] = ['pending', 'in_progress', 'resolved'];
   const currentIdx = STEPS.indexOf(ticket.status);
 
   return (

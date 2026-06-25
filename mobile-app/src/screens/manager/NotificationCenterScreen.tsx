@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { realNotificationService, ApiNotification } from '../../services/notificationService.real';
 
 // ===================== TYPES =====================
 type NotifType =
@@ -182,6 +183,27 @@ export const NotificationCenterScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Nạp thông báo thật từ BE mỗi khi vào màn; offline/lỗi → giữ mock.
+  const load = useCallback(async () => {
+    try {
+      const rows = await realNotificationService.list();
+      if (rows.length > 0) {
+        setNotifications(rows.map((n: ApiNotification): AppNotification => ({
+          id: String(n.id), title: n.title, body: n.body,
+          type: n.type as AppNotification['type'], isRead: n.isRead,
+          priority: 'normal', createdAt: n.createdAt, actionRoute: n.screen,
+        })));
+      }
+    } catch { /* offline */ }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   const filtered = useMemo(() => {
     if (activeFilter === 'all') return notifications;
@@ -193,10 +215,13 @@ export const NotificationCenterScreen: React.FC = () => {
 
   const markRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    const num = Number(id);
+    if (Number.isFinite(num)) realNotificationService.markRead(num).catch(() => { /* offline */ });
   };
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    realNotificationService.markAllRead().catch(() => { /* offline */ });
   };
 
   const TAB_ROUTES = ['ManagerBilling', 'ManagerMaintenance', 'MeterReading', 'ManagerHome'];
@@ -296,6 +321,7 @@ export const NotificationCenterScreen: React.FC = () => {
         )}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>

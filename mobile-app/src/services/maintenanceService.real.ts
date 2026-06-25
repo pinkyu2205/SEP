@@ -87,6 +87,28 @@ export const realMaintenanceService = {
     return data;
   },
 
+  /**
+   * Upload ảnh hiện trường (POST /{id}/photos, multipart).
+   * `type`: BEFORE (trước sửa) | AFTER (sau sửa). Trả về request đã cập nhật URL ảnh.
+   */
+  uploadPhotos: async (
+    id: number,
+    uris: string[],
+    type: 'BEFORE' | 'AFTER',
+  ): Promise<MaintenanceRequestDto> => {
+    const form = new FormData();
+    uris.forEach((uri, i) => {
+      const name = uri.split('/').pop() || `photo-${Date.now()}-${i}.jpg`;
+      // RN FormData yêu cầu object { uri, name, type }.
+      form.append('files', { uri, name, type: 'image/jpeg' } as any);
+    });
+    form.append('type', type);
+    const { data } = await realApiClient.post<MaintenanceRequestDto>(`${BASE}/${id}/photos`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
   // ---- Admin / shared ----
   getDashboard: async (propertyId?: number): Promise<MaintenanceDashboardDto> => {
     const { data } = await realApiClient.get<MaintenanceDashboardDto>(`${BASE}/dashboard`, {
