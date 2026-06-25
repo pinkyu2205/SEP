@@ -120,7 +120,8 @@ export const importService = {
   /**
    * POST /api/v1/import/renovation-supplement-excel?dryRun=... — Cải tạo bổ sung (session v2+).
    * Tiên quyết: nhà đã ACTIVE và đã gọi POST /properties/{id}/renovation/start (mở session mới).
-   * Import xong: completeRenovation → ACTIVE (KHÔNG gửi Host lại); manifest TB mua cộng dồn.
+   * Import xong: completeRenovation + tính lại giá + submit-to-host → PENDING_HOST_REVIEW
+   * (đổi chi phí/thiết bị nên host duyệt lại giá); manifest TB mua cộng dồn.
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
   importRenovationSupplementExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {

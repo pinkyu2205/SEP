@@ -18,7 +18,8 @@ const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} K
 
 /**
  * Import cải tạo bổ sung (session v2+) — POST /import/renovation-supplement-excel.
- * Tiên quyết: đã gọi renovation/start (nhà đang UNDER_RENOVATION). Nhập xong → ACTIVE, KHÔNG gửi Host.
+ * Tiên quyết: đã gọi renovation/start (nhà đang UNDER_RENOVATION). Nhập xong → BE tính lại giá +
+ * gửi Host duyệt lại → PENDING_HOST_REVIEW (vì cải tạo bổ sung đổi chi phí/thiết bị nên cần host duyệt giá mới).
  * File gồm hợp đồng cải tạo (sheet 1) + thiết bị mua mới (sheet 2, có Hành động THEM_MOI/THAY_THE).
  */
 export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
@@ -54,7 +55,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
         toast.success(`File hợp lệ — ${res.renovationLinesImported} dòng cải tạo · ${res.equipmentRowsImported} thiết bị`);
       } else {
         setPhase('done');
-        toast.success('Đã nhập cải tạo bổ sung — nhà trở lại Đang kinh doanh');
+        toast.success('Đã nhập cải tạo bổ sung — đã gửi Host duyệt lại giá');
       }
     } catch (err) {
       if (isBulkImportError(err)) {
@@ -76,7 +77,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-          <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo bổ sung — {result.renovationLinesImported} dòng cải tạo, {result.equipmentRowsImported} thiết bị. Nhà trở lại Đang kinh doanh.
+          <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo bổ sung — {result.renovationLinesImported} dòng cải tạo, {result.equipmentRowsImported} thiết bị. Đã gửi Host duyệt lại giá.
         </div>
         <button onClick={() => onDone?.()}
           className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition">
@@ -94,8 +95,8 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
             <Hammer className="h-4 w-4 text-amber-600" /> Nhập cải tạo bổ sung từ Excel
           </h3>
           <p className="mt-1 max-w-xl text-sm text-slate-500">
-            File gồm hợp đồng cải tạo và thiết bị mua mới (THÊM_MỚI / THAY_THẾ). Nhập xong nhà trở lại
-            <b className="text-slate-600"> Đang kinh doanh</b> — không gửi Host lại.
+            File gồm hợp đồng cải tạo và thiết bị mua mới (THÊM_MỚI / THAY_THẾ). Nhập xong, hệ thống
+            <b className="text-slate-600"> tự động gửi Host duyệt lại giá</b> (vì đổi chi phí/thiết bị).
           </p>
         </div>
         <a href={TEMPLATE_URL} download
@@ -198,7 +199,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
         message={
           <>Hệ thống sẽ nhập <b className="text-slate-700">{result?.renovationLinesImported ?? 0} dòng cải tạo</b> và
           <b className="text-slate-700"> {result?.equipmentRowsImported ?? 0} thiết bị</b> từ file <b className="text-slate-700">{file?.name}</b>,
-          sau đó hoàn tất đợt cải tạo và đưa nhà về Đang kinh doanh.</>
+          sau đó hoàn tất đợt cải tạo và tự động gửi Host duyệt lại giá.</>
         }
         confirmText="Nhập ngay"
         loading={phase === 'importing'}
