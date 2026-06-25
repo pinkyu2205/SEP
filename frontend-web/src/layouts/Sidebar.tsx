@@ -2,10 +2,12 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   Wrench, DollarSign, BarChart3, Bell, Settings,
-  ChevronRight, QrCode,
+  ChevronRight, QrCode, Receipt, Coins, PiggyBank,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { MOCK_NOTIFICATIONS, ALL_CONTRACTS } from '../utils/mockData';
+import { ALL_CONTRACTS } from '../utils/mockData';
+import { useUnreadNotifications } from '../contexts/UnreadNotificationsContext';
+import { useWebAuth } from '../auth/WebAuthContext';
 
 interface NavItem {
   name: string;
@@ -14,6 +16,8 @@ interface NavItem {
   end?: boolean;
   badge?: number;
   badgeColor?: string;
+  /** Chỉ hiện cho role host (ROLE_OWNER). */
+  hostOnly?: boolean;
 }
 
 interface NavSection {
@@ -21,7 +25,6 @@ interface NavSection {
   items: NavItem[];
 }
 
-const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;
 const pendingCount = ALL_CONTRACTS.filter(c => c.status === 'pending_approval').length;
 
 const NAV_SECTIONS: NavSection[] = [
@@ -62,6 +65,9 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Tài chính & Báo cáo',
     items: [
       { name: 'Quản lý tài chính',  path: '/host/financial', icon: DollarSign },
+      { name: 'Ghi nhận chi phí',   path: '/host/expenses',  icon: Receipt },
+      { name: 'Công nợ phải thu',   path: '/host/receivables', icon: Coins,     hostOnly: true },
+      { name: 'Sổ cọc',             path: '/host/deposits',    icon: PiggyBank, hostOnly: true },
       { name: 'Báo cáo & Phân tích', path: '/host/reports',  icon: BarChart3 },
     ],
   },
@@ -72,7 +78,7 @@ const NAV_SECTIONS: NavSection[] = [
         name: 'Thông báo',
         path: '/host/notifications',
         icon: Bell,
-        badge: unreadCount > 0 ? unreadCount : undefined,
+        // badge gán động từ context unread thật (xem render bên dưới).
         badgeColor: 'bg-rose-500',
       },
       { name: 'Cài đặt', path: '/host/settings', icon: Settings },
@@ -81,6 +87,9 @@ const NAV_SECTIONS: NavSection[] = [
 ];
 
 export const Sidebar = () => {
+  const { count: unread } = useUnreadNotifications();
+  const { user } = useWebAuth();
+  const isHost = user?.role === 'host';
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col h-screen sticky top-0 select-none">
       {/* Brand */}
@@ -104,7 +113,12 @@ export const Sidebar = () => {
               <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">{section.label}</p>
             </div>
             <div className="px-2 space-y-0.5">
-              {section.items.map(item => (
+              {section.items.filter(item => !item.hostOnly || isHost).map(item => {
+                // Badge thông báo lấy từ unread thật; các mục khác giữ badge tĩnh.
+                const badge = item.path === '/host/notifications'
+                  ? (unread > 0 ? unread : undefined)
+                  : item.badge;
+                return (
                 <NavLink
                   key={item.path}
                   to={item.path}
@@ -120,18 +134,19 @@ export const Sidebar = () => {
                     <>
                       <item.icon className={clsx('w-4 h-4 flex-shrink-0 transition-transform group-hover:scale-110', isActive ? 'text-white' : 'text-slate-500 group-hover:text-slate-300')} />
                       <span className="flex-1 truncate">{item.name}</span>
-                      {item.badge !== undefined && (
+                      {badge !== undefined && (
                         <span className={`${item.badgeColor || 'bg-slate-600'} text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 flex-shrink-0`}>
-                          {item.badge}
+                          {badge}
                         </span>
                       )}
-                      {!item.badge && !isActive && (
+                      {!badge && !isActive && (
                         <ChevronRight className="w-3 h-3 text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                       )}
                     </>
                   )}
                 </NavLink>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
@@ -144,7 +159,7 @@ export const Sidebar = () => {
       <div className="p-4 flex-shrink-0">
         <div className="flex items-center gap-3 bg-slate-800/60 rounded-xl px-3 py-2.5 border border-slate-700/50">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md">
-            UN
+            HB
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-white truncate leading-tight">Hoàng Bình Land</p>

@@ -7,6 +7,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { useAuth } from '../../hooks';
+import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
 import {
   ManagedProperty, getPropPriority, getPriorityMeta, getIssueCount,
 } from '../../data/managedProperties';
@@ -44,6 +45,7 @@ export const ManagerHomeScreen: React.FC = () => {
   const [properties, setProperties] = useState<ManagedProperty[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → fallback mock)
 
   const load = useCallback(async () => {
     try {
@@ -119,10 +121,10 @@ export const ManagerHomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
             <Text style={s.notifIcon}>🔔</Text>
-            {UNREAD_NOTIFICATIONS > 0 && (
+            {(realUnread ?? UNREAD_NOTIFICATIONS) > 0 && (
               <View style={s.notifBadge}>
                 <Text style={s.notifBadgeText}>
-                  {UNREAD_NOTIFICATIONS > 9 ? '9+' : UNREAD_NOTIFICATIONS}
+                  {(realUnread ?? UNREAD_NOTIFICATIONS) > 9 ? '9+' : (realUnread ?? UNREAD_NOTIFICATIONS)}
                 </Text>
               </View>
             )}

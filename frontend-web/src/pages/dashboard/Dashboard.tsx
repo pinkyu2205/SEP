@@ -18,6 +18,7 @@ import {
   MOCK_MAINTENANCE_REQUESTS, MOCK_NOTIFICATIONS,
 } from '../../utils/mockData';
 import { formatCurrency, maintenancePriorityMap, maintenanceStatusMap, notificationTypeConfig } from '../../utils';
+import { hostService } from '../../services/host.service';
 
 // ── Dữ liệu tài chính ────────────────────────────────────────────────────────
 const CASH_FLOW_DATA = [
@@ -146,7 +147,12 @@ export const Dashboard = () => {
 
   const handleApprovalAction = () => {
     if (!approvalModal) return;
-    setPendingContracts(prev => prev.filter(c => c.id !== approvalModal.contract.id));
+    const { contract, action } = approvalModal;
+    setPendingContracts(prev => prev.filter(c => c.id !== contract.id));
+    const call = action === 'approve'
+      ? hostService.approveContract(contract.id)
+      : hostService.rejectContract(contract.id, rejectReason.trim());
+    call.catch(() => { /* offline: đã cập nhật cục bộ */ });
     setApprovalModal(null);
     setRejectReason('');
   };

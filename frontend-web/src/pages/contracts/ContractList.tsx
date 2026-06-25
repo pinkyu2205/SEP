@@ -7,6 +7,7 @@ import type { Contract } from '../../types';
 import { ALL_CONTRACTS } from '../../utils/mockData';
 import { formatCurrency, contractStatusMap } from '../../utils';
 import { ContractFormModal } from './ContractFormModal';
+import { hostService } from '../../services/host.service';
 
 type ActiveTab = 'pending_approval' | 'admin_manager' | 'manager_tenant';
 
@@ -78,11 +79,15 @@ export const ContractList = () => {
 
   const handleApprove = () => {
     if (!approvalModal) return;
+    const { contract, action } = approvalModal;
+    // Optimistic + gọi API thật (fallback cục bộ nếu BE chưa sẵn sàng).
     setContracts(prev => prev.map(c =>
-      c.id === approvalModal.contract.id
-        ? { ...c, status: approvalModal.action === 'approve' ? 'active' : 'terminated' }
-        : c
+      c.id === contract.id ? { ...c, status: action === 'approve' ? 'active' : 'terminated' } : c
     ));
+    const call = action === 'approve'
+      ? hostService.approveContract(contract.id)
+      : hostService.rejectContract(contract.id, rejectReason.trim());
+    call.catch(() => { /* offline: đã cập nhật cục bộ */ });
     setApprovalModal(null);
     setRejectReason('');
   };

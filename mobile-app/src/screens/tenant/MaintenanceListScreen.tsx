@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -12,30 +12,36 @@ import {
 import { useTenantRequests } from '../../store/maintenanceStore';
 import { realMaintenanceService } from '../../services/maintenanceService.real';
 import { dtoToTenantRequest } from '../../services/maintenanceMappers';
+import {
+  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
+} from '../../constants/maintenance';
 
 // ─── Filter tabs ───────────────────────────────────────────
-const FILTERS: { key: 'all' | MaintenanceStatus; label: string }[] = [
-  { key: 'all',         label: 'Tất cả'       },
-  { key: 'pending',     label: 'Chờ xử lý'    },
-  { key: 'accepted',    label: 'Đã tiếp nhận' },
+type FilterKey = 'active' | 'completed' | MaintenanceStatus;
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'active',      label: 'Đang xử lý'   },
+  { key: 'pending',     label: 'Chờ tiếp nhận' },
   { key: 'in_progress', label: 'Đang sửa'     },
+  { key: 'done',        label: 'Chờ nghiệm thu' },
+  { key: 'completed',   label: 'Hoàn tất'     },
 ];
 
-// ─── Status config ─────────────────────────────────────────
-const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> = {
-  pending:     { label: 'Chờ xử lý',    bg: Colors.warningLight, text: Colors.warning, dot: Colors.warning  },
-  accepted:    { label: 'Đã tiếp nhận', bg: Colors.infoLight,    text: Colors.info,    dot: Colors.info     },
-  in_progress: { label: 'Đang sửa',     bg: Colors.primaryBg,    text: Colors.primary, dot: Colors.primary  },
-  resolved:    { label: 'Hoàn tất',     bg: Colors.successLight,  text: Colors.success, dot: Colors.success  },
-  cancelled:   { label: 'Đã hủy',       bg: Colors.divider,      text: Colors.textMuted, dot: Colors.textMuted },
-};
+const COMPLETED: MaintenanceStatus[] = ['confirmed', 'resolved'];
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  electrical: '⚡', plumbing: '🚰', furniture: '🪑', appliance: '📺', other: '🔧',
-};
+// ─── Status config (3 bước, khớp BE) ───────────────────────
+const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> =
+  Object.fromEntries(
+    Object.entries(MAINTENANCE_STATUS_META).map(([k, m]) => [
+      k, { label: k === 'in_progress' ? 'Đang sửa' : m.label, bg: m.bg, text: m.color, dot: m.color },
+    ]),
+  );
 
-const ACTIVE: MaintenanceStatus[] = ['pending', 'accepted', 'in_progress'];
-const STEP_ORDER: MaintenanceStatus[] = ['pending', 'accepted', 'in_progress', 'resolved'];
+const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
+
+const ACTIVE: MaintenanceStatus[] = [
+  'pending', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval', 'done',
+];
+const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
 // ─── Card ──────────────────────────────────────────────────
 const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = ({ item, onPress }) => {
@@ -94,7 +100,7 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
           return (
             <React.Fragment key={s}>
               <View style={[styles.progDot, reached && { backgroundColor: Colors.primary }]} />
-              {i < 3 && (
+              {i < STEP_ORDER.length - 1 && (
                 <View style={[styles.progLine, reached && i < stepIdx && { backgroundColor: Colors.primary }]} />
               )}
             </React.Fragment>
@@ -113,8 +119,8 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
         </View>
       )}
 
-      {/* ── Cost banner for resolved ── */}
-      {item.status === 'resolved' && item.repairCost ? (
+      {/* ── Cost banner for completed ── */}
+      {(item.status === 'resolved' || item.status === 'confirmed') && item.repairCost ? (
         <View style={styles.resolvedBanner}>
           <Text style={styles.resolvedText}>
             ✅ Hoàn tất · Chi phí: {item.repairCost.toLocaleString('vi-VN')} đ
@@ -128,9 +134,10 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
 // ─── Main screen ───────────────────────────────────────────
 export const MaintenanceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [filter, setFilter] = useState<'all' | MaintenanceStatus>('all');
+  const [filter, setFilter] = useState<FilterKey>('active');
   const mockAll = useTenantRequests();
   const [remote, setRemote] = useState<MaintenanceRequest[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Lấy danh sách thật từ BE; nếu lỗi (BE chưa sẵn sàng) → dùng store mock.
   useFocusEffect(
@@ -143,14 +150,25 @@ export const MaintenanceListScreen: React.FC = () => {
     }, []),
   );
 
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    realMaintenanceService.getMyRequests()
+      .then(page => setRemote(page.content.map(dtoToTenantRequest)))
+      .catch(() => { /* giữ dữ liệu hiện tại */ })
+      .finally(() => setRefreshing(false));
+  }, []);
+
   const all = remote ?? mockAll;
 
   const active   = all.filter(r => ACTIVE.includes(r.status as MaintenanceStatus));
-  const filtered = filter === 'all' ? active : all.filter(r => r.status === filter);
+  const filtered =
+    filter === 'active'    ? active
+    : filter === 'completed' ? all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus))
+    : all.filter(r => r.status === filter);
 
   const pendingCount     = all.filter(r => r.status === 'pending').length;
-  const inProgressCount  = all.filter(r => r.status === 'in_progress').length;
-  const resolvedThisMonth = all.filter(r => r.status === 'resolved').length;
+  const inProgressCount  = active.filter(r => r.status !== 'pending').length;
+  const resolvedThisMonth = all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus)).length;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -227,6 +245,7 @@ export const MaintenanceListScreen: React.FC = () => {
         contentContainerStyle={styles.list}
         style={styles.requestList}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         ListEmptyComponent={
           <View style={styles.empty}>

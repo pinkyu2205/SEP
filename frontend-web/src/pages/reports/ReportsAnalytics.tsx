@@ -1,10 +1,26 @@
+import { useEffect, useState } from 'react';
 import { Download, TrendingUp, BarChart3, Users, Building2 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { MOCK_PROPERTIES, MOCK_USERS, MOCK_MAINTENANCE_REQUESTS, ALL_CONTRACTS } from '../../utils/mockData';
+import { MOCK_PROPERTIES, MOCK_USERS, MOCK_MAINTENANCE_REQUESTS } from '../../utils/mockData';
 import { formatCurrency } from '../../utils';
+import { exportToExcel } from '../../utils/exportExcel';
+import { hostService } from '../../services/host.service';
+import { CURRENT_MONTH } from '../../utils/expenseStore';
+
+type SummaryRow = { month: string; doanhThu: number; chiPhi: number; loiNhuan: number; tyLePhong: number };
+type MgrPerfRow = {
+  manager: { id: string; fullName: string; phone: string };
+  propCount: number; activeTenants: number;
+  resolvedMaintenance: number; openMaintenance: number; propOccupancy: number;
+};
+const fmtMonth = (m: string) => {
+  if (!m.includes('-')) return m;
+  const [y, mo] = m.split('-');
+  return `Th${Number(mo)}/${y.slice(2)}`;
+};
 
 // ── Dữ liệu mock ──────────────────────────────────────────────────────────────
 const FINANCIAL_SUMMARY = [
@@ -15,12 +31,6 @@ const FINANCIAL_SUMMARY = [
   { month: 'Th4/26',  doanhThu: 125_000_000, chiPhi: 53_000_000, loiNhuan: 72_000_000, tyLePhong: 90 },
   { month: 'Th5/26',  doanhThu: 130_000_000, chiPhi: 55_000_000, loiNhuan: 75_000_000, tyLePhong: 92 },
 ];
-
-const OCCUPANCY_TREND = FINANCIAL_SUMMARY.map(r => ({
-  month: r.month,
-  'Thực tế (%)': r.tyLePhong,
-  'Mục tiêu (%)': 95,
-}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtM = (v: number) => `${(v / 1_000_000).toFixed(0)}tr`;
@@ -33,9 +43,35 @@ export const ReportsAnalytics = () => {
   const totalRooms = allRooms.length;
   const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
+  // ── Nối API báo cáo (financial-summary, manager-performance); offline → mock ──
+  const [apiSummary, setApiSummary] = useState<SummaryRow[] | null>(null);
+  const [apiMgr, setApiMgr] = useState<MgrPerfRow[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    hostService.getFinancialSummary('2025-12', CURRENT_MONTH)
+      .then(rows => {
+        if (!active || !rows?.length) return;
+        setApiSummary(rows.map(r => ({
+          month: fmtMonth(r.month), doanhThu: r.revenue, chiPhi: r.expense,
+          loiNhuan: r.netProfit, tyLePhong: r.occupancyRate,
+        })));
+      }).catch(() => { /* offline */ });
+    hostService.getManagerPerformance(CURRENT_MONTH)
+      .then(rows => {
+        if (!active || !rows?.length) return;
+        setApiMgr(rows.map(r => ({
+          manager: { id: r.managerId, fullName: r.managerName, phone: r.phone },
+          propCount: r.propertyCount, activeTenants: r.activeTenants,
+          resolvedMaintenance: r.resolvedMaintenance, openMaintenance: r.openMaintenance,
+          propOccupancy: r.occupancyRate,
+        })));
+      }).catch(() => { /* offline */ });
+    return () => { active = false; };
+  }, []);
+
   const managers = MOCK_USERS.filter(u => u.role === 'manager');
 
-  const managerPerformance = managers.map(m => {
+  const localManagerPerformance: MgrPerfRow[] = managers.map(m => {
     const assignedProps = MOCK_PROPERTIES.filter(p => p.managerId === m.id);
     const activeTenants = assignedProps.flatMap(p => p.rooms.filter(r => r.status === 'occupied')).length;
     const resolvedMaintenance = MOCK_MAINTENANCE_REQUESTS.filter(
@@ -43,9 +79,6 @@ export const ReportsAnalytics = () => {
     ).length;
     const openMaintenance = MOCK_MAINTENANCE_REQUESTS.filter(
       r => r.assignedManagerId === m.id && (r.status === 'open' || r.status === 'in_progress')
-    ).length;
-    const activeContracts = ALL_CONTRACTS.filter(
-      c => c.type === 'admin_manager' && c.lesseeId === m.id && c.status === 'active'
     ).length;
     const propCount = assignedProps.length;
     const propOccupancy = propCount > 0
@@ -55,12 +88,63 @@ export const ReportsAnalytics = () => {
         )
       : 0;
 
-    return { manager: m, propCount, activeTenants, resolvedMaintenance, openMaintenance, activeContracts, propOccupancy };
+    return { manager: { id: m.id, fullName: m.fullName, phone: m.phone }, propCount, activeTenants, resolvedMaintenance, openMaintenance, propOccupancy };
   });
 
-  const totalRevenue6M = FINANCIAL_SUMMARY.reduce((s, r) => s + r.doanhThu, 0);
-  const totalExpenses6M = FINANCIAL_SUMMARY.reduce((s, r) => s + r.chiPhi, 0);
-  const totalProfit6M = FINANCIAL_SUMMARY.reduce((s, r) => s + r.loiNhuan, 0);
+  // Nguồn dữ liệu cuối: ưu tiên API, fallback mock.
+  const financialSummary: SummaryRow[] = apiSummary ?? FINANCIAL_SUMMARY;
+  const managerPerformance: MgrPerfRow[] = apiMgr ?? localManagerPerformance;
+  const occupancyTrend = financialSummary.map(r => ({
+    month: r.month, 'Thực tế (%)': r.tyLePhong, 'Mục tiêu (%)': 95,
+  }));
+
+  const totalRevenue6M = financialSummary.reduce((s, r) => s + r.doanhThu, 0);
+  const totalExpenses6M = financialSummary.reduce((s, r) => s + r.chiPhi, 0);
+  const totalProfit6M = financialSummary.reduce((s, r) => s + r.loiNhuan, 0);
+
+  const handleExportExcel = () => {
+    exportToExcel('BaoCao_HoangBinhLand', [
+      {
+        name: 'Tài chính 6 tháng',
+        rows: financialSummary.map(r => ({
+          'Tháng': r.month,
+          'Doanh thu (₫)': r.doanhThu,
+          'Chi phí (₫)': r.chiPhi,
+          'Lợi nhuận (₫)': r.loiNhuan,
+          'Biên LN (%)': Math.round((r.loiNhuan / r.doanhThu) * 100),
+          'Tỷ lệ lấp đầy (%)': r.tyLePhong,
+        })),
+      },
+      {
+        name: 'Hiệu suất quản lý',
+        rows: managerPerformance.map(({ manager, propCount, activeTenants, resolvedMaintenance, openMaintenance, propOccupancy }) => ({
+          'Quản lý': manager.fullName,
+          'SĐT': manager.phone,
+          'Số nhà': propCount,
+          'Khách thuê': activeTenants,
+          'Tỷ lệ lấp đầy (%)': propOccupancy,
+          'Bảo trì đã xử lý': resolvedMaintenance,
+          'Đang chờ xử lý': openMaintenance,
+        })),
+      },
+      {
+        name: 'Hiệu suất theo BĐS',
+        rows: MOCK_PROPERTIES.map(prop => {
+          const occupied = prop.rooms.filter(r => r.status === 'occupied').length;
+          const total = prop.rooms.length;
+          const monthlyRev = prop.rooms.filter(r => r.status === 'occupied').reduce((s, r) => s + r.rentPrice, 0);
+          return {
+            'Bất động sản': prop.name,
+            'Địa chỉ': prop.address,
+            'Tỷ lệ lấp đầy (%)': total > 0 ? Math.round((occupied / total) * 100) : 0,
+            'Phòng đang thuê': occupied,
+            'Tổng phòng': total,
+            'Doanh thu/tháng (₫)': monthlyRev,
+          };
+        }),
+      },
+    ]);
+  };
 
   return (
     <div className="space-y-6">
@@ -79,7 +163,7 @@ export const ReportsAnalytics = () => {
             Xuất PDF
           </button>
           <button
-            onClick={() => alert('Xuất Excel... (mô phỏng)')}
+            onClick={handleExportExcel}
             className="btn-primary flex items-center gap-2"
           >
             <Download className="w-4 h-4" />
@@ -107,9 +191,9 @@ export const ReportsAnalytics = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {FINANCIAL_SUMMARY.map((row, i) => {
+              {financialSummary.map((row, i) => {
                 const margin = Math.round((row.loiNhuan / row.doanhThu) * 100);
-                const isLast = i === FINANCIAL_SUMMARY.length - 1;
+                const isLast = i === financialSummary.length - 1;
                 return (
                   <tr key={row.month} className={`hover:bg-slate-50 transition-colors ${isLast ? 'bg-indigo-50/40' : ''}`}>
                     <td className="px-5 py-3.5 font-medium text-slate-900">
@@ -149,7 +233,7 @@ export const ReportsAnalytics = () => {
                   </span>
                 </td>
                 <td className="px-5 py-3.5 text-right text-slate-500 text-xs">
-                  TB: {Math.round(FINANCIAL_SUMMARY.reduce((s, r) => s + r.tyLePhong, 0) / FINANCIAL_SUMMARY.length)}%
+                  TB: {Math.round(financialSummary.reduce((s, r) => s + r.tyLePhong, 0) / financialSummary.length)}%
                 </td>
               </tr>
             </tbody>
@@ -166,7 +250,7 @@ export const ReportsAnalytics = () => {
             <h2 className="text-base font-semibold text-slate-900">Xu hướng lấp đầy phòng</h2>
           </div>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={OCCUPANCY_TREND} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+            <LineChart data={occupancyTrend} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} />
               <YAxis domain={[70, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 11, fill: '#94a3b8' }} width={40} />
@@ -199,7 +283,7 @@ export const ReportsAnalytics = () => {
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart
-              data={FINANCIAL_SUMMARY}
+              data={financialSummary}
               margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />

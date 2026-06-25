@@ -1,12 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { AppNotification } from '../../types';
 import { formatRelativeTime } from '../../utils';
+import { realNotificationService, ApiNotification } from '../../services/notificationService.real';
+
+// Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
+const mapApiNotif = (n: ApiNotification): AppNotification => ({
+  id: String(n.id),
+  title: n.title,
+  body: n.body,
+  type: n.type as AppNotification['type'],
+  isRead: n.isRead,
+  priority: 'normal',
+  createdAt: n.createdAt,
+  actionRoute: n.screen,
+});
 
 // ─── Mock data (business logic unchanged) ─────────────────────────────────────
 const MOCK_NOTIFICATIONS: AppNotification[] = [
@@ -136,16 +149,38 @@ export const TenantNotificationScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [notifications, setNotifications] = useState<AppNotification[]>(MOCK_NOTIFICATIONS);
   const [filter, setFilter] = useState<string>('all');
+  const [refreshing, setRefreshing] = useState(false);
 
-  // ── Business logic (unchanged) ────────────────────────────────────────────
+  // Nạp thông báo thật từ BE mỗi khi vào màn; offline/lỗi → giữ mock.
+  const load = useCallback(async () => {
+    try {
+      const rows = await realNotificationService.list();
+      if (rows.length > 0) setNotifications(rows.map(mapApiNotif));
+    } catch { /* offline: giữ danh sách hiện tại */ }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  // ── Business logic ────────────────────────────────────────────────────────
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const filtered = filter === 'all'
     ? notifications
     : notifications.filter(n => TYPE_CATEGORY[n.type] === filter);
 
-  const markAllRead = () => setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-  const markRead    = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+  const markAllRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    realNotificationService.markAllRead().catch(() => { /* offline */ });
+  };
+  const markRead = (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    const num = Number(id);
+    if (Number.isFinite(num)) realNotificationService.markRead(num).catch(() => { /* offline */ });
+  };
 
   const TENANT_TAB_ROUTES = ['Home', 'InvoiceList', 'MaintenanceList', 'TenantContracts', 'Profile'];
 
@@ -310,6 +345,7 @@ export const TenantNotificationScreen: React.FC = () => {
         SectionSeparatorComponent={() => <View style={{ height: 4 }} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
         ListEmptyComponent={<ListEmpty />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       />
     </SafeAreaView>
   );

@@ -11,26 +11,36 @@ import {
   realTenantSelfService, MyContractListItem, mapBeContractStatus,
 } from '../../services/tenantSelfService.real';
 
+// Card mở rộng: thêm nhãn mô tả phạm vi thuê (toàn nhà / phòng)
+type CardContract = Contract & { isWholeHouse: boolean; scopeLabel: string };
+
 // Map item danh sách từ BE -> shape Contract dùng cho card
-const toCardContract = (it: MyContractListItem): Contract => {
+const toCardContract = (it: MyContractListItem): CardContract => {
   const daysUntilExpiry = getDaysUntil(it.endDate);
+  const isWholeHouse = (it.type || '').toUpperCase() === 'WHOLE_HOUSE';
+  const roomLabel = it.roomCode || it.roomNumber;
+  const scopeLabel = isWholeHouse
+    ? 'Thuê toàn nhà'
+    : roomLabel ? `Phòng ${roomLabel}` : 'Thuê phòng';
   return {
     id: String(it.id),
     code: it.code,
     type: 'manager_tenant',
-    lessorName: '',
+    lessorName: it.lessorName || 'Ban Quản Lý',
     lesseeName: '',
     lesseeCccd: '',
     lesseePhone: '',
     propertyName: it.propertyName,
-    roomCode: it.roomCode,
+    roomCode: roomLabel ?? undefined,
     startDate: it.startDate,
     endDate: it.endDate,
-    depositAmount: it.depositAmount,
-    rentAmount: it.rentAmount,
+    depositAmount: it.depositAmount ?? it.deposit ?? 0,
+    rentAmount: it.rentAmount ?? 0,
     status: mapBeContractStatus(it.status, daysUntilExpiry),
     equipmentList: [],
     daysUntilExpiry,
+    isWholeHouse,
+    scopeLabel,
   };
 };
 
@@ -56,7 +66,7 @@ const ContractStatusBadge: React.FC<{ status: ContractStatus }> = ({ status }) =
 export const TenantContractScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<'all' | ContractStatus>('all');
-  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contracts, setContracts] = useState<CardContract[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -76,7 +86,7 @@ export const TenantContractScreen: React.FC = () => {
 
   const activeContract = contracts.find(c => c.status === 'active' || c.status === 'expiring_soon');
 
-  const renderContract = ({ item }: { item: Contract }) => {
+  const renderContract = ({ item }: { item: CardContract }) => {
     const isActive = item.status === 'active';
     const isExpiringSoon = item.status === 'expiring_soon';
     const canSign = item.status === 'waiting_sign';
@@ -92,7 +102,7 @@ export const TenantContractScreen: React.FC = () => {
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.contractCode}>{item.code}</Text>
-            <Text style={styles.propertyName}>{item.propertyName} · Phòng {item.roomCode}</Text>
+            <Text style={styles.propertyName}>{item.propertyName} · {item.scopeLabel}</Text>
           </View>
           <ContractStatusBadge status={item.status} />
         </View>
@@ -107,7 +117,7 @@ export const TenantContractScreen: React.FC = () => {
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Tiền thuê</Text>
             <Text style={[styles.infoValue, { color: Colors.primary, fontWeight: '700' }]}>
-              {item.rentAmount.toLocaleString('vi-VN')} đ/tháng
+              {(item.rentAmount ?? 0).toLocaleString('vi-VN')} đ/tháng
             </Text>
           </View>
           <View style={styles.infoItem}>
@@ -116,7 +126,7 @@ export const TenantContractScreen: React.FC = () => {
           </View>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Đặt cọc</Text>
-            <Text style={styles.infoValue}>{item.depositAmount.toLocaleString('vi-VN')} đ</Text>
+            <Text style={styles.infoValue}>{(item.depositAmount ?? 0).toLocaleString('vi-VN')} đ</Text>
           </View>
         </View>
 
@@ -187,7 +197,7 @@ export const TenantContractScreen: React.FC = () => {
           <View style={styles.summaryLeft}>
             <Text style={styles.summaryEmoji}>✅</Text>
             <View>
-              <Text style={styles.summaryTitle}>Đang thuê · {activeContract.roomCode}</Text>
+              <Text style={styles.summaryTitle}>Đang thuê · {activeContract.scopeLabel}</Text>
               <Text style={styles.summaryDesc}>{activeContract.propertyName}</Text>
             </View>
           </View>

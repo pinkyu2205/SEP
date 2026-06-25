@@ -11,15 +11,13 @@ import {
   MaintenanceTicket, TicketStatus, TicketCategory,
 } from '../../store/maintenanceStore';
 import { getPropertyById } from '../../data/managedProperties';
+import { MAINTENANCE_STATUS_META } from '../../constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: string }> = {
-  pending:     { label: 'Chờ tiếp nhận', color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  accepted:    { label: 'Đã tiếp nhận',  color: '#3B82F6', bg: '#EFF6FF', icon: '📋' },
-  in_progress: { label: 'Đang xử lý',    color: '#8B5CF6', bg: '#F5F3FF', icon: '🔧' },
-  resolved:    { label: 'Hoàn tất',      color: '#10B981', bg: '#F0FDF4', icon: '✅' },
-  cancelled:   { label: 'Đã hủy',        color: '#6B7280', bg: '#F3F4F6', icon: '✕'  },
+  ...MAINTENANCE_STATUS_META,
+  accepted: MAINTENANCE_STATUS_META.acknowledged,
 };
 
 const PRIORITY_CONFIG = {
@@ -37,12 +35,12 @@ const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> =
   other:      { label: 'Khác',     icon: '🔧' },
 };
 
-const NEXT_STATUS: Record<TicketStatus, TicketStatus | null> = {
-  pending: 'accepted', accepted: 'in_progress', in_progress: 'resolved',
+const NEXT_STATUS: Partial<Record<TicketStatus, TicketStatus | null>> = {
+  pending: 'in_progress', accepted: 'in_progress', in_progress: 'resolved',
   resolved: null, cancelled: null,
 };
-const NEXT_ACTION_LABEL: Record<TicketStatus, string> = {
-  pending:     '✓ Tiếp nhận',
+const NEXT_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
+  pending:     '🔧 Tiếp nhận & xử lý',
   accepted:    '🔧 Bắt đầu xử lý',
   in_progress: '✅ Hoàn tất',
   resolved: '', cancelled: '',
@@ -219,7 +217,6 @@ export const BuildingMaintenanceScreen: React.FC = () => {
   const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
     { id: 'all',         label: 'Tất cả' },
     { id: 'pending',     label: '⏳ Chờ' },
-    { id: 'accepted',    label: '📋 Đã nhận' },
     { id: 'in_progress', label: '🔧 Đang xử lý' },
     { id: 'resolved',    label: '✅ Hoàn tất' },
     { id: 'cancelled',   label: '✕ Đã hủy' },

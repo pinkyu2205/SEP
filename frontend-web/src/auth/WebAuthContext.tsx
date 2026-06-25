@@ -2,7 +2,11 @@ import { createContext, useContext, useMemo, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import api from '../services/api';
 
-export type WebRole = 'admin' | 'host' | 'manager';
+// Web chỉ phục vụ host (ROLE_OWNER) và admin (ROLE_ADMIN).
+// Manager là mobile-only — không có không gian làm việc trên web.
+export type WebRole = 'admin' | 'host';
+
+const MANAGER_WEB_BLOCK_MSG = 'Tài khoản Quản lý vận hành vui lòng sử dụng ứng dụng di động.';
 
 export interface WebAuthUser {
   id: string;
@@ -51,8 +55,8 @@ const readStoredUser = (): WebAuthUser | null => {
       storage.setItem(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
-    // Discard sessions with unrecognised roles
-    if (parsed.role !== 'admin' && parsed.role !== 'host' && parsed.role !== 'manager') {
+    // Chỉ chấp nhận host & admin; mọi role khác (kể cả manager) bị loại bỏ.
+    if (parsed.role !== 'admin' && parsed.role !== 'host') {
       storage.removeItem(STORAGE_KEY);
       return null;
     }
@@ -82,10 +86,15 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
 
           // Ánh xạ Role từ Backend sang Frontend WebRole
           const backendRole = response.role; // e.g., 'ROLE_ADMIN', 'ROLE_OWNER', 'ROLE_MANAGER'
-          const webRole: WebRole =
-            backendRole === 'ROLE_ADMIN'   ? 'admin'   :
-            backendRole === 'ROLE_OWNER'   ? 'host'    :
-            backendRole === 'ROLE_MANAGER' ? 'manager' : 'manager';
+          const webRole: WebRole | null =
+            backendRole === 'ROLE_ADMIN' ? 'admin' :
+            backendRole === 'ROLE_OWNER' ? 'host'  : null;
+
+          // Manager (và mọi role khác) không được phép vào web — chặn ngay, không tạo session.
+          if (!webRole) {
+            localStorage.removeItem('access_token');
+            throw new Error(MANAGER_WEB_BLOCK_MSG);
+          }
 
           const nextUser: WebAuthUser = {
             id: response.username || username,
@@ -100,6 +109,10 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
         }
         throw new Error('Không nhận được JWT Token từ máy chủ.');
       } catch (backendError: any) {
+        // Manager đăng nhập đúng nhưng bị chặn vào web → không thử demo, trả message rõ ràng.
+        if (backendError instanceof Error && backendError.message === MANAGER_WEB_BLOCK_MSG) {
+          throw backendError;
+        }
         console.warn('Đăng nhập qua Backend thất bại, thử kiểm tra tài khoản Demo...', backendError);
 
         // 2. Fallback: Nếu backend lỗi hoặc không chạy, kiểm tra tài khoản DEMO để dev offline mượt mà
@@ -153,7 +166,6 @@ export const useWebAuth = () => {
 const defaultPathByRole: Record<WebRole, string> = {
   admin: '/admin',
   host: '/host',
-  manager: '/host',
 };
 
 export const ProtectedRoute = ({ allowedRoles }: { allowedRoles: WebRole[] }) => {

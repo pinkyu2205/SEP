@@ -1,9 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Bell, CheckCheck, X, FileText, DollarSign, Wrench, Home, ClipboardCheck,
 } from 'lucide-react';
 import type { PortalNotification, NotificationType } from '../../types';
 import { MOCK_NOTIFICATIONS } from '../../utils/mockData';
+import { hostService, type HostNotificationDto } from '../../services/host.service';
+import { useUnreadNotifications } from '../../contexts/UnreadNotificationsContext';
+
+// Map type BE (UPPER) → type FE (lowercase). Loại lạ → 'approval_needed'.
+const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
+  APPROVAL_NEEDED: 'approval_needed',
+  CONTRACT_EXPIRY: 'contract_expiry',
+  MASTER_LEASE_EXPIRY: 'contract_expiry',
+  UNPAID_INVOICE: 'unpaid_invoice',
+  MAINTENANCE_DELAY: 'maintenance_delay',
+  OCCUPANCY_ALERT: 'occupancy_alert',
+  LOSS_ALERT: 'occupancy_alert',
+};
+const dtoToNotification = (d: HostNotificationDto): PortalNotification => ({
+  id: d.id,
+  type: NOTI_TYPE_FROM_API[d.type] ?? 'approval_needed',
+  title: d.title,
+  message: d.message,
+  isRead: d.isRead,
+  priority: (d.priority?.toLowerCase() as PortalNotification['priority']) ?? 'medium',
+  createdAt: d.createdAt,
+});
 
 // ── Cấu hình loại thông báo ───────────────────────────────────────────────────
 const typeConfig: Record<NotificationType, {
@@ -37,6 +59,19 @@ export const NotificationCenter = () => {
   const [notifications, setNotifications] = useState<PortalNotification[]>(MOCK_NOTIFICATIONS);
   const [filterType, setFilterType] = useState<'all' | NotificationType>('all');
   const [filterRead, setFilterRead] = useState<'all' | 'unread' | 'read'>('all');
+  const { refresh: refreshUnreadBadge } = useUnreadNotifications();
+
+  // Nạp thông báo thật từ BE; lỗi/offline → giữ mock.
+  useEffect(() => {
+    let active = true;
+    hostService.listNotifications({ page: 0, size: 50 })
+      .then(page => {
+        const list = (page?.content ?? []).map(dtoToNotification);
+        if (active && list.length > 0) setNotifications(list);
+      })
+      .catch(() => { /* offline: dùng mock */ });
+    return () => { active = false; };
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -51,6 +86,9 @@ export const NotificationCenter = () => {
 
   const markRead = (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    hostService.markNotificationRead(id)
+      .then(refreshUnreadBadge)
+      .catch(() => { /* offline */ });
   };
 
   const dismiss = (id: string) => {
@@ -59,6 +97,9 @@ export const NotificationCenter = () => {
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    hostService.markAllNotificationsRead()
+      .then(refreshUnreadBadge)
+      .catch(() => { /* offline */ });
   };
 
   return (
