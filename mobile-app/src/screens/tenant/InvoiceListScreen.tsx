@@ -345,7 +345,7 @@ export const InvoiceListScreen: React.FC = () => {
 
             {(payingInvoice?.lateFee ?? 0) > 0 && (
               <View style={styles.lateFeeWarning}>
-                <Text style={styles.lateFeeText}>
+                <Text style={styles.lateFeeWarningText}>
                   Bao gồm phí trả chậm: {formatCurrency(payingInvoice?.lateFee ?? 0)}
                 </Text>
               </View>
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md,
     padding: Spacing.sm, marginBottom: Spacing.md,
   },
-  lateFeeText: { fontSize: 13, fontWeight: '600', color: Colors.error, textAlign: 'center' },
+  lateFeeWarningText: { fontSize: 13, fontWeight: '600', color: Colors.error, textAlign: 'center' },
 
   confirmBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,

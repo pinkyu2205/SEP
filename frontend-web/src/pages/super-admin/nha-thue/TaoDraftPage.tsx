@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen,
-  FileText, Hammer, Image as ImageIcon, Layers, MapPin, Plus, Power, Search,
-  TrendingUp, Trash2, Upload, XCircle,
+  FileSpreadsheet, FileText, Image as ImageIcon, Layers, MapPin, Plus, Power, Search, Settings2,
+  TrendingUp, Trash2, Upload, X, XCircle,
 } from 'lucide-react';
 import { propertyService } from '../../../services/property.service';
 import { zoneService } from '../../../services/zone.service';
@@ -15,10 +16,12 @@ import { KpiCard } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { AddressAutocomplete } from '../../../components/AddressAutocomplete';
 import { PropertyMap } from '../../../components/PropertyMap';
+import { LeaseImportPanel } from './LeaseImportPanel';
+import { HandoverEquipmentSection } from './HandoverEquipmentSection';
 
 const statusBadge: Record<string, { label: string; cls: string }> = {
   DRAFT:                { label: 'Nháp',                cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION:     { label: 'Đang cải tạo',        cls: 'bg-amber-100 text-amber-800' },
+  UNDER_RENOVATION:     { label: 'Chờ cấu hình',        cls: 'bg-amber-100 text-amber-800' },
   RENOVATION_COMPLETED: { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' },
   PENDING_HOST_REVIEW:  { label: 'Chờ duyệt',           cls: 'bg-blue-100 text-blue-800' },
   ACTIVE:               { label: 'Đang kinh doanh',     cls: 'bg-emerald-100 text-emerald-800' },
@@ -66,7 +69,10 @@ type View = 'list' | 'create-form' | 'step-info' | 'detail';
 
 export const TaoDraftPage = () => {
   // ─── view & selected ──────────────────────────────────────────────
+  // Mặc định xem danh sách toà nhà; import Excel mở dạng popup khi bấm nút.
+  const [importOpen, setImportOpen] = useState(false);
   const [view, setView] = useState<View>('list');
+  const navigate = useNavigate();
   const [newProperty, setNewProperty] = useState<PropertyResponse | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<PropertyResponse | null>(null);
 
@@ -115,6 +121,14 @@ export const TaoDraftPage = () => {
     fetchBuildings();
     zoneService.getRootZones().then(setZones).catch(console.error);
   }, []);
+
+  // Khoá cuộn nền khi mở popup import (tránh nền cuộn lung tung phía sau).
+  useEffect(() => {
+    if (!importOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [importOpen]);
 
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => ({
@@ -323,13 +337,6 @@ export const TaoDraftPage = () => {
     }
   };
 
-  const handleCompleteRenovation = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!window.confirm('Xác nhận cải tạo hoàn tất?')) return;
-    try { await propertyService.completeRenovation(id); fetchBuildings(); }
-    catch (err: any) { alert(err.response?.data?.message || 'Lỗi'); }
-  };
-
   const backToList = () => {
     setView('list');
     setNewProperty(null);
@@ -358,6 +365,33 @@ export const TaoDraftPage = () => {
     backToList();
   };
 
+
+  // ─── Popup "Nhập từ Excel" (mở khi bấm nút ở danh sách) ─────────────
+  const importModal = importOpen && (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Backdrop fixed → luôn phủ kín màn hình kể cả khi cuộn nội dung dài */}
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+      <div className="relative flex min-h-full items-start justify-center p-4 sm:py-10"
+        onClick={() => setImportOpen(false)}>
+        <div className="relative w-full max-w-3xl rounded-2xl bg-white shadow-xl"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-slate-100 bg-white px-6 py-4">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+              <h3 className="text-base font-bold text-slate-900">Nhập nhà từ Excel</h3>
+            </div>
+            <button onClick={() => setImportOpen(false)}
+              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="p-6">
+            <LeaseImportPanel onImported={fetchBuildings} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   // ═══════════════════════════════════════════════════════════════════
   // VIEW: StepPropertyInfo (hợp đồng + thiết bị) sau khi tạo draft
@@ -439,6 +473,9 @@ export const TaoDraftPage = () => {
             </div>
           </div>
         )}
+
+        {/* Thiết bị chủ nhà bàn giao (import đợt 1 — chỉ hiển thị) */}
+        <HandoverEquipmentSection propertyId={selectedBuilding.id} />
 
         {/* Bản đồ vị trí (Goong) */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
@@ -805,15 +842,21 @@ export const TaoDraftPage = () => {
   // ═══════════════════════════════════════════════════════════════════
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-slate-900">Khởi tạo tòa nhà</h1>
-          <p className="text-slate-500 mt-1 text-sm font-medium">Quản lý toàn bộ tòa nhà trong hệ thống</p>
+          <h1 className="text-2xl font-black text-slate-900">Khởi tạo nhà</h1>
+          <p className="text-slate-500 mt-1 text-sm font-medium">Quản lý toàn bộ tòa nhà — nhập hàng loạt từ Excel hoặc tạo thủ công</p>
         </div>
-        <button onClick={() => setView('create-form')}
-          className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5">
-          <Plus className="h-5 w-5" /> Khởi tạo mới
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button onClick={() => setImportOpen(true)}
+            className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 transition">
+            <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
+          </button>
+          <button onClick={() => setView('create-form')}
+            className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5">
+            <Plus className="h-5 w-5" /> Khởi tạo mới
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -833,7 +876,7 @@ export const TaoDraftPage = () => {
           <option value="all">Tất cả trạng thái</option>
           <option value="DRAFT">Nháp</option>
           <option value="INITIALIZED">Đã khởi tạo</option>
-          <option value="UNDER_RENOVATION">Đang cải tạo</option>
+          <option value="UNDER_RENOVATION">Chờ cấu hình</option>
           <option value="RENOVATION_COMPLETED">Đã hoàn tất cải tạo</option>
           <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
           <option value="ACTIVE">Đang kinh doanh</option>
@@ -938,20 +981,15 @@ export const TaoDraftPage = () => {
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-slate-100">
-                  {b.status === 'UNDER_RENOVATION' && (
-                    <button onClick={(e) => handleCompleteRenovation(b.id, e)}
-                      className="w-full py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                      <Hammer className="w-4 h-4" /> Hoàn tất Cải tạo
+                  {(b.status === 'UNDER_RENOVATION' || isSubmittedDraft) && (
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${b.id}`); }}
+                      className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                      <Settings2 className="w-4 h-4" /> Cấu hình khai thác
                     </button>
-                  )}
-                  {isSubmittedDraft && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-indigo-600 bg-indigo-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã khởi tạo — sang Cấu hình khai thác
-                    </div>
                   )}
                   {b.status === 'RENOVATION_COMPLETED' && (
                     <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — sang Định giá để gửi Host
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — chờ gửi Host
                     </div>
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
@@ -970,6 +1008,8 @@ export const TaoDraftPage = () => {
           })}
         </div>
       )}
+
+      {importModal}
     </div>
   );
 };

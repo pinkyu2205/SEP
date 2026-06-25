@@ -23,6 +23,8 @@ import type {
   HostConfirmResponse,
   PropertyActivationResponse,
   PropertyPurgeResponse,
+  HandoverEquipmentResponse,
+  OperationalEquipmentResponse,
 } from '../types/api.types';
 
 const BASE = '/api/v1/properties';
@@ -197,6 +199,16 @@ export const propertyService = {
   /** GET /properties/{id}/depreciation */
   getDepreciation: (id: number): Promise<PricingResponse> => {
     return api.get(`${BASE}/${id}/depreciation`);
+  },
+
+  /** GET /properties/{id}/handover-equipments — TB chủ nhà bàn giao (đợt 1, chỉ hiển thị) */
+  getHandoverEquipments: (id: number): Promise<HandoverEquipmentResponse[]> => {
+    return api.get(`${BASE}/${id}/handover-equipments`);
+  },
+
+  /** GET /properties/{id}/equipments — TB vận hành (đã gán phòng/khu vực, có version cải tạo + bảo hành) */
+  getEquipments: (id: number): Promise<OperationalEquipmentResponse[]> => {
+    return api.get(`${BASE}/${id}/equipments`);
   },
 
   /** POST /properties/{id}/submit-to-host — Admin gửi cho Host */

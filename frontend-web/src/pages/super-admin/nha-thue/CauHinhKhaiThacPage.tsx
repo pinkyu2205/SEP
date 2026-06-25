@@ -1,15 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Building2, CheckCircle2, Clock, Hammer,
-  MapPin, Search, Settings2, Wrench, History, RefreshCw,
-  AlertTriangle, DoorOpen, Users, ChevronDown, ChevronRight,
+  ArrowLeft, Building2, CheckCircle2, Clock, FileSpreadsheet, Hammer,
+  MapPin, Package, Search, Settings2, Wrench, History, RefreshCw,
+  AlertTriangle, DoorOpen, Users, ChevronDown, ChevronRight, X,
 } from 'lucide-react';
 import { propertyService } from '../../../services/property.service';
 import type { PropertyResponse, RenovationLineResponse, RenovationSession, RoomResponse } from '../../../types/api.types';
 import { StepOnboardingOptions } from '../properties/wizard/StepOnboardingOptions';
 import { KpiCard } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { RenovationImportPanel } from './RenovationImportPanel';
+import { HandoverEquipmentSection } from './HandoverEquipmentSection';
+import { OperationalEquipmentPanel } from './OperationalEquipmentPanel';
+import { SupplementImportPanel } from './SupplementImportPanel';
 
 const formatVND = (n: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -19,33 +23,44 @@ const flatToSessions = (lines: RenovationLineResponse[]): RenovationSession[] =>
   { sessionNumber: 1, startDate: undefined, endDate: undefined, totalCost: lines.reduce((s, l) => s + l.cost, 0), lines },
 ];
 
+const AREA_LABEL: Record<string, string> = {
+  LIVING_ROOM: 'Phòng khách', KITCHEN: 'Bếp', BATHROOM: 'Nhà tắm',
+  BALCONY: 'Ban công', GARAGE: 'Nhà để xe', OTHER: 'Khu vực chung',
+};
+const equipLoc = (e: { roomNumber?: string | null; houseArea?: string | null }): string =>
+  e.roomNumber ? `Phòng ${e.roomNumber}` : e.houseArea ? (AREA_LABEL[e.houseArea] ?? e.houseArea) : 'Toàn nhà';
+
 const SessionAccordion = ({ session, defaultOpen = true }: { session: RenovationSession; defaultOpen?: boolean }) => {
   const [open, setOpen] = useState(defaultOpen);
   const dateLabel = session.startDate
     ? new Date(session.startDate).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : null;
+  const inProgress = session.status === 'IN_PROGRESS' || (!session.status && !session.endDate);
+  const disabled = session.status === 'DISABLED';
+  const equipments = session.equipments ?? [];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+    <div className={`rounded-2xl border overflow-hidden ${disabled ? 'border-slate-200 bg-slate-50/60' : 'border-slate-200 bg-white'}`}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50 border-b border-slate-100 text-left hover:bg-slate-100 transition"
+        className="w-full flex items-center gap-2.5 px-6 py-4 bg-slate-50 border-b border-slate-100 text-left hover:bg-slate-100 transition"
       >
         {open ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
         <Hammer className="h-4 w-4 text-amber-600 shrink-0" />
-        <span className="font-bold text-slate-800">Cải tạo lần {session.sessionNumber}</span>
+        <span className={`font-bold ${disabled ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+          Cải tạo {session.versionLabel ?? `lần ${session.sessionNumber}`}
+        </span>
         {dateLabel && <span className="text-xs text-slate-400 font-medium">— {dateLabel}</span>}
-        {!session.endDate && (
-          <span className="ml-1 text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Đang thi công</span>
-        )}
-        <span className="ml-auto text-xs font-semibold text-slate-400">{session.lines.length} hạng mục</span>
-        <span className="font-black text-amber-700 text-sm ml-3">{formatVND(session.totalCost)}</span>
+        {inProgress && <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">Đang thi công</span>}
+        {session.status === 'ACTIVE' && <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Đang hiệu lực</span>}
+        {disabled && <span className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">Đợt cũ</span>}
+        <span className="ml-auto text-xs font-semibold text-slate-400">{session.lines.length} hạng mục{equipments.length ? ` · ${equipments.length} TB` : ''}</span>
+        <span className="font-black text-amber-700 text-sm ml-3 shrink-0">{formatVND(session.totalCost)}</span>
       </button>
       {open && (
-        <div className="p-5">
-          {session.lines.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-4">Chưa có hạng mục nào</p>
-          ) : (
+        <div className="p-5 space-y-4">
+          {/* Hạng mục cải tạo */}
+          {session.lines.length > 0 ? (
             <div className="space-y-2">
               {session.lines.map((line, i) => (
                 <div key={line.id} className="flex items-center justify-between px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-sm">
@@ -58,8 +73,38 @@ const SessionAccordion = ({ session, defaultOpen = true }: { session: Renovation
                 </div>
               ))}
               <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm">
-                <span className="font-bold text-amber-800">Tổng đợt này</span>
+                <span className="font-bold text-amber-800">Tổng chi phí cải tạo đợt này</span>
                 <span className="font-black text-amber-700">{formatVND(session.totalCost)}</span>
+              </div>
+            </div>
+          ) : equipments.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4">Chưa có hạng mục nào</p>
+          ) : null}
+
+          {/* Thiết bị mua đợt này */}
+          {equipments.length > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Thiết bị mua đợt này</p>
+              <div className="space-y-2">
+                {equipments.map((eq) => {
+                  const eqDisabled = eq.operationalStatus === 'DISABLED' || eq.currentEffective === false;
+                  return (
+                    <div key={eq.id} className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm">
+                      <div className="min-w-0">
+                        <p className={`font-semibold ${eqDisabled ? 'line-through text-slate-400' : 'text-slate-700'}`}>{eq.catalogName}</p>
+                        <p className="text-xs text-slate-400">
+                          {equipLoc(eq)}{eq.warrantyMonths ? ` · BH ${eq.warrantyMonths} tháng` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {eqDisabled
+                          ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">Đã thay thế</span>
+                          : <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-700">Đang dùng</span>}
+                        <span className="font-bold text-slate-600">{formatVND(eq.price)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -138,6 +183,8 @@ const RenovateRestartPanel = ({ property, onDone }: { property: PropertyResponse
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [wholeHouseConfirmed, setWholeHouseConfirmed] = useState(false);
+  // Sau khi bấm "Bắt đầu cải tạo lại" → hiện form import cải tạo bổ sung.
+  const [started, setStarted] = useState(property.status === 'UNDER_RENOVATION');
 
   useEffect(() => {
     const load = async () => {
@@ -168,16 +215,27 @@ const RenovateRestartPanel = ({ property, onDone }: { property: PropertyResponse
     setStarting(true);
     try {
       await propertyService.startRenovation(property.id);
-      alert('Đã chuyển sang trạng thái Đang cải tạo!');
-      onDone();
+      setStarted(true); // chuyển sang bước nhập cải tạo bổ sung
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Lỗi — BE chưa có endpoint này, xem doc/NOTE-CHO-TEAM-BE.md mục 5');
+      alert(err.response?.data?.message || 'Không bắt đầu được cải tạo lại');
     } finally {
       setStarting(false);
     }
   };
 
   if (loading) return <div className="py-16 text-center text-slate-400">Đang tải dữ liệu cải tạo...</div>;
+
+  // Đã mở đợt cải tạo mới → nhập cải tạo bổ sung từ Excel.
+  if (started) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700">
+          <RefreshCw className="h-4 w-4" /> Đã mở đợt cải tạo mới. Tải file cải tạo bổ sung để hoàn tất.
+        </div>
+        <SupplementImportPanel onDone={onDone} />
+      </div>
+    );
+  }
 
   const prevGrandTotal = prevSessions.reduce((s, sess) => s + sess.totalCost, 0);
 
@@ -303,6 +361,7 @@ const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | n
   if (b.status === 'UNDER_RENOVATION') return { label: 'Đang cải tạo', cls: 'bg-amber-100 text-amber-800' };
   if (b.status === 'RENOVATION_COMPLETED') return { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' };
   if (b.status === 'PENDING_HOST_REVIEW') return { label: 'Đã cải tạo xong', cls: 'bg-teal-100 text-teal-800' };
+  if (b.status === 'PENDING_OPERATION_MANAGER') return { label: 'Chờ gán quản lý', cls: 'bg-violet-100 text-violet-800' };
   if (b.status === 'ACTIVE') return { label: 'Đang kinh doanh', cls: 'bg-emerald-100 text-emerald-800' };
   if (b.status === 'DISABLED') return { label: 'Đã vô hiệu', cls: 'bg-rose-100 text-rose-800' };
   return null;
@@ -313,7 +372,9 @@ export const CauHinhKhaiThacPage = () => {
   const navigate = useNavigate();
 
   const [selected, setSelected] = useState<PropertyResponse | null>(null);
-  const [viewMode, setViewMode] = useState<'config' | 'history' | 'renovate'>('config');
+  const [viewMode, setViewMode] = useState<'config' | 'equipment' | 'history' | 'renovate'>('config');
+  // Mặc định xem danh sách; import cải tạo mở dạng popup khi bấm nút.
+  const [importOpen, setImportOpen] = useState(false);
   const [buildings, setBuildings] = useState<PropertyResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -331,6 +392,14 @@ export const CauHinhKhaiThacPage = () => {
   };
 
   useEffect(() => { fetchList(); }, []);
+
+  // Khoá cuộn nền khi mở popup import.
+  useEffect(() => {
+    if (!importOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [importOpen]);
 
   useEffect(() => {
     if (id && buildings.length > 0) {
@@ -392,8 +461,10 @@ export const CauHinhKhaiThacPage = () => {
   if (selected) {
     const canShowHistory = !!(selected.hasRenovation || selected.renovationCompleted);
     const canShowRenovate = selected.status === 'ACTIVE';
+    const canShowEquipment = selected.status !== 'DRAFT';
     const tabs = [
       { key: 'config' as const, label: 'Cấu hình', icon: Settings2 },
+      ...(canShowEquipment ? [{ key: 'equipment' as const, label: 'Thiết bị', icon: Package }] : []),
       ...(canShowHistory ? [{ key: 'history' as const, label: 'Lịch sử cải tạo', icon: History }] : []),
       ...(canShowRenovate ? [{ key: 'renovate' as const, label: 'Cải tạo lại', icon: RefreshCw }] : []),
     ];
@@ -435,14 +506,20 @@ export const CauHinhKhaiThacPage = () => {
         )}
 
         {viewMode === 'config' && (
-          <StepOnboardingOptions
-            property={selected}
-            onNext={backToList}
-            onBack={backToList}
-            onPropertyUpdated={setSelected}
-            nextLabel={selected.status === 'UNDER_RENOVATION' ? 'Lưu cấu hình cải tạo & Quay về' : 'Xác nhận cấu hình & Quay về'}
-            renovationOnly={selected.status === 'UNDER_RENOVATION'}
-          />
+          <>
+            <HandoverEquipmentSection propertyId={selected.id} />
+            <StepOnboardingOptions
+              property={selected}
+              onNext={backToList}
+              onBack={backToList}
+              onPropertyUpdated={setSelected}
+              nextLabel={selected.status === 'UNDER_RENOVATION' ? 'Lưu cấu hình cải tạo & Quay về' : 'Xác nhận cấu hình & Quay về'}
+              renovationOnly={selected.status === 'UNDER_RENOVATION'}
+            />
+          </>
+        )}
+        {viewMode === 'equipment' && (
+          <OperationalEquipmentPanel propertyId={selected.id} />
         )}
         {viewMode === 'history' && (
           <RenovationHistoryPanel property={selected} />
@@ -459,11 +536,17 @@ export const CauHinhKhaiThacPage = () => {
   // ═══════════════════════════════════════════════════════════════════
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-black text-slate-900">Cấu hình khai thác</h1>
-        <p className="text-slate-500 mt-1 text-sm font-medium">
-          Cấu hình loại hình kinh doanh, cải tạo, phòng và phân bổ thiết bị cho từng tòa nhà
-        </p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900">Cấu hình khai thác</h1>
+          <p className="text-slate-500 mt-1 text-sm font-medium">
+            Cấu hình cải tạo / phòng cho từng tòa nhà, hoặc nhập hợp đồng cải tạo hàng loạt từ Excel.
+          </p>
+        </div>
+        <button onClick={() => setImportOpen(true)}
+          className="flex shrink-0 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 transition">
+          <FileSpreadsheet className="h-4 w-4" /> Nhập cải tạo từ Excel
+        </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -590,6 +673,19 @@ export const CauHinhKhaiThacPage = () => {
                       )}
                     </div>
                   )}
+                  {b.status === 'PENDING_OPERATION_MANAGER' && (
+                    <div className="flex flex-col gap-2">
+                      <div className="w-full py-2 text-center text-xs font-semibold text-violet-600 bg-violet-50 rounded-xl flex items-center justify-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Host đã duyệt giá — chờ gán quản lý vận hành để kinh doanh
+                      </div>
+                      {(b.hasRenovation || b.renovationCompleted) && (
+                        <button onClick={() => openHistory(b)}
+                          className="w-full py-2 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-xs flex justify-center items-center gap-1.5">
+                          <History className="w-3.5 h-3.5" /> Xem lịch sử cải tạo
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {b.status === 'ACTIVE' && (
                     <div className="flex flex-col gap-2">
                       <div className="w-full py-2 text-center text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl flex items-center justify-center gap-1.5">
@@ -602,8 +698,9 @@ export const CauHinhKhaiThacPage = () => {
                         </button>
                       )}
                       <button onClick={() => openRenovate(b)}
+                        title="Mở đợt cải tạo mới & nhập file cải tạo bổ sung"
                         className="w-full py-2 bg-orange-50 text-orange-700 hover:bg-orange-500 hover:text-white transition rounded-xl font-bold text-xs flex justify-center items-center gap-1.5">
-                        <RefreshCw className="w-3.5 h-3.5" /> Cải tạo lại
+                        <RefreshCw className="w-3.5 h-3.5" /> Cải tạo lại (nhập bổ sung)
                       </button>
                     </div>
                   )}
@@ -642,6 +739,32 @@ export const CauHinhKhaiThacPage = () => {
         onConfirm={handleRenovationComplete}
         onCancel={() => setRenoTarget(null)}
       />
+
+      {importOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          {/* Backdrop fixed → luôn phủ kín màn hình kể cả khi cuộn nội dung dài */}
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+          <div className="relative flex min-h-full items-start justify-center p-4 sm:py-10"
+            onClick={() => setImportOpen(false)}>
+            <div className="relative w-full max-w-3xl rounded-2xl bg-white shadow-xl"
+              onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-slate-100 bg-white px-6 py-4">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
+                  <h3 className="text-base font-bold text-slate-900">Nhập cải tạo từ Excel</h3>
+                </div>
+                <button onClick={() => setImportOpen(false)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-6">
+                <RenovationImportPanel onImported={fetchList} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

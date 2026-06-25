@@ -38,8 +38,9 @@ const VALID_TRANSITIONS: Record<ExtendedStatus, { status: ExtendedStatus; desc: 
   ],
 };
 
-// Rooms may have an extended status not in the original type — cast locally.
-interface RoomWithExt extends BuildingRoom { status: ExtendedStatus; }
+// Rooms may have an extended status not in the original type — override status locally.
+// Dùng Omit thay vì `extends` vì ExtendedStatus rộng hơn RoomStatus (không hợp lệ khi extends).
+type RoomWithExt = Omit<BuildingRoom, 'status'> & { status: ExtendedStatus };
 
 const FILTERS: { id: 'all' | ExtendedStatus; label: string }[] = [
   { id: 'all',         label: 'Tất cả' },

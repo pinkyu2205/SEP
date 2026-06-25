@@ -3,6 +3,13 @@ import type {
 } from '../types/api.types';
 
 const ENDPOINT = '/api/v1/import/onboarding-excel';
+// Endpoint MỚI (BE đang làm — xem doc/BE-tach-import-khoi-tao-va-cai-tao.md):
+//  - lease-excel:      module Khởi tạo nhà — file chỉ có hợp đồng thuê + thiết bị bàn giao (hiển thị).
+//  - renovation-excel: module Cấu hình khai thác — file chỉ có cải tạo, import xong TỰ ĐỘNG gửi Host.
+const LEASE_ENDPOINT = '/api/v1/import/lease-excel';
+const RENOVATION_ENDPOINT = '/api/v1/import/renovation-excel';
+// Cải tạo bổ sung (session v2+) — sau khi nhà ACTIVE + đã gọi renovation/start.
+const RENOVATION_SUPPLEMENT_ENDPOINT = '/api/v1/import/renovation-supplement-excel';
 const IMAGES_ZIP_ENDPOINT = '/api/v1/import/property-images-zip';
 
 /**
@@ -36,48 +43,88 @@ const UPLOAD_SIZE_MESSAGE =
  *  2. fetch để trình duyệt tự set `multipart/form-data; boundary=...` chuẩn.
  *  3. Tránh timeout 10s của axios instance — import thật có thể chạy lâu.
  */
+/**
+ * Upload 1 file Excel lên endpoint import + chuẩn hoá lỗi. Dùng chung cho cả
+ * onboarding (legacy), lease (Khởi tạo nhà) và renovation (Cấu hình khai thác).
+ * @throws BulkImportErrorResult khi HTTP != 2xx
+ */
+async function postExcel(endpoint: string, file: File, dryRun: boolean): Promise<BulkImportResponse> {
+  const form = new FormData();
+  form.append('file', file);
+
+  const token = localStorage.getItem('access_token');
+
+  const res = await fetch(`${endpoint}?dryRun=${dryRun}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: form,
+  });
+
+  let body: any = null;
+  try {
+    body = await res.json();
+  } catch {
+    // body rỗng / không phải JSON
+  }
+
+  if (!res.ok) {
+    const raw = body?.message || body?.error;
+    const err: BulkImportErrorResult = {
+      status: res.status,
+      message: isUploadSizeError(res.status, raw)
+        ? UPLOAD_SIZE_MESSAGE
+        : raw ||
+          (res.status === 403
+            ? 'Bạn không có quyền (yêu cầu vai trò ADMIN) hoặc phiên đăng nhập đã hết hạn.'
+            : `Lỗi máy chủ (HTTP ${res.status})`),
+      errors: Array.isArray(body?.errors) ? body.errors : [],
+    };
+    throw err;
+  }
+
+  return body as BulkImportResponse;
+}
+
 export const importService = {
   /**
-   * POST /api/v1/import/onboarding-excel?dryRun=...
+   * POST /api/v1/import/onboarding-excel?dryRun=... (LEGACY — 1 file đủ 3 sheet).
+   * Giữ lại để tương thích; luồng mới dùng importLeaseExcel + importRenovationExcel.
    * @param file   File .xlsx / .xls
    * @param dryRun true = chỉ validate (không ghi DB); false = import thật
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
-  async importOnboardingExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
-    const form = new FormData();
-    form.append('file', file);
+  importOnboardingExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
+    return postExcel(ENDPOINT, file, dryRun);
+  },
 
-    const token = localStorage.getItem('access_token');
+  /**
+   * POST /api/v1/import/lease-excel?dryRun=... — Module "Khởi tạo nhà".
+   * File chỉ chứa hợp đồng thuê (sheet 1) + thiết bị bàn giao (sheet 3, chỉ để hiển thị).
+   * Tạo toà nhà + phòng; KHÔNG cải tạo, KHÔNG gửi Host.
+   * @throws BulkImportErrorResult khi HTTP != 2xx
+   */
+  importLeaseExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
+    return postExcel(LEASE_ENDPOINT, file, dryRun);
+  },
 
-    const res = await fetch(`${ENDPOINT}?dryRun=${dryRun}`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: form,
-    });
+  /**
+   * POST /api/v1/import/renovation-excel?dryRun=... — Module "Cấu hình khai thác".
+   * File chỉ chứa hợp đồng cải tạo (sheet 2), khớp theo mã HĐ thuê của căn đã khởi tạo.
+   * Import thật xong BE TỰ ĐỘNG gửi Host (property → PENDING_HOST_REVIEW).
+   * @throws BulkImportErrorResult khi HTTP != 2xx
+   */
+  importRenovationExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
+    return postExcel(RENOVATION_ENDPOINT, file, dryRun);
+  },
 
-    let body: any = null;
-    try {
-      body = await res.json();
-    } catch {
-      // body rỗng / không phải JSON
-    }
-
-    if (!res.ok) {
-      const raw = body?.message || body?.error;
-      const err: BulkImportErrorResult = {
-        status: res.status,
-        message: isUploadSizeError(res.status, raw)
-          ? UPLOAD_SIZE_MESSAGE
-          : raw ||
-            (res.status === 403
-              ? 'Bạn không có quyền (yêu cầu vai trò ADMIN) hoặc phiên đăng nhập đã hết hạn.'
-              : `Lỗi máy chủ (HTTP ${res.status})`),
-        errors: Array.isArray(body?.errors) ? body.errors : [],
-      };
-      throw err;
-    }
-
-    return body as BulkImportResponse;
+  /**
+   * POST /api/v1/import/renovation-supplement-excel?dryRun=... — Cải tạo bổ sung (session v2+).
+   * Tiên quyết: nhà đã ACTIVE và đã gọi POST /properties/{id}/renovation/start (mở session mới).
+   * Import xong: completeRenovation → ACTIVE (KHÔNG gửi Host lại); manifest TB mua cộng dồn.
+   * @throws BulkImportErrorResult khi HTTP != 2xx
+   */
+  importRenovationSupplementExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
+    return postExcel(RENOVATION_SUPPLEMENT_ENDPOINT, file, dryRun);
   },
 
   /**

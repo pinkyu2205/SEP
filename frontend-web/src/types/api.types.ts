@@ -142,8 +142,31 @@ export interface PropertyResponse {
   operationManagerName?: string;
   renovationCompleted: boolean;
   imageUrls?: string[];
+  // TB chủ nhà gốc bàn giao (import đợt 1) — CHỈ hiển thị, không khấu hao.
+  handoverEquipments?: HandoverEquipmentResponse[];
+  // Đợt cải tạo đang hiệu lực + toàn bộ lịch sử cải tạo (có version v1/v2).
+  activeRenovationSession?: RenovationSession | null;
+  renovationSessions?: RenovationSession[];
   // Legacy fields (giữ tương thích)
   deposit?: number;
+}
+
+/**
+ * 1 thiết bị/nội thất chủ nhà gốc bàn giao theo HĐ thuê (import đợt 1).
+ * Chỉ để hiển thị ở màn chi tiết toà nhà — KHÔNG gán phòng, KHÔNG khấu hao.
+ * GET /api/v1/properties/{id} (field handoverEquipments) hoặc
+ * GET /api/v1/properties/{propertyId}/handover-equipments.
+ */
+export interface HandoverEquipmentResponse {
+  id: number;
+  catalogId: number;
+  catalogName: string;
+  description: string | null;
+  roomNumber: string | null;
+  houseArea: string | null;   // HouseArea: LIVING_ROOM | KITCHEN | ...
+  status: string;             // EquipmentStatus: NEW | GOOD | DAMAGED | BROKEN
+  quantity: number;
+  note: string | null;
 }
 
 /**
@@ -294,15 +317,70 @@ export interface RenovationLineResponse {
 }
 
 // =============================================================================
-// RENOVATION SESSION (BE mục 10 — grouped renovation history)
+// RENOVATION SESSION (BE — grouped renovation history, có version v1/v2)
 // =============================================================================
 
+export type RenovationSessionStatus = 'IN_PROGRESS' | 'ACTIVE' | 'DISABLED';
+export type EquipmentOperationalStatus = 'ACTIVE' | 'DISABLED';
+export type EquipmentImportAction = 'THEM_MOI' | 'THAY_THE';
+
+/** 1 thiết bị mua (PURCHASED) gắn theo 1 đợt cải tạo (renovationSession). */
+export interface SessionEquipmentResponse {
+  id: number;
+  catalogId: number;
+  catalogName: string;
+  roomId: number | null;
+  roomNumber: string | null;
+  houseArea: string | null;
+  source: 'PURCHASED' | 'INITIAL_HANDOVER';
+  status: string;
+  operationalStatus: EquipmentOperationalStatus;
+  currentEffective: boolean;       // true = đang dùng; false = đã thay thế (THAY_THE)
+  price: number;
+  note: string | null;
+  warrantyMonths: number | null;
+  warrantyStartDate: string | null;
+  warrantyEndDate: string | null;
+  disabledAt: string | null;
+}
+
 export interface RenovationSession {
+  id?: number;
   sessionNumber: number;
+  versionLabel?: string;             // "v1", "v2", ...
+  status?: RenovationSessionStatus;  // ACTIVE = đang hiệu lực, DISABLED = đợt cũ
+  currentEffective?: boolean;
   startDate?: string;   // ISO date, may be null while in progress
   endDate?: string;     // ISO date, null if current session
+  disabledAt?: string | null;
   totalCost: number;
   lines: RenovationLineResponse[];
+  equipments?: SessionEquipmentResponse[];
+}
+
+/**
+ * TB vận hành (đã gán phòng/khu vực) — GET /api/v1/properties/{id}/equipments.
+ * Gồm cả PURCHASED lẫn INITIAL_HANDOVER đã gán; có version cải tạo + bảo hành.
+ */
+export interface OperationalEquipmentResponse {
+  id: number;
+  propertyId: number;
+  roomId: number | null;
+  catalogId: number;
+  catalogName: string;
+  houseArea: string | null;
+  source: 'PURCHASED' | 'INITIAL_HANDOVER';
+  status: string;
+  price: number;
+  note: string | null;
+  warrantyMonths: number | null;
+  warrantyStartDate: string | null;
+  warrantyEndDate: string | null;
+  operationalStatus: EquipmentOperationalStatus;
+  currentEffective: boolean;               // true = đang dùng; false = đã thay thế
+  renovationSessionNumber: number | null;
+  renovationVersionLabel: string | null;   // "v1", "v2", ...
+  disabledAt: string | null;
 }
 
 // =============================================================================
@@ -661,18 +739,21 @@ export interface BulkImportError {
   message: string;
 }
 
-/** Kết quả 1 căn nhà được import (chỉ có khi dryRun=false) */
+/** Kết quả 1 căn nhà trong import (có cả ở dry-run lẫn import thật) */
 export interface BulkImportContractResult {
+  importStatus: 'IMPORTED' | 'SKIPPED';
   contractCode: string;
-  propertyId: number;
-  propertyName: string;
-  finalStatus: string;       // "RENOVATION_COMPLETED" khi import thật
+  propertyId: number | null;   // null khi dry-run hoặc skip không tra được
+  propertyName: string | null;
+  finalStatus: string | null;  // UNDER_RENOVATION | PENDING_HOST_REVIEW | ...
+  message: string | null;      // lý do skip / ghi chú dry-run
 }
 
 /** Response HTTP 200 của endpoint import (cả dry-run lẫn import thật) */
 export interface BulkImportResponse {
   dryRun: boolean;
-  contractsProcessed: number;
+  contractsProcessed: number;  // số HĐ import thành công (không tính SKIPPED)
+  contractsSkipped: number;    // số HĐ bỏ qua (trùng mã / trùng địa chỉ)
   renovationLinesImported: number;
   equipmentRowsImported: number;
   results: BulkImportContractResult[];
