@@ -18,6 +18,9 @@ import type {
   EquipmentAssignRequest,
   EquipmentAssignmentResponse,
   PricingResponse,
+  CalculatePricingRequest,
+  PricingCalculationResponse,
+  PricingReconciliationResponse,
   OnboardingSummaryResponse,
   HostConfirmRequest,
   HostConfirmResponse,
@@ -199,6 +202,26 @@ export const propertyService = {
   /** GET /properties/{id}/depreciation */
   getDepreciation: (id: number): Promise<PricingResponse> => {
     return api.get(`${BASE}/${id}/depreciation`);
+  },
+
+  // ── Định giá mô hình mới (FORWARD/REVERSE) — /properties/{id}/pricing/* ──
+
+  /** POST /properties/{id}/pricing/calculate — Tính giá theo lợi nhuận (FORWARD) hoặc ROI (REVERSE) */
+  calculatePricing: (id: number, data: CalculatePricingRequest): Promise<PricingCalculationResponse> => {
+    return api.post(`${BASE}/${id}/pricing/calculate`, data);
+  },
+
+  /** GET /properties/{id}/pricing — Lấy kết quả tính giá đã lưu (404 nếu chưa tính lần nào) */
+  getPricing: (id: number): Promise<PricingCalculationResponse> => {
+    return api.get(`${BASE}/${id}/pricing`);
+  },
+
+  /** GET /properties/{id}/pricing/reconciliation — Đối soát doanh thu/lợi nhuận thực tế theo tháng */
+  reconcilePricing: (
+    id: number,
+    params: { month: string; oOperation?: number; pDesired?: number; vRate?: number },
+  ): Promise<PricingReconciliationResponse> => {
+    return api.get(`${BASE}/${id}/pricing/reconciliation`, { params });
   },
 
   /** GET /properties/{id}/handover-equipments — TB chủ nhà bàn giao (đợt 1, chỉ hiển thị) */

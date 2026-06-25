@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, BadgeCheck, Check, DoorOpen, Headphones, MapPin, Maximize,
-  ShieldCheck, Tag,
+  ShieldCheck, Tag, Zap, Droplets, Wallet, ReceiptText,
+  Snowflake, Fan, BedDouble, ShowerHead, Shirt, Refrigerator, WashingMachine,
+  Tv, Wifi, Sofa, Armchair, Microwave, Camera, Flame, Blinds, Lightbulb, Utensils, Package,
 } from 'lucide-react';
 import { PropertyGallery } from '../../components/public/PropertyGallery';
 import { ContactSection } from '../../components/public/ContactSection';
 import { PropertyCard } from '../../components/public/PropertyCard';
+import { PropertyMap } from '../../components/PropertyMap';
 import { getPropertyById, getRelatedProperties } from '../../services/propertyService';
 import type { PublicProperty } from '../../types/property';
-import { AMENITY_LABEL, PROPERTY_TYPE_LABEL } from '../../utils/constants';
-import { formatArea, formatMonthlyPrice } from '../../utils/helpers';
+import { PROPERTY_TYPE_LABEL } from '../../utils/constants';
+import { formatArea, formatMonthlyPrice, formatPrice } from '../../utils/helpers';
 import { ROUTES } from '../../utils/routes';
 
 /** 1 ô thông tin nhanh (chỉ render khi có dữ liệu) */
@@ -27,6 +30,37 @@ const TRUST_POINTS = [
   { icon: BadgeCheck, text: 'Thông tin bất động sản đã được xác minh' },
   { icon: Headphones, text: 'Hỗ trợ xem nhà & tư vấn 24/7' },
 ];
+
+// Bỏ dấu tiếng Việt + thường hoá để so khớp tên thiết bị.
+const normName = (s: string) =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').toLowerCase();
+
+// Chọn icon theo từ khoá trong tên thiết bị/tiện ích (mặc định Package).
+const AMENITY_ICON_RULES: { kw: string[]; icon: typeof Check }[] = [
+  { kw: ['dieu hoa', 'may lanh'], icon: Snowflake },
+  { kw: ['quat'], icon: Fan },
+  { kw: ['giuong'], icon: BedDouble },
+  { kw: ['nong lanh', 'nuoc nong', 'binh nong'], icon: ShowerHead },
+  { kw: ['tu quan ao', 'quan ao', 'tu ao'], icon: Shirt },
+  { kw: ['tu lanh'], icon: Refrigerator },
+  { kw: ['may giat'], icon: WashingMachine },
+  { kw: ['tivi', 'ti vi', 'man hinh'], icon: Tv },
+  { kw: ['wifi', 'internet', 'mang'], icon: Wifi },
+  { kw: ['sofa'], icon: Sofa },
+  { kw: ['ghe', 'ban'], icon: Armchair },
+  { kw: ['vi song'], icon: Microwave },
+  { kw: ['camera'], icon: Camera },
+  { kw: ['bep', 'lo nuong', 'lo ga'], icon: Flame },
+  { kw: ['rem', 'man cua'], icon: Blinds },
+  { kw: ['den', 'bong den'], icon: Lightbulb },
+  { kw: ['bat dia', 'chen', 'xoong'], icon: Utensils },
+];
+
+const amenityIcon = (name: string): typeof Check => {
+  const n = normName(name);
+  const hit = AMENITY_ICON_RULES.find((r) => r.kw.some((k) => n.includes(k)));
+  return hit ? hit.icon : Package;
+};
 
 export const PropertyDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -70,8 +104,23 @@ export const PropertyDetailPage = () => {
   }
 
   const hasDescription = property.description.trim().length > 0;
-  const hasAmenities = property.amenities.length > 0;
+  const amenities = property.rawAmenities ?? [];
+  const hasAmenities = amenities.length > 0;
   const roomLabel = property.type === 'WHOLE_HOUSE' ? 'Số phòng' : 'Số phòng trong dãy';
+
+  // Chi phí & điều khoản thuê — chỉ hiện field có dữ liệu
+  const costRows = ([
+    property.electricityUnitPrice != null && property.electricityUnitPrice > 0
+      ? { icon: Zap, label: 'Đơn giá điện', value: `${formatPrice(property.electricityUnitPrice)}/kWh` } : null,
+    property.waterUnitPrice != null && property.waterUnitPrice > 0
+      ? { icon: Droplets, label: 'Đơn giá nước', value: `${formatPrice(property.waterUnitPrice)}/m³` } : null,
+    property.depositMonths != null && property.depositMonths > 0
+      ? { icon: Wallet, label: 'Đặt cọc', value: `${property.depositMonths} tháng` } : null,
+    property.serviceFee != null && property.serviceFee > 0
+      ? { icon: ReceiptText, label: 'Phí dịch vụ', value: `${formatPrice(property.serviceFee)}/tháng` } : null,
+  ].filter(Boolean)) as { icon: typeof Zap; label: string; value: string }[];
+
+  const hasMap = (property.latitude != null && property.longitude != null) || !!property.address;
 
   return (
     <div className="bg-slate-50">
@@ -116,6 +165,26 @@ export const PropertyDetailPage = () => {
               </div>
             </div>
 
+            {/* Vị trí trên bản đồ — đưa lên đầu (địa chỉ đã có ở header, không lặp lại) */}
+            {hasMap && (
+              <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-50 text-rose-500 shrink-0">
+                    <MapPin className="h-5 w-5" />
+                  </span>
+                  <h2 className="text-lg font-black text-slate-900">Vị trí trên bản đồ</h2>
+                </div>
+                <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+                  <PropertyMap
+                    lat={property.latitude ?? undefined}
+                    lng={property.longitude ?? undefined}
+                    address={property.address}
+                    height={320}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Mô tả */}
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
               <h2 className="text-lg font-black text-slate-900">Mô tả chi tiết</h2>
@@ -129,17 +198,40 @@ export const PropertyDetailPage = () => {
               )}
             </div>
 
-            {/* Tiện ích — chỉ hiện khi có */}
+            {/* Tiện ích / nội thất — tên thiết bị thật từ hệ thống */}
             {hasAmenities && (
               <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-                <h2 className="text-lg font-black text-slate-900">Tiện ích</h2>
+                <h2 className="text-lg font-black text-slate-900">Nội thất & tiện ích</h2>
                 <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  {property.amenities.map((a) => (
-                    <div key={a} className="flex items-center gap-2.5 text-sm text-slate-700">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-                        <Check className="h-3.5 w-3.5" />
+                  {amenities.map((a) => {
+                    const Icon = amenityIcon(a);
+                    return (
+                      <div key={a} className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600 shrink-0">
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        {a}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Chi phí & điều khoản thuê — chỉ hiện khi có dữ liệu */}
+            {costRows.length > 0 && (
+              <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+                <h2 className="text-lg font-black text-slate-900">Chi phí & điều khoản</h2>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {costRows.map(({ icon: Icon, label, value }) => (
+                    <div key={label} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-primary-600 shrink-0">
+                        <Icon className="h-5 w-5" />
                       </span>
-                      {AMENITY_LABEL[a]}
+                      <div>
+                        <p className="text-xs text-slate-500">{label}</p>
+                        <p className="font-bold text-slate-900">{value}</p>
+                      </div>
                     </div>
                   ))}
                 </div>

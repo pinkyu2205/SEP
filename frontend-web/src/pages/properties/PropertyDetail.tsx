@@ -4,16 +4,25 @@ import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
   Zap, Droplets, RefreshCw, Home, UserCog, X, CheckCircle2,
   Wrench, CircleCheck, Layers, BadgeDollarSign, Wallet, Phone, CalendarClock, UserRound,
+  Package, FileText, TrendingUp, Link2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '../../services/property.service';
 import { tenantService } from '../../services/tenant.service';
-import type { PropertyResponse, RoomResponse, TenantContractResponse } from '../../types/api.types';
+import type {
+  PropertyResponse, RoomResponse, TenantContractResponse,
+  PricingCalculationResponse, InboundContractResponse,
+} from '../../types/api.types';
+import { OperationalEquipmentPanel } from '../super-admin/nha-thue/OperationalEquipmentPanel';
+import { PropertyMap } from '../../components/PropertyMap';
 import { formatCurrency } from '../../utils';
 
 /** dd/MM/yyyy hoặc '—' */
 const fmtDate = (iso?: string) =>
   iso ? new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+
+/** formatCurrency an toàn: trả '—' khi null/undefined (dữ liệu định giá cũ có thể thiếu field). */
+const money = (n?: number | null) => (n == null ? '—' : formatCurrency(n));
 
 const roomStatusMap: Record<string, { label: string; cls: string; dot: string; border: string }> = {
   AVAILABLE:   { label: 'Phòng trống',   cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500', border: 'border-emerald-200 hover:border-emerald-400' },
@@ -139,6 +148,17 @@ function InfoCell({ icon: Icon, label, value, highlight }: { icon: typeof Ruler;
     <div className="rounded-xl bg-slate-50 px-4 py-3">
       <p className="text-xs text-slate-400 flex items-center gap-1.5"><Icon className="w-3.5 h-3.5" /> {label}</p>
       <p className={`mt-0.5 font-bold ${highlight ? 'text-indigo-600 text-base' : 'text-slate-800 text-sm'}`}>{value}</p>
+    </div>
+  );
+}
+
+// Ô chỉ số tài chính nhỏ gọn cho thẻ "Phân tích tài chính & định giá"
+function FinStat({ label, value, tone }: { label: string; value: string; tone?: 'indigo' | 'emerald' }) {
+  const color = tone === 'indigo' ? 'text-indigo-600' : tone === 'emerald' ? 'text-emerald-600' : 'text-slate-800';
+  return (
+    <div className="rounded-xl bg-slate-50 px-3.5 py-3">
+      <p className="text-[11px] text-slate-400 leading-tight">{label}</p>
+      <p className={`mt-1 font-extrabold text-sm ${color}`}>{value}</p>
     </div>
   );
 }
@@ -280,16 +300,20 @@ export const PropertyDetail = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
+  const [pricing, setPricing] = useState<PricingCalculationResponse | null>(null);
+  const [inbound, setInbound] = useState<InboundContractResponse | null>(null);
 
   const fetchData = async () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [prop, roomList, mgrs, contractList] = await Promise.all([
+      const [prop, roomList, mgrs, contractList, pricingData, inboundData] = await Promise.all([
         propertyService.getPropertyById(Number(id)),
         propertyService.getRooms(Number(id)),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
         tenantService.listByProperty(Number(id), { silent: true }).catch(() => null),
+        propertyService.getPricing(Number(id)).catch(() => null),          // 404 nếu chưa từng tính giá
+        propertyService.getInboundContract(Number(id)).catch(() => null),  // HĐ chủ nhà gốc
       ]);
       // Patch tên manager nếu BE chưa trả (mục 6 NOTE-CHO-TEAM-BE.md)
       if (prop.operationManagerId && !prop.operationManagerName) {
@@ -300,6 +324,8 @@ export const PropertyDetail = () => {
       setProperty(prop);
       setRooms(roomList);
       setContracts(contractList ?? []);
+      setPricing(pricingData);
+      setInbound(inboundData);
     } catch (e) {
       console.error(e);
     } finally {
@@ -500,6 +526,42 @@ export const PropertyDetail = () => {
         </div>
       </div>
 
+      {/* ═══════════ Vị trí trên bản đồ (cả 2 loại hình) ═══════════ */}
+      {(property.fullAddress || property.shortAddress) && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
+              <MapPin className="w-5 h-5 text-rose-500" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Vị trí</h2>
+          </div>
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
+              <PropertyMap address={property.fullAddress || property.shortAddress} height={200} />
+            </div>
+            <div className="flex flex-col justify-center gap-3.5">
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Địa chỉ</p>
+                <p className="font-semibold text-slate-800 leading-snug">{property.fullAddress || property.shortAddress}</p>
+              </div>
+              {property.zoneName && (
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Khu vực</p>
+                  <p className="font-semibold text-slate-800">{property.zoneName}</p>
+                </div>
+              )}
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(property.fullAddress || property.shortAddress || '')}`}
+                target="_blank" rel="noreferrer"
+                className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-100 transition"
+              >
+                <MapPin className="h-4 w-4" /> Mở trên Google Maps
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ═══════════ NHÀ NGUYÊN CĂN — căn nhà là 1 đơn vị cho thuê ═══════════ */}
       {isWholeHouse && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -681,6 +743,121 @@ export const PropertyDetail = () => {
 
         </>
       )}
+
+      {/* ═══════════ Phân tích tài chính & định giá (mô hình mới) ═══════════ */}
+      {pricing && (pricing.capex != null || pricing.wholeHouseResult || (pricing.roomResults?.length ?? 0) > 0) && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+              <TrendingUp className="w-5 h-5 text-emerald-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Phân tích tài chính & định giá</h2>
+          </div>
+
+          {/* KPI tổng hợp — chỉ hiện field có dữ liệu */}
+          {(pricing.capex != null || pricing.monthlyRecovery != null || pricing.fixedOpex != null || pricing.revenueTarget != null) && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+              {pricing.capex != null && <FinStat label="Tổng vốn đầu tư" value={money(pricing.capex)} />}
+              {pricing.contractMonths != null && <FinStat label="Thời hạn thuê" value={`${pricing.contractMonths} tháng`} />}
+              {pricing.monthlyRecovery != null && <FinStat label="Thu hồi vốn / tháng" value={money(pricing.monthlyRecovery)} tone="indigo" />}
+              {pricing.fixedOpex != null && <FinStat label="Chi phí cần bù / tháng" value={money(pricing.fixedOpex)} />}
+              {pricing.revenueTarget != null && <FinStat label="Doanh thu mục tiêu / tháng" value={money(pricing.revenueTarget)} tone="emerald" />}
+            </div>
+          )}
+
+          {/* Nhà nguyên căn — 1 giá */}
+          {pricing.wholeHouseResult && (
+            <div className="flex flex-wrap gap-3">
+              <div className="flex-1 min-w-[200px] rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3">
+                <p className="text-xs text-indigo-500 font-semibold">Giá thuê đề xuất (đã tính lãi)</p>
+                <p className="font-black text-indigo-700 text-lg">
+                  {money(pricing.wholeHouseResult.suggestedPriceWithProfit ?? pricing.wholeHouseResult.suggestedMinPrice)}
+                  <span className="text-sm font-medium text-indigo-400">/tháng</span>
+                </p>
+              </div>
+              <div className="min-w-[150px] rounded-xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p className="text-xs text-slate-400 font-semibold">Giá tối thiểu</p>
+                <p className="font-bold text-slate-600 text-lg">{money(pricing.wholeHouseResult.roomFloor)}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Nhà chia phòng — bảng từng phòng */}
+          {pricing.roomResults && pricing.roomResults.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-500 uppercase">
+                    <th className="pb-2">Phòng</th>
+                    <th className="pb-2">Diện tích</th>
+                    <th className="pb-2 text-right">Tổng vốn</th>
+                    <th className="pb-2 text-right">Giá đề xuất</th>
+                    <th className="pb-2 text-right">Giá tối thiểu</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pricing.roomResults.map(r => (
+                    <tr key={r.roomId} className="border-b border-slate-50">
+                      <td className="py-2 font-semibold text-slate-900">{r.roomNumber}</td>
+                      <td className="py-2 text-slate-500">{r.area != null ? `${r.area} m²` : '—'}</td>
+                      <td className="py-2 text-right text-slate-600">{money(r.totalInvestment)}</td>
+                      <td className="py-2 text-right font-bold text-indigo-600">{money(r.suggestedPriceWithProfit ?? r.suggestedMinPrice)}</td>
+                      <td className="py-2 text-right text-slate-500">{money(r.roomFloor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════ Hợp đồng với chủ nhà gốc ═══════════ */}
+      {inbound && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-amber-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Hợp đồng với chủ nhà gốc</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-slate-400 text-xs">Mã hợp đồng</p>
+              <p className="font-bold text-slate-900">{inbound.contractCode}</p>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs">Chủ nhà</p>
+              <p className="font-bold text-slate-900">{inbound.ownerName}</p>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs">Tổng tiền thuê</p>
+              <p className="font-bold text-emerald-700">{money(inbound.totalRentAmount)}</p>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs">Thời hạn</p>
+              <p className="font-bold text-slate-900">{fmtDate(inbound.startDate)} → {fmtDate(inbound.endDate)}</p>
+            </div>
+          </div>
+          {inbound.contractScanUrl && (
+            <a href={inbound.contractScanUrl} target="_blank" rel="noreferrer"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-100 transition">
+              <Link2 className="w-4 h-4" /> Xem bản scan hợp đồng
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════ Thiết bị vận hành (nguồn, tình trạng, giá, bảo hành/hạn dùng) ═══════════ */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6">
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
+            <Package className="w-5 h-5 text-violet-600" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">Thiết bị vận hành</h2>
+        </div>
+        <OperationalEquipmentPanel propertyId={Number(id)} />
+      </div>
 
       {selectedRoom && (
         <RoomDetailModal

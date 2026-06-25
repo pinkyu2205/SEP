@@ -39,8 +39,21 @@ export interface PublicProperty {
   /** Danh sách ảnh (ảnh đầu là ảnh đại diện) */
   images: string[];
   amenities: Amenity[];
+  /** Tên thiết bị/tiện ích thực tế từ BE (đã là tên tiếng Việt hiển thị được). */
+  rawAmenities?: string[];
   bedrooms?: number;
   bathrooms?: number;
+  /** Toạ độ để vẽ bản đồ (nếu BE đã có). */
+  latitude?: number | null;
+  longitude?: number | null;
+  /** Đơn giá điện (VND/kWh). */
+  electricityUnitPrice?: number | null;
+  /** Đơn giá nước (VND/m³). */
+  waterUnitPrice?: number | null;
+  /** Số tháng đặt cọc. */
+  depositMonths?: number | null;
+  /** Phí dịch vụ mỗi tháng (VND). */
+  serviceFee?: number | null;
   /** Hiển thị ở mục "nổi bật" trên trang chủ */
   featured?: boolean;
   createdAt: string;

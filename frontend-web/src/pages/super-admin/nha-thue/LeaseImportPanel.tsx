@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle, ArrowRight, CheckCircle2, Download, FileArchive, FileSpreadsheet, FileWarning,
-  Loader2, RotateCcw, Trash2, Upload, X,
+  Loader2, MapPin, RotateCcw, Trash2, Upload, X,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '../../../services/import.service';
+import { zoneService } from '../../../services/zone.service';
 import type { BulkImportError, BulkImportResponse, BulkImportImagesResponse } from '../../../types/api.types';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { inspectZipImages, type ZipImagePreview } from '../../../utils/zipImageInspect';
@@ -19,6 +20,37 @@ type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const isZip = (f: File) => /\.zip$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
+
+// ── Phát hiện Khu vực (Tỉnh/TP + Quận/Huyện) chưa tồn tại từ message lỗi dry-run của BE ──
+// BE chỉ có 2 cấp zone; message khi thiếu:
+//   "Không tìm thấy Tỉnh/Thành phố (Zone level 1): <tỉnh>"
+//   "Không tìm thấy Quận/Huyện (Zone level 2) '<quận>' thuộc <tỉnh>"
+type MissingZones = { cities: string[]; districts: { district: string; city: string }[] };
+const normZone = (s: string) =>
+  s.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').toLowerCase();
+const CITY_NOT_FOUND_RE = /Không tìm thấy Tỉnh\/Thành phố \(Zone level 1\):\s*(.+?)\s*$/;
+const DISTRICT_NOT_FOUND_RE = /Không tìm thấy Quận\/Huyện \(Zone level 2\)\s*'(.+?)'\s*thuộc\s*(.+?)\s*$/;
+
+function parseMissingZones(errs: BulkImportError[]): MissingZones {
+  const cities = new Map<string, string>();
+  const districts = new Map<string, { district: string; city: string }>();
+  for (const e of errs) {
+    const msg = e.message ?? '';
+    const dm = msg.match(DISTRICT_NOT_FOUND_RE);
+    if (dm) {
+      const district = dm[1].trim();
+      const city = dm[2].trim();
+      districts.set(`${normZone(city)}|${normZone(district)}`, { district, city });
+      continue;
+    }
+    const cm = msg.match(CITY_NOT_FOUND_RE);
+    if (cm) {
+      const city = cm[1].trim();
+      cities.set(normZone(city), city);
+    }
+  }
+  return { cities: [...cities.values()], districts: [...districts.values()] };
+}
 
 const StepDot = ({ n, done }: { n: number; done?: boolean }) => (
   <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
@@ -48,6 +80,11 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
 
+  // Khu vực (Tỉnh/Quận) trong file chưa có trong Quản lý Khu vực
+  const [missingZones, setMissingZones] = useState<MissingZones>({ cities: [], districts: [] });
+  const [zoneConfirmOpen, setZoneConfirmOpen] = useState(false);
+  const [creatingZones, setCreatingZones] = useState(false);
+
   // Ảnh (.zip) — kiểm tra client-side TRƯỚC khi nhập, gắn thật khi bấm "Nhập nhà".
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [zipDragOver, setZipDragOver] = useState(false);
@@ -61,17 +98,19 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
     if (zipInputRef.current) zipInputRef.current.value = '';
   };
 
+  const resetZones = () => { setMissingZones({ cities: [], districts: [] }); setZoneConfirmOpen(false); };
+
   const pickFile = (f: File | null | undefined) => {
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
     setFile(f); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
-    resetZip();
+    resetZip(); resetZones();
   };
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
     if (inputRef.current) inputRef.current.value = '';
-    resetZip();
+    resetZip(); resetZones();
   };
 
   const pickZip = (f: File | null | undefined) => {
@@ -84,7 +123,7 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
   // Bước 1: kiểm tra file Excel (dry-run, không ghi DB).
   const validate = async () => {
     if (!file) return;
-    setPhase('validating'); setErrors([]); setErrorMessage(''); setZipPreview(null);
+    setPhase('validating'); setErrors([]); setErrorMessage(''); setZipPreview(null); resetZones();
     try {
       const res = await importService.importLeaseExcel(file, true);
       setResult(res);
@@ -94,12 +133,91 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
       if (isBulkImportError(err)) {
         setErrors(err.errors);
         setErrorMessage(err.errors.length ? '' : err.message);
-        toast.error(err.errors.length ? `File có ${err.errors.length} lỗi cần sửa` : err.message);
+        // Tách riêng lỗi "khu vực chưa tồn tại" → mời tạo tự động
+        const mz = parseMissingZones(err.errors);
+        if (mz.cities.length || mz.districts.length) {
+          setMissingZones(mz);
+          setZoneConfirmOpen(true);
+          toast.error('Có khu vực trong file chưa tồn tại trong hệ thống');
+        } else {
+          toast.error(err.errors.length ? `File có ${err.errors.length} lỗi cần sửa` : err.message);
+        }
       } else {
         setErrorMessage('Có lỗi không xác định khi xử lý file.');
         toast.error('Có lỗi không xác định khi xử lý file.');
       }
       setPhase('idle');
+    }
+  };
+
+  // Tạo các khu vực còn thiếu (Tỉnh/TP trước → Quận/Huyện) rồi tự kiểm tra lại file.
+  const handleAutoCreateZones = async () => {
+    if (!file) return;
+    setCreatingZones(true);
+    const created: string[] = [];
+    try {
+      let pending = missingZones;
+      for (let round = 0; round < 4; round++) {
+        if (pending.cities.length === 0 && pending.districts.length === 0) break;
+
+        const roots = await zoneService.getRootZones();
+        const cityIdByName = new Map(roots.map((z) => [normZone(z.name), z.id]));
+
+        // 1) Tỉnh/TP (level 1)
+        for (const city of pending.cities) {
+          if (!cityIdByName.has(normZone(city))) {
+            const z = await zoneService.createZone({ name: city, level: 1 });
+            cityIdByName.set(normZone(city), z.id);
+            created.push(`Tỉnh/TP: ${city}`);
+          }
+        }
+
+        // 2) Quận/Huyện (level 2, parent = Tỉnh; tạo cả Tỉnh nếu vẫn thiếu)
+        for (const d of pending.districts) {
+          let cityId = cityIdByName.get(normZone(d.city));
+          if (!cityId) {
+            const z = await zoneService.createZone({ name: d.city, level: 1 });
+            cityId = z.id;
+            cityIdByName.set(normZone(d.city), z.id);
+            created.push(`Tỉnh/TP: ${d.city}`);
+          }
+          const children = await zoneService.getChildrenZones(cityId);
+          if (!children.some((c) => normZone(c.name) === normZone(d.district))) {
+            await zoneService.createZone({ name: d.district, level: 2, parentId: cityId });
+            created.push(`Quận/Huyện: ${d.district} (thuộc ${d.city})`);
+          }
+        }
+
+        // 3) Kiểm tra lại file
+        try {
+          const res = await importService.importLeaseExcel(file, true);
+          setResult(res); setErrors([]); setErrorMessage('');
+          setMissingZones({ cities: [], districts: [] });
+          setPhase('validated');
+          pending = { cities: [], districts: [] };
+          break;
+        } catch (err) {
+          if (isBulkImportError(err)) {
+            setErrors(err.errors);
+            setErrorMessage(err.errors.length ? '' : err.message);
+            pending = parseMissingZones(err.errors);
+            setMissingZones(pending);
+            setPhase('idle');
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      if (created.length) toast.success(`Đã tạo ${created.length} khu vực mới vào Quản lý Khu vực`);
+      if (pending.cities.length || pending.districts.length) {
+        toast.error('Vẫn còn khu vực chưa tạo được — vui lòng kiểm tra Quản lý Khu vực.');
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || e?.response?.data?.error || e?.message || 'Lỗi khi tạo khu vực');
+    } finally {
+      setCreatingZones(false);
+      setZoneConfirmOpen(false);
     }
   };
 
@@ -254,6 +372,22 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {(missingZones.cities.length > 0 || missingZones.districts.length > 0) && (
+          <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-amber-800">
+                {missingZones.cities.length + missingZones.districts.length} khu vực trong file chưa có trong Quản lý Khu vực
+              </p>
+              <p className="mt-0.5 text-xs text-amber-700">Hệ thống có thể tự tạo các khu vực này để tiếp tục nhập.</p>
+            </div>
+            <button onClick={() => setZoneConfirmOpen(true)}
+              className="shrink-0 rounded-lg bg-amber-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-amber-700 transition">
+              Tạo tự động
+            </button>
           </div>
         )}
 
@@ -447,6 +581,38 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
         loading={phase === 'importing'}
         onConfirm={() => { setConfirmOpen(false); doImport(); }}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      {/* Popup: khu vực chưa tồn tại → tạo tự động */}
+      <ConfirmDialog
+        open={zoneConfirmOpen}
+        tone="warning"
+        title="Một số khu vực chưa có trong hệ thống"
+        message={
+          <div className="space-y-2">
+            <p>Các khu vực sau trong file <b className="text-slate-700">chưa có</b> trong module <b className="text-slate-700">Quản lý Khu vực</b>:</p>
+            <ul className="max-h-44 space-y-1.5 overflow-auto rounded-lg bg-slate-50 p-3">
+              {missingZones.cities.map((c) => (
+                <li key={`c-${c}`} className="flex items-center gap-2 text-slate-700">
+                  <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">TỈNH/TP</span>
+                  <b>{c}</b>
+                </li>
+              ))}
+              {missingZones.districts.map((d) => (
+                <li key={`d-${d.city}-${d.district}`} className="flex items-center gap-2 text-slate-700">
+                  <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">QUẬN/HUYỆN</span>
+                  <b>{d.district}</b> <span className="text-xs text-slate-400">thuộc {d.city}</span>
+                </li>
+              ))}
+            </ul>
+            <p>Bạn có muốn hệ thống <b className="text-slate-700">tự động tạo</b> các khu vực này (kèm quận/huyện liên quan nếu cần) rồi <b className="text-slate-700">kiểm tra lại file</b> không?</p>
+          </div>
+        }
+        confirmText="Tạo khu vực & kiểm tra lại"
+        cancelText="Để tôi tự thêm"
+        loading={creatingZones}
+        onConfirm={handleAutoCreateZones}
+        onCancel={() => setZoneConfirmOpen(false)}
       />
     </div>
   );

@@ -59,6 +59,12 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   const [isSavingContract, setIsSavingContract] = useState(false);
   const [rentAmountDisplay, setRentAmountDisplay] = useState('');
 
+  // Khóa chỉnh sửa Hợp đồng + Thiết bị khi tòa nhà KHÔNG còn là nháp (DRAFT):
+  // đã "Cấu hình khai thác" / đang "Chờ duyệt" (PENDING_HOST_REVIEW) / đang kinh doanh.
+  const locked = property.status !== 'DRAFT';
+  const inBusiness = property.status === 'ACTIVE' || property.status === 'RENTED';
+  const lockBadgeLabel = inBusiness ? 'Đang kinh doanh — khóa chỉnh sửa' : 'Đã gửi duyệt — khóa chỉnh sửa';
+
   const formatVND = (value: number) =>
     value > 0 ? value.toLocaleString('vi-VN') : '';
 
@@ -160,6 +166,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   };
 
   const saveManifest = async () => {
+    if (locked) return; // chỉ sửa thiết bị khi tòa nhà còn là nháp (DRAFT)
     // Validate
     const validItems = manifestItems.filter(i => i.catalogId > 0 && i.quantity > 0);
     if (manifestItems.length > 0 && validItems.length !== manifestItems.length) {
@@ -185,7 +192,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
   const saveContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (property.status === 'ACTIVE') return; // tòa nhà đang kinh doanh → khóa sửa hợp đồng
+    if (locked) return; // chỉ sửa hợp đồng khi tòa nhà còn là nháp (DRAFT)
     setIsSavingContract(true);
     try {
       const res = await propertyService.createInboundContract(property.id, contractForm);
@@ -198,8 +205,6 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   };
 
   const isFormComplete = manifestSaved && contract !== null;
-  // Hợp đồng chỉ sửa được khi tòa nhà CHƯA đang kinh doanh (ACTIVE)
-  const contractLocked = property.status === 'ACTIVE';
 
   if (loading) return <div className="py-20 text-center text-slate-500">Đang tải dữ liệu...</div>;
 
@@ -247,27 +252,31 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <h3 className="font-bold text-slate-800">Hợp đồng với chủ nhà</h3>
             {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
-          {contractLocked && (
-            <span className="flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-700">
-              <Lock className="h-3.5 w-3.5" /> Đang kinh doanh — khóa chỉnh sửa
+          {locked && (
+            <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${inBusiness ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+              <Lock className="h-3.5 w-3.5" /> {lockBadgeLabel}
             </span>
           )}
         </div>
-        {contractLocked && (
+        {locked && (
           <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">
             <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>Tòa nhà đã ở trạng thái <b>Đang kinh doanh</b> nên hợp đồng được khóa, không thể chỉnh sửa.</span>
+            <span>
+              {inBusiness
+                ? <>Tòa nhà đã ở trạng thái <b>Đang kinh doanh</b> nên hợp đồng và thiết bị được khóa, không thể chỉnh sửa.</>
+                : <>Tòa nhà đã được <b>cấu hình khai thác / gửi Host duyệt</b> nên hợp đồng và thiết bị được khóa, không thể chỉnh sửa.</>}
+            </span>
           </div>
         )}
         <form onSubmit={saveContract} className="p-5">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Mã hợp đồng *</span>
-              <input required disabled={contractLocked} value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="VD: HD-001" />
+              <input required disabled={locked} value={contractForm.contractCode} onChange={e => setContractForm({...contractForm, contractCode: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="VD: HD-001" />
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Tên Chủ nhà *</span>
-              <input required disabled={contractLocked} value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="Nguyễn Văn A" />
+              <input required disabled={locked} value={contractForm.ownerName} onChange={e => setContractForm({...contractForm, ownerName: e.target.value})} className="input-field disabled:opacity-60 disabled:cursor-not-allowed" placeholder="Nguyễn Văn A" />
             </label>
             <label className="block">
               <span className="mb-1 text-sm font-bold text-slate-700">Tổng tiền thuê *</span>
@@ -275,7 +284,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                 <input
                   type="text"
                   required
-                  disabled={contractLocked}
+                  disabled={locked}
                   value={rentAmountDisplay}
                   onChange={e => {
                     const raw = e.target.value.replace(/\./g, '').replace(/,/g, '');
@@ -294,7 +303,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               <input
                 type="date"
                 required
-                disabled={contractLocked}
+                disabled={locked}
                 min={TODAY_STR}
                 value={contractForm.startDate}
                 onChange={e => {
@@ -317,7 +326,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                 required
                 min={contractForm.startDate || TODAY_STR}
                 max={addYearsStr(contractForm.startDate || TODAY_STR, 50)}
-                disabled={contractLocked || !contractForm.startDate}
+                disabled={locked || !contractForm.startDate}
                 value={contractForm.endDate}
                 onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })}
                 className="input-field disabled:opacity-50 disabled:cursor-not-allowed"
@@ -333,7 +342,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               </div>
             )}
           </div>
-          {!contractLocked && (
+          {!locked && (
             <div className="flex justify-end">
               <button type="submit" disabled={isSavingContract} className="btn-primary py-2 px-6 rounded-xl flex items-center gap-2">
                 {isSavingContract ? 'Đang lưu...' : <><Save className="w-4 h-4" /> {contract ? 'Cập nhật Hợp đồng' : 'Lưu Hợp đồng'}</>}
@@ -351,9 +360,15 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <h3 className="font-bold text-slate-800">Khai báo trang thiết bị có sẵn</h3>
             {manifestSaved && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
-          <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
-            {isSavingManifest ? 'Đang lưu...' : <><Save className="w-4 h-4" /> Lưu Thiết bị</>}
-          </button>
+          {locked ? (
+            <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${inBusiness ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+              <Lock className="h-3.5 w-3.5" /> {lockBadgeLabel}
+            </span>
+          ) : (
+            <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
+              {isSavingManifest ? 'Đang lưu...' : <><Save className="w-4 h-4" /> Lưu Thiết bị</>}
+            </button>
+          )}
         </div>
         <div className="p-5">
           {/* Header */}
@@ -367,7 +382,8 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           {/* Rows */}
           <div className="space-y-2 mt-2">
             {manifestItems.map((item, idx) => {
-              const isLocked = idx < manifestItems.length - 1;
+              // Khoá toàn bộ khi tòa nhà đã rời nháp; nếu còn nháp thì chỉ khoá tên các dòng cũ (dòng cuối mới sửa được).
+              const isLocked = locked || idx < manifestItems.length - 1;
               const suggestions = catalog.filter(c => normalizeText(c.name).includes(normalizeText(manifestSearch)));
               return (
                 <div key={idx} className="grid grid-cols-[1fr_96px_128px_48px] gap-2 items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
@@ -417,11 +433,15 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                   </div>
 
                   {/* Số lượng */}
-                  <input
-                    type="number" min={1} value={item.quantity}
-                    onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))}
-                    className="input-field py-1.5 text-sm text-right"
-                  />
+                  {locked ? (
+                    <span className="px-3 py-1.5 text-sm text-right text-slate-600">{item.quantity}</span>
+                  ) : (
+                    <input
+                      type="number" min={1} value={item.quantity}
+                      onChange={e => updateManifestRow(idx, 'quantity', Number(e.target.value))}
+                      className="input-field py-1.5 text-sm text-right"
+                    />
+                  )}
 
                   {/* Tình trạng */}
                   {isLocked ? (
@@ -437,38 +457,42 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
                   {/* Xóa */}
                   <div className="flex justify-center">
-                    <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {!locked && (
+                      <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
-          <button
-            onClick={handleAddManifestRow}
-            disabled={!canAddManifestRow}
-            className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
-            title={canAddManifestRow ? '' : 'Hoàn thành dòng hiện tại trước (chọn thiết bị và số lượng > 0)'}
-          >
-            <Plus className="w-4 h-4" /> Thêm thiết bị
-          </button>
+          {!locked && (
+            <button
+              onClick={handleAddManifestRow}
+              disabled={!canAddManifestRow}
+              className="mt-3 flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={canAddManifestRow ? '' : 'Hoàn thành dòng hiện tại trước (chọn thiết bị và số lượng > 0)'}
+            >
+              <Plus className="w-4 h-4" /> Thêm thiết bị
+            </button>
+          )}
         </div>
       </section>
 
       {/* Navigation */}
       <div className="mt-8 flex justify-end pt-4 border-t border-slate-200">
-        {!isFormComplete && (
+        {!isFormComplete && !locked && (
           <p className="text-sm font-semibold text-amber-600 flex items-center gap-1 mr-4">
             <AlertCircle className="w-4 h-4" /> Vui lòng Lưu Thiết bị và Lưu Hợp đồng trước khi tiếp tục
           </p>
         )}
         <button
-          onClick={() => (confirmBeforeNext ? setConfirmNextOpen(true) : onNext())}
-          disabled={!isFormComplete}
+          onClick={() => (locked ? onNext() : confirmBeforeNext ? setConfirmNextOpen(true) : onNext())}
+          disabled={!locked && !isFormComplete}
           className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {nextLabel}
+          {locked ? 'Quay về danh sách' : nextLabel}
         </button>
       </div>
 

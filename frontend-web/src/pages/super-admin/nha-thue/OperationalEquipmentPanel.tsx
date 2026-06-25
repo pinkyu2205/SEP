@@ -103,12 +103,26 @@ export const OperationalEquipmentPanel = ({ propertyId }: { propertyId: number }
                     {loc(eq)} · {STATUS_LABEL[eq.status] ?? eq.status}
                     {eq.note ? ` · ${eq.note}` : ''}
                   </p>
-                  {eq.warrantyMonths != null && (
-                    <p className="mt-1 flex items-center gap-1 text-xs text-slate-400">
-                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                      Bảo hành {eq.warrantyMonths} tháng · đến {formatDate(eq.warrantyEndDate)}
-                    </p>
-                  )}
+                  {(() => {
+                    const start = eq.warrantyStartDate ? formatDate(eq.warrantyStartDate) : null;
+                    const end = eq.warrantyEndDate ? formatDate(eq.warrantyEndDate) : null;
+                    const hasInfo = !!end || eq.warrantyMonths != null;
+                    let text: string;
+                    if (end) {
+                      text = start ? `Hạn sử dụng: ${start} → ${end}` : `Hạn sử dụng đến ${end}`;
+                      if (eq.warrantyMonths != null) text += ` · bảo hành ${eq.warrantyMonths} tháng`;
+                    } else if (eq.warrantyMonths != null) {
+                      text = `Bảo hành ${eq.warrantyMonths} tháng`;
+                    } else {
+                      text = 'Hạn sử dụng: chưa cập nhật';
+                    }
+                    return (
+                      <p className={`mt-1 flex items-center gap-1 text-xs ${hasInfo ? 'text-slate-500' : 'text-slate-400 italic'}`}>
+                        <ShieldCheck className={`h-3.5 w-3.5 ${hasInfo ? 'text-emerald-500' : 'text-slate-300'}`} />
+                        {text}
+                      </p>
+                    );
+                  })()}
                 </div>
                 <span className="shrink-0 text-sm font-bold text-slate-700">{formatVND(eq.price)}</span>
               </div>

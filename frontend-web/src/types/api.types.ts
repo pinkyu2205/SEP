@@ -490,6 +490,81 @@ export interface PricingResponse {
   roomResults?: DepreciationRoomResult[];
 }
 
+// ── Mô hình định giá mới (FORWARD/REVERSE) — base /api/v1/properties/{id}/pricing ──
+// FORWARD: host biết lợi nhuận ròng mong muốn/tháng (pDesired).
+// REVERSE: host biết ROI %/năm (roiExpected) trên tổng vốn đầu tư.
+export type PricingMode = 'FORWARD' | 'REVERSE';
+
+export interface CalculatePricingRequest {
+  mode?: PricingMode;
+  pDesired?: number;          // FORWARD: lợi nhuận ròng mong muốn/tháng (VND)
+  roiExpected?: number;       // REVERSE: ROI %/năm trên CAPEX
+  oOperation?: number;        // Chi phí vận hành cố định/tháng (mặc định 0)
+  vRate?: number;             // Buffer trống phòng dạng thập phân (0.10 = 10%)
+  roomQualityFactors?: Record<string, number>; // key = roomId (string), hệ số chất lượng
+}
+
+export interface RoomPricingResult {
+  roomId: number;
+  roomNumber: string;
+  area: number;
+  effectiveM2: number;
+  weight: number;
+  roomFloor: number;                 // Giá sàn tối thiểu — cảnh báo nếu nhập thấp hơn
+  suggestedMinPrice: number;
+  suggestedPriceWithProfit: number;  // Giá gợi ý niêm yết (đã gồm lợi nhuận)
+  belowFloor?: boolean;
+  // Optional — BE trả kèm để hiển thị chi tiết phân bổ theo phòng
+  rentShare?: number;            // tiền thuê phân bổ cho phòng
+  renovationShare?: number;      // cải tạo phân bổ cho phòng
+  equipmentShare?: number;       // thiết bị phân bổ cho phòng
+  totalRentAmount?: number;
+  totalRenovationCost?: number;
+  totalEquipmentCost?: number;
+  totalInvestment?: number;      // tổng vốn phòng (capex phòng)
+  contractMonths?: number;
+  monthlyBreakEven?: number;     // hoàn vốn/tháng của phòng
+}
+
+export interface PricingCalculationResponse {
+  propertyId: number;
+  pricingScope: PricingScope;
+  mode?: PricingMode;
+  cRent?: number;
+  cRenovation?: number;
+  cEquipment?: number;
+  capex: number;                 // Tổng vốn đầu tư (thuê trả trước + cải tạo + thiết bị)
+  contractMonths: number;
+  monthlyRecovery: number;       // Hoàn vốn kế toán/tháng
+  fixedOpex: number;             // Chi phí nền/tháng = oOperation + hoàn vốn
+  revenueMin?: number;
+  revenueTarget: number;         // Doanh thu mục tiêu khi lấp đầy 100% (đã cộng buffer)
+  pDesired?: number;
+  roiExpected?: number;
+  oOperation?: number;
+  vRate?: number;
+  commonAreaM2?: number;
+  totalWeight?: number;
+  roomCount?: number;
+  roomResults?: RoomPricingResult[];
+  wholeHouseResult?: RoomPricingResult;
+}
+
+export interface PricingReconciliationResponse {
+  propertyId: number;
+  month: string;                 // YYYY-MM
+  actualRevenue: number;
+  occupancyRate: number;
+  actualProfit: number;          // actualRevenue - fixedOpex
+  actualCashFlow: number;        // actualRevenue - oOperation
+  fixedOpex: number;
+  revenueTarget: number;
+  revenueTargetAtOccupancy: number;
+  pDesired: number;
+  profitTargetMet: boolean;
+  revenueTargetMet: boolean;
+}
+
 // =============================================================================
 // ONBOARDING SUMMARY — Tổng hợp cho Host xem
 // =============================================================================

@@ -31,7 +31,15 @@ function mapToPublicProperty(p: GuestPropertyResponse, pricing: { price: number;
     status: p.status === 'RENTED' || p.rentalAvailable === false ? 'RENTED' : 'AVAILABLE',
     images: p.imageUrls ?? [],
     amenities: [],
+    // Tên thiết bị thật từ BE (distinct theo property) — hiển thị trực tiếp.
+    rawAmenities: p.amenities ?? [],
     bedrooms: isWholeHouse ? (p.totalRooms || undefined) : undefined,
+    latitude: p.latitude ?? null,
+    longitude: p.longitude ?? null,
+    electricityUnitPrice: p.electricityUnitPrice ?? null,
+    waterUnitPrice: p.waterUnitPrice ?? null,
+    depositMonths: p.depositMonths ?? null,
+    serviceFee: p.serviceFee ?? null,
     featured: false,
     createdAt: new Date().toISOString().slice(0, 10),
   };
@@ -66,10 +74,13 @@ async function fetchActiveProperties(): Promise<PublicProperty[]> {
     const res: { content: GuestPropertyResponse[] } = await api.get(PUBLIC_BASE, {
       params: { page: 0, size: 200 },
     });
-    // BE đã lọc ACTIVE + đã gán manager ở server; vẫn lọc lại phía FE cho chắc
-    // và để giữ cả property RENTED (đã có khách thuê) hiển thị.
+    // BE đã lọc sẵn ACTIVE/RENTED + đã gán manager ở server
+    // (findByStatusInAndOperationManagerIdIsNotNull). KHÔNG lọc lại theo
+    // operationManagerId ở FE: GuestPropertyResponse hiện KHÔNG trả field này
+    // (PublicPropertyServiceImpl.mapToGuestResponse quên set → luôn null) nên nếu
+    // lọc sẽ loại nhầm HẾT. Chỉ giữ lọc trạng thái cho chắc.
     const active = (res.content ?? []).filter(
-      p => (p.status === 'ACTIVE' || p.status === 'RENTED') && p.operationManagerId != null,
+      p => p.status === 'ACTIVE' || p.status === 'RENTED',
     );
     return Promise.all(active.map(async p => mapToPublicProperty(p, await resolvePricing(p))));
   } catch {
