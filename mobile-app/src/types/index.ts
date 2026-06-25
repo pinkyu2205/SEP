@@ -242,6 +242,10 @@ export interface ResolveMaintenanceRequestDto {
    * HOST. Nếu TENANT thì không tạo expense để net profit không bị sai.
    */
   costPaidBy?: 'HOST' | 'TENANT';
+  /** Nguyên nhân hư hỏng (phục vụ trừ cọc khi MISUSE). */
+  cause?: 'WEAR' | 'MISUSE';
+  /** Thiết bị liên quan — BE bật cờ recommendReplacement nếu chi phí > 1tr. */
+  equipmentId?: number;
 }
 
 export interface MaintenanceDashboardDto {

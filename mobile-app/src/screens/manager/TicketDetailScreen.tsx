@@ -203,6 +203,7 @@ export const TicketDetailScreen: React.FC = () => {
   const allTickets = useTickets();
   const storeTicket = allTickets.find(t => t.id === ticketId);
   const [realTicket, setRealTicket] = useState<MaintenanceTicket | undefined>(undefined);
+  const [realEquipmentId, setRealEquipmentId] = useState<number | undefined>(undefined);
   const isReal = !!realTicket;
   const ticket = realTicket ?? storeTicket;
 
@@ -211,7 +212,7 @@ export const TicketDetailScreen: React.FC = () => {
     if (!isRealId) return;
     let active = true;
     realMaintenanceService.getDetail(idNum)
-      .then(dto => { if (active) setRealTicket(dtoToTicket(dto)); })
+      .then(dto => { if (active) { setRealTicket(dtoToTicket(dto)); setRealEquipmentId(dto.equipmentId); } })
       .catch(() => { /* giữ store mock */ });
     return () => { active = false; };
   }, [idNum, isRealId]);
@@ -220,6 +221,7 @@ export const TicketDetailScreen: React.FC = () => {
     try {
       const dto = await realMaintenanceService.getDetail(idNum);
       setRealTicket(dtoToTicket(dto));
+      setRealEquipmentId(dto.equipmentId);
     } catch { /* bỏ qua */ }
   };
 
@@ -228,6 +230,7 @@ export const TicketDetailScreen: React.FC = () => {
     ticket?.repairCost !== undefined ? String(ticket.repairCost) : '',
   );
   const [costPaidBy,    setCostPaidBy]    = useState<CostPaidBy>(ticket?.costPaidBy || 'host');
+  const [cause,         setCause]         = useState<DamageCause>(ticket?.cause || 'wear');
   const [noteInput,     setNoteInput]     = useState('');
   const [showCostInput, setShowCostInput] = useState(false);
   const [photos,        setPhotos]        = useState<PhotoEvidence[]>(ticket?.photos || []);
@@ -270,11 +273,21 @@ export const TicketDetailScreen: React.FC = () => {
   const handleAddPhoto = async (type: 'before' | 'after') => {
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
     if (result.canceled || !result.assets[0]) return;
+    const uri = result.assets[0].uri;
     setPhotos(prev => [...prev, {
-      id: `ph-${Date.now()}`, type, uri: result.assets[0].uri,
+      id: `ph-${Date.now()}`, type, uri,
       caption:    type === 'before' ? 'Ảnh hiện trạng' : 'Ảnh sau sửa chữa',
       capturedAt: now(),
     }]);
+    // Ticket thật → upload ảnh lên BE (POST /{id}/photos). Mock → chỉ lưu cục bộ.
+    if (isReal) {
+      try {
+        await realMaintenanceService.uploadPhotos(idNum, [uri], type === 'before' ? 'BEFORE' : 'AFTER');
+        await refreshReal();
+      } catch {
+        Alert.alert('Lỗi tải ảnh', 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.');
+      }
+    }
   };
 
   // ── Đường real-API (BE 3 trạng thái) ──────────────────────────────
@@ -291,6 +304,8 @@ export const TicketDetailScreen: React.FC = () => {
       await realMaintenanceService.resolve(idNum, {
         repairCost: cost, resolutionNote: note,
         costPaidBy: costPaidBy === 'host' ? 'HOST' : 'TENANT',
+        cause: cause === 'misuse' ? 'MISUSE' : 'WEAR',  // MISUSE → BE trừ cọc lúc checkout
+        equipmentId: realEquipmentId,   // BE bật cờ thay mới nếu chi phí > 1tr
       });
       await refreshReal();
       setShowCostInput(false);
@@ -339,7 +354,7 @@ export const TicketDetailScreen: React.FC = () => {
     // Cổng duyệt chi phí: vượt ngưỡng → chờ Admin duyệt.
     if (cost > MAINTENANCE_COST_APPROVAL_THRESHOLD) {
       patchStore(
-        { status: 'pending_approval', approvalStatus: 'pending', repairCost: cost, costPaidBy },
+        { status: 'pending_approval', approvalStatus: 'pending', repairCost: cost, costPaidBy, cause },
         mkEntry('pending_approval', `Chi phí ${fmt(cost)} vượt ngưỡng — chờ Admin duyệt`),
       );
       setShowCostInput(false);
@@ -347,7 +362,7 @@ export const TicketDetailScreen: React.FC = () => {
       return;
     }
     patchStore(
-      { status: 'done', doneAt: today(), repairCost: cost, costPaidBy },
+      { status: 'done', doneAt: today(), repairCost: cost, costPaidBy, cause },
       mkEntry('done', note),
     );
     setShowCostInput(false);
@@ -369,8 +384,11 @@ export const TicketDetailScreen: React.FC = () => {
           try {
             await realMaintenanceService.updateStatus(idNum, 'CANCELLED', 'Đã hủy yêu cầu');
             await refreshReal();
-          } catch {
-            Alert.alert('Lỗi', 'Không thể hủy yêu cầu. Vui lòng thử lại.');
+          } catch (e: any) {
+            // BE trả 403 nếu không đủ quyền (tenant / manager không quản lý property).
+            const msg = e?.response?.data?.message
+              || (e?.response?.status === 403 ? 'Bạn không có quyền hủy yêu cầu này.' : 'Không thể hủy yêu cầu. Vui lòng thử lại.');
+            Alert.alert('Không thể hủy', msg);
           }
           return;
         }
@@ -620,6 +638,29 @@ export const TicketDetailScreen: React.FC = () => {
                 <Text style={[s.costPaidByText, costPaidBy === 'tenant' && { color: Colors.white }]}>Khách thuê</Text>
               </TouchableOpacity>
             </View>
+
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Nguyên nhân hư hỏng</Text>
+            <View style={s.costPaidByRow}>
+              <TouchableOpacity
+                style={[s.costPaidByBtn, cause === 'wear' && s.costPaidByBtnHost]}
+                onPress={() => setCause('wear')}
+              >
+                <Text style={s.costPaidByIcon}>🕗</Text>
+                <Text style={[s.costPaidByText, cause === 'wear' && { color: Colors.white }]}>Hao mòn</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.costPaidByBtn, cause === 'misuse' && s.costPaidByBtnTenant]}
+                onPress={() => setCause('misuse')}
+              >
+                <Text style={s.costPaidByIcon}>⚠️</Text>
+                <Text style={[s.costPaidByText, cause === 'misuse' && { color: Colors.white }]}>Dùng sai</Text>
+              </TouchableOpacity>
+            </View>
+            {costPaidBy === 'tenant' && cause === 'misuse' && (
+              <Text style={s.causeHint}>
+                ⓘ Khách thuê làm hư — chi phí sẽ trừ vào tiền cọc khi trả phòng.
+              </Text>
+            )}
           </View>
         )}
 
@@ -791,6 +832,7 @@ const s = StyleSheet.create({
   costPaidByBtnTenant:{ backgroundColor: Colors.success, borderColor: Colors.success },
   costPaidByIcon: { fontSize: 16 },
   costPaidByText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  causeHint:      { fontSize: 12, color: Colors.warning, marginTop: Spacing.sm, lineHeight: 17 },
 
   scheduleRow:            { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   scheduleChip:           { paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },

@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius } from '../../constants';
 import { useAuth } from '../../hooks';
+import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
 import {
   MANAGED_PROPERTIES, getPropPriority, getPriorityMeta, getIssueCount,
 } from '../../data/managedProperties';
@@ -62,6 +63,7 @@ export const ManagerHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const stats = MOCK_STATS;
+  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → fallback mock)
   const occupancyRate = Math.round((stats.occupied / stats.totalRooms) * 100);
 
   const attentionBuildings = useMemo(
@@ -97,10 +99,10 @@ export const ManagerHomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
             <Text style={s.notifIcon}>🔔</Text>
-            {stats.unreadNotifications > 0 && (
+            {(realUnread ?? stats.unreadNotifications) > 0 && (
               <View style={s.notifBadge}>
                 <Text style={s.notifBadgeText}>
-                  {stats.unreadNotifications > 9 ? '9+' : stats.unreadNotifications}
+                  {(realUnread ?? stats.unreadNotifications) > 9 ? '9+' : (realUnread ?? stats.unreadNotifications)}
                 </Text>
               </View>
             )}

@@ -33,6 +33,9 @@ import { ImportExcelPage } from './pages/super-admin/nha-thue/ImportExcelPage';
 import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
 import { DinhGiaPheDuyetPage } from './pages/super-admin/nha-thue/DinhGiaPheDuyetPage';
 import { TenantList } from './pages/tenants/TenantList';
+import { ExpenseManagement } from './pages/finance/ExpenseManagement';
+import { ReceivablesAging } from './pages/finance/ReceivablesAging';
+import { DepositLedger } from './pages/finance/DepositLedger';
 import { HostPropertyReview } from './pages/host/HostPropertyReview';
 
 // Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
@@ -98,6 +101,12 @@ function App() {
             <Route path="/host/maintenance" element={<MaintenanceList />} />
             <Route path="/host/equipments" element={<EquipmentQrManager />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
+            <Route path="/host/expenses" element={<ExpenseManagement />} />
+            {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
+            <Route element={<ProtectedRoute allowedRoles={['host']} />}>
+              <Route path="/host/receivables" element={<ReceivablesAging />} />
+              <Route path="/host/deposits" element={<DepositLedger />} />
+            </Route>
             <Route path="/host/reports" element={<ReportsAnalytics />} />
             <Route path="/host/notifications" element={<NotificationCenter />} />
             <Route

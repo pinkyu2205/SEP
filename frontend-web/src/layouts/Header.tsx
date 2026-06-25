@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, ChevronRight, Home, LogOut, Search } from 'lucide-react';
 import { useWebAuth } from '../auth/WebAuthContext';
-import { MOCK_NOTIFICATIONS } from '../utils/mockData';
+import { useUnreadNotifications } from '../contexts/UnreadNotificationsContext';
 
 const ROUTE_LABELS: Record<string, string> = {
   '/host': 'Bảng điều hành',
@@ -31,7 +31,7 @@ const formatVNDate = (date: Date) => {
 export const Header = () => {
   const location = useLocation();
   const { user, logout } = useWebAuth();
-  const unreadCount = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;
+  const { count: unreadCount } = useUnreadNotifications();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -113,10 +113,10 @@ export const Header = () => {
 
         <div className="flex items-center gap-2.5 group">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-            {user?.role === 'admin' ? 'A' : 'UN'}
+            {user?.role === 'admin' ? 'A' : 'HB'}
           </div>
           <div className="hidden sm:block">
-            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'UrbanNest Host'}</p>
+            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'Hoàng Bình Land Host'}</p>
             <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'admin' ? 'Admin' : 'Cổng quản lý Host'}</p>
           </div>
         </div>

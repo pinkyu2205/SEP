@@ -54,7 +54,7 @@ export const WebLogin = () => {
               <Building2 className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-lg font-black leading-tight">UrbanNest</p>
+              <p className="text-lg font-black leading-tight">Hoàng Bình Land</p>
               <p className="text-xs font-semibold uppercase tracking-widest text-cyan-200">Web Admin Portal</p>
             </div>
           </div>

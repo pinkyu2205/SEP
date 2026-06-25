@@ -89,7 +89,7 @@ export const MOCK_CONTRACTS: Contract[] = [
   // ========== Host ↔ Manager Contracts ==========
   {
     id: 'c-am-1', code: 'HD-AM-2026-001', type: 'admin_manager',
-    lessorId: 'host', lessorName: 'UrbanNest Host',
+    lessorId: 'host', lessorName: 'Hoàng Bình Land Host',
     lesseeId: 'm1', lesseeName: 'Nguyễn Văn Quản', lesseeCccd: '079200100100', lesseePhone: '0901234567',
     propertyId: 'prop-1', propertyName: 'Nhà Nguyễn Trãi',
     startDate: '2026-01-15', endDate: '2027-01-15',
@@ -103,7 +103,7 @@ export const MOCK_CONTRACTS: Contract[] = [
   },
   {
     id: 'c-am-2', code: 'HD-AM-2026-002', type: 'admin_manager',
-    lessorId: 'host', lessorName: 'UrbanNest Host',
+    lessorId: 'host', lessorName: 'Hoàng Bình Land Host',
     lesseeId: 'm2', lesseeName: 'Trần Thị Quản', lesseeCccd: '079200100200', lesseePhone: '0912345678',
     propertyId: 'prop-2', propertyName: 'Nhà Lê Văn Sỹ',
     startDate: '2026-02-10', endDate: '2027-02-10',
@@ -116,7 +116,7 @@ export const MOCK_CONTRACTS: Contract[] = [
   },
   {
     id: 'c-am-3', code: 'HD-AM-2026-003', type: 'admin_manager',
-    lessorId: 'host', lessorName: 'UrbanNest Host',
+    lessorId: 'host', lessorName: 'Hoàng Bình Land Host',
     lesseeId: 'm1', lesseeName: 'Nguyễn Văn Quản', lesseeCccd: '079200100100', lesseePhone: '0901234567',
     propertyId: 'prop-3', propertyName: 'Nhà Cách Mạng Tháng 8',
     startDate: '2026-03-05', endDate: '2027-03-05',
