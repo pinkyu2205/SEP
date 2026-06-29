@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -35,7 +35,8 @@ export const BillingManagementScreen: React.FC = () => {
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
+      // Màn này CHỈ về tiền nhà (RENT). Điện/nước có thống kê riêng ở màn Ghi chỉ số & Hóa đơn.
+      realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
     ])
       .then(([inv, pay]) => { setInvoices(inv); setPayments(pay); })
@@ -75,26 +76,28 @@ export const BillingManagementScreen: React.FC = () => {
   }, [invoices]);
 
   const handleVerify = (p: ManagerPayment, approved: boolean) => {
-    Alert.alert(
-      approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?',
-      approved ? `Xác nhận đã nhận đủ ${fmt(p.amount)} từ ${p.tenantName}?` : 'Từ chối giao dịch này?',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        {
-          text: approved ? 'Xác nhận' : 'Từ chối',
-          style: approved ? 'default' : 'destructive',
-          onPress: async () => {
-            try {
-              if (approved) await realManagerInvoiceService.verifyPayment(p.id);
-              else await realManagerInvoiceService.rejectPayment(p.id);
-              load();
-            } catch (e: any) {
-              Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch (BE chưa có endpoint?).');
-            }
-          },
-        },
-      ],
-    );
+    const doIt = async () => {
+      try {
+        if (approved) await realManagerInvoiceService.verifyPayment(p.id);
+        else await realManagerInvoiceService.rejectPayment(p.id);
+        load();
+      } catch (e: any) {
+        Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch (BE chưa có endpoint?).');
+      }
+    };
+
+    const title = approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?';
+    const msg = approved ? `Xác nhận đã nhận đủ ${fmt(p.amount)} từ ${p.tenantName}?` : 'Từ chối giao dịch này?';
+
+    // Web: Alert nhiều nút không chạy callback → dùng window.confirm.
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${msg}`)) doIt();
+      return;
+    }
+    Alert.alert(title, msg, [
+      { text: 'Hủy', style: 'cancel' },
+      { text: approved ? 'Xác nhận' : 'Từ chối', style: approved ? 'default' : 'destructive', onPress: doIt },
+    ]);
   };
 
   const now = new Date();
@@ -110,7 +113,7 @@ export const BillingManagementScreen: React.FC = () => {
             <Text style={s.backBtnText}>‹</Text>
           </TouchableOpacity>
           <Text style={s.title}>Hóa đơn & Thanh toán</Text>
-          <Text style={s.subtitle}>{monthLabel}</Text>
+          <Text style={s.subtitle}>Tiền nhà · {monthLabel}</Text>
         </View>
 
         {/* ── (1) Gửi hoá đơn tiền nhà — ưu tiên đầu màn ── */}
@@ -287,7 +290,7 @@ export const BillingManagementScreen: React.FC = () => {
             {invoices.length === 0 && pendingVerifications.length === 0 && (
               <View style={s.emptyBox}>
                 <Text style={s.emptyEmoji}>🧾</Text>
-                <Text style={s.emptyText}>Chưa có hóa đơn nào trong kỳ này.</Text>
+                <Text style={s.emptyText}>Chưa có hóa đơn tiền nhà nào trong kỳ này.</Text>
               </View>
             )}
           </>

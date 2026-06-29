@@ -71,7 +71,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
   };
 
   const busy = phase === 'validating' || phase === 'importing';
-  const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0;
+  const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0 && !errorMessage;
 
   if (phase === 'done' && result) {
     return (

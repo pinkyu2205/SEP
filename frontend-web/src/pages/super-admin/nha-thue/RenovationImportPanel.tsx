@@ -158,7 +158,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
 
         {phase !== 'done' && (
           <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-            {phase === 'validated' && result && errors.length === 0 && (
+            {phase === 'validated' && result && errors.length === 0 && !errorMessage && (
               <p className="mr-auto flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
                 <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {result.contractsProcessed} căn · {result.renovationLinesImported} dòng cải tạo · {result.equipmentRowsImported} thiết bị mua mới
                 {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} bỏ qua`}
@@ -172,7 +172,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                 ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra...</>
                 : <><CheckCircle2 className="h-4 w-4" /> {phase === 'validated' ? 'Kiểm tra lại' : 'Kiểm tra file'}</>}
             </button>
-            {(phase === 'validated' || phase === 'importing') && result && errors.length === 0 && (
+            {(phase === 'validated' || phase === 'importing') && result && errors.length === 0 && !errorMessage && (
               <button
                 onClick={() => setConfirmOpen(true)}
                 disabled={busy}
