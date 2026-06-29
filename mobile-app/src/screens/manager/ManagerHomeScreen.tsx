@@ -32,6 +32,7 @@ const QUICK_ACTIONS = [
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary,       badge: 0 },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary, badge: 0 },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info,          badge: 2 },
+  { emoji: '📨', label: 'Chờ duyệt', route: 'ResumeContract',     color: Colors.warning,       badge: 0 },
 ] as const;
 
 const UNREAD_NOTIFICATIONS = 6; // TODO: nối API thông báo

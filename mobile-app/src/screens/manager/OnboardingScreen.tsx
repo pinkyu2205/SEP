@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,10 +26,13 @@ import {
   realPropertyService,
 } from '../../services/propertyService.real'
 import {
+  EquipmentSnapshotItem,
   OnboardTenantRequest,
   realTenantService,
   TenantContractResponse,
 } from '../../services/tenantService.real'
+import { realEquipmentService } from '../../services/equipmentService.real'
+import type { EquipmentDto } from '../../types'
 
 type RentalMode = 'room' | 'whole_house'
 
@@ -46,6 +50,7 @@ const PAY_SUCCESS_URL = 'https://slms.app/payment-success'
 const PAY_CANCEL_URL = 'https://slms.app/payment-cancel'
 
 const MODE_STEP = 'Chọn loại'
+const HANDOVER_STEP = 'Bàn giao thiết bị'
 const ROOM_STEPS = [
   MODE_STEP,
   'Chọn phòng',
@@ -53,6 +58,7 @@ const ROOM_STEPS = [
   'Thành viên ở cùng',
   'Điện nước',
   'Hiện trạng phòng',
+  HANDOVER_STEP,
   'Tạo hợp đồng',
   'Thanh toán cọc',
   'Xác nhận',
@@ -64,10 +70,23 @@ const WHOLE_HOUSE_STEPS = [
   'Thành viên ở cùng',
   'Điện nước',
   'Hiện trạng nhà',
+  HANDOVER_STEP,
   'Tạo hợp đồng',
   'Thanh toán cọc',
   'Xác nhận',
 ]
+
+// Danh mục thiết bị cho phần "Khách lắp thêm" (đồng bộ với EquipmentScreen).
+const HANDOVER_CATEGORIES = ['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng']
+
+// 1 thiết bị khách yêu cầu lắp thêm (chủ đầu tư mua → tài sản nhà).
+interface AddedEquipmentForm {
+  tempId: string
+  name: string
+  category: string
+  quantity: number
+  cost: number
+}
 
 const rentalModeOptions: Array<{
   mode: RentalMode
@@ -205,6 +224,18 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [photoUploading, setPhotoUploading] = useState(false)
   const [inspectionNotes, setInspectionNotes] = useState('')
 
+  // Bàn giao thiết bị
+  const [availableEquipments, setAvailableEquipments] = useState<EquipmentDto[]>([])
+  const [loadingEquipments, setLoadingEquipments] = useState(false)
+  // map equipmentId -> có bàn giao cho khách không (mặc định true)
+  const [handoverSelected, setHandoverSelected] = useState<Record<number, boolean>>({})
+  const [addedEquipments, setAddedEquipments] = useState<AddedEquipmentForm[]>([])
+  const [showAddEquipModal, setShowAddEquipModal] = useState(false)
+
+  // Chế độ giá khi tạo HĐ: 'agreed' = đã thống nhất với Host (kích hoạt ngay) ·
+  // 'approval' = gửi Host duyệt giá (tạm dừng, chưa thu cọc).
+  const [priceMode, setPriceMode] = useState<'agreed' | 'approval'>('agreed')
+
   const [otp, setOtp] = useState('')
 
   // Dữ liệu thật
@@ -339,6 +370,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const currentLabel = steps[step]
   const progress = ((step + 1) / steps.length) * 100
 
+  // Case 2 đã gửi Host duyệt giá (HĐ đã tạo, đang chờ) -> hiện màn "chờ duyệt".
+  const submittedForApproval = priceMode === 'approval' && !!contract
+
   // Poll trạng thái thanh toán khi ở bước "Thanh toán cọc"
   useEffect(() => {
     if (currentLabel !== 'Thanh toán cọc' || !contract || paid) return
@@ -356,6 +390,38 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }, 5000)
     return () => clearInterval(timer)
   }, [currentLabel, contract, paid])
+
+  // Tải thiết bị sẵn có của phòng/nhà khi vào bước "Bàn giao thiết bị".
+  useEffect(() => {
+    if (currentLabel !== HANDOVER_STEP) return
+    const roomId = rentalMode === 'room' ? Number(selectedRoomId) : null
+    const propertyId =
+      rentalMode === 'whole_house' ? Number(selectedWholeHouseId) : Number(selectedBuildingId)
+    let active = true
+    setLoadingEquipments(true)
+    const fetcher =
+      rentalMode === 'room' && roomId
+        ? realEquipmentService.getByRoom(roomId)
+        : realEquipmentService.getByProperty(propertyId)
+    fetcher
+      .then((list) => {
+        if (!active) return
+        setAvailableEquipments(list)
+        // Mặc định bàn giao tất cả thiết bị sẵn có (giữ lựa chọn cũ nếu đã có).
+        setHandoverSelected((prev) => {
+          const next = { ...prev }
+          list.forEach((e) => {
+            if (next[e.id] === undefined) next[e.id] = true
+          })
+          return next
+        })
+      })
+      .catch(() => active && setAvailableEquipments([]))
+      .finally(() => active && setLoadingEquipments(false))
+    return () => {
+      active = false
+    }
+  }, [currentLabel, rentalMode, selectedRoomId, selectedWholeHouseId, selectedBuildingId])
 
   // ===== Lưu nháp (draft) =====
   // Có tiến trình đáng kể để cảnh báo khi thoát / để lưu nháp
@@ -383,6 +449,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     setWaterMeterUrl(d.waterMeterUrl ?? '')
     setConditionPhotos(d.conditionPhotos ?? [])
     setInspectionNotes(d.inspectionNotes ?? '')
+    setHandoverSelected(d.handoverSelected ?? {})
+    setAddedEquipments(d.addedEquipments ?? [])
+    setPriceMode(d.priceMode ?? 'agreed')
     setContract(d.contract ?? null)
     setPaid(d.paid ?? false)
   }
@@ -445,6 +514,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       waterMeterUrl,
       conditionPhotos,
       inspectionNotes,
+      handoverSelected,
+      addedEquipments,
+      priceMode,
       contract,
       paid,
     }
@@ -468,6 +540,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     waterMeterUrl,
     conditionPhotos,
     inspectionNotes,
+    handoverSelected,
+    addedEquipments,
+    priceMode,
     contract,
     paid,
   ])
@@ -590,6 +665,15 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
             'Vui lòng chụp/tải ít nhất 1 ảnh hiện trạng.',
           )
         break
+      case HANDOVER_STEP:
+        // Không bắt buộc chọn thiết bị, nhưng món lắp thêm phải có tên + số lượng > 0.
+        for (const a of addedEquipments) {
+          if (!a.name.trim())
+            return Alert.alert('Thiếu tên thiết bị', 'Vui lòng nhập tên cho thiết bị lắp thêm.')
+          if (a.quantity <= 0)
+            return Alert.alert('Số lượng không hợp lệ', `Thiết bị "${a.name.trim()}" cần số lượng lớn hơn 0.`)
+        }
+        break
       case 'Tạo hợp đồng':
         await createContractAndPayment()
         return // createContractAndPayment tự chuyển bước nếu thành công
@@ -709,6 +793,30 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     setHouseholdMembers((prev) => prev.filter((m) => m.id !== id))
 
   // ===== Tạo HĐ + thanh toán =====
+
+  // Biên bản bàn giao thiết bị (snapshot theo hợp đồng): thiết bị sẵn có được tick
+  // + thiết bị khách lắp thêm (chủ đầu tư mua). Serialize thành JSON cho field equipmentSnapshot.
+  const buildEquipmentSnapshotItems = (): EquipmentSnapshotItem[] => [
+    ...availableEquipments
+      .filter((e) => handoverSelected[e.id])
+      .map((e): EquipmentSnapshotItem => ({
+        equipmentId: e.id,
+        name: e.equipmentName,
+        category: e.category,
+        quantity: 1,
+        source: 'EXISTING',
+        ownedBy: 'OWNER',
+      })),
+    ...addedEquipments.map((a): EquipmentSnapshotItem => ({
+      name: a.name.trim(),
+      category: a.category,
+      quantity: a.quantity,
+      cost: a.cost || undefined,
+      source: 'ADDED',
+      ownedBy: 'OWNER',
+    })),
+  ]
+
   const buildPayload = (): OnboardTenantRequest => ({
     fullName: tenantInfo.fullName.trim(),
     cccd: tenantInfo.cccd.trim(),
@@ -733,7 +841,14 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         dateOfBirth: m.dateOfBirth ? toIsoDate(m.dateOfBirth) : undefined,
         cccd: m.cccd,
       })),
-    requireDepositPayment: depositMethod === 'payos',
+    equipmentSnapshot: JSON.stringify({
+      handoverDate: toIsoDate(todayStr),
+      items: buildEquipmentSnapshotItems(),
+    }),
+    // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
+    requireHostPriceApproval: priceMode === 'approval',
+    // Case 1 thu cọc luôn theo phương thức đã chọn; Case 2 hoãn tới sau khi Host duyệt.
+    requireDepositPayment: priceMode === 'agreed' && depositMethod === 'payos',
   })
 
   const createContractAndPayment = async () => {
@@ -756,6 +871,17 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
               payload,
             )
 
+      // Tạo thiết bị lắp thêm thành tài sản nhà (chủ đầu tư mua) — best-effort.
+      await createAddedEquipments()
+
+      // Case 2: gửi Host duyệt giá -> KHÔNG thu cọc, dừng tại màn "chờ duyệt".
+      if (priceMode === 'approval') {
+        setContract(created)
+        completedRef.current = true // bỏ qua cảnh báo thoát
+        clearDraft()
+        return
+      }
+
       if (depositMethod === 'cash') {
         // Thu cọc tiền mặt -> bỏ qua tạo link PayOS, vào bước xác nhận thu cọc thủ công
         setContract(created)
@@ -772,6 +898,30 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     } finally {
       setCreating(false)
     }
+  }
+
+  // Tạo các thiết bị khách lắp thêm thành tài sản của nhà/phòng. Best-effort:
+  // lỗi (BE chưa sẵn / không có quyền) không chặn luồng đón khách.
+  const createAddedEquipments = async () => {
+    if (addedEquipments.length === 0) return
+    const propertyId =
+      rentalMode === 'whole_house'
+        ? Number(selectedWholeHouseId)
+        : Number(selectedBuildingId)
+    const roomId = rentalMode === 'room' ? Number(selectedRoomId) : undefined
+    await Promise.all(
+      addedEquipments.map((a) =>
+        realEquipmentService
+          .create(propertyId, {
+            equipmentName: a.name.trim(),
+            category: a.category,
+            roomId,
+          })
+          .catch(() => {
+            /* best-effort: snapshot vẫn lưu kèm hợp đồng */
+          }),
+      ),
+    )
   }
 
   const checkPaidNow = async () => {
@@ -1377,7 +1527,130 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     )
   }
 
-  const renderContractStep = () => (
+  const addEquipmentItem = (name: string, category: string, quantity: number, cost: number) =>
+    setAddedEquipments((prev) => [
+      ...prev,
+      { tempId: `ae-${Date.now()}`, name, category, quantity, cost },
+    ])
+  const removeAddedEquipment = (tempId: string) =>
+    setAddedEquipments((prev) => prev.filter((a) => a.tempId !== tempId))
+
+  const renderHandoverEquipmentStep = () => (
+    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+      <Text style={styles.sectionTitle}>Bàn giao thiết bị</Text>
+      <Text style={styles.hint}>
+        Chọn đúng thiết bị bàn giao cho khách (bỏ tick món khách không nhận). Có thể thêm thiết bị
+        khách yêu cầu lắp thêm — do chủ đầu tư mua, tính là tài sản của nhà.
+      </Text>
+
+      {/* Thiết bị sẵn có */}
+      <Text style={styles.handoverGroupTitle}>Thiết bị sẵn có</Text>
+      {loadingEquipments ? (
+        <View style={styles.emptyBox}>
+          <ActivityIndicator color={Colors.primary} />
+        </View>
+      ) : availableEquipments.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>Phòng/nhà này chưa có thiết bị sẵn có.</Text>
+        </View>
+      ) : (
+        availableEquipments.map((e) => {
+          const checked = handoverSelected[e.id] ?? true
+          return (
+            <TouchableOpacity
+              key={e.id}
+              style={[styles.handoverRow, checked && styles.handoverRowActive]}
+              onPress={() =>
+                setHandoverSelected((prev) => ({ ...prev, [e.id]: !checked }))
+              }
+              activeOpacity={0.85}
+            >
+              <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+                {checked && <Text style={styles.checkboxTick}>✓</Text>}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.handoverName}>{e.equipmentName}</Text>
+                <Text style={styles.handoverMeta}>
+                  {e.category}
+                  {e.roomName ? ` · ${e.roomName}` : ''}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )
+        })
+      )}
+
+      {/* Thiết bị lắp thêm */}
+      <View style={styles.handoverAddHeader}>
+        <Text style={styles.handoverGroupTitle}>Khách lắp thêm (chủ đầu tư mua)</Text>
+        <TouchableOpacity
+          style={styles.addMemberBtn}
+          onPress={() => setShowAddEquipModal(true)}
+        >
+          <Text style={styles.addMemberText}>+ Thêm</Text>
+        </TouchableOpacity>
+      </View>
+      {addedEquipments.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyText}>Chưa có thiết bị lắp thêm.</Text>
+        </View>
+      ) : (
+        addedEquipments.map((a) => (
+          <View key={a.tempId} style={styles.handoverRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.handoverName}>
+                {a.name} × {a.quantity}
+              </Text>
+              <Text style={styles.handoverMeta}>
+                {a.category}
+                {a.cost > 0 ? ` · ${formatVnd(a.cost)} đ` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => removeAddedEquipment(a.tempId)}>
+              <Text style={styles.removeText}>Xoá</Text>
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
+
+      <View style={styles.handoverNote}>
+        <Text style={styles.handoverNoteText}>
+          💡 Nếu lắp thêm làm đổi giá thuê, hãy chỉnh giá đã thống nhất ở bước "Khách thuê" trước khi
+          tạo hợp đồng.
+        </Text>
+      </View>
+    </ScrollView>
+  )
+
+  const renderApprovalSubmittedStep = () => (
+    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+      <View style={styles.approvalBox}>
+        <Text style={styles.approvalIcon}>📨</Text>
+        <Text style={styles.approvalTitle}>Đã gửi Host duyệt giá</Text>
+        <Text style={styles.approvalDesc}>
+          Hợp đồng cho {tenantInfo.fullName || 'khách'} ({formatVnd(rentValue)} đ/tháng) đã được gửi cho
+          Host phê duyệt. Hệ thống sẽ báo cho bạn khi Host phản hồi.
+        </Text>
+        <View style={styles.approvalSteps}>
+          <Text style={styles.approvalStepText}>✅ Host đồng ý → bạn tiếp tục thu cọc & xác thực OTP.</Text>
+          <Text style={styles.approvalStepText}>❌ Host từ chối → bạn chỉnh giá gửi lại hoặc hủy.</Text>
+        </View>
+        <Text style={styles.approvalHint}>
+          Mở lại từ "Hợp đồng chờ xử lý" ở trang chủ để tiếp tục.
+        </Text>
+      </View>
+      <TouchableOpacity
+        style={styles.payBtn}
+        onPress={() => navigation.navigate('ManagerTabs')}
+      >
+        <Text style={styles.payBtnText}>Về trang chủ</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  )
+
+  const renderContractStep = () => {
+    if (submittedForApproval) return renderApprovalSubmittedStep()
+    return (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Xem lại & tạo hợp đồng</Text>
       <View style={styles.summaryCard}>
@@ -1416,53 +1689,85 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         )}
       </View>
 
-      <Text style={[styles.label, { marginTop: Spacing.base }]}>
-        Hình thức thu cọc
-      </Text>
+      {/* Chế độ giá — Case 1 (đã thống nhất) vs Case 2 (gửi Host duyệt) */}
+      <Text style={[styles.label, { marginTop: Spacing.base }]}>Giá thuê</Text>
       <View style={styles.methodRow}>
         <TouchableOpacity
-          style={[
-            styles.methodChip,
-            depositMethod === 'payos' && styles.methodChipActive,
-          ]}
-          onPress={() => setDepositMethod('payos')}
+          style={[styles.methodChip, priceMode === 'agreed' && styles.methodChipActive]}
+          onPress={() => setPriceMode('agreed')}
           activeOpacity={0.85}
         >
-          <Text
-            style={[
-              styles.methodChipText,
-              depositMethod === 'payos' && styles.methodChipTextActive,
-            ]}
-          >
-            💳 Chuyển khoản (PayOS)
+          <Text style={[styles.methodChipText, priceMode === 'agreed' && styles.methodChipTextActive]}>
+            ✅ Đã thống nhất với Host
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[
-            styles.methodChip,
-            depositMethod === 'cash' && styles.methodChipActive,
-          ]}
-          onPress={() => setDepositMethod('cash')}
+          style={[styles.methodChip, priceMode === 'approval' && styles.methodChipActive]}
+          onPress={() => setPriceMode('approval')}
           activeOpacity={0.85}
         >
-          <Text
-            style={[
-              styles.methodChipText,
-              depositMethod === 'cash' && styles.methodChipTextActive,
-            ]}
-          >
-            💵 Tiền mặt
+          <Text style={[styles.methodChipText, priceMode === 'approval' && styles.methodChipTextActive]}>
+            📨 Gửi Host duyệt giá
           </Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.hint}>
-        {depositMethod === 'payos'
-          ? 'Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.'
-          : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng rồi xác nhận đã thu cọc.'}
-      </Text>
+      {priceMode === 'agreed' ? (
+        <>
+          <Text style={[styles.label, { marginTop: Spacing.base }]}>
+            Hình thức thu cọc
+          </Text>
+          <View style={styles.methodRow}>
+            <TouchableOpacity
+              style={[
+                styles.methodChip,
+                depositMethod === 'payos' && styles.methodChipActive,
+              ]}
+              onPress={() => setDepositMethod('payos')}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.methodChipText,
+                  depositMethod === 'payos' && styles.methodChipTextActive,
+                ]}
+              >
+                💳 Chuyển khoản (PayOS)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.methodChip,
+                depositMethod === 'cash' && styles.methodChipActive,
+              ]}
+              onPress={() => setDepositMethod('cash')}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.methodChipText,
+                  depositMethod === 'cash' && styles.methodChipTextActive,
+                ]}
+              >
+                💵 Tiền mặt
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.hint}>
+            {depositMethod === 'payos'
+              ? 'Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.'
+              : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng rồi xác nhận đã thu cọc.'}
+          </Text>
+        </>
+      ) : (
+        <Text style={styles.hint}>
+          Nhấn "Tiếp tục" để tạo hợp đồng và gửi Host duyệt giá. Sẽ thu cọc sau khi Host đồng ý.
+        </Text>
+      )}
     </ScrollView>
-  )
+    )
+  }
 
   const renderCashDepositStep = () => (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
@@ -1622,6 +1927,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       case 'Hiện trạng phòng':
       case 'Hiện trạng nhà':
         return renderConditionPhotoStep()
+      case HANDOVER_STEP:
+        return renderHandoverEquipmentStep()
       case 'Tạo hợp đồng':
         return renderContractStep()
       case 'Thanh toán cọc':
@@ -1633,9 +1940,12 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }
   }
 
-  // Ẩn nút "Tiếp tục" ở bước cuối (Xác nhận) và bước Thanh toán khi chưa trả
+  // Ẩn nút "Tiếp tục" ở bước cuối (Xác nhận), bước Thanh toán khi chưa trả,
+  // và khi đã gửi Host duyệt giá (Case 2 — màn chờ duyệt có nút riêng).
   const showNextButton =
-    currentLabel !== 'Xác nhận' && !(currentLabel === 'Thanh toán cọc' && !paid)
+    currentLabel !== 'Xác nhận' &&
+    !(currentLabel === 'Thanh toán cọc' && !paid) &&
+    !submittedForApproval
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -1674,6 +1984,16 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         </View>
       )}
 
+      {showAddEquipModal && (
+        <AddEquipmentModal
+          onClose={() => setShowAddEquipModal(false)}
+          onAdd={(name, category, quantity, cost) => {
+            addEquipmentItem(name, category, quantity, cost)
+            setShowAddEquipModal(false)
+          }}
+        />
+      )}
+
       {(photoUploading || ocrLoading !== null) && (
         <View style={styles.uploadOverlay}>
           <View style={styles.uploadOverlayCard}>
@@ -1687,6 +2007,103 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         </View>
       )}
     </SafeAreaView>
+  )
+}
+
+// ===== Modal thêm thiết bị lắp thêm (chủ đầu tư mua) =====
+const AddEquipmentModal: React.FC<{
+  onClose: () => void
+  onAdd: (name: string, category: string, quantity: number, cost: number) => void
+}> = ({ onClose, onAdd }) => {
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState(HANDOVER_CATEGORIES[0])
+  const [quantity, setQuantity] = useState('1')
+  const [cost, setCost] = useState('')
+
+  const submit = () => {
+    if (!name.trim()) return Alert.alert('Lỗi', 'Vui lòng nhập tên thiết bị.')
+    const qty = Math.max(1, parseInt(quantity, 10) || 1)
+    onAdd(name.trim(), category, qty, parseNum(cost))
+  }
+
+  return (
+    <Modal transparent animationType='slide'>
+      <View style={styles.addEquipOverlay}>
+        <View style={styles.addEquipContent}>
+          <Text style={styles.addEquipTitle}>Thêm thiết bị lắp thêm</Text>
+          <Text style={styles.addEquipSubtitle}>Chủ đầu tư mua — tính là tài sản của nhà.</Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Tên thiết bị *</Text>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder='Máy lạnh, máy giặt...'
+              placeholderTextColor={Colors.textMuted}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Danh mục</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.addEquipCatRow}>
+                {HANDOVER_CATEGORIES.map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[styles.addEquipCatChip, category === c && styles.addEquipCatChipActive]}
+                    onPress={() => setCategory(c)}
+                  >
+                    <Text
+                      style={[
+                        styles.addEquipCatText,
+                        category === c && styles.addEquipCatTextActive,
+                      ]}
+                    >
+                      {c}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+
+          <View style={styles.addEquipRow}>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.label}>Số lượng</Text>
+              <TextInput
+                style={styles.input}
+                value={quantity}
+                onChangeText={(v) => setQuantity(v.replace(/[^0-9]/g, ''))}
+                keyboardType='number-pad'
+                placeholder='1'
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+            <View style={[styles.inputGroup, { flex: 2 }]}>
+              <Text style={styles.label}>Chi phí (VNĐ)</Text>
+              <TextInput
+                style={styles.input}
+                value={cost ? Number(parseNum(cost)).toLocaleString('vi-VN') : ''}
+                onChangeText={(v) => setCost(v)}
+                keyboardType='numeric'
+                placeholder='Không bắt buộc'
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md }}>
+            <TouchableOpacity style={[styles.addEquipCancelBtn, { flex: 1 }]} onPress={onClose}>
+              <Text style={styles.addEquipCancelText}>Hủy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.addEquipSubmitBtn, { flex: 2 }]} onPress={submit}>
+              <Text style={styles.addEquipSubmitText}>Thêm thiết bị</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
   )
 }
 
@@ -2237,4 +2654,118 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.textPrimary,
   },
+
+  // ===== Bàn giao thiết bị =====
+  handoverGroupTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  handoverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.base,
+    marginBottom: Spacing.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  handoverRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.white,
+  },
+  checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxTick: { color: Colors.white, fontSize: 14, fontWeight: '800' },
+  handoverName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  handoverMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  handoverAddHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Spacing.lg,
+  },
+  handoverNote: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginTop: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+  },
+  handoverNoteText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
+
+  // ===== Màn chờ Host duyệt giá =====
+  approvalBox: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    alignItems: 'center',
+    ...Shadow.sm,
+    marginBottom: Spacing.lg,
+  },
+  approvalIcon: { fontSize: 44, marginBottom: Spacing.sm },
+  approvalTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  approvalDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20 },
+  approvalSteps: {
+    alignSelf: 'stretch',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginTop: Spacing.lg,
+    gap: 6,
+  },
+  approvalStepText: { fontSize: 13, color: Colors.textPrimary, lineHeight: 19 },
+  approvalHint: { fontSize: 12, color: Colors.textMuted, marginTop: Spacing.md, textAlign: 'center' },
+
+  // ===== Modal thêm thiết bị =====
+  addEquipOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  addEquipContent: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    paddingBottom: 40,
+  },
+  addEquipTitle: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
+  addEquipSubtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.lg, marginTop: 2 },
+  addEquipRow: { flexDirection: 'row', gap: Spacing.md },
+  addEquipCatRow: { flexDirection: 'row', gap: Spacing.sm },
+  addEquipCatChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  addEquipCatChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  addEquipCatText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  addEquipCatTextActive: { color: Colors.white },
+  addEquipCancelBtn: {
+    backgroundColor: Colors.background,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  addEquipCancelText: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
+  addEquipSubmitBtn: {
+    backgroundColor: Colors.primary,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+  },
+  addEquipSubmitText: { color: Colors.white, fontSize: 15, fontWeight: '700' },
 })

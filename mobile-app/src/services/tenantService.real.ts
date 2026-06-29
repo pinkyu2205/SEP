@@ -11,6 +11,18 @@ export interface HouseholdMemberInput {
   cccd?: string;
 }
 
+// 1 dòng trong biên bản bàn giao thiết bị (snapshot theo hợp đồng).
+// EXISTING = thiết bị sẵn có của nhà/phòng được bàn giao · ADDED = khách lắp thêm (chủ đầu tư mua).
+export interface EquipmentSnapshotItem {
+  equipmentId?: number;
+  name: string;
+  category: string;
+  quantity: number;
+  cost?: number;
+  source: 'EXISTING' | 'ADDED';
+  ownedBy: 'OWNER';
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
@@ -19,6 +31,7 @@ export interface OnboardTenantRequest {
   rentAmount: number;
   deposit: number;
   endDate?: string;
+  // Biên bản bàn giao thiết bị: JSON.stringify({ handoverDate, items: EquipmentSnapshotItem[] }).
   equipmentSnapshot?: string;
 
   depositMonths?: number;
@@ -32,6 +45,8 @@ export interface OnboardTenantRequest {
 
   // mobile: tạo HĐ PENDING, cần thanh toán cọc + OTP rồi confirm
   requireDepositPayment?: boolean;
+  // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Host duyệt giá, CHƯA thu cọc.
+  requireHostPriceApproval?: boolean;
 }
 
 export interface TenantContractResponse {
@@ -59,7 +74,18 @@ export interface TenantContractResponse {
   tenantUsername?: string;
   tenantAccountCreated?: boolean; // true nếu vừa tạo mới tài khoản
   tenantRolePromoted?: boolean;   // true nếu vừa nâng ROLE_USER -> ROLE_TENANT
+
+  // Duyệt giá (Case 2). Tên field suy ra từ thiết kế — chỉnh nếu BE đặt khác.
+  priceApprovalStatus?: ContractPriceApprovalStatus;
+  priceRejectReason?: string;
+  equipmentSnapshot?: string;
 }
+
+// Trạng thái duyệt giá của hợp đồng (Case 2 — gửi Host duyệt).
+export type ContractPriceApprovalStatus =
+  | 'PENDING_PRICE_APPROVAL'   // chờ Host duyệt
+  | 'APPROVED_AWAITING_DEPOSIT' // Host đồng ý, chờ manager thu cọc
+  | 'PRICE_REJECTED';          // Host từ chối (+ lý do)
 
 export interface OcrMeterResponse {
   reading: string;
@@ -161,5 +187,36 @@ export const realTenantService = {
       body,
     );
     return data;
+  },
+
+  // ===== Duyệt giá (Case 2) — phụ thuộc BE, tên endpoint suy ra từ thiết kế =====
+
+  // Danh sách HĐ chờ xử lý của manager (chờ duyệt / đã duyệt-chờ cọc / bị từ chối).
+  // Chấp nhận cả response dạng array thuần lẫn Spring Page ({ content: [...] }).
+  listManagedContracts: async (
+    status?: ContractPriceApprovalStatus,
+  ): Promise<TenantContractResponse[]> => {
+    const { data } = await realApiClient.get<
+      TenantContractResponse[] | { content?: TenantContractResponse[] }
+    >('/api/v1/tenant-contracts/managed', { params: status ? { status } : {} });
+    if (Array.isArray(data)) return data;
+    return data?.content ?? [];
+  },
+
+  // Manager chỉnh giá sau khi Host từ chối -> gửi Host duyệt lại.
+  resubmitPriceApproval: async (
+    contractId: number,
+    body: { rentAmount: number; deposit: number },
+  ): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.post<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}/resubmit-approval`,
+      body,
+    );
+    return data;
+  },
+
+  // Hủy hợp đồng (khi manager quyết định không tiếp tục onboarding).
+  cancelContract: async (contractId: number): Promise<void> => {
+    await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/cancel`);
   },
 };

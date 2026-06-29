@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Search, Plus, FileText, User, DoorOpen, Calendar, CalendarClock,
   ShieldAlert, BadgeCheck, Building2, X, Package, CheckCircle, XCircle, Clock,
@@ -7,7 +7,51 @@ import type { Contract } from '../../types';
 import { ALL_CONTRACTS } from '../../utils/mockData';
 import { formatCurrency, contractStatusMap } from '../../utils';
 import { ContractFormModal } from './ContractFormModal';
-import { hostService } from '../../services/host.service';
+import { hostService, type HostContractDto } from '../../services/host.service';
+import type { ContractEquipment } from '../../types';
+
+// 1 item trong equipmentSnapshot (JSON) do mobile manager gửi lên.
+interface SnapshotItem {
+  equipmentId?: number;
+  name: string;
+  category?: string;
+  quantity?: number;
+  cost?: number;
+  source?: 'EXISTING' | 'ADDED';
+}
+
+// Parse equipmentSnapshot (chuỗi JSON) -> danh sách tài sản bàn giao để hiển thị.
+const parseSnapshot = (raw?: string): ContractEquipment[] => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as { items?: SnapshotItem[] };
+    return (parsed.items ?? []).map((it, i) => ({
+      id: String(it.equipmentId ?? `snap-${i}`),
+      name: it.name,
+      quantity: it.quantity ?? 1,
+      condition: it.source === 'ADDED' ? `${it.category ?? ''} · Lắp thêm`.trim() : (it.category ?? ''),
+      source: it.source === 'ADDED' ? 'manager' : 'host',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+// Map HĐ chờ duyệt thật từ BE -> kiểu Contract dùng trong trang.
+const mapHostContract = (d: HostContractDto): Contract => ({
+  id: d.id,
+  code: d.code,
+  type: 'manager_tenant',
+  lessorId: '', lessorName: d.lessorName ?? '',
+  lesseeId: '', lesseeName: d.lesseeName,
+  propertyId: '', propertyName: d.propertyName,
+  roomCode: d.roomCode,
+  startDate: d.startDate, endDate: d.endDate ?? '',
+  depositAmount: 0, rentAmount: d.rentAmount,
+  equipmentList: parseSnapshot(d.equipmentSnapshot),
+  status: d.status === 'PENDING' ? 'pending_approval' : 'active',
+  createdAt: d.startDate,
+});
 
 type ActiveTab = 'pending_approval' | 'admin_manager' | 'manager_tenant';
 
@@ -28,6 +72,24 @@ export const ContractList = () => {
 
   const [approvalModal, setApprovalModal] = useState<{ contract: Contract; action: 'approve' | 'reject' } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+
+  // Nạp HĐ chờ Host duyệt giá thật từ BE; ghép vào danh sách (mock là fallback khi offline).
+  useEffect(() => {
+    hostService
+      .listContracts({ status: 'PENDING' })
+      .then((page) => {
+        const real = (page?.content ?? []).map(mapHostContract);
+        if (real.length === 0) return;
+        setContracts((prev) => {
+          const existed = new Set(prev.map((c) => c.id));
+          const merged = real.filter((c) => !existed.has(c.id));
+          return [...merged, ...prev];
+        });
+      })
+      .catch(() => {
+        /* offline: giữ dữ liệu mock */
+      });
+  }, []);
 
   const tabContracts =
     activeTab === 'pending_approval'
@@ -371,6 +433,21 @@ export const ContractList = () => {
               <p className="font-semibold text-slate-900">{approvalModal.contract.lesseeName}</p>
               <p className="text-slate-500">{approvalModal.contract.propertyName} · {approvalModal.contract.roomCode}</p>
               <p className="text-slate-500">{formatCurrency(approvalModal.contract.rentAmount)}/tháng · bắt đầu {approvalModal.contract.startDate}</p>
+              {approvalModal.contract.equipmentList.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <p className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
+                    <Package className="w-3.5 h-3.5" /> Thiết bị bàn giao đề xuất ({approvalModal.contract.equipmentList.length})
+                  </p>
+                  <ul className="space-y-0.5">
+                    {approvalModal.contract.equipmentList.map(eq => (
+                      <li key={eq.id} className="text-xs text-slate-600 flex justify-between gap-2">
+                        <span>{eq.name} × {eq.quantity}</span>
+                        {eq.condition && <span className="text-slate-400">{eq.condition}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             {approvalModal.action === 'reject' && (
               <div className="mb-4">
