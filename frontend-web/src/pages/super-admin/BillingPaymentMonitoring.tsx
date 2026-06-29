@@ -1,27 +1,59 @@
-import { useMemo, useState } from 'react';
-import { CreditCard, Download, Search } from 'lucide-react';
-import type { PlatformBillStatus } from '../../types';
+import { useEffect, useMemo, useState } from 'react';
+import { CreditCard, Download, Search, Loader2, Info } from 'lucide-react';
+import type { PlatformBill, PlatformBillStatus } from '../../types';
 import { PLATFORM_BILLS, PLATFORM_HOSTS } from '../../utils/superAdminMockData';
+import { adminService } from '../../services/admin.service';
 import { SectionShell, StatusPill, billStatusMap, formatVnd } from './shared';
+
+// Map businessName -> ownerName (chỉ áp dụng cho dữ liệu mock; data thật BE đã trả tên host).
+const ownerByBusiness = Object.fromEntries(PLATFORM_HOSTS.map(h => [h.businessName, h.ownerName]));
 
 export const BillingPaymentMonitoring = () => {
   const [hostFilter, setHostFilter] = useState('all');
   const [billStatusFilter, setBillStatusFilter] = useState<'all' | PlatformBillStatus>('all');
   const [billSearch, setBillSearch] = useState('');
+  const [month, setMonth] = useState('2026-05');
 
-  const uniqueHosts = PLATFORM_HOSTS.map(host => host.businessName);
-  const ownerByBusiness = Object.fromEntries(PLATFORM_HOSTS.map(h => [h.businessName, h.ownerName]));
+  const [bills, setBills] = useState<PlatformBill[]>(PLATFORM_BILLS);
+  const [loading, setLoading] = useState(true);
+  const [usingMock, setUsingMock] = useState(true);
+
+  // Tải hóa đơn toàn hệ thống từ BE; lọc theo tháng phía server.
+  // BE chưa có endpoint → fallback dữ liệu demo để trang vẫn dùng được.
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    adminService.listInvoices({ month })
+      .then(list => {
+        if (!active) return;
+        setBills(list);
+        setUsingMock(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setBills(PLATFORM_BILLS);
+        setUsingMock(true);
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [month]);
+
+  // Danh sách host cho dropdown — lấy từ chính dữ liệu đang hiển thị.
+  const uniqueHosts = useMemo(
+    () => Array.from(new Set(bills.map(b => b.hostName))),
+    [bills],
+  );
 
   const filteredBills = useMemo(() => {
     const keyword = billSearch.trim().toLowerCase();
-    return PLATFORM_BILLS.filter(bill => {
+    return bills.filter(bill => {
       const matchesHost = hostFilter === 'all' || bill.hostName === hostFilter;
       const matchesStatus = billStatusFilter === 'all' || bill.status === billStatusFilter;
       const matchesSearch = !keyword || [bill.id, bill.hostName, bill.buildingName, bill.tenantName]
         .some(value => value.toLowerCase().includes(keyword));
       return matchesHost && matchesStatus && matchesSearch;
     });
-  }, [billSearch, billStatusFilter, hostFilter]);
+  }, [bills, billSearch, billStatusFilter, hostFilter]);
 
   return (
     <SectionShell
@@ -35,6 +67,16 @@ export const BillingPaymentMonitoring = () => {
         </button>
       }
     >
+      {usingMock && !loading && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Đang hiển thị <b>dữ liệu demo</b> — API <code>/api/v1/admin/invoices</code> chưa sẵn sàng.
+            Khi BE bật endpoint, trang tự động hiển thị hóa đơn thật của toàn hệ thống.
+          </span>
+        </div>
+      )}
+
       <div className="mb-4 grid gap-3 lg:grid-cols-5">
         <div className="relative lg:col-span-2">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -48,7 +90,7 @@ export const BillingPaymentMonitoring = () => {
           <option value="all">Tất cả trạng thái</option>
           {Object.entries(billStatusMap).map(([status, cfg]) => <option key={status} value={status}>{cfg.label}</option>)}
         </select>
-        <select className="input-field" defaultValue="2026-05">
+        <select value={month} onChange={event => setMonth(event.target.value)} className="input-field">
           <option value="2026-05">Tháng 05/2026</option>
           <option value="2026-04">Tháng 04/2026</option>
           <option value="2026-03">Tháng 03/2026</option>
@@ -68,7 +110,19 @@ export const BillingPaymentMonitoring = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredBills.map(bill => (
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-16 text-center text-slate-400">
+                  <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Đang tải hóa đơn...
+                </td>
+              </tr>
+            ) : filteredBills.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-16 text-center text-slate-500">
+                  {billSearch ? `Không tìm thấy kết quả cho "${billSearch}"` : 'Không có hóa đơn nào trong kỳ này.'}
+                </td>
+              </tr>
+            ) : filteredBills.map(bill => (
               <tr key={bill.id} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{bill.id}</td>
                 <td className="px-4 py-3"><p className="font-bold text-slate-900">{ownerByBusiness[bill.hostName] ?? bill.hostName}</p><p className="text-xs text-slate-500">{bill.buildingName}</p></td>

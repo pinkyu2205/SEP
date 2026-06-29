@@ -26,7 +26,7 @@ const statusBadge: Record<string, { label: string; cls: string; dot: string }> =
  *   → loại các căn admin đang onboarding (cải tạo lần đầu / nháp bị vô hiệu) chưa gửi Host.
  * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Host"), PENDING_HOST_REVIEW (đang chờ duyệt).
  */
-const isHostApproved = (p: PropertyResponse): boolean => {
+export const isHostApproved = (p: PropertyResponse): boolean => {
   if (p.status === 'ACTIVE' || p.status === 'RENTED' || p.status === 'PENDING_OPERATION_MANAGER') return true;
   if (p.status === 'UNDER_RENOVATION' || p.status === 'DISABLED') {
     return (p.price ?? 0) > 0 || !!p.operationManagerId;

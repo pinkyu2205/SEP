@@ -1,9 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, UserCog, Building2, Users, Wrench, RefreshCw, Phone, CheckCircle2 } from 'lucide-react';
+import {
+  Search, UserCog, Building2, Users, Wrench, RefreshCw, Phone, CheckCircle2,
+  DoorOpen, TrendingUp, MapPin, AlertTriangle, ChevronDown,
+} from 'lucide-react';
 import { propertyService } from '../../services/property.service';
 import { userService } from '../../services/user.service';
 import { hostService, type HostContractDto, type PropertyPerformanceRow } from '../../services/host.service';
 import type { PropertyResponse, UserResponse } from '../../types/api.types';
+import { formatCurrency } from '../../utils';
 
 type ManagerItem = { id: string; fullName: string; username: string };
 
@@ -17,7 +21,7 @@ const statusCls: Record<string, { label: string; color: string; dot: string }> =
 };
 
 function StatCard({ icon: Icon, label, value, tone }: {
-  icon: typeof Users; label: string; value: number;
+  icon: typeof Users; label: string; value: string | number;
   tone: 'indigo' | 'emerald' | 'blue' | 'amber';
 }) {
   const tones = {
@@ -39,6 +43,26 @@ function StatCard({ icon: Icon, label, value, tone }: {
   );
 }
 
+// Chip chỉ số gọn nằm trên dòng quản lý (thu gọn).
+function KpiChip({ icon: Icon, value, label, tone }: {
+  icon: typeof Users; value: string | number; label: string;
+  tone: 'indigo' | 'blue' | 'emerald' | 'amber';
+}) {
+  const tones = {
+    indigo:  'text-indigo-600',
+    blue:    'text-blue-600',
+    emerald: 'text-emerald-600',
+    amber:   'text-amber-600',
+  };
+  return (
+    <div className="flex items-center gap-1.5" title={label}>
+      <Icon className={`h-4 w-4 ${tones[tone]}`} />
+      <span className="text-sm font-bold text-slate-800">{value}</span>
+      <span className="hidden text-xs text-slate-400 sm:inline">{label}</span>
+    </div>
+  );
+}
+
 export const ManagerList = () => {
   const [managers, setManagers]     = useState<ManagerItem[]>([]);
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
@@ -47,6 +71,7 @@ export const ManagerList = () => {
   const [userMap, setUserMap]       = useState<Map<string, UserResponse>>(new Map());
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState('');
+  const [openId, setOpenId]         = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -75,36 +100,23 @@ export const ManagerList = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  // propertyId -> operationManagerId (để quy số liệu về đúng quản lý).
-  const propToMgr = useMemo(() => {
-    const m = new Map<number, string>();
-    properties.forEach(p => { if (p.operationManagerId) m.set(p.id, p.operationManagerId); });
+  // propertyId -> số liệu vận hành tháng này (lấp đầy, doanh thu, bảo trì).
+  const perfByProp = useMemo(() => {
+    const m = new Map<number, PropertyPerformanceRow>();
+    perf.forEach(r => m.set(Number(r.propertyId), r));
     return m;
-  }, [properties]);
+  }, [perf]);
 
-  // Khách thuê đang ở (HĐ ACTIVE) theo từng quản lý — tính trực tiếp từ contracts,
-  // khớp BĐS qua operationManagerId (giống cột "Nhà phụ trách"). Không dùng
-  // manager-performance vì BE đếm theo zone, lệch với cách gán nhà ở đây.
-  const tenantsByMgr = useMemo(() => {
-    const m = new Map<string, number>();
+  // Khách thuê đang ở (HĐ ACTIVE) theo từng bất động sản, khớp qua propertyId/tên.
+  const tenantsByProp = useMemo(() => {
+    const m = new Map<number, number>();
     contracts.forEach(c => {
       if (c.status !== 'ACTIVE') return;
       const pid = c.propertyId ?? properties.find(p => p.propertyName === c.propertyName)?.id;
-      const mgrId = pid != null ? propToMgr.get(pid) : undefined;
-      if (mgrId) m.set(mgrId, (m.get(mgrId) ?? 0) + 1);
+      if (pid != null) m.set(pid, (m.get(pid) ?? 0) + 1);
     });
     return m;
-  }, [contracts, properties, propToMgr]);
-
-  // Bảo trì chờ xử lý theo từng quản lý — từ property-performance (theo propertyId).
-  const maintByMgr = useMemo(() => {
-    const m = new Map<string, number>();
-    perf.forEach(r => {
-      const mgrId = propToMgr.get(Number(r.propertyId));
-      if (mgrId) m.set(mgrId, (m.get(mgrId) ?? 0) + (r.openMaintenance ?? 0));
-    });
-    return m;
-  }, [perf, propToMgr]);
+  }, [contracts, properties]);
 
   const filtered = managers.filter(m => {
     const kw = search.trim().toLowerCase();
@@ -120,10 +132,41 @@ export const ManagerList = () => {
   const getAssignedProps = (mgId: string) =>
     properties.filter(p => p.operationManagerId === mgId);
 
-  // Tổng hợp cho thẻ thống kê
+  // Lấp đầy theo "đơn vị cho thuê": nhà nguyên căn = 1 đơn vị (đã thuê/còn trống),
+  // nhà chia phòng = số phòng. Nhờ vậy nhà nguyên căn có khách vẫn hiện 100%.
+  const propOccupancy = (p: PropertyResponse) => {
+    const r        = perfByProp.get(p.id);
+    const tenants  = tenantsByProp.get(p.id) ?? 0;
+    const isWhole  = p.wholeHouse === true || (r?.totalRooms ?? p.totalRooms ?? 0) === 0;
+    if (isWhole) {
+      const rented = tenants > 0 || (r?.occupiedRooms ?? 0) > 0;
+      return { isWhole: true, units: 1, occupied: rented ? 1 : 0, rate: rented ? 100 : 0 };
+    }
+    const units    = r?.totalRooms ?? p.totalRooms ?? 0;
+    const occupied = r?.occupiedRooms ?? 0;
+    return { isWhole: false, units, occupied, rate: units > 0 ? Math.round((occupied / units) * 100) : 0 };
+  };
+
+  // Gom toàn bộ số liệu của một quản lý từ danh sách nhà phụ trách.
+  const summarize = (assigned: PropertyResponse[]) => {
+    let units = 0, occupied = 0, tenants = 0, openMaint = 0, revenue = 0;
+    assigned.forEach(p => {
+      const r   = perfByProp.get(p.id);
+      const occ = propOccupancy(p);
+      units     += occ.units;
+      occupied  += occ.occupied;
+      tenants   += tenantsByProp.get(p.id) ?? 0;
+      openMaint += r?.openMaintenance ?? 0;
+      revenue   += r?.monthlyRevenue ?? 0;
+    });
+    const occRate = units > 0 ? Math.round((occupied / units) * 100) : 0;
+    return { rooms: units, occupied, tenants, openMaint, revenue, occRate };
+  };
+
+  // Tổng hợp cho thẻ thống kê đầu trang
   const activeManagers = managers.filter(m => (userMap.get(m.id)?.status ?? 'ACTIVE') === 'ACTIVE').length;
-  const totalTenants   = [...tenantsByMgr.values()].reduce((a, b) => a + b, 0);
-  const totalOpenMaint = [...maintByMgr.values()].reduce((a, b) => a + b, 0);
+  const totalTenants   = [...tenantsByProp.values()].reduce((a, b) => a + b, 0);
+  const totalOpenMaint = perf.reduce((a, r) => a + (r.openMaintenance ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -156,115 +199,154 @@ export const ManagerList = () => {
           value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-10" />
       </div>
 
-      {/* Table */}
-      <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-600">
-            <thead className="bg-slate-50 text-slate-500 uppercase font-medium border-b border-slate-100 text-xs">
-              <tr>
-                <th className="px-6 py-4">Quản lý</th>
-                <th className="px-6 py-4">Liên hệ</th>
-                <th className="px-6 py-4">Nhà phụ trách</th>
-                <th className="px-6 py-4 text-center">Khách thuê</th>
-                <th className="px-6 py-4 text-center">Bảo trì chờ xử lý</th>
-                <th className="px-6 py-4">Trạng thái</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center">
-                    <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600 mb-3" />
-                    <p className="text-sm text-slate-400">Đang tải...</p>
-                  </td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
-                    <UserCog className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có quản lý nào.'}
-                  </td>
-                </tr>
-              ) : filtered.map(mgr => {
-                const user        = userMap.get(mgr.id);
-                const assignedProps = getAssignedProps(mgr.id);
-                const displayName = mgr.fullName || mgr.username;
-                const statusKey   = user?.status ?? 'ACTIVE';
-                const st          = statusCls[statusKey] ?? statusCls.ACTIVE;
-                const phone       = user?.phoneNumber;
-                const tenants     = tenantsByMgr.get(mgr.id) ?? 0;
-                const openMaint   = maintByMgr.get(mgr.id) ?? 0;
-
-                return (
-                  <tr key={mgr.id} className="hover:bg-slate-50 transition-colors">
-                    {/* Tên */}
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                          {displayName.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-900">{displayName}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">@{mgr.username}</p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Liên hệ */}
-                    <td className="px-6 py-4">
-                      {phone ? (
-                        <div className="flex items-center gap-1.5">
-                          <Phone className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="font-medium text-slate-900">{phone}</span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-300 italic text-xs">Chưa có</span>
-                      )}
-                    </td>
-
-                    {/* Nhà phụ trách */}
-                    <td className="px-6 py-4">
-                      {assignedProps.length > 0 ? (
-                        <div className="flex flex-col gap-1">
-                          {assignedProps.map(p => (
-                            <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full w-fit">
-                              <Building2 className="w-3 h-3" />{p.propertyName}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 italic text-xs">Chưa phân công</span>
-                      )}
-                    </td>
-
-                    {/* Khách thuê */}
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center justify-center min-w-[2.5rem] gap-1.5 text-sm font-bold px-2.5 py-1 rounded-lg ${tenants > 0 ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <Users className="w-3.5 h-3.5" />{tenants}
-                      </span>
-                    </td>
-
-                    {/* Bảo trì */}
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center justify-center min-w-[2.5rem] gap-1.5 text-sm font-bold px-2.5 py-1 rounded-lg ${openMaint > 0 ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <Wrench className="w-3.5 h-3.5" />{openMaint}
-                      </span>
-                    </td>
-
-                    {/* Trạng thái */}
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${st.color}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
-                        {st.label}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Danh sách quản lý — dòng gọn, bấm để mở chi tiết */}
+      {loading ? (
+        <div className="card flex flex-col items-center justify-center py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600 mb-3" />
+          <p className="text-sm text-slate-400">Đang tải...</p>
         </div>
-      </div>
+      ) : filtered.length === 0 ? (
+        <div className="card flex flex-col items-center justify-center py-16 text-slate-500">
+          <UserCog className="w-12 h-12 text-slate-300 mb-3" />
+          {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có quản lý nào.'}
+        </div>
+      ) : (
+        <div className="card divide-y divide-slate-100 overflow-hidden p-0">
+          {filtered.map(mgr => {
+            const user          = userMap.get(mgr.id);
+            const assignedProps = getAssignedProps(mgr.id);
+            const displayName   = mgr.fullName || mgr.username;
+            const statusKey     = user?.status ?? 'ACTIVE';
+            const st            = statusCls[statusKey] ?? statusCls.ACTIVE;
+            const phone         = user?.phoneNumber;
+            const s             = summarize(assignedProps);
+            const isOpen        = openId === mgr.id;
+
+            return (
+              <div key={mgr.id}>
+                {/* Dòng quản lý (thu gọn) */}
+                <button
+                  onClick={() => setOpenId(isOpen ? null : mgr.id)}
+                  className={`flex w-full items-center gap-4 px-4 py-3 text-left transition hover:bg-slate-50 ${isOpen ? 'bg-slate-50' : ''}`}
+                >
+                  {/* Hồ sơ */}
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="relative shrink-0">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-base font-bold text-white">
+                        {displayName.charAt(0).toUpperCase()}
+                      </div>
+                      <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${st.dot}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-900">{displayName}</p>
+                      <p className="mt-0.5 flex items-center gap-2 truncate text-xs text-slate-400">
+                        <span>@{mgr.username}</span>
+                        {phone && (
+                          <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{phone}</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* KPI gọn */}
+                  <div className="hidden items-center gap-5 md:flex">
+                    <KpiChip icon={Building2}  value={assignedProps.length} label="nhà"    tone="indigo" />
+                    <KpiChip icon={Users}      value={s.tenants}            label="khách"  tone="blue" />
+                    <KpiChip icon={TrendingUp} value={`${s.occRate}%`}      label="lấp đầy" tone="emerald" />
+                    <KpiChip icon={Wrench}     value={s.openMaint}          label="bảo trì" tone="amber" />
+                  </div>
+
+                  {/* Số nhà (mobile) + mũi tên */}
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-600 md:hidden">
+                      {assignedProps.length} nhà
+                    </span>
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
+
+                {/* Chi tiết (mở rộng) */}
+                {isOpen && (
+                  <div className="bg-slate-50/60 px-4 pb-4 pt-1">
+                    {/* Tổng quan + doanh thu */}
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-2.5 ring-1 ring-slate-100">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 md:hidden">
+                        <DoorOpen className="h-3.5 w-3.5" /> {s.occupied}/{s.rooms} phòng · {s.tenants} khách · {s.openMaint} bảo trì
+                      </div>
+                      <span className="text-xs font-medium text-slate-500">
+                        Doanh thu tháng {MONTH.slice(5)}/{MONTH.slice(0, 4)}
+                      </span>
+                      <span className="text-sm font-bold text-emerald-600">{formatCurrency(s.revenue)}</span>
+                    </div>
+
+                    <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Bất động sản phụ trách ({assignedProps.length})
+                    </p>
+
+                    {assignedProps.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                        {assignedProps.map(p => {
+                          const r        = perfByProp.get(p.id);
+                          const occ      = propOccupancy(p);
+                          const occRate  = occ.rate;
+                          const open     = r?.openMaintenance ?? 0;
+                          return (
+                            <div key={p.id} className="rounded-xl bg-white p-3 ring-1 ring-slate-100">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-800">
+                                    <Building2 className="h-3.5 w-3.5 shrink-0 text-indigo-500" />
+                                    {p.propertyName}
+                                  </p>
+                                  <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-400">
+                                    <MapPin className="h-3 w-3 shrink-0" />
+                                    {p.shortAddress || p.fullAddress || '—'}
+                                  </p>
+                                </div>
+                                {open > 0 && (
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-600">
+                                    <AlertTriangle className="h-3 w-3" />{open}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Thanh lấp đầy phòng */}
+                              <div className="mt-2.5 flex items-center gap-2">
+                                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                                  <div
+                                    className={`h-full rounded-full ${occRate >= 80 ? 'bg-emerald-500' : occRate >= 50 ? 'bg-amber-500' : 'bg-rose-400'}`}
+                                    style={{ width: `${occRate}%` }}
+                                  />
+                                </div>
+                                <span className="shrink-0 text-xs font-medium text-slate-500">
+                                  {occ.isWhole
+                                    ? (occ.occupied ? 'Đã cho thuê' : 'Còn trống')
+                                    : `${occ.occupied}/${occ.units} · ${occRate}%`}
+                                </span>
+                              </div>
+
+                              {r && r.monthlyRevenue > 0 && (
+                                <p className="mt-1.5 text-xs text-slate-400">
+                                  Doanh thu: <span className="font-semibold text-slate-600">{formatCurrency(r.monthlyRevenue)}</span>
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center">
+                        <Building2 className="mx-auto mb-1.5 h-6 w-6 text-slate-300" />
+                        <p className="text-xs italic text-slate-400">Chưa phân công bất động sản nào</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
