@@ -79,6 +79,17 @@ const WHOLE_HOUSE_STEPS = [
 // Danh mục thiết bị cho phần "Khách lắp thêm" (đồng bộ với EquipmentScreen).
 const HANDOVER_CATEGORIES = ['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng']
 
+// Nhãn vị trí trong nhà (BE trả houseArea cho thiết bị nguyên căn).
+const HOUSE_AREA_LABEL: Record<string, string> = {
+  LIVING_ROOM: 'Phòng khách',
+  BEDROOM: 'Phòng ngủ',
+  KITCHEN: 'Bếp',
+  BATHROOM: 'Nhà tắm',
+  BALCONY: 'Ban công',
+  GARAGE: 'Gara',
+  OTHER: 'Khác',
+}
+
 // 1 thiết bị khách yêu cầu lắp thêm (chủ đầu tư mua → tài sản nhà).
 interface AddedEquipmentForm {
   tempId: string
@@ -794,6 +805,22 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
 
   // ===== Tạo HĐ + thanh toán =====
 
+  // BE trả tên thiết bị ở catalogName, mô tả ở note, vị trí ở houseArea (không có field category).
+  // Đọc linh hoạt để tránh hiển thị trống.
+  const equipName = (e: EquipmentDto): string =>
+    e.equipmentName || (e as any).name || (e as any).catalogName || 'Thiết bị'
+  const equipDetail = (e: EquipmentDto): string =>
+    (e as any).note ||
+    HOUSE_AREA_LABEL[(e as any).houseArea as keyof typeof HOUSE_AREA_LABEL] ||
+    e.category ||
+    ''
+  // Dùng cho snapshot (cần 1 nhãn "danh mục"): ưu tiên vị trí trong nhà.
+  const equipCategory = (e: EquipmentDto): string =>
+    HOUSE_AREA_LABEL[(e as any).houseArea as keyof typeof HOUSE_AREA_LABEL] ||
+    e.category ||
+    (e as any).catalogName ||
+    ''
+
   // Biên bản bàn giao thiết bị (snapshot theo hợp đồng): thiết bị sẵn có được tick
   // + thiết bị khách lắp thêm (chủ đầu tư mua). Serialize thành JSON cho field equipmentSnapshot.
   const buildEquipmentSnapshotItems = (): EquipmentSnapshotItem[] => [
@@ -801,8 +828,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       .filter((e) => handoverSelected[e.id])
       .map((e): EquipmentSnapshotItem => ({
         equipmentId: e.id,
-        name: e.equipmentName,
-        category: e.category,
+        name: equipName(e),
+        category: equipCategory(e),
         quantity: 1,
         source: 'EXISTING',
         ownedBy: 'OWNER',
@@ -845,6 +872,10 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       handoverDate: toIsoDate(todayStr),
       items: buildEquipmentSnapshotItems(),
     }),
+    // Thiết bị sẵn có bị bỏ tick = khách không nhận -> BE gỡ khỏi phòng (DISABLED).
+    declinedEquipmentIds: availableEquipments
+      .filter((e) => !handoverSelected[e.id])
+      .map((e) => e.id),
     // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
     requireHostPriceApproval: priceMode === 'approval',
     // Case 1 thu cọc luôn theo phương thức đã chọn; Case 2 hoãn tới sau khi Host duyệt.
@@ -1545,8 +1576,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Bàn giao thiết bị</Text>
       <Text style={styles.hint}>
-        Chọn đúng thiết bị bàn giao cho khách (bỏ tick món khách không nhận). Có thể thêm thiết bị
-        khách yêu cầu lắp thêm — do chủ đầu tư mua, tính là tài sản của nhà.
+        Chọn đúng thiết bị bàn giao cho khách. Bỏ tick món khách không nhận — thiết bị đó sẽ được gỡ
+        khỏi phòng (giữ nguyên tình trạng, tự lắp lại khi hết hợp đồng). Có thể thêm thiết bị khách yêu
+        cầu lắp thêm — do chủ đầu tư mua, tính là tài sản của nhà.
       </Text>
 
       {/* Thiết bị sẵn có */}
@@ -1575,11 +1607,15 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
                 {checked && <Text style={styles.checkboxTick}>✓</Text>}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.handoverName}>{e.equipmentName}</Text>
-                <Text style={styles.handoverMeta}>
-                  {e.category}
-                  {e.roomName ? ` · ${e.roomName}` : ''}
-                </Text>
+                <Text style={styles.handoverName}>{equipName(e)}</Text>
+                {!!equipDetail(e) && (
+                  <Text style={styles.handoverMeta}>{equipDetail(e)}</Text>
+                )}
+                {!!(e as any).houseArea && (
+                  <Text style={styles.handoverMeta}>
+                    📍 {HOUSE_AREA_LABEL[(e as any).houseArea] ?? (e as any).houseArea}
+                  </Text>
+                )}
               </View>
             </TouchableOpacity>
           )

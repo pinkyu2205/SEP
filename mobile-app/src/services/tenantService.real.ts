@@ -47,6 +47,9 @@ export interface OnboardTenantRequest {
   requireDepositPayment?: boolean;
   // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Host duyệt giá, CHƯA thu cọc.
   requireHostPriceApproval?: boolean;
+  // Thiết bị sẵn có khách KHÔNG nhận -> BE set operationalStatus=DISABLED (gỡ khỏi phòng),
+  // lưu disabled_reason + gắn contract; tự ACTIVE lại khi hết HĐ. Xem Phần C của plan.
+  declinedEquipmentIds?: number[];
 }
 
 export interface TenantContractResponse {
