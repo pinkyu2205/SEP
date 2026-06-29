@@ -951,11 +951,16 @@ export interface MaintenanceEquipmentResponse {
   status: string;             // EquipmentStatus: NEW|GOOD|MAINTENANCE|BROKEN|DISPOSED
   roomId?: number;
   roomName?: string;
+  roomNumber?: string;        // BE trả số/mã phòng (nhà chia phòng); "Toàn nhà" cho nguyên căn
   propertyId: number;
   installationDate?: string;
   warrantyExpiredDate?: string;
   maintenanceCount: number;
   lastMaintenanceDate?: string;
+  // Trục hiện diện trong phòng (độc lập với status vật lý). ACTIVE = đang lắp · DISABLED = đã gỡ.
+  operationalStatus?: 'ACTIVE' | 'DISABLED';
+  disabledAt?: string;
+  disabledReason?: string;
 }
 
 export interface EquipmentMaintenanceHistoryResponse {

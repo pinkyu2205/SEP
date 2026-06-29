@@ -64,6 +64,23 @@ export const realEquipmentService = {
     return data;
   },
 
+  /**
+   * Bật/tắt hiện diện thiết bị trong phòng (trục độc lập với status vật lý).
+   * ACTIVE = đang lắp · DISABLED = đã gỡ. Dùng cho thao tác thủ công ngoài onboarding;
+   * luồng đón khách thì BE tự xử lý qua declinedEquipmentIds. (Endpoint BE đang bổ sung.)
+   */
+  setOperationalStatus: async (
+    id: number,
+    operationalStatus: 'ACTIVE' | 'DISABLED',
+    reason?: string,
+  ): Promise<EquipmentDto> => {
+    const { data } = await realApiClient.patch<EquipmentDto>(
+      `/api/v1/equipments/${id}/operational-status`,
+      { operationalStatus, reason },
+    );
+    return data;
+  },
+
   getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
       `/api/v1/equipment/${id}/maintenance-history`,
