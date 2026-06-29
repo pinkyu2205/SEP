@@ -5,6 +5,7 @@ import { propertyService } from '../../services/property.service';
 import { hostService, type HostContractDto } from '../../services/host.service';
 import type { PropertyResponse, RoomResponse, ContractStatus } from '../../types/api.types';
 import { TenantFormModal } from './TenantFormModal';
+import { isHostApproved } from '../properties/PropertyList';
 
 const statusMap: Record<ContractStatus, { label: string; color: string; dot: string }> = {
   ACTIVE:     { label: 'Đang hiệu lực', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
@@ -33,11 +34,12 @@ export const TenantList = () => {
 
   const selectedProperty = properties.find((p) => p.id === selectedId) || null;
 
-  // Load danh sách property 1 lần
+  // Load danh sách property 1 lần — chỉ giữ nhà đã được Host duyệt thành công,
+  // ẩn các căn còn chờ phê duyệt / nháp (giống tiêu chí ở màn Bất động sản).
   useEffect(() => {
     propertyService
       .getProperties(0, 200)
-      .then((page) => setProperties(page.content))
+      .then((page) => setProperties(page.content.filter(isHostApproved)))
       .catch(() => toast.error('Không tải được danh sách bất động sản'));
   }, []);
 

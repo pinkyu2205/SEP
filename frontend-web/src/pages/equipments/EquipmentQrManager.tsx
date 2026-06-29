@@ -7,6 +7,7 @@ import {
 import { propertyService } from '../../services/property.service';
 import { equipmentService } from '../../services/equipment.service';
 import type { PropertyResponse, MaintenanceEquipmentResponse } from '../../types/api.types';
+import { isHostApproved } from '../properties/PropertyList';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const equipName = (e: MaintenanceEquipmentResponse): string =>
@@ -91,7 +92,8 @@ export const EquipmentQrManager = () => {
     propertyService.getProperties(0, 200)
       .then(page => {
         if (!active) return;
-        const list = page.content ?? [];
+        // Chỉ giữ nhà đã được Host duyệt — ẩn các căn còn chờ phê duyệt / nháp.
+        const list = (page.content ?? []).filter(isHostApproved);
         setProperties(list);
         if (list.length > 0) setPropertyId(list[0].id);
       })
