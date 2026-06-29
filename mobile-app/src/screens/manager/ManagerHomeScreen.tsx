@@ -12,30 +12,21 @@ import {
   ManagedProperty, getPropPriority, getPriorityMeta, getIssueCount,
 } from '../../data/managedProperties';
 import { managerPropertyService } from '../../services/managerPropertyService';
-
-// ── Mock data ──────────────────────────────────────────────────────────────
-
-const PRIORITY_ITEMS = [
-  { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',  count: 2, urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
-  { id: 'p2', icon: '🔧', label: 'Bảo trì khẩn cấp', count: 1, urgency: 'critical', color: Colors.error,   route: 'ManagerMaintenance' },
-  { id: 'p3', icon: '⚡', label: 'Chốt điện nước',   count: 3, urgency: 'warning',  color: Colors.warning, route: 'UtilityBilling' },
-  { id: 'p4', icon: '📋', label: 'HĐ sắp hết hạn',   count: 2, urgency: 'info',     color: Colors.info,    route: 'ManagerContracts' },
-  { id: 'p5', icon: '🚪', label: 'Check-in hôm nay', count: 1, urgency: 'success',  color: Colors.success, route: 'Onboarding' },
-];
+import {
+  realManagerInvoiceService, ManagerInvoice, ManagerPayment,
+} from '../../services/managerInvoiceService.real';
 
 const QUICK_ACTIONS = [
-  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',        color: Colors.primary,       badge: 0 },
-  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning,       badge: 2 },
-  { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error,         badge: 4 },
-  { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent,        badge: 0 },
-  { emoji: '🏠', label: 'Phòng',     route: 'RoomManage',         color: Colors.success,       badge: 0 },
-  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary,       badge: 0 },
-  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary, badge: 0 },
-  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info,          badge: 2 },
-  { emoji: '📨', label: 'Chờ duyệt', route: 'ResumeContract',     color: Colors.warning,       badge: 0 },
+  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',        color: Colors.primary },
+  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
+  { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
+  { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
+  { emoji: '🏠', label: 'Phòng',     route: 'RoomManage',         color: Colors.success },
+  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
+  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
+  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
+  { emoji: '📨', label: 'Chờ duyệt', route: 'ResumeContract',     color: Colors.warning },
 ] as const;
-
-const UNREAD_NOTIFICATIONS = 6; // TODO: nối API thông báo
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -44,14 +35,22 @@ export const ManagerHomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
 
   const [properties, setProperties] = useState<ManagedProperty[]>([]);
+  const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
+  const [payments, setPayments] = useState<ManagerPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → fallback mock)
+  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → 0)
 
   const load = useCallback(async () => {
     try {
-      const data = await managerPropertyService.getManagedProperties();
-      setProperties(data);
+      const [props, inv, pay] = await Promise.all([
+        managerPropertyService.getManagedProperties(),
+        realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
+        realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
+      ]);
+      setProperties(props);
+      setInvoices(inv);
+      setPayments(pay);
     } catch {
       // Lỗi đã được xử lý/log ở service; giữ dữ liệu cũ.
     } finally {
@@ -88,7 +87,23 @@ export const ManagerHomeScreen: React.FC = () => {
     [properties],
   );
 
-  const activeItems    = PRIORITY_ITEMS.filter(p => p.count > 0);
+  // Số liệu thật cho "Cần xử lý hôm nay" + badge thao tác nhanh.
+  const overdueCount  = invoices.filter(i => i.status === 'OVERDUE').length;
+  const unpaidCount   = invoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
+  const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
+
+  const priorityItems = [
+    { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
+    { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
+    { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
+  ];
+
+  const quickBadges: Record<string, number> = {
+    ManagerBilling: unpaidCount,
+    ManagerMaintenance: m.maintenance,
+  };
+
+  const activeItems    = priorityItems.filter(p => p.count > 0);
   const criticalItems  = activeItems.filter(p => p.urgency === 'critical');
   const secondaryItems = activeItems.filter(p => p.urgency !== 'critical');
   const urgentTotal    = criticalItems.reduce((sum, p) => sum + p.count, 0);
@@ -122,10 +137,10 @@ export const ManagerHomeScreen: React.FC = () => {
           </View>
           <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
             <Text style={s.notifIcon}>🔔</Text>
-            {(realUnread ?? UNREAD_NOTIFICATIONS) > 0 && (
+            {(realUnread ?? 0) > 0 && (
               <View style={s.notifBadge}>
                 <Text style={s.notifBadgeText}>
-                  {(realUnread ?? UNREAD_NOTIFICATIONS) > 9 ? '9+' : (realUnread ?? UNREAD_NOTIFICATIONS)}
+                  {(realUnread ?? 0) > 9 ? '9+' : (realUnread ?? 0)}
                 </Text>
               </View>
             )}
@@ -317,24 +332,27 @@ export const ManagerHomeScreen: React.FC = () => {
           style={s.actionsScroll}
           contentContainerStyle={s.actionsContent}
         >
-          {QUICK_ACTIONS.map((a, i) => (
-            <TouchableOpacity
-              key={i}
-              style={s.actionChip}
-              onPress={() => navigation.navigate(a.route)}
-              activeOpacity={0.7}
-            >
-              <View style={[s.actionIconWrap, { backgroundColor: a.color + '15' }]}>
-                <Text style={s.actionEmoji}>{a.emoji}</Text>
-                {a.badge > 0 && (
-                  <View style={s.actionBadge}>
-                    <Text style={s.actionBadgeText}>{a.badge}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={s.actionLabel}>{a.label}</Text>
-            </TouchableOpacity>
-          ))}
+          {QUICK_ACTIONS.map((a, i) => {
+            const badge = quickBadges[a.route] ?? 0;
+            return (
+              <TouchableOpacity
+                key={i}
+                style={s.actionChip}
+                onPress={() => navigation.navigate(a.route)}
+                activeOpacity={0.7}
+              >
+                <View style={[s.actionIconWrap, { backgroundColor: a.color + '15' }]}>
+                  <Text style={s.actionEmoji}>{a.emoji}</Text>
+                  {badge > 0 && (
+                    <View style={s.actionBadge}>
+                      <Text style={s.actionBadgeText}>{badge > 9 ? '9+' : badge}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={s.actionLabel}>{a.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         {/* ── Toà nhà cần chú ý ─────────────────────────────────────── */}

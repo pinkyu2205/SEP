@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { realPropertyService, ApiProperty, ApiRoom } from './propertyService.real';
+import { realTenantService, TenantContractResponse } from './tenantService.real';
 import { ManagedProperty, WholeHouseRentalStatus } from '../data/managedProperties';
 
 /**
@@ -28,12 +29,32 @@ const wholeHouseStatus = (rooms: ApiRoom[], propStatus?: string): WholeHouseRent
   return 'vacant';
 };
 
-const mapToManaged = (p: ApiProperty, rooms: ApiRoom[]): ManagedProperty => {
+const mapToManaged = (p: ApiProperty, rooms: ApiRoom[], contracts: TenantContractResponse[] = []): ManagedProperty => {
   const isWhole = p.wholeHouse === true;
   const occupied = rooms.filter(r => r.status === 'RENTED').length;
   const available = rooms.filter(r => r.status === 'AVAILABLE').length;
   const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
   const totalRooms = isWhole ? 0 : (rooms.length || p.totalRooms || 0);
+
+  // Nhà nguyên căn: trạng thái thuê theo HỢP ĐỒNG đang hiệu lực (không phụ thuộc trạng thái phòng).
+  let wholeExtra: Partial<ManagedProperty> = {};
+  if (isWhole) {
+    const active = contracts.find(c => (c.status || '').toUpperCase() === 'ACTIVE');
+    const daysLeft = active?.endDate
+      ? Math.ceil((new Date(active.endDate).getTime() - Date.now()) / 86400000)
+      : null;
+    const rentalStatus: WholeHouseRentalStatus = active
+      ? (daysLeft != null && daysLeft >= 0 && daysLeft <= 30 ? 'expiring' : 'rented')
+      : wholeHouseStatus(rooms, p.status);
+    wholeExtra = {
+      rentalStatus,
+      monthlyRent: active?.rentAmount ?? p.price,
+      tenantName: active?.tenantFullName,
+      contractEndDate: active?.endDate,
+      hasExpiringContracts: rentalStatus === 'expiring',
+      expiringContractCount: rentalStatus === 'expiring' ? 1 : 0,
+    };
+  }
 
   return {
     id: String(p.id),
@@ -58,9 +79,7 @@ const mapToManaged = (p: ApiProperty, rooms: ApiRoom[]): ManagedProperty => {
     missingUtility: false,
     hasExpiringContracts: false,
     expiringContractCount: 0,
-    ...(isWhole
-      ? { rentalStatus: wholeHouseStatus(rooms, p.status), monthlyRent: p.price }
-      : {}),
+    ...wholeExtra,
   };
 };
 
@@ -128,13 +147,15 @@ export const managerPropertyService = {
 
     return Promise.all(
       scoped.map(async (p) => {
-        try {
-          const rooms = await realPropertyService.getRooms(p.id);
-          return mapToManaged(p, rooms);
-        } catch {
-          // Một property lỗi lấy rooms không nên làm hỏng cả danh sách.
-          return mapToManaged(p, []);
-        }
+        const isWhole = p.wholeHouse === true;
+        const [rooms, contracts] = await Promise.all([
+          realPropertyService.getRooms(p.id).catch(() => [] as ApiRoom[]),
+          // Nhà nguyên căn cần hợp đồng để biết đang thuê hay trống (phòng không flip RENTED).
+          isWhole
+            ? realTenantService.listByProperty(p.id).catch(() => [] as TenantContractResponse[])
+            : Promise.resolve([] as TenantContractResponse[]),
+        ]);
+        return mapToManaged(p, rooms, contracts);
       }),
     );
   },

@@ -28,76 +28,6 @@ interface AppNotification {
   actionLabel?: string;
 }
 
-// ===================== MOCK DATA =====================
-const MOCK_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: 'n1', type: 'bill_overdue', priority: 'high', isRead: false,
-    title: '🚨 Hóa đơn quá hạn!',
-    body: 'Phòng P201 (Phạm Văn C) chưa thanh toán hóa đơn tháng 5 — quá hạn 1 ngày. Tổng nợ: 4,805,075đ',
-    createdAt: '2026-05-16 08:00', actionRoute: 'ManagerBilling', actionLabel: 'Xem hóa đơn',
-  },
-  {
-    id: 'n2', type: 'bill_overdue', priority: 'high', isRead: false,
-    title: '🚨 Hóa đơn quá hạn tháng trước',
-    body: 'Phòng P201 (Phạm Văn C) vẫn còn nợ hóa đơn tháng 4 — quá hạn 31 ngày. Tổng nợ: 4,615,700đ',
-    createdAt: '2026-05-16 07:55', actionRoute: 'ManagerBilling', actionLabel: 'Xử lý ngay',
-  },
-  {
-    id: 'n3', type: 'maintenance_new', priority: 'high', isRead: false,
-    title: '⚡ Yêu cầu sửa chữa khẩn cấp',
-    body: 'Phạm Văn C (P201) báo cáo: "Ổ cắm điện bị cháy" — Mức độ: Khẩn cấp. Ticket: TK-2026-003',
-    createdAt: '2026-05-14 07:05', actionRoute: 'ManagerMaintenance', actionLabel: 'Xem ticket',
-  },
-  {
-    id: 'n4', type: 'payment_pending_verify', priority: 'high', isRead: false,
-    title: '💳 Thanh toán cần xác nhận',
-    body: 'Trần Văn A (P101) vừa gửi ảnh chuyển khoản cho HD-T5-101 — 4,352,500đ. Cần xác nhận.',
-    createdAt: '2026-05-14 09:16', actionRoute: 'ManagerBilling', actionLabel: 'Xác nhận',
-  },
-  {
-    id: 'n5', type: 'contract_expiring', priority: 'normal', isRead: false,
-    title: '📋 Hợp đồng sắp hết hạn',
-    body: 'Hợp đồng của Lê Thị B (P102) sẽ hết hạn vào 15/05/2026 — còn 0 ngày. Cần gia hạn hoặc thanh lý.',
-    createdAt: '2026-05-13 09:00', actionRoute: 'ManagerContracts', actionLabel: 'Gia hạn HĐ',
-  },
-  {
-    id: 'n6', type: 'contract_expiring', priority: 'normal', isRead: true,
-    title: '📋 Hợp đồng sắp hết hạn (30 ngày)',
-    body: 'Hợp đồng của Lê Thị B (P102) sẽ hết hạn sau 30 ngày. Nên liên hệ trước để tránh gián đoạn.',
-    createdAt: '2026-04-15 09:00', actionRoute: 'ManagerContracts', actionLabel: 'Xem HĐ',
-  },
-  {
-    id: 'n7', type: 'payment_success', priority: 'low', isRead: true,
-    title: '✅ Thanh toán thành công',
-    body: 'Lê Thị B (P102) đã thanh toán HD-T5-102 — 3,860,000đ qua QR VietQR lúc 14:30.',
-    createdAt: '2026-05-10 14:31', actionRoute: 'ManagerBilling',
-  },
-  {
-    id: 'n8', type: 'maintenance_new', priority: 'normal', isRead: true,
-    title: '🚰 Yêu cầu sửa chữa mới',
-    body: 'Phạm Văn C (P201) báo cáo: "Vòi nước bị rỉ" — Mức độ: Trung bình. Ticket: TK-2026-002',
-    createdAt: '2026-05-13 16:02', actionRoute: 'ManagerMaintenance',
-  },
-  {
-    id: 'n9', type: 'maintenance_resolved', priority: 'low', isRead: true,
-    title: '✅ Bảo trì hoàn tất',
-    body: 'Ticket TK-2026-004 (Cửa phòng tắm P101 CMT8) đã được giải quyết. Chi phí: 250,000đ.',
-    createdAt: '2026-05-08 11:01', actionRoute: 'ManagerMaintenance',
-  },
-  {
-    id: 'n10', type: 'tenant_onboarded', priority: 'low', isRead: true,
-    title: '🤝 Khách mới nhận phòng',
-    body: 'Hoàng Thị E đã hoàn tất onboarding cho phòng P302 (Nhà Nguyễn Trãi). Hợp đồng đang chờ ký.',
-    createdAt: '2026-05-15 16:30', actionRoute: 'TenantList',
-  },
-  {
-    id: 'n11', type: 'system', priority: 'low', isRead: true,
-    title: '📊 Báo cáo tháng 4/2026',
-    body: 'Báo cáo doanh thu tháng 4 đã sẵn sàng. Doanh thu: 59,500,000đ. Tỉ lệ thu: 92%.',
-    createdAt: '2026-05-01 08:00',
-  },
-];
-
 // ===================== CONFIG =====================
 const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; category: string }> = {
   new_bill: { icon: '🧾', color: Colors.info, bg: Colors.infoLight, category: 'Hóa đơn' },
@@ -122,8 +52,8 @@ const FILTER_TABS = [
 ];
 
 function timeAgo(dateStr: string): string {
-  const now = new Date('2026-05-16T10:00:00');
-  const date = new Date(dateStr.replace(' ', 'T'));
+  const now = new Date();
+  const date = new Date(dateStr);
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
@@ -181,22 +111,22 @@ const NotifCard: React.FC<{
 // ===================== MAIN =====================
 export const NotificationCenterScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
 
-  // Nạp thông báo thật từ BE mỗi khi vào màn; offline/lỗi → giữ mock.
+  // Nạp thông báo thật từ BE mỗi khi vào màn.
   const load = useCallback(async () => {
     try {
       const rows = await realNotificationService.list();
-      if (rows.length > 0) {
-        setNotifications(rows.map((n: ApiNotification): AppNotification => ({
-          id: String(n.id), title: n.title, body: n.body,
-          type: n.type as AppNotification['type'], isRead: n.isRead,
-          priority: 'normal', createdAt: n.createdAt, actionRoute: n.screen,
-        })));
-      }
-    } catch { /* offline */ }
+      setNotifications(rows.map((n: ApiNotification): AppNotification => ({
+        id: String(n.id), title: n.title, body: n.body,
+        type: n.type as AppNotification['type'], isRead: n.isRead,
+        priority: 'normal', createdAt: n.createdAt, actionRoute: n.screen,
+      })));
+    } catch {
+      setNotifications([]);
+    }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = useCallback(async () => {

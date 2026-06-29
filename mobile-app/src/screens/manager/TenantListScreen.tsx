@@ -1,14 +1,16 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Modal, Alert, ScrollView, Dimensions, Linking,
+  TextInput, Modal, Alert, ScrollView, Dimensions, Linking, ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { managerPropertyService } from '../../services/managerPropertyService';
+import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const TODAY = new Date(2026, 4, 21);
+const TODAY = new Date();
 
 // ===================== TYPES =====================
 type TenantStatus = 'active' | 'pending_activation' | 'moved_out' | 'suspended';
@@ -41,98 +43,52 @@ interface Tenant {
   notes?: string;
 }
 
-// ===================== MOCK DATA =====================
-const MOCK_TENANTS: Tenant[] = [
-  {
-    id: 't1', fullName: 'Trần Văn A', phone: '0901111001', email: 'tranvana@gmail.com',
-    cccd: '079201001001', propertyName: 'Nhà Nguyễn Trãi', propertyId: 'p1',
-    roomId: 'r1', roomName: 'P101', status: 'active', moveInDate: '20/01/2026',
-    depositAmount: 3500000, unpaidAmount: 4352500, unpaidBills: 1,
-    openTickets: 0, contractId: 'c-mt-1', contractEndDate: '20/01/2027',
-  },
-  {
-    id: 't2', fullName: 'Lê Thị B', phone: '0901111002', email: 'lethib@gmail.com',
-    cccd: '079201001002', propertyName: 'Nhà Nguyễn Trãi', propertyId: 'p1',
-    roomId: 'r2', roomName: 'P102', status: 'active', moveInDate: '01/02/2026',
-    depositAmount: 3200000, unpaidAmount: 0, unpaidBills: 0,
-    openTickets: 1, contractId: 'c-mt-2', contractEndDate: '15/05/2026',
-  },
-  {
-    id: 't3', fullName: 'Phạm Văn C', phone: '0901111003', email: 'phamvanc@gmail.com',
-    cccd: '079201001003', propertyName: 'Nhà Nguyễn Trãi', propertyId: 'p1',
-    roomId: 'r3', roomName: 'P201', status: 'active', moveInDate: '15/02/2026',
-    depositAmount: 3800000, unpaidAmount: 9420775, unpaidBills: 2,
-    openTickets: 2, contractId: 'c-mt-3', contractEndDate: '15/02/2027',
-  },
-  {
-    id: 't4', fullName: 'Ngô Thị D', phone: '0901111004',
-    cccd: '079201001004', propertyName: 'Nhà Nguyễn Trãi', propertyId: 'p1',
-    roomId: 'r4', roomName: 'P301', status: 'active', moveInDate: '01/03/2026',
-    depositAmount: 3500000, unpaidAmount: 4105000, unpaidBills: 1,
-    openTickets: 0, contractId: 'c-mt-4', contractEndDate: '01/03/2027',
-  },
-  {
-    id: 't5', fullName: 'Hoàng Thị E', phone: '0901111005',
-    cccd: '079201001005', propertyName: 'Nhà Nguyễn Trãi', propertyId: 'p1',
-    roomId: 'r5', roomName: 'P302', status: 'pending_activation', moveInDate: '16/05/2026',
-    depositAmount: 3500000, unpaidAmount: 0, unpaidBills: 0, openTickets: 0,
-  },
-  {
-    id: 't8', fullName: 'Bùi Văn H', phone: '0901111008',
-    cccd: '079201001008', propertyName: 'Nhà CMT8', propertyId: 'p2',
-    roomId: 'r8', roomName: 'P101', status: 'active', moveInDate: '15/03/2026',
-    depositAmount: 4000000, unpaidAmount: 4845000, unpaidBills: 1,
-    openTickets: 1, contractId: 'c-mt-8', contractEndDate: '15/03/2027',
-  },
-  {
-    id: 't9', fullName: 'Cao Thị I', phone: '0901111009',
-    cccd: '079201001009', propertyName: 'Nhà CMT8', propertyId: 'p2',
-    roomId: 'r9', roomName: 'P102', status: 'active', moveInDate: '20/03/2026',
-    depositAmount: 3800000, unpaidAmount: 0, unpaidBills: 0, openTickets: 0,
-    contractId: 'c-mt-9', contractEndDate: '20/03/2027',
-  },
-  {
-    id: 't10', fullName: 'Lý Văn K', phone: '0901111010',
-    cccd: '079201001010', propertyName: 'Nhà CMT8', propertyId: 'p2',
-    roomId: 'r10', roomName: 'P202', status: 'moved_out', moveInDate: '01/01/2026',
-    moveOutDate: '30/04/2026', depositAmount: 3500000, unpaidAmount: 0, unpaidBills: 0,
-    openTickets: 0, notes: 'Đã trả phòng bình thường',
-  },
-  {
-    id: 'wh-1', fullName: 'Gia đình anh Minh', phone: '0909111222', email: 'minh.family@gmail.com',
-    cccd: '079201009901', propertyName: 'Nhà Nguyễn Văn Cừ', propertyId: 'house-1',
-    roomId: 'house-1', roomName: 'Nhà nguyên căn', propertyType: 'WHOLE_HOUSE',
-    status: 'active', moveInDate: '01/01/2026', depositAmount: 24000000,
-    unpaidAmount: 13040000, unpaidBills: 1, openTickets: 1,
-    contractId: 'HD-NVC-2026', contractEndDate: '30/12/2026',
-    householdMembers: [
-      { name: 'Anh Minh', relation: 'Người đại diện' },
-      { name: 'Chị Hạnh', relation: 'Vợ/chồng' },
-      { name: 'Bé An', relation: 'Thành viên gia đình' },
-    ],
-  },
-  {
-    id: 'wh-3', fullName: 'Công ty An Phú', phone: '0909333444', email: 'admin@anphu.vn',
-    cccd: 'MST-0312999888', propertyName: 'Nhà Trần Hưng Đạo', propertyId: 'house-3',
-    roomId: 'house-3', roomName: 'Nhà nguyên căn', propertyType: 'WHOLE_HOUSE',
-    status: 'active', moveInDate: '15/06/2025', depositAmount: 36000000,
-    unpaidAmount: 0, unpaidBills: 0, openTickets: 0,
-    contractId: 'HD-THD-2025', contractEndDate: '15/06/2026',
-    householdMembers: [
-      { name: 'Đại diện pháp lý An Phú', relation: 'Người đại diện' },
-      { name: 'Nhóm vận hành', relation: 'Người sử dụng' },
-    ],
-  },
-];
-
-// ===================== HELPERS =====================
-const parseViDate = (str: string): Date => {
-  const [d, m, y] = str.split('/').map(Number);
-  return new Date(y, m - 1, d);
+// ===================== MAP API → UI =====================
+// Trạng thái HĐ từ BE (uppercase) → trạng thái khách thuê dùng trong UI.
+const mapTenantStatus = (s?: string): TenantStatus => {
+  const u = (s || '').toUpperCase();
+  if (u === 'ACTIVE') return 'active';
+  if (u.startsWith('PENDING')) return 'pending_activation';
+  if (['ENDED', 'TERMINATED', 'MOVED_OUT', 'EXPIRED', 'CANCELLED'].includes(u)) return 'moved_out';
+  if (u === 'SUSPENDED') return 'suspended';
+  return 'active';
 };
 
+const fmtIsoDate = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString('vi-VN');
+};
+
+// 1 hợp đồng (BE) + thông tin nhà → 1 khách thuê (UI).
+const mapContractToTenant = (
+  c: TenantContractResponse,
+  propertyName: string,
+  isWholeHouse: boolean,
+): Tenant => ({
+  id: String(c.id),
+  fullName: c.tenantFullName,
+  phone: c.tenantPhone,
+  cccd: c.tenantCccd ?? '',
+  propertyName,
+  propertyId: String(c.propertyId),
+  roomId: String(c.roomId ?? ''),
+  roomName: isWholeHouse || !c.roomNumber ? 'Nhà nguyên căn' : `Phòng ${c.roomNumber}`,
+  propertyType: isWholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
+  status: mapTenantStatus(c.status),
+  moveInDate: fmtIsoDate(c.moveInDate || c.startDate),
+  depositAmount: c.deposit ?? 0,
+  contractId: c.contractCode,
+  contractEndDate: c.endDate,   // ISO (yyyy-MM-dd)
+  // BE chưa trả công nợ/ticket theo từng khách ở endpoint này → để 0 (không bịa số).
+  unpaidAmount: 0,
+  unpaidBills: 0,
+  openTickets: 0,
+});
+
+// ===================== HELPERS =====================
 const getDaysRemaining = (dateStr: string): number =>
-  Math.ceil((parseViDate(dateStr).getTime() - TODAY.getTime()) / 86400000);
+  Math.ceil((new Date(dateStr).getTime() - TODAY.getTime()) / 86400000);
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 
@@ -731,9 +687,32 @@ export const TenantListScreen: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [propertyFilter, setPropertyFilter] = useState('all');
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
-  const [tenants, setTenants] = useState(MOCK_TENANTS);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const properties = useMemo(() => [...new Set(MOCK_TENANTS.map(t => t.propertyName))], []);
+  // Tải khách thuê THẬT: gom hợp đồng của tất cả nhà manager phụ trách.
+  const load = useCallback(async () => {
+    try {
+      const scoped = await managerPropertyService.getScopedProperties();
+      const lists = await Promise.all(
+        scoped.map(async (p: any) => {
+          const contracts = await realTenantService
+            .listByProperty(p.id)
+            .catch(() => [] as TenantContractResponse[]);
+          const isWhole = p.wholeHouse === true;
+          return contracts.map(c => mapContractToTenant(c, p.propertyName, isWhole));
+        }),
+      );
+      setTenants(lists.flat());
+    } catch {
+      setTenants([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const properties = useMemo(() => [...new Set(tenants.map(t => t.propertyName))], [tenants]);
 
   const filtered = useMemo(() => tenants.filter(t => {
     const matchSearch = !search || (
@@ -803,27 +782,30 @@ export const TenantListScreen: React.FC = () => {
         setSelectedTenant(null);
         navigation.navigate('TenantMaintenance', tenantNavParams(tenant));
         break;
-      case 'checkout':
-        Alert.alert(
-          isWH ? 'Xác nhận trả nhà' : 'Xác nhận trả phòng',
-          `${tenant.fullName} - ${isWH ? tenant.propertyName : tenant.roomName}\n\nĐảm bảo hóa đơn và tiền cọc đã được xử lý trước khi xác nhận.`,
-          [
+      case 'checkout': {
+        const doCheckout = async () => {
+          try {
+            await realTenantService.terminateContract(Number(tenant.id));
+            setSelectedTenant(null);
+            load();
+            Alert.alert('Thành công', `Đã ${isWH ? 'trả nhà' : 'trả phòng'} cho ${tenant.fullName}.`);
+          } catch (e: any) {
+            Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không kết thúc được hợp đồng (BE chưa có endpoint trả phòng?).');
+          }
+        };
+        const title = isWH ? 'Xác nhận trả nhà' : 'Xác nhận trả phòng';
+        const msg = `${tenant.fullName} - ${isWH ? tenant.propertyName : tenant.roomName}\n\nĐảm bảo hóa đơn và tiền cọc đã được xử lý trước khi xác nhận.`;
+        // Web: Alert nhiều nút không chạy callback → dùng window.confirm.
+        if (Platform.OS === 'web') {
+          if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${msg}`)) doCheckout();
+        } else {
+          Alert.alert(title, msg, [
             { text: 'Hủy', style: 'cancel' },
-            {
-              text: isWH ? 'Trả nhà' : 'Trả phòng',
-              style: 'destructive',
-              onPress: () => {
-                setTenants(prev => prev.map(t =>
-                  t.id === tenant.id
-                    ? { ...t, status: 'moved_out', moveOutDate: new Date().toLocaleDateString('vi-VN') }
-                    : t
-                ));
-                setSelectedTenant(null);
-              },
-            },
-          ]
-        );
+            { text: isWH ? 'Trả nhà' : 'Trả phòng', style: 'destructive', onPress: doCheckout },
+          ]);
+        }
         break;
+      }
       case 'activate':
         setTenants(prev => prev.map(t =>
           t.id === tenant.id ? { ...t, status: 'active' } : t
@@ -832,7 +814,7 @@ export const TenantListScreen: React.FC = () => {
         Alert.alert('Kích hoạt thành công', `${isWH ? 'Nhà nguyên căn' : `Phòng ${tenant.roomName}`} đã kích hoạt cho ${tenant.fullName}.`);
         break;
     }
-  }, [navigation]);
+  }, [navigation, load]);
 
   const handleQuickAction = useCallback((tenant: Tenant) => {
     const isWH = tenant.propertyType === 'WHOLE_HOUSE';
@@ -955,11 +937,18 @@ export const TenantListScreen: React.FC = () => {
           />
         )}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>🔍</Text>
-            <Text style={styles.emptyTitle}>Không tìm thấy khách thuê</Text>
-            <Text style={styles.emptyDesc}>Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.emptyDesc}>Đang tải khách thuê...</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>🔍</Text>
+              <Text style={styles.emptyTitle}>Chưa có khách thuê</Text>
+              <Text style={styles.emptyDesc}>Khách thuê sẽ hiển thị khi có hợp đồng trong các nhà bạn quản lý</Text>
+            </View>
+          )
         }
       />
 

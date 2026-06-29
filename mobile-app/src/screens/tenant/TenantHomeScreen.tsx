@@ -76,8 +76,9 @@ export const TenantHomeScreen: React.FC = () => {
     electricityRate: b?.electricityRate ?? 0,
     waterRate: b?.waterRate ?? 0,
     serviceCharge: b?.serviceCharge ?? 0,
-    hostName: b?.hostName ?? '—',
-    hostPhone: b?.hostPhone ?? '',
+    // "Chủ nhà" hiển thị cho tenant = người quản lý (manager) trực tiếp; fallback host nếu BE chưa có manager.
+    hostName: b?.managerName ?? b?.hostName ?? '—',
+    hostPhone: b?.managerPhone ?? b?.hostPhone ?? '',
   };
   const data = {
     room: {
@@ -217,24 +218,12 @@ export const TenantHomeScreen: React.FC = () => {
             <Text style={styles.buildingAddressIcon}>📍</Text>
             <Text style={styles.buildingAddress}>{buildingInfo.address}</Text>
           </View>
-          <View style={styles.buildingRatesRow}>
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateIcon}>⚡</Text>
-              <Text style={styles.buildingRateValue}>{buildingInfo.electricityRate.toLocaleString('vi-VN')}đ</Text>
-              <Text style={styles.buildingRateLabel}>/ kWh</Text>
-            </View>
-            <View style={styles.buildingRateDivider} />
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateIcon}>💧</Text>
-              <Text style={styles.buildingRateValue}>{buildingInfo.waterRate.toLocaleString('vi-VN')}đ</Text>
-              <Text style={styles.buildingRateLabel}>/ m³</Text>
-            </View>
-            <View style={styles.buildingRateDivider} />
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateIcon}>🏠</Text>
-              <Text style={styles.buildingRateValue}>{(buildingInfo.serviceCharge / 1000).toFixed(0)}k</Text>
-              <Text style={styles.buildingRateLabel}>Dịch vụ/tháng</Text>
-            </View>
+          {/* Điện/nước tính theo hóa đơn nhà nước (EVN) mỗi kỳ — không hiển thị đơn giá cố định. */}
+          <View style={styles.buildingNoteRow}>
+            <Text style={styles.buildingNoteIcon}>ℹ️</Text>
+            <Text style={styles.buildingNoteText}>
+              Tiền điện/nước tính theo hóa đơn nhà nước thực tế hằng tháng.
+            </Text>
           </View>
           <View style={styles.buildingHostRow}>
             <Text style={styles.buildingHostLabel}>Chủ nhà: </Text>
@@ -345,29 +334,36 @@ export const TenantHomeScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
         </View>
         <View style={styles.actionsGrid}>
-          {(actionsExpanded ? QUICK_ACTIONS : QUICK_ACTIONS.slice(0, 4)).map((a, i) => (
-            <TouchableOpacity
-              key={i}
-              style={styles.actionBtn}
-              onPress={() => navigation.navigate(a.route)}
-              activeOpacity={0.75}
-            >
-              <View style={[
-                styles.actionIconWrap,
-                { backgroundColor: a.color + (a.primary ? '1A' : '0F') },
-              ]}>
-                <Text style={styles.actionEmoji}>{a.emoji}</Text>
-                {a.badge > 0 && (
-                  <View style={styles.actionBadge}>
-                    <Text style={styles.actionBadgeText}>{a.badge}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[styles.actionLabel, !a.primary && styles.actionLabelSecondary]}>
-                {a.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {(actionsExpanded ? QUICK_ACTIONS : QUICK_ACTIONS.slice(0, 4)).map((a, i) => {
+            // Badge số thật: hóa đơn chưa thanh toán / bảo trì đang xử lý.
+            const badge =
+              a.route === 'InvoiceList' ? unpaidBills.length
+              : a.route === 'MaintenanceList' ? (data.maintenance.pending + data.maintenance.inProgress)
+              : 0;
+            return (
+              <TouchableOpacity
+                key={i}
+                style={styles.actionBtn}
+                onPress={() => navigation.navigate(a.route)}
+                activeOpacity={0.75}
+              >
+                <View style={[
+                  styles.actionIconWrap,
+                  { backgroundColor: a.color + (a.primary ? '1A' : '0F') },
+                ]}>
+                  <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                  {badge > 0 && (
+                    <View style={styles.actionBadge}>
+                      <Text style={styles.actionBadgeText}>{badge > 9 ? '9+' : badge}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={[styles.actionLabel, !a.primary && styles.actionLabelSecondary]}>
+                  {a.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <TouchableOpacity
           style={styles.actionsToggle}
@@ -440,6 +436,9 @@ const styles = StyleSheet.create({
   buildingRateValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   buildingRateLabel: { fontSize: 10, color: Colors.textMuted },
   buildingRateDivider: { width: 1, height: 36, backgroundColor: Colors.divider },
+  buildingNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: Spacing.sm, marginBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  buildingNoteIcon: { fontSize: 13 },
+  buildingNoteText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   buildingHostRow: { flexDirection: 'row', alignItems: 'center' },
   buildingHostLabel: { fontSize: 12, color: Colors.textSecondary },
   buildingHostName: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },

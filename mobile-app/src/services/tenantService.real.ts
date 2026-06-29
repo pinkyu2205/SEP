@@ -222,4 +222,10 @@ export const realTenantService = {
   cancelContract: async (contractId: number): Promise<void> => {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/cancel`);
   },
+
+  // Trả phòng / trả nhà: kết thúc HĐ đang hiệu lực (manager). Phòng tự về AVAILABLE.
+  // (BE TODO nếu chưa có endpoint này — FE gọi sẵn.)
+  terminateContract: async (contractId: number, reason?: string): Promise<void> => {
+    await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/terminate`, { reason });
+  },
 };

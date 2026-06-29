@@ -1,100 +1,125 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import {
-  getPropertyById, getBuildingOps, getBuildingHealth, RoomStatus, ManagedProperty,
-} from '../../data/managedProperties';
+import { ManagedProperty } from '../../data/managedProperties';
+import { realPropertyService, ApiRoom } from '../../services/propertyService.real';
+import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
+import { realManagerInvoiceService, ManagerInvoice } from '../../services/managerInvoiceService.real';
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 
-const ROOM_DOT: Record<RoomStatus, string> = {
+type UIRoomStatus = 'occupied' | 'available' | 'maintenance';
+const ROOM_DOT: Record<UIRoomStatus, string> = {
   occupied: '#3B82F6', available: '#16A34A', maintenance: '#F59E0B',
 };
-const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
+const ROOM_STATUS_LABEL: Record<UIRoomStatus, string> = {
   occupied: 'Đang thuê', available: 'Trống', maintenance: 'Bảo trì',
+};
+const mapRoomStatus = (s: string): UIRoomStatus => {
+  const u = (s || '').toUpperCase();
+  if (u === 'RENTED') return 'occupied';
+  if (u === 'MAINTENANCE') return 'maintenance';
+  return 'available';
+};
+// Suy tầng từ số phòng (vd "201" -> tầng 2); không xác định được -> tầng 1.
+const floorOf = (roomNumber: string): number => {
+  const n = parseInt(roomNumber, 10);
+  return !isNaN(n) && n >= 100 ? Math.floor(n / 100) : 1;
 };
 
 const QUICK_ACTIONS = [
   { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingInvoice', color: '#F59E0B' },
   { emoji: '⚡', label: 'Chốt số', desc: 'Điện nước', route: 'UtilityBilling', color: Colors.accent },
   { emoji: '🔧', label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
-  { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'BuildingRoom', color: Colors.success },
+  { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'RoomManage', color: Colors.success },
   { emoji: '📋', label: 'Hợp đồng', desc: 'HĐ thuê', route: 'BuildingContract', color: Colors.info },
-  { emoji: '👥', label: 'Khách thuê', desc: 'Cư dân', route: 'BuildingTenant', color: Colors.primary },
+  { emoji: '👥', label: 'Khách thuê', desc: 'Cư dân', route: 'TenantList', color: Colors.primary },
 ];
 
 interface IssueItem {
-  key: string; icon: string; title: string; meta: string; color: string;
-  route: string;
+  key: string; icon: string; title: string; meta: string; color: string; route: string;
 }
 
 export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
-  // Ưu tiên property được truyền từ danh sách (dữ liệu API thật); fallback mock theo id.
-  const prop = (route?.params?.property as ManagedProperty | undefined) ?? getPropertyById(propertyId);
+  const prop = route?.params?.property as ManagedProperty | undefined;
+  const pid = Number(propertyId ?? prop?.id);
 
-  if (!prop) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backText}>← Quay lại</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Toà nhà</Text>
-          <View style={{ width: 60 }} />
-        </View>
-        <View style={styles.emptyState}>
-          <Text style={{ fontSize: 40 }}>🏢</Text>
-          <Text style={styles.emptyText}>Không tìm thấy toà nhà</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const [rooms, setRooms] = useState<ApiRoom[]>([]);
+  const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
+  const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const ops = getBuildingOps(prop.id);
-  const occ = Math.round((prop.occupied / prop.totalRooms) * 100);
+  const load = useCallback(() => {
+    if (!pid) { setLoading(false); return; }
+    setLoading(true);
+    Promise.all([
+      realPropertyService.getRooms(pid).catch(() => [] as ApiRoom[]),
+      realTenantService.listByProperty(pid).catch(() => [] as TenantContractResponse[]),
+      realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
+    ])
+      .then(([r, c, inv]) => {
+        setRooms(r);
+        setContracts(c);
+        setInvoices(inv.filter(i => i.propertyId === pid));
+      })
+      .finally(() => setLoading(false));
+  }, [pid]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const nav = (r: string) => navigation.navigate(r, { propertyId: String(pid), property: prop });
+
+  // Số liệu phòng thật
+  const occupied    = rooms.filter(r => r.status === 'RENTED').length;
+  const available   = rooms.filter(r => r.status === 'AVAILABLE').length;
+  const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
+  const totalRooms  = rooms.length;
+  const occ = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
   const occColor = occ >= 80 ? Colors.success : occ >= 60 ? Colors.primary : occ >= 40 ? '#F59E0B' : '#EF4444';
-  const health = getBuildingHealth(prop);
-  const nav = (r: string) => navigation.navigate(r, { propertyId: prop.id });
+
+  // Tên khách theo số phòng (HĐ đang hiệu lực)
+  const activeContracts = useMemo(
+    () => contracts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE'),
+    [contracts],
+  );
+  const tenantByRoom = useMemo(() => {
+    const m = new Map<string, string>();
+    activeContracts.forEach(c => { if (c.roomNumber) m.set(c.roomNumber, c.tenantFullName); });
+    return m;
+  }, [activeContracts]);
 
   const { urgent, upcoming } = useMemo(() => {
-    const urgent: IssueItem[] = [];
-    const upcoming: IssueItem[] = [];
-
-    ops.invoices.filter(i => i.status === 'overdue').forEach(i => urgent.push({
-      key: `inv-${i.id}`, icon: '💸', color: '#EF4444',
-      title: `Hoá đơn quá hạn · ${i.room}`,
-      meta: `${i.tenant} · ${fmt(i.amount)} · trễ ${i.daysOverdue} ngày`,
-      route: 'BuildingInvoice',
-    }));
-    ops.maintenance.filter(m => m.urgency === 'urgent' && m.status !== 'done').forEach(m => urgent.push({
-      key: `mt-${m.id}`, icon: '🔧', color: '#EF4444',
-      title: `${m.title} · ${m.room}`, meta: 'Bảo trì khẩn cấp',
-      route: 'BuildingMaintenance',
-    }));
-    ops.utility.filter(u => u.status === 'missing').forEach(u => urgent.push({
-      key: `ut-${u.id}`, icon: '⚡', color: '#3B82F6',
-      title: `Thiếu chỉ số · ${u.room}`, meta: `Chốt gần nhất ${u.lastReadingDate}`,
-      route: 'UtilityBilling',
-    }));
-
-    ops.contracts.filter(c => c.status === 'expiring' || c.status === 'expiring_soon').forEach(c => upcoming.push({
-      key: `ct-${c.id}`, icon: '📋', color: '#7C3AED',
-      title: `HĐ sắp hết hạn · ${c.room}`, meta: `${c.tenant} · đến ${c.endDate}`,
-      route: 'BuildingContract',
-    }));
-    ops.maintenance.filter(m => m.status === 'pending' && m.urgency !== 'urgent').forEach(m => upcoming.push({
-      key: `mtp-${m.id}`, icon: '🔧', color: '#F59E0B',
-      title: `${m.title} · ${m.room}`, meta: 'Chờ xử lý',
-      route: 'BuildingMaintenance',
-    }));
-
+    const urgent: IssueItem[] = invoices
+      .filter(i => i.status === 'OVERDUE')
+      .map(i => ({
+        key: `inv-${i.id}`, icon: '💸', color: '#EF4444',
+        title: `Hoá đơn quá hạn · ${i.roomNumber ? `Phòng ${i.roomNumber}` : 'Nguyên căn'}`,
+        meta: `${i.tenantName ?? ''}${i.tenantName ? ' · ' : ''}${fmt(i.amount)}`,
+        route: 'BuildingInvoice',
+      }));
+    const upcoming: IssueItem[] = rooms
+      .filter(r => r.status === 'MAINTENANCE')
+      .map(r => ({
+        key: `mt-${r.id}`, icon: '🔧', color: '#F59E0B',
+        title: `Phòng ${r.roomNumber} đang bảo trì`, meta: 'Cần xử lý',
+        route: 'RoomManage',
+      }));
     return { urgent, upcoming };
-  }, [ops]);
+  }, [invoices, rooms]);
 
   const totalIssues = urgent.length + upcoming.length;
-  const floors = useMemo(() => Array.from(new Set(ops.rooms.map(r => r.floor))).sort((a, b) => a - b), [ops.rooms]);
+  const health = urgent.length > 0
+    ? { label: '🔴 Cần xử lý ngay', color: '#EF4444' }
+    : upcoming.length > 0
+      ? { label: '🟡 Có việc sắp tới', color: '#F59E0B' }
+      : { label: '✅ Hoạt động ổn định', color: '#16A34A' };
+
+  const floors = useMemo(
+    () => [...new Set(rooms.map(r => floorOf(r.roomNumber)))].sort((a, b) => a - b),
+    [rooms],
+  );
 
   const renderIssue = (it: IssueItem) => (
     <TouchableOpacity key={it.key} style={[styles.issueRow, { borderLeftColor: it.color }]} onPress={() => nav(it.route)}>
@@ -107,13 +132,29 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     </TouchableOpacity>
   );
 
+  if (!pid) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.backText}>← Quay lại</Text></TouchableOpacity>
+          <Text style={styles.title}>Toà nhà</Text>
+          <View style={{ width: 60 }} />
+        </View>
+        <View style={styles.emptyState}>
+          <Text style={{ fontSize: 40 }}>🏢</Text>
+          <Text style={styles.emptyText}>Không tìm thấy toà nhà</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backText}>← Quay lại</Text>
         </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{prop.name}</Text>
+        <Text style={styles.title} numberOfLines={1}>{prop?.name ?? 'Toà nhà'}</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -125,11 +166,11 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
             <View style={{ flex: 1 }}>
               <Text style={styles.heroLabel}>TỈ LỆ LẤP ĐẦY</Text>
               <Text style={styles.heroValue}>{occ}%</Text>
-              <Text style={styles.heroSub}>{prop.occupied}/{prop.totalRooms} phòng đang thuê</Text>
+              <Text style={styles.heroSub}>{occupied}/{totalRooms} phòng đang thuê</Text>
             </View>
             <View style={styles.heroAddrBox}>
-              <Text style={styles.heroAddr} numberOfLines={3}>📍 {prop.address}</Text>
-              <Text style={styles.heroFloors}>🏢 {prop.totalFloors} tầng · {prop.totalRooms} phòng</Text>
+              {!!prop?.address && <Text style={styles.heroAddr} numberOfLines={3}>📍 {prop.address}</Text>}
+              <Text style={styles.heroFloors}>🏢 {floors.length} tầng · {totalRooms} phòng</Text>
             </View>
           </View>
           <View style={styles.heroBarBg}>
@@ -137,19 +178,19 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
           <View style={styles.heroRoomRow}>
             <View style={styles.heroRoomStat}>
-              <Text style={[styles.heroRoomNum, { color: '#A7F3D0' }]}>{prop.occupied}</Text>
+              <Text style={[styles.heroRoomNum, { color: '#A7F3D0' }]}>{occupied}</Text>
               <Text style={styles.heroRoomLabel}>Đang thuê</Text>
             </View>
             <View style={styles.heroRoomStat}>
-              <Text style={styles.heroRoomNum}>{prop.available}</Text>
+              <Text style={styles.heroRoomNum}>{available}</Text>
               <Text style={styles.heroRoomLabel}>Trống</Text>
             </View>
             <View style={styles.heroRoomStat}>
-              <Text style={[styles.heroRoomNum, { color: '#FCD34D' }]}>{prop.maintenance}</Text>
+              <Text style={[styles.heroRoomNum, { color: '#FCD34D' }]}>{maintenance}</Text>
               <Text style={styles.heroRoomLabel}>Bảo trì</Text>
             </View>
             <View style={styles.heroRoomStat}>
-              <Text style={styles.heroRoomNum}>{prop.totalRooms}</Text>
+              <Text style={styles.heroRoomNum}>{totalRooms}</Text>
               <Text style={styles.heroRoomLabel}>Tổng</Text>
             </View>
           </View>
@@ -158,6 +199,10 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
         </View>
 
+        {loading ? (
+          <View style={styles.loadingWrap}><ActivityIndicator size="large" color={Colors.primary} /></View>
+        ) : (
+        <>
         {/* 2. Cần xử lý */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Cần xử lý</Text>
@@ -192,22 +237,28 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
         {/* 3. Room Overview */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Tổng quan phòng</Text>
-          <TouchableOpacity onPress={() => nav('BuildingRoom')}>
+          <TouchableOpacity onPress={() => nav('RoomManage')}>
             <Text style={styles.sectionLink}>Quản lý ›</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.card}>
-          {floors.map((floor, fi) => (
+          {rooms.length === 0 ? (
+            <Text style={styles.cardEmptyText}>Chưa có phòng</Text>
+          ) : floors.map((floor, fi) => (
             <View key={floor} style={fi > 0 ? styles.floorBlockDivider : undefined}>
               <Text style={styles.floorTitle}>Tầng {floor}</Text>
-              {ops.rooms.filter(r => r.floor === floor).map(r => (
-                <TouchableOpacity key={r.id} style={styles.roomRow} onPress={() => nav('BuildingRoom')}>
-                  <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[r.status] }]} />
-                  <Text style={styles.roomCode}>{r.code}</Text>
-                  <Text style={styles.roomStatus}>{ROOM_STATUS_LABEL[r.status]}</Text>
-                  {r.tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{r.tenantName}</Text>}
-                </TouchableOpacity>
-              ))}
+              {rooms.filter(r => floorOf(r.roomNumber) === floor).map(r => {
+                const st = mapRoomStatus(r.status);
+                const tenantName = tenantByRoom.get(r.roomNumber);
+                return (
+                  <TouchableOpacity key={r.id} style={styles.roomRow} onPress={() => nav('RoomManage')}>
+                    <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[st] }]} />
+                    <Text style={styles.roomCode}>{r.roomNumber}</Text>
+                    <Text style={styles.roomStatus}>{ROOM_STATUS_LABEL[st]}</Text>
+                    {!!tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{tenantName}</Text>}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           ))}
         </View>
@@ -229,48 +280,27 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
         {/* 5. Tenant Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Khách thuê</Text>
-          <TouchableOpacity onPress={() => nav('BuildingTenant')}>
+          <TouchableOpacity onPress={() => nav('TenantList')}>
             <Text style={styles.sectionLink}>Tất cả ›</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.card}>
-          {ops.tenants.length === 0 ? (
+          {activeContracts.length === 0 ? (
             <Text style={styles.cardEmptyText}>Chưa có khách thuê</Text>
-          ) : ops.tenants.slice(0, 4).map((t, i) => (
-            <TouchableOpacity key={t.id} style={[styles.tenantRow, i > 0 && styles.rowDivider]} onPress={() => nav('BuildingTenant')}>
-              <View style={styles.tenantAvatar}><Text style={styles.tenantAvatarText}>{t.name.charAt(0)}</Text></View>
+          ) : activeContracts.slice(0, 4).map((t, i) => (
+            <TouchableOpacity key={t.id} style={[styles.tenantRow, i > 0 && styles.rowDivider]} onPress={() => nav('TenantList')}>
+              <View style={styles.tenantAvatar}><Text style={styles.tenantAvatarText}>{t.tenantFullName.charAt(0)}</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.tenantName}>{t.name}</Text>
-                <Text style={styles.tenantMeta}>{t.room} · {t.phone}</Text>
+                <Text style={styles.tenantName}>{t.tenantFullName}</Text>
+                <Text style={styles.tenantMeta}>
+                  {t.roomNumber ? `Phòng ${t.roomNumber}` : 'Nguyên căn'} · {t.tenantPhone}
+                </Text>
               </View>
             </TouchableOpacity>
           ))}
         </View>
-
-        {/* 6. Finance & Configuration */}
-        <Text style={styles.sectionTitle}>Tài chính & cấu hình</Text>
-        <View style={styles.card}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Chủ nhà</Text>
-            <Text style={styles.infoValue}>{prop.hostName}</Text>
-          </View>
-          <View style={[styles.infoRow, styles.rowDivider]}>
-            <Text style={styles.infoLabel}>Tiền thuê / tháng</Text>
-            <Text style={styles.infoValue}>{fmt(prop.monthlyLeaseCost)}</Text>
-          </View>
-          <View style={[styles.infoRow, styles.rowDivider]}>
-            <Text style={styles.infoLabel}>Giá điện</Text>
-            <Text style={styles.infoValue}>{fmt(prop.electricityRate)}/kWh</Text>
-          </View>
-          <View style={[styles.infoRow, styles.rowDivider]}>
-            <Text style={styles.infoLabel}>Giá nước</Text>
-            <Text style={styles.infoValue}>{fmt(prop.waterRate)}/m³</Text>
-          </View>
-          <View style={[styles.infoRow, styles.rowDivider]}>
-            <Text style={styles.infoLabel}>Phí dịch vụ</Text>
-            <Text style={styles.infoValue}>{fmt(prop.serviceCharge)}/tháng</Text>
-          </View>
-        </View>
+        </>
+        )}
 
         <View style={{ height: 80 }} />
       </ScrollView>
@@ -291,6 +321,7 @@ const styles = StyleSheet.create({
 
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.sm },
   emptyText: { fontSize: 15, color: Colors.textSecondary },
+  loadingWrap: { paddingVertical: Spacing['3xl'], alignItems: 'center' },
 
   // Hero
   hero: { backgroundColor: Colors.primary, borderRadius: BorderRadius.xl, padding: Spacing.lg, marginBottom: Spacing.xl },
@@ -360,9 +391,4 @@ const styles = StyleSheet.create({
   tenantAvatarText: { fontSize: 15, fontWeight: '800', color: Colors.primary },
   tenantName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   tenantMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
-
-  // Finance
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.md },
-  infoLabel: { fontSize: 13, color: Colors.textSecondary },
-  infoValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
 });

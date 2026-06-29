@@ -55,6 +55,10 @@ export interface DashboardBuilding {
   serviceCharge?: number;
   hostName?: string;
   hostPhone?: string;
+  // Người quản lý trực tiếp (manager) — tenant liên hệ người này, KHÔNG phải chủ sở hữu.
+  // BE cần bổ sung (xem doc/BE-NEED-dashboard-manager-2026-06-29.md). FE đã ưu tiên dùng.
+  managerName?: string;
+  managerPhone?: string;
 }
 export interface DashboardSummary {
   overdueInvoiceCount: number;
