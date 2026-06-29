@@ -95,6 +95,8 @@ export interface HostContractDto {
   roomCode?: string; lessorName?: string; rentAmount: number;
   startDate: string; endDate?: string;
   status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
+  // Biên bản bàn giao thiết bị (JSON string) — để Host xem thiết bị đề xuất khi duyệt giá.
+  equipmentSnapshot?: string;
 }
 
 // ── Notifications ────────────────────────────────────────────────────────────
