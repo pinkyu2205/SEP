@@ -224,7 +224,7 @@ export const NotificationCenterScreen: React.FC = () => {
     realNotificationService.markAllRead().catch(() => { /* offline */ });
   };
 
-  const TAB_ROUTES = ['ManagerBilling', 'ManagerMaintenance', 'MeterReading', 'ManagerHome'];
+  const TAB_ROUTES = ['ManagerBilling', 'ManagerMaintenance', 'UtilityBilling', 'ManagerHome'];
 
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);

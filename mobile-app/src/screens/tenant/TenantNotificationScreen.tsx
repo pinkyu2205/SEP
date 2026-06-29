@@ -21,55 +21,6 @@ const mapApiNotif = (n: ApiNotification): AppNotification => ({
   actionRoute: n.screen,
 });
 
-// ─── Mock data (business logic unchanged) ─────────────────────────────────────
-const MOCK_NOTIFICATIONS: AppNotification[] = [
-  {
-    id: '1', title: 'Hóa đơn tháng 3/2026 đã quá hạn',
-    body: 'Hóa đơn tháng 3/2026 của bạn đã quá hạn thanh toán. Vui lòng thanh toán ngay để tránh phát sinh phí trễ.',
-    type: 'bill_overdue', isRead: false, priority: 'high',
-    referenceId: '3', referenceType: 'invoice',
-    actionLabel: 'Thanh toán ngay', actionRoute: 'InvoiceList',
-    createdAt: '2026-05-01T10:00:00Z',
-  },
-  {
-    id: '2', title: 'Hóa đơn tháng 5/2026 đã được tạo',
-    body: 'Hóa đơn tháng 5/2026 của phòng 201 đã được tạo với tổng số tiền 3.855.000đ. Hạn thanh toán 15/05/2026.',
-    type: 'new_bill', isRead: false, priority: 'normal',
-    referenceId: '1', referenceType: 'invoice',
-    actionLabel: 'Xem hóa đơn', actionRoute: 'InvoiceList',
-    createdAt: '2026-04-29T09:00:00Z',
-  },
-  {
-    id: '3', title: 'Yêu cầu sửa chữa đã được tiếp nhận',
-    body: 'Yêu cầu sửa ổ cắm điện (TK-T-002) đã được quản lý tiếp nhận và phân công thợ. Dự kiến hoàn thành trước 30/04/2026.',
-    type: 'maintenance_accepted', isRead: true, priority: 'normal',
-    referenceId: '2', referenceType: 'maintenance',
-    actionLabel: 'Xem tiến độ', actionRoute: 'MaintenanceList',
-    createdAt: '2026-04-27T14:00:00Z',
-  },
-  {
-    id: '4', title: 'Sửa chữa tủ quần áo hoàn tất',
-    body: 'Yêu cầu sửa tủ quần áo (TK-T-003) đã được hoàn tất. Bản lề mới đã được thay. Chi phí: 150.000đ.',
-    type: 'maintenance_resolved', isRead: true, priority: 'normal',
-    referenceId: '3', referenceType: 'maintenance',
-    createdAt: '2026-04-22T16:00:00Z',
-  },
-  {
-    id: '5', title: 'Thanh toán tháng 4 được xác nhận',
-    body: 'Thanh toán hóa đơn tháng 4/2026 đã được quản lý xác nhận. Cảm ơn bạn!',
-    type: 'payment_success', isRead: true, priority: 'normal',
-    referenceId: '2', referenceType: 'invoice',
-    createdAt: '2026-04-10T11:00:00Z',
-  },
-  {
-    id: '6', title: 'Hợp đồng còn 230 ngày nữa hết hạn',
-    body: 'Hợp đồng thuê phòng 201 của bạn sẽ hết hạn vào ngày 31/12/2026. Bạn có thể yêu cầu gia hạn sớm.',
-    type: 'contract_expiring', isRead: true, priority: 'low',
-    referenceId: '1', referenceType: 'contract',
-    actionLabel: 'Xem hợp đồng', actionRoute: 'TenantContracts',
-    createdAt: '2026-05-15T08:00:00Z',
-  },
-];
 
 // ─── Category / filter mappings (business logic unchanged) ────────────────────
 const TYPE_CATEGORY: Record<string, string> = {
@@ -147,16 +98,18 @@ const groupByTime = (items: AppNotification[]): Section[] => {
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TenantNotificationScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [notifications, setNotifications] = useState<AppNotification[]>(MOCK_NOTIFICATIONS);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [refreshing, setRefreshing] = useState(false);
 
-  // Nạp thông báo thật từ BE mỗi khi vào màn; offline/lỗi → giữ mock.
+  // Nạp thông báo thật từ BE mỗi khi vào màn.
   const load = useCallback(async () => {
     try {
       const rows = await realNotificationService.list();
-      if (rows.length > 0) setNotifications(rows.map(mapApiNotif));
-    } catch { /* offline: giữ danh sách hiện tại */ }
+      setNotifications(rows.map(mapApiNotif));
+    } catch {
+      setNotifications([]);
+    }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = useCallback(async () => {

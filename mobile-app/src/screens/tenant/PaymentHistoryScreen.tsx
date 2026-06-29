@@ -1,41 +1,32 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { PaymentTransaction } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils';
+import { realTenantBillingService, TenantPayment } from '../../services/tenantBillingService.real';
 
-const MOCK_TRANSACTIONS: PaymentTransaction[] = [
-  {
-    id: 'txn-1', invoiceId: '2', invoiceCode: 'HD-T04-2026', tenantId: 't1',
-    tenantName: 'Nguyễn Văn A', roomName: 'Phòng 201',
-    amount: 3755000, method: 'qr', status: 'verified',
-    bankCode: 'MB', bankAccount: '0865803493',
-    transferContent: 'HD2 T4 Phong 201',
-    createdAt: '2026-04-10T09:30:00Z', verifiedAt: '2026-04-10T11:00:00Z',
-    verifiedBy: 'Trần Văn Minh',
-  },
-  {
-    id: 'txn-2', invoiceId: '5', invoiceCode: 'HD-T03-2026', tenantId: 't1',
-    tenantName: 'Nguyễn Văn A', roomName: 'Phòng 201',
-    amount: 3755000, method: 'qr', status: 'verified',
-    bankCode: 'MB', bankAccount: '0865803493',
-    transferContent: 'HD5 T3 Phong 201',
-    createdAt: '2026-03-12T14:15:00Z', verifiedAt: '2026-03-12T16:00:00Z',
-    verifiedBy: 'Trần Văn Minh',
-  },
-  {
-    id: 'txn-3', invoiceId: '6', invoiceCode: 'HD-T02-2026', tenantId: 't1',
-    tenantName: 'Nguyễn Văn A', roomName: 'Phòng 201',
-    amount: 3700000, method: 'cash', status: 'verified',
-    createdAt: '2026-02-08T10:00:00Z', verifiedAt: '2026-02-08T10:05:00Z',
-    verifiedBy: 'Trần Văn Minh',
-    notes: 'Thanh toán tiền mặt tại văn phòng',
-  },
-];
+// Map lịch sử thanh toán BE -> shape PaymentTransaction màn đang dùng.
+const PAY_METHOD_MAP: Record<string, PaymentTransaction['method']> = {
+  QR: 'qr', BANK_TRANSFER: 'bank_transfer', CASH: 'cash', EWALLET: 'other', OTHER: 'other',
+};
+const toTxn = (p: TenantPayment): PaymentTransaction => ({
+  id: String(p.id),
+  invoiceId: String(p.invoiceId),
+  invoiceCode: p.invoiceCode,
+  tenantId: '',
+  tenantName: '',
+  roomName: p.roomNumber ? `Phòng ${p.roomNumber}` : (p.propertyName ?? ''),
+  amount: p.amount,
+  method: PAY_METHOD_MAP[p.method] ?? 'other',
+  status: 'verified',
+  transferContent: p.transactionId,
+  createdAt: p.paidAt,
+  verifiedAt: p.paidAt,
+});
 
 const METHOD_CONFIG: Record<string, { label: string; emoji: string }> = {
   qr: { label: 'QR Code', emoji: '📱' },
@@ -54,8 +45,18 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 
 export const PaymentHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const totalPaid = MOCK_TRANSACTIONS.reduce((sum, t) => sum + t.amount, 0);
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    realTenantBillingService.listPayments()
+      .then(rows => setTransactions(rows.map(toTxn)))
+      .catch(() => setTransactions([]))
+      .finally(() => setLoading(false));
+  }, []));
+
+  const totalPaid = transactions.reduce((sum, t) => sum + t.amount, 0);
 
   const renderTransaction = ({ item }: { item: PaymentTransaction }) => {
     const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
@@ -147,23 +148,29 @@ export const PaymentHistoryScreen: React.FC = () => {
         <Text style={styles.summaryLabel}>Tổng đã thanh toán</Text>
         <Text style={styles.summaryAmount}>{formatCurrency(totalPaid)}</Text>
         <Text style={styles.summaryCount}>
-          {MOCK_TRANSACTIONS.length} giao dịch đã xác nhận
+          {transactions.length} giao dịch đã xác nhận
         </Text>
       </View>
 
       <FlatList
-        data={MOCK_TRANSACTIONS}
+        data={transactions}
         renderItem={renderTransaction}
         keyExtractor={t => t.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>💳</Text>
-            <Text style={styles.emptyTitle}>Chưa có giao dịch</Text>
-            <Text style={styles.emptyDesc}>Lịch sử thanh toán sẽ hiển thị ở đây</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>💳</Text>
+              <Text style={styles.emptyTitle}>Chưa có giao dịch</Text>
+              <Text style={styles.emptyDesc}>Lịch sử thanh toán sẽ hiển thị ở đây</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>

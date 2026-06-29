@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, FlatList,
+  TextInput, Alert, FlatList, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { billsStore, SharedBill, BillStatus } from '../../store/billsStore';
+import { managerPropertyService } from '../../services/managerPropertyService';
+import { realPropertyService } from '../../services/propertyService.real';
+import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
+import { realManagerInvoiceService } from '../../services/managerInvoiceService.real';
+import { uploadImageToCloudinary } from '../../services/cloudinary';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';
@@ -26,6 +32,7 @@ interface RoomMeterReading {
   prevReading: number;
   newReading: string;
   hasPhoto: boolean;
+  meterImageUrl?: string;  // ảnh đồng hồ đã chụp (Cloudinary)
   consumption?: number;
   fee?: number;
   sent: boolean;           // đã gửi hóa đơn cho phòng này chưa
@@ -57,73 +64,112 @@ interface HistoryEntry {
   sentAt: string;
 }
 
-// ===================== MOCK PROPERTIES =====================
+// ===================== BILLING PROPERTIES (data thật từ BE) =====================
 type PropType = 'multi_room' | 'whole_house';
 
-interface MockRoom {
+interface BillingRoom {
   id: string;
   code: string;
   tenantName: string;
-  prevElec: number;
-  prevWater: number;
+  prevElec: number;   // BE chưa có lịch sử chỉ số → tạm 0 (xem doc/ gap)
+  prevWater: number;  // BE chưa có lịch sử chỉ số → tạm 0
 }
 
-interface MockProperty {
+interface BillingProperty {
   id: string;
   name: string;
   type: PropType;
-  electricityRate: number;
-  waterRate: number;
-  rooms: MockRoom[];            // multi_room: danh sách phòng; whole_house: 1 phần tử duy nhất
+  electricityRate: number; // BE chưa cấp đơn giá cho manager → 0
+  waterRate: number;       // BE chưa cấp đơn giá cho manager → 0
+  rooms: BillingRoom[];    // multi_room: danh sách phòng; whole_house: 1 phần tử duy nhất
 }
 
-const MOCK_PROPERTIES: MockProperty[] = [
-  {
-    id: 'p1', name: 'Nhà Nguyễn Trãi', type: 'multi_room',
-    electricityRate: 3500, waterRate: 20000,
-    rooms: [
-      { id: 'r1', code: 'P101', tenantName: 'Trần Văn An',    prevElec: 1250, prevWater: 45 },
-      { id: 'r2', code: 'P102', tenantName: 'Lê Thị Bình',    prevElec: 2840, prevWater: 78 },
-      { id: 'r3', code: 'P103', tenantName: 'Phạm Văn Cường', prevElec: 980,  prevWater: 32 },
-      { id: 'r4', code: 'P201', tenantName: 'Hoàng Văn Dũng', prevElec: 3120, prevWater: 92 },
-      { id: 'r5', code: 'P202', tenantName: 'Trần Thị Emi',   prevElec: 1560, prevWater: 55 },
-    ],
-  },
-  {
-    id: 'p2', name: 'Nhà Lê Văn Sỹ', type: 'multi_room',
-    electricityRate: 3800, waterRate: 16000,
-    rooms: [
-      { id: 'r6', code: 'P101', tenantName: 'Nguyễn Bảo Gia',  prevElec: 740,  prevWater: 12 },
-      { id: 'r7', code: 'P102', tenantName: 'Vũ Minh Phương',  prevElec: 1890, prevWater: 28 },
-      { id: 'r8', code: 'P201', tenantName: 'Đỗ Hương Giang',  prevElec: 620,  prevWater: 9  },
-    ],
-  },
-  // ── Nhà nguyên căn ──────────────────────────────────────────────────────────
-  {
-    id: 'house-1', name: 'Nhà Nguyễn Văn Cừ', type: 'whole_house',
-    electricityRate: 3500, waterRate: 15000,
-    rooms: [
-      { id: 'house-1-unit', code: 'Nhà nguyên căn', tenantName: 'Gia đình anh Minh', prevElec: 1850, prevWater: 126 },
-    ],
-  },
-  {
-    id: 'house-3', name: 'Nhà Trần Hưng Đạo', type: 'whole_house',
-    electricityRate: 3500, waterRate: 15000,
-    rooms: [
-      { id: 'house-3-unit', code: 'Nhà nguyên căn', tenantName: 'Công ty An Phú', prevElec: 4120, prevWater: 310 },
-    ],
-  },
-];
-
-const MOCK_HISTORY: HistoryEntry[] = [
-  { id: 'h1', type: 'electricity', propertyName: 'Nhà Nguyễn Trãi',   billingPeriod: '01/04 – 30/04/2026', totalAmount: 2345000, roomCount: 5, sentAt: '2026-04-30' },
-  { id: 'h2', type: 'water',       propertyName: 'Nhà Nguyễn Trãi',   billingPeriod: '01/04 – 30/04/2026', totalAmount: 980000,  roomCount: 5, sentAt: '2026-04-30' },
-  { id: 'h3', type: 'electricity', propertyName: 'Nhà Lê Văn Sỹ',     billingPeriod: '01/04 – 30/04/2026', totalAmount: 1876000, roomCount: 3, sentAt: '2026-04-29' },
-  { id: 'h4', type: 'water',       propertyName: 'Nhà Lê Văn Sỹ',     billingPeriod: '01/04 – 30/04/2026', totalAmount: 784000,  roomCount: 3, sentAt: '2026-04-29' },
-  { id: 'h5', type: 'electricity', propertyName: 'Nhà Nguyễn Văn Cừ', billingPeriod: '01/04 – 30/04/2026', totalAmount: 910000,  roomCount: 1, sentAt: '2026-04-28' },
-];
+const ROOM_STATUS_RENTED = 'RENTED';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
+
+/**
+ * Đọc best-effort hoá đơn EVN từ kết quả OCR (endpoint /ocr/meter trả rawText + numbers).
+ * EVN tính điện bậc thang nên KHÔNG có đơn giá sẵn → chỉ lấy Tổng kWh, Tổng tiền, Kỳ.
+ * Luôn cần manager xác nhận lại (BE chưa có parser hoá đơn riêng — xem doc/ gap #8).
+ */
+const parseEvnInvoice = (
+  ocr: { reading?: string; numbers?: string[]; rawText?: string },
+): { totalKwh: string; totalAmount: string; billingPeriod: string } => {
+  const text = (ocr.rawText || '').replace(/\s+/g, ' ');
+  const out = { totalKwh: '', totalAmount: '', billingPeriod: '' };
+
+  // Kỳ hoá đơn: "từ 07/04/2022 đến 06/05/2022" hoặc "Tháng 5/2022"
+  const range = text.match(/từ\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*đến\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (range) out.billingPeriod = `${range[1]} – ${range[2]}`;
+  else {
+    const m = text.match(/Tháng\s*(\d{1,2})\s*\/\s*(\d{4})/i);
+    if (m) out.billingPeriod = `Tháng ${m[1]}/${m[2]}`;
+  }
+
+  // Tổng tiền thanh toán (ưu tiên dòng "Tổng cộng tiền thanh toán")
+  const amt =
+    text.match(/Tổng cộng tiền thanh toán[^\d]*([\d.,]+)/i) ||
+    text.match(/Tổng cộng[^\d]*([\d.,]+)/i);
+  if (amt) out.totalAmount = onlyDigits(amt[1]);
+  if (!out.totalAmount && ocr.numbers?.length) {
+    const nums = ocr.numbers.map(n => Number(onlyDigits(n))).filter(n => n > 0);
+    if (nums.length) out.totalAmount = String(Math.max(...nums)); // tổng tiền thường là số lớn nhất
+  }
+
+  // Tổng kWh: số đứng ngay trước "kWh"
+  const kwh = text.match(/([\d.,]+)\s*kWh/i);
+  if (kwh) out.totalKwh = onlyDigits(kwh[1]);
+
+  return out;
+};
+
+// Map property + rooms + hợp đồng (BE) -> shape màn ghi chỉ số dùng.
+const mapBillingProperty = (
+  p: { id: number; propertyName: string; wholeHouse: boolean | null },
+  rooms: { id: number; roomNumber: string; status: string }[],
+  contracts: TenantContractResponse[],
+): BillingProperty => {
+  const active = contracts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE');
+  const tenantByRoomId = new Map<number, string>();
+  const tenantByRoomNo = new Map<string, string>();
+  active.forEach(c => {
+    if (c.roomId != null) tenantByRoomId.set(c.roomId, c.tenantFullName);
+    if (c.roomNumber) tenantByRoomNo.set(c.roomNumber, c.tenantFullName);
+  });
+  const isWhole = p.wholeHouse === true;
+
+  if (isWhole) {
+    const tenant = active[0]?.tenantFullName || 'Chưa có khách thuê';
+    return {
+      id: String(p.id),
+      name: p.propertyName,
+      type: 'whole_house',
+      electricityRate: 0,
+      waterRate: 0,
+      rooms: [{ id: `house-${p.id}-unit`, code: 'Nhà nguyên căn', tenantName: tenant, prevElec: 0, prevWater: 0 }],
+    };
+  }
+
+  return {
+    id: String(p.id),
+    name: p.propertyName,
+    type: 'multi_room',
+    electricityRate: 0,
+    waterRate: 0,
+    rooms: rooms
+      // chỉ tính tiền cho phòng đang có khách thuê
+      .filter(r => (r.status || '').toUpperCase() === ROOM_STATUS_RENTED)
+      .map(r => ({
+        id: String(r.id),
+        code: r.roomNumber,
+        tenantName: tenantByRoomId.get(r.id) ?? tenantByRoomNo.get(r.roomNumber) ?? 'Chưa có khách thuê',
+        prevElec: 0,
+        prevWater: 0,
+      })),
+  };
+};
 
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
@@ -136,6 +182,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [roomElecReadings,   setRoomElecReadings]   = useState<RoomMeterReading[]>([]);
   const [editingEvn,         setEditingEvn]         = useState(false);
   const [evnEditForm,        setEvnEditForm]        = useState({ totalKwh: '', totalAmount: '', billingPeriod: '' });
+  const [evnImageUrl,        setEvnImageUrl]        = useState('');           // ảnh hoá đơn EVN
+  const [evnScanning,        setEvnScanning]        = useState(false);        // đang upload + OCR hoá đơn
+  const [ocrRoomId,          setOcrRoomId]          = useState<string | null>(null); // phòng đang OCR đồng hồ
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
@@ -144,24 +193,105 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [roomWaterReadings,setRoomWaterReadings]= useState<RoomWaterReading[]>([]);
   const [waterBillForm,    setWaterBillForm]    = useState({ totalAmount: '', billingPeriod: '01/05 – 31/05/2026', pricePerM3: '20000' });
 
-  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>(MOCK_HISTORY);
+  // Lịch sử gửi hoá đơn: BE chưa có endpoint → tạm rỗng, chỉ tích trong phiên (xem doc/ gap).
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
 
-  const selectedProperty = MOCK_PROPERTIES.find(p => p.id === selectedPropertyId);
-  const waterProperty    = MOCK_PROPERTIES.find(p => p.id === waterPropertyId);
+  // Danh sách nhà/phòng THẬT của manager
+  const [properties, setProperties] = useState<BillingProperty[]>([]);
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [errorProps, setErrorProps] = useState<string | null>(null);
+
+  const loadProperties = useCallback(async () => {
+    try {
+      setErrorProps(null);
+      const scoped = await managerPropertyService.getScopedProperties();
+      const mapped = await Promise.all(
+        scoped.map(async (p) => {
+          const [rooms, contracts] = await Promise.all([
+            realPropertyService.getRooms(p.id).catch(() => []),
+            realTenantService.listByProperty(p.id).catch(() => [] as TenantContractResponse[]),
+          ]);
+          return mapBillingProperty(p, rooms, contracts);
+        }),
+      );
+      setProperties(mapped);
+    } catch (e: any) {
+      setErrorProps(e?.response?.data?.message || e?.message || 'Không tải được danh sách tòa nhà');
+    } finally {
+      setLoadingProps(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadProperties(); }, [loadProperties]));
+
+  const selectedProperty = properties.find(p => p.id === selectedPropertyId);
+  const waterProperty    = properties.find(p => p.id === waterPropertyId);
   const isWholeHouse     = selectedProperty?.type === 'whole_house';
 
+  // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
+  const pickImage = async (useCamera: boolean): Promise<string | null> => {
+    if (useCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (perm.status !== 'granted') { Alert.alert('Lỗi', 'Cần quyền camera.'); return null; }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+      return r.canceled ? null : r.assets[0].uri;
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    return r.canceled ? null : r.assets[0].uri;
+  };
+
+  // Hỏi nguồn ảnh (chụp / thư viện) rồi gọi tiếp.
+  const chooseImageSource = (onPick: (useCamera: boolean) => void) => {
+    Alert.alert('Chọn ảnh', undefined, [
+      { text: '📷 Chụp ảnh', onPress: () => onPick(true) },
+      { text: '🖼 Chọn từ thư viện', onPress: () => onPick(false) },
+      { text: 'Huỷ', style: 'cancel' },
+    ]);
+  };
+
   // ── EVN helpers ────────────────────────────────────────────────────────────
-  const simulateEVNScan = () => {
-    const fakeKwh = 1240 + Math.floor(Math.random() * 200);
-    const fakeAmount = Math.round(fakeKwh * 3500 * 0.9);
-    setEvnData({ totalKwh: fakeKwh, totalAmount: fakeAmount, billingPeriod: '01/05 – 31/05/2026', imageUploaded: true });
-    setEvnEditForm({ totalKwh: String(fakeKwh), totalAmount: String(fakeAmount), billingPeriod: '01/05 – 31/05/2026' });
-    Alert.alert('Nhận diện thành công', `Tổng điện: ${fakeKwh} kWh\nTổng tiền: ${fmt(fakeAmount)}\nKỳ: 01/05 – 31/05/2026\n\nVui lòng kiểm tra và sửa nếu cần.`);
+  // Tải/chụp hoá đơn EVN -> OCR best-effort -> tự điền form để manager xác nhận.
+  const scanEvnInvoice = async (useCamera: boolean) => {
+    const uri = await pickImage(useCamera);
+    if (!uri) return;
+    try {
+      setEvnScanning(true);
+      const url = await uploadImageToCloudinary(uri);
+      setEvnImageUrl(url);
+
+      let parsed = { totalKwh: '', totalAmount: '', billingPeriod: '' };
+      try {
+        const ocr = await realTenantService.ocrMeter(url);
+        parsed = parseEvnInvoice(ocr);
+      } catch {
+        /* OCR lỗi -> để manager nhập tay */
+      }
+
+      setEvnEditForm(parsed);
+      setEvnData({
+        totalKwh: Number(parsed.totalKwh) || 0,
+        totalAmount: Number(parsed.totalAmount) || 0,
+        billingPeriod: parsed.billingPeriod,
+        imageUploaded: true,
+      });
+      setEditingEvn(true); // luôn mở form để manager kiểm tra/sửa
+      const got = parsed.totalKwh || parsed.totalAmount || parsed.billingPeriod;
+      Alert.alert(
+        got ? 'Đã quét hoá đơn' : 'Đã tải hoá đơn',
+        got
+          ? 'Hệ thống đã đọc sơ bộ. Vui lòng KIỂM TRA và sửa lại tổng kWh / tổng tiền / kỳ cho đúng hoá đơn.'
+          : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay tổng kWh, tổng tiền và kỳ thanh toán.',
+      );
+    } catch {
+      Alert.alert('Lỗi', 'Không tải/đọc được ảnh hoá đơn. Bạn có thể nhập tay số liệu.');
+    } finally {
+      setEvnScanning(false);
+    }
   };
 
   const saveEvnEdit = () => {
-    const kwh = Number(evnEditForm.totalKwh);
-    const amt = Number(evnEditForm.totalAmount);
+    const kwh = Number(onlyDigits(evnEditForm.totalKwh));
+    const amt = Number(onlyDigits(evnEditForm.totalAmount));
     if (!kwh || !amt || !evnEditForm.billingPeriod.trim()) {
       Alert.alert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn EVN.');
       return;
@@ -171,7 +301,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const initRoomElecReadings = (propId: string) => {
-    const prop = MOCK_PROPERTIES.find(p => p.id === propId);
+    const prop = properties.find(p => p.id === propId);
     if (!prop) return;
     setRoomElecReadings(prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
@@ -180,17 +310,35 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     setElecStep('room_readings');
   };
 
-  const simulateRoomOCR = (roomId: string) => {
-    const room = selectedProperty?.rooms.find(r => r.id === roomId);
-    if (!room) return;
-    const fakeNew = room.prevElec + 80 + Math.floor(Math.random() * 80);
-    setRoomElecReadings(prev => prev.map(r =>
-      r.roomId === roomId ? { ...r, newReading: String(fakeNew), hasPhoto: true } : r
-    ));
+  // Chụp/chọn ảnh đồng hồ điện 1 phòng -> upload + OCR -> tự điền chỉ số mới.
+  const captureRoomMeter = async (roomId: string, useCamera: boolean) => {
+    const uri = await pickImage(useCamera);
+    if (!uri) return;
+    try {
+      setOcrRoomId(roomId);
+      const url = await uploadImageToCloudinary(uri);
+      let reading = '';
+      try {
+        const ocr = await realTenantService.ocrMeter(url);
+        reading = onlyDigits(ocr.reading || '');
+      } catch {
+        /* OCR lỗi -> nhập tay */
+      }
+      setRoomElecReadings(prev => prev.map(r =>
+        r.roomId === roomId
+          ? { ...r, newReading: reading || r.newReading, hasPhoto: true, meterImageUrl: url }
+          : r,
+      ));
+      if (!reading) Alert.alert('OCR', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
+    } catch {
+      Alert.alert('Lỗi', 'Không tải/đọc được ảnh đồng hồ. Vui lòng nhập tay.');
+    } finally {
+      setOcrRoomId(null);
+    }
   };
 
-  // Gửi hóa đơn cho 1 phòng cụ thể (multi-room)
-  const sendSingleRoomElec = (roomId: string) => {
+  // Gửi hóa đơn ĐIỆN (riêng) cho 1 phòng cụ thể (multi-room)
+  const sendSingleRoomElec = async (roomId: string) => {
     if (!evnData || !selectedProperty) return;
     const room = roomElecReadings.find(r => r.roomId === roomId);
     if (!room) return;
@@ -204,42 +352,30 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       if (r.roomId === roomId) return s + Math.max(newVal - r.prevReading, 0);
       return s + Math.max(Number(r.newReading) - r.prevReading, 0);
     }, 0);
-    const feePerKwh  = evnData.totalAmount / (totalRecorded || 1);
+    const feePerKwh   = evnData.totalAmount / (totalRecorded || 1);
     const consumption = Math.max(newVal - room.prevReading, 0);
     const fee         = Math.round(consumption * feePerKwh);
 
-    const now = new Date().toISOString().split('T')[0];
-    billsStore.addBills([{
-      id: `elec-${roomId}-${Date.now()}`,
-      code: `HD-ELEC-${room.roomCode}-T5`,
-      invoiceType: 'electricity',
-      roomId: room.roomId,
-      roomName: room.roomCode,
-      propertyId: selectedProperty.id,
-      propertyName: selectedProperty.name,
-      tenantId: room.roomId,
-      tenantName: room.tenantName,
-      tenantPhone: '',
-      month: 5, year: 2026,
-      items: [{ label: `Điện (${consumption} kWh)`, amount: fee }],
-      totalAmount: fee, lateFee: 0, grandTotal: fee,
-      status: 'pending' as BillStatus,
-      dueDate: '2026-05-25', createdAt: now,
-      kwhUsed: consumption,
-      electricityRate: selectedProperty.electricityRate,
-      billingPeriod: evnData.billingPeriod,
-    }]);
-
-    // Đánh dấu phòng này đã gửi
-    setRoomElecReadings(prev => prev.map(r =>
-      r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r
-    ));
-
-    Alert.alert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã được gửi cho ${room.tenantName}.`);
+    try {
+      await realManagerInvoiceService.createRoomUtilityInvoice(
+        Number(selectedProperty.id), Number(room.roomId),
+        {
+          type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+          prevReading: room.prevReading, newReading: newVal, consumption,
+          unitPrice: Math.round(feePerKwh), amount: fee, meterImageUrl: room.meterImageUrl,
+        },
+      );
+      setRoomElecReadings(prev => prev.map(r =>
+        r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r,
+      ));
+      Alert.alert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+    }
   };
 
-  // Gửi tất cả phòng chưa gửi (multi-room)
-  const sendAllUnsent = () => {
+  // Gửi hóa đơn ĐIỆN (riêng) cho tất cả phòng chưa gửi (multi-room)
+  const sendAllUnsent = async () => {
     if (!evnData || !selectedProperty) return;
     const unsent = roomElecReadings.filter(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading);
     if (!unsent.length) { Alert.alert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
@@ -248,50 +384,47 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const feePerKwh = evnData.totalAmount / (totalRecorded || 1);
     const now = new Date().toISOString().split('T')[0];
 
-    const newBills: SharedBill[] = unsent.map(r => {
-      const consumption = Math.max(Number(r.newReading) - r.prevReading, 0);
-      const fee = Math.round(consumption * feePerKwh);
-      return {
-        id: `elec-${r.roomId}-${Date.now()}`,
-        code: `HD-ELEC-${r.roomCode}-T5`,
-        invoiceType: 'electricity' as const,
-        roomId: r.roomId, roomName: r.roomCode,
-        propertyId: selectedProperty.id, propertyName: selectedProperty.name,
-        tenantId: r.roomId, tenantName: r.tenantName, tenantPhone: '',
-        month: 5, year: 2026,
-        items: [{ label: `Điện (${consumption} kWh)`, amount: fee }],
-        totalAmount: fee, lateFee: 0, grandTotal: fee,
-        status: 'pending' as BillStatus,
-        dueDate: '2026-05-25', createdAt: now,
-        kwhUsed: consumption, electricityRate: selectedProperty.electricityRate,
-        billingPeriod: evnData.billingPeriod,
-      };
-    });
-    billsStore.addBills(newBills);
-
-    setRoomElecReadings(prev => prev.map(r => {
-      if (!r.sent && r.newReading && Number(r.newReading) > r.prevReading) {
+    try {
+      await Promise.all(unsent.map(r => {
         const consumption = Math.max(Number(r.newReading) - r.prevReading, 0);
         const fee = Math.round(consumption * feePerKwh);
-        return { ...r, consumption, fee, sent: true };
-      }
-      return r;
-    }));
+        return realManagerInvoiceService.createRoomUtilityInvoice(
+          Number(selectedProperty.id), Number(r.roomId),
+          {
+            type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+            prevReading: r.prevReading, newReading: Number(r.newReading), consumption,
+            unitPrice: Math.round(feePerKwh), amount: fee, meterImageUrl: r.meterImageUrl,
+          },
+        );
+      }));
 
-    const total = newBills.reduce((s, b) => s + b.grandTotal, 0);
-    setHistoryEntries(prev => [{
-      id: `he-${Date.now()}`, type: 'electricity',
-      propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
-      totalAmount: total, roomCount: newBills.length, sentAt: now,
-    }, ...prev]);
+      let total = 0;
+      setRoomElecReadings(prev => prev.map(r => {
+        if (!r.sent && r.newReading && Number(r.newReading) > r.prevReading) {
+          const consumption = Math.max(Number(r.newReading) - r.prevReading, 0);
+          const fee = Math.round(consumption * feePerKwh);
+          total += fee;
+          return { ...r, consumption, fee, sent: true };
+        }
+        return r;
+      }));
 
-    Alert.alert('Đã gửi', `Đã gửi hóa đơn điện cho ${newBills.length} phòng.`, [
-      { text: 'OK', onPress: () => setElecStep('done') },
-    ]);
+      setHistoryEntries(prev => [{
+        id: `he-${Date.now()}`, type: 'electricity',
+        propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
+        totalAmount: total, roomCount: unsent.length, sentAt: now,
+      }, ...prev]);
+
+      Alert.alert('Đã gửi', `Đã gửi hóa đơn điện cho ${unsent.length} phòng.`, [
+        { text: 'OK', onPress: () => setElecStep('done') },
+      ]);
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+    }
   };
 
-  // Gửi nhà nguyên căn (whole_house) — 1 hóa đơn duy nhất
-  const sendWholeHouseElec = () => {
+  // Gửi hóa đơn ĐIỆN (riêng) cho nhà nguyên căn (whole_house)
+  const sendWholeHouseElec = async () => {
     if (!evnData || !selectedProperty) return;
     const unit = roomElecReadings[0];
     if (!unit) return;
@@ -304,33 +437,30 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const fee = Math.round(evnData.totalAmount); // nhà nguyên căn trả toàn bộ tiền EVN
     const now = new Date().toISOString().split('T')[0];
 
-    billsStore.addBills([{
-      id: `elec-${unit.roomId}-${Date.now()}`,
-      code: `HD-ELEC-${selectedProperty.id.toUpperCase()}-T5`,
-      invoiceType: 'electricity', propertyType: 'WHOLE_HOUSE',
-      roomId: unit.roomId, roomName: unit.roomCode,
-      propertyId: selectedProperty.id, propertyName: selectedProperty.name,
-      tenantId: unit.roomId, tenantName: unit.tenantName, tenantPhone: '',
-      month: 5, year: 2026,
-      items: [{ label: `Điện (${consumption} kWh)`, amount: fee }],
-      totalAmount: fee, lateFee: 0, grandTotal: fee,
-      status: 'pending' as BillStatus,
-      dueDate: '2026-05-25', createdAt: now,
-      kwhUsed: consumption, electricityRate: selectedProperty.electricityRate,
-      billingPeriod: evnData.billingPeriod,
-    }]);
-
-    setHistoryEntries(prev => [{
-      id: `he-${Date.now()}`, type: 'electricity',
-      propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
-      totalAmount: fee, roomCount: 1, sentAt: now,
-    }, ...prev]);
-    setElecStep('done');
+    try {
+      await realManagerInvoiceService.createPropertyUtilityInvoice(
+        Number(selectedProperty.id),
+        {
+          type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+          prevReading: unit.prevReading, newReading: newVal, consumption,
+          unitPrice: consumption > 0 ? Math.round(fee / consumption) : 0,
+          amount: fee, meterImageUrl: unit.meterImageUrl,
+        },
+      );
+      setHistoryEntries(prev => [{
+        id: `he-${Date.now()}`, type: 'electricity',
+        propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
+        totalAmount: fee, roomCount: 1, sentAt: now,
+      }, ...prev]);
+      setElecStep('done');
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+    }
   };
 
   // ── Water helpers ──────────────────────────────────────────────────────────
   const initRoomWaterReadings = (propId: string) => {
-    const prop = MOCK_PROPERTIES.find(p => p.id === propId);
+    const prop = properties.find(p => p.id === propId);
     if (!prop) return;
     setRoomWaterReadings(prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
@@ -362,37 +492,50 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     return true;
   };
 
-  const sendWaterInvoices = () => {
+  const sendWaterInvoices = async () => {
     if (!waterBillData || !waterProperty) return;
     const now = new Date().toISOString().split('T')[0];
-    const newBills: SharedBill[] = roomWaterReadings.map(r => ({
-      id: `water-${r.roomId}-${Date.now()}`,
-      code: `HD-WATER-${r.roomCode}-T5`,
-      invoiceType: 'water' as const,
-      roomId: r.roomId, roomName: r.roomCode,
-      propertyId: waterProperty.id, propertyName: waterProperty.name,
-      tenantId: r.roomId, tenantName: r.tenantName, tenantPhone: '',
-      month: 5, year: 2026,
-      items: [{ label: `Nước (${r.consumption} m³ × ${fmt(waterBillData.pricePerM3)})`, amount: r.fee ?? 0 }],
-      totalAmount: r.fee ?? 0, lateFee: 0, grandTotal: r.fee ?? 0,
-      status: 'pending' as BillStatus,
-      dueDate: '2026-05-25', createdAt: now,
-      m3Used: r.consumption, waterRate: waterBillData.pricePerM3,
-      billingPeriod: waterBillData.billingPeriod,
-    }));
-    billsStore.addBills(newBills);
-    const totalSent = newBills.reduce((s, b) => s + b.grandTotal, 0);
-    setHistoryEntries(prev => [{
-      id: `hw-${Date.now()}`, type: 'water',
-      propertyName: waterProperty.name, billingPeriod: waterBillData.billingPeriod,
-      totalAmount: totalSent, roomCount: newBills.length, sentAt: now,
-    }, ...prev]);
-    setWaterStep('done');
+    const period = waterBillData.billingPeriod;
+    const price  = waterBillData.pricePerM3;
+    try {
+      if (waterProperty.type === 'whole_house') {
+        const r = roomWaterReadings[0];
+        await realManagerInvoiceService.createPropertyUtilityInvoice(
+          Number(waterProperty.id),
+          {
+            type: 'WATER', billingPeriod: period,
+            prevReading: r.prevReading, newReading: Number(r.newReading),
+            consumption: r.consumption ?? 0, unitPrice: price, amount: r.fee ?? 0,
+          },
+        );
+      } else {
+        await Promise.all(roomWaterReadings.map(r =>
+          realManagerInvoiceService.createRoomUtilityInvoice(
+            Number(waterProperty.id), Number(r.roomId),
+            {
+              type: 'WATER', billingPeriod: period,
+              prevReading: r.prevReading, newReading: Number(r.newReading),
+              consumption: r.consumption ?? 0, unitPrice: price, amount: r.fee ?? 0,
+            },
+          ),
+        ));
+      }
+      const totalSent = roomWaterReadings.reduce((s, r) => s + (r.fee ?? 0), 0);
+      setHistoryEntries(prev => [{
+        id: `hw-${Date.now()}`, type: 'water',
+        propertyName: waterProperty.name, billingPeriod: period,
+        totalAmount: totalSent, roomCount: roomWaterReadings.length, sentAt: now,
+      }, ...prev]);
+      setWaterStep('done');
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
+    }
   };
 
   const resetElec = () => {
     setSelectedPropertyId(null); setEvnData(null);
     setElecStep('select_property'); setRoomElecReadings([]); setEditingEvn(false);
+    setEvnImageUrl(''); setEvnScanning(false);
   };
 
   const resetWater = () => {
@@ -439,35 +582,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           <View>
             <SectionHeader title="Bước 1: Chọn tòa nhà / căn hộ" />
 
-            <Text style={styles.groupLabel}>🏢 Nhà nhiều phòng</Text>
-            {MOCK_PROPERTIES.filter(p => p.type === 'multi_room').map(prop => (
-              <TouchableOpacity
-                key={prop.id}
-                style={[styles.propertyRow, selectedPropertyId === prop.id && styles.propertyRowActive]}
-                onPress={() => setSelectedPropertyId(prop.id)}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.propertyName}>{prop.name}</Text>
-                  <Text style={styles.propertyMeta}>{prop.rooms.length} phòng · {prop.rooms.map(r => r.code).join(', ')}</Text>
-                </View>
-                {selectedPropertyId === prop.id && <Text style={styles.checkMark}>✓</Text>}
-              </TouchableOpacity>
-            ))}
-
-            <Text style={[styles.groupLabel, { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>
-            {MOCK_PROPERTIES.filter(p => p.type === 'whole_house').map(prop => (
-              <TouchableOpacity
-                key={prop.id}
-                style={[styles.propertyRow, selectedPropertyId === prop.id && styles.propertyRowActive]}
-                onPress={() => setSelectedPropertyId(prop.id)}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.propertyName}>{prop.name}</Text>
-                  <Text style={styles.propertyMeta}>Nguyên căn · {prop.rooms[0].tenantName}</Text>
-                </View>
-                {selectedPropertyId === prop.id && <Text style={styles.checkMark}>✓</Text>}
-              </TouchableOpacity>
-            ))}
+            <PropertyPicker
+              properties={properties}
+              loading={loadingProps}
+              error={errorProps}
+              selectedId={selectedPropertyId}
+              onSelect={setSelectedPropertyId}
+              onRetry={() => { setLoadingProps(true); loadProperties(); }}
+              showRoomCodes
+            />
 
             {selectedPropertyId && (
               <TouchableOpacity
@@ -496,11 +619,24 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               <Text style={styles.cardDesc}>
                 Tải ảnh hoặc chụp hóa đơn điện chính thức từ EVN. Hệ thống sẽ tự động nhận diện tổng kWh, tổng tiền và kỳ thanh toán.
               </Text>
-              <TouchableOpacity style={styles.uploadBtn} onPress={simulateEVNScan}>
+              <TouchableOpacity
+                style={styles.uploadBtn}
+                onPress={() => chooseImageSource(scanEvnInvoice)}
+                disabled={evnScanning}
+              >
                 <Text style={styles.uploadBtnIcon}>📄</Text>
                 <Text style={styles.uploadBtnText}>Tải ảnh / Chụp hóa đơn EVN</Text>
                 <Text style={styles.uploadBtnSub}>Tự nhận diện kWh · số tiền · kỳ thanh toán</Text>
               </TouchableOpacity>
+
+              {evnScanning && (
+                <View style={styles.scanningRow}>
+                  <ActivityIndicator color={Colors.primary} />
+                  <Text style={styles.scanningText}>Đang tải & đọc hóa đơn...</Text>
+                </View>
+              )}
+
+              {!!evnImageUrl && <Image source={{ uri: evnImageUrl }} style={styles.evnThumb} resizeMode="contain" />}
 
               {evnData && !editingEvn && (
                 <View style={styles.evnResult}>
@@ -586,8 +722,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                           value={r.newReading}
                           onChangeText={t => setRoomElecReadings(prev => [{ ...prev[0], newReading: t }])}
                         />
-                        <TouchableOpacity style={styles.ocrBtn} onPress={() => simulateRoomOCR(r.roomId)}>
-                          <Text style={styles.ocrBtnText}>📷 OCR</Text>
+                        <TouchableOpacity
+                          style={styles.ocrBtn}
+                          onPress={() => chooseImageSource(cam => captureRoomMeter(r.roomId, cam))}
+                          disabled={ocrRoomId === r.roomId}
+                        >
+                          {ocrRoomId === r.roomId
+                            ? <ActivityIndicator color={Colors.primary} />
+                            : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
                         </TouchableOpacity>
                       </View>
                       {r.newReading && Number(r.newReading) > r.prevReading && (
@@ -672,8 +814,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                               prev.map((x, i) => i === idx ? { ...x, newReading: t } : x)
                             )}
                           />
-                          <TouchableOpacity style={styles.ocrBtn} onPress={() => simulateRoomOCR(r.roomId)}>
-                            <Text style={styles.ocrBtnText}>📷 OCR</Text>
+                          <TouchableOpacity
+                            style={styles.ocrBtn}
+                            onPress={() => chooseImageSource(cam => captureRoomMeter(r.roomId, cam))}
+                            disabled={ocrRoomId === r.roomId}
+                          >
+                            {ocrRoomId === r.roomId
+                              ? <ActivityIndicator color={Colors.primary} />
+                              : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
                           </TouchableOpacity>
                         </View>
                         {r.newReading && Number(r.newReading) > r.prevReading && (
@@ -751,30 +899,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 onChangeText={t => setWaterBillForm(f => ({ ...f, billingPeriod: t }))} />
 
               <SectionHeader title="Chọn tòa nhà" />
-              <Text style={styles.groupLabel}>🏢 Nhà nhiều phòng</Text>
-              {MOCK_PROPERTIES.filter(p => p.type === 'multi_room').map(prop => (
-                <TouchableOpacity key={prop.id}
-                  style={[styles.propertyRow, waterPropertyId === prop.id && styles.propertyRowActive]}
-                  onPress={() => setWaterPropertyId(prop.id)}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.propertyName}>{prop.name}</Text>
-                    <Text style={styles.propertyMeta}>{prop.rooms.length} phòng</Text>
-                  </View>
-                  {waterPropertyId === prop.id && <Text style={styles.checkMark}>✓</Text>}
-                </TouchableOpacity>
-              ))}
-              <Text style={[styles.groupLabel, { marginTop: Spacing.sm }]}>🏠 Nhà nguyên căn</Text>
-              {MOCK_PROPERTIES.filter(p => p.type === 'whole_house').map(prop => (
-                <TouchableOpacity key={prop.id}
-                  style={[styles.propertyRow, waterPropertyId === prop.id && styles.propertyRowActive]}
-                  onPress={() => setWaterPropertyId(prop.id)}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.propertyName}>{prop.name}</Text>
-                    <Text style={styles.propertyMeta}>Nguyên căn · {prop.rooms[0].tenantName}</Text>
-                  </View>
-                  {waterPropertyId === prop.id && <Text style={styles.checkMark}>✓</Text>}
-                </TouchableOpacity>
-              ))}
+              <PropertyPicker
+                properties={properties}
+                loading={loadingProps}
+                error={errorProps}
+                selectedId={waterPropertyId}
+                onSelect={setWaterPropertyId}
+                onRetry={() => { setLoadingProps(true); loadProperties(); }}
+              />
 
               {waterPropertyId && (
                 <TouchableOpacity style={[styles.primaryBtn, { marginTop: Spacing.md }]} onPress={handleWaterBillSubmit}>
@@ -947,6 +1079,79 @@ const EVNDataRow: React.FC<{ label: string; value: string; highlight?: boolean }
   </View>
 );
 
+// Bộ chọn nhà (nhiều phòng / nguyên căn) + xử lý loading / lỗi / rỗng — dùng chung 2 tab.
+const PropertyPicker: React.FC<{
+  properties: BillingProperty[];
+  loading: boolean;
+  error: string | null;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onRetry: () => void;
+  showRoomCodes?: boolean;
+}> = ({ properties, loading, error, selectedId, onSelect, onRetry, showRoomCodes }) => {
+  if (loading) {
+    return (
+      <View style={styles.pickerState}>
+        <ActivityIndicator color={Colors.primary} />
+        <Text style={styles.pickerStateText}>Đang tải danh sách...</Text>
+      </View>
+    );
+  }
+  if (error) {
+    return (
+      <View style={styles.pickerState}>
+        <Text style={styles.pickerStateEmoji}>⚠️</Text>
+        <Text style={styles.pickerStateText}>{error}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={onRetry}>
+          <Text style={styles.retryBtnText}>Thử lại</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (properties.length === 0) {
+    return (
+      <View style={styles.pickerState}>
+        <Text style={styles.pickerStateEmoji}>🏢</Text>
+        <Text style={styles.pickerStateText}>Chưa có tòa nhà được giao</Text>
+      </View>
+    );
+  }
+
+  const multi = properties.filter(p => p.type === 'multi_room');
+  const whole = properties.filter(p => p.type === 'whole_house');
+  const row = (prop: BillingProperty, meta: string) => (
+    <TouchableOpacity
+      key={prop.id}
+      style={[styles.propertyRow, selectedId === prop.id && styles.propertyRowActive]}
+      onPress={() => onSelect(prop.id)}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={styles.propertyName}>{prop.name}</Text>
+        <Text style={styles.propertyMeta}>{meta}</Text>
+      </View>
+      {selectedId === prop.id && <Text style={styles.checkMark}>✓</Text>}
+    </TouchableOpacity>
+  );
+
+  return (
+    <>
+      {multi.length > 0 && <Text style={styles.groupLabel}>🏢 Nhà nhiều phòng</Text>}
+      {multi.map(prop =>
+        row(
+          prop,
+          showRoomCodes && prop.rooms.length > 0
+            ? `${prop.rooms.length} phòng · ${prop.rooms.map(r => r.code).join(', ')}`
+            : `${prop.rooms.length} phòng`,
+        ),
+      )}
+      {whole.length > 0 && (
+        <Text style={[styles.groupLabel, { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>
+      )}
+      {whole.map(prop => row(prop, `Nguyên căn · ${prop.rooms[0]?.tenantName ?? ''}`))}
+    </>
+  );
+};
+
 // ===================== STYLES =====================
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
@@ -984,6 +1189,9 @@ const styles = StyleSheet.create({
   uploadBtnIcon: { fontSize: 32, marginBottom: Spacing.xs },
   uploadBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary, textAlign: 'center' },
   uploadBtnSub:  { fontSize: 12, color: Colors.textMuted, textAlign: 'center', marginTop: 4 },
+  scanningRow:   { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },
+  scanningText:  { fontSize: 13, color: Colors.primary, fontWeight: '600' },
+  evnThumb:      { width: '100%', height: 200, borderRadius: BorderRadius.md, marginBottom: Spacing.md, backgroundColor: Colors.background },
 
   evnResult: {
     backgroundColor: '#F0FDF4', borderRadius: BorderRadius.md,
@@ -1008,6 +1216,13 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
   },
   propertyRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+
+  pickerState:      { alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.sm },
+  pickerStateEmoji: { fontSize: 32 },
+  pickerStateText:  { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  retryBtn:         { marginTop: Spacing.xs, backgroundColor: Colors.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  retryBtnText:     { color: Colors.white, fontWeight: '800', fontSize: 13 },
+
   propertyName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   propertyMeta: { fontSize: 12, color: Colors.textMuted, marginRight: Spacing.sm },
   checkMark:    { fontSize: 16, color: Colors.primary, fontWeight: '900' },

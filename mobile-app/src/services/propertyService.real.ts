@@ -48,4 +48,14 @@ export const realPropertyService = {
     const { data } = await realApiClient.get<ApiRoom[]>(`/api/v1/properties/${propertyId}/rooms`);
     return data ?? [];
   },
+
+  // Cập nhật trạng thái vận hành 1 phòng (manager).
+  // status: DRAFT | AVAILABLE | RENTED | MAINTENANCE — khớp enum RoomStatus của BE.
+  updateRoomStatus: async (propertyId: number, roomId: number, status: string): Promise<ApiRoom> => {
+    const { data } = await realApiClient.patch<ApiRoom>(
+      `/api/v1/properties/${propertyId}/rooms/${roomId}/status`,
+      { status },
+    );
+    return data;
+  },
 };

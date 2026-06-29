@@ -17,7 +17,7 @@ const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
 
 const QUICK_ACTIONS = [
   { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingInvoice', color: '#F59E0B' },
-  { emoji: '⚡', label: 'Chốt số', desc: 'Điện nước', route: 'BuildingUtility', color: Colors.accent },
+  { emoji: '⚡', label: 'Chốt số', desc: 'Điện nước', route: 'UtilityBilling', color: Colors.accent },
   { emoji: '🔧', label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
   { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'BuildingRoom', color: Colors.success },
   { emoji: '📋', label: 'Hợp đồng', desc: 'HĐ thuê', route: 'BuildingContract', color: Colors.info },
@@ -76,7 +76,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     ops.utility.filter(u => u.status === 'missing').forEach(u => urgent.push({
       key: `ut-${u.id}`, icon: '⚡', color: '#3B82F6',
       title: `Thiếu chỉ số · ${u.room}`, meta: `Chốt gần nhất ${u.lastReadingDate}`,
-      route: 'BuildingUtility',
+      route: 'UtilityBilling',
     }));
 
     ops.contracts.filter(c => c.status === 'expiring' || c.status === 'expiring_soon').forEach(c => upcoming.push({

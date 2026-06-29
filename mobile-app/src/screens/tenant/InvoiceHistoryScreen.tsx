@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { formatCurrency, formatDate } from '../../utils';
-import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
+import { SharedBill, InvoiceType } from '../../store/billsStore';
+import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
@@ -14,7 +15,15 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
 
 export const InvoiceHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const invoices = useBills('Nguyễn Văn A');
+  const [invoices, setInvoices] = useState<SharedBill[]>([]);
+  const [loading, setLoading] = useState(true);
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    realTenantBillingService.listInvoices({ status: 'PAID' })
+      .then(r => setInvoices(r.map(toSharedBill)))
+      .catch(() => setInvoices([]))
+      .finally(() => setLoading(false));
+  }, []));
   const paidInvoices = invoices.filter(i => i.status === 'paid');
 
   const renderItem = ({ item }: { item: SharedBill }) => {
@@ -91,11 +100,17 @@ export const InvoiceHistoryScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>📋</Text>
-            <Text style={styles.emptyTitle}>Chưa có hóa đơn nào</Text>
-            <Text style={styles.emptyDesc}>Các hóa đơn đã thanh toán sẽ hiển thị ở đây.</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>📋</Text>
+              <Text style={styles.emptyTitle}>Chưa có hóa đơn nào</Text>
+              <Text style={styles.emptyDesc}>Các hóa đơn đã thanh toán sẽ hiển thị ở đây.</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>

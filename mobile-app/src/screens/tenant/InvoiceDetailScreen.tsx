@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, Image, ActivityIndicator,
+  Modal, Image, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { SharedBill, BillStatus, InvoiceType, billsStore } from '../../store/billsStore';
+import { SharedBill, BillStatus, InvoiceType } from '../../store/billsStore';
+import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
 
 // ── VietQR ──────────────────────────────────────────────────
 const VIETQR_BANK_BIN  = '970422';
@@ -85,15 +86,11 @@ export const InvoiceDetailScreen: React.FC = () => {
   const handleConfirmPaid = () => {
     if (processing) return;
     setProcessing(true);
-    setTimeout(() => {
-      billsStore.updateStatus(invoice.id, 'paid', {
-        paidAt: new Date().toISOString().slice(0, 10),
-        paymentMethod: 'qr',
-      });
-      setInvoice(prev => ({ ...prev, status: 'paid', paidAt: new Date().toISOString().slice(0, 10), paymentMethod: 'qr' }));
-      setProcessing(false);
-      setPaying(false);
-    }, 3000);
+    // Nhờ BE đồng bộ trạng thái thanh toán hoá đơn này.
+    realTenantBillingService.checkInvoicePayment(invoice.id)
+      .then(updated => { setInvoice(toSharedBill(updated)); setPaying(false); })
+      .catch(() => Alert.alert('Đang xử lý', 'Hệ thống sẽ tự xác nhận sau khi nhận được giao dịch.'))
+      .finally(() => setProcessing(false));
   };
 
   return (

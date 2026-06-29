@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Building2, UserPlus, User, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '../../services/property.service';
-import { tenantService } from '../../services/tenant.service';
-import type { PropertyResponse, RoomResponse, TenantContractResponse, ContractStatus } from '../../types/api.types';
+import { hostService, type HostContractDto } from '../../services/host.service';
+import type { PropertyResponse, RoomResponse, ContractStatus } from '../../types/api.types';
 import { TenantFormModal } from './TenantFormModal';
 
 const statusMap: Record<ContractStatus, { label: string; color: string; dot: string }> = {
@@ -16,7 +16,10 @@ const statusMap: Record<ContractStatus, { label: string; color: string; dot: str
 export const TenantList = () => {
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
+  // Host xem hợp đồng qua endpoint host (/api/v1/host/contracts). Endpoint manager
+  // /properties/{id}/tenant-contracts chỉ cho MANAGER/ADMIN -> host (OWNER) bị 403.
+  // (Xem doc/BE-FIXES-host-web-2026-06-29.md — chờ BE thêm propertyId + SĐT/CCCD/cọc/ngày vào ở.)
+  const [contracts, setContracts] = useState<HostContractDto[]>([]);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,37 +38,48 @@ export const TenantList = () => {
       .catch(() => toast.error('Không tải được danh sách bất động sản'));
   }, []);
 
-  // Load hợp đồng + phòng theo property đang chọn
-  const loadData = useCallback((propertyId: number) => {
+  // Toàn bộ hợp đồng của host (endpoint host trả tất cả, lọc theo BĐS ở client)
+  const loadContracts = useCallback(() => {
     setLoading(true);
-    Promise.all([
-      tenantService.listByProperty(propertyId),
-      propertyService.getRooms(propertyId).catch(() => [] as RoomResponse[]),
-    ])
-      .then(([c, r]) => {
-        setContracts(c);
-        setRooms(r);
-      })
+    hostService
+      .listContracts({ size: 500 })
+      .then((page) => setContracts(page.content))
       .catch(() => toast.error('Không tải được dữ liệu hợp đồng'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    if (selectedId != null) loadData(selectedId);
-  }, [selectedId, loadData]);
+    loadContracts();
+  }, [loadContracts]);
+
+  // Phòng của BĐS đang chọn (cho modal "Thêm khách thuê")
+  useEffect(() => {
+    if (selectedId == null) {
+      setRooms([]);
+      return;
+    }
+    propertyService
+      .getRooms(selectedId)
+      .then(setRooms)
+      .catch(() => setRooms([]));
+  }, [selectedId]);
 
   // Phòng còn trống để gán khách
   const availableRooms = rooms.filter((r) => r.status === 'AVAILABLE');
 
-  const filtered = contracts.filter(
+  // Endpoint host chưa có propertyId -> lọc theo tên BĐS đang chọn.
+  const propContracts = selectedProperty
+    ? contracts.filter((c) => c.propertyName === selectedProperty.propertyName)
+    : contracts;
+
+  const filtered = propContracts.filter(
     (c) =>
-      c.tenantFullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.tenantPhone.includes(searchTerm) ||
-      (c.tenantCccd ?? '').includes(searchTerm) ||
-      c.contractCode.toLowerCase().includes(searchTerm.toLowerCase()),
+      c.lesseeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.roomCode ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.code.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  const activeCount = contracts.filter((c) => c.status === 'ACTIVE').length;
+  const activeCount = propContracts.filter((c) => c.status === 'ACTIVE').length;
 
   return (
     <div className="space-y-6">
@@ -75,7 +89,7 @@ export const TenantList = () => {
           <h1 className="text-2xl font-bold text-slate-900">Khách thuê & Hợp đồng</h1>
           <p className="text-sm text-slate-500 mt-1">
             {selectedProperty
-              ? `${contracts.length} hợp đồng · ${activeCount} đang hiệu lực`
+              ? `${propContracts.length} hợp đồng · ${activeCount} đang hiệu lực`
               : 'Chọn bất động sản để xem khách thuê'}
           </p>
         </div>
@@ -110,7 +124,7 @@ export const TenantList = () => {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
           <input
             type="text"
-            placeholder="Tìm theo tên, SĐT, mã HĐ..."
+            placeholder="Tìm theo tên, phòng, mã HĐ..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="input-field pl-10 bg-white"
@@ -136,11 +150,9 @@ export const TenantList = () => {
                 <tr>
                   <th className="px-4 py-3">Mã HĐ</th>
                   <th className="px-4 py-3">Khách thuê</th>
-                  <th className="px-4 py-3">SĐT</th>
                   <th className="px-4 py-3">Phòng</th>
                   <th className="px-4 py-3">Giá thuê</th>
-                  <th className="px-4 py-3">Cọc</th>
-                  <th className="px-4 py-3">Vào ở</th>
+                  <th className="px-4 py-3">Bắt đầu</th>
                   <th className="px-4 py-3">Trạng thái</th>
                 </tr>
               </thead>
@@ -149,13 +161,11 @@ export const TenantList = () => {
                   const st = statusMap[c.status];
                   return (
                     <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.contractCode}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{c.tenantFullName}</td>
-                      <td className="px-4 py-3">{c.tenantPhone}</td>
-                      <td className="px-4 py-3">{c.roomNumber ?? 'Nguyên căn'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.code}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-900">{c.lesseeName}</td>
+                      <td className="px-4 py-3">{c.roomCode ?? 'Nguyên căn'}</td>
                       <td className="px-4 py-3 text-primary-600 font-medium">{c.rentAmount.toLocaleString('vi-VN')}đ</td>
-                      <td className="px-4 py-3">{c.deposit.toLocaleString('vi-VN')}đ</td>
-                      <td className="px-4 py-3 text-slate-500">{c.moveInDate}</td>
+                      <td className="px-4 py-3 text-slate-500">{c.startDate}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${st.color}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
@@ -177,7 +187,7 @@ export const TenantList = () => {
           propertyName={selectedProperty.propertyName}
           wholeHouse={selectedProperty.wholeHouse === true}
           rooms={availableRooms}
-          onSuccess={() => loadData(selectedProperty.id)}
+          onSuccess={() => loadContracts()}
           onClose={() => setShowModal(false)}
         />
       )}

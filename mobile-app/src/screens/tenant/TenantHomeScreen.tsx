@@ -5,35 +5,15 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { useAuth } from '../../hooks';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { useBills, SharedBill, InvoiceType } from '../../store/billsStore';
+import { SharedBill, InvoiceType } from '../../store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
+import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
 import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
-
-// ── Mock data ──────────────────────────────────────────────
-const BUILDING_INFO = {
-  name: 'Nhà Nguyễn Trãi',
-  address: '123 Nguyễn Trãi, Quận 5, TP.HCM',
-  totalFloors: 3,
-  totalRooms: 8,
-  electricityRate: 3500,    // đ/kWh — do host cài đặt
-  waterRate: 15000,         // đ/m³  — do host cài đặt
-  serviceCharge: 100000,    // đ/tháng — do host cài đặt
-  hostName: 'Nguyễn Văn Host',
-  hostPhone: '0901000001',
-};
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-};
-
-const DASHBOARD_DATA = {
-  room: { name: 'Phòng 201', property: BUILDING_INFO.name, floor: 2, area: 25 },
-  contract: { code: 'HD-MT-2025-001', endDate: '2026-12-31', daysLeft: getDaysUntil('2026-12-31') },
-  depositAmount: 7000000,
-  maintenance: { pending: 1, inProgress: 1 },
-  unreadNotifications: 3,
 };
 
 const QUICK_ACTIONS = [
@@ -53,19 +33,26 @@ export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const [actionsExpanded, setActionsExpanded] = useState(false);
-  const allBills = useBills('Nguyễn Văn A');
-  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → fallback mock)
+  const realUnread = useUnreadNotifications();   // badge chuông từ BE
 
-  // ── Dashboard thật (GET /tenant/me/dashboard) ──
+  // ── Dashboard + hoá đơn thật của tenant ──
   const [dash, setDash] = useState<TenantDashboard | null>(null);
+  const [allBills, setAllBills] = useState<SharedBill[]>([]);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      realTenantSelfService.getDashboard()
-        .then(d => { if (active) setDash(d); })
-        .catch(() => { if (active) setDash(null); })
+      setLoading(true);
+      Promise.all([
+        realTenantSelfService.getDashboard().catch(() => null),
+        realTenantBillingService.listInvoices().then(r => r.map(toSharedBill)).catch(() => [] as SharedBill[]),
+      ])
+        .then(([d, bills]) => {
+          if (!active) return;
+          setDash(d);
+          setAllBills(bills);
+        })
         .finally(() => { if (active) setLoading(false); });
       return () => { active = false; };
     }, []),
@@ -83,30 +70,30 @@ export const TenantHomeScreen: React.FC = () => {
   // Map dữ liệu API -> shape UI (fallback mock khi chưa tải xong / chưa có data)
   const b = dash?.building;
   const buildingInfo = {
-    name: b?.name ?? BUILDING_INFO.name,
-    address: b?.address ?? BUILDING_INFO.address,
-    totalFloors: b?.totalFloors ?? BUILDING_INFO.totalFloors,
-    electricityRate: b?.electricityRate ?? BUILDING_INFO.electricityRate,
-    waterRate: b?.waterRate ?? BUILDING_INFO.waterRate,
-    serviceCharge: b?.serviceCharge ?? BUILDING_INFO.serviceCharge,
-    hostName: b?.hostName ?? BUILDING_INFO.hostName,
-    hostPhone: b?.hostPhone ?? BUILDING_INFO.hostPhone,
+    name: b?.name ?? '',
+    address: b?.address ?? '',
+    totalFloors: b?.totalFloors ?? 0,
+    electricityRate: b?.electricityRate ?? 0,
+    waterRate: b?.waterRate ?? 0,
+    serviceCharge: b?.serviceCharge ?? 0,
+    hostName: b?.hostName ?? '—',
+    hostPhone: b?.hostPhone ?? '',
   };
   const data = {
     room: {
       // Toàn nhà: hiển thị tên tòa nhà; Theo phòng: hiển thị "Phòng {số}"
       name: isWholeHouse
-        ? (b?.name ?? DASHBOARD_DATA.room.property)
-        : (dash?.room?.roomNumber ? `Phòng ${dash.room.roomNumber}` : DASHBOARD_DATA.room.name),
-      property: b?.name ?? DASHBOARD_DATA.room.property,
-      floor: dash?.room?.floor ?? DASHBOARD_DATA.room.floor,
-      area: dash?.room?.area ?? DASHBOARD_DATA.room.area,
+        ? (b?.name ?? 'Nhà của bạn')
+        : (dash?.room?.roomNumber ? `Phòng ${dash.room.roomNumber}` : 'Phòng của bạn'),
+      property: b?.name ?? '',
+      floor: dash?.room?.floor ?? 0,
+      area: dash?.room?.area ?? 0,
     },
     contract: {
-      code: dash?.contract?.code ?? DASHBOARD_DATA.contract.code,
-      daysLeft: dash?.contract?.daysLeft ?? DASHBOARD_DATA.contract.daysLeft,
+      code: dash?.contract?.code ?? '',
+      daysLeft: dash?.contract?.daysLeft ?? 0,
     },
-    depositAmount: dash?.room?.depositAmount ?? DASHBOARD_DATA.depositAmount,
+    depositAmount: dash?.room?.depositAmount ?? 0,
     maintenance: {
       pending: dash?.summary?.maintenancePending ?? 0,
       inProgress: dash?.summary?.maintenanceInProgress ?? 0,

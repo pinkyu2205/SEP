@@ -54,9 +54,15 @@ export const REAL_BASE_URL = resolveRealBaseUrl();
 export const API_CONFIG = {
   // Backend mock/legacy (giữ nguyên để tương thích code cũ).
   BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api',
-  // Backend Spring thật: ưu tiên env, nếu không có thì dùng URL tự suy theo nền tảng
-  // (đã tự dò IP LAN cho thiết bị thật — xem resolveRealBaseUrl ở trên).
-  REAL_BASE_URL: process.env.EXPO_PUBLIC_REAL_API_BASE_URL ?? REAL_BASE_URL,
+  // Backend Spring thật.
+  // - WEB: LUÔN dùng '' (đi qua dev proxy của Metro → tránh CORS), BỎ QUA env. Nếu để env
+  //   trỏ thẳng http://localhost:8080 thì web gọi khác origin → dính CORS → login fail.
+  // - NATIVE (Expo Go / thiết bị thật / build): ưu tiên env (LAN IP / domain thật),
+  //   không có thì tự suy theo nền tảng (xem resolveRealBaseUrl ở trên).
+  REAL_BASE_URL:
+    Platform.OS === 'web'
+      ? REAL_BASE_URL
+      : (process.env.EXPO_PUBLIC_REAL_API_BASE_URL ?? REAL_BASE_URL),
   // Backend public (không cần auth).
   PUBLIC_BASE_URL:
     process.env.EXPO_PUBLIC_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/public',

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, Modal,
-  Image, ScrollView, ActivityIndicator,
+  Image, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { useBills, billsStore, SharedBill, BillStatus, InvoiceType } from '../../store/billsStore';
+import { SharedBill, BillStatus, InvoiceType } from '../../store/billsStore';
+import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
 
 type Invoice = SharedBill;
 type InvoiceStatus = BillStatus;
@@ -52,11 +53,21 @@ const STATUS_FILTER_TABS: { key: StatusFilter; label: string }[] = [
 
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const invoices = useBills('Nguyễn Văn A');
+  const [invoices, setInvoices] = useState<SharedBill[]>([]);
+  const [loading, setLoading]   = useState(true);
   const [typeFilter, setTypeFilter]     = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('unpaid');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [isProcessing, setIsProcessing]   = useState(false);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    realTenantBillingService.listInvoices()
+      .then(r => setInvoices(r.map(toSharedBill)))
+      .catch(() => setInvoices([]))
+      .finally(() => setLoading(false));
+  }, []);
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
   const filtered = invoices.filter(i => {
     if (typeFilter !== 'all' && i.invoiceType !== typeFilter) return false;
@@ -82,14 +93,11 @@ export const InvoiceListScreen: React.FC = () => {
   const handleConfirmPaid = () => {
     if (!payingInvoice || isProcessing) return;
     setIsProcessing(true);
-    setTimeout(() => {
-      billsStore.updateStatus(payingInvoice.id, 'paid', {
-        paidAt: new Date().toISOString().slice(0, 10),
-        paymentMethod: 'qr',
-      });
-      setIsProcessing(false);
-      setPayingInvoice(null);
-    }, 3000);
+    // Nhờ BE đồng bộ trạng thái thanh toán cho hoá đơn rồi tải lại danh sách.
+    realTenantBillingService.checkInvoicePayment(payingInvoice.id)
+      .then(() => { reload(); setPayingInvoice(null); })
+      .catch(() => Alert.alert('Đang xử lý', 'Hệ thống sẽ tự xác nhận sau khi nhận được giao dịch.'))
+      .finally(() => setIsProcessing(false));
   };
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
@@ -273,19 +281,26 @@ export const InvoiceListScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>
-              {statusFilter === 'paid' ? '✅' : '📄'}
-            </Text>
-            <Text style={styles.emptyTitle}>Không có hóa đơn</Text>
-            <Text style={styles.emptyDesc}>
-              {statusFilter === 'paid'
-                ? 'Chưa có hóa đơn nào đã thanh toán.'
-                : statusFilter === 'unpaid'
-                  ? 'Tất cả hóa đơn đã được thanh toán.'
-                  : 'Không có hóa đơn nào phù hợp với bộ lọc này.'}
-            </Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={[styles.emptyDesc, { marginTop: Spacing.md }]}>Đang tải hóa đơn...</Text>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>
+                {statusFilter === 'paid' ? '✅' : '📄'}
+              </Text>
+              <Text style={styles.emptyTitle}>Không có hóa đơn</Text>
+              <Text style={styles.emptyDesc}>
+                {statusFilter === 'paid'
+                  ? 'Chưa có hóa đơn nào đã thanh toán.'
+                  : statusFilter === 'unpaid'
+                    ? 'Tất cả hóa đơn đã được thanh toán.'
+                    : 'Không có hóa đơn nào phù hợp với bộ lọc này.'}
+              </Text>
+            </View>
+          )
         }
       />
 

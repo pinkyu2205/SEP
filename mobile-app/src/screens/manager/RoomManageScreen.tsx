@@ -1,35 +1,19 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import {
+  roomOperationService, OpStatus, OpRoom, OpProperty,
+} from '../../services/roomOperationService';
 
 // ======================== TYPES ========================
-type OpStatus = 'available' | 'occupied' | 'maintenance' | 'disabled';
 type ActionView = 'menu' | 'status' | 'detail';
-
-interface Room {
-  id: string;
-  code: string;
-  floor: number;
-  area: number;
-  maxOccupants: number;
-  rentPrice: number;
-  deposit: number;
-  electricityRate: number;
-  waterRate: number;
-  status: OpStatus;
-  tenantName?: string;
-  tenantPhone?: string;
-}
-
-interface Property {
-  id: string;
-  name: string;
-  address: string;
-  totalFloors: number;
-}
+type Room = OpRoom;
+type Property = OpProperty;
 
 // ======================== CONFIG ========================
 const STATUS_META: Record<OpStatus, { label: string; color: string; bg: string; dot: string }> = {
@@ -56,31 +40,6 @@ const VALID_TRANSITIONS: Record<OpStatus, { status: OpStatus; desc: string }[]> 
   ],
   disabled:    [
     { status: 'available',   desc: 'Kích hoạt lại — phòng sẵn sàng cho thuê' },
-  ],
-};
-
-// ======================== MOCK DATA ========================
-const PROPERTIES: Property[] = [
-  { id: 'p1', name: 'Nhà Nguyễn Trãi',         address: '123 Nguyễn Trãi, Q.5',  totalFloors: 3 },
-  { id: 'p2', name: 'Nhà Cách Mạng Tháng 8',   address: '789 CMT8, Q.10',         totalFloors: 2 },
-];
-
-const INITIAL_ROOMS: Record<string, Room[]> = {
-  p1: [
-    { id: 'r1-101', code: 'P101', floor: 1, area: 20, maxOccupants: 2, rentPrice: 3500000, deposit: 7000000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Trần Văn A',   tenantPhone: '0901 234 567' },
-    { id: 'r1-102', code: 'P102', floor: 1, area: 18, maxOccupants: 2, rentPrice: 3200000, deposit: 6400000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Lê Thị B',    tenantPhone: '0902 345 678' },
-    { id: 'r1-103', code: 'P103', floor: 1, area: 18, maxOccupants: 2, rentPrice: 3300000, deposit: 6600000, electricityRate: 3500, waterRate: 15000, status: 'available' },
-    { id: 'r1-201', code: 'P201', floor: 2, area: 22, maxOccupants: 3, rentPrice: 3800000, deposit: 7600000, electricityRate: 3500, waterRate: 15000, status: 'maintenance' },
-    { id: 'r1-202', code: 'P202', floor: 2, area: 20, maxOccupants: 2, rentPrice: 3600000, deposit: 7200000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Phạm Văn C',  tenantPhone: '0903 456 789' },
-    { id: 'r1-301', code: 'P301', floor: 3, area: 20, maxOccupants: 2, rentPrice: 3500000, deposit: 7000000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Ngô Thị D',   tenantPhone: '0904 567 890' },
-    { id: 'r1-302', code: 'P302', floor: 3, area: 20, maxOccupants: 2, rentPrice: 3500000, deposit: 7000000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Vũ Thị E',    tenantPhone: '0905 678 901' },
-    { id: 'r1-303', code: 'P303', floor: 3, area: 19, maxOccupants: 2, rentPrice: 3400000, deposit: 6800000, electricityRate: 3500, waterRate: 15000, status: 'disabled' },
-  ],
-  p2: [
-    { id: 'r2-101', code: 'P101', floor: 1, area: 25, maxOccupants: 3, rentPrice: 4000000, deposit: 8000000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Bùi Văn H',   tenantPhone: '0906 789 012' },
-    { id: 'r2-102', code: 'P102', floor: 1, area: 22, maxOccupants: 2, rentPrice: 3600000, deposit: 7200000, electricityRate: 3500, waterRate: 15000, status: 'available' },
-    { id: 'r2-201', code: 'P201', floor: 2, area: 23, maxOccupants: 3, rentPrice: 3800000, deposit: 7600000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Đỗ Thị K',    tenantPhone: '0907 890 123' },
-    { id: 'r2-202', code: 'P202', floor: 2, area: 22, maxOccupants: 2, rentPrice: 3700000, deposit: 7400000, electricityRate: 3500, waterRate: 15000, status: 'occupied',    tenantName: 'Hoàng Văn L', tenantPhone: '0908 901 234' },
   ],
 };
 
@@ -140,8 +99,12 @@ const RoomCard: React.FC<{ room: Room; onAction: () => void }> = ({ room, onActi
       <View style={[cardSt.priceRow, isDisabled && { opacity: 0.45 }]}>
         <Text style={cardSt.priceChip}>💰 {(room.rentPrice / 1000000).toFixed(1)}tr/th</Text>
         <Text style={cardSt.priceChip}>🔒 {(room.deposit / 1000000).toFixed(1)}tr cọc</Text>
-        <Text style={cardSt.priceChip}>⚡ {room.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
-        <Text style={cardSt.priceChip}>💧 {room.waterRate.toLocaleString('vi-VN')}đ/m³</Text>
+        {room.electricityRate ? (
+          <Text style={cardSt.priceChip}>⚡ {room.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
+        ) : null}
+        {room.waterRate ? (
+          <Text style={cardSt.priceChip}>💧 {room.waterRate.toLocaleString('vi-VN')}đ/m³</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -201,14 +164,58 @@ const actSt = StyleSheet.create({
 
 // ======================== MAIN SCREEN ========================
 export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
+  // Danh sách nhà (màn chọn nhà)
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [errorProps, setErrorProps] = useState<string | null>(null);
+  const [refreshingProps, setRefreshingProps] = useState(false);
+
+  // Phòng của nhà đang chọn
   const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
-  const [allRooms, setAllRooms] = useState(INITIAL_ROOMS);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loadingRooms, setLoadingRooms] = useState(false);
+  const [errorRooms, setErrorRooms] = useState<string | null>(null);
+  const [refreshingRooms, setRefreshingRooms] = useState(false);
+  const [updating, setUpdating] = useState(false);
+
   const [filter, setFilter] = useState<'all' | OpStatus>('all');
   const [actionRoom, setActionRoom] = useState<Room | null>(null);
   const [actionView, setActionView] = useState<ActionView>('menu');
 
-  const property = PROPERTIES.find(p => p.id === selectedPropId);
-  const rooms = selectedPropId ? (allRooms[selectedPropId] ?? []) : [];
+  const property = properties.find(p => p.id === selectedPropId);
+
+  const msgOf = (e: any, fallback: string) =>
+    e?.response?.data?.message || e?.message || fallback;
+
+  const loadProperties = useCallback(async () => {
+    try {
+      setErrorProps(null);
+      const data = await roomOperationService.getProperties();
+      setProperties(data);
+    } catch (e: any) {
+      setErrorProps(msgOf(e, 'Không tải được danh sách tòa nhà'));
+    } finally {
+      setLoadingProps(false);
+      setRefreshingProps(false);
+    }
+  }, []);
+
+  const loadRooms = useCallback(async (propId: string) => {
+    try {
+      setErrorRooms(null);
+      const data = await roomOperationService.getRooms(Number(propId));
+      setRooms(data);
+    } catch (e: any) {
+      setRooms([]);
+      setErrorRooms(msgOf(e, 'Không tải được danh sách phòng'));
+    } finally {
+      setLoadingRooms(false);
+      setRefreshingRooms(false);
+    }
+  }, []);
+
+  // Tải danh sách nhà mỗi khi màn được focus (vd quay lại sau khi onboard khách).
+  useFocusEffect(useCallback(() => { loadProperties(); }, [loadProperties]));
 
   const counts = useMemo(() => ({
     total:       rooms.length,
@@ -224,18 +231,40 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     [filtered],
   );
 
+  const selectProperty = (p: Property) => {
+    setSelectedPropId(p.id);
+    setFilter('all');
+    setRooms([]);
+    setLoadingRooms(true);
+    loadRooms(p.id);
+  };
+
+  // Quay về màn chọn nhà: cập nhật lại số liệu phòng của nhà vừa xem cho khớp.
+  const backToProperties = () => {
+    // Chỉ đồng bộ lại số liệu khi phòng đã tải xong (tránh ghi đè bằng 0 lúc đang tải/lỗi).
+    if (selectedPropId && !loadingRooms && !errorRooms) {
+      setProperties(prev => prev.map(p => p.id === selectedPropId ? { ...p, counts } : p));
+    }
+    setSelectedPropId(null);
+    setRooms([]);
+    setErrorRooms(null);
+  };
+
   const openAction = (room: Room) => { setActionRoom(room); setActionView('menu'); };
   const closeAction = () => { setActionRoom(null); setActionView('menu'); };
 
-  const applyStatus = (roomId: string, newStatus: OpStatus) => {
-    if (!selectedPropId) return;
-    setAllRooms(prev => ({
-      ...prev,
-      [selectedPropId]: prev[selectedPropId].map(r =>
-        r.id === roomId ? { ...r, status: newStatus } : r,
-      ),
-    }));
-    closeAction();
+  const applyStatus = async (room: Room, newStatus: OpStatus) => {
+    if (!selectedPropId || updating) return;
+    setUpdating(true);
+    try {
+      await roomOperationService.updateRoomStatus(Number(selectedPropId), room.roomId, newStatus);
+      setRooms(prev => prev.map(r => (r.id === room.id ? { ...r, status: newStatus } : r)));
+      closeAction();
+    } catch (e: any) {
+      Alert.alert('Lỗi', msgOf(e, 'Không cập nhật được trạng thái phòng'));
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const handleCheckOut = (room: Room) => {
@@ -273,7 +302,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
       `Xác nhận phòng ${room.code} đã sửa xong và chuyển về trạng thái Trống?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        { text: 'Xác nhận', onPress: () => applyStatus(room.id, 'available') },
+        { text: 'Xác nhận', onPress: () => applyStatus(room, 'available') },
       ],
     );
   };
@@ -288,7 +317,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
         {
           text: 'Tạo yêu cầu',
           onPress: () => {
-            applyStatus(room.id, 'maintenance');
+            applyStatus(room, 'maintenance');
           },
         },
       ],
@@ -309,24 +338,46 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
           <View style={styles.headerSide} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshingProps}
+              onRefresh={() => { setRefreshingProps(true); loadProperties(); }}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
+        >
           <Text style={styles.pageTitle}>Chọn tòa nhà</Text>
           <Text style={styles.pageSubtitle}>Xem và vận hành các phòng trong tòa nhà được giao</Text>
 
-          {PROPERTIES.map(p => {
-            const pr = allRooms[p.id] ?? [];
-            const pc = {
-              total:       pr.length,
-              occupied:    pr.filter(r => r.status === 'occupied').length,
-              available:   pr.filter(r => r.status === 'available').length,
-              maintenance: pr.filter(r => r.status === 'maintenance').length,
-              disabled:    pr.filter(r => r.status === 'disabled').length,
-            };
+          {loadingProps && !refreshingProps ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={[styles.emptyText, { marginTop: Spacing.md }]}>Đang tải dữ liệu...</Text>
+            </View>
+          ) : errorProps ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>⚠️</Text>
+              <Text style={styles.emptyText}>{errorProps}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoadingProps(true); loadProperties(); }}>
+                <Text style={styles.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : properties.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🏢</Text>
+              <Text style={styles.emptyText}>Chưa có tòa nhà nào được giao</Text>
+            </View>
+          ) : properties.map(p => {
+            const pc = p.counts;
             return (
               <TouchableOpacity
                 key={p.id}
                 style={styles.propCard}
-                onPress={() => { setSelectedPropId(p.id); setFilter('all'); }}
+                onPress={() => selectProperty(p)}
                 activeOpacity={0.85}
               >
                 <View style={styles.propIcon}>
@@ -371,7 +422,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => setSelectedPropId(null)} style={styles.headerSide}>
+        <TouchableOpacity onPress={backToProperties} style={styles.headerSide}>
           <Text style={styles.headerBackText}>← Quay lại</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
@@ -417,8 +468,35 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
       </ScrollView>
 
       {/* Room list */}
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 ? (
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshingRooms}
+            onRefresh={() => { if (selectedPropId) { setRefreshingRooms(true); loadRooms(selectedPropId); } }}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
+        }
+      >
+        {loadingRooms && !refreshingRooms ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={[styles.emptyText, { marginTop: Spacing.md }]}>Đang tải phòng...</Text>
+          </View>
+        ) : errorRooms ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>⚠️</Text>
+            <Text style={styles.emptyText}>{errorRooms}</Text>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => { if (selectedPropId) { setLoadingRooms(true); loadRooms(selectedPropId); } }}
+            >
+              <Text style={styles.retryBtnText}>Thử lại</Text>
+            </TouchableOpacity>
+          </View>
+        ) : filtered.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🚪</Text>
             <Text style={styles.emptyText}>Không có phòng nào</Text>
@@ -515,7 +593,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                     icon="🟢"
                     label="Kích hoạt lại phòng"
                     primary
-                    onPress={() => applyStatus(actionRoom.id, 'available')}
+                    onPress={() => applyStatus(actionRoom, 'available')}
                   />
                 )}
 
@@ -553,7 +631,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                     <TouchableOpacity
                       key={t.status}
                       style={styles.statusOption}
-                      onPress={() => applyStatus(actionRoom.id, t.status)}
+                      onPress={() => applyStatus(actionRoom, t.status)}
                       activeOpacity={0.75}
                     >
                       <View style={[styles.statusOptionDot, { backgroundColor: meta.dot }]} />
@@ -608,8 +686,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                   {[
                     { label: 'Giá thuê',   value: fmt(actionRoom.rentPrice) + '/tháng' },
                     { label: 'Tiền cọc',   value: fmt(actionRoom.deposit) },
-                    { label: 'Điện',       value: fmt(actionRoom.electricityRate) + '/kWh' },
-                    { label: 'Nước',       value: fmt(actionRoom.waterRate) + '/m³' },
+                    ...(actionRoom.electricityRate ? [{ label: 'Điện', value: fmt(actionRoom.electricityRate) + '/kWh' }] : []),
+                    ...(actionRoom.waterRate ? [{ label: 'Nước', value: fmt(actionRoom.waterRate) + '/m³' }] : []),
                     { label: 'Diện tích',  value: `${actionRoom.area} m²` },
                     { label: 'Sức chứa',   value: `${actionRoom.maxOccupants} người` },
                     { label: 'Tầng',       value: `Tầng ${actionRoom.floor}` },
@@ -692,7 +770,9 @@ const styles = StyleSheet.create({
   // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 48 },
   emptyIcon:  { fontSize: 44, marginBottom: Spacing.md },
-  emptyText:  { fontSize: 14, color: Colors.textMuted },
+  emptyText:  { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
+  retryBtn:     { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 
   // Admin note (footer)
   adminNote:     { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.md, marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.primary + '25' },

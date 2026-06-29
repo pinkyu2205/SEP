@@ -852,45 +852,51 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   })
 
   const createContractAndPayment = async () => {
-    if (contract) {
-      setStep((prev) => prev + 1)
-      return
-    } // đã tạo rồi
     try {
       setCreating(true)
-      const payload = buildPayload()
-      const created =
-        rentalMode === 'whole_house'
-          ? await realTenantService.onboardWholeHouseTenant(
-              Number(selectedWholeHouseId),
-              payload,
-            )
-          : await realTenantService.onboardRoomTenant(
-              Number(selectedBuildingId),
-              Number(selectedRoomId),
-              payload,
-            )
 
-      // Tạo thiết bị lắp thêm thành tài sản nhà (chủ đầu tư mua) — best-effort.
-      await createAddedEquipments()
+      // 1) Chỉ tạo hợp đồng khi CHƯA có. Lưu `contract` NGAY sau khi tạo (201) để lần
+      //    bấm sau (vd PayOS lỗi) KHÔNG tạo hợp đồng trùng cho cùng phòng (gây HĐ mồ côi).
+      let current = contract
+      if (!current) {
+        const payload = buildPayload()
+        current =
+          rentalMode === 'whole_house'
+            ? await realTenantService.onboardWholeHouseTenant(
+                Number(selectedWholeHouseId),
+                payload,
+              )
+            : await realTenantService.onboardRoomTenant(
+                Number(selectedBuildingId),
+                Number(selectedRoomId),
+                payload,
+              )
+        setContract(current)
+
+        // Tạo thiết bị lắp thêm thành tài sản nhà (chủ đầu tư mua) — best-effort, chỉ 1 lần.
+        await createAddedEquipments()
+      }
 
       // Case 2: gửi Host duyệt giá -> KHÔNG thu cọc, dừng tại màn "chờ duyệt".
       if (priceMode === 'approval') {
-        setContract(created)
         completedRef.current = true // bỏ qua cảnh báo thoát
         clearDraft()
         return
       }
 
+      // Thu cọc tiền mặt -> bỏ qua PayOS, sang bước xác nhận thu cọc thủ công.
       if (depositMethod === 'cash') {
-        // Thu cọc tiền mặt -> bỏ qua tạo link PayOS, vào bước xác nhận thu cọc thủ công
-        setContract(created)
         setStep((prev) => prev + 1)
         return
       }
 
-      // Tạo link thanh toán cọc qua PayOS
-      const withPay = await realTenantService.createDepositPayment(created.id)
+      // PayOS: đã có link/QR thì chỉ sang bước thanh toán (tránh tạo lại);
+      // chưa có thì tạo link cọc cho ĐÚNG hợp đồng đã tạo ở trên.
+      if (current.payosCheckoutUrl || current.payosQrCode) {
+        setStep((prev) => prev + 1)
+        return
+      }
+      const withPay = await realTenantService.createDepositPayment(current.id)
       setContract(withPay)
       setStep((prev) => prev + 1) // sang bước Thanh toán cọc
     } catch (err: any) {

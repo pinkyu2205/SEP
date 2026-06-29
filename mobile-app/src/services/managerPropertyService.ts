@@ -99,10 +99,11 @@ function resolveManagerId(claims: Record<string, unknown> | null, properties: Ap
 
 export const managerPropertyService = {
   /**
-   * Danh sách bất động sản của RIÊNG manager đang đăng nhập (host đã phân quyền),
-   * kèm số liệu phòng. Lọc theo operationManagerId suy ra từ JWT.
+   * Danh sách bất động sản THÔ (ApiProperty) của RIÊNG manager đang đăng nhập,
+   * đã lọc theo operationManagerId suy ra từ JWT. Dùng chung cho các màn vận hành
+   * (Quản lý toà nhà, Quản lý phòng...) để không lặp lại logic scope.
    */
-  getManagedProperties: async (): Promise<ManagedProperty[]> => {
+  getScopedProperties: async (): Promise<ApiProperty[]> => {
     const token = await AsyncStorage.getItem('accessToken');
     const claims = token ? decodeJwtClaims(token) : null;
 
@@ -111,10 +112,19 @@ export const managerPropertyService = {
 
     // Lọc đúng nhà của manager. Nếu không xác định được id (vd JWT không chứa) thì
     // tạm hiện tất cả để không khoá người dùng — xem doc/ cho hướng xử lý triệt để (BE).
-    const scoped = managerId ? all.filter((p) => p.operationManagerId === managerId) : all;
     if (!managerId) {
       console.warn('[managerProperties] Chưa xác định được managerId từ JWT — đang hiển thị tất cả. Claims:', claims);
+      return all;
     }
+    return all.filter((p) => p.operationManagerId === managerId);
+  },
+
+  /**
+   * Danh sách bất động sản của RIÊNG manager đang đăng nhập (host đã phân quyền),
+   * kèm số liệu phòng. Lọc theo operationManagerId suy ra từ JWT.
+   */
+  getManagedProperties: async (): Promise<ManagedProperty[]> => {
+    const scoped = await managerPropertyService.getScopedProperties();
 
     return Promise.all(
       scoped.map(async (p) => {
