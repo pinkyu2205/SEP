@@ -1,7 +1,7 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, FlatList, ActivityIndicator, Image,
+  TextInput, Alert, FlatList, ActivityIndicator, Image, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,7 +10,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { managerPropertyService } from '../../services/managerPropertyService';
 import { realPropertyService } from '../../services/propertyService.real';
 import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
-import { realManagerInvoiceService } from '../../services/managerInvoiceService.real';
+import { realManagerInvoiceService, ManagerInvoice } from '../../services/managerInvoiceService.real';
 import { uploadImageToCloudinary } from '../../services/cloudinary';
 
 // ===================== TYPES =====================
@@ -88,6 +88,11 @@ const ROOM_STATUS_RENTED = 'RENTED';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
+// Hiển thị số có dấu phân cách nghìn (vd "400000" -> "400.000"); rỗng nếu không có số.
+const groupThousands = (s: string) => {
+  const d = onlyDigits(s);
+  return d ? Number(d).toLocaleString('vi-VN') : '';
+};
 
 /**
  * Đọc best-effort hoá đơn EVN từ kết quả OCR (endpoint /ocr/meter trả rawText + numbers).
@@ -118,8 +123,12 @@ const parseEvnInvoice = (
     if (nums.length) out.totalAmount = String(Math.max(...nums)); // tổng tiền thường là số lớn nhất
   }
 
-  // Tổng kWh: số đứng ngay trước "kWh"
-  const kwh = text.match(/([\d.,]+)\s*kWh/i);
+  // Tổng kWh: số gần chữ "kWh" (trước HOẶC sau, do thứ tự cột OCR khác nhau),
+  // hoặc số sau "Điện tiêu thụ".
+  const kwh =
+    text.match(/([\d.,]+)\s*kWh/i) ||
+    text.match(/kWh[^\d]*([\d.,]+)/i) ||
+    text.match(/tiêu thụ[^\d]*?([\d.,]+)\s*kWh/i);
   if (kwh) out.totalKwh = onlyDigits(kwh[1]);
 
   return out;
@@ -174,6 +183,11 @@ const mapBillingProperty = (
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState<MainTab>('electricity');
+  // Tăng mỗi lần gửi hóa đơn để panel trạng thái tự tải lại.
+  const [utilReloadKey, setUtilReloadKey] = useState(0);
+  // Lịch sử hóa đơn điện/nước đã gửi (toàn bộ nhà) — dữ liệu thật từ BE.
+  const [histInvoices, setHistInvoices] = useState<ManagerInvoice[]>([]);
+  const [loadingHist,  setLoadingHist]  = useState(false);
 
   // ── Electricity state ──────────────────────────────────────────────────────
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
@@ -222,7 +236,18 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { loadProperties(); }, [loadProperties]));
+  const loadHistory = useCallback(() => {
+    setLoadingHist(true);
+    Promise.all([
+      realManagerInvoiceService.listInvoices({ type: 'ELECTRICITY' }).catch(() => [] as ManagerInvoice[]),
+      realManagerInvoiceService.listInvoices({ type: 'WATER' }).catch(() => [] as ManagerInvoice[]),
+    ])
+      .then(([e, w]) => setHistInvoices([...e, ...w].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))))
+      .finally(() => setLoadingHist(false));
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadProperties(); loadHistory(); }, [loadProperties, loadHistory]));
+  useEffect(() => { loadHistory(); }, [utilReloadKey, loadHistory]);
 
   const selectedProperty = properties.find(p => p.id === selectedPropertyId);
   const waterProperty    = properties.find(p => p.id === waterPropertyId);
@@ -241,7 +266,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   // Hỏi nguồn ảnh (chụp / thư viện) rồi gọi tiếp.
+  // Web: Alert nhiều nút không chạy callback → mở thẳng thư viện ảnh.
   const chooseImageSource = (onPick: (useCamera: boolean) => void) => {
+    if (Platform.OS === 'web') { onPick(false); return; }
     Alert.alert('Chọn ảnh', undefined, [
       { text: '📷 Chụp ảnh', onPress: () => onPick(true) },
       { text: '🖼 Chọn từ thư viện', onPress: () => onPick(false) },
@@ -337,6 +364,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
+  // Cập nhật 1 phòng trong danh sách chỉ số điện (nhập tay chỉ số cũ / mới).
+  const updateRoomElec = (roomId: string, patch: Partial<RoomMeterReading>) =>
+    setRoomElecReadings(prev => prev.map(r => (r.roomId === roomId ? { ...r, ...patch } : r)));
+
   // Gửi hóa đơn ĐIỆN (riêng) cho 1 phòng cụ thể (multi-room)
   const sendSingleRoomElec = async (roomId: string) => {
     if (!evnData || !selectedProperty) return;
@@ -347,12 +378,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       Alert.alert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
-    // Tính phí dựa trên đơn giá EVN (tổng tiền / tổng kWh của toà nhà)
-    const totalRecorded = roomElecReadings.reduce((s, r) => {
-      if (r.roomId === roomId) return s + Math.max(newVal - r.prevReading, 0);
-      return s + Math.max(Number(r.newReading) - r.prevReading, 0);
-    }, 0);
-    const feePerKwh   = evnData.totalAmount / (totalRecorded || 1);
+    // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
+    const feePerKwh   = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
     const consumption = Math.max(newVal - room.prevReading, 0);
     const fee         = Math.round(consumption * feePerKwh);
 
@@ -368,6 +395,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setRoomElecReadings(prev => prev.map(r =>
         r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r,
       ));
+      setUtilReloadKey(k => k + 1);
       Alert.alert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
     } catch (e: any) {
       Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
@@ -380,8 +408,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const unsent = roomElecReadings.filter(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading);
     if (!unsent.length) { Alert.alert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
 
-    const totalRecorded = roomElecReadings.reduce((s, r) => s + Math.max(Number(r.newReading) - r.prevReading, 0), 0);
-    const feePerKwh = evnData.totalAmount / (totalRecorded || 1);
+    // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
+    const feePerKwh = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
     const now = new Date().toISOString().split('T')[0];
 
     try {
@@ -415,9 +443,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         totalAmount: total, roomCount: unsent.length, sentAt: now,
       }, ...prev]);
 
-      Alert.alert('Đã gửi', `Đã gửi hóa đơn điện cho ${unsent.length} phòng.`, [
-        { text: 'OK', onPress: () => setElecStep('done') },
-      ]);
+      setUtilReloadKey(k => k + 1);
+      setElecStep('done');
+      Alert.alert('Đã gửi', `Đã gửi hóa đơn điện cho ${unsent.length} phòng.`);
     } catch (e: any) {
       Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
     }
@@ -452,6 +480,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
         totalAmount: fee, roomCount: 1, sentAt: now,
       }, ...prev]);
+      setUtilReloadKey(k => k + 1);
       setElecStep('done');
     } catch (e: any) {
       Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
@@ -526,6 +555,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         propertyName: waterProperty.name, billingPeriod: period,
         totalAmount: totalSent, roomCount: roomWaterReadings.length, sentAt: now,
       }, ...prev]);
+      setUtilReloadKey(k => k + 1);
       setWaterStep('done');
     } catch (e: any) {
       Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
@@ -576,6 +606,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           steps={['Chọn tòa nhà', 'Hóa đơn EVN', isWholeHouse ? 'Chỉ số & Gửi' : 'Chỉ số phòng', 'Xem trước']}
           current={stepIndex}
         />
+
+        {selectedPropertyId && (
+          <SentInvoicePanel propertyId={selectedPropertyId} type="ELECTRICITY" reloadKey={utilReloadKey} />
+        )}
 
         {/* ── STEP 1: Chọn tòa nhà ─────────────────────────────────── */}
         {elecStep === 'select_property' && (
@@ -647,7 +681,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     </TouchableOpacity>
                   </View>
                   <EVNDataRow label="Tổng điện"     value={`${evnData.totalKwh} kWh`} />
-                  <EVNDataRow label="Tổng tiền"     value={fmt(evnData.totalAmount)} highlight />
+                  <EVNDataRow label="Tổng tiền"     value={fmt(evnData.totalAmount)} />
+                  <EVNDataRow
+                    label="Đơn giá điện"
+                    value={`${fmt(evnData.totalKwh > 0 ? Math.round(evnData.totalAmount / evnData.totalKwh) : 0)}/kWh`}
+                    highlight
+                  />
                   <EVNDataRow label="Kỳ thanh toán" value={evnData.billingPeriod} />
                 </View>
               )}
@@ -655,11 +694,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               {editingEvn && (
                 <View style={styles.evnEditForm}>
                   <Text style={styles.formLabel}>Tổng kWh</Text>
-                  <TextInput style={styles.input} keyboardType="numeric" value={evnEditForm.totalKwh}
-                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalKwh: t }))} />
+                  <TextInput style={styles.input} keyboardType="numeric" value={groupThousands(evnEditForm.totalKwh)}
+                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalKwh: onlyDigits(t) }))} />
                   <Text style={styles.formLabel}>Tổng tiền (đ)</Text>
-                  <TextInput style={styles.input} keyboardType="numeric" value={evnEditForm.totalAmount}
-                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalAmount: t }))} />
+                  <TextInput style={styles.input} keyboardType="numeric" value={groupThousands(evnEditForm.totalAmount)}
+                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalAmount: onlyDigits(t) }))} />
                   <Text style={styles.formLabel}>Kỳ thanh toán</Text>
                   <TextInput style={styles.input} value={evnEditForm.billingPeriod}
                     onChangeText={t => setEvnEditForm(f => ({ ...f, billingPeriod: t }))} />
@@ -713,14 +752,22 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                           </View>
                         )}
                       </View>
-                      <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>
+                      <Text style={styles.formLabel}>Chỉ số cũ (tháng trước)</Text>
+                      <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        placeholder="Nhập chỉ số tháng trước"
+                        value={r.prevReading ? String(r.prevReading) : ''}
+                        onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(onlyDigits(t)) })}
+                      />
+                      <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
                       <View style={styles.readingRow}>
                         <TextInput
                           style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
                           keyboardType="numeric"
                           placeholder={`> ${r.prevReading}`}
                           value={r.newReading}
-                          onChangeText={t => setRoomElecReadings(prev => [{ ...prev[0], newReading: t }])}
+                          onChangeText={t => updateRoomElec(r.roomId, { newReading: onlyDigits(t) })}
                         />
                         <TouchableOpacity
                           style={styles.ocrBtn}
@@ -732,6 +779,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                             : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
                         </TouchableOpacity>
                       </View>
+                      <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
                       {r.newReading && Number(r.newReading) > r.prevReading && (
                         <View style={styles.calcPreview}>
                           <Text style={styles.calcPreviewText}>
@@ -792,7 +840,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                       </View>
                     </View>
 
-                    <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>
+                    {r.sent && <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>}
 
                     {r.sent ? (
                       /* Phòng đã gửi: hiện tóm tắt */
@@ -802,17 +850,24 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         </Text>
                       </View>
                     ) : (
-                      /* Phòng chưa gửi: hiện input + nút gửi */
+                      /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
                       <>
+                        <Text style={styles.formLabel}>Chỉ số cũ (tháng trước)</Text>
+                        <TextInput
+                          style={styles.input}
+                          keyboardType="numeric"
+                          placeholder="Nhập chỉ số tháng trước"
+                          value={r.prevReading ? String(r.prevReading) : ''}
+                          onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(onlyDigits(t)) })}
+                        />
+                        <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
                         <View style={styles.readingRow}>
                           <TextInput
                             style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
                             keyboardType="numeric"
                             placeholder={`> ${r.prevReading}`}
                             value={r.newReading}
-                            onChangeText={t => setRoomElecReadings(prev =>
-                              prev.map((x, i) => i === idx ? { ...x, newReading: t } : x)
-                            )}
+                            onChangeText={t => updateRoomElec(r.roomId, { newReading: onlyDigits(t) })}
                           />
                           <TouchableOpacity
                             style={styles.ocrBtn}
@@ -824,16 +879,29 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                               : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
                           </TouchableOpacity>
                         </View>
-                        {r.newReading && Number(r.newReading) > r.prevReading && (
-                          <TouchableOpacity
-                            style={styles.sendRoomBtn}
-                            onPress={() => sendSingleRoomElec(r.roomId)}
-                          >
-                            <Text style={styles.sendRoomBtnText}>
-                              ⚡ Gửi hóa đơn phòng {r.roomCode}
-                            </Text>
-                          </TouchableOpacity>
-                        )}
+                        <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
+                        {r.newReading && Number(r.newReading) > r.prevReading && (() => {
+                          const unitPrice = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
+                          const consumption = Number(r.newReading) - r.prevReading;
+                          const fee = Math.round(consumption * unitPrice);
+                          return (
+                            <>
+                              <View style={styles.calcPreview}>
+                                <Text style={styles.calcPreviewText}>
+                                  {consumption} kWh × {fmt(Math.round(unitPrice))}/kWh = {fmt(fee)}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                style={styles.sendRoomBtn}
+                                onPress={() => sendSingleRoomElec(r.roomId)}
+                              >
+                                <Text style={styles.sendRoomBtnText}>
+                                  ⚡ Gửi hóa đơn phòng {r.roomCode} · {fmt(fee)}
+                                </Text>
+                              </TouchableOpacity>
+                            </>
+                          );
+                        })()}
                       </>
                     )}
                   </View>
@@ -880,19 +948,23 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           current={waterStep === 'bill_entry' ? 0 : waterStep === 'room_readings' ? 1 : waterStep === 'review' ? 2 : 3}
         />
 
+        {waterPropertyId && (
+          <SentInvoicePanel propertyId={waterPropertyId} type="WATER" reloadKey={utilReloadKey} />
+        )}
+
         {waterStep === 'bill_entry' && (
           <View>
             <SectionHeader title="Bước 1: Nhập thông tin hóa đơn nước" />
             <View style={styles.card}>
               <Text style={styles.cardDesc}>Nhập thông tin từ hóa đơn nước chính thức khi có.</Text>
               <Text style={styles.formLabel}>Tổng tiền hóa đơn nước (đ) *</Text>
-              <TextInput style={styles.input} keyboardType="numeric" placeholder="Ví dụ: 2500000"
-                value={waterBillForm.totalAmount}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, totalAmount: t }))} />
+              <TextInput style={styles.input} keyboardType="numeric" placeholder="Ví dụ: 2.500.000"
+                value={groupThousands(waterBillForm.totalAmount)}
+                onChangeText={t => setWaterBillForm(f => ({ ...f, totalAmount: onlyDigits(t) }))} />
               <Text style={styles.formLabel}>Đơn giá m³ (đ) *</Text>
               <TextInput style={styles.input} keyboardType="numeric"
-                value={waterBillForm.pricePerM3}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, pricePerM3: t }))} />
+                value={groupThousands(waterBillForm.pricePerM3)}
+                onChangeText={t => setWaterBillForm(f => ({ ...f, pricePerM3: onlyDigits(t) }))} />
               <Text style={styles.formLabel}>Kỳ thanh toán *</Text>
               <TextInput style={styles.input}
                 value={waterBillForm.billingPeriod}
@@ -987,32 +1059,47 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   const renderHistoryTab = () => (
     <FlatList
-      data={historyEntries}
-      keyExtractor={i => i.id}
+      data={histInvoices}
+      keyExtractor={i => String(i.id)}
       contentContainerStyle={styles.tabContent}
       showsVerticalScrollIndicator={false}
-      ListHeaderComponent={<SectionHeader title="Lịch sử ghi chỉ số & gửi hóa đơn" />}
-      renderItem={({ item }) => (
-        <View style={styles.historyCard}>
-          <View style={styles.historyHeader}>
-            <View style={[styles.typeTag, item.type === 'electricity' ? styles.typeTagElec : styles.typeTagWater]}>
-              <Text style={styles.typeTagText}>{item.type === 'electricity' ? '⚡ Điện' : '💧 Nước'}</Text>
+      ListHeaderComponent={<SectionHeader title="Lịch sử hóa đơn điện / nước đã gửi" />}
+      renderItem={({ item }) => {
+        const st = UTIL_STATUS[item.status] ?? UTIL_STATUS.PENDING;
+        return (
+          <View style={styles.historyCard}>
+            <View style={styles.historyHeader}>
+              <View style={[styles.typeTag, item.type === 'ELECTRICITY' ? styles.typeTagElec : styles.typeTagWater]}>
+                <Text style={styles.typeTagText}>{item.type === 'ELECTRICITY' ? '⚡ Điện' : '💧 Nước'}</Text>
+              </View>
+              <View style={[statusSt.badge, { backgroundColor: st.bg }]}>
+                <Text style={[statusSt.badgeText, { color: st.color }]}>{st.label}</Text>
+              </View>
             </View>
-            <Text style={styles.historyDate}>{item.sentAt}</Text>
+            <Text style={styles.historyProperty}>
+              {item.propertyName}{item.roomNumber ? ` · Phòng ${item.roomNumber}` : ' · Nguyên căn'}
+            </Text>
+            <Text style={styles.historyPeriod}>
+              T{String(item.month).padStart(2, '0')}/{item.year}{item.tenantName ? ` · ${item.tenantName}` : ''}
+            </Text>
+            <View style={styles.historyFooter}>
+              <Text style={styles.historyRooms}>{item.code}</Text>
+              <Text style={styles.historyAmount}>{fmt(item.amount)}</Text>
+            </View>
           </View>
-          <Text style={styles.historyProperty}>{item.propertyName}</Text>
-          <Text style={styles.historyPeriod}>{item.billingPeriod}</Text>
-          <View style={styles.historyFooter}>
-            <Text style={styles.historyRooms}>{item.roomCount} {item.roomCount === 1 ? 'đơn vị' : 'phòng'}</Text>
-            <Text style={styles.historyAmount}>{fmt(item.totalAmount)}</Text>
-          </View>
-        </View>
-      )}
+        );
+      }}
       ListEmptyComponent={
-        <View style={styles.empty}>
-          <Text style={styles.emptyEmoji}>📋</Text>
-          <Text style={styles.emptyText}>Chưa có lịch sử</Text>
-        </View>
+        loadingHist ? (
+          <View style={styles.empty}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+        ) : (
+          <View style={styles.empty}>
+            <Text style={styles.emptyEmoji}>📋</Text>
+            <Text style={styles.emptyText}>Chưa có hóa đơn điện/nước nào</Text>
+          </View>
+        )
       }
       ListFooterComponent={<View style={{ height: 80 }} />}
     />
@@ -1078,6 +1165,87 @@ const EVNDataRow: React.FC<{ label: string; value: string; highlight?: boolean }
     <Text style={[evnSt.value, highlight && evnSt.valueHighlight]}>{value}</Text>
   </View>
 );
+
+// Trạng thái thanh toán hóa đơn điện/nước ĐÃ gửi của 1 nhà (dữ liệu thật từ BE).
+const UTIL_STATUS: Record<string, { label: string; color: string; bg: string }> = {
+  PENDING:   { label: 'Chưa thu', color: Colors.warning, bg: Colors.warningLight },
+  PAID:      { label: 'Đã thu',   color: Colors.success, bg: Colors.successLight },
+  OVERDUE:   { label: 'Quá hạn',  color: Colors.error,   bg: Colors.errorLight },
+  PARTIAL:   { label: 'Một phần', color: Colors.info,    bg: Colors.infoLight },
+  CANCELLED: { label: 'Đã huỷ',   color: Colors.textMuted, bg: Colors.background },
+};
+
+const SentInvoicePanel: React.FC<{
+  propertyId: string | null;
+  type: 'ELECTRICITY' | 'WATER';
+  reloadKey: number;
+}> = ({ propertyId, type, reloadKey }) => {
+  const [list, setList] = useState<ManagerInvoice[]>([]);
+  const [loading, setLoading] = useState(false);
+  const label = type === 'ELECTRICITY' ? 'điện' : 'nước';
+
+  useEffect(() => {
+    if (!propertyId) { setList([]); return; }
+    let alive = true;
+    setLoading(true);
+    realManagerInvoiceService.listInvoices({ type })
+      .then(all => {
+        if (!alive) return;
+        setList(
+          all.filter(i => i.propertyId === Number(propertyId))
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+        );
+      })
+      .catch(() => { if (alive) setList([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [propertyId, type, reloadKey]);
+
+  if (!propertyId) return null;
+
+  const paid   = list.filter(i => i.status === 'PAID').length;
+  const unpaid = list.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE').length;
+
+  return (
+    <View style={statusSt.wrap}>
+      <View style={statusSt.header}>
+        <Text style={statusSt.title}>Trạng thái hóa đơn {label} đã gửi</Text>
+        {loading && <ActivityIndicator size="small" color={Colors.primary} />}
+      </View>
+
+      {list.length === 0 ? (
+        <Text style={statusSt.empty}>
+          {loading ? 'Đang tải...' : `Chưa gửi hóa đơn ${label} nào cho nhà này.`}
+        </Text>
+      ) : (
+        <>
+          <View style={statusSt.statRow}>
+            <Text style={[statusSt.statChip, { color: Colors.success }]}>● Đã thu: {paid}</Text>
+            <Text style={[statusSt.statChip, { color: Colors.warning }]}>● Chưa thu: {unpaid}</Text>
+          </View>
+          {list.map(inv => {
+            const st = UTIL_STATUS[inv.status] ?? UTIL_STATUS.PENDING;
+            return (
+              <View key={inv.id} style={statusSt.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={statusSt.rowTitle}>
+                    {inv.roomNumber ? `Phòng ${inv.roomNumber}` : 'Nhà nguyên căn'} · T{String(inv.month).padStart(2, '0')}/{inv.year}
+                  </Text>
+                  <Text style={statusSt.rowSub}>
+                    {(inv.tenantName || inv.code)} · {fmt(inv.amount)}
+                  </Text>
+                </View>
+                <View style={[statusSt.badge, { backgroundColor: st.bg }]}>
+                  <Text style={[statusSt.badgeText, { color: st.color }]}>{st.label}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </>
+      )}
+    </View>
+  );
+};
 
 // Bộ chọn nhà (nhiều phòng / nguyên căn) + xử lý loading / lỗi / rỗng — dùng chung 2 tab.
 const PropertyPicker: React.FC<{
@@ -1361,4 +1529,25 @@ const evnSt = StyleSheet.create({
   label:          { fontSize: 13, color: Colors.textSecondary },
   value:          { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   valueHighlight: { color: Colors.success, fontSize: 15, fontWeight: '800' },
+});
+
+const statusSt = StyleSheet.create({
+  wrap: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
+  title:  { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  empty:  { fontSize: 13, color: Colors.textMuted },
+  statRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.sm },
+  statChip: { fontSize: 12, fontWeight: '700' },
+  row: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  rowTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  rowSub:   { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  badge:    { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
+  badgeText:{ fontSize: 11, fontWeight: '700' },
 });

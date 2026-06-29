@@ -1,20 +1,20 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, Alert, Image, TextInput, ScrollView, Dimensions,
+  Modal, Alert, Image, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useBills, billsStore, SharedBill } from '../../store/billsStore';
-import { getPropertyById } from '../../data/managedProperties';
+import {
+  realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
+} from '../../services/managerInvoiceService.real';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
 // ===================== TYPES =====================
-type BillStatus    = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
-type PaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet';
-type FilterType    = 'all' | BillStatus;
+type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
+type FilterType = 'all' | BillStatus;
 
 // ===================== CONSTANTS =====================
 const VIETQR_BANK_BIN = '970422';
@@ -23,26 +23,14 @@ const VIETQR_ACCOUNT  = '0865803493';
 const buildQRUrl = (amount: number, content: string) =>
   `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=ROOMRENT`;
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 
 const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: string }> = {
-  pending:   { label: 'Chưa thanh toán',    color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  paid:      { label: 'Đã thanh toán',      color: '#10B981', bg: '#F0FDF4', icon: '✅' },
-  overdue:   { label: 'Quá hạn',            color: '#EF4444', bg: '#FEF2F2', icon: '🚨' },
+  pending:   { label: 'Chưa thanh toán',     color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
+  paid:      { label: 'Đã thanh toán',       color: '#10B981', bg: '#F0FDF4', icon: '✅' },
+  overdue:   { label: 'Quá hạn',             color: '#EF4444', bg: '#FEF2F2', icon: '🚨' },
   partial:   { label: 'Thanh toán một phần', color: '#3B82F6', bg: '#EFF6FF', icon: '💛' },
-  cancelled: { label: 'Đã huỷ',            color: '#9CA3AF', bg: '#F3F4F6', icon: '🚫' },
-};
-
-const METHOD_CONFIG: Record<PaymentMethod, { label: string; icon: string }> = {
-  qr:            { label: 'QR VietQR',    icon: '📱' },
-  bank_transfer: { label: 'Chuyển khoản', icon: '🏦' },
-  cash:          { label: 'Tiền mặt',     icon: '💵' },
-  ewallet:       { label: 'Ví điện tử',   icon: '👛' },
-};
-
-const ITEM_ICONS: Record<string, string> = {
-  'Tiền phòng': '🏠', 'Điện': '⚡', 'Nước': '💧',
-  'Phí dịch vụ': '🧹', 'Phí quản lý': '🔑', 'default': '📄',
+  cancelled: { label: 'Đã huỷ',              color: '#9CA3AF', bg: '#F3F4F6', icon: '🚫' },
 };
 
 const FILTERS: { id: FilterType; label: string }[] = [
@@ -55,11 +43,14 @@ const FILTERS: { id: FilterType; label: string }[] = [
 
 const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3, cancelled: 4 };
 
-const getItemIcon = (label: string) => {
-  for (const key of Object.keys(ITEM_ICONS)) {
-    if (label.includes(key)) return ITEM_ICONS[key];
+const toLocalStatus = (s: ManagerInvoiceStatus): BillStatus => {
+  switch (s) {
+    case 'PAID':      return 'paid';
+    case 'OVERDUE':   return 'overdue';
+    case 'PARTIAL':   return 'partial';
+    case 'CANCELLED': return 'cancelled';
+    default:          return 'pending';
   }
-  return ITEM_ICONS['default'];
 };
 
 // ===================== SCREEN =====================
@@ -67,75 +58,75 @@ export const BuildingBillingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route      = useRoute<any>();
   const { propertyId, propertyName } = route.params as { propertyId: string; propertyName: string };
-  const prop = getPropertyById(propertyId);
-  const isWholeHouse = prop?.propertyType === 'WHOLE_HOUSE';
+  const pid = Number(propertyId);
 
-  const allBills      = useBills();
-  const buildingBills = useMemo(
-    () => allBills.filter(b => b.propertyId === propertyId),
-    [allBills, propertyId],
-  );
+  const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
+  const [loading,  setLoading]  = useState(true);
 
-  const [search,            setSearch]            = useState('');
-  const [filter,            setFilter]            = useState<FilterType>('all');
-  const [selectedBill,      setSelectedBill]      = useState<SharedBill | null>(null);
-  const [showQRModal,       setShowQRModal]       = useState(false);
-  const [showCashModal,     setShowCashModal]     = useState(false);
-  const [showEwalletModal,  setShowEwalletModal]  = useState(false);
-  const [cashNote,          setCashNote]          = useState('');
-  const [expandedItems,     setExpandedItems]     = useState(false);
+  // Chỉ lấy hoá đơn TIỀN NHÀ (RENT) của BĐS này — điện/nước có thống kê riêng ở màn Ghi chỉ số.
+  const load = useCallback(() => {
+    setLoading(true);
+    realManagerInvoiceService.listInvoices({ type: 'RENT' })
+      .then(list => setInvoices(list.filter(i => i.propertyId === pid)))
+      .catch(() => setInvoices([]))
+      .finally(() => setLoading(false));
+  }, [pid]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const [search,           setSearch]           = useState('');
+  const [filter,           setFilter]           = useState<FilterType>('all');
+  const [selectedBill,     setSelectedBill]     = useState<ManagerInvoice | null>(null);
+  const [showQRModal,      setShowQRModal]      = useState(false);
+  const [showCashModal,    setShowCashModal]    = useState(false);
+  const [showEwalletModal, setShowEwalletModal] = useState(false);
+  const [cashNote,         setCashNote]         = useState('');
+  const [submitting,       setSubmitting]       = useState(false);
+
+  const isWholeHouse = (b: ManagerInvoice) => !b.roomNumber;
 
   const filteredBills = useMemo(() => {
-    let list = buildingBills;
-    if (filter !== 'all') list = list.filter(b => b.status === filter);
+    let list = invoices;
+    if (filter !== 'all') list = list.filter(b => toLocalStatus(b.status) === filter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(b =>
-        b.tenantName.toLowerCase().includes(q) ||
-        b.roomName.toLowerCase().includes(q) ||
-        b.code.toLowerCase().includes(q),
+        (b.tenantName || '').toLowerCase().includes(q) ||
+        (b.roomNumber || '').toLowerCase().includes(q) ||
+        (b.code || '').toLowerCase().includes(q),
       );
     }
-    return [...list].sort((a, b) => (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9));
-  }, [buildingBills, filter, search]);
+    return [...list].sort((a, b) => STATUS_ORDER[toLocalStatus(a.status)] - STATUS_ORDER[toLocalStatus(b.status)]);
+  }, [invoices, filter, search]);
 
   const stats = useMemo(() => {
-    const paid    = buildingBills.filter(b => b.status === 'paid');
-    const overdue = buildingBills.filter(b => b.status === 'overdue');
+    const paid    = invoices.filter(b => b.status === 'PAID');
+    const overdue = invoices.filter(b => b.status === 'OVERDUE');
     return {
-      total:        buildingBills.length,
+      total:        invoices.length,
       paidCount:    paid.length,
-      paidAmt:      paid.reduce((s, b) => s + b.grandTotal, 0),
+      paidAmt:      paid.reduce((s, b) => s + b.amount, 0),
       overdueCount: overdue.length,
-      uncollected:  buildingBills.filter(b => b.status !== 'paid').reduce((s, b) => s + b.grandTotal, 0),
+      uncollected:  invoices.filter(b => b.status !== 'PAID' && b.status !== 'CANCELLED').reduce((s, b) => s + b.amount, 0),
     };
-  }, [buildingBills]);
+  }, [invoices]);
 
   const payRate  = stats.total > 0 ? Math.round((stats.paidCount / stats.total) * 100) : 0;
   const barColor = payRate >= 80 ? Colors.success : payRate >= 50 ? Colors.warning : Colors.error;
 
-  const handleMarkPaidCash = () => {
+  const recordPaid = async (method: string, note?: string) => {
     if (!selectedBill) return;
-    billsStore.updateStatus(selectedBill.id, 'paid', {
-      paidAt: new Date().toISOString().split('T')[0],
-      paymentMethod: 'cash',
-      paidAmount: selectedBill.grandTotal,
-    });
-    setShowCashModal(false);
-    setSelectedBill(null);
-    Alert.alert('✅ Thành công', 'Đã ghi nhận thanh toán tiền mặt.');
-  };
-
-  const handleMarkPaidEwallet = () => {
-    if (!selectedBill) return;
-    billsStore.updateStatus(selectedBill.id, 'paid', {
-      paidAt: new Date().toISOString().split('T')[0],
-      paymentMethod: 'other' as any,
-      paidAmount: selectedBill.grandTotal,
-    });
-    setShowEwalletModal(false);
-    setSelectedBill(null);
-    Alert.alert('✅ Thành công', 'Đã ghi nhận thanh toán ví điện tử.');
+    setSubmitting(true);
+    try {
+      await realManagerInvoiceService.markInvoicePaid(selectedBill.id, { method, note });
+      setShowQRModal(false); setShowCashModal(false); setShowEwalletModal(false);
+      setSelectedBill(null); setCashNote('');
+      Alert.alert('✅ Thành công', 'Đã ghi nhận thanh toán.');
+      load();
+    } catch (e: any) {
+      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không ghi nhận được (BE chưa có endpoint?).');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -148,7 +139,7 @@ export const BuildingBillingScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle} numberOfLines={1}>{propertyName}</Text>
-          <Text style={s.headerSub}>Hóa đơn · Tháng 05/2026</Text>
+          <Text style={s.headerSub}>Hóa đơn tiền nhà</Text>
         </View>
       </View>
 
@@ -187,7 +178,7 @@ export const BuildingBillingScreen: React.FC = () => {
         <Text style={s.searchIcon}>🔍</Text>
         <TextInput
           style={s.searchInput}
-          placeholder={isWholeHouse ? 'Tìm theo người đại diện, mã hóa đơn...' : 'Tìm theo tên, phòng, mã hóa đơn...'}
+          placeholder="Tìm theo tên, phòng, mã hóa đơn..."
           placeholderTextColor={Colors.textMuted}
           value={search}
           onChangeText={setSearch}
@@ -214,188 +205,131 @@ export const BuildingBillingScreen: React.FC = () => {
       </ScrollView>
 
       {/* ── Bill list ────────────────────────────────────────────── */}
-      <FlatList
-        data={filteredBills}
-        keyExtractor={i => i.id}
-        renderItem={({ item }) => {
-          const cfg = STATUS_CONFIG[item.status];
-          return (
-            <TouchableOpacity
-              style={[s.billCard, item.status === 'overdue' && s.billCardOverdue]}
-              onPress={() => { setSelectedBill(item); setExpandedItems(false); }}
-              activeOpacity={0.8}
-            >
-              <View style={s.billCardHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.billCode}>{item.code}</Text>
-                  <Text style={s.billRoom}>{isWholeHouse || item.propertyType === 'WHOLE_HOUSE' ? 'Nhà nguyên căn' : item.roomName}</Text>
+      {loading ? (
+        <View style={s.emptyState}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      ) : (
+        <FlatList
+          data={filteredBills}
+          keyExtractor={i => String(i.id)}
+          renderItem={({ item }) => {
+            const st  = toLocalStatus(item.status);
+            const cfg = STATUS_CONFIG[st];
+            return (
+              <TouchableOpacity
+                style={[s.billCard, st === 'overdue' && s.billCardOverdue]}
+                onPress={() => setSelectedBill(item)}
+                activeOpacity={0.8}
+              >
+                <View style={s.billCardHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.billCode}>{item.code}</Text>
+                    <Text style={s.billRoom}>{isWholeHouse(item) ? 'Nhà nguyên căn' : `Phòng ${item.roomNumber}`}</Text>
+                  </View>
+                  <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
+                    <Text style={s.statusIcon}>{cfg.icon}</Text>
+                    <Text style={[s.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
                 </View>
-                <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
-                  <Text style={s.statusIcon}>{cfg.icon}</Text>
-                  <Text style={[s.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+                <View style={s.billTenantRow}>
+                  <Text style={s.billTenant}>👤 {item.tenantName || '—'}</Text>
+                  <Text style={s.billMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
                 </View>
-              </View>
-              <View style={s.billTenantRow}>
-                <Text style={s.billTenant}>👤 {item.tenantName}</Text>
-                <Text style={s.billMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
-              </View>
-              <View style={s.billAmountRow}>
-                <View>
+                <View style={s.billAmountRow}>
                   <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
-                  {item.daysOverdue != null && item.daysOverdue > 0 && (
-                    <Text style={s.billOverdueDays}>Quá hạn {item.daysOverdue} ngày</Text>
-                  )}
-                  {item.lateFee > 0 && (
-                    <Text style={s.billLateFee}>Phí trễ: {fmt(item.lateFee)}</Text>
-                  )}
-                </View>
-                <Text style={[s.billTotal, item.status === 'overdue' && { color: Colors.error }]}>
-                  {fmt(item.grandTotal)}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-        contentContainerStyle={s.listContent}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListEmptyComponent={
-          <View style={s.emptyState}>
-            <Text style={{ fontSize: 40 }}>🧾</Text>
-            <Text style={s.emptyText}>Không có hóa đơn phù hợp</Text>
-          </View>
-        }
-      />
-
-      {/* ── Bill Detail Modal ─────────────────────────────────────── */}
-      {selectedBill && !showQRModal && !showCashModal && !showEwalletModal && (
-        <Modal transparent animationType="slide">
-          <View style={s.modalOverlay}>
-            <View style={s.billDetailSheet}>
-              <ScrollView bounces={false} showsVerticalScrollIndicator={false}
-                contentContainerStyle={s.billDetailContent}>
-                <View style={s.modalHeader}>
-                  <Text style={s.modalTitle}>{selectedBill.code}</Text>
-                  <TouchableOpacity onPress={() => setSelectedBill(null)}>
-                    <Text style={s.modalClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={[s.statusBannerFull, { backgroundColor: STATUS_CONFIG[selectedBill.status].bg }]}>
-                  <Text style={s.statusBannerIcon}>{STATUS_CONFIG[selectedBill.status].icon}</Text>
-                  <Text style={[s.statusBannerText, { color: STATUS_CONFIG[selectedBill.status].color }]}>
-                    {STATUS_CONFIG[selectedBill.status].label}
+                  <Text style={[s.billTotal, st === 'overdue' && { color: Colors.error }]}>
+                    {fmt(item.amount)}
                   </Text>
                 </View>
+              </TouchableOpacity>
+            );
+          }}
+          contentContainerStyle={s.listContent}
+          showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
+          ListEmptyComponent={
+            <View style={s.emptyState}>
+              <Text style={{ fontSize: 40 }}>🏠</Text>
+              <Text style={s.emptyText}>Chưa có hóa đơn tiền nhà</Text>
+            </View>
+          }
+        />
+      )}
 
-                <View style={s.detailSection}>
-                  {[
-                    { label: isWholeHouse || selectedBill.propertyType === 'WHOLE_HOUSE' ? 'Người đại diện' : 'Khách thuê', val: selectedBill.tenantName },
-                    { label: isWholeHouse || selectedBill.propertyType === 'WHOLE_HOUSE' ? 'Tài sản thuê' : 'Phòng', val: isWholeHouse || selectedBill.propertyType === 'WHOLE_HOUSE' ? selectedBill.propertyName : selectedBill.roomName },
-                    { label: 'Tháng',      val: `T${String(selectedBill.month).padStart(2,'0')}/${selectedBill.year}` },
-                    { label: 'Hạn thanh toán', val: selectedBill.dueDate, overdue: selectedBill.status === 'overdue' },
-                  ].map((row, i) => (
-                    <View key={i} style={s.detailRow}>
-                      <Text style={s.detailLabel}>{row.label}</Text>
-                      <Text style={[s.detailVal, row.overdue && { color: Colors.error }]}>{row.val}</Text>
-                    </View>
-                  ))}
-                </View>
+      {/* ── Bill Detail Modal ─────────────────────────────────────── */}
+      {selectedBill && !showQRModal && !showCashModal && !showEwalletModal && (() => {
+        const st  = toLocalStatus(selectedBill.status);
+        const cfg = STATUS_CONFIG[st];
+        return (
+          <Modal transparent animationType="slide">
+            <View style={s.modalOverlay}>
+              <View style={s.billDetailSheet}>
+                <ScrollView bounces={false} showsVerticalScrollIndicator={false}
+                  contentContainerStyle={s.billDetailContent}>
+                  <View style={s.modalHeader}>
+                    <Text style={s.modalTitle}>{selectedBill.code}</Text>
+                    <TouchableOpacity onPress={() => setSelectedBill(null)}>
+                      <Text style={s.modalClose}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                <TouchableOpacity
-                  style={s.breakdownToggle}
-                  onPress={() => setExpandedItems(!expandedItems)}
-                >
-                  <Text style={s.breakdownToggleText}>Chi tiết hóa đơn</Text>
-                  <Text style={s.breakdownToggleIcon}>{expandedItems ? '▲' : '▼'}</Text>
-                </TouchableOpacity>
+                  <View style={[s.statusBannerFull, { backgroundColor: cfg.bg }]}>
+                    <Text style={s.statusBannerIcon}>{cfg.icon}</Text>
+                    <Text style={[s.statusBannerText, { color: cfg.color }]}>{cfg.label}</Text>
+                  </View>
 
-                {expandedItems && (
-                  <View style={s.itemsSection}>
-                    {selectedBill.items.map((item, i) => (
-                      <View key={i} style={s.itemRow}>
-                        <View style={s.itemLabelRow}>
-                          <Text style={s.itemIcon}>{getItemIcon(item.label)}</Text>
-                          <Text style={s.itemLabel}>{item.label}</Text>
-                        </View>
-                        <Text style={s.itemAmount}>{fmt(item.amount)}</Text>
+                  <View style={s.detailSection}>
+                    {[
+                      { label: isWholeHouse(selectedBill) ? 'Người đại diện' : 'Khách thuê', val: selectedBill.tenantName || '—' },
+                      { label: isWholeHouse(selectedBill) ? 'Tài sản thuê' : 'Phòng', val: isWholeHouse(selectedBill) ? selectedBill.propertyName : `Phòng ${selectedBill.roomNumber}` },
+                      { label: 'Tháng', val: `T${String(selectedBill.month).padStart(2,'0')}/${selectedBill.year}` },
+                      { label: 'Hạn thanh toán', val: selectedBill.dueDate, overdue: st === 'overdue' },
+                    ].map((row, i) => (
+                      <View key={i} style={s.detailRow}>
+                        <Text style={s.detailLabel}>{row.label}</Text>
+                        <Text style={[s.detailVal, row.overdue && { color: Colors.error }]}>{row.val}</Text>
                       </View>
                     ))}
-                    {selectedBill.lateFee > 0 && (
-                      <View style={s.itemRow}>
-                        <View style={s.itemLabelRow}>
-                          <Text style={s.itemIcon}>⏰</Text>
-                          <Text style={[s.itemLabel, { color: Colors.error }]}>
-                            Phí trễ hạn ({selectedBill.daysOverdue} ngày)
-                          </Text>
-                        </View>
-                        <Text style={[s.itemAmount, { color: Colors.error }]}>{fmt(selectedBill.lateFee)}</Text>
-                      </View>
-                    )}
-                    <View style={s.totalRow}>
-                      <Text style={s.totalLabel}>TỔNG CỘNG</Text>
-                      <Text style={s.totalAmount}>{fmt(selectedBill.grandTotal)}</Text>
-                    </View>
                   </View>
-                )}
 
-                {!expandedItems && (
                   <View style={s.totalRowCompact}>
-                    <Text style={s.totalLabel}>TỔNG CỘNG</Text>
-                    <Text style={s.totalAmount}>{fmt(selectedBill.grandTotal)}</Text>
+                    <Text style={s.totalLabel}>TIỀN NHÀ</Text>
+                    <Text style={s.totalAmount}>{fmt(selectedBill.amount)}</Text>
                   </View>
-                )}
 
-                {selectedBill.status !== 'paid' && (
-                  <View style={s.paymentActions}>
-                    <Text style={s.paymentActionsTitle}>Ghi nhận thanh toán</Text>
-                    <TouchableOpacity style={s.qrPayBtn} onPress={() => setShowQRModal(true)}>
-                      <Text style={s.qrPayBtnText}>📱 Hiện QR cho khách quét</Text>
-                    </TouchableOpacity>
-                    <View style={s.payAltRow}>
-                      <TouchableOpacity style={s.payAltBtn} onPress={() => setShowCashModal(true)}>
-                        <Text style={s.payAltIcon}>💵</Text>
-                        <Text style={s.payAltText}>Tiền mặt</Text>
+                  {st !== 'paid' && st !== 'cancelled' && (
+                    <View style={s.paymentActions}>
+                      <Text style={s.paymentActionsTitle}>Ghi nhận thanh toán</Text>
+                      <TouchableOpacity style={s.qrPayBtn} onPress={() => setShowQRModal(true)}>
+                        <Text style={s.qrPayBtnText}>📱 Hiện QR cho khách quét</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={s.payAltBtn} onPress={() => setShowEwalletModal(true)}>
-                        <Text style={s.payAltIcon}>👛</Text>
-                        <Text style={s.payAltText}>Ví điện tử</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={s.payAltBtn}
-                        onPress={() => {
-                          billsStore.updateStatus(selectedBill.id, 'paid', {
-                            paidAt: new Date().toISOString().split('T')[0],
-                            paymentMethod: 'bank_transfer',
-                            paidAmount: selectedBill.grandTotal,
-                          });
-                          setSelectedBill(null);
-                          Alert.alert('✅ Thành công', 'Đã ghi nhận chuyển khoản ngân hàng.');
-                        }}
-                      >
-                        <Text style={s.payAltIcon}>🏦</Text>
-                        <Text style={s.payAltText}>CK ngân hàng</Text>
-                      </TouchableOpacity>
+                      <View style={s.payAltRow}>
+                        <TouchableOpacity style={s.payAltBtn} onPress={() => setShowCashModal(true)}>
+                          <Text style={s.payAltIcon}>💵</Text>
+                          <Text style={s.payAltText}>Tiền mặt</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.payAltBtn} onPress={() => setShowEwalletModal(true)}>
+                          <Text style={s.payAltIcon}>👛</Text>
+                          <Text style={s.payAltText}>Ví điện tử</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.payAltBtn} disabled={submitting} onPress={() => recordPaid('BANK_TRANSFER')}>
+                          <Text style={s.payAltIcon}>🏦</Text>
+                          <Text style={s.payAltText}>CK ngân hàng</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
-                )}
+                  )}
 
-                {selectedBill.status === 'paid' && (
-                  <View style={s.paidInfo}>
-                    <Text style={s.paidInfoText}>
-                      ✅ Đã thanh toán ngày {selectedBill.paidAt}
-                      {selectedBill.paymentMethod
-                        ? `\nPhương thức: ${METHOD_CONFIG[selectedBill.paymentMethod as PaymentMethod]?.label ?? selectedBill.paymentMethod}`
-                        : ''}
-                      {selectedBill.transactionId ? `\nMã GD: ${selectedBill.transactionId}` : ''}
-                    </Text>
-                  </View>
-                )}
-              </ScrollView>
+                  {st === 'paid' && (
+                    <View style={s.paidInfo}>
+                      <Text style={s.paidInfoText}>✅ Hóa đơn đã được thanh toán.</Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
             </View>
-          </View>
-        </Modal>
-      )}
+          </Modal>
+        );
+      })()}
 
       {/* ── QR Payment Modal ──────────────────────────────────────── */}
       {showQRModal && selectedBill && (
@@ -410,10 +344,10 @@ export const BuildingBillingScreen: React.FC = () => {
                     <Text style={s.modalClose}>✕</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {fmt(selectedBill.grandTotal)}</Text>
+                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {fmt(selectedBill.amount)}</Text>
                 <View style={s.qrImageContainer}>
                   <Image
-                    source={{ uri: buildQRUrl(selectedBill.grandTotal, `${selectedBill.code} ${selectedBill.tenantName}`) }}
+                    source={{ uri: buildQRUrl(selectedBill.amount, `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim()) }}
                     style={s.qrImage}
                     resizeMode="contain"
                   />
@@ -422,8 +356,8 @@ export const BuildingBillingScreen: React.FC = () => {
                   {[
                     { label: 'Ngân hàng', val: 'MB Bank' },
                     { label: 'Số TK',     val: VIETQR_ACCOUNT },
-                    { label: 'Số tiền',   val: fmt(selectedBill.grandTotal), primary: true },
-                    { label: 'Nội dung',  val: `${selectedBill.code} ${selectedBill.tenantName}` },
+                    { label: 'Số tiền',   val: fmt(selectedBill.amount), primary: true },
+                    { label: 'Nội dung',  val: `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim() },
                   ].map((row, i) => (
                     <View key={i} style={s.bankRow}>
                       <Text style={s.bankLabel}>{row.label}</Text>
@@ -433,19 +367,7 @@ export const BuildingBillingScreen: React.FC = () => {
                     </View>
                   ))}
                 </View>
-                <TouchableOpacity
-                  style={s.confirmPayBtn}
-                  onPress={() => {
-                    billsStore.updateStatus(selectedBill.id, 'paid', {
-                      paidAt: new Date().toISOString().split('T')[0],
-                      paymentMethod: 'qr',
-                      paidAmount: selectedBill.grandTotal,
-                    });
-                    setShowQRModal(false);
-                    setSelectedBill(null);
-                    Alert.alert('✅ Đã ghi nhận!', 'Thanh toán QR được xác nhận.');
-                  }}
-                >
+                <TouchableOpacity style={s.confirmPayBtn} disabled={submitting} onPress={() => recordPaid('QR')}>
                   <Text style={s.confirmPayBtnText}>✅ Xác nhận đã thanh toán</Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -462,7 +384,7 @@ export const BuildingBillingScreen: React.FC = () => {
               <Text style={s.modalTitle}>💵 Ghi nhận tiền mặt</Text>
               <View style={s.cashAmountBox}>
                 <Text style={s.cashAmountLabel}>Số tiền cần thu</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.grandTotal)}</Text>
+                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
               </View>
               <Text style={s.cashHint}>Xác nhận sau khi đã đếm đủ tiền mặt từ khách thuê.</Text>
               <TextInput
@@ -472,7 +394,7 @@ export const BuildingBillingScreen: React.FC = () => {
                 onChangeText={setCashNote}
                 multiline
               />
-              <TouchableOpacity style={s.confirmPayBtn} onPress={handleMarkPaidCash}>
+              <TouchableOpacity style={s.confirmPayBtn} disabled={submitting} onPress={() => recordPaid('CASH', cashNote)}>
                 <Text style={s.confirmPayBtnText}>✅ Xác nhận đã thu tiền mặt</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowCashModal(false); setCashNote(''); }}>
@@ -491,11 +413,11 @@ export const BuildingBillingScreen: React.FC = () => {
               <Text style={s.modalTitle}>👛 Ví điện tử</Text>
               <View style={s.cashAmountBox}>
                 <Text style={s.cashAmountLabel}>Số tiền</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.grandTotal)}</Text>
+                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
               </View>
               <Text style={s.cashHint}>Chọn ví điện tử khách đã thanh toán:</Text>
               {['MoMo', 'ZaloPay', 'VNPay', 'Ví khác'].map(wallet => (
-                <TouchableOpacity key={wallet} style={s.ewalletOption} onPress={handleMarkPaidEwallet}>
+                <TouchableOpacity key={wallet} style={s.ewalletOption} disabled={submitting} onPress={() => recordPaid('EWALLET', wallet)}>
                   <Text style={s.ewalletOptionText}>👛 {wallet}</Text>
                   <Text style={s.ewalletOptionArrow}>→</Text>
                 </TouchableOpacity>
@@ -583,8 +505,6 @@ const s = StyleSheet.create({
   billMonth:        { fontSize: 12, color: Colors.textMuted },
   billAmountRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
   billDue:          { fontSize: 12, color: Colors.textSecondary },
-  billOverdueDays:  { fontSize: 11, color: Colors.error, fontWeight: '700' },
-  billLateFee:      { fontSize: 11, color: Colors.error },
   billTotal:        { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
 
   emptyState: { alignItems: 'center', paddingTop: 80, gap: Spacing.md },
@@ -616,27 +536,6 @@ const s = StyleSheet.create({
   detailLabel:   { fontSize: 14, color: Colors.textSecondary },
   detailVal:     { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
 
-  breakdownToggle: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: 10, marginBottom: Spacing.sm,
-  },
-  breakdownToggleText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
-  breakdownToggleIcon: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
-
-  itemsSection: {
-    backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.md,
-  },
-  itemRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  itemLabelRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
-  itemIcon:     { fontSize: 16, width: 24 },
-  itemLabel:    { fontSize: 14, color: Colors.textSecondary, flex: 1 },
-  itemAmount:   { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
-  totalRow: {
-    flexDirection: 'row', justifyContent: 'space-between', paddingTop: Spacing.md,
-    borderTopWidth: 1.5, borderColor: Colors.divider, marginTop: Spacing.sm,
-  },
   totalRowCompact: {
     flexDirection: 'row', justifyContent: 'space-between',
     backgroundColor: Colors.background, borderRadius: BorderRadius.lg,

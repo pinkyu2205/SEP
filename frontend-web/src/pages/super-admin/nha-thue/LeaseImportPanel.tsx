@@ -286,7 +286,7 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
   };
 
   const busy = phase === 'validating' || phase === 'importing';
-  const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0;
+  const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0 && !errorMessage;
   const zipReady = !zipFile || !!zipPreview;            // chưa kèm zip thì coi như sẵn sàng
   const canImport = validOk && zipReady && !busy;
 

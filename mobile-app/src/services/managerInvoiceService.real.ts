@@ -140,4 +140,11 @@ export const realManagerInvoiceService = {
   rejectPayment: async (id: number | string, reason?: string): Promise<void> => {
     await realApiClient.post(`/api/v1/manager/payments/${id}/reject`, { reason });
   },
+
+  // POST /api/v1/manager/invoices/{id}/mark-paid  — manager tự ghi nhận đã thu (tiền mặt/CK tay)
+  // method: CASH | BANK_TRANSFER | QR | EWALLET | OTHER. (BE TODO — FE gọi sẵn)
+  markInvoicePaid: async (id: number | string, body: { method: string; note?: string }) => {
+    const { data } = await realApiClient.post(`/api/v1/manager/invoices/${id}/mark-paid`, body);
+    return data;
+  },
 };
