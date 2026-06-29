@@ -9,13 +9,41 @@ import {
 import toast from 'react-hot-toast';
 import { propertyService } from '../../services/property.service';
 import { tenantService } from '../../services/tenant.service';
+import { hostService, type HostContractDto } from '../../services/host.service';
 import type {
-  PropertyResponse, RoomResponse, TenantContractResponse,
+  PropertyResponse, RoomResponse, TenantContractResponse, ContractStatus,
   PricingCalculationResponse, InboundContractResponse,
 } from '../../types/api.types';
 import { OperationalEquipmentPanel } from '../super-admin/nha-thue/OperationalEquipmentPanel';
 import { PropertyMap } from '../../components/PropertyMap';
 import { formatCurrency } from '../../utils';
+
+/**
+ * Host portal: endpoint /properties/{id}/tenant-contracts chỉ cho MANAGER/ADMIN (host bị 403),
+ * nên host lấy HĐ qua /host/contracts. Map về TenantContractResponse để dùng chung với phần
+ * hiển thị khách thuê (modal phòng, card nhà nguyên căn). roomId suy ra từ roomCode ↔ roomNumber.
+ */
+const hostContractToTenant = (hc: HostContractDto, rooms: RoomResponse[]): TenantContractResponse => {
+  const room = hc.roomCode ? rooms.find(r => r.roomNumber === hc.roomCode) : undefined;
+  return {
+    id: Number(hc.id),
+    propertyId: hc.propertyId ?? 0,
+    roomId: room?.id,
+    roomNumber: hc.roomCode,
+    tenantUserId: '',
+    tenantFullName: hc.lesseeName,
+    tenantPhone: hc.tenantPhone ?? '',
+    tenantCccd: hc.tenantCccd,
+    contractCode: hc.code,
+    rentAmount: Number(hc.rentAmount) || 0,
+    deposit: Number(hc.deposit) || 0,
+    moveInDate: hc.moveInDate ?? hc.startDate,
+    startDate: hc.startDate,
+    endDate: hc.endDate,
+    status: hc.status as ContractStatus,
+    equipmentSnapshot: hc.equipmentSnapshot,
+  };
+};
 
 /** dd/MM/yyyy hoặc '—' */
 const fmtDate = (iso?: string) =>
@@ -143,9 +171,9 @@ const STATUS_OPTIONS = [
 ];
 
 // ─── Room Detail Modal — xem đầy đủ thông tin phòng + đổi trạng thái ──────────
-function InfoCell({ icon: Icon, label, value, highlight }: { icon: typeof Ruler; label: string; value: string; highlight?: boolean }) {
+function InfoCell({ icon: Icon, label, value, highlight, className }: { icon: typeof Ruler; label: string; value: string; highlight?: boolean; className?: string }) {
   return (
-    <div className="rounded-xl bg-slate-50 px-4 py-3">
+    <div className={`rounded-xl bg-slate-50 px-4 py-3 ${className ?? ''}`}>
       <p className="text-xs text-slate-400 flex items-center gap-1.5"><Icon className="w-3.5 h-3.5" /> {label}</p>
       <p className={`mt-0.5 font-bold ${highlight ? 'text-indigo-600 text-base' : 'text-slate-800 text-sm'}`}>{value}</p>
     </div>
@@ -211,9 +239,8 @@ function RoomDetailModal({
             <InfoCell icon={Ruler} label="Diện tích" value={room.area != null ? `${room.area} m²` : '—'} />
             <InfoCell icon={Users} label="Sức chứa" value={room.maxOccupants != null ? `${room.maxOccupants} người` : '—'} />
             <InfoCell icon={BadgeDollarSign} label="Giá thuê / tháng" value={room.price != null ? formatCurrency(room.price) : '—'} highlight />
-            <InfoCell icon={Wallet} label="Tiền cọc" value={room.deposit != null ? formatCurrency(room.deposit) : '—'} />
-            <InfoCell icon={Zap} label="Mã điện" value={room.electricMeterCode || '—'} />
-            <InfoCell icon={Droplets} label="Mã nước" value={room.waterMeterCode || '—'} />
+            <InfoCell icon={Wallet} label="Tiền cọc" value={room.deposit != null ? formatCurrency(room.deposit) : (tenant?.deposit ? formatCurrency(tenant.deposit) : '—')} />
+            <InfoCell icon={Zap} label="Điện & nước" value="Tính theo giá nhà nước hằng tháng" className="col-span-2" />
           </div>
 
           {room.structureDescription && (
@@ -240,9 +267,19 @@ function RoomDetailModal({
                   <p className="font-bold text-slate-800">{formatCurrency(tenant.rentAmount)}</p>
                 </div>
                 <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <p className="text-xs text-slate-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Tiền cọc</p>
+                  <p className="font-bold text-slate-800">{tenant.deposit ? formatCurrency(tenant.deposit) : '—'}</p>
+                </div>
+                <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Kỳ hạn</p>
                   <p className="font-bold text-slate-800 text-xs mt-0.5">{fmtDate(tenant.startDate)} → {tenant.endDate ? fmtDate(tenant.endDate) : 'Không thời hạn'}</p>
                 </div>
+                {tenant.contractCode && (
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-xs text-slate-400">Mã hợp đồng</p>
+                    <p className="font-bold text-slate-800 text-xs mt-0.5">{tenant.contractCode}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -307,14 +344,23 @@ export const PropertyDetail = () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [prop, roomList, mgrs, contractList, pricingData, inboundData] = await Promise.all([
+      const [prop, roomList, mgrs, hostContracts, pricingData, inboundData] = await Promise.all([
         propertyService.getPropertyById(Number(id)),
         propertyService.getRooms(Number(id)),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-        tenantService.listByProperty(Number(id), { silent: true }).catch(() => null),
+        // Host xem HĐ khách thuê qua /host/contracts (endpoint /properties/.../tenant-contracts chỉ cho MANAGER/ADMIN).
+        hostService.listContracts({ propertyId: Number(id), size: 100 }).then(p => p.content).catch(() => null),
         propertyService.getPricing(Number(id)).catch(() => null),          // 404 nếu chưa từng tính giá
         propertyService.getInboundContract(Number(id)).catch(() => null),  // HĐ chủ nhà gốc
       ]);
+
+      // Host dùng /host/contracts; nếu trống (vd manager/admin xem) thì fallback endpoint manager.
+      let contractList: TenantContractResponse[];
+      if (hostContracts && hostContracts.length) {
+        contractList = hostContracts.map(hc => hostContractToTenant(hc, roomList));
+      } else {
+        contractList = await tenantService.listByProperty(Number(id), { silent: true }).catch(() => [] as TenantContractResponse[]);
+      }
       // Patch tên manager nếu BE chưa trả (mục 6 NOTE-CHO-TEAM-BE.md)
       if (prop.operationManagerId && !prop.operationManagerName) {
         const mgr = mgrs.find(m => m.id === prop.operationManagerId);

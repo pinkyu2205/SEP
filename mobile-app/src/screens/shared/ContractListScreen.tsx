@@ -1,13 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, FlatList,
-  TextInput, Dimensions,
+  TextInput, Dimensions, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
 import { DatePickerField } from '../../components/common/DatePickerField';
-import { MANAGED_PROPERTIES, getBuildingOps } from '../../data/managedProperties';
+import { ManagedProperty } from '../../data/managedProperties';
+import { managerPropertyService } from '../../services/managerPropertyService';
+import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
@@ -77,6 +79,8 @@ interface Contract {
   approvalHistory: ApprovalEntry[];
   createdAt: string;
   updatedAt: string;
+  // ID property thật từ BE — dùng để gom HĐ theo bất động sản ở dashboard.
+  _propertyId?: string;
 }
 
 interface ContractForm {
@@ -101,259 +105,6 @@ const DEFAULT_TERMS =
   'Điều 2: Tiền thuê thanh toán vào ngày 05 hàng tháng.\n' +
   'Điều 3: Thông báo trước 30 ngày khi chấm dứt hợp đồng.\n' +
   'Điều 4: Không được chuyển nhượng hợp đồng cho bên thứ ba.';
-
-const MOCK_HOST_CONTRACTS: Contract[] = [
-  {
-    id: 'h1', code: 'HD-NH-2026-001', type: 'building_rental',
-    lessorName: 'Nguyễn Văn Host', lesseeName: 'Nguyễn Văn Quản',
-    lesseeCccd: '079201002001', lesseePhone: '0901222001',
-    propertyName: 'Nhà Nguyễn Trãi',
-    startDate: '01/01/2026', endDate: '01/01/2028',
-    depositAmount: 20000000, rentAmount: 8000000,
-    status: 'active', daysUntilExpiry: 228,
-    otpVerified: true, signedAt: '01/01/2026',
-    equipmentList: [],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Nguyễn Văn Host',
-    approvedBy: 'Admin Hệ thống',
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Host', at: '28/12/2025' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '30/12/2025' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/01/2026' },
-    ],
-    createdAt: '28/12/2025', updatedAt: '01/01/2026',
-  },
-  {
-    id: 'h2', code: 'HD-NH-2026-002', type: 'building_rental',
-    lessorName: 'Trần Văn Host', lesseeName: 'Nguyễn Văn Quản',
-    lesseeCccd: '079201002001', lesseePhone: '0901222001',
-    propertyName: 'Nhà Lê Văn Sỹ',
-    startDate: '01/03/2026', endDate: '01/03/2027',
-    depositAmount: 15000000, rentAmount: 6500000,
-    status: 'expiring_soon', daysUntilExpiry: 18,
-    otpVerified: true, signedAt: '01/03/2026',
-    equipmentList: [],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Trần Văn Host',
-    approvedBy: 'Admin Hệ thống',
-    approvalHistory: [
-      { action: 'created', by: 'Trần Văn Host', at: '26/02/2026' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '28/02/2026' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/03/2026' },
-    ],
-    createdAt: '26/02/2026', updatedAt: '01/03/2026',
-  },
-  {
-    id: 'h3', code: 'HD-NH-2025-003', type: 'building_rental',
-    lessorName: 'Lê Văn Host', lesseeName: 'Nguyễn Văn Quản',
-    lesseeCccd: '079201002001', lesseePhone: '0901222001',
-    propertyName: 'Nhà Phan Đình Phùng',
-    startDate: '01/06/2024', endDate: '01/06/2025',
-    depositAmount: 12000000, rentAmount: 5000000,
-    status: 'expired', daysUntilExpiry: -348,
-    otpVerified: true, signedAt: '01/06/2024',
-    equipmentList: [],
-    terms: DEFAULT_TERMS,
-    approvalHistory: [
-      { action: 'created', by: 'Lê Văn Host', at: '28/05/2024' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '30/05/2024' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/06/2024' },
-    ],
-    createdAt: '28/05/2024', updatedAt: '01/06/2024',
-  },
-];
-
-const MOCK_CONTRACTS: Contract[] = [
-  {
-    id: 'c1', code: 'HD-MT-2026-001', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Trần Văn An',
-    lesseeCccd: '079201001001', lesseePhone: '0901111001',
-    propertyName: 'Nhà Nguyễn Trãi', roomCode: 'P101',
-    startDate: '01/06/2026', endDate: '01/06/2027',
-    depositAmount: 3500000, rentAmount: 3500000,
-    status: 'draft',
-    equipmentList: [
-      { id: 'e1', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Mới' },
-      { id: 'e2', name: 'Giường 1m6 + Nệm', quantity: 1, condition: 'Mới' },
-    ],
-    terms: DEFAULT_TERMS,
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '14/05/2026 09:00' },
-    ],
-    createdAt: '14/05/2026', updatedAt: '14/05/2026',
-  },
-  {
-    id: 'c2', code: 'HD-MT-2026-002', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Lê Thị Bình',
-    lesseeCccd: '079201001002', lesseePhone: '0901111002',
-    propertyName: 'Nhà Nguyễn Trãi', roomCode: 'P102',
-    startDate: '01/06/2026', endDate: '01/06/2027',
-    depositAmount: 3200000, rentAmount: 3200000,
-    status: 'pending_approval',
-    submittedBy: 'Nguyễn Văn Quản',
-    submittedAt: '15/05/2026 10:30',
-    equipmentList: [
-      { id: 'e3', name: 'Bình nước nóng Ariston 30L', quantity: 1, condition: 'Mới' },
-      { id: 'e4', name: 'Tủ quần áo 2 cánh', quantity: 1, condition: 'Mới' },
-    ],
-    terms: DEFAULT_TERMS,
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '13/05/2026 14:00' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '15/05/2026 10:30', note: 'Gửi duyệt lần đầu' },
-    ],
-    createdAt: '13/05/2026', updatedAt: '15/05/2026',
-  },
-  {
-    id: 'c3', code: 'HD-MT-2026-003', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Phạm Văn Cường',
-    lesseeCccd: '079201001003', lesseePhone: '0901111003',
-    propertyName: 'Nhà Nguyễn Trãi', roomCode: 'P103',
-    startDate: '01/06/2026', endDate: '01/06/2027',
-    depositAmount: 3800000, rentAmount: 3800000,
-    status: 'approved',
-    submittedBy: 'Nguyễn Văn Quản',
-    submittedAt: '10/05/2026 09:00',
-    approvedBy: 'Admin Hệ thống',
-    approvedAt: '12/05/2026 14:00',
-    equipmentList: [
-      { id: 'e5', name: 'Điều hòa Panasonic 12000BTU', quantity: 1, condition: 'Mới' },
-      { id: 'e6', name: 'Bình nước nóng 30L', quantity: 1, condition: 'Mới' },
-      { id: 'e7', name: 'Giường + Nệm 1m6', quantity: 1, condition: 'Mới' },
-    ],
-    terms: DEFAULT_TERMS,
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '09/05/2026 11:00' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '10/05/2026 09:00' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '12/05/2026 14:00', note: 'Hợp đồng hợp lệ, đủ điều kiện kích hoạt' },
-    ],
-    createdAt: '09/05/2026', updatedAt: '12/05/2026',
-  },
-  {
-    id: 'c4', code: 'HD-MT-2026-004', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Hoàng Văn Dũng',
-    lesseeCccd: '079201001004', lesseePhone: '0901111004',
-    propertyName: 'Nhà Nguyễn Trãi', roomCode: 'P201',
-    startDate: '01/02/2026', endDate: '01/02/2027',
-    depositAmount: 4000000, rentAmount: 4000000,
-    status: 'active', daysUntilExpiry: 261,
-    otpVerified: true, signedAt: '01/02/2026',
-    equipmentList: [
-      { id: 'e8', name: 'Điều hòa Casper 9000BTU', quantity: 1, condition: 'Mới' },
-      { id: 'e9', name: 'Máy giặt Toshiba 8kg', quantity: 1, condition: 'Mới' },
-    ],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Nguyễn Văn Quản',
-    submittedAt: '28/01/2026',
-    approvedBy: 'Admin Hệ thống',
-    approvedAt: '30/01/2026',
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '27/01/2026 10:00' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '28/01/2026 09:00' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '30/01/2026 15:00' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/02/2026 08:00', note: 'Đã xác nhận OTP, hợp đồng có hiệu lực' },
-    ],
-    createdAt: '27/01/2026', updatedAt: '01/02/2026',
-  },
-  {
-    id: 'c5', code: 'HD-MT-2026-005', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Trần Thị Emi',
-    lesseeCccd: '079201001005', lesseePhone: '0901111005',
-    propertyName: 'Nhà Lê Văn Sỹ', roomCode: 'P101',
-    startDate: '01/06/2026', endDate: '01/06/2027',
-    depositAmount: 3500000, rentAmount: 3500000,
-    status: 'rejected',
-    submittedBy: 'Nguyễn Văn Quản',
-    submittedAt: '12/05/2026 08:30',
-    rejectedBy: 'Admin Hệ thống',
-    rejectedAt: '13/05/2026 16:00',
-    rejectionReason: 'CCCD của khách thuê không hợp lệ, vui lòng cập nhật lại và gửi duyệt lại.',
-    equipmentList: [
-      { id: 'e10', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Mới' },
-    ],
-    terms: DEFAULT_TERMS,
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '11/05/2026 14:00' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '12/05/2026 08:30' },
-      { action: 'rejected', by: 'Admin Hệ thống', at: '13/05/2026 16:00', note: 'CCCD của khách thuê không hợp lệ, vui lòng cập nhật lại và gửi duyệt lại.' },
-    ],
-    createdAt: '11/05/2026', updatedAt: '13/05/2026',
-  },
-  {
-    id: 'c6', code: 'HD-MT-2025-006', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Vũ Minh Phương',
-    lesseeCccd: '079201001006', lesseePhone: '0901111006',
-    propertyName: 'Nhà Lê Văn Sỹ', roomCode: 'P102',
-    startDate: '01/06/2025', endDate: '25/05/2026',
-    depositAmount: 3000000, rentAmount: 3000000,
-    status: 'expiring_soon', daysUntilExpiry: 9,
-    otpVerified: true, signedAt: '01/06/2025',
-    equipmentList: [
-      { id: 'e11', name: 'Bình nước nóng 30L', quantity: 1, condition: 'Đã sử dụng - Tốt' },
-    ],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Nguyễn Văn Quản',
-    submittedAt: '28/05/2025',
-    approvedBy: 'Admin Hệ thống',
-    approvedAt: '30/05/2025',
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '27/05/2025 10:00' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '28/05/2025 09:00' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '30/05/2025 14:00' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/06/2025 08:00' },
-    ],
-    createdAt: '27/05/2025', updatedAt: '01/06/2025',
-  },
-  {
-    id: 'c7', code: 'HD-MT-2025-007', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Nguyễn Bảo Gia',
-    lesseeCccd: '079201001007', lesseePhone: '0901111007',
-    propertyName: 'Nhà Nguyễn Trãi', roomCode: 'P301',
-    startDate: '01/04/2025', endDate: '01/04/2026',
-    depositAmount: 3200000, rentAmount: 3200000,
-    status: 'expired', daysUntilExpiry: -45,
-    otpVerified: true, signedAt: '01/04/2025',
-    equipmentList: [
-      { id: 'e12', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Đã sử dụng - Tốt' },
-      { id: 'e13', name: 'Giường + Nệm', quantity: 1, condition: 'Đã sử dụng - Tốt' },
-    ],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Nguyễn Văn Quản',
-    approvedBy: 'Admin Hệ thống',
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '28/03/2025' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '29/03/2025' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '31/03/2025' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/04/2025' },
-    ],
-    createdAt: '28/03/2025', updatedAt: '01/04/2025',
-  },
-  {
-    id: 'c8', code: 'HD-MT-2025-008', type: 'room_rental',
-    lessorName: 'Nguyễn Văn Quản', lesseeName: 'Đỗ Hương Giang',
-    lesseeCccd: '079201001008', lesseePhone: '0901111008',
-    propertyName: 'Nhà Lê Văn Sỹ', roomCode: 'P201',
-    startDate: '01/01/2025', endDate: '01/01/2026',
-    depositAmount: 3500000, rentAmount: 3500000,
-    status: 'terminated',
-    otpVerified: true, signedAt: '01/01/2025',
-    terminatedAt: '10/03/2025',
-    terminationReason: 'Khách thuê chuyển đi theo yêu cầu cá nhân',
-    equipmentList: [
-      { id: 'e14', name: 'Điều hòa Panasonic 9000BTU', quantity: 1, condition: 'Đã sử dụng - Tốt' },
-    ],
-    terms: DEFAULT_TERMS,
-    submittedBy: 'Nguyễn Văn Quản',
-    approvedBy: 'Admin Hệ thống',
-    approvalHistory: [
-      { action: 'created', by: 'Nguyễn Văn Quản', at: '28/12/2024' },
-      { action: 'submitted', by: 'Nguyễn Văn Quản', at: '29/12/2024' },
-      { action: 'approved', by: 'Admin Hệ thống', at: '30/12/2024' },
-      { action: 'activated', by: 'Nguyễn Văn Quản', at: '01/01/2025' },
-      { action: 'terminated', by: 'Nguyễn Văn Quản', at: '10/03/2025', note: 'Khách thuê chuyển đi theo yêu cầu cá nhân' },
-    ],
-    createdAt: '28/12/2024', updatedAt: '10/03/2025',
-  },
-];
 
 // ===================== CONFIG =====================
 const STATUS_CONFIG: Record<ContractStatus, { label: string; color: string; bg: string; icon: string }> = {
@@ -389,6 +140,82 @@ const FILTER_TABS: Array<{ key: 'all' | ContractStatus; label: string }> = [
 ];
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+
+// ===================== MAP API → UI =====================
+// ISO (yyyy-MM-dd) -> dd/MM/yyyy. Giữ nguyên nếu không parse được.
+const fmtIsoDate = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString('vi-VN');
+};
+
+const daysUntil = (iso?: string): number | null =>
+  iso ? Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000) : null;
+
+// Trạng thái HĐ từ BE (status + priceApprovalStatus) -> ContractStatus của UI.
+const mapApiContractStatus = (c: TenantContractResponse): ContractStatus => {
+  const pa = (c.priceApprovalStatus || '').toUpperCase();
+  if (pa === 'PENDING_PRICE_APPROVAL') return 'pending_approval';
+  if (pa === 'PRICE_REJECTED') return 'rejected';
+  if (pa === 'APPROVED_AWAITING_DEPOSIT') return 'approved';
+
+  const s = (c.status || '').toUpperCase();
+  if (s === 'TERMINATED' || s === 'CANCELLED') return 'terminated';
+  if (s === 'EXPIRED') return 'expired';
+  if (s === 'ACTIVE') {
+    const d = daysUntil(c.endDate);
+    return d != null && d >= 0 && d <= 30 ? 'expiring_soon' : 'active';
+  }
+  if (s === 'PENDING') return 'approved'; // đã tạo, chờ thu cọc/OTP để kích hoạt
+  return 'draft';
+};
+
+// Parse biên bản thiết bị (JSON) -> danh sách tài sản bàn giao. Lỗi -> [].
+const parseEquipment = (snapshot?: string): ContractEquipment[] => {
+  if (!snapshot) return [];
+  try {
+    const parsed = JSON.parse(snapshot);
+    const items = Array.isArray(parsed) ? parsed : parsed.items;
+    if (!Array.isArray(items)) return [];
+    return items.map((it: any, i: number) => ({
+      id: String(it.equipmentId ?? i),
+      name: it.name ?? 'Thiết bị',
+      quantity: Number(it.quantity) || 1,
+      condition: it.source === 'ADDED' ? 'Lắp thêm' : 'Sẵn có',
+    }));
+  } catch {
+    return [];
+  }
+};
+
+// 1 hợp đồng BE (TenantContractResponse) -> Contract dùng trong UI.
+const mapApiToContract = (c: TenantContractResponse, propertyName: string): Contract => {
+  const status = mapApiContractStatus(c);
+  const d = daysUntil(c.endDate);
+  return {
+    id: String(c.id),
+    code: c.contractCode,
+    type: c.roomId ? 'room_rental' : 'building_rental',
+    lessorName: '',
+    lesseeName: c.tenantFullName,
+    lesseeCccd: c.tenantCccd ?? '',
+    lesseePhone: c.tenantPhone,
+    propertyName,
+    roomCode: c.roomNumber ? `P${c.roomNumber}` : undefined,
+    startDate: fmtIsoDate(c.moveInDate || c.startDate),
+    endDate: fmtIsoDate(c.endDate),
+    depositAmount: c.deposit ?? 0,
+    rentAmount: c.rentAmount ?? 0,
+    status,
+    equipmentList: parseEquipment(c.equipmentSnapshot),
+    daysUntilExpiry: d ?? undefined,
+    rejectionReason: c.priceRejectReason,
+    approvalHistory: [],
+    createdAt: fmtIsoDate(c.startDate),
+    updatedAt: fmtIsoDate(c.startDate),
+    _propertyId: String(c.propertyId),
+  };
+};
 
 const DEFAULT_FORM: ContractForm = {
   type: 'room_rental',
@@ -1342,13 +1169,41 @@ interface Props {
 export const ContractListScreen: React.FC<Props> = () => {
   const navigation = useNavigation<any>();
   type ViewMode = 'dashboard' | 'detail' | 'create';
-  type TabType = 'tenant' | 'host';
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
-  const [tab, setTab] = useState<TabType>('tenant');
-  const [contracts, setContracts] = useState<Contract[]>(MOCK_CONTRACTS);
-  const [hostContracts] = useState<Contract[]>(MOCK_HOST_CONTRACTS);
+  const tab = 'tenant' as const; // Màn này chỉ quản lý HĐ giữa manager ↔ khách thuê.
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [managedProps, setManagedProps] = useState<ManagedProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
+
+  // Tải HĐ THẬT: gom hợp đồng của tất cả nhà manager phụ trách.
+  const load = useCallback(async () => {
+    try {
+      const props = await managerPropertyService.getManagedProperties();
+      setManagedProps(props);
+      const lists = await Promise.all(
+        props.map(async (p) => {
+          const apiContracts = await realTenantService
+            .listByProperty(Number(p.id))
+            .catch(() => [] as TenantContractResponse[]);
+          return apiContracts.map(c => mapApiToContract(c, p.name));
+        }),
+      );
+      setContracts(lists.flat());
+    } catch {
+      setManagedProps([]);
+      setContracts([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
   const tenantStats = useMemo(() => ({
     total: contracts.length,
@@ -1360,19 +1215,12 @@ export const ContractListScreen: React.FC<Props> = () => {
     rejected: contracts.filter(c => c.status === 'rejected').length,
   }), [contracts]);
 
-  const hostStats = useMemo(() => ({
-    total: hostContracts.length,
-    active: hostContracts.filter(c => c.status === 'active').length,
-    approved: hostContracts.filter(c => c.status === 'approved').length,
-    expiring: hostContracts.filter(c => c.status === 'expiring_soon').length,
-    pending: hostContracts.filter(c => c.status === 'pending_approval').length,
-    draft: 0,
-    rejected: 0,
-  }), [hostContracts]);
-
   const buildingCards = useMemo(() =>
-    MANAGED_PROPERTIES.map(p => ({ prop: p, bContracts: getBuildingOps(p.id).contracts })),
-    []
+    managedProps.map(p => ({
+      prop: p,
+      bContracts: contracts.filter(c => c._propertyId === p.id),
+    })),
+    [managedProps, contracts]
   );
 
   const recentActivity = useMemo(() =>
@@ -1637,7 +1485,7 @@ export const ContractListScreen: React.FC<Props> = () => {
     );
   }
 
-  const curStats = tab === 'tenant' ? tenantStats : hostStats;
+  const curStats = tenantStats;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -1651,34 +1499,25 @@ export const ContractListScreen: React.FC<Props> = () => {
           )}
           <Text style={dashStyles.headerTitle}>Hợp đồng</Text>
         </View>
-        {tab === 'tenant' && (
-          <TouchableOpacity style={dashStyles.createBtn} onPress={() => { setEditingContract(null); setViewMode('create'); }}>
-            <Text style={dashStyles.createBtnText}>+ Tạo HĐ</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={dashStyles.createBtn} onPress={() => { setEditingContract(null); setViewMode('create'); }}>
+          <Text style={dashStyles.createBtnText}>+ Tạo HĐ</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Tab switcher */}
+      {/* Tổng số HĐ với khách thuê */}
       <View style={dashStyles.tabRow}>
-        <TouchableOpacity
-          style={[dashStyles.tabPill, tab === 'tenant' && dashStyles.tabPillActive]}
-          onPress={() => setTab('tenant')}
-        >
-          <Text style={[dashStyles.tabPillText, tab === 'tenant' && dashStyles.tabPillTextActive]}>
-            🚪 Với khách thuê ({contracts.length})
+        <View style={[dashStyles.tabPill, dashStyles.tabPillActive]}>
+          <Text style={[dashStyles.tabPillText, dashStyles.tabPillTextActive]}>
+            🚪 Hợp đồng với khách thuê ({contracts.length})
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[dashStyles.tabPill, tab === 'host' && dashStyles.tabPillActive]}
-          onPress={() => setTab('host')}
-        >
-          <Text style={[dashStyles.tabPillText, tab === 'host' && dashStyles.tabPillTextActive]}>
-            🏢 Với Host ({hostContracts.length})
-          </Text>
-        </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={dashStyles.scrollContent}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={dashStyles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         {/* Stats row */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dashStyles.statsContent}>
           <View style={[dashStyles.statCard, { borderTopColor: Colors.success }]}>
@@ -1708,7 +1547,7 @@ export const ContractListScreen: React.FC<Props> = () => {
         </ScrollView>
 
         {/* Alert banner */}
-        {tab === 'tenant' && (tenantStats.expiring > 0 || tenantStats.pending > 0 || tenantStats.rejected > 0) && (
+        {(tenantStats.expiring > 0 || tenantStats.pending > 0 || tenantStats.rejected > 0) && (
           <View style={dashStyles.alertBanner}>
             <Text style={dashStyles.alertText}>
               {[
@@ -1720,15 +1559,24 @@ export const ContractListScreen: React.FC<Props> = () => {
           </View>
         )}
 
-        {tab === 'tenant' ? (
+        {loading ? (
+          <View style={{ paddingVertical: 48 }}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+        ) : (
           <>
             {/* Building cards */}
             <Text style={dashStyles.sectionTitle}>Theo bất động sản</Text>
+            {buildingCards.length === 0 && (
+              <View style={dashStyles.emptyBox}>
+                <Text style={dashStyles.emptyText}>🏠  Chưa có bất động sản nào được phân công</Text>
+              </View>
+            )}
             {buildingCards.map(({ prop, bContracts }) => {
               const isWholeHouse = prop.propertyType === 'WHOLE_HOUSE';
               const activeCount = bContracts.filter(c => c.status === 'active').length;
-              const expiringCount = bContracts.filter(c => c.status === 'expiring' || c.status === 'expiring_soon').length;
-              const pendingCount = bContracts.filter(c => c.status === 'pending' || c.status === 'pending_approval').length;
+              const expiringCount = bContracts.filter(c => c.status === 'expiring_soon').length;
+              const pendingCount = bContracts.filter(c => c.status === 'pending_approval').length;
               const occ = prop.totalRooms > 0 ? Math.round((prop.occupied / prop.totalRooms) * 100) : 0;
               const needsAction = isWholeHouse ? prop.expiringContractCount : expiringCount + pendingCount;
               return (
@@ -1795,22 +1643,6 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ))}
               </>
             )}
-          </>
-        ) : (
-          <>
-            <Text style={dashStyles.sectionTitle}>Hợp đồng với Host/Admin</Text>
-            {hostContracts.length === 0 ? (
-              <View style={dashStyles.emptyBox}>
-                <Text style={dashStyles.emptyText}>📋  Chưa có hợp đồng với Host/Admin</Text>
-              </View>
-            ) : hostContracts.map(c => (
-              <ContractCard
-                key={c.id}
-                contract={c}
-                onPress={() => { setSelectedContract(c); setViewMode('detail'); }}
-                onAction={handleAction}
-              />
-            ))}
           </>
         )}
 
