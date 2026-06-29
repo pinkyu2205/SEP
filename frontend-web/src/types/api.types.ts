@@ -142,6 +142,9 @@ export interface PropertyResponse {
   operationManagerName?: string;
   renovationCompleted: boolean;
   imageUrls?: string[];
+  // Đơn giá điện/nước cấp nhà (theo giá nhà nước). BE trả ở GET /properties/{id}.
+  electricityUnitPrice?: number | null;
+  waterUnitPrice?: number | null;
   // TB chủ nhà gốc bàn giao (import đợt 1) — CHỈ hiển thị, không khấu hao.
   handoverEquipments?: HandoverEquipmentResponse[];
   // Đợt cải tạo đang hiệu lực + toàn bộ lịch sử cải tạo (có version v1/v2).

@@ -91,9 +91,12 @@ export interface PropertyPerformanceRow {
 
 // ── Contracts ────────────────────────────────────────────────────────────────
 export interface HostContractDto {
-  id: string; code: string; lesseeName: string; propertyName: string;
-  roomCode?: string; lessorName?: string; rentAmount: number;
-  startDate: string; endDate?: string;
+  id: string; propertyId?: number; code: string;
+  lesseeName: string; tenantPhone?: string; tenantCccd?: string;
+  propertyName: string;
+  roomCode?: string; lessorName?: string;
+  rentAmount: number; deposit?: number;
+  moveInDate?: string; startDate: string; endDate?: string;
   status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
   // Biên bản bàn giao thiết bị (JSON string) — để Host xem thiết bị đề xuất khi duyệt giá.
   equipmentSnapshot?: string;
@@ -162,7 +165,7 @@ export const hostService = {
     api.get(`${REPORTS}/property-performance`, { params: { month } }),
 
   // Contracts (host duyệt HĐ tenant)
-  listContracts: (params: { status?: string; page?: number; size?: number } = {}): Promise<Page<HostContractDto>> =>
+  listContracts: (params: { propertyId?: number; status?: string; page?: number; size?: number } = {}): Promise<Page<HostContractDto>> =>
     api.get(CONTRACTS, { params }),
   approveContract: (id: string): Promise<HostContractDto> => api.put(`${CONTRACTS}/${id}/approve`),
   rejectContract: (id: string, reason: string): Promise<HostContractDto> =>
