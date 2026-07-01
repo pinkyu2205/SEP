@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -26,6 +27,7 @@ import {
   realPropertyService,
 } from '../../services/propertyService.real'
 import {
+  defaultTenantUsername,
   EquipmentSnapshotItem,
   OnboardTenantRequest,
   realTenantService,
@@ -189,9 +191,15 @@ const isValidCccd = (s: string) => /^\d{12}$/.test(onlyDigits(s))
 type DepositMethod = 'payos' | 'cash'
 
 // Khoá lưu nháp onboarding (1 phiên đón khách dở dang)
-const DRAFT_KEY = 'onboarding_draft_v1'
+const DRAFT_KEY = 'onboarding_draft_v2'
 
-export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
+// Cooldown gửi lại OTP (giây)
+const OTP_RESEND_COOLDOWN = 30
+
+// OnboardingScreenV2 — bản đón khách khớp đầy đủ backend (xem kế hoạch tiếp khách):
+// nối đúng luồng send-otp, fallback username = t{phone}, cọc tiền mặt => HĐ ACTIVE ngay (bỏ OTP),
+// chặn submit khi role lookup không hợp lệ. Màn cũ OnboardingScreen được giữ làm dự phòng.
+export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [step, setStep] = useState(0)
   const [rentalMode, setRentalMode] = useState<RentalMode | null>(null)
 
@@ -250,6 +258,9 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
   const [priceMode, setPriceMode] = useState<'agreed' | 'approval'>('agreed')
 
   const [otp, setOtp] = useState('')
+  const [otpSending, setOtpSending] = useState(false)
+  const [otpCooldown, setOtpCooldown] = useState(0) // giây còn lại trước khi cho gửi lại
+  const otpSentForRef = useRef<number | null>(null) // contractId đã auto-gửi OTP (tránh gửi lặp)
 
   // Dữ liệu thật
   const [properties, setProperties] = useState<UiProperty[]>([])
@@ -415,6 +426,20 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }, 5000)
     return () => clearInterval(timer)
   }, [currentLabel, contract, paid])
+
+  // Tự gửi OTP đúng 1 lần khi vào bước "Xác nhận" (luồng BE: send-otp -> confirm).
+  useEffect(() => {
+    if (currentLabel !== 'Xác nhận' || !contract) return
+    if (otpSentForRef.current === contract.id) return
+    sendOtp(false)
+  }, [currentLabel, contract])
+
+  // Đếm ngược cooldown nút "Gửi lại OTP".
+  useEffect(() => {
+    if (otpCooldown <= 0) return
+    const t = setInterval(() => setOtpCooldown((s) => (s > 0 ? s - 1 : 0)), 1000)
+    return () => clearInterval(t)
+  }, [otpCooldown])
 
   // Tải thiết bị sẵn có của phòng/nhà khi vào bước "Bàn giao thiết bị".
   useEffect(() => {
@@ -654,6 +679,17 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
           return Alert.alert(
             'CCCD không hợp lệ',
             'Số căn cước công dân phải gồm đúng 12 chữ số.',
+          )
+        // Chặn cứng nếu SĐT đã thuộc tài khoản nội bộ (không phải USER/TENANT) — onboard sẽ lỗi ở BE.
+        if (
+          lookupFound &&
+          lookupRole &&
+          lookupRole !== 'ROLE_USER' &&
+          lookupRole !== 'ROLE_TENANT'
+        )
+          return Alert.alert(
+            'Không thể đón khách',
+            `Số điện thoại này đang là tài khoản nội bộ (${lookupRole}). Vui lòng dùng số khác cho khách thuê.`,
           )
         {
           const end = parseDmy(endDate)
@@ -1042,9 +1078,27 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     }
   }
 
+  // Gửi (hoặc gửi lại) OTP xác nhận tới SĐT khách. Dev OTP mode: BE không gửi SMS thật.
+  const sendOtp = async (manual = false) => {
+    if (!contract) return
+    try {
+      setOtpSending(true)
+      await realTenantService.sendContractOtp(contract.id)
+      otpSentForRef.current = contract.id
+      setOtpCooldown(OTP_RESEND_COOLDOWN)
+      if (manual)
+        Alert.alert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${tenantInfo.phone}.`)
+    } catch (err: any) {
+      Alert.alert('Lỗi gửi OTP', readErr(err, 'Không gửi được mã OTP. Vui lòng thử lại.'))
+    } finally {
+      setOtpSending(false)
+    }
+  }
+
   const verifyOTPAndSubmit = async () => {
-    if (otp !== '123456')
-      return Alert.alert('Lỗi', 'Mã OTP không hợp lệ (demo: 123456).')
+    // Không chặn cứng mã ở client — để BE xác thực (dev: chấp nhận mọi mã 6 số; prod: Twilio).
+    if (otp.length !== 6)
+      return Alert.alert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
     if (!contract) return
     try {
       setConfirming(true)
@@ -1057,7 +1111,7 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         tenantFullName: res.tenantFullName,
         roomNumber: res.roomNumber,
         phone: tenantInfo.phone,
-        username: res.tenantUsername ?? tenantInfo.phone,
+        username: res.tenantUsername ?? defaultTenantUsername(tenantInfo.phone),
         accountCreated: res.tenantAccountCreated ?? !lookupFound,
         rolePromoted:
           res.tenantRolePromoted ?? (lookupFound && lookupRole === 'ROLE_USER'),
@@ -1067,6 +1121,25 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     } finally {
       setConfirming(false)
     }
+  }
+
+  // Cọc tiền mặt + đã thống nhất giá => BE tạo HĐ ACTIVE ngay (requireDepositPayment=false,
+  // không duyệt giá — xem ma trận §8). Không cần PayOS/OTP: chỉ xác nhận đã thu tiền rồi sang
+  // màn thành công. Dùng dữ liệu từ response onboard (HĐ đã active, tài khoản đã tạo lúc onboard).
+  const finalizeCashOnboard = () => {
+    if (!contract) return
+    completedRef.current = true // bỏ qua cảnh báo thoát
+    clearDraft()
+    navigation.navigate('OnboardingSuccess', {
+      contractCode: contract.contractCode,
+      tenantFullName: contract.tenantFullName,
+      roomNumber: contract.roomNumber,
+      phone: tenantInfo.phone,
+      username: contract.tenantUsername ?? defaultTenantUsername(tenantInfo.phone),
+      accountCreated: contract.tenantAccountCreated ?? !lookupFound,
+      rolePromoted:
+        contract.tenantRolePromoted ?? (lookupFound && lookupRole === 'ROLE_USER'),
+    })
   }
 
   // ===== RENDER STEPS =====
@@ -1936,18 +2009,11 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
       <Text style={styles.sectionTitle}>Thu cọc tiền mặt</Text>
       <Text style={styles.hint}>
         Xác nhận đã nhận đủ tiền cọc {formatVnd(depositValue)} đ bằng tiền mặt
-        từ khách. Sau đó sang bước xác thực OTP.
+        từ khách. Hợp đồng đã được kích hoạt — không cần xác thực OTP.
       </Text>
-      {paid ? (
-        <View style={styles.paidBox}>
-          <Text style={styles.paidIcon}>✅</Text>
-          <Text style={styles.paidText}>Đã xác nhận thu cọc tiền mặt!</Text>
-        </View>
-      ) : (
-        <TouchableOpacity style={styles.payBtn} onPress={() => setPaid(true)}>
-          <Text style={styles.payBtnText}>💵 Xác nhận đã thu cọc tiền mặt</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.payBtn} onPress={finalizeCashOnboard}>
+        <Text style={styles.payBtnText}>💵 Đã thu cọc — Hoàn tất kích hoạt</Text>
+      </TouchableOpacity>
     </ScrollView>
   )
 
@@ -2029,8 +2095,8 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Xác thực OTP</Text>
       <Text style={styles.hint}>
-        Hệ thống gửi OTP đến SĐT {tenantInfo.phone} để khách xác nhận hợp đồng.
-        (Demo: nhập 123456)
+        Hệ thống đã gửi mã OTP đến SĐT {tenantInfo.phone} để khách xác nhận hợp
+        đồng. Khách đọc mã cho bạn nhập vào đây.
       </Text>
       <View style={[styles.inputGroup, styles.otpGroup]}>
         <Text style={styles.label}>Mã OTP</Text>
@@ -2044,6 +2110,19 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
           placeholderTextColor={Colors.textMuted}
         />
       </View>
+      <TouchableOpacity
+        style={styles.resendOtpBtn}
+        onPress={() => sendOtp(true)}
+        disabled={otpSending || otpCooldown > 0}
+      >
+        {otpSending ? (
+          <ActivityIndicator color={Colors.primary} />
+        ) : (
+          <Text style={styles.resendOtpText}>
+            {otpCooldown > 0 ? `Gửi lại OTP sau ${otpCooldown}s` : 'Gửi lại OTP'}
+          </Text>
+        )}
+      </TouchableOpacity>
       <TouchableOpacity
         style={[
           styles.submitBtn,
@@ -2835,6 +2914,8 @@ const styles = StyleSheet.create({
   submitBtnText: { fontSize: 16, fontWeight: '700' },
   submitTextReady: { color: Colors.white },
   submitTextDisabled: { color: Colors.textMuted },
+  resendOtpBtn: { alignItems: 'center', paddingVertical: Spacing.sm, marginTop: Spacing.sm },
+  resendOtpText: { color: Colors.primary, fontSize: 13, fontWeight: '600' },
   bottomSpacer: { height: 100 },
 
   footer: {

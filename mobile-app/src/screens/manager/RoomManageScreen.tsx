@@ -291,7 +291,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
       `Tạo hợp đồng và đón khách mới cho phòng ${room.code}?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        { text: 'Tiến hành', onPress: () => navigation.navigate('Onboarding') },
+        { text: 'Tiến hành', onPress: () => navigation.navigate('OnboardingV2') },
       ],
     );
   };
