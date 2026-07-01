@@ -29,6 +29,7 @@ import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
 import { TaoDraftPage } from './pages/super-admin/nha-thue/TaoDraftPage';
+import { DraftOnboardingList } from './pages/onboarding/DraftOnboardingList';
 import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
 import { TenantList } from './pages/tenants/TenantList';
 import { ExpenseManagement } from './pages/finance/ExpenseManagement';
@@ -76,6 +77,7 @@ function App() {
             <Route path="/admin/buildings/import" element={<Navigate to="/admin/buildings/draft" replace />} />
             <Route path="/admin/buildings/pricing-approval" element={<Navigate to="/admin/buildings/configuration" replace />} />
             <Route path="/admin/buildings/pricing-approval/:id" element={<Navigate to="/admin/buildings/configuration" replace />} />
+            <Route path="/admin/onboarding" element={<DraftOnboardingList />} />
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />

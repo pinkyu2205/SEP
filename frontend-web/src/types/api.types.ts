@@ -27,7 +27,7 @@ export type EquipmentStatus = 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
 /** Trạng thái thiết bị khi khai báo manifest inbound (chỉ 2 giá trị) */
 export type ManifestEquipmentStatus = 'NEW' | 'GOOD';
 
-export type ContractStatus = 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
+export type ContractStatus = 'DRAFT' | 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 
 export type UserRole = 'ROLE_ADMIN' | 'ROLE_OWNER' | 'ROLE_MANAGER' | 'ROLE_TENANT';
 
@@ -772,6 +772,15 @@ export interface Page<T> {
 // TENANT ONBOARDING — Khách thuê + Hợp đồng thuê
 // =============================================================================
 
+/** Thành viên ở cùng (nguyên căn / hộ gia đình) */
+export interface HouseholdMemberInput {
+  fullName: string;
+  relation?: string;
+  phone?: string;
+  dateOfBirth?: string; // yyyy-MM-dd
+  cccd?: string;
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
@@ -782,6 +791,24 @@ export interface OnboardTenantRequest {
   endDate?: string;          // optional
   equipmentSnapshot?: string;
   roomConditionUrl?: string;
+
+  // --- Onboarding v2: field mở rộng (khớp mobile OnboardTenantRequest) ---
+  depositMonths?: number;
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
+  householdMembers?: HouseholdMemberInput[];
+  requireDepositPayment?: boolean;
+  requireHostPriceApproval?: boolean;
+
+  // --- DRAFT flow (admin tạo hợp đồng nháp trên web) ---
+  draft?: boolean;                 // true = tạo HĐ ở trạng thái DRAFT (không giữ phòng, không tạo account)
+  assignedManagerId?: string;      // manager sẽ đón khách (mặc định = operationManagerId của property)
+  draftContractFileUrl?: string;   // link file HĐ đã điền admin upload (Cloudinary)
+  expectedReceptionDate?: string;  // ngày dự kiến đón khách (yyyy-MM-dd)
 }
 
 export interface TenantContractResponse {
@@ -801,6 +828,16 @@ export interface TenantContractResponse {
   endDate?: string;
   status: ContractStatus;
   equipmentSnapshot?: string;
+
+  // --- Onboarding v2 ---
+  paymentStatus?: string;          // PENDING | PAID | FAILED | CANCELLED
+  depositMonths?: number;
+  tenantUsername?: string;         // sau confirm — username khách (= SĐT)
+  assignedManagerId?: string;
+  assignedManagerName?: string;
+  draftContractFileUrl?: string;
+  expectedReceptionDate?: string;
+  priceApprovalStatus?: string;    // PENDING_PRICE_APPROVAL | APPROVED_AWAITING_DEPOSIT | PRICE_REJECTED
 }
 
 // =============================================================================

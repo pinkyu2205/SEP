@@ -8,6 +8,7 @@ import { TenantFormModal } from './TenantFormModal';
 import { isHostApproved } from '../properties/PropertyList';
 
 const statusMap: Record<ContractStatus, { label: string; color: string; dot: string }> = {
+  DRAFT:      { label: 'Nháp',          color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },
   ACTIVE:     { label: 'Đang hiệu lực', color: 'bg-emerald-50 text-emerald-600', dot: 'bg-emerald-500' },
   PENDING:    { label: 'Chờ xác nhận',  color: 'bg-amber-50 text-amber-600',    dot: 'bg-amber-500' },
   EXPIRED:    { label: 'Đã hết hạn',    color: 'bg-red-50 text-red-600',        dot: 'bg-red-500' },

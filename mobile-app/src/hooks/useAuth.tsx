@@ -126,6 +126,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         fullName: profile.fullName!,
         phone: profile.phone ?? '',
         role,
+        // Khách vừa được cấp tài khoản (SĐT/123456) -> bắt buộc đổi mật khẩu lần đầu.
+        isFirstLogin: res.isFirstLogin ?? false,
         createdAt: new Date().toISOString(),
       });
       // Đăng ký Expo push token để nhận thông báo (cả tenant lẫn manager) — best-effort
