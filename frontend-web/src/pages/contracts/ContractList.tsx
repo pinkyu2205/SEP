@@ -1,100 +1,30 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Search, Plus, FileText, User, DoorOpen, Calendar, CalendarClock,
-  ShieldAlert, BadgeCheck, Building2, X, Package, CheckCircle, XCircle, Clock,
+  ShieldAlert, BadgeCheck, Building2, X, Package,
 } from 'lucide-react';
 import type { Contract } from '../../types';
 import { ALL_CONTRACTS } from '../../utils/mockData';
 import { formatCurrency, contractStatusMap } from '../../utils';
 import { ContractFormModal } from './ContractFormModal';
-import { hostService, type HostContractDto } from '../../services/host.service';
-import type { ContractEquipment } from '../../types';
 
-// 1 item trong equipmentSnapshot (JSON) do mobile manager gửi lên.
-interface SnapshotItem {
-  equipmentId?: number;
-  name: string;
-  category?: string;
-  quantity?: number;
-  cost?: number;
-  source?: 'EXISTING' | 'ADDED';
-}
-
-// Parse equipmentSnapshot (chuỗi JSON) -> danh sách tài sản bàn giao để hiển thị.
-const parseSnapshot = (raw?: string): ContractEquipment[] => {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as { items?: SnapshotItem[] };
-    return (parsed.items ?? []).map((it, i) => ({
-      id: String(it.equipmentId ?? `snap-${i}`),
-      name: it.name,
-      quantity: it.quantity ?? 1,
-      condition: it.source === 'ADDED' ? `${it.category ?? ''} · Lắp thêm`.trim() : (it.category ?? ''),
-      source: it.source === 'ADDED' ? 'manager' : 'host',
-    }));
-  } catch {
-    return [];
-  }
-};
-
-// Map HĐ chờ duyệt thật từ BE -> kiểu Contract dùng trong trang.
-const mapHostContract = (d: HostContractDto): Contract => ({
-  id: d.id,
-  code: d.code,
-  type: 'manager_tenant',
-  lessorId: '', lessorName: d.lessorName ?? '',
-  lesseeId: '', lesseeName: d.lesseeName,
-  propertyId: '', propertyName: d.propertyName,
-  roomCode: d.roomCode,
-  startDate: d.startDate, endDate: d.endDate ?? '',
-  depositAmount: 0, rentAmount: d.rentAmount,
-  equipmentList: parseSnapshot(d.equipmentSnapshot),
-  status: d.status === 'PENDING' ? 'pending_approval' : 'active',
-  createdAt: d.startDate,
-});
-
-type ActiveTab = 'pending_approval' | 'admin_manager' | 'manager_tenant';
+type ActiveTab = 'admin_manager' | 'manager_tenant';
 
 const CONTRACT_TABS = [
-  { key: 'pending_approval' as const, label: 'Chờ phê duyệt',   icon: Clock },
-  { key: 'admin_manager'   as const, label: 'Host ↔ Quản lý',  icon: Building2 },
-  { key: 'manager_tenant'  as const, label: 'Quản lý ↔ Thuê',  icon: User },
+  { key: 'admin_manager'  as const, label: 'Host ↔ Quản lý', icon: Building2 },
+  { key: 'manager_tenant' as const, label: 'Quản lý ↔ Thuê', icon: User },
 ];
 
 export const ContractList = () => {
   const [contracts, setContracts] = useState<Contract[]>(ALL_CONTRACTS);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('pending_approval');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('admin_manager');
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingContract, setEditingContract] = useState<Contract | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'extend'>('create');
 
-  const [approvalModal, setApprovalModal] = useState<{ contract: Contract; action: 'approve' | 'reject' } | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
-
-  // Nạp HĐ chờ Host duyệt giá thật từ BE; ghép vào danh sách (mock là fallback khi offline).
-  useEffect(() => {
-    hostService
-      .listContracts({ status: 'PENDING' })
-      .then((page) => {
-        const real = (page?.content ?? []).map(mapHostContract);
-        if (real.length === 0) return;
-        setContracts((prev) => {
-          const existed = new Set(prev.map((c) => c.id));
-          const merged = real.filter((c) => !existed.has(c.id));
-          return [...merged, ...prev];
-        });
-      })
-      .catch(() => {
-        /* offline: giữ dữ liệu mock */
-      });
-  }, []);
-
-  const tabContracts =
-    activeTab === 'pending_approval'
-      ? contracts.filter(c => c.status === 'pending_approval')
-      : contracts.filter(c => c.type === activeTab);
+  const tabContracts = contracts.filter(c => c.type === activeTab);
 
   const filtered = tabContracts.filter(c =>
     c.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -102,9 +32,9 @@ export const ContractList = () => {
     c.propertyName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalCount    = contracts.length;
   const activeCount   = contracts.filter(c => c.status === 'active').length;
   const expiringCount = contracts.filter(c => c.status === 'expiring_soon').length;
-  const pendingCount  = contracts.filter(c => c.status === 'pending_approval').length;
 
   const handleSave = (data: Partial<Contract>) => {
     if (editingContract && modalMode === 'extend') {
@@ -115,7 +45,7 @@ export const ContractList = () => {
       const newContract: Contract = {
         id: `c-${Date.now()}`,
         code: `HD-${activeTab === 'admin_manager' ? 'AM' : 'MT'}-${new Date().getFullYear()}-${String(contracts.length + 1).padStart(3, '0')}`,
-        type: activeTab === 'pending_approval' ? 'manager_tenant' : activeTab,
+        type: activeTab,
         lessorId: data.lessorId || '', lessorName: data.lessorName || '',
         lesseeId: data.lesseeId || '', lesseeName: data.lesseeName || '',
         lesseeCccd: data.lesseeCccd, lesseePhone: data.lesseePhone,
@@ -139,21 +69,6 @@ export const ContractList = () => {
     }
   };
 
-  const handleApprove = () => {
-    if (!approvalModal) return;
-    const { contract, action } = approvalModal;
-    // Optimistic + gọi API thật (fallback cục bộ nếu BE chưa sẵn sàng).
-    setContracts(prev => prev.map(c =>
-      c.id === contract.id ? { ...c, status: action === 'approve' ? 'active' : 'terminated' } : c
-    ));
-    const call = action === 'approve'
-      ? hostService.approveContract(contract.id)
-      : hostService.rejectContract(contract.id, rejectReason.trim());
-    call.catch(() => { /* offline: đã cập nhật cục bộ */ });
-    setApprovalModal(null);
-    setRejectReason('');
-  };
-
   return (
     <div className="space-y-6">
       {/* Tiêu đề */}
@@ -161,7 +76,7 @@ export const ContractList = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Quản lý Hợp đồng</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Phê duyệt và quản lý hợp đồng giữa Host–Quản lý và Quản lý–Khách thuê
+            Quản lý hợp đồng giữa Host–Quản lý và Quản lý–Khách thuê
           </p>
         </div>
         <button
@@ -175,11 +90,11 @@ export const ContractList = () => {
 
       {/* Thẻ tổng quan */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-amber-500">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl"><Clock className="w-6 h-6" /></div>
+        <div className="card p-4 flex items-center gap-4 border-l-4 border-l-slate-400">
+          <div className="p-3 bg-slate-100 text-slate-600 rounded-xl"><FileText className="w-6 h-6" /></div>
           <div>
-            <p className="text-sm text-slate-500">Chờ phê duyệt</p>
-            <p className="text-xl font-bold text-slate-900">{pendingCount} <span className="text-sm font-normal text-slate-500">hợp đồng</span></p>
+            <p className="text-sm text-slate-500">Tổng hợp đồng</p>
+            <p className="text-xl font-bold text-slate-900">{totalCount} <span className="text-sm font-normal text-slate-500">hợp đồng</span></p>
           </div>
         </div>
         <div className="card p-4 flex items-center gap-4 border-l-4 border-l-emerald-500">
@@ -207,11 +122,6 @@ export const ContractList = () => {
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
-              {tab.key === 'pending_approval' && pendingCount > 0 && (
-                <span className="bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
-                  {pendingCount}
-                </span>
-              )}
             </button>
           ))}
         </div>
@@ -241,10 +151,9 @@ export const ContractList = () => {
             <tbody className="divide-y divide-slate-100">
               {filtered.map(contract => {
                 const statusInfo = contractStatusMap[contract.status];
-                const isPending = contract.status === 'pending_approval';
                 return (
                   <tr key={contract.id}
-                    className={`hover:bg-slate-50 transition-colors cursor-pointer ${isPending ? 'bg-amber-50/30' : ''}`}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer"
                     onClick={() => setSelectedContract(contract)}
                   >
                     <td className="px-5 py-4">
@@ -281,18 +190,7 @@ export const ContractList = () => {
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-                        {isPending ? (
-                          <>
-                            <button onClick={() => setApprovalModal({ contract, action: 'approve' })}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors">
-                              <CheckCircle className="w-3.5 h-3.5" /> Duyệt
-                            </button>
-                            <button onClick={() => setApprovalModal({ contract, action: 'reject' })}
-                              className="flex items-center gap-1 px-2.5 py-1.5 border border-rose-300 text-rose-600 text-xs font-medium rounded-lg hover:bg-rose-50 transition-colors">
-                              <XCircle className="w-3.5 h-3.5" /> Từ chối
-                            </button>
-                          </>
-                        ) : contract.status !== 'terminated' ? (
+                        {contract.status !== 'terminated' && (
                           <>
                             <button onClick={() => { setEditingContract(contract); setModalMode('extend'); setShowFormModal(true); }}
                               className="px-2.5 py-1.5 text-xs font-medium bg-primary-50 text-primary-600 hover:bg-primary-100 rounded-lg transition-colors flex items-center gap-1.5">
@@ -303,7 +201,7 @@ export const ContractList = () => {
                               Chấm dứt
                             </button>
                           </>
-                        ) : null}
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -409,62 +307,6 @@ export const ContractList = () => {
                   <p className="text-sm text-amber-800">{selectedContract.notes}</p>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal phê duyệt */}
-      {approvalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setApprovalModal(null)} />
-          <div className="relative bg-white rounded-2xl shadow-xl p-6 max-w-md w-full mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              {approvalModal.action === 'approve'
-                ? <div className="p-2 bg-emerald-50 rounded-lg"><CheckCircle className="w-5 h-5 text-emerald-600" /></div>
-                : <div className="p-2 bg-rose-50 rounded-lg"><XCircle className="w-5 h-5 text-rose-600" /></div>
-              }
-              <h3 className="text-base font-bold text-slate-900">
-                {approvalModal.action === 'approve' ? 'Phê duyệt hợp đồng' : 'Từ chối hợp đồng'}
-              </h3>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-4 mb-4 text-sm">
-              <p className="font-mono text-xs text-slate-500 mb-1">{approvalModal.contract.code}</p>
-              <p className="font-semibold text-slate-900">{approvalModal.contract.lesseeName}</p>
-              <p className="text-slate-500">{approvalModal.contract.propertyName} · {approvalModal.contract.roomCode}</p>
-              <p className="text-slate-500">{formatCurrency(approvalModal.contract.rentAmount)}/tháng · bắt đầu {approvalModal.contract.startDate}</p>
-              {approvalModal.contract.equipmentList.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-slate-200">
-                  <p className="text-xs font-semibold text-slate-500 mb-1.5 flex items-center gap-1">
-                    <Package className="w-3.5 h-3.5" /> Thiết bị bàn giao đề xuất ({approvalModal.contract.equipmentList.length})
-                  </p>
-                  <ul className="space-y-0.5">
-                    {approvalModal.contract.equipmentList.map(eq => (
-                      <li key={eq.id} className="text-xs text-slate-600 flex justify-between gap-2">
-                        <span>{eq.name} × {eq.quantity}</span>
-                        {eq.condition && <span className="text-slate-400">{eq.condition}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-            {approvalModal.action === 'reject' && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Lý do từ chối</label>
-                <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)}
-                  placeholder="Nhập lý do từ chối..." rows={3}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 resize-none" />
-              </div>
-            )}
-            <div className="flex gap-3">
-              <button onClick={() => setApprovalModal(null)} className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
-                Hủy
-              </button>
-              <button onClick={handleApprove}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors ${approvalModal.action === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>
-                {approvalModal.action === 'approve' ? 'Xác nhận duyệt' : 'Xác nhận từ chối'}
-              </button>
             </div>
           </div>
         </div>

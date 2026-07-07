@@ -2,13 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, CheckCircle2, Clock, FileSpreadsheet, Hammer,
-  MapPin, Package, Search, Settings2, Wrench, History, RefreshCw,
+  Package, Search, Settings2, Wrench, History, RefreshCw,
   AlertTriangle, DoorOpen, Users, ChevronDown, ChevronRight, X,
+  Eye, Home, Layers, Ruler,
 } from 'lucide-react';
 import { propertyService } from '../../../services/property.service';
-import type { PropertyResponse, RenovationLineResponse, RenovationSession, RoomResponse } from '../../../types/api.types';
-import { StepOnboardingOptions } from '../properties/wizard/StepOnboardingOptions';
-import { KpiCard } from '../shared';
+import type { PropertyResponse, RenovationLineResponse, RenovationSession, RoomResponse, RoomStatus } from '../../../types/api.types';
+import { KpiCard, BuildingCard, Pagination } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { RenovationImportPanel } from './RenovationImportPanel';
 import { HandoverEquipmentSection } from './HandoverEquipmentSection';
@@ -367,6 +367,162 @@ const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } | n
   return null;
 };
 
+// ─── Chi tiết khai thác (read-only) — mọi cấu hình đến từ import Excel ────────
+const STATUS_DESC: Record<string, string> = {
+  DRAFT: 'Nhà đã khởi tạo — nhập cấu hình cải tạo từ Excel để hoàn tất khai thác.',
+  UNDER_RENOVATION: 'Đang trong quá trình cải tạo.',
+  RENOVATION_COMPLETED: 'Đã hoàn tất cải tạo — chờ gửi Host duyệt giá.',
+  PENDING_HOST_REVIEW: 'Đã cải tạo xong — đang chờ Host phê duyệt giá.',
+  PENDING_OPERATION_MANAGER: 'Host đã duyệt giá — chờ gán quản lý vận hành.',
+  ACTIVE: 'Tòa nhà đang kinh doanh.',
+  DISABLED: 'Tòa nhà đã bị vô hiệu hóa.',
+};
+
+const ROOM_STATUS: Record<RoomStatus, { label: string; cls: string }> = {
+  DRAFT:       { label: 'Nháp',     cls: 'bg-slate-100 text-slate-600' },
+  AVAILABLE:   { label: 'Trống',    cls: 'bg-emerald-100 text-emerald-700' },
+  RENTED:      { label: 'Đang thuê', cls: 'bg-rose-100 text-rose-700' },
+  MAINTENANCE: { label: 'Bảo trì',  cls: 'bg-amber-100 text-amber-700' },
+};
+
+const OverviewStat = ({ icon: Icon, label, value, tint }: {
+  icon: typeof Home; label: string; value: string; tint: string;
+}) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className={`mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg ${tint}`}>
+      <Icon className="h-4 w-4" />
+    </div>
+    <p className="text-lg font-black text-slate-900 leading-tight">{value}</p>
+    <p className="mt-0.5 text-xs font-semibold text-slate-400">{label}</p>
+  </div>
+);
+
+const InfoRow = ({ icon: Icon, label, children }: {
+  icon: typeof Home; label: string; children: React.ReactNode;
+}) => (
+  <div className="flex items-center justify-between gap-3 py-3">
+    <span className="flex items-center gap-2 text-sm font-semibold text-slate-500">
+      <Icon className="h-4 w-4 text-slate-400" /> {label}
+    </span>
+    <span className="text-sm font-bold text-slate-800 text-right">{children}</span>
+  </div>
+);
+
+const ConfigOverview = ({ property }: { property: PropertyResponse }) => {
+  const [detail, setDetail] = useState<PropertyResponse>(property);
+  const [rooms, setRooms] = useState<RoomResponse[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+
+  const isPhongTro = property.wholeHouse === false;
+
+  useEffect(() => {
+    setDetail(property);
+    propertyService.getPropertyById(property.id).then(setDetail).catch(() => { /* giữ dữ liệu list */ });
+    if (isPhongTro) {
+      setRoomsLoading(true);
+      propertyService.getRooms(property.id)
+        .then(setRooms).catch(() => setRooms([]))
+        .finally(() => setRoomsLoading(false));
+    }
+  }, [property.id]);
+
+  const badge = getStatusBadge(detail);
+  const renoTotal = (detail.renovationSessions ?? []).reduce((s, sess) => s + (sess.totalCost || 0), 0);
+  const typeLabel = detail.wholeHouse === null ? 'Chưa xác định' : detail.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ';
+
+  return (
+    <div className="space-y-6">
+      {/* Trạng thái khai thác */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50">
+            <Settings2 className="h-5 w-5 text-indigo-500" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-black text-slate-800">Trạng thái khai thác</h3>
+              {badge && <span className={`rounded-full px-2.5 py-0.5 text-xs font-black ${badge.cls}`}>{badge.label}</span>}
+            </div>
+            <p className="mt-1 text-sm text-slate-500">{STATUS_DESC[detail.status] ?? 'Cấu hình khai thác được nhập từ file Excel.'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Thông số nhanh */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <OverviewStat icon={Home}    label="Loại hình"  value={typeLabel} tint="bg-indigo-50 text-indigo-600" />
+        <OverviewStat icon={Ruler}   label="Diện tích"  value={detail.areaSize ? `${detail.areaSize} m²` : '—'} tint="bg-slate-100 text-slate-600" />
+        <OverviewStat icon={Layers}  label="Số tầng"    value={String(detail.totalFloor ?? detail.floorCount ?? '—')} tint="bg-blue-50 text-blue-600" />
+        <OverviewStat icon={DoorOpen} label="Tổng phòng" value={String(detail.totalRooms || 0)} tint="bg-emerald-50 text-emerald-600" />
+      </div>
+
+      {/* Thông tin khai thác */}
+      <div className="rounded-2xl border border-slate-200 bg-white px-5 py-2">
+        <div className="divide-y divide-slate-100">
+          <InfoRow icon={Home} label="Loại hình khai thác">{typeLabel}</InfoRow>
+          <InfoRow icon={Hammer} label="Cải tạo">
+            {detail.renovationCompleted
+              ? <span className="text-teal-600">Có — đã hoàn tất</span>
+              : detail.hasRenovation
+              ? <span className="text-amber-600">Có — đang thực hiện</span>
+              : <span className="text-slate-400">Không cải tạo</span>}
+          </InfoRow>
+          {renoTotal > 0 && (
+            <InfoRow icon={Wrench} label="Tổng chi phí cải tạo">
+              <span className="text-amber-700">{formatVND(renoTotal)}</span>
+            </InfoRow>
+          )}
+        </div>
+      </div>
+
+      {/* Thiết bị chủ nhà bàn giao (nhà gốc) */}
+      <HandoverEquipmentSection propertyId={property.id} />
+
+      {/* Danh sách phòng (chỉ nhà chia phòng) */}
+      {isPhongTro && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex items-center gap-2.5 border-b border-slate-100 bg-slate-50 px-5 py-3.5">
+            <DoorOpen className="h-4 w-4 text-indigo-500" />
+            <h3 className="text-sm font-black uppercase tracking-widest text-slate-500">Danh sách phòng</h3>
+            <span className="ml-auto text-xs font-bold text-slate-400">{rooms.length} phòng</span>
+          </div>
+          {roomsLoading ? (
+            <p className="py-8 text-center text-sm text-slate-400">Đang tải phòng...</p>
+          ) : rooms.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">Chưa có phòng nào.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50/60 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <tr>
+                  <th className="px-5 py-2.5">Phòng</th>
+                  <th className="px-5 py-2.5">Diện tích</th>
+                  <th className="px-5 py-2.5">Giá thuê</th>
+                  <th className="px-5 py-2.5 text-right">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rooms.map(r => {
+                  const st = ROOM_STATUS[r.status] ?? { label: r.status, cls: 'bg-slate-100 text-slate-600' };
+                  return (
+                    <tr key={r.id} className="hover:bg-slate-50/40 transition-colors">
+                      <td className="px-5 py-3 font-bold text-slate-800">{r.roomNumber}</td>
+                      <td className="px-5 py-3 text-slate-600">{r.area} m²</td>
+                      <td className="px-5 py-3 text-slate-600">{r.price ? formatVND(r.price) : '—'}</td>
+                      <td className="px-5 py-3 text-right">
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${st.cls}`}>{st.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const CauHinhKhaiThacPage = () => {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
@@ -429,6 +585,14 @@ export const CauHinhKhaiThacPage = () => {
     });
   }, [buildings, statusFilter, search]);
 
+  // ─── phân trang (9 / trang) ───────────────────────────────────────
+  const PER_PAGE = 9;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
+  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
   const openConfig = (b: PropertyResponse) => { setSelected(b); setViewMode('config'); };
   const openHistory = (b: PropertyResponse) => { setSelected(b); setViewMode('history'); };
   const openRenovate = (b: PropertyResponse) => { setSelected(b); setViewMode('renovate'); };
@@ -463,7 +627,7 @@ export const CauHinhKhaiThacPage = () => {
     const canShowRenovate = selected.status === 'ACTIVE';
     const canShowEquipment = selected.status !== 'DRAFT';
     const tabs = [
-      { key: 'config' as const, label: 'Cấu hình', icon: Settings2 },
+      { key: 'config' as const, label: 'Tổng quan', icon: Settings2 },
       ...(canShowEquipment ? [{ key: 'equipment' as const, label: 'Thiết bị', icon: Package }] : []),
       ...(canShowHistory ? [{ key: 'history' as const, label: 'Lịch sử cải tạo', icon: History }] : []),
       ...(canShowRenovate ? [{ key: 'renovate' as const, label: 'Cải tạo lại', icon: RefreshCw }] : []),
@@ -506,17 +670,7 @@ export const CauHinhKhaiThacPage = () => {
         )}
 
         {viewMode === 'config' && (
-          <>
-            <HandoverEquipmentSection propertyId={selected.id} />
-            <StepOnboardingOptions
-              property={selected}
-              onNext={backToList}
-              onBack={backToList}
-              onPropertyUpdated={setSelected}
-              nextLabel={selected.status === 'UNDER_RENOVATION' ? 'Lưu cấu hình cải tạo & Quay về' : 'Xác nhận cấu hình & Quay về'}
-              renovationOnly={selected.status === 'UNDER_RENOVATION'}
-            />
-          </>
+          <ConfigOverview property={selected} />
         )}
         {viewMode === 'equipment' && (
           <OperationalEquipmentPanel propertyId={selected.id} />
@@ -580,65 +734,34 @@ export const CauHinhKhaiThacPage = () => {
           <p className="text-sm font-semibold">Không tìm thấy tòa nhà phù hợp.</p>
         </div>
       ) : (
+        <>
         <div className="grid gap-4 xl:grid-cols-3">
-          {filtered.map(b => {
-            const badge = getStatusBadge(b);
+          {paged.map(b => {
             return (
-              <div key={b.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-extrabold text-slate-950 leading-tight">{b.propertyName}</p>
-                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
-                      <MapPin className="h-3 w-3 shrink-0" />
-                      <span className="line-clamp-1">{b.fullAddress || b.shortAddress}</span>
-                    </div>
-                  </div>
-                  {badge && (
-                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-black ${badge.cls}`}>
-                      {badge.label}
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  {b.zoneName && (
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{b.zoneName}</span>
-                  )}
-                  <span className="font-bold text-indigo-600">
-                    {b.wholeHouse === null ? 'Chưa chọn loại hình' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
-                  </span>
-                  {b.areaSize ? <span className="text-slate-500">{b.areaSize} m²</span> : null}
-                </div>
-
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-blue-50 py-2 text-blue-700">
-                    <p className="font-black text-base leading-tight">{b.totalRooms || 0}</p>
-                    <p className="mt-0.5">Tổng phòng</p>
-                  </div>
-                  <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
-                    <p className="font-black text-base leading-tight">{b.totalFloor ?? b.floorCount ?? '—'}</p>
-                    <p className="mt-0.5">Số tầng</p>
-                  </div>
-                  <div className="rounded-lg bg-amber-50 py-2 text-amber-700">
-                    <p className="font-black text-base leading-tight">
-                      {b.renovationCompleted ? 'Xong' : b.hasRenovation ? 'Chưa xong' : '—'}
-                    </p>
-                    <p className="mt-0.5">Cải tạo</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-slate-100">
+              <BuildingCard
+                key={b.id}
+                name={b.propertyName}
+                address={b.fullAddress || b.shortAddress}
+                zoneName={b.zoneName}
+                typeLabel={b.wholeHouse === null ? 'Chưa chọn loại hình' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
+                areaSize={b.areaSize}
+                totalRooms={b.totalRooms}
+                floors={b.totalFloor ?? b.floorCount ?? '—'}
+                renovation={b.renovationCompleted ? 'done' : b.hasRenovation ? 'in_progress' : 'none'}
+                badge={getStatusBadge(b)}
+                managerName={b.operationManagerName}
+              >
                   {b.status === 'DRAFT' && (
                     <button onClick={() => openConfig(b)}
                       className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                      <Settings2 className="w-4 h-4" /> Cấu hình tòa nhà →
+                      <Eye className="w-4 h-4" /> Xem chi tiết →
                     </button>
                   )}
                   {b.status === 'UNDER_RENOVATION' && (
                     <div className="flex flex-col gap-2">
                       <button onClick={() => openConfig(b)}
                         className="w-full py-2.5 bg-amber-50 text-amber-700 hover:bg-amber-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                        <Wrench className="w-4 h-4" /> Xem / cập nhật cấu hình
+                        <Eye className="w-4 h-4" /> Xem chi tiết
                       </button>
                       <button onClick={() => setRenoTarget(b)}
                         className="w-full py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
@@ -650,7 +773,7 @@ export const CauHinhKhaiThacPage = () => {
                     <div className="flex flex-col gap-2">
                       <button onClick={() => openConfig(b)}
                         className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                        <Settings2 className="w-4 h-4" /> Xem / cập nhật cấu hình
+                        <Eye className="w-4 h-4" /> Xem chi tiết
                       </button>
                       {(b.hasRenovation || b.renovationCompleted) && (
                         <button onClick={() => openHistory(b)}
@@ -662,6 +785,10 @@ export const CauHinhKhaiThacPage = () => {
                   )}
                   {b.status === 'PENDING_HOST_REVIEW' && (
                     <div className="flex flex-col gap-2">
+                      <button onClick={() => openConfig(b)}
+                        className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                        <Eye className="w-4 h-4" /> Xem chi tiết
+                      </button>
                       <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
                         <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
                       </div>
@@ -675,6 +802,10 @@ export const CauHinhKhaiThacPage = () => {
                   )}
                   {b.status === 'PENDING_OPERATION_MANAGER' && (
                     <div className="flex flex-col gap-2">
+                      <button onClick={() => openConfig(b)}
+                        className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                        <Eye className="w-4 h-4" /> Xem chi tiết
+                      </button>
                       <div className="w-full py-2 text-center text-xs font-semibold text-violet-600 bg-violet-50 rounded-xl flex items-center justify-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5" /> Host đã duyệt giá — chờ gán quản lý vận hành để kinh doanh
                       </div>
@@ -688,6 +819,10 @@ export const CauHinhKhaiThacPage = () => {
                   )}
                   {b.status === 'ACTIVE' && (
                     <div className="flex flex-col gap-2">
+                      <button onClick={() => openConfig(b)}
+                        className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                        <Eye className="w-4 h-4" /> Xem chi tiết
+                      </button>
                       <div className="w-full py-2 text-center text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl flex items-center justify-center gap-1.5">
                         <CheckCircle2 className="w-3.5 h-3.5" /> Đang kinh doanh
                       </div>
@@ -706,6 +841,10 @@ export const CauHinhKhaiThacPage = () => {
                   )}
                   {b.status === 'DISABLED' && (
                     <div className="flex flex-col gap-2">
+                      <button onClick={() => openConfig(b)}
+                        className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                        <Eye className="w-4 h-4" /> Xem chi tiết
+                      </button>
                       <div className="w-full py-2 text-center text-xs font-semibold text-slate-500 bg-slate-100 rounded-xl">
                         Đã vô hiệu hóa
                       </div>
@@ -717,11 +856,12 @@ export const CauHinhKhaiThacPage = () => {
                       )}
                     </div>
                   )}
-                </div>
-              </div>
+                </BuildingCard>
             );
           })}
         </div>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </>
       )}
 
       <ConfirmDialog

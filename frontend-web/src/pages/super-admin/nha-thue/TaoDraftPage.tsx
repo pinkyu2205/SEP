@@ -12,7 +12,7 @@ import { uploadToCloudinary } from '../../../services/upload.service';
 import { extractContractData } from '../../../utils/pdfExtract';
 import type { InboundContractRequest, PropertyDraftRequest, PropertyResponse, ZoneResponse } from '../../../types/api.types';
 import { StepPropertyInfo } from '../properties/wizard/StepPropertyInfo';
-import { KpiCard } from '../shared';
+import { KpiCard, BuildingCard, Pagination } from '../shared';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { AddressAutocomplete } from '../../../components/AddressAutocomplete';
 import { PropertyMap } from '../../../components/PropertyMap';
@@ -152,6 +152,14 @@ export const TaoDraftPage = () => {
       return matchStatus && matchSearch;
     });
   }, [buildings, statusFilter, search, submittedDrafts]);
+
+  // ─── phân trang (9 / trang) ───────────────────────────────────────
+  const PER_PAGE = 9;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
+  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
   // ─── form handlers ────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -845,16 +853,12 @@ export const TaoDraftPage = () => {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Khởi tạo nhà</h1>
-          <p className="text-slate-500 mt-1 text-sm font-medium">Quản lý toàn bộ tòa nhà — nhập hàng loạt từ Excel hoặc tạo thủ công</p>
+          <p className="text-slate-500 mt-1 text-sm font-medium">Quản lý toàn bộ tòa nhà — nhập hàng loạt từ Excel</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button onClick={() => setImportOpen(true)}
-            className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 transition">
-            <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
-          </button>
-          <button onClick={() => setView('create-form')}
             className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5">
-            <Plus className="h-5 w-5" /> Khởi tạo mới
+            <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
           </button>
         </div>
       </div>
@@ -889,124 +893,98 @@ export const TaoDraftPage = () => {
       ) : filtered.length === 0 ? (
         <div className="py-16 text-center text-slate-400">
           <Building2 className="mx-auto h-10 w-10 mb-3 opacity-30" />
-          <p className="text-sm font-semibold">Chưa có tòa nhà nào. Hãy tạo draft đầu tiên.</p>
-          <button onClick={() => setView('create-form')}
-            className="mt-4 btn-primary rounded-xl px-5 py-2.5 text-sm">
-            Khởi tạo tòa nhà đầu tiên
+          <p className="text-sm font-semibold">Chưa có tòa nhà nào. Hãy nhập từ Excel để bắt đầu.</p>
+          <button onClick={() => setImportOpen(true)}
+            className="mt-4 btn-primary flex items-center gap-2 mx-auto rounded-xl px-5 py-2.5 text-sm">
+            <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
           </button>
         </div>
       ) : (
+        <>
         <div className="grid gap-4 xl:grid-cols-3">
-          {filtered.map(b => {
+          {paged.map(b => {
             const badge = getStatusBadge(b);
             const isSubmittedDraft = b.status === 'DRAFT' && submittedDrafts.includes(b.id);
+            const footer =
+              (b.status === 'UNDER_RENOVATION' || isSubmittedDraft) ? (
+                <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${b.id}`); }}
+                  className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
+                  <Settings2 className="w-4 h-4" /> Cấu hình khai thác
+                </button>
+              ) : b.status === 'RENOVATION_COMPLETED' ? (
+                <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — chờ gửi Host
+                </div>
+              ) : b.status === 'PENDING_HOST_REVIEW' ? (
+                <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
+                </div>
+              ) : b.status === 'ACTIVE' ? (
+                <div className="w-full py-2 text-center text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl flex items-center justify-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Đang kinh doanh
+                </div>
+              ) : null;
             return (
-              <div key={b.id} onClick={() => openDetail(b)} className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-cyan-300 hover:shadow-md transition relative group">
-                <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity bg-white/80 p-1 rounded-lg backdrop-blur-sm z-10">
-                  {b.status === 'DISABLED' ? (
-                    <>
-                      {/* Đã vô hiệu → cho phép kích hoạt lại hoặc xóa vĩnh viễn */}
-                      <button onClick={(e) => handleEnableBuilding(b.id, e)} title="Kích hoạt lại"
-                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
-                        <Power className="w-4 h-4" />
-                      </button>
-                      <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa vĩnh viễn"
-                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : b.status === 'ACTIVE' ? (
-                    <>
-                      {/* Đang kinh doanh → vô hiệu hóa / xóa, chỉ khi không còn khách thuê */}
-                      <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa (cần phòng trống)"
-                        className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                        <XCircle className="w-4 h-4" />
-                      </button>
-                      <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa (cần phòng trống)"
-                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {/* Các trạng thái khác (Nháp/Cải tạo/Chờ duyệt...) → vô hiệu hóa; Nháp cho xóa trực tiếp */}
-                      <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa"
-                        className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                        <XCircle className="w-4 h-4" />
-                      </button>
-                      {b.status === 'DRAFT' && (
-                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa nháp"
+              <BuildingCard
+                key={b.id}
+                onClick={() => openDetail(b)}
+                name={b.propertyName}
+                address={b.fullAddress || b.shortAddress}
+                zoneName={b.zoneName}
+                typeLabel={b.wholeHouse === null ? 'Chưa chọn loại' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
+                areaSize={b.areaSize}
+                totalRooms={b.totalRooms}
+                floors={b.totalFloor ?? b.floorCount ?? '—'}
+                badge={badge}
+                managerName={b.operationManagerName}
+                overlay={
+                  <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-lg bg-white/80 p-1 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                    {b.status === 'DISABLED' ? (
+                      <>
+                        <button onClick={(e) => handleEnableBuilding(b.id, e)} title="Kích hoạt lại"
+                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
+                          <Power className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa vĩnh viễn"
                           className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
                           <Trash2 className="w-4 h-4" />
                         </button>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-start justify-between gap-3 pr-14">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-extrabold text-slate-950 leading-tight">{b.propertyName}</p>
-                    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
-                      <MapPin className="h-3 w-3 shrink-0" />
-                      <span className="line-clamp-1">{b.fullAddress || b.shortAddress}</span>
-                    </div>
+                      </>
+                    ) : b.status === 'ACTIVE' ? (
+                      <>
+                        <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa (cần phòng trống)"
+                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa (cần phòng trống)"
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa"
+                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                        {b.status === 'DRAFT' && (
+                          <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa nháp"
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-black ${badge.cls}`}>{badge.label}</span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                  {b.zoneName && <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{b.zoneName}</span>}
-                  <span className="font-bold text-emerald-600">
-                    {b.wholeHouse === null ? 'Chưa chọn loại' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
-                  </span>
-                  {b.areaSize ? <span className="text-slate-500">{b.areaSize} m²</span> : null}
-                </div>
-
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-blue-50 py-2 text-blue-700">
-                    <p className="font-black text-base leading-tight">{b.totalRooms || '—'}</p>
-                    <p className="mt-0.5">Tổng phòng</p>
-                  </div>
-                  <div className="rounded-lg bg-indigo-50 py-2 text-indigo-700">
-                    <p className="font-black text-base leading-tight">{b.totalFloor ?? b.floorCount ?? '—'}</p>
-                    <p className="mt-0.5">Số tầng</p>
-                  </div>
-                  <div className="rounded-lg bg-amber-50 py-2 text-amber-700">
-                    <p className="font-black text-base leading-tight">
-                      {b.renovationCompleted ? 'Xong' : b.hasRenovation ? 'Chưa xong' : '—'}
-                    </p>
-                    <p className="mt-0.5">Cải tạo</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  {(b.status === 'UNDER_RENOVATION' || isSubmittedDraft) && (
-                    <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${b.id}`); }}
-                      className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                      <Settings2 className="w-4 h-4" /> Cấu hình khai thác
-                    </button>
-                  )}
-                  {b.status === 'RENOVATION_COMPLETED' && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — chờ gửi Host
-                    </div>
-                  )}
-                  {b.status === 'PENDING_HOST_REVIEW' && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
-                    </div>
-                  )}
-                  {b.status === 'ACTIVE' && (
-                    <div className="w-full py-2 text-center text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl flex items-center justify-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Đang kinh doanh
-                    </div>
-                  )}
-                </div>
-              </div>
+                }
+              >
+                {footer}
+              </BuildingCard>
             );
           })}
         </div>
+        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+        </>
       )}
 
       {importModal}

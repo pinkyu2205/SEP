@@ -5,7 +5,6 @@ import {
   ChevronRight, QrCode, Receipt, Coins, PiggyBank,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { ALL_CONTRACTS } from '../utils/mockData';
 import { useUnreadNotifications } from '../contexts/UnreadNotificationsContext';
 import { useWebAuth } from '../auth/WebAuthContext';
 
@@ -25,8 +24,6 @@ interface NavSection {
   items: NavItem[];
 }
 
-const pendingCount = ALL_CONTRACTS.filter(c => c.status === 'pending_approval').length;
-
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Tổng quan',
@@ -43,14 +40,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: 'Hợp đồng & Phê duyệt',
+    label: 'Hợp đồng',
     items: [
       {
-        name: 'Phê duyệt hợp đồng',
+        name: 'Quản lý hợp đồng',
         path: '/host/contracts',
         icon: FileText,
-        badge: pendingCount > 0 ? pendingCount : undefined,
-        badgeColor: 'bg-amber-500',
       },
     ],
   },
