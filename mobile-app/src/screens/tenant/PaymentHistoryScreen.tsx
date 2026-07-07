@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { PaymentTransaction } from '../../types';
-import { formatCurrency, formatDateTime } from '../../utils';
-import { realTenantBillingService, TenantPayment } from '../../services/tenantBillingService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { PaymentTransaction } from '@/types';
+import { formatCurrency, formatDateTime } from '@/utils';
+import { realTenantBillingService, TenantPayment } from '@/services/tenant/billingService';
 
 // Map lịch sử thanh toán BE -> shape PaymentTransaction màn đang dùng.
 const PAY_METHOD_MAP: Record<string, PaymentTransaction['method']> = {

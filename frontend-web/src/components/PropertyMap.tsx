@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import goongjs from '@goongmaps/goong-js';
 import '@goongmaps/goong-js/dist/goong-js.css';
 import { MapPin, Loader2 } from 'lucide-react';
-import { goongService } from '../services/goong.service';
+import { goongService } from '@/services/goong.service';
 
 interface Props {
   /** Địa chỉ để geocode (dùng khi chưa có sẵn toạ độ). */

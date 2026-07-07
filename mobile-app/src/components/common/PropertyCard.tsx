@@ -2,9 +2,9 @@ import React from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Image,
 } from 'react-native';
-import { Colors, Spacing, Shadow } from '../../constants';
-import { PropertyListing } from '../../types';
-import { formatCurrency } from '../../utils/helpers';
+import { Colors, Spacing, Shadow } from '@/constants';
+import { PropertyListing } from '@/types';
+import { formatCurrency } from '@/utils/helpers';
 
 interface PropertyCardProps {
   property: PropertyListing;

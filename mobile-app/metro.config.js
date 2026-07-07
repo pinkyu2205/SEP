@@ -2,7 +2,7 @@
 // Mục đích chính: thêm DEV PROXY cho web — chuyển tiếp mọi request /api/* từ
 // dev server (localhost:8081) sang backend Spring (localhost:8080).
 // Nhờ vậy app web gọi cùng origin -> không dính CORS, KHÔNG cần sửa backend.
-// (Trên mobile native không qua proxy này; xem realApiClient.ts.)
+// (Trên mobile native không qua proxy này; xem src/services/core/realApiClient.ts.)
 const { getDefaultConfig } = require('expo/metro-config');
 const http = require('http');
 

@@ -6,12 +6,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { managerPropertyService } from '../../services/managerPropertyService';
-import { realPropertyService } from '../../services/propertyService.real';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
-import { realManagerInvoiceService, ManagerInvoice } from '../../services/managerInvoiceService.real';
-import { uploadImageToCloudinary } from '../../services/cloudinary';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realPropertyService } from '@/services/manager/propertyApi';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
+import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';

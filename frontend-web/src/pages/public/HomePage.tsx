@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { HeroSection } from '../../components/public/HeroSection';
-import { HotlineBanner } from '../../components/public/HotlineBanner';
-import { PropertyCard } from '../../components/public/PropertyCard';
-import { Reveal } from '../../components/public/Reveal';
-import { getFeaturedProperties } from '../../services/propertyService';
-import type { PublicProperty } from '../../types/property';
-import { ROUTES } from '../../utils/routes';
+import { HeroSection } from '@/components/public/HeroSection';
+import { HotlineBanner } from '@/components/public/HotlineBanner';
+import { PropertyCard } from '@/components/public/PropertyCard';
+import { Reveal } from '@/components/public/Reveal';
+import { getFeaturedProperties } from '@/services/public-property.service';
+import type { PublicProperty } from '@/types/property';
+import { ROUTES } from '@/utils/routes';
 
 const CardSkeleton = () => (
   <div className="animate-pulse overflow-hidden rounded-3xl bg-white ring-1 ring-slate-100">

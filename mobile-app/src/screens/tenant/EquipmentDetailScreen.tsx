@@ -4,9 +4,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Equipment } from '../../types';
-import { formatDate } from '../../utils';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Equipment } from '@/types';
+import { formatDate } from '@/utils';
 
 type Tab = 'info' | 'warranty' | 'usage' | 'history';
 

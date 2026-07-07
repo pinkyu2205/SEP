@@ -5,11 +5,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors, Spacing, BorderRadius, Typography, Shadow } from '../../constants';
-import { PropertyCard, FilterChips } from '../../components/common';
-import { searchService } from '../../services';
-import { PropertyListing } from '../../types';
-import { GuestStackParamList } from '../../navigation/GuestStackNavigator';
+import { Colors, Spacing, BorderRadius, Typography, Shadow } from '@/constants';
+import { PropertyCard, FilterChips } from '@/components/common';
+import { searchService } from '@/services';
+import { PropertyListing } from '@/types';
+import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'SearchResult'>;
 type RouteProps = RouteProp<GuestStackParamList, 'SearchResult'>;

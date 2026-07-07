@@ -28,7 +28,7 @@ import type {
   PropertyPurgeResponse,
   HandoverEquipmentResponse,
   OperationalEquipmentResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 const BASE = '/api/v1/properties';
 
@@ -254,7 +254,7 @@ export const propertyService = {
   },
 
   /** GET /properties/{id}/renovation/sessions — Lịch sử cải tạo nhóm theo đợt (BE mục 10) */
-  getRenovationSessions: (id: number): Promise<import('../types/api.types').RenovationSession[]> => {
+  getRenovationSessions: (id: number): Promise<import('@/types/api.types').RenovationSession[]> => {
     return api.get(`${BASE}/${id}/renovation/sessions`);
   },
 

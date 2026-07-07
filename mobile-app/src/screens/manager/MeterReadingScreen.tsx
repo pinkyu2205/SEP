@@ -4,8 +4,8 @@ import {
   TextInput, Alert, Platform, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { billsStore, SharedBill } from '../../store/billsStore';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { billsStore, SharedBill } from '@/store/billsStore';
 
 // ===================== TYPES =====================
 type PropertyType = 'multi_room' | 'single_unit';

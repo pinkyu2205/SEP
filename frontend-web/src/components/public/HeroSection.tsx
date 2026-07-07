@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, BadgeCheck, Phone, Sparkles } from 'lucide-react';
 import { PropertySearchBar } from './PropertySearchBar';
-import { ROUTES } from '../../utils/routes';
-import { COMPANY } from '../../utils/constants';
+import { ROUTES } from '@/utils/routes';
+import { COMPANY } from '@/utils/constants';
 
 const img = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=900&q=70`;
 

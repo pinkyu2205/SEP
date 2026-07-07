@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { realNotificationService } from '../services/notificationService.real';
+import { realNotificationService } from '@/services/shared/notificationService';
 
 /**
  * Số thông báo chưa đọc (thật, từ BE) cho badge chuông ở Home.

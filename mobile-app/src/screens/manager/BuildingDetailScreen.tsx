@@ -2,11 +2,11 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { ManagedProperty } from '../../data/managedProperties';
-import { realPropertyService, ApiRoom } from '../../services/propertyService.real';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
-import { realManagerInvoiceService, ManagerInvoice } from '../../services/managerInvoiceService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { ManagedProperty } from '@/data/managedProperties';
+import { realPropertyService, ApiRoom } from '@/services/manager/propertyApi';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 
 const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 

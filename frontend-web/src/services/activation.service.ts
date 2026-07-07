@@ -2,7 +2,7 @@ import api from './api';
 import type {
   ConfirmPropertyActivationRequest,
   PropertyActivationResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 export const activationService = {
   /** POST /api/v1/properties/{propertyId}/activation/confirm — Xác nhận giá & kích hoạt */

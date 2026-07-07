@@ -1,46 +1,44 @@
 import { lazy } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { ProtectedRoute, PublicOnlyRoute } from './auth/WebAuthContext';
-import { AuthLayout } from './layouts/AuthLayout';
-import { PublicLayout } from './layouts/PublicLayout';
-import { HostLayout } from './layouts/HostLayout';
-import { AdminLayout } from './layouts/SuperAdminLayout';
-import { WebLogin } from './pages/auth/WebLogin';
-import { ContractList } from './pages/contracts/ContractList';
-import { Dashboard } from './pages/dashboard/Dashboard';
-import { EquipmentCatalogPage } from './pages/super-admin/EquipmentCatalogPage';
-import { FinancialManagement } from './pages/financial/FinancialManagement';
-import { MaintenanceList } from './pages/maintenance/MaintenanceList';
-import { EquipmentQrManager } from './pages/equipments/EquipmentQrManager';
-import { ManagerList } from './pages/managers/ManagerList';
-import { NotificationCenter } from './pages/notifications/NotificationCenter';
-import { PropertyDetail } from './pages/properties/PropertyDetail';
-import { PropertyList } from './pages/properties/PropertyList';
-import { ReportsAnalytics } from './pages/reports/ReportsAnalytics';
-import { ActivityLogsSecurity } from './pages/super-admin/ActivityLogsSecurity';
-import { BillingPaymentMonitoring } from './pages/super-admin/BillingPaymentMonitoring';
-import { NhaThueLanding } from './pages/super-admin/nha-thue/NhaThueLanding';
-import { ContractMonitoring } from './pages/super-admin/ContractMonitoring';
-import { HostManagement } from './pages/super-admin/HostManagement';
-import { MaintenanceEquipmentMonitoring } from './pages/super-admin/MaintenanceEquipmentMonitoring';
-import { SuperAdminOverview } from './pages/super-admin/SuperAdminOverview';
-import { SystemConfiguration } from './pages/super-admin/SystemConfiguration';
-import { UserRoleManagement } from './pages/super-admin/UserRoleManagement';
-import { PropertyOnboardingWizard } from './pages/super-admin/properties/wizard/PropertyOnboardingWizard';
-import { ZoneManagement } from './pages/super-admin/zones/ZoneManagement';
-import { TaoDraftPage } from './pages/super-admin/nha-thue/TaoDraftPage';
-import { CauHinhKhaiThacPage } from './pages/super-admin/nha-thue/CauHinhKhaiThacPage';
-import { TenantList } from './pages/tenants/TenantList';
-import { ExpenseManagement } from './pages/finance/ExpenseManagement';
-import { ReceivablesAging } from './pages/finance/ReceivablesAging';
-import { DepositLedger } from './pages/finance/DepositLedger';
-import { HostPropertyReview } from './pages/host/HostPropertyReview';
+import { ProtectedRoute, PublicOnlyRoute } from '@/auth/WebAuthContext';
+import { AuthLayout } from '@/layouts/AuthLayout';
+import { PublicLayout } from '@/layouts/PublicLayout';
+import { HostLayout } from '@/layouts/HostLayout';
+import { AdminLayout } from '@/layouts/AdminLayout';
+import { WebLogin } from '@/pages/auth/LoginPage';
+import { ContractList } from '@/pages/host/contracts/ContractList';
+import { Dashboard } from '@/pages/host/HostDashboard';
+import { EquipmentCatalogPage } from '@/pages/admin/EquipmentCatalogPage';
+import { FinancialManagement } from '@/pages/host/finance/FinancialManagement';
+import { MaintenanceList } from '@/pages/host/maintenance/MaintenanceList';
+import { EquipmentQrManager } from '@/pages/host/equipments/EquipmentQrManager';
+import { ManagerList } from '@/pages/host/managers/ManagerList';
+import { NotificationCenter } from '@/pages/host/notifications/NotificationCenter';
+import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
+import { PropertyList } from '@/pages/host/properties/PropertyList';
+import { ReportsAnalytics } from '@/pages/host/reports/ReportsAnalytics';
+import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
+import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
+import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
+import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
+import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
+import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
+import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
+import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
+import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
+import { ZoneManagement } from '@/pages/admin/zones/ZoneManagement';
+import { TaoDraftPage } from '@/pages/admin/onboarding/CreateDraftPage';
+import { CauHinhKhaiThacPage } from '@/pages/admin/onboarding/OperationConfigPage';
+import { TenantList } from '@/pages/host/tenants/TenantList';
+import { ReceivablesAging } from '@/pages/host/finance/ReceivablesAging';
+import { DepositLedger } from '@/pages/host/finance/DepositLedger';
+import { HostPropertyReview } from '@/pages/host/PropertyReview';
 
 // Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
-const HomePage = lazy(() => import('./pages/public/HomePage'));
-const PropertyListPage = lazy(() => import('./pages/public/PropertyListPage'));
-const PropertyDetailPage = lazy(() => import('./pages/public/PropertyDetailPage'));
-const ContactPage = lazy(() => import('./pages/public/ContactPage'));
+const HomePage = lazy(() => import('@/pages/public/HomePage'));
+const PropertyListPage = lazy(() => import('@/pages/public/PropertyListPage'));
+const PropertyDetailPage = lazy(() => import('@/pages/public/PropertyDetailPage'));
+const ContactPage = lazy(() => import('@/pages/public/ContactPage'));
 
 function App() {
   return (
@@ -66,7 +64,6 @@ function App() {
           <Route element={<AdminLayout />}>
             <Route path="/admin" element={<SuperAdminOverview />} />
             <Route path="/admin/users" element={<UserRoleManagement />} />
-            <Route path="/admin/hosts" element={<HostManagement />} />
             <Route path="/admin/buildings" element={<NhaThueLanding />} />
             <Route path="/admin/properties/onboarding/:id" element={<PropertyOnboardingWizard />} />
             <Route path="/admin/buildings/draft" element={<TaoDraftPage />} />
@@ -100,7 +97,6 @@ function App() {
             <Route path="/host/maintenance" element={<MaintenanceList />} />
             <Route path="/host/equipments" element={<EquipmentQrManager />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
-            <Route path="/host/expenses" element={<ExpenseManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
             <Route element={<ProtectedRoute allowedRoles={['host']} />}>
               <Route path="/host/receivables" element={<ReceivablesAging />} />

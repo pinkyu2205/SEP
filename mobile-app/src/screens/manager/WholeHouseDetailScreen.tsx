@@ -2,10 +2,10 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { ManagedProperty, WholeHouseRentalStatus } from '../../data/managedProperties';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
-import { realManagerInvoiceService, ManagerInvoice } from '../../services/managerInvoiceService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { ManagedProperty, WholeHouseRentalStatus } from '@/data/managedProperties';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 
 const STATUS_META: Record<WholeHouseRentalStatus, { label: string; color: string; bg: string }> = {
   rented: { label: 'Đang thuê', color: Colors.success, bg: Colors.successLight },

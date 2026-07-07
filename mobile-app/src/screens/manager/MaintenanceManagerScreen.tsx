@@ -2,12 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useTickets, MaintenanceTicket } from '../../store/maintenanceStore';
-import { getPropertyById } from '../../data/managedProperties';
-import { realMaintenanceService } from '../../services/maintenanceService.real';
-import { dtoToTicket } from '../../services/maintenanceMappers';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '../../constants/maintenance';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useTickets, MaintenanceTicket } from '@/store/maintenanceStore';
+import { getPropertyById } from '@/data/managedProperties';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTicket } from '@/services/shared/maintenanceMappers';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 

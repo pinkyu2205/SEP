@@ -4,8 +4,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { realNotificationService, ApiNotification } from '../../services/notificationService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 
 // ===================== TYPES =====================
 type NotifType =

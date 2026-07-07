@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { managerPropertyService } from '../../services/managerPropertyService';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
-import { realManagerInvoiceService } from '../../services/managerInvoiceService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { realManagerInvoiceService } from '@/services/manager/invoiceService';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 

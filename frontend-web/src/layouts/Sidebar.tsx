@@ -2,11 +2,11 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   Wrench, DollarSign, BarChart3, Bell, Settings,
-  ChevronRight, QrCode, Receipt, Coins, PiggyBank,
+  ChevronRight, QrCode, Coins, PiggyBank,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useUnreadNotifications } from '../contexts/UnreadNotificationsContext';
-import { useWebAuth } from '../auth/WebAuthContext';
+import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
+import { useWebAuth } from '@/auth/WebAuthContext';
 
 interface NavItem {
   name: string;
@@ -60,7 +60,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Tài chính & Báo cáo',
     items: [
       { name: 'Quản lý tài chính',  path: '/host/financial', icon: DollarSign },
-      { name: 'Ghi nhận chi phí',   path: '/host/expenses',  icon: Receipt },
       { name: 'Công nợ phải thu',   path: '/host/receivables', icon: Coins,     hostOnly: true },
       { name: 'Sổ cọc',             path: '/host/deposits',    icon: PiggyBank, hostOnly: true },
       { name: 'Báo cáo & Phân tích', path: '/host/reports',  icon: BarChart3 },

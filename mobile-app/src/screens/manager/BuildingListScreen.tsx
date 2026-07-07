@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   ManagedProperty, WholeHouseRentalStatus,
   getPropPriority, getPriorityMeta, getIssueCount,
-} from '../../data/managedProperties';
-import { managerPropertyService } from '../../services/managerPropertyService';
+} from '@/data/managedProperties';
+import { managerPropertyService } from '@/services/manager/propertyService';
 
 const FILTERS = [
   { id: 'all', label: 'Tất cả' },

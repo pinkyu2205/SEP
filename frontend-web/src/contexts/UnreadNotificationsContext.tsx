@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { hostService } from '../services/host.service';
-import { MOCK_NOTIFICATIONS } from '../utils/mockData';
+import { hostService } from '@/services/host.service';
+import { MOCK_NOTIFICATIONS } from '@/utils/mockData';
 
 // Fallback offline: số chưa đọc từ mock (để demo vẫn có badge khi BE chưa bật).
 const MOCK_UNREAD = MOCK_NOTIFICATIONS.filter(n => !n.isRead).length;

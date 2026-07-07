@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { AppNotification } from '../../types';
-import { formatRelativeTime } from '../../utils';
-import { realNotificationService, ApiNotification } from '../../services/notificationService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { AppNotification } from '@/types';
+import { formatRelativeTime } from '@/utils';
+import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
 const mapApiNotif = (n: ApiNotification): AppNotification => ({

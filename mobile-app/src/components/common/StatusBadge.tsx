@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Colors, Spacing, BorderRadius } from '../../constants';
+import { Colors, Spacing, BorderRadius } from '@/constants';
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
 

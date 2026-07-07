@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, Shadow } from '../../constants';
+import { Colors, Spacing, Shadow } from '@/constants';
 
 const SH = Dimensions.get('window').height;
 const TODAY = new Date(2026, 4, 21);

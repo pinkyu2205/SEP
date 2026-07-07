@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Animated, StyleSheet } from 'react-native';
-import { Colors, Spacing, Shadow } from '../../constants';
+import { Colors, Spacing, Shadow } from '@/constants';
 
 const BONE = '#E2E8F0';
 

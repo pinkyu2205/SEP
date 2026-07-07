@@ -6,10 +6,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Contract } from '../../types';
-import { formatDate } from '../../utils';
-import { checkoutStore, CheckoutRequest } from '../../store/checkoutStore';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Contract } from '@/types';
+import { formatDate } from '@/utils';
+import { checkoutStore, CheckoutRequest } from '@/store/checkoutStore';
 
 const REASONS = [
   'Chuyển chỗ ở do công việc',

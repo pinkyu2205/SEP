@@ -4,17 +4,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { MaintenanceRequest, MaintenanceStatus } from '../../types';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import {
   getMaintenancePriorityLabel, getMaintenancePriorityColor, formatDate,
-} from '../../utils';
-import { useTenantRequests } from '../../store/maintenanceStore';
-import { realMaintenanceService } from '../../services/maintenanceService.real';
-import { dtoToTenantRequest } from '../../services/maintenanceMappers';
+} from '@/utils';
+import { useTenantRequests } from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
-} from '../../constants/maintenance';
+} from '@/constants/maintenance';
 
 // ─── Filter tabs ───────────────────────────────────────────
 type FilterKey = 'active' | 'completed' | MaintenanceStatus;

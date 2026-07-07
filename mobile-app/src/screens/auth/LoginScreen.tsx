@@ -9,9 +9,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Button, Input } from '../../components/common';
-import { useAuth } from '../../hooks';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Button, Input } from '@/components/common';
+import { useAuth } from '@/hooks';
 import { useNavigation } from '@react-navigation/native';
 
 export const LoginScreen: React.FC = () => {

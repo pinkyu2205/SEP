@@ -6,8 +6,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { OnboardingAsset } from '../../types';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { OnboardingAsset } from '@/types';
 
 type Step = 'room' | 'assets' | 'meter' | 'confirm';
 

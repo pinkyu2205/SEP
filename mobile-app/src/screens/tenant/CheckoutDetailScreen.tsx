@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   CheckoutRequest,
   DamageItem,
@@ -17,8 +17,8 @@ import {
   DEMO_TRANSITION_DATA,
   checkoutStore,
   useCheckoutRequests,
-} from '../../store/checkoutStore';
-import { formatDate } from '../../utils';
+} from '@/store/checkoutStore';
+import { formatDate } from '@/utils';
 
 // ── Timeline steps definition ────────────────────────────────
 const TIMELINE_STEPS = [

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MaintenanceRequest, MaintenanceStatus } from '../types';
+import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 
 // ===================== TENANT MAINTENANCE REQUESTS =====================
 const SEED_TENANT_REQUESTS: MaintenanceRequest[] = [

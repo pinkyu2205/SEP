@@ -1,6 +1,6 @@
 import api from './api';
-import type { Page } from '../types/api.types';
-import type { PlatformBillStatus } from '../types';
+import type { Page } from '@/types/api.types';
+import type { PlatformBillStatus } from '@/types';
 
 // =============================================================================
 // Admin (System Admin) service — các API giám sát toàn hệ thống.

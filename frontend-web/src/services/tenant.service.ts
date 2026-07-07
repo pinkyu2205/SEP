@@ -1,5 +1,5 @@
 import api from './api';
-import type { OnboardTenantRequest, TenantContractResponse } from '../types/api.types';
+import type { OnboardTenantRequest, TenantContractResponse } from '@/types/api.types';
 
 const BASE = '/api/v1/properties';
 

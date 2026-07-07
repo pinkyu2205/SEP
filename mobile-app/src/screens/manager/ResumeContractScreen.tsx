@@ -14,12 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
 import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
-import { BorderRadius, Colors, Shadow, Spacing } from '../../constants'
+import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import {
   ContractPriceApprovalStatus,
   realTenantService,
   TenantContractResponse,
-} from '../../services/tenantService.real'
+} from '@/services/tenant/tenantService'
 
 // Khớp với OnboardingScreen — PayOS redirect URLs.
 const PAY_SUCCESS_URL = 'https://slms.app/payment-success'

@@ -17,22 +17,22 @@ import {
 import QRCode from 'react-native-qrcode-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
-import { DatePickerField } from '../../components/common/DatePickerField'
-import { BorderRadius, Colors, Shadow, Spacing } from '../../constants'
-import { uploadImageToCloudinary } from '../../services/cloudinary'
+import { DatePickerField } from '@/components/common/DatePickerField'
+import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
+import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
   ApiProperty,
   ApiRoom,
   realPropertyService,
-} from '../../services/propertyService.real'
+} from '@/services/manager/propertyApi'
 import {
   EquipmentSnapshotItem,
   OnboardTenantRequest,
   realTenantService,
   TenantContractResponse,
-} from '../../services/tenantService.real'
-import { realEquipmentService } from '../../services/equipmentService.real'
-import type { EquipmentDto } from '../../types'
+} from '@/services/tenant/tenantService'
+import { realEquipmentService } from '@/services/manager/equipmentService'
+import type { EquipmentDto } from '@/types'
 
 type RentalMode = 'room' | 'whole_house'
 

@@ -1,4 +1,4 @@
-import type { EquipmentResponse, InboundContractResponse, PropertyResponse, RenovationResponse } from '../types/api.types';
+import type { EquipmentResponse, InboundContractResponse, PropertyResponse, RenovationResponse } from '@/types/api.types';
 
 export interface AdminContractDraft {
   contract?: InboundContractResponse;

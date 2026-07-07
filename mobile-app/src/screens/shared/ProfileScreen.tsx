@@ -5,9 +5,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useAuth } from '../../hooks';
-import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useAuth } from '@/hooks';
+import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 
 const ROLE_CONFIG = {
   manager: { label: 'Quản lý vận hành', color: Colors.primary,   bg: Colors.primaryBg   },

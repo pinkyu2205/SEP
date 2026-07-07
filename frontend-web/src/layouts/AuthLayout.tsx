@@ -1,6 +1,6 @@
 import { Link, Outlet } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { ROUTES } from '../utils/routes';
+import { ROUTES } from '@/utils/routes';
 
 /**
  * Khung cho các trang xác thực (đăng nhập).

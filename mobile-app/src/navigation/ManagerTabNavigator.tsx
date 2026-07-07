@@ -4,12 +4,12 @@ import {
   Animated, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ManagerHomeScreen } from '../screens/manager/ManagerHomeScreen';
-import { BuildingListScreen } from '../screens/manager/BuildingListScreen';
-import { BillingManagementScreen } from '../screens/manager/BillingManagementScreen';
-import { MaintenanceManagerScreen } from '../screens/manager/MaintenanceManagerScreen';
-import { ProfileScreen } from '../screens/shared/ProfileScreen';
-import { Colors, BorderRadius, Shadow, Spacing } from '../constants';
+import { ManagerHomeScreen } from '@/screens/manager/ManagerHomeScreen';
+import { BuildingListScreen } from '@/screens/manager/BuildingListScreen';
+import { BillingManagementScreen } from '@/screens/manager/BillingManagementScreen';
+import { MaintenanceManagerScreen } from '@/screens/manager/MaintenanceManagerScreen';
+import { ProfileScreen } from '@/screens/shared/ProfileScreen';
+import { Colors, BorderRadius, Shadow, Spacing } from '@/constants';
 
 const Tab = createBottomTabNavigator();
 

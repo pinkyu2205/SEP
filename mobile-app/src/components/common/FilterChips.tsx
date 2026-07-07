@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { Colors, Spacing, BorderRadius } from '../../constants';
+import { Colors, Spacing, BorderRadius } from '@/constants';
 
 export interface FilterChipOption {
   id: string;

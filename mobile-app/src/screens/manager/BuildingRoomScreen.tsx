@@ -1,14 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { getPropertyById, getBuildingOps, BuildingRoom, RoomStatus } from '../../data/managedProperties';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { getPropertyById, getBuildingOps, BuildingRoom, RoomStatus } from '@/data/managedProperties';
 import {
   getInspectionsByRoom,
   getInspectionStatusLabel,
   getInspectionTypeLabel,
   RoomInspection,
-} from '../../data/roomInspections';
+} from '@/data/roomInspections';
 
 // Extend status to include 'disabled' locally (BuildingRoomScreen-only extension)
 type ExtendedStatus = RoomStatus | 'disabled';
