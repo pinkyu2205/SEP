@@ -1,6 +1,6 @@
 import type {
   BulkImportResponse, BulkImportError, PropertyPurgeResponse, BulkImportImagesResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 const ENDPOINT = '/api/v1/import/onboarding-excel';
 // Endpoint MỚI (BE đang làm — xem doc/BE-tach-import-khoi-tao-va-cai-tao.md):

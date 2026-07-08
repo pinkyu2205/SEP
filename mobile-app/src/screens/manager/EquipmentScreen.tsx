@@ -5,9 +5,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { realEquipmentService } from '../../services/equipmentService.real';
-import type { EquipmentLifecycleStatus } from '../../types';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { realEquipmentService } from '@/services/manager/equipmentService';
+import type { EquipmentLifecycleStatus } from '@/types';
 
 // ===================== TYPES =====================
 type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';

@@ -4,12 +4,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Contract, ContractStatus } from '../../types';
-import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '../../utils';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Contract, ContractStatus } from '@/types';
+import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '@/utils';
 import {
   realTenantSelfService, MyContractListItem, mapBeContractStatus,
-} from '../../services/tenantSelfService.real';
+} from '@/services/tenant/selfService';
 
 // Card mở rộng: thêm nhãn mô tả phạm vi thuê (toàn nhà / phòng)
 type CardContract = Contract & { isWholeHouse: boolean; scopeLabel: string };

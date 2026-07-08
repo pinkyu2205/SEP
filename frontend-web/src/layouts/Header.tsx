@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Bell, ChevronRight, Home, LogOut, Search } from 'lucide-react';
-import { useWebAuth } from '../auth/WebAuthContext';
-import { useUnreadNotifications } from '../contexts/UnreadNotificationsContext';
+import { useWebAuth } from '@/auth/WebAuthContext';
+import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 
 const ROUTE_LABELS: Record<string, string> = {
   '/host': 'Bảng điều hành',

@@ -5,7 +5,7 @@ import type {
   MaintenanceEquipmentResponse,
   EquipmentMaintenanceHistoryResponse,
   EquipmentLifecycleStatus,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 export const equipmentService = {
   /** POST /api/v1/properties/{propertyId}/equipments — Thêm thiết bị */

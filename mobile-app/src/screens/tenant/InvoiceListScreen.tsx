@@ -5,10 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { SharedBill, BillStatus, InvoiceType } from '../../store/billsStore';
-import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
+import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
+import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 
 type Invoice = SharedBill;
 type InvoiceStatus = BillStatus;

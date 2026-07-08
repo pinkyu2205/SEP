@@ -1,5 +1,5 @@
 import api from './api';
-import type { AuthRequest, AuthResponse } from '../types/api.types';
+import type { AuthRequest, AuthResponse } from '@/types/api.types';
 
 export const authService = {
   /**

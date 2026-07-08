@@ -2,10 +2,10 @@ import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { formatDate, getMaintenanceCategoryLabel } from '../../utils';
-import { MaintenanceRequest, MaintenanceStatus } from '../../types';
-import { useTenantRequests } from '../../store/maintenanceStore';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { formatDate, getMaintenanceCategoryLabel } from '@/utils';
+import { MaintenanceRequest, MaintenanceStatus } from '@/types';
+import { useTenantRequests } from '@/store/maintenanceStore';
 
 const HISTORY_STATUSES: MaintenanceStatus[] = ['resolved', 'cancelled'];
 

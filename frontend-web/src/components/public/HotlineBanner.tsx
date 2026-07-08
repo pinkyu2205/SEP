@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { CalendarCheck, Phone } from 'lucide-react';
-import { CONTACT } from '../../utils/constants';
-import { telHref } from '../../utils/helpers';
-import { ROUTES } from '../../utils/routes';
+import { CONTACT } from '@/utils/constants';
+import { telHref } from '@/utils/helpers';
+import { ROUTES } from '@/utils/routes';
 import { Reveal } from './Reveal';
 
 export const HotlineBanner = () => {

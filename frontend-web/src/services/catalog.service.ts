@@ -1,5 +1,5 @@
 import api from './api';
-import type { EquipmentCatalogItem, RenovationCategory } from '../types/api.types';
+import type { EquipmentCatalogItem, RenovationCategory } from '@/types/api.types';
 
 export const catalogService = {
   /** GET /api/v1/equipment-catalog — Danh mục thiết bị */

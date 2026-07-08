@@ -5,9 +5,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { managerPropertyService } from '../../services/managerPropertyService';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const TODAY = new Date();

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '../../constants';
-import { Button, Input } from '../../components/common';
-import { useAuth } from '../../hooks';
+import { Colors, Spacing, BorderRadius } from '@/constants';
+import { Button, Input } from '@/components/common';
+import { useAuth } from '@/hooks';
 import { useNavigation } from '@react-navigation/native';
-import { realAuthService } from '../../services/realAuthService';
+import { realAuthService } from '@/services/auth/realAuthService';
 
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;

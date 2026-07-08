@@ -1,6 +1,6 @@
 import api from './api';
-import type { Page } from '../types/api.types';
-import type { Expense, ExpenseCategory } from '../utils/expenseStore';
+import type { Page } from '@/types/api.types';
+import type { Expense, ExpenseCategory } from '@/utils/expenseStore';
 
 // =============================================================================
 // Host Portal service — nối API BE (/api/v1/host).

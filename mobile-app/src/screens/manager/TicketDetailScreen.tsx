@@ -6,18 +6,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, PhotoEvidence, CostPaidBy, TimelineEntry, DamageCause,
-} from '../../store/maintenanceStore';
-import { realMaintenanceService } from '../../services/maintenanceService.real';
-import { dtoToTicket } from '../../services/maintenanceMappers';
+} from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, StatusMeta,
   MAINTENANCE_TECHNICIANS, MAINTENANCE_COST_APPROVAL_THRESHOLD,
   EQUIPMENT_REPLACE_SUGGEST_COUNT,
-} from '../../constants/maintenance';
+} from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 

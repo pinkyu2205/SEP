@@ -6,15 +6,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   MaintenanceCategory, MaintenancePriority, Equipment,
   CreateMaintenanceRequestDto, MaintenanceReqCategory, MaintenanceReqPriority,
-} from '../../types';
-import { formatDate } from '../../utils';
-import { tenantMaintenanceStore } from '../../store/maintenanceStore';
-import { realMaintenanceService } from '../../services/maintenanceService.real';
-import { uploadImageToCloudinary } from '../../services/cloudinary';
+} from '@/types';
+import { formatDate } from '@/utils';
+import { tenantMaintenanceStore } from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 
 const CATEGORIES: { key: MaintenanceCategory; label: string; emoji: string }[] = [
   { key: 'electrical', label: 'Điện', emoji: '⚡' },

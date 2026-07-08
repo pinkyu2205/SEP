@@ -3,7 +3,7 @@ import type {
   Page,
   MaintenanceRequestResponse,
   MaintenanceDashboardResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 const BASE = '/api/v1/maintenance';
 

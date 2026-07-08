@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Search, Tag, Wallet } from 'lucide-react';
-import { DISTRICTS, PRICE_RANGES, PROPERTY_TYPE_LABEL } from '../../utils/constants';
-import { ROUTES } from '../../utils/routes';
-import type { PropertyType } from '../../types/property';
+import { DISTRICTS, PRICE_RANGES, PROPERTY_TYPE_LABEL } from '@/utils/constants';
+import { ROUTES } from '@/utils/routes';
+import type { PropertyType } from '@/types/property';
 
 interface SearchValues {
   district: string;

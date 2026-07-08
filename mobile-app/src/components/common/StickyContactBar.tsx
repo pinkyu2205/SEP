@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Linking, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Spacing, Shadow } from '../../constants';
+import { Colors, Spacing, Shadow } from '@/constants';
 
 const HOTLINE = '19008386';
 const HOTLINE_DISPLAY = '1900 8386';

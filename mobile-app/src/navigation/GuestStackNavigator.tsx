@@ -1,12 +1,12 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { GuestHomeScreen } from '../screens/guest/GuestHomeScreen';
-import { SearchScreen } from '../screens/guest/SearchScreen';
-import { SearchResultScreen } from '../screens/guest/SearchResultScreen';
-import { PropertyDetailScreen } from '../screens/guest/PropertyDetailScreen';
-import { LoginScreen } from '../screens/auth/LoginScreen';
-import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
-import { SearchFilters } from '../types';
+import { GuestHomeScreen } from '@/screens/guest/GuestHomeScreen';
+import { SearchScreen } from '@/screens/guest/SearchScreen';
+import { SearchResultScreen } from '@/screens/guest/SearchResultScreen';
+import { PropertyDetailScreen } from '@/screens/guest/PropertyDetailScreen';
+import { LoginScreen } from '@/screens/auth/LoginScreen';
+import { ForgotPasswordScreen } from '@/screens/auth/ForgotPasswordScreen';
+import { SearchFilters } from '@/types';
 
 export type GuestStackParamList = {
   GuestHome: undefined;

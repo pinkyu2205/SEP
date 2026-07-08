@@ -1,4 +1,4 @@
-import { ContactSection } from '../../components/public/ContactSection';
+import { ContactSection } from '@/components/public/ContactSection';
 
 export const ContactPage = () => {
   return (

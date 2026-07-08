@@ -2,16 +2,16 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { MaintenanceRequest, MaintenanceStatus, MaintenanceTimeline } from '../../types';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { MaintenanceRequest, MaintenanceStatus, MaintenanceTimeline } from '@/types';
 import {
   formatDate, formatDateTime, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor,
-} from '../../utils';
+} from '@/utils';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
-} from '../../constants/maintenance';
-import { useTenantRequests, tenantMaintenanceStore } from '../../store/maintenanceStore';
+} from '@/constants/maintenance';
+import { useTenantRequests, tenantMaintenanceStore } from '@/store/maintenanceStore';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 

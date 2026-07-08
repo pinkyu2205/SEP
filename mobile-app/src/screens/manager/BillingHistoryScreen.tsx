@@ -4,8 +4,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useBills, InvoiceType } from '../../store/billsStore';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useBills, InvoiceType } from '@/store/billsStore';
 
 // ===================== CONFIG =====================
 const TYPE_CONFIG: Record<InvoiceType, { icon: string; label: string; color: string; bg: string }> = {

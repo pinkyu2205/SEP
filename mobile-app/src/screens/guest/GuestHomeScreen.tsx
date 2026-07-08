@@ -7,12 +7,12 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { SkeletonCard } from '../../components/common';
-import { searchService } from '../../services';
-import { PropertyListing } from '../../types';
-import { GuestStackParamList } from '../../navigation/GuestStackNavigator';
-import { formatCurrency } from '../../utils/helpers';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { SkeletonCard } from '@/components/common';
+import { searchService } from '@/services';
+import { PropertyListing } from '@/types';
+import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
+import { formatCurrency } from '@/utils/helpers';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList>;

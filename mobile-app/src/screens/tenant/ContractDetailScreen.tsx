@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Contract } from '../../types';
-import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '../../utils';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Contract } from '@/types';
+import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '@/utils';
 import {
   realTenantSelfService, ContractDetailDto, mapBeContractStatus,
-} from '../../services/tenantSelfService.real';
+} from '@/services/tenant/selfService';
 
 // Map DTO chi tiết từ BE -> Contract dùng cho UI
 const mapDetail = (d: ContractDetailDto): Contract => {

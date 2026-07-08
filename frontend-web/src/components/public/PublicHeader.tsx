@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { Building2, Menu, Phone, X } from 'lucide-react';
 import clsx from 'clsx';
-import { ROUTES } from '../../utils/routes';
-import { COMPANY, CONTACT } from '../../utils/constants';
-import { telHref } from '../../utils/helpers';
+import { ROUTES } from '@/utils/routes';
+import { COMPANY, CONTACT } from '@/utils/constants';
+import { telHref } from '@/utils/helpers';
 
 const NAV_ITEMS = [
   { label: 'Trang chủ', to: ROUTES.HOME, end: true },

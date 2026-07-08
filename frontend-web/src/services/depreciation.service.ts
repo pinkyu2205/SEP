@@ -2,7 +2,7 @@ import api from './api';
 import type {
   CalculateDepreciationRequest,
   DepreciationCalculationResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 export const depreciationService = {
   /** POST /api/v1/properties/{propertyId}/depreciation/calculate — Tính khấu hao */

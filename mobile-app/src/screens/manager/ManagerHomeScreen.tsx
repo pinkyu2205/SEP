@@ -5,16 +5,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius } from '../../constants';
-import { useAuth } from '../../hooks';
-import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
+import { Colors, Spacing, BorderRadius } from '@/constants';
+import { useAuth } from '@/hooks';
+import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 import {
   ManagedProperty, getPropPriority, getPriorityMeta, getIssueCount,
-} from '../../data/managedProperties';
-import { managerPropertyService } from '../../services/managerPropertyService';
+} from '@/data/managedProperties';
+import { managerPropertyService } from '@/services/manager/propertyService';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
-} from '../../services/managerInvoiceService.real';
+} from '@/services/manager/invoiceService';
 
 const QUICK_ACTIONS = [
   { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },

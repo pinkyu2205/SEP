@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { getPropertyById, getBuildingOps, BuildingTenantInfo, PaymentRisk } from '../../data/managedProperties';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { getPropertyById, getBuildingOps, BuildingTenantInfo, PaymentRisk } from '@/data/managedProperties';
 
 const RISK_META: Record<PaymentRisk, { label: string; color: string; bg: string }> = {
   low: { label: 'Rủi ro thấp', color: '#16A34A', bg: '#F0FDF4' },

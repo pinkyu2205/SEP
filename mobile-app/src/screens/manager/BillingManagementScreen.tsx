@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
-} from '../../services/managerInvoiceService.real';
+} from '@/services/manager/invoiceService';
 
 const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
   QR:            { label: 'QR VietQR',    icon: '📱' },

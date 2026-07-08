@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Alert, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '../../constants';
-import { Button, Input } from '../../components/common';
+import { Colors, Spacing, BorderRadius } from '@/constants';
+import { Button, Input } from '@/components/common';
 import { useNavigation } from '@react-navigation/native';
 
 export const ForgotPasswordScreen: React.FC = () => {

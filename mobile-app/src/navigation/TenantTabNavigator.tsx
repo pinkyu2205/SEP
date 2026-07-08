@@ -1,12 +1,12 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, Platform } from 'react-native';
-import { TenantHomeScreen } from '../screens/tenant/TenantHomeScreen';
-import { InvoiceListScreen } from '../screens/tenant/InvoiceListScreen';
-import { MaintenanceListScreen } from '../screens/tenant/MaintenanceListScreen';
-import { TenantContractScreen } from '../screens/tenant/TenantContractScreen';
-import { ProfileScreen } from '../screens/shared/ProfileScreen';
-import { Colors } from '../constants';
+import { TenantHomeScreen } from '@/screens/tenant/TenantHomeScreen';
+import { InvoiceListScreen } from '@/screens/tenant/InvoiceListScreen';
+import { MaintenanceListScreen } from '@/screens/tenant/MaintenanceListScreen';
+import { TenantContractScreen } from '@/screens/tenant/TenantContractScreen';
+import { ProfileScreen } from '@/screens/shared/ProfileScreen';
+import { Colors } from '@/constants';
 
 const Tab = createBottomTabNavigator();
 
