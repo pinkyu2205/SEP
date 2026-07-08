@@ -1,0 +1,9 @@
+@startuml StateMaintenanceRequest
+title MaintenanceRequest - State Diagram
+
+[*] --> Pending : Tenant submits request
+Pending --> InProgress : Manager accepts/schedules
+InProgress --> Resolved : Repair completed
+Resolved --> [*]
+
+@enduml

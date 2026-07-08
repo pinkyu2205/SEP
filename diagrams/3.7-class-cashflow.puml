@@ -1,0 +1,38 @@
+@startuml ClassCashFlow
+title Class Diagram - Cash Flow Reconciliation & Financial Reporting
+
+class ExpenseController {
+  +recordExpense(request)
+}
+class CashFlowController {
+  +getDashboard(propertyId) : CashFlowSummary
+  +exportReport(propertyId) : File
+}
+class CashFlowService {
+  +recordExpense(dto) : Expense
+  +getDashboard(propertyId) : CashFlowSummary
+  +exportToExcel(propertyId) : File
+  -reconcile(expenses, payments) : CashFlowSummary
+}
+class ExpenseRepository {
+  +save(Expense)
+  +findByProperty(propertyId)
+}
+class Expense {
+  -id : Long
+  -amount : BigDecimal
+  -period : String
+}
+class CashFlowSummary {
+  -totalRevenue : BigDecimal
+  -totalExpense : BigDecimal
+  -netProfit : BigDecimal
+}
+
+ExpenseController --> CashFlowService
+CashFlowController --> CashFlowService
+CashFlowService --> ExpenseRepository
+CashFlowService --> Expense
+CashFlowService ..> CashFlowSummary : builds
+
+@enduml

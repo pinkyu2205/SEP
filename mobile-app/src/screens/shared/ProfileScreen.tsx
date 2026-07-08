@@ -98,7 +98,7 @@ export const ProfileScreen: React.FC = () => {
     if (newPwd !== confirmPwd) return Alert.alert('Không khớp', 'Xác nhận mật khẩu mới không khớp.');
     try {
       setChanging(true);
-      await realTenantSelfService.changePassword({ oldPassword: oldPwd, newPassword: newPwd });
+      await realTenantSelfService.changePassword({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd });
       setShowPwdModal(false);
       resetPwdForm();
       Alert.alert('Thành công', 'Đổi mật khẩu thành công.');

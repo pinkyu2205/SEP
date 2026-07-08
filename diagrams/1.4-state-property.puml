@@ -1,0 +1,22 @@
+@startuml StateProperty
+title Property - State Diagram (matches PropertyStatus enum in api.types.ts)
+
+[*] --> DRAFT : Admin creates draft manually OR imports via lease-excel
+DRAFT --> UNDER_RENOVATION : Renovation lines added / renovation-excel imported
+UNDER_RENOVATION --> RENOVATION_COMPLETED : renovation/complete (or import stops here)
+RENOVATION_COMPLETED --> PENDING_HOST_REVIEW : submit-to-host (pricing calculated)
+PENDING_HOST_REVIEW --> ACTIVE : Host approves (host-confirm) + activation/confirm
+ACTIVE --> RENTED : Whole-house tenant contract activated
+RENTED --> ACTIVE : Whole-house contract ends
+ACTIVE --> UNDER_RENOVATION : renovation/start (supplement renovation, session v2+)
+ACTIVE --> DISABLED : disable
+DISABLED --> ACTIVE : enable
+
+note right of PENDING_HOST_REVIEW
+  Re-entered after a supplement renovation
+  import (renovation-supplement-excel) on an
+  already-ACTIVE property — price must be
+  re-approved by Host before reactivation.
+end note
+
+@enduml

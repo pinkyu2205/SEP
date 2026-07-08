@@ -1,0 +1,44 @@
+@startuml ClassMaintenance
+title Class Diagram - Maintenance Request
+' Grounded in mobile-app/src/services/maintenanceService.real.ts (real endpoints)
+
+class MaintenanceController {
+  +createRequest(body) : MaintenanceRequest
+  +getMyRequests(params) : Page<MaintenanceRequest>
+  +getDetail(id) : MaintenanceRequest
+  +listForManager(params) : Page<MaintenanceRequest>
+  +updateStatus(id, status, note, scheduledDate) : MaintenanceRequest
+  +resolve(id, body) : MaintenanceRequest
+  +uploadPhotos(id, files, type) : MaintenanceRequest
+  +getDashboard(propertyId) : MaintenanceDashboard
+}
+class MaintenanceService {
+  +createRequest(dto) : MaintenanceRequest
+  +updateStatus(id, status, note, scheduledDate)
+  +resolve(id, dto)
+  -createExpenseFromRepair(request) : Expense
+  -updateEquipmentHistory(equipmentId, request)
+}
+class MaintenanceRepository {
+  +save(MaintenanceRequest)
+  +findById(Long)
+}
+class MaintenanceRequest {
+  -id : Long
+  -category : String
+  -description : String
+  -priority : String
+  -status : Enum <<PENDING, IN_PROGRESS, RESOLVED>>
+  -scheduledDate : Date
+  -repairCost : BigDecimal
+  -photosBefore : List<String>
+  -photosAfter : List<String>
+}
+
+MaintenanceController --> MaintenanceService
+MaintenanceService --> MaintenanceRepository
+MaintenanceService --> MaintenanceRequest
+MaintenanceService ..> "Equipment (see 3.6)" : updates history
+MaintenanceService ..> "Expense" : creates on resolve
+
+@enduml

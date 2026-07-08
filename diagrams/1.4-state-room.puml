@@ -1,0 +1,11 @@
+@startuml StateRoom
+title Room - State Diagram (matches RoomStatus enum in api.types.ts)
+
+[*] --> DRAFT : Room created via import/draft (not yet published)
+DRAFT --> AVAILABLE : Property activated / room published
+AVAILABLE --> RENTED : Tenant contract activated
+RENTED --> AVAILABLE : Contract terminated / expired
+AVAILABLE --> MAINTENANCE : Manager marks for maintenance
+MAINTENANCE --> AVAILABLE : Maintenance resolved
+
+@enduml

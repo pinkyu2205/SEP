@@ -1,0 +1,21 @@
+@startuml SequenceRoomStatusUpdate
+title Sequence Diagram - Automatic Room Status Update
+
+participant "TenantContractService" as ContractSvc
+participant "RoomStatusHandler" as Handler
+participant "RoomService" as RoomSvc
+database "Database" as DB
+participant "NotificationService" as Notify
+
+ContractSvc -> Handler : onContractStatusChanged(event=ACTIVE)
+Handler -> RoomSvc : updateStatus(roomId, OCCUPIED)
+RoomSvc -> DB : UPDATE room SET status='OCCUPIED'
+
+... later, contract terminates ...
+
+ContractSvc -> Handler : onContractStatusChanged(event=TERMINATED)
+Handler -> RoomSvc : updateStatus(roomId, AVAILABLE)
+RoomSvc -> DB : UPDATE room SET status='AVAILABLE'
+Handler -> Notify : notify(admin, ROOM_AVAILABLE)
+
+@enduml

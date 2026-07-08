@@ -9,7 +9,9 @@ export interface RealAuthResponse {
   token: string;
   username: string;
   role: string; // ROLE_MANAGER | ROLE_ADMIN | ROLE_TENANT | ROLE_OWNER
-  isFirstLogin?: boolean; // true = khách vừa được cấp tài khoản, bắt buộc đổi mật khẩu lần đầu
+  // BE serialize field Java `isFirstLogin` (boolean) thành key JSON `firstLogin`
+  // (Jackson bỏ tiền tố "is" khi tên field đã bắt đầu bằng "is") — đã verify bằng login thật.
+  firstLogin?: boolean; // true = khách vừa được cấp tài khoản, bắt buộc đổi mật khẩu lần đầu
 }
 
 export const realAuthService = {
@@ -23,8 +25,17 @@ export const realAuthService = {
   },
 
   // Đổi mật khẩu (bắt buộc lần đầu đăng nhập). BE set is_first_login=false sau khi đổi.
-  changePassword: async (oldPassword: string, newPassword: string): Promise<void> => {
-    await realApiClient.post('/api/v1/auth/change-password', { oldPassword, newPassword });
+  // BE yêu cầu đủ 3 field: oldPassword, newPassword, confirmPassword.
+  changePassword: async (
+    oldPassword: string,
+    newPassword: string,
+    confirmPassword: string,
+  ): Promise<void> => {
+    await realApiClient.post('/api/v1/auth/change-password', {
+      oldPassword,
+      newPassword,
+      confirmPassword,
+    });
   },
 
   logout: async (): Promise<void> => {

@@ -1,0 +1,47 @@
+@startuml SequenceHostReviewActivation
+title Sequence Diagram - Host Reviews Pricing & Confirms Activation
+' Grounded in frontend-web/src/pages/host/HostPropertyReview.tsx +
+' property.service.ts (onboarding-summary, host-confirm) + activation.service.ts
+
+actor Host as "Host (ROLE_OWNER)"
+participant "Web Admin Portal\n(HostPropertyReview)" as UI
+participant "PropertyController" as Controller
+participant "PropertyService" as Service
+participant "ActivationController" as ActCtrl
+participant "ActivationService" as ActSvc
+database "Database" as DB
+participant "NotificationService" as Notify
+actor Admin
+
+Notify --> Host : Notification "Property pending review"
+Host -> UI : Open property review screen
+UI -> Controller : GET /api/v1/properties/{id}/onboarding-summary
+Controller -> Service : getOnboardingSummary(id)
+Service -> DB : query property + rooms + renovation + equipment + inbound contract
+DB --> Service : aggregated summary
+Service --> Controller : OnboardingSummaryResponse
+Controller --> UI : 200 OK - show full onboarding package
+
+Host -> UI : Choose pricing mode (FORWARD: desired profit, or REVERSE: target ROI)
+UI -> Controller : POST /api/v1/properties/{id}/pricing/calculate\n{ mode, pDesired/roiExpected, oOperation, vacancyRatePct }
+Controller -> Service : calculatePricing(id, dto)
+Service --> Controller : PricingCalculationResponse (suggestedPriceWithProfit)
+Controller --> UI : 200 OK - suggested whole-house/room prices
+
+Host -> UI : Adjust final prices if needed, confirm
+UI -> Controller : POST /api/v1/properties/{id}/host-confirm\n{ wholePrice, roomPrices, operationManagerId }
+Controller -> Service : hostConfirm(id, dto)
+Service -> DB : UPDATE property (approved prices, priceApprovalStatus=APPROVED)
+Service -> Notify : notify(admin, HOST_CONFIRMED_PRICE)
+Notify --> Admin : Notification "Host approved pricing"
+Service --> Controller : HostConfirmResponse
+Controller --> UI : 200 OK
+
+Admin -> UI : Confirm activation (Admin/System, web Admin Portal)
+UI -> ActCtrl : POST /api/v1/properties/{id}/activation/confirm
+ActCtrl -> ActSvc : confirmActivation(id, dto)
+ActSvc -> DB : UPDATE property status=ACTIVE, rooms status=AVAILABLE
+ActSvc --> ActCtrl : PropertyActivationResponse
+ActCtrl --> UI : 200 OK - property is now live and rentable
+
+@enduml

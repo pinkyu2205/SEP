@@ -12,8 +12,8 @@ import {
   CreateMaintenanceRequestDto, MaintenanceReqCategory, MaintenanceReqPriority,
 } from '@/types';
 import { formatDate } from '@/utils';
-import { tenantMaintenanceStore } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { realTenantSelfService } from '@/services/tenant/selfService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 
 const CATEGORIES: { key: MaintenanceCategory; label: string; emoji: string }[] = [
@@ -74,80 +74,45 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
     setSubmitting(true);
 
-    // 1) Thử gọi real API (Maintenance_BE_Contract.md). Cần roomId dạng số.
-    const roomIdNum = Number(equipment?.roomId);
-    const equipmentIdNum = Number(equipment?.id);
-    if (Number.isFinite(roomIdNum) && roomIdNum > 0) {
-      try {
-        const uploaded: string[] = [];
-        for (const uri of images) {
-          try { uploaded.push(await uploadImageToCloudinary(uri)); } catch { /* bỏ ảnh lỗi */ }
-        }
-        const body: CreateMaintenanceRequestDto = {
-          roomId: roomIdNum,
-          equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
-          category: category!.toUpperCase() as MaintenanceReqCategory,
-          priority: priority.toUpperCase() as MaintenanceReqPriority,
-          description: `${title.trim()} — ${description.trim()}`,
-          images: uploaded,
-        };
-        await realMaintenanceService.createRequest(body);
-        setSubmitting(false);
-        Alert.alert(
-          '🔧 Gửi yêu cầu thành công!',
-          'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý vận hành sẽ tiếp nhận và phản hồi sớm nhất.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }],
-        );
-        return;
-      } catch {
-        // BE chưa sẵn sàng → fallback lưu cục bộ để demo không gián đoạn.
+    try {
+      // roomId: ưu tiên từ QR thiết bị; không có thì lấy phòng của HĐ ACTIVE qua dashboard.
+      let roomIdNum = Number(equipment?.roomId);
+      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
+        const dash = await realTenantSelfService.getDashboard();
+        roomIdNum = Number(dash.room?.id);
       }
+      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
+        setSubmitting(false);
+        Alert.alert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng kiểm tra hợp đồng đang hiệu lực.');
+        return;
+      }
+
+      const uploaded: string[] = [];
+      for (const uri of images) {
+        try { uploaded.push(await uploadImageToCloudinary(uri)); } catch { /* bỏ ảnh lỗi */ }
+      }
+      const equipmentIdNum = Number(equipment?.id);
+      const body: CreateMaintenanceRequestDto = {
+        roomId: roomIdNum,
+        equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
+        category: category!.toUpperCase() as MaintenanceReqCategory,
+        priority: priority.toUpperCase() as MaintenanceReqPriority,
+        description: `${title.trim()} — ${description.trim()}`,
+        images: uploaded,
+      };
+      await realMaintenanceService.createRequest(body);
+      setSubmitting(false);
+      Alert.alert(
+        '🔧 Gửi yêu cầu thành công!',
+        'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý vận hành sẽ tiếp nhận và phản hồi sớm nhất.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }],
+      );
+      return;
+    } catch (e: any) {
+      setSubmitting(false);
+      const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Không thể kết nối máy chủ.';
+      Alert.alert('Gửi yêu cầu thất bại', msg);
     }
-
-    // 2) Fallback: lưu vào store cục bộ (hành vi cũ).
-    await new Promise(r => setTimeout(r, 600));
-    setSubmitting(false);
-
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const ticketNum = String(Math.floor(Math.random() * 900) + 100);
-
-    tenantMaintenanceStore.add({
-      id: `req-${Date.now()}`,
-      ticketCode: `TK-T-${ticketNum}`,
-      roomId: equipment?.roomId ?? 'r1',
-      roomName: equipment?.roomName ?? 'Phòng 201',
-      propertyId: equipment?.houseId,
-      propertyName: equipment?.houseName,
-      tenantId: 't1',
-      tenantName: 'Nguyễn Văn A',
-      title: title.trim(),
-      description: description.trim(),
-      category: category!,
-      priority,
-      status: 'pending',
-      images,
-      equipmentId: equipment?.id,
-      equipmentName: equipment?.name,
-      timeline: [{
-        status: 'pending',
-        note: equipment
-          ? `Yêu cầu tạo qua QR thiết bị: ${equipment.name} (${equipment.assetId})`
-          : 'Yêu cầu đã được tạo',
-        updatedBy: 'Nguyễn Văn A',
-        updatedAt: now.toISOString(),
-      }],
-      createdAt: dateStr,
-      updatedAt: dateStr,
-    });
-
-    Alert.alert(
-      '🔧 Gửi yêu cầu thành công!',
-      equipment
-        ? `Yêu cầu sửa chữa cho thiết bị "${equipment.name}" đã được gửi. Quản lý sẽ được thông báo và phân công thợ sớm nhất.`
-        : 'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý sẽ tiếp nhận và phản hồi sớm nhất.',
-      [{ text: 'OK', onPress: () => navigation.goBack() }]
-    );
   };
 
   const isValid = title.trim() && description.trim() && category;

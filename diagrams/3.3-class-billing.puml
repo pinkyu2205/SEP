@@ -1,0 +1,93 @@
+@startuml ClassBilling
+title Class Diagram - Monthly Billing & Payment
+' Grounded in mobile-app/src/services/managerInvoiceService.real.ts
+' and mobile-app/src/services/tenantBillingService.real.ts (real DTOs).
+' NOTE: several endpoints below are marked "BE TODO" in the source comments
+' as of this report — FE already calls them; confirm they exist before build.
+
+class UtilityInvoiceController {
+  +createRoomUtilityInvoice(propertyId, roomId, body)
+  +createPropertyUtilityInvoice(propertyId, body)
+}
+class RentInvoiceController {
+  +createRoomRentInvoice(propertyId, roomId, body)
+  +createPropertyRentInvoice(propertyId, body)
+  +listRentInvoices(propertyId, month)
+}
+class ManagerInvoiceController {
+  +listInvoices(period, status, type) : List<Invoice>
+  +markInvoicePaid(id, method, note)
+}
+class ManagerPaymentController {
+  +listPayments(status) : List<Payment>
+  +verifyPayment(id)
+  +rejectPayment(id, reason)
+}
+class TenantInvoiceController {
+  +listMyInvoices(status, type) : List<Invoice>
+  +getMyInvoice(id) : Invoice
+  +payInvoice(id) : Invoice   ' returns PayOS checkout URL/QR
+  +checkInvoicePayment(id) : Invoice
+  +listMyPayments() : List<Payment>
+}
+
+class InvoiceService {
+  +createUtilityInvoice(dto) : Invoice
+  +createRentInvoice(dto) : Invoice
+  +createPayOsCheckout(invoiceId) : Invoice
+  +syncPayOsStatus(invoiceId) : Invoice
+  +markPaid(invoiceId, method, note)
+}
+class PaymentService {
+  +verify(paymentId)
+  +reject(paymentId, reason)
+}
+class InvoiceRepository {
+  +save(Invoice)
+  +findByTenant(tenantId)
+}
+class PaymentRepository {
+  +save(Payment)
+  +findByInvoiceId(Long)
+}
+
+class Invoice {
+  -id : Long
+  -code : String
+  -type : Enum <<RENT, ELECTRICITY, WATER, SERVICE, OTHER>>
+  -month : int
+  -year : int
+  -totalAmount : BigDecimal
+  -lateFee : BigDecimal
+  -grandTotal : BigDecimal
+  -status : Enum <<PENDING, PAID, OVERDUE, PARTIAL, CANCELLED>>
+  -dueDate : Date
+  -kwhUsed : Double
+  -m3Used : Double
+  -payosCheckoutUrl : String
+  -payosQrCode : String
+  -payosOrderCode : Long
+}
+class Payment {
+  -id : Long
+  -amount : BigDecimal
+  -method : Enum <<QR, BANK_TRANSFER, CASH, EWALLET, OTHER>>
+  -status : Enum <<PENDING_VERIFY, VERIFIED, REJECTED>>
+  -transferContent : String
+  -paidAt : DateTime
+}
+class "PayOS Gateway" as PayOS <<external>>
+
+UtilityInvoiceController --> InvoiceService
+RentInvoiceController --> InvoiceService
+ManagerInvoiceController --> InvoiceService
+TenantInvoiceController --> InvoiceService
+ManagerPaymentController --> PaymentService
+InvoiceService --> InvoiceRepository
+InvoiceService --> Invoice
+InvoiceService --> PayOS : creates checkout / polls status
+PaymentService --> PaymentRepository
+PaymentService --> Payment
+Invoice "1" -- "many" Payment
+
+@enduml

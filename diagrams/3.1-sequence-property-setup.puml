@@ -1,0 +1,44 @@
+@startuml SequencePropertySetup
+title Sequence Diagram - Setup Property Portfolio & Room Pricing
+
+actor Admin
+participant "Web Admin Portal" as UI
+participant "PropertyController" as Controller
+participant "PropertyService" as Service
+participant "PropertyRepository" as Repo
+database "Database" as DB
+
+Admin -> UI : Add new property (house)
+UI -> Controller : POST /api/properties
+Controller -> Service : createProperty(dto)
+Service -> Repo : save(property)
+Repo -> DB : INSERT property
+DB --> Repo : property saved
+Repo --> Service : Property
+Service --> Controller : Property
+Controller --> UI : 201 Created
+UI --> Admin : Show property created
+
+Admin -> UI : Configure rooms & pricing
+UI -> Controller : POST /api/properties/{id}/rooms
+Controller -> Service : addRoom(propertyId, dto)
+Service -> Repo : save(room)
+Repo -> DB : INSERT room
+DB --> Repo : room saved
+Repo --> Service : Room
+Service --> Controller : Room
+Controller --> UI : 201 Created
+UI --> Admin : Show room added
+
+Admin -> UI : Record initial equipment
+UI -> Controller : POST /api/rooms/{id}/equipment
+Controller -> Service : addEquipment(roomId, dto)
+Service -> Repo : save(equipment)
+Repo -> DB : INSERT equipment
+DB --> Repo : equipment saved
+Repo --> Service : Equipment
+Service --> Controller : Equipment
+Controller --> UI : 201 Created
+UI --> Admin : Show equipment recorded
+
+@enduml

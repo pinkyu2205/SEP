@@ -1,0 +1,36 @@
+@startuml SequenceCaptureRoomCondition
+title Sequence Diagram - Capture Room Condition & Initial Utility Meter Reading
+' Corrected against real code: mobile-app/src/services/tenantService.real.ts
+' and frontend-web/src/types/api.types.ts (OnboardTenantRequest fields).
+' There is no separate "handover" endpoint — these fields are part of the
+' same draft/update payload (createDraft / updateDraft), plus an OCR helper.
+
+actor Manager
+participant "Mobile App\n(ResumeContractScreen)" as UI
+participant "OCR Endpoint\nPOST /api/v1/ocr/meter" as OCR
+participant "Cloudinary" as Storage
+participant "TenantContractController" as Controller
+participant "TenantContractService" as Service
+database "Database" as DB
+
+Manager -> UI : Capture room condition photos
+UI -> Storage : Upload photos
+Storage --> UI : roomConditionUrls[]
+
+Manager -> UI : Capture electricity/water meter photos
+UI -> Storage : Upload meter photos
+Storage --> UI : electricMeterImageUrl, waterMeterImageUrl
+UI -> OCR : POST /api/v1/ocr/meter { imageUrl }
+OCR --> UI : initialElectricReading / initialWaterReading (auto-extracted)
+Manager -> UI : Confirm/adjust readings if OCR is inaccurate
+
+Manager -> UI : Save handover info
+UI -> Controller : PUT /api/v1/tenant-contracts/{id}\n(updateDraft: roomConditionUrls, roomConditionNote,\ninitialElectricReading, initialWaterReading,\nelectricMeterImageUrl, waterMeterImageUrl, householdMembers)
+Controller -> Service : updateDraft(id, dto)
+Service -> DB : UPDATE tenant_contract
+DB --> Service : saved
+Service --> Controller : TenantContract
+Controller --> UI : 200 OK
+UI --> Manager : Handover recorded, proceed to deposit collection
+
+@enduml

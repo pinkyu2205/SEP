@@ -1,0 +1,39 @@
+@startuml ClassViewHistory
+title Class Diagram - View Room, Contract & Payment History (Tenant)
+
+class TenantContractController {
+  +getMyContract() : TenantContractResponse
+}
+class InvoiceController {
+  +getMyInvoices() : List<InvoiceResponse>
+}
+class TenantContractService {
+  +getActiveContractForTenant(tenantId) : TenantContract
+}
+class InvoiceService {
+  +getInvoiceHistory(tenantId) : List<Invoice>
+}
+class TenantContract {
+  -id : Long
+  -status : String
+}
+class Invoice {
+  -id : Long
+  -period : String
+  -totalAmount : BigDecimal
+  -status : String
+}
+class Payment {
+  -id : Long
+  -amount : BigDecimal
+  -status : String
+  -paidAt : DateTime
+}
+
+TenantContractController --> TenantContractService
+InvoiceController --> InvoiceService
+TenantContractService --> TenantContract
+InvoiceService --> Invoice
+Invoice "1" *-- "many" Payment
+
+@enduml

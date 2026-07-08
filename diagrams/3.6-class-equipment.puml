@@ -1,0 +1,46 @@
+@startuml ClassEquipment
+title Class Diagram - Equipment Inventory & Lifecycle
+' Grounded in frontend-web/src/services/equipment.service.ts (real endpoints)
+
+class EquipmentController {
+  +addEquipment(propertyId, request) : Equipment
+  +getEquipmentsByProperty(propertyId) : List<Equipment>
+  +getById(id) : Equipment
+  +getByRoom(roomId) : List<Equipment>
+  +updateEquipment(id, request) : Equipment
+  +updateLifecycleStatus(id, status) : Equipment
+  +getMaintenanceHistory(id) : List<MaintenanceHistoryEntry>
+}
+class EquipmentService {
+  +addEquipment(propertyId, dto) : Equipment
+  +updateLifecycleStatus(id, status)
+  +appendMaintenanceHistory(equipmentId, entry)
+}
+class EquipmentRepository {
+  +save(Equipment)
+  +findByRoom(roomId)
+}
+class Equipment {
+  -id : Long
+  -name : String
+  -catalogName : String
+  -source : Enum <<INITIAL_HANDOVER, PURCHASED>>
+  -status : Enum <<NEW, GOOD, DAMAGED, BROKEN>>
+  -operationalStatus : Enum <<ACTIVE, DISABLED>>
+  -warrantyMonths : int
+  -price : BigDecimal
+}
+class MaintenanceHistoryEntry {
+  -id : Long
+  -maintenanceRequestId : Long
+  -date : Date
+  -note : String
+  -cost : BigDecimal
+}
+
+EquipmentController --> EquipmentService
+EquipmentService --> EquipmentRepository
+EquipmentService --> Equipment
+Equipment "1" *-- "many" MaintenanceHistoryEntry
+
+@enduml

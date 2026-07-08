@@ -1,0 +1,10 @@
+@startuml StateInvoice
+title Invoice - State Diagram
+
+[*] --> Unpaid : Invoice generated
+Unpaid --> Paid : Payment confirmed (webhook)
+Unpaid --> Overdue : Due date passed
+Overdue --> Paid : Late payment confirmed
+Paid --> [*]
+
+@enduml

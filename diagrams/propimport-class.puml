@@ -1,0 +1,111 @@
+@startuml ClassPropertyImport
+title Class Diagram - Property Import & Activation into System
+' Grounded in frontend-web/src/services/property.service.ts, import.service.ts,
+' inbound-contract.service.ts, activation.service.ts (real endpoints).
+
+class ImportController {
+  +importLeaseExcel(file, dryRun) : BulkImportResponse
+  +importRenovationExcel(file, dryRun) : BulkImportResponse
+  +importRenovationSupplementExcel(file, dryRun) : BulkImportResponse
+  +importPropertyImagesZip(file, dryRun) : BulkImportImagesResponse
+  +deleteImportedContract(contractCode) : PropertyPurgeResponse
+}
+class PropertyController {
+  +createDraft(request) : Property
+  +updateStructure(id, request)
+  +addRoom(id, request) : Room
+  +updateEquipmentManifest(id, request)
+  +addRenovationLine(id, request)
+  +updateRenovationSchedule(id, request)
+  +calculateDepreciation(id)
+  +calculatePricing(id, request) : PricingCalculation
+  +startRenovation(id)
+  +completeRenovation(id)
+  +submitToHost(id)
+  +getOnboardingSummary(id) : OnboardingSummary
+  +hostConfirm(id, request) : HostConfirmResponse
+  +disable(id)
+  +enable(id)
+}
+class InboundContractController {
+  +signContract(propertyId, request) : InboundContract
+  +getContractByProperty(propertyId) : InboundContract
+}
+class ActivationController {
+  +confirmActivation(propertyId, request) : PropertyActivationResponse
+}
+
+class ImportService {
+  +importLeaseExcel(file) : List<Property>
+  +importRenovationExcel(file) : List<Property>
+  -matchByLeaseContractCode(rows) : Property
+  -autoSubmitToHost(property)
+}
+class PropertyService {
+  +createDraft(dto) : Property
+  +calculatePricing(id, dto) : PricingCalculation
+  +submitToHost(id)
+  +hostConfirm(id, dto) : Property
+}
+class ActivationService {
+  +confirmActivation(id, dto) : Property
+}
+class PropertyRepository {
+  +save(Property)
+  +findById(Long)
+}
+
+class Property {
+  -id : Long
+  -address : String
+  -type : Enum <<INDIVIDUAL_ROOM, WHOLE_HOUSE>>
+  -status : Enum <<DRAFT, UNDER_RENOVATION, RENOVATION_COMPLETED,\n  PENDING_HOST_REVIEW, ACTIVE, RENTED, DISABLED>>
+  -ownerId : Long
+  -assignedManagerId : Long
+}
+class Room {
+  -id : Long
+  -name : String
+  -status : Enum <<DRAFT, AVAILABLE, RENTED, MAINTENANCE>>
+  -price : BigDecimal
+}
+class InboundContract {
+  -id : Long
+  -ownerName : String
+  -monthlyRent : BigDecimal
+  -startDate : Date
+  -endDate : Date
+}
+class RenovationLine {
+  -id : Long
+  -categoryName : String
+  -cost : BigDecimal
+  -sessionNumber : int
+}
+class EquipmentManifestItem {
+  -id : Long
+  -catalogName : String
+  -status : Enum <<NEW, GOOD>>
+  -source : Enum <<INITIAL_HANDOVER, PURCHASED>>
+}
+class PricingCalculation {
+  -mode : Enum <<FORWARD, REVERSE>>
+  -suggestedPriceWithProfit : BigDecimal
+  -roiPct : Double
+}
+
+ImportController --> ImportService
+PropertyController --> PropertyService
+InboundContractController --> PropertyService
+ActivationController --> ActivationService
+ImportService --> PropertyRepository
+PropertyService --> PropertyRepository
+ActivationService --> PropertyRepository
+PropertyService --> Property
+Property "1" *-- "many" Room
+Property "1" *-- "1" InboundContract
+Property "1" *-- "many" RenovationLine
+Property "1" *-- "many" EquipmentManifestItem
+PropertyService ..> PricingCalculation : produces
+
+@enduml

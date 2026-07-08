@@ -1,0 +1,11 @@
+@startuml StateEquipment
+title Equipment - State Diagram
+
+[*] --> Installed : Manager records initial equipment
+Installed --> InMaintenance : Maintenance request logged against this item
+InMaintenance --> Installed : Repair completed
+Installed --> Retired : Equipment removed / replaced
+InMaintenance --> Retired : Beyond repair, replaced
+Retired --> [*]
+
+@enduml

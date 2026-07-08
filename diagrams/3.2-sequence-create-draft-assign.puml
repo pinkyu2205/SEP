@@ -1,0 +1,45 @@
+@startuml SequenceCreateDraftAssign
+title Sequence Diagram - Create Draft Contract & Assign Manager
+' Grounded in frontend-web/src/services/tenant.service.ts (real endpoints)
+
+actor Admin
+participant "Web Admin Portal\n(DraftContractFormModal)" as UI
+participant "OCR / pdfExtract.ts" as OCR
+participant "TenantContractController" as Controller
+participant "TenantContractService" as Service
+participant "TenantContractRepository" as Repo
+participant "NotificationService" as Notify
+database "Database" as DB
+
+Admin -> UI : Upload signed contract file (or switch to manual entry tab)
+UI -> OCR : extractTenantContractData(file)
+OCR --> UI : Extracted fields (tenant, room, rentAmount, deposit)
+Admin -> UI : Select property/room, confirm/edit data
+UI -> Controller : lookupByPhone(phone) -> GET /api/v1/tenants/lookup
+Controller --> UI : eligible / role warning
+
+alt whole-house lease (roomId = null)
+  UI -> Controller : POST /api/v1/properties/{propertyId}/tenant-contract\n(draft=true)
+else per-room lease
+  UI -> Controller : POST /api/v1/properties/{propertyId}/rooms/{roomId}/tenant-contract\n(draft=true)
+end
+Controller -> Service : createDraft(dto)
+Service -> Repo : save(TenantContract [status=DRAFT])
+Repo -> DB : INSERT tenant_contract
+DB --> Repo : saved
+Repo --> Service : TenantContract
+Service --> Controller : TenantContract
+Controller --> UI : 201 Created (DRAFT)
+
+Admin -> UI : Assign manager to draft (optional: do it now)
+UI -> Controller : PATCH /api/v1/tenant-contracts/{id}/assign-manager\n{ assignedManagerId, expectedReceptionDate }
+Controller -> Service : assignManager(id, dto)
+Service -> Repo : update assignedManagerId, expectedReceptionDate
+Repo -> DB : UPDATE tenant_contract
+Service -> Notify : notify(managerId, CUSTOMER_ASSIGNED)
+Notify --> Service : notification sent
+Service --> Controller : TenantContract
+Controller --> UI : 200 OK
+UI --> Admin : Show "Assigned" status
+
+@enduml

@@ -1,0 +1,53 @@
+@startuml ClassPayment
+title Class Diagram - Payment (PayOS + Manual Verification)
+' Grounded in tenantBillingService.real.ts + managerInvoiceService.real.ts
+
+class TenantInvoiceController {
+  +payInvoice(id) : Invoice
+  +checkInvoicePayment(id) : Invoice
+}
+class ManagerPaymentController {
+  +verifyPayment(id)
+  +rejectPayment(id, reason)
+}
+class ManagerInvoiceController {
+  +markInvoicePaid(id, method, note)
+}
+class PaymentService {
+  +createPayOsCheckout(invoiceId) : Invoice
+  +syncPayOsStatus(invoiceId) : Invoice
+  +handlePayOsWebhook(payload)
+  +verify(paymentId)
+  +reject(paymentId, reason)
+  +markPaidManually(invoiceId, method, note)
+}
+class PaymentRepository {
+  +save(Payment)
+  +findByInvoiceId(Long)
+}
+class Payment {
+  -id : Long
+  -amount : BigDecimal
+  -method : Enum <<QR, BANK_TRANSFER, CASH, EWALLET, OTHER>>
+  -status : Enum <<PENDING_VERIFY, VERIFIED, REJECTED>>
+  -transferContent : String
+  -paidAt : DateTime
+}
+class Invoice {
+  -id : Long
+  -status : Enum <<PENDING, PAID, OVERDUE, PARTIAL, CANCELLED>>
+  -payosCheckoutUrl : String
+  -payosQrCode : String
+  -payosOrderCode : Long
+}
+class "PayOS Gateway" as PayOS <<external>>
+
+TenantInvoiceController --> PaymentService
+ManagerPaymentController --> PaymentService
+ManagerInvoiceController --> PaymentService
+PaymentService --> PaymentRepository
+PaymentService --> Payment
+PaymentService --> Invoice
+PaymentService --> PayOS : create checkout / receive webhook
+
+@enduml

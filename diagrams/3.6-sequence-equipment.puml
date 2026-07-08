@@ -1,0 +1,29 @@
+@startuml SequenceEquipment
+title Sequence Diagram - Equipment Lifecycle Update (triggered by Maintenance resolve)
+
+participant "MaintenanceService" as MaintSvc
+participant "EquipmentController" as Controller
+participant "EquipmentService" as Service
+database "Database" as DB
+actor Manager
+
+Manager -> Controller : GET /api/v1/equipment/{id}/maintenance-history
+Controller -> Service : getMaintenanceHistory(id)
+Service -> DB : SELECT maintenance_history WHERE equipment_id=...
+DB --> Service : history entries
+Service --> Controller : List<MaintenanceHistoryEntry>
+Controller --> Manager : Show equipment history
+
+... when a maintenance request is resolved (see §3.5) ...
+MaintSvc -> Service : appendMaintenanceHistory(equipmentId, entry)
+Service -> DB : INSERT maintenance_history
+Service -> Service : evaluate damage severity
+alt equipment beyond repair
+  Service -> Controller : updateLifecycleStatus(id, BROKEN)
+  Controller -> DB : PATCH equipment SET status='BROKEN'
+else repaired successfully
+  Service -> Controller : updateLifecycleStatus(id, GOOD)
+  Controller -> DB : PATCH equipment SET status='GOOD'
+end
+
+@enduml

@@ -1,0 +1,33 @@
+@startuml SystemArchitecture
+skinparam componentStyle rectangle
+title Sub-leasing Management System - System Architecture
+
+package "Client Tier" {
+  [Web Admin Portal\n(React + Vite)] as WebAdmin
+  [Mobile App\n(React Native / Expo)] as MobileApp
+}
+
+package "Server Tier" {
+  [Backend API\n(Spring Boot, MVC2)] as Backend
+}
+
+package "Database Tier" {
+  database "Relational DB\n(MySQL/PostgreSQL)" as DB
+}
+
+package "External Systems" {
+  [Payment Gateway /\nBank Webhook (VietQR)] as Payment
+  [Cloudinary\n(File/Image Storage)] as Cloudinary
+  [Expo Push\nNotification Service] as Push
+  [OCR / Extraction\nLibrary] as OCR
+}
+
+WebAdmin --> Backend : REST/HTTPS (JWT)
+MobileApp --> Backend : REST/HTTPS (JWT)
+Backend --> DB : JDBC / JPA
+Backend --> Payment : Create payment / receive webhook
+Backend --> Cloudinary : Upload/retrieve files
+Backend --> Push : Send push notification
+Backend --> OCR : Extract contract/meter data
+
+@enduml

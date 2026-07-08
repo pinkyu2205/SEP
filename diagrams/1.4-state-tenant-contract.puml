@@ -1,0 +1,21 @@
+@startuml StateTenantContract
+title TenantContract - State Diagram (matches ContractStatus enum: DRAFT | PENDING | ACTIVE | EXPIRED | TERMINATED)
+
+[*] --> DRAFT : Admin creates draft (createDraft)
+DRAFT --> PENDING : Manager collects deposit (deposit-payment)
+PENDING --> ACTIVE : OTP confirmed (confirm)
+ACTIVE --> EXPIRED : endDate reached without renewal
+ACTIVE --> TERMINATED : terminate (early termination / checkout)
+DRAFT --> TERMINATED : cancel() on a draft
+PENDING --> TERMINATED : cancel() before OTP confirm
+EXPIRED --> [*]
+TERMINATED --> [*]
+
+note right of TERMINATED
+  cancel() and terminate() both call
+  distinct endpoints (/cancel, /terminate);
+  confirm exact resulting status value
+  with backend once implemented.
+end note
+
+@enduml

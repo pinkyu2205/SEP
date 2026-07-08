@@ -52,7 +52,7 @@ export const DraftOnboardingList = () => {
     setAssignBusy(true);
     try {
       await tenantService.assignManager(assigning.id, {
-        managerId: assignManagerId,
+        assignedManagerId: assignManagerId,
         expectedReceptionDate: assignDate || undefined,
       });
       toast.success('Đã gán & gửi thông báo cho quản lý.');

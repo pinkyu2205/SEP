@@ -1,0 +1,46 @@
+@startuml SequenceBulkImport
+title Sequence Diagram - Bulk Import House via Excel (Khoi tao nha + Cau hinh khai thac)
+' Grounded in frontend-web/src/services/import.service.ts (real endpoints + comments)
+
+actor Admin
+participant "Web Admin Portal\n(NhaThueLanding -> LeaseImportPanel)" as UI
+participant "ImportController" as Controller
+participant "ImportService" as Service
+participant "PropertyRepository" as Repo
+database "Database" as DB
+
+== Step 1: Khoi tao nha (Initialize house) ==
+Admin -> UI : Upload Excel (lease contract + handover equipment sheets)
+UI -> Controller : POST /api/v1/import/lease-excel?dryRun=true
+Controller -> Service : importLeaseExcel(file, dryRun=true)
+Service --> Controller : BulkImportResponse (validation preview, no DB writes)
+Controller --> UI : Show preview + errors (if any)
+
+Admin -> UI : Confirm import (dryRun=false)
+UI -> Controller : POST /api/v1/import/lease-excel?dryRun=false
+Controller -> Service : importLeaseExcel(file, dryRun=false)
+Service -> Repo : save(Property [status=DRAFT/UNDER_RENOVATION], Room[])
+Repo -> DB : INSERT property, room, equipment_manifest (display only)
+Service --> Controller : BulkImportResponse (contractsProcessed, contractsSkipped)
+Controller --> UI : 200 OK - houses created
+
+Admin -> UI : Upload property images ZIP (folder name = contract code)
+UI -> Controller : POST /api/v1/import/property-images-zip?dryRun=false
+Controller -> Service : importPropertyImagesZip(file)
+Service -> DB : Attach images to matching property by contract code
+Service --> Controller : BulkImportImagesResponse
+Controller --> UI : 200 OK - images attached
+
+== Step 2: Cau hinh khai thac (Configure operation / renovation) ==
+Admin -> UI : Upload Excel (renovation contract, matched by lease contract code)
+UI -> Controller : POST /api/v1/import/renovation-excel?dryRun=false
+Controller -> Service : importRenovationExcel(file)
+Service -> Service : matchByLeaseContractCode(rows)
+Service -> Repo : save(RenovationLine[]) for matched Property
+Repo -> DB : INSERT renovation_line, UPDATE property status=UNDER_RENOVATION
+Service -> Service : autoSubmitToHost(property)\n(calculates pricing, then submit-to-host)
+Repo -> DB : UPDATE property status=PENDING_HOST_REVIEW
+Service --> Controller : BulkImportResponse
+Controller --> UI : 200 OK - sent to Host for review (see propimport-sequence-host-review-activation.puml)
+
+@enduml

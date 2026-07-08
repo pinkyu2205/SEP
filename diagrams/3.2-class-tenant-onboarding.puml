@@ -1,0 +1,55 @@
+@startuml ClassTenantOnboarding
+title Class Diagram - Tenant Onboarding
+
+class TenantContractController {
+  +createDraft(request) : TenantContractResponse
+  +assignManager(contractId, managerId)
+  +collectDeposit(contractId, request)
+  +confirmOtp(contractId, otp)
+}
+
+class TenantContractService {
+  +createDraft(dto) : TenantContract
+  +assignManager(contractId, managerId)
+  +collectDeposit(contractId, dto)
+  +confirmOtp(contractId, otp) : TenantContract
+  -createTenantAccount(contract) : User
+}
+
+class TenantContractRepository {
+  +save(TenantContract)
+  +findById(Long)
+}
+
+class TenantContract {
+  -id : Long
+  -status : String
+  -assignedManagerId : Long
+  -draftContractFileUrl : String
+  -expectedReceptionDate : Date
+  -depositAmount : BigDecimal
+  -otpCode : String
+}
+
+class HouseholdMember {
+  -id : Long
+  -fullName : String
+  -idCardNumber : String
+}
+
+class User {
+  -id : Long
+  -username : String
+  -passwordHash : String
+  -role : String
+  -isFirstLogin : boolean
+}
+
+TenantContractController --> TenantContractService
+TenantContractService --> TenantContractRepository
+TenantContractService --> TenantContract
+TenantContractService ..> User : creates on confirm
+TenantContract "1" *-- "many" HouseholdMember
+TenantContract "many" --> "1" User : tenant
+
+@enduml

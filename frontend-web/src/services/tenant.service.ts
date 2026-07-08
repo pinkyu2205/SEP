@@ -6,6 +6,7 @@ const BASE = '/api/v1/properties';
 /** Kết quả tra cứu khách theo SĐT (GET /api/v1/tenants/lookup). */
 export interface TenantLookupResponse {
   exists: boolean;
+  eligible?: boolean; // BE tự tính: SĐT có hợp lệ để onboard làm khách thuê không
   fullName?: string;
   phoneNumber?: string;
   cccd?: string;
@@ -16,6 +17,16 @@ export interface TenantLookupResponse {
 export const isTenantEligibleRole = (role?: string): boolean =>
   !role || role === 'ROLE_USER' || role === 'ROLE_TENANT';
 
+// BE (OnboardTenantRequest) deserialize bằng constructor sinh bởi Lombok, nên các field
+// `boolean` (không phải Boolean) BẮT BUỘC phải có mặt trong JSON, thiếu 1 field là toàn bộ
+// request 400 lỗi "Cannot map `null` into type `boolean`". Luôn set default tường minh ở đây.
+const withBooleanDefaults = (data: OnboardTenantRequest): OnboardTenantRequest => ({
+  requireDepositPayment: false,
+  requireHostPriceApproval: false,
+  draft: false,
+  ...data,
+});
+
 export const tenantService = {
   /** POST /properties/{propertyId}/rooms/{roomId}/tenant-contract — Onboard khách vào 1 phòng */
   onboardRoomTenant: (
@@ -23,7 +34,7 @@ export const tenantService = {
     roomId: number,
     data: OnboardTenantRequest,
   ): Promise<TenantContractResponse> => {
-    return api.post(`${BASE}/${propertyId}/rooms/${roomId}/tenant-contract`, data);
+    return api.post(`${BASE}/${propertyId}/rooms/${roomId}/tenant-contract`, withBooleanDefaults(data));
   },
 
   /** POST /properties/{propertyId}/tenant-contract — Onboard khách thuê nguyên căn */
@@ -31,7 +42,7 @@ export const tenantService = {
     propertyId: number,
     data: OnboardTenantRequest,
   ): Promise<TenantContractResponse> => {
-    return api.post(`${BASE}/${propertyId}/tenant-contract`, data);
+    return api.post(`${BASE}/${propertyId}/tenant-contract`, withBooleanDefaults(data));
   },
 
   /** GET /properties/{propertyId}/tenant-contracts — DS hợp đồng thuê của tòa.
@@ -54,7 +65,7 @@ export const tenantService = {
     roomId: number | null,
     data: OnboardTenantRequest,
   ): Promise<TenantContractResponse> => {
-    const body = { ...data, draft: true };
+    const body = withBooleanDefaults({ ...data, draft: true });
     return roomId != null
       ? api.post(`${BASE}/${propertyId}/rooms/${roomId}/tenant-contract`, body)
       : api.post(`${BASE}/${propertyId}/tenant-contract`, body);
@@ -81,7 +92,7 @@ export const tenantService = {
   /** PATCH /tenant-contracts/{id}/assign-manager — gán manager đón khách + gửi thông báo. */
   assignManager: (
     id: number,
-    data: { managerId: string; expectedReceptionDate?: string },
+    data: { assignedManagerId: string; expectedReceptionDate?: string },
   ): Promise<TenantContractResponse> => {
     return api.patch(`/api/v1/tenant-contracts/${id}/assign-manager`, data);
   },

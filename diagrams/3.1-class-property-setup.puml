@@ -1,0 +1,51 @@
+@startuml ClassPropertySetup
+title Class Diagram - Setup Property Portfolio & Room Pricing
+
+class PropertyController {
+  +createProperty(request) : PropertyResponse
+  +addRoom(propertyId, request) : RoomResponse
+  +addEquipment(roomId, request) : EquipmentResponse
+}
+
+class PropertyService {
+  +createProperty(dto) : Property
+  +addRoom(propertyId, dto) : Room
+  +addEquipment(roomId, dto) : Equipment
+}
+
+class PropertyRepository {
+  +save(Property) : Property
+  +findById(Long) : Property
+}
+
+class Property {
+  -id : Long
+  -address : String
+  -ownerName : String
+  -leaseCost : BigDecimal
+  -status : String
+  +addRoom(Room)
+  +calculateTotalExpense() : BigDecimal
+}
+
+class Room {
+  -id : Long
+  -name : String
+  -price : BigDecimal
+  -status : String
+}
+
+class Equipment {
+  -id : Long
+  -name : String
+  -installedDate : Date
+  -condition : String
+}
+
+PropertyController --> PropertyService
+PropertyService --> PropertyRepository
+PropertyService --> Property
+Property "1" *-- "many" Room
+Room "1" *-- "many" Equipment
+
+@enduml

@@ -1,0 +1,30 @@
+@startuml SequenceViewHistory
+title Sequence Diagram - View Room, Contract & Payment History (Tenant)
+
+actor Tenant
+participant "Mobile App" as UI
+participant "TenantContractController" as ContractCtrl
+participant "InvoiceController" as InvoiceCtrl
+participant "TenantContractService" as ContractSvc
+participant "InvoiceService" as InvoiceSvc
+database "Database" as DB
+
+Tenant -> UI : Open "My Room" screen
+UI -> ContractCtrl : GET /api/tenant-contracts/me
+ContractCtrl -> ContractSvc : getActiveContractForTenant(tenantId)
+ContractSvc -> DB : SELECT tenant_contract, room, property
+DB --> ContractSvc : contract + room details
+ContractSvc --> ContractCtrl : TenantContract
+ContractCtrl --> UI : 200 OK (room, contract terms)
+UI --> Tenant : Show room details & contract terms
+
+Tenant -> UI : Open "Payment History" tab
+UI -> InvoiceCtrl : GET /api/invoices/me
+InvoiceCtrl -> InvoiceSvc : getInvoiceHistory(tenantId)
+InvoiceSvc -> DB : SELECT invoice, payment WHERE tenant_id=...
+DB --> InvoiceSvc : list of invoices + payments
+InvoiceSvc --> InvoiceCtrl : List<Invoice>
+InvoiceCtrl --> UI : 200 OK
+UI --> Tenant : Show itemized invoice & payment history
+
+@enduml

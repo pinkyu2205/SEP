@@ -1,0 +1,21 @@
+@startuml SequencePaymentReminder
+title Sequence Diagram - Automatic Payment Reminder
+
+participant "PaymentReminderScheduler" as Scheduler
+participant "InvoiceService" as InvoiceSvc
+database "Database" as DB
+participant "NotificationService" as Notify
+actor Tenant
+
+== Runs daily via cron ==
+Scheduler -> InvoiceSvc : findOverdueUnpaidInvoices()
+InvoiceSvc -> DB : SELECT invoice WHERE status=UNPAID AND due_date < now()
+DB --> InvoiceSvc : list of overdue invoices
+loop for each overdue invoice
+  InvoiceSvc -> InvoiceSvc : applyLateFee(invoice)
+  InvoiceSvc -> DB : UPDATE invoice (status=OVERDUE, late_fee)
+  InvoiceSvc -> Notify : notify(tenant, PAYMENT_REMINDER)
+  Notify --> Tenant : Push/SMS reminder
+end
+
+@enduml

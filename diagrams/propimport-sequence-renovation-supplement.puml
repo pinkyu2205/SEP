@@ -1,0 +1,40 @@
+@startuml SequenceRenovationSupplement
+title Sequence Diagram - Supplement Renovation on an Already-Active Property
+' Grounded in property.service.ts (renovation/start, renovation/complete) +
+' import.service.ts (renovation-supplement-excel) real endpoints.
+' Precondition: property.status == ACTIVE
+
+actor Admin
+participant "Web Admin Portal\n(RenovationImportPanel / SupplementImportPanel)" as UI
+participant "PropertyController" as Controller
+participant "ImportController" as ImportCtrl
+participant "PropertyService" as Service
+database "Database" as DB
+
+Admin -> UI : Start a new renovation session on an ACTIVE property
+UI -> Controller : POST /api/v1/properties/{id}/renovation/start
+Controller -> Service : startRenovation(id)
+Service -> DB : UPDATE property status=UNDER_RENOVATION\n(new renovation session opened, session v2+)
+Service --> Controller : Property [UNDER_RENOVATION]
+Controller --> UI : 200 OK
+
+Admin -> UI : Upload supplement renovation Excel (additional cost/equipment)
+UI -> ImportCtrl : POST /api/v1/import/renovation-supplement-excel?dryRun=false
+ImportCtrl -> Service : importRenovationSupplementExcel(file)
+Service -> DB : INSERT renovation_line (session 2+), cumulative equipment manifest
+
+Admin -> UI : Mark renovation complete
+UI -> Controller : POST /api/v1/properties/{id}/renovation/complete
+Controller -> Service : completeRenovation(id)
+Service -> DB : UPDATE property status=RENOVATION_COMPLETED
+Service -> Service : recalculate pricing (cost changed)
+Service -> Controller : submitToHost(id)
+Controller -> DB : UPDATE property status=PENDING_HOST_REVIEW
+
+note right of DB
+  Property re-enters Host review because cost/equipment
+  changed — see propimport-sequence-host-review-activation.puml
+  for the host-confirm + activation/confirm steps that follow.
+end note
+
+@enduml

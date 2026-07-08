@@ -1,0 +1,33 @@
+@startuml SequenceAuth
+title Sequence Diagram - First-time Password Change
+
+actor Tenant
+participant "Mobile App" as UI
+participant "AuthController" as Controller
+participant "AuthService" as Service
+participant "UserRepository" as Repo
+database "Database" as DB
+
+Tenant -> UI : Login with default password (phone / 123456)
+UI -> Controller : POST /api/auth/login
+Controller -> Service : login(username, password)
+Service -> Repo : findByUsername(username)
+Repo -> DB : SELECT users
+DB --> Repo : User
+Repo --> Service : User
+Service --> Controller : AuthResponse [isFirstLogin=true]
+Controller --> UI : 200 OK
+UI -> UI : Route to ChangePasswordScreen
+
+Tenant -> UI : Submit old & new password
+UI -> Controller : POST /api/auth/change-password
+Controller -> Service : changePassword(userId, old, new)
+Service -> Repo : findById(userId)
+Service -> Service : verify old password
+Service -> Repo : update passwordHash, isFirstLogin=false
+Repo -> DB : UPDATE users
+Service --> Controller : success
+Controller --> UI : 200 OK
+UI --> Tenant : Redirect to Tutorial/Home
+
+@enduml
