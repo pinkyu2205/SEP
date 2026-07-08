@@ -12,8 +12,8 @@ export const HeroSection = () => {
       {/* Mesh + grid background */}
       <div className="absolute inset-0 bg-mesh" />
       <div className="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
-      <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-primary-600/30 blur-3xl animate-float" />
-      <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-accent-500/20 blur-3xl animate-float [animation-delay:1.5s]" />
+      <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-green-600/30 blur-3xl animate-float" />
+      <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-red-500/20 blur-3xl animate-float [animation-delay:1.5s]" />
 
       <div className="pub-container relative py-16 lg:py-24">
         <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_0.95fr]">
@@ -51,19 +51,19 @@ export const HeroSection = () => {
             {/* trust badges */}
             <div className="mt-10 flex flex-wrap items-center gap-x-8 gap-y-4">
               <div className="flex items-center gap-2 text-sm">
-                <BadgeCheck className="h-5 w-5 text-cyan-300" />
+                <BadgeCheck className="h-5 w-5 text-emerald-300" />
                 <span className="text-slate-300">Hợp đồng điện tử</span>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <div className="flex -space-x-1">
                   {[0, 1, 2, 3].map((i) => (
-                    <span key={i} className="h-6 w-6 rounded-full border-2 border-slate-950 bg-gradient-to-br from-primary-400 to-violet-500" />
+                    <span key={i} className="h-6 w-6 rounded-full border-2 border-slate-950 bg-gradient-to-br from-green-400 to-emerald-500" />
                   ))}
                 </div>
                 <span className="text-slate-300"><b className="text-white">1.850+</b> khách thuê</span>
               </div>
               <div className="flex items-center gap-2 text-sm">
-                <BadgeCheck className="h-5 w-5 text-cyan-300" />
+                <BadgeCheck className="h-5 w-5 text-emerald-300" />
                 <span className="text-slate-300">Hỗ trợ 24/7</span>
               </div>
             </div>

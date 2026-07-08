@@ -19,7 +19,7 @@ export const PublicFooter = () => {
           {/* Brand */}
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-600 via-violet-600 to-accent-500 shadow-glow">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-green-600 via-emerald-600 to-emerald-500 shadow-glow">
                 <Building2 className="h-5 w-5 text-white" />
               </div>
               <p className="text-xl font-extrabold text-white">{COMPANY.name}</p>
@@ -29,7 +29,7 @@ export const PublicFooter = () => {
               hợp đồng điện tử và hỗ trợ quản lý chuyên nghiệp.
             </p>
             <div className="mt-6">
-              <a href={telHref(CONTACT.hotline)} className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2.5 text-sm font-bold text-white ring-1 ring-white/10 transition-colors hover:bg-primary-600">
+              <a href={telHref(CONTACT.hotline)} className="inline-flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2.5 text-sm font-bold text-white ring-1 ring-white/10 transition-colors hover:bg-green-600">
                 <Phone className="h-4 w-4" /> Hotline: {CONTACT.hotline}
               </a>
             </div>
@@ -41,12 +41,12 @@ export const PublicFooter = () => {
             <ul className="mt-5 space-y-3.5 text-sm">
               <li>
                 <a href={telHref(CONTACT.hotline)} className="flex items-center gap-3 text-slate-400 hover:text-white">
-                  <Phone className="h-4 w-4 text-primary-400 flex-shrink-0" />
+                  <Phone className="h-4 w-4 text-green-400 flex-shrink-0" />
                   {CONTACT.hotline}
                 </a>
               </li>
               <li className="flex items-start gap-3 text-slate-400">
-                <MapPin className="h-4 w-4 text-primary-400 flex-shrink-0 mt-0.5" />
+                <MapPin className="h-4 w-4 text-green-400 flex-shrink-0 mt-0.5" />
                 {CONTACT.address}
               </li>
             </ul>

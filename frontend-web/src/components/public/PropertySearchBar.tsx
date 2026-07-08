@@ -47,7 +47,7 @@ export const PropertySearchBar = ({ initial, onSearch, className = '' }: Propert
   };
 
   const fieldWrap =
-    'relative rounded-xl bg-slate-50/80 ring-1 ring-slate-100 transition-colors focus-within:bg-white focus-within:ring-primary-200';
+    'relative rounded-xl bg-slate-50/80 ring-1 ring-slate-100 transition-colors focus-within:bg-white focus-within:ring-green-200';
   const selectCls =
     'w-full appearance-none cursor-pointer rounded-xl bg-transparent py-3 pl-10 pr-3 text-sm font-medium text-slate-700 outline-none';
 
@@ -58,7 +58,7 @@ export const PropertySearchBar = ({ initial, onSearch, className = '' }: Propert
     >
       {/* Khu vực */}
       <label className={fieldWrap}>
-        <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary-500" />
+        <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-green-500" />
         <select value={values.district} onChange={(e) => update({ district: e.target.value })} className={selectCls} aria-label="Khu vực">
           <option value="">Tất cả khu vực</option>
           {DISTRICTS.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -67,7 +67,7 @@ export const PropertySearchBar = ({ initial, onSearch, className = '' }: Propert
 
       {/* Mức giá */}
       <label className={fieldWrap}>
-        <Wallet className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary-500" />
+        <Wallet className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-green-500" />
         <select value={values.maxPrice} onChange={(e) => update({ maxPrice: e.target.value })} className={selectCls} aria-label="Mức giá">
           <option value="">Mọi mức giá</option>
           {PRICE_RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
@@ -76,7 +76,7 @@ export const PropertySearchBar = ({ initial, onSearch, className = '' }: Propert
 
       {/* Loại hình */}
       <label className={fieldWrap}>
-        <Tag className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary-500" />
+        <Tag className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-green-500" />
         <select value={values.type} onChange={(e) => update({ type: e.target.value as PropertyType | '' })} className={selectCls} aria-label="Loại hình thuê">
           <option value="">Mọi loại hình</option>
           {(Object.keys(PROPERTY_TYPE_LABEL) as PropertyType[]).map((t) => <option key={t} value={t}>{PROPERTY_TYPE_LABEL[t]}</option>)}
@@ -85,7 +85,7 @@ export const PropertySearchBar = ({ initial, onSearch, className = '' }: Propert
 
       <button
         type="submit"
-        className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary-600 to-violet-600 px-7 py-3 text-sm font-bold text-white shadow-glow transition-all hover:-translate-y-0.5 hover:shadow-card-hover"
+        className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-600 to-emerald-600 px-7 py-3 text-sm font-bold text-white shadow-glow transition-all hover:-translate-y-0.5 hover:shadow-card-hover"
       >
         <Search className="h-4 w-4" />
         Tìm kiếm

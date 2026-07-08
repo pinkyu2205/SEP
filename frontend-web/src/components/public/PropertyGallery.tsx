@@ -98,7 +98,7 @@ export const PropertyGallery = ({ images, title, autoPlayMs = 4000 }: PropertyGa
               onClick={() => setActive(idx)}
               className={clsx(
                 'overflow-hidden rounded-xl border-2 transition-all',
-                idx === active ? 'border-primary-600 ring-2 ring-primary-100' : 'border-transparent opacity-80 hover:opacity-100',
+                idx === active ? 'border-green-600 ring-2 ring-green-100' : 'border-transparent opacity-80 hover:opacity-100',
               )}
             >
               <img src={src} alt={`thumbnail ${idx + 1}`} className="aspect-square w-full object-cover" />
