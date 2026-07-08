@@ -14,8 +14,8 @@ export const HotlineBanner = () => {
             {/* animated mesh */}
             <div className="absolute inset-0 bg-mesh" />
             <div className="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
-            <div className="absolute -left-16 top-0 h-56 w-56 rounded-full bg-primary-600/30 blur-3xl animate-float" />
-            <div className="absolute -right-10 bottom-0 h-56 w-56 rounded-full bg-accent-500/20 blur-3xl animate-float [animation-delay:1.2s]" />
+            <div className="absolute -left-16 top-0 h-56 w-56 rounded-full bg-green-600/30 blur-3xl animate-float" />
+            <div className="absolute -right-10 bottom-0 h-56 w-56 rounded-full bg-emerald-500/20 blur-3xl animate-float [animation-delay:1.2s]" />
 
             <div className="relative">
               <span className="pub-chip">Cần hỗ trợ ngay?</span>
@@ -26,7 +26,7 @@ export const HotlineBanner = () => {
               </p>
 
               <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <a href={telHref(CONTACT.hotline)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-bold text-primary-700 shadow-lg transition-all hover:-translate-y-0.5 sm:w-auto">
+                <a href={telHref(CONTACT.hotline)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-7 py-3.5 text-sm font-bold text-green-700 shadow-lg transition-all hover:-translate-y-0.5 sm:w-auto">
                   <Phone className="h-4 w-4" />
                   Gọi ngay
                 </a>

@@ -46,7 +46,7 @@ export const HomePage = () => {
               </h2>
               <p className="mt-3 max-w-xl text-slate-500">Những lựa chọn chất lượng, sẵn sàng cho bạn dọn vào ngay.</p>
             </div>
-            <Link to={ROUTES.PROPERTIES} className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-primary-600 transition-all hover:-translate-y-0.5 hover:border-primary-200">
+            <Link to={ROUTES.PROPERTIES} className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-green-600 transition-all hover:-translate-y-0.5 hover:border-green-200">
               Xem tất cả <ArrowRight className="h-4 w-4" />
             </Link>
           </Reveal>

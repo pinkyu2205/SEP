@@ -12,7 +12,7 @@ export const CONTACT: CompanyContact = {
   hotline: '1900 8386',
   zalo: '0901 234 567',
   email: 'lienhe@hoangbinhland.vn',
-  address: '123 Nguyễn Văn Linh, Quận 7, TP. Hồ Chí Minh',
+  address: '408/31 Nguyễn Thị Minh Khai, Phường Bàn Cờ, TP. Hồ Chí Minh',
 };
 
 /** Liên kết Zalo (mở chat) */

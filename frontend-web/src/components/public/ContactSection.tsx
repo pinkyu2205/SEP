@@ -40,7 +40,7 @@ export const ContactSection = ({ propertyId, propertyTitle, compact = false }: C
   };
 
   const ContactButtons = (
-    <a href={telHref(CONTACT.hotline)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-3 text-sm font-bold text-white hover:bg-primary-700 transition-colors">
+    <a href={telHref(CONTACT.hotline)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 px-4 py-3 text-sm font-bold text-white hover:bg-green-700 transition-colors">
       <Phone className="h-4 w-4" /> Gọi ngay {CONTACT.hotline}
     </a>
   );
@@ -98,15 +98,15 @@ export const ContactSection = ({ propertyId, propertyTitle, compact = false }: C
       <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
         <h3 className="text-lg font-black text-slate-900">Liên hệ tư vấn</h3>
         <div className="mt-4 space-y-2 text-sm">
-          <a href={telHref(CONTACT.hotline)} className="flex items-center gap-2.5 text-slate-600 hover:text-primary-600">
-            <Phone className="h-4 w-4 text-primary-500" /> Hotline: <span className="font-bold">{CONTACT.hotline}</span>
+          <a href={telHref(CONTACT.hotline)} className="flex items-center gap-2.5 text-slate-600 hover:text-green-600">
+            <Phone className="h-4 w-4 text-green-500" /> Hotline: <span className="font-bold">{CONTACT.hotline}</span>
           </a>
         </div>
         <div className="mt-4">{ContactButtons}</div>
         {SHOW_CONSULT_FORM && (
           <div className="mt-5 border-t border-slate-100 pt-5">
             <p className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-900">
-              <CalendarCheck className="h-4 w-4 text-primary-600" /> Đặt lịch xem nhà
+              <CalendarCheck className="h-4 w-4 text-green-600" /> Đặt lịch xem nhà
             </p>
             {Form}
           </div>
@@ -129,14 +129,14 @@ export const ContactSection = ({ propertyId, propertyTitle, compact = false }: C
 
             <div className="mt-8 space-y-4">
               <div className="flex items-start gap-4 rounded-2xl border border-slate-100 p-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600"><Phone className="h-5 w-5" /></span>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50 text-green-600"><Phone className="h-5 w-5" /></span>
                 <div>
                   <p className="text-sm text-slate-500">Hotline</p>
                   <a href={telHref(CONTACT.hotline)} className="font-bold text-slate-900">{CONTACT.hotline}</a>
                 </div>
               </div>
               <div className="flex items-start gap-4 rounded-2xl border border-slate-100 p-4">
-                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600"><MapPin className="h-5 w-5" /></span>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50 text-green-600"><MapPin className="h-5 w-5" /></span>
                 <div>
                   <p className="text-sm text-slate-500">Địa chỉ</p>
                   <p className="font-bold text-slate-900">{CONTACT.address}</p>

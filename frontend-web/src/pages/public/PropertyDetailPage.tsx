@@ -19,7 +19,7 @@ import { ROUTES } from '@/utils/routes';
 /** 1 ô thông tin nhanh (chỉ render khi có dữ liệu) */
 const Fact = ({ icon: Icon, label, value }: { icon: typeof Maximize; label: string; value: string }) => (
   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-    <Icon className="h-5 w-5 text-primary-600" />
+    <Icon className="h-5 w-5 text-green-600" />
     <p className="mt-2 text-xs text-slate-500">{label}</p>
     <p className="font-bold text-slate-900">{value}</p>
   </div>
@@ -126,7 +126,7 @@ export const PropertyDetailPage = () => {
     <div className="bg-slate-50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
         {/* Breadcrumb */}
-        <Link to={ROUTES.PROPERTIES} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-primary-600">
+        <Link to={ROUTES.PROPERTIES} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-green-600">
           <ArrowLeft className="h-4 w-4" /> Về danh sách nhà cho thuê
         </Link>
 
@@ -138,7 +138,7 @@ export const PropertyDetailPage = () => {
             {/* Header + key facts */}
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-primary-50 px-3 py-1 text-xs font-bold text-primary-700">
+                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
                   {PROPERTY_TYPE_LABEL[property.type]}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -155,7 +155,7 @@ export const PropertyDetailPage = () => {
               )}
 
               {/* Giá — nổi bật trên mobile, sidebar lo phần desktop */}
-              <p className="mt-4 text-3xl font-black text-primary-600 lg:hidden">{formatMonthlyPrice(property.price)}</p>
+              <p className="mt-4 text-3xl font-black text-green-600 lg:hidden">{formatMonthlyPrice(property.price)}</p>
 
               {/* Key facts */}
               <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -207,7 +207,7 @@ export const PropertyDetailPage = () => {
                     const Icon = amenityIcon(a);
                     return (
                       <div key={a} className="flex items-center gap-2.5 text-sm font-medium text-slate-700">
-                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600 shrink-0">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-50 text-green-600 shrink-0">
                           <Icon className="h-5 w-5" />
                         </span>
                         {a}
@@ -225,7 +225,7 @@ export const PropertyDetailPage = () => {
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {costRows.map(({ icon: Icon, label, value }) => (
                     <div key={label} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-primary-600 shrink-0">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-green-600 shrink-0">
                         <Icon className="h-5 w-5" />
                       </span>
                       <div>
@@ -244,7 +244,7 @@ export const PropertyDetailPage = () => {
               <div className="mt-4 space-y-3">
                 {TRUST_POINTS.map(({ icon: Icon, text }) => (
                   <div key={text} className="flex items-center gap-3 text-sm text-slate-700">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600 shrink-0">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-50 text-green-600 shrink-0">
                       <Icon className="h-4 w-4" />
                     </span>
                     {text}
@@ -258,7 +258,7 @@ export const PropertyDetailPage = () => {
           <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
             <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
               <p className="text-sm text-slate-500">Giá thuê</p>
-              <p className="mt-1 text-3xl font-black text-primary-600">{formatMonthlyPrice(property.price)}</p>
+              <p className="mt-1 text-3xl font-black text-green-600">{formatMonthlyPrice(property.price)}</p>
 
               <div className="mt-5 space-y-2.5 border-t border-slate-100 pt-5 text-sm">
                 <div className="flex items-center justify-between">

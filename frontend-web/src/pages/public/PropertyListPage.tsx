@@ -141,9 +141,9 @@ export const PropertyListPage = () => {
                 value={keywordInput}
                 onChange={(e) => setKeywordInput(e.target.value)}
                 placeholder="Tìm theo tên hoặc địa chỉ bất động sản..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50/70 py-3 pl-11 pr-24 text-sm outline-none transition-colors focus:border-primary-300 focus:bg-white"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/70 py-3 pl-11 pr-24 text-sm outline-none transition-colors focus:border-green-300 focus:bg-white"
               />
-              <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-bold text-white hover:bg-primary-700">
+              <button type="submit" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-700">
                 Tìm
               </button>
             </form>
@@ -154,14 +154,14 @@ export const PropertyListPage = () => {
               aria-expanded={expanded}
               className={`inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold transition-colors ${
                 expanded || activeCount > 0
-                  ? 'border-primary-200 bg-primary-50 text-primary-700'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-primary-200 hover:text-primary-700'
+                  ? 'border-green-200 bg-green-50 text-green-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-green-200 hover:text-green-700'
               }`}
             >
               <SlidersHorizontal className="h-4 w-4" />
               Bộ lọc
               {activeCount > 0 && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-600 px-1.5 text-[11px] font-extrabold text-white">
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-green-600 px-1.5 text-[11px] font-extrabold text-white">
                   {activeCount}
                 </span>
               )}
@@ -187,7 +187,7 @@ export const PropertyListPage = () => {
               {DISTRICTS.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
 
-            <select value={filter.type} onChange={(e) => handleTypeChange(e.target.value)} className="input-field cursor-pointer font-semibold text-primary-700" aria-label="Loại hình">
+            <select value={filter.type} onChange={(e) => handleTypeChange(e.target.value)} className="input-field cursor-pointer font-semibold text-green-700" aria-label="Loại hình">
               <option value="">Mọi loại hình</option>
               {(Object.keys(PROPERTY_TYPE_LABEL) as PropertyType[]).map((t) => <option key={t} value={t}>{PROPERTY_TYPE_LABEL[t]}</option>)}
             </select>
@@ -226,8 +226,8 @@ export const PropertyListPage = () => {
                     onClick={() => toggleAmenity(a)}
                     className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all ${
                       active
-                        ? 'border-primary-600 bg-primary-600 text-white shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-primary-200 hover:text-primary-600'
+                        ? 'border-green-600 bg-green-600 text-white shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-green-200 hover:text-green-600'
                     }`}
                   >
                     {AMENITY_LABEL[a]}
@@ -249,7 +249,7 @@ export const PropertyListPage = () => {
           ) : <span />}
           <label className="flex items-center gap-2 text-sm text-slate-500">
             Sắp xếp:
-            <select value={filter.sort} onChange={(e) => setParam('sort', e.target.value)} className="rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-8 text-sm font-semibold text-slate-700 outline-none focus:border-primary-300 cursor-pointer" aria-label="Sắp xếp">
+            <select value={filter.sort} onChange={(e) => setParam('sort', e.target.value)} className="rounded-lg border border-slate-200 bg-white py-2 pl-3 pr-8 text-sm font-semibold text-slate-700 outline-none focus:border-green-300 cursor-pointer" aria-label="Sắp xếp">
               {SORT_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </label>
@@ -292,7 +292,7 @@ export const PropertyListPage = () => {
                   key={page}
                   onClick={() => goToPage(page)}
                   className={`h-10 w-10 rounded-lg text-sm font-bold transition-colors ${
-                    page === data.page ? 'bg-primary-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    page === data.page ? 'bg-green-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   {page}

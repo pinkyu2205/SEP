@@ -128,19 +128,19 @@
   }
 
   .pub-btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-6 py-3 text-sm font-bold text-white shadow-glow transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary-700 hover:shadow-card-hover active:translate-y-0;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-green-600/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-green-700 hover:shadow-xl hover:shadow-green-600/35 active:translate-y-0;
   }
 
   .pub-btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-6 py-3 text-sm font-bold text-slate-700 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-200 hover:text-primary-700;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white/70 px-6 py-3 text-sm font-bold text-slate-700 backdrop-blur transition-all duration-200 hover:-translate-y-0.5 hover:border-green-200 hover:text-green-700;
   }
 
   .pub-chip {
-    @apply inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-cyan-100 backdrop-blur;
+    @apply inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-green-100 backdrop-blur;
   }
 
   .pub-eyebrow {
-    @apply inline-flex items-center gap-2 rounded-full bg-primary-50 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-primary-600;
+    @apply inline-flex items-center gap-2 rounded-full bg-green-50 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-green-700;
   }
 
   .glass {
@@ -154,19 +154,19 @@
 
 @layer utilities {
   .text-gradient {
-    @apply bg-gradient-to-r from-primary-600 via-violet-500 to-accent-500 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-green-600 via-emerald-500 to-teal-500 bg-clip-text text-transparent;
   }
 
   .text-gradient-light {
-    @apply bg-gradient-to-r from-white via-cyan-100 to-violet-200 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-white via-green-100 to-emerald-200 bg-clip-text text-transparent;
   }
 
   .bg-mesh {
     background-image:
-      radial-gradient(at 15% 15%, rgba(99, 102, 241, 0.35), transparent 45%),
-      radial-gradient(at 85% 10%, rgba(6, 182, 212, 0.30), transparent 40%),
-      radial-gradient(at 75% 90%, rgba(139, 92, 246, 0.30), transparent 45%),
-      radial-gradient(at 10% 85%, rgba(79, 70, 229, 0.25), transparent 40%);
+      radial-gradient(at 15% 15%, rgba(34, 197, 94, 0.32), transparent 45%),
+      radial-gradient(at 85% 10%, rgba(16, 185, 129, 0.26), transparent 40%),
+      radial-gradient(at 75% 90%, rgba(239, 68, 68, 0.20), transparent 45%),
+      radial-gradient(at 10% 85%, rgba(5, 150, 105, 0.24), transparent 40%);
   }
 
   .bg-grid {
