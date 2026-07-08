@@ -1,5 +1,5 @@
 import api from './api';
-import type { AddRenovationRequest, RenovationResponse } from '../types/api.types';
+import type { AddRenovationRequest, RenovationResponse } from '@/types/api.types';
 
 export const renovationService = {
   /** POST /api/v1/properties/{propertyId}/renovations — Thêm hạng mục cải tạo */

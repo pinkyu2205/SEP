@@ -3,7 +3,7 @@ import type {
   ZoneRequest,
   ZoneResponse,
   Page,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 export const zoneService = {
   /**

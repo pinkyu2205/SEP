@@ -6,15 +6,15 @@ import {
   Snowflake, Fan, BedDouble, ShowerHead, Shirt, Refrigerator, WashingMachine,
   Tv, Wifi, Sofa, Armchair, Microwave, Camera, Flame, Blinds, Lightbulb, Utensils, Package,
 } from 'lucide-react';
-import { PropertyGallery } from '../../components/public/PropertyGallery';
-import { ContactSection } from '../../components/public/ContactSection';
-import { PropertyCard } from '../../components/public/PropertyCard';
-import { PropertyMap } from '../../components/PropertyMap';
-import { getPropertyById, getRelatedProperties } from '../../services/propertyService';
-import type { PublicProperty } from '../../types/property';
-import { PROPERTY_TYPE_LABEL } from '../../utils/constants';
-import { formatArea, formatMonthlyPrice, formatPrice } from '../../utils/helpers';
-import { ROUTES } from '../../utils/routes';
+import { PropertyGallery } from '@/components/public/PropertyGallery';
+import { ContactSection } from '@/components/public/ContactSection';
+import { PropertyCard } from '@/components/public/PropertyCard';
+import { PropertyMap } from '@/components/PropertyMap';
+import { getPropertyById, getRelatedProperties } from '@/services/public-property.service';
+import type { PublicProperty } from '@/types/property';
+import { PROPERTY_TYPE_LABEL } from '@/utils/constants';
+import { formatArea, formatMonthlyPrice, formatPrice } from '@/utils/helpers';
+import { ROUTES } from '@/utils/routes';
 
 /** 1 ô thông tin nhanh (chỉ render khi có dữ liệu) */
 const Fact = ({ icon: Icon, label, value }: { icon: typeof Maximize; label: string; value: string }) => (

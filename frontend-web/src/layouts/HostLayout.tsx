@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { UnreadNotificationsProvider } from '../contexts/UnreadNotificationsContext';
+import { UnreadNotificationsProvider } from '@/contexts/UnreadNotificationsContext';
 
 export const HostLayout = () => {
   return (

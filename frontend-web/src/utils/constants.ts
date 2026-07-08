@@ -1,6 +1,6 @@
 // Hằng số dùng chung cho Public Website Hoàng Bình Land.
-import type { Amenity, PropertyStatus, PropertyType, PropertySort } from '../types/property';
-import type { CompanyContact } from '../types/common';
+import type { Amenity, PropertyStatus, PropertyType, PropertySort } from '@/types/property';
+import type { CompanyContact } from '@/types/common';
 
 /** Thông tin thương hiệu & liên hệ công ty */
 export const COMPANY = {

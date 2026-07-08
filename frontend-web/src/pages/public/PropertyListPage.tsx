@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search, SearchX, SlidersHorizontal } from 'lucide-react';
-import { PropertyCard } from '../../components/public/PropertyCard';
-import { getProperties } from '../../services/propertyService';
-import type { Paginated } from '../../types/common';
-import type { Amenity, PropertyFilter, PropertySort, PropertyType, PublicProperty } from '../../types/property';
+import { PropertyCard } from '@/components/public/PropertyCard';
+import { getProperties } from '@/services/public-property.service';
+import type { Paginated } from '@/types/common';
+import type { Amenity, PropertyFilter, PropertySort, PropertyType, PublicProperty } from '@/types/property';
 import {
   AMENITY_LABEL,
   DISTRICTS,
@@ -12,7 +12,7 @@ import {
   PROPERTY_TYPE_LABEL,
   SORT_OPTIONS,
   getTypeFilterOptions,
-} from '../../utils/constants';
+} from '@/utils/constants';
 
 const CardSkeleton = () => (
   <div className="animate-pulse overflow-hidden rounded-2xl border border-slate-100 bg-white">

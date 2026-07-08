@@ -1,5 +1,5 @@
 import api from './api';
-import type { UserResponse, CreateUserRequest, UserStatus } from '../types/api.types';
+import type { UserResponse, CreateUserRequest, UserStatus } from '@/types/api.types';
 
 export const userService = {
   // 1. Lấy danh sách users

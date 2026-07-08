@@ -1,5 +1,5 @@
 import api from './api';
-import type { AddRoomRequest, RoomResponse } from '../types/api.types';
+import type { AddRoomRequest, RoomResponse } from '@/types/api.types';
 
 export const roomService = {
   /** POST /api/v1/properties/{propertyId}/rooms — Thêm phòng (chỉ wholeHouse=false) */

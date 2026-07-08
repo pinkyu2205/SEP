@@ -1,9 +1,9 @@
 import { useState, useEffect, createContext, useContext } from 'react';
-import { User, UserRole } from '../types';
-import { authService } from '../services/authService';
-import { realAuthService } from '../services/realAuthService';
-import { realTenantSelfService } from '../services/tenantSelfService.real';
-import { registerPushToken, unregisterPushToken } from '../services/pushToken';
+import { User, UserRole } from '@/types';
+import { authService } from '@/services/auth/authService';
+import { realAuthService } from '@/services/auth/realAuthService';
+import { realTenantSelfService } from '@/services/tenant/selfService';
+import { registerPushToken, unregisterPushToken } from '@/services/core/pushToken';
 
 /**
  * Auth Context - Quản lý trạng thái đăng nhập toàn ứng dụng.

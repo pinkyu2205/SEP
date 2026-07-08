@@ -5,17 +5,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { DatePickerField } from '../../components/common/DatePickerField';
-import { ManagedProperty } from '../../data/managedProperties';
-import { managerPropertyService } from '../../services/managerPropertyService';
-import { realTenantService, TenantContractResponse } from '../../services/tenantService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { DatePickerField } from '@/components/common/DatePickerField';
+import { ManagedProperty } from '@/data/managedProperties';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
   getInspectionTypeLabel,
   RoomInspection,
-} from '../../data/roomInspections';
+} from '@/data/roomInspections';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 

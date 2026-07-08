@@ -6,12 +6,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Colors, Spacing, BorderRadius, Typography, Shadow } from '../../constants';
-import { PropertyCard, StickyContactBar } from '../../components/common';
-import { searchService } from '../../services';
-import { PropertyListing, PropertyRoom } from '../../types';
-import { formatCurrency } from '../../utils/helpers';
-import { GuestStackParamList } from '../../navigation/GuestStackNavigator';
+import { Colors, Spacing, BorderRadius, Typography, Shadow } from '@/constants';
+import { PropertyCard, StickyContactBar } from '@/components/common';
+import { searchService } from '@/services';
+import { PropertyListing, PropertyRoom } from '@/types';
+import { formatCurrency } from '@/utils/helpers';
+import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'PropertyDetail'>;
 type RouteProps = RouteProp<GuestStackParamList, 'PropertyDetail'>;

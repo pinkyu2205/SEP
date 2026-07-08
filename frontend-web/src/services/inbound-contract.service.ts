@@ -2,7 +2,7 @@ import api from './api';
 import type {
   CreateInboundContractRequest,
   InboundContractResponse,
-} from '../types/api.types';
+} from '@/types/api.types';
 
 export const inboundContractService = {
   /** POST /api/v1/properties/{propertyId}/inbound-contract — Ký hợp đồng inbound */

@@ -1,8 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius } from '../../constants';
-import { useAuth } from '../../hooks';
+import { Colors, Spacing, BorderRadius } from '@/constants';
+import { useAuth } from '@/hooks';
 
 const { width } = Dimensions.get('window');
 

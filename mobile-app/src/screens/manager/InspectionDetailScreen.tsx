@@ -5,14 +5,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   getInspectionById,
   getInspectionStatusLabel,
   getInspectionTypeLabel,
   getSiblingInspection,
   RoomInspection,
-} from '../../data/roomInspections';
+} from '@/data/roomInspections';
 
 const money = (value?: number) => value ? `${value.toLocaleString('vi-VN')}đ` : 'Không có';
 

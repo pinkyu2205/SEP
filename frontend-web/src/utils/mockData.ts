@@ -1,4 +1,4 @@
-import type { Property, Contract, Equipment, AppUser, Manager, MaintenanceRequest, PortalNotification } from '../types';
+import type { Property, Contract, Equipment, AppUser, Manager, MaintenanceRequest, PortalNotification } from '@/types';
 
 export const MOCK_PROPERTIES: Property[] = [
   {

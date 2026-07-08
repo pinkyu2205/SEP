@@ -2,13 +2,13 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { useAuth } from '../../hooks';
-import { formatCurrency, formatDate, getDaysUntil } from '../../utils';
-import { SharedBill, InvoiceType } from '../../store/billsStore';
-import { realTenantSelfService, TenantDashboard } from '../../services/tenantSelfService.real';
-import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
-import { useUnreadNotifications } from '../../hooks/useUnreadNotifications';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useAuth } from '@/hooks';
+import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
+import { SharedBill, InvoiceType } from '@/store/billsStore';
+import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
+import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
+import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },

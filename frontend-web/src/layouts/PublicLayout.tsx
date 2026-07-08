@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
-import { PublicHeader } from '../components/public/PublicHeader';
-import { PublicFooter } from '../components/public/PublicFooter';
+import { PublicHeader } from '@/components/public/PublicHeader';
+import { PublicFooter } from '@/components/public/PublicFooter';
 
 /** Spinner toàn trang hiển thị khi lazy-load các trang public */
 const PageFallback = () => (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, MapPin } from 'lucide-react';
-import { goongService, type GoongLocation, type GoongPrediction } from '../services/goong.service';
+import { goongService, type GoongLocation, type GoongPrediction } from '@/services/goong.service';
 
 interface Props {
   value: string;

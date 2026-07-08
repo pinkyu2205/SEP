@@ -1,4 +1,4 @@
-import { City, Ward, PropertyListing, SearchFilters, SearchResult, NearbyRequest } from '../types';
+import { City, Ward, PropertyListing, SearchFilters, SearchResult, NearbyRequest } from '@/types';
 
 export const CITIES: City[] = [
   { id: 'hcm', name: 'TP. Hồ Chí Minh', availableRooms: 180 },

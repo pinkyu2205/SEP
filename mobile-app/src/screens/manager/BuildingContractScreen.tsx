@@ -3,16 +3,16 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   getPropertyById, getBuildingOps, BuildingContract, ContractStatus,
-} from '../../data/managedProperties';
+} from '@/data/managedProperties';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
   getInspectionTypeLabel,
   RoomInspection,
-} from '../../data/roomInspections';
+} from '@/data/roomInspections';
 
 type FilterId = 'all' | 'draft' | 'pending' | 'approved' | 'active' | 'expiring_soon' | 'rejected';
 type NormalStatus = Exclude<FilterId, 'all'>;

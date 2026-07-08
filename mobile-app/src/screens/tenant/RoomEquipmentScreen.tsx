@@ -4,10 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { Equipment } from '../../types';
-import { useRoomEquipment } from '../../store/equipmentStore';
-import { formatDate } from '../../utils';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Equipment } from '@/types';
+import { useRoomEquipment } from '@/store/equipmentStore';
+import { formatDate } from '@/utils';
 
 // Tenant's room — in a real app this comes from auth context
 const TENANT_ROOM_ID = 'r1';

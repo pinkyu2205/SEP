@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { BorderRadius, Shadow, Spacing } from '../../constants';
-import { City, District } from '../../types';
+import { BorderRadius, Shadow, Spacing } from '@/constants';
+import { City, District } from '@/types';
 
 interface DistrictCardProps {
   district: City | District;

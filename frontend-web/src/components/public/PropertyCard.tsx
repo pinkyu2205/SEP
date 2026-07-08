@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, BedDouble, Maximize, MapPin } from 'lucide-react';
-import type { PublicProperty } from '../../types/property';
-import { PROPERTY_TYPE_LABEL, PROPERTY_STATUS_META } from '../../utils/constants';
-import { formatArea, formatMonthlyPrice } from '../../utils/helpers';
-import { propertyDetailPath } from '../../utils/routes';
+import type { PublicProperty } from '@/types/property';
+import { PROPERTY_TYPE_LABEL, PROPERTY_STATUS_META } from '@/utils/constants';
+import { formatArea, formatMonthlyPrice } from '@/utils/helpers';
+import { propertyDetailPath } from '@/utils/routes';
 
 interface PropertyCardProps {
   property: PublicProperty;

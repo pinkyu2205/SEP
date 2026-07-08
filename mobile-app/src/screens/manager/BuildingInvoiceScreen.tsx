@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { getPropertyById, getBuildingOps, BuildingInvoice, InvoiceStatus } from '../../data/managedProperties';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { getPropertyById, getBuildingOps, BuildingInvoice, InvoiceStatus } from '@/data/managedProperties';
 
 const FILTERS: { id: 'all' | InvoiceStatus; label: string }[] = [
   { id: 'all', label: 'Tất cả' },

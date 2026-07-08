@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { getPropertyById, getBuildingOps, BuildingUtilityReading } from '../../data/managedProperties';
-import { billsStore } from '../../store/billsStore';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { getPropertyById, getBuildingOps, BuildingUtilityReading } from '@/data/managedProperties';
+import { billsStore } from '@/store/billsStore';
 
 export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;

@@ -5,13 +5,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore,
   MaintenanceTicket, TicketStatus, TicketCategory,
-} from '../../store/maintenanceStore';
-import { getPropertyById } from '../../data/managedProperties';
-import { MAINTENANCE_STATUS_META } from '../../constants/maintenance';
+} from '@/store/maintenanceStore';
+import { getPropertyById } from '@/data/managedProperties';
+import { MAINTENANCE_STATUS_META } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 

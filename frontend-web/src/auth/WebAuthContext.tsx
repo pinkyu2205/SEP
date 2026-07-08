@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import api from '../services/api';
+import api from '@/services/api';
 
 // Web chỉ phục vụ host (ROLE_OWNER) và admin (ROLE_ADMIN).
 // Manager là mobile-only — không có không gian làm việc trên web.

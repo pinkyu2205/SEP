@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Equipment } from '../types';
+import { Equipment } from '@/types';
 
 export const MOCK_EQUIPMENT_DB: Record<string, Equipment> = {
   'EQ-101-AC': {

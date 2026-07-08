@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Building2, MapPin, Phone } from 'lucide-react';
-import { ROUTES } from '../../utils/routes';
-import { COMPANY, CONTACT } from '../../utils/constants';
-import { telHref } from '../../utils/helpers';
+import { ROUTES } from '@/utils/routes';
+import { COMPANY, CONTACT } from '@/utils/constants';
+import { telHref } from '@/utils/helpers';
 
 const QUICK_LINKS = [
   { label: 'Trang chủ', to: ROUTES.HOME },

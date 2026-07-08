@@ -5,8 +5,8 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius } from '../../constants';
-import { MOCK_EQUIPMENT_DB } from '../../store/equipmentStore';
+import { Colors, Spacing, BorderRadius } from '@/constants';
+import { MOCK_EQUIPMENT_DB } from '@/store/equipmentStore';
 
 const parseParams = (raw: string): Record<string, string> => {
   try {

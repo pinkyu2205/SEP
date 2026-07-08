@@ -2,10 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
-import { formatCurrency, formatDate } from '../../utils';
-import { SharedBill, InvoiceType } from '../../store/billsStore';
-import { realTenantBillingService, toSharedBill } from '../../services/tenantBillingService.real';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { formatCurrency, formatDate } from '@/utils';
+import { SharedBill, InvoiceType } from '@/store/billsStore';
+import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },

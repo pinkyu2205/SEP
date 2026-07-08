@@ -5,10 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '../../constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   roomOperationService, OpStatus, OpRoom, OpProperty,
-} from '../../services/roomOperationService';
+} from '@/services/manager/roomService';
 
 // ======================== TYPES ========================
 type ActionView = 'menu' | 'status' | 'detail';

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { CalendarCheck, MapPin, Phone, Send } from 'lucide-react';
-import { CONTACT } from '../../utils/constants';
-import { telHref } from '../../utils/helpers';
-import { submitContact } from '../../services/contactService';
+import { CONTACT } from '@/utils/constants';
+import { telHref } from '@/utils/helpers';
+import { submitContact } from '@/services/contact.service';
 
 interface ContactSectionProps {
   /** Bối cảnh bất động sản (khi nhúng ở trang chi tiết) */
