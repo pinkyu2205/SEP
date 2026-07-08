@@ -14,7 +14,7 @@ export const ChangePasswordScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
 
-  // Mật khẩu hiện tại: lần đầu khách được cấp mặc định là 123456.
+  // Mật khẩu hiện tại: lần đầu khách được cấp mặc định là tenant123.
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -22,7 +22,7 @@ export const ChangePasswordScreen: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!currentPassword) {
-      return Alert.alert('Lỗi', 'Vui lòng nhập mật khẩu hiện tại (mặc định 123456).');
+      return Alert.alert('Lỗi', 'Vui lòng nhập mật khẩu hiện tại (mặc định tenant123).');
     }
     if (newPassword.length < 6) {
       return Alert.alert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
@@ -36,7 +36,7 @@ export const ChangePasswordScreen: React.FC = () => {
 
     setLoading(true);
     try {
-      await realAuthService.changePassword(currentPassword, newPassword);
+      await realAuthService.changePassword(currentPassword, newPassword, confirmPassword);
       // BE đã set is_first_login=false. Sang Tutorial; Tutorial sẽ clear cờ isFirstLogin ở client.
       navigation.navigate('Tutorial');
     } catch (err: any) {
@@ -61,7 +61,7 @@ export const ChangePasswordScreen: React.FC = () => {
         <View style={styles.form}>
           <Input
             label="Mật khẩu hiện tại"
-            placeholder="Mặc định 123456"
+            placeholder="Mặc định tenant123"
             value={currentPassword}
             onChangeText={setCurrentPassword}
             secureTextEntry

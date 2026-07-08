@@ -1,0 +1,18 @@
+@startuml PackageDiagramBackend
+title Back-end - Package Diagram
+
+package "controller" as pkgController
+package "service" as pkgService
+package "repository" as pkgRepository
+package "entity" as pkgEntity
+package "dto" as pkgDto
+package "config / security" as pkgConfig
+
+pkgController ..> pkgService : uses
+pkgController ..> pkgDto : uses
+pkgService ..> pkgRepository : uses
+pkgService ..> pkgEntity : uses
+pkgRepository ..> pkgEntity : maps
+pkgController ..> pkgConfig : secured by (JWT)
+
+@enduml

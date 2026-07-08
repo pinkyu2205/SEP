@@ -1,0 +1,46 @@
+@startuml SequenceOnboardActivate
+title Sequence Diagram - Deposit Payment, OTP & Activation (Manager side)
+' Grounded in mobile-app/src/services/tenantService.real.ts real endpoints:
+' POST .../deposit-payment, POST .../send-otp, POST .../confirm
+
+actor Manager
+actor Tenant
+participant "Mobile App\n(ResumeContractScreen)" as UI
+participant "TenantContractController" as Controller
+participant "TenantContractService" as Service
+participant "TenantContractRepository" as Repo
+database "Database" as DB
+
+Manager -> UI : Collect deposit (cash or PayOS)
+UI -> Controller : POST /api/v1/tenant-contracts/{id}/deposit-payment
+Controller -> Service : recordDepositPayment(contractId, dto)
+Service -> Repo : update paymentStatus = PAID, status = PENDING
+Repo -> DB : UPDATE tenant_contract
+Service --> Controller : TenantContract [PENDING]
+Controller --> UI : 200 OK
+
+Manager -> UI : Send OTP to tenant
+UI -> Controller : POST /api/v1/tenant-contracts/{id}/send-otp
+Controller -> Service : sendOtp(contractId)
+note right of Service
+  Dev mode: OTP not actually sent via SMS,
+  confirm() accepts any 6-digit code.
+  Prod (Twilio): must call this before confirm.
+end note
+Service --> Controller : OTP sent
+Controller --> UI : 200 OK
+UI --> Tenant : Tenant receives OTP (SMS, prod only)
+
+Tenant -> UI : Enter OTP to confirm
+UI -> Controller : POST /api/v1/tenant-contracts/{id}/confirm\n{ otp }
+Controller -> Service : confirmContract(contractId, otp)
+Service -> Service : validate OTP
+Service -> Repo : update status = ACTIVE
+Repo -> DB : UPDATE tenant_contract
+Service -> Service : createTenantAccount(contract)\n(username = phone, isFirstLogin = true)
+Service -> DB : INSERT users
+Service --> Controller : TenantContract [ACTIVE] + tenantUsername
+Controller --> UI : 200 OK
+UI --> Tenant : Onboarding success, account created
+
+@enduml

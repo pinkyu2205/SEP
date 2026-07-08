@@ -1,0 +1,10 @@
+@startuml StatePayment
+title Payment / Transaction - State Diagram
+
+[*] --> PENDING : Payment request created (QR/bank info generated)
+PENDING --> SUCCESS : Bank webhook confirms payment
+PENDING --> FAILED : Timeout / bank declines / signature invalid
+SUCCESS --> [*]
+FAILED --> [*]
+
+@enduml

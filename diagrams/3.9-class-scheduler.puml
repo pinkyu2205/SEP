@@ -1,0 +1,26 @@
+@startuml ClassScheduler
+title Class Diagram - Automated System-Handler Flows
+
+class PaymentReminderScheduler {
+  +run()
+}
+class RoomStatusHandler {
+  +onContractStatusChanged(event)
+}
+class InvoiceService {
+  +findOverdueUnpaidInvoices() : List<Invoice>
+  +applyLateFee(invoice)
+}
+class NotificationService {
+  +notify(userId, type)
+}
+class RoomService {
+  +updateStatus(roomId, status)
+}
+
+PaymentReminderScheduler --> InvoiceService
+PaymentReminderScheduler --> NotificationService
+RoomStatusHandler --> RoomService
+RoomStatusHandler --> NotificationService
+
+@enduml

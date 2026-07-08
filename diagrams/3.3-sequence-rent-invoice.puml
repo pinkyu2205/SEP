@@ -1,0 +1,28 @@
+@startuml SequenceRentInvoice
+title Sequence Diagram - Manager Creates Rent Invoice
+' Grounded in managerInvoiceService.real.ts createRoomRentInvoice/createPropertyRentInvoice.
+' NOTE: marked "BE TODO" in source as of this report (doc/BE-TODO-rent-invoice-2026-06-29.md) —
+' FE already calls this endpoint; backend team should confirm/implement it.
+
+actor Manager
+participant "Mobile App\n(RentInvoiceScreen)" as UI
+participant "RentInvoiceController" as Controller
+participant "InvoiceService" as Service
+database "Database" as DB
+participant "NotificationService" as Notify
+actor Tenant
+
+Manager -> UI : Open room/property, select billing month
+UI -> Controller : GET /api/v1/properties/{id}/rent-invoices?month=...
+Controller --> UI : Rooms already invoiced this month
+Manager -> UI : Create rent invoice for remaining room(s)
+UI -> Controller : POST /api/v1/properties/{id}/rooms/{roomId}/rent-invoices\n{ contractId, billingMonth, amount, dueDate, note }
+Controller -> Service : createRentInvoice(dto)
+Service -> DB : INSERT invoice (type=RENT, status=PENDING)
+DB --> Service : saved
+Service -> Notify : notify(tenant, INVOICE_CREATED)
+Notify --> Tenant : Push notification "New rent invoice"
+Service --> Controller : Invoice
+Controller --> UI : 201 Created
+
+@enduml

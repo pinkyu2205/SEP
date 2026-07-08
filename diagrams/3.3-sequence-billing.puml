@@ -1,0 +1,32 @@
+@startuml SequenceUtilityInvoice
+title Sequence Diagram - Manager Creates Utility Invoice (Electricity/Water)
+' Grounded in mobile-app/src/services/managerInvoiceService.real.ts
+' Real model: meter reading is embedded directly in the invoice payload
+' (prevReading/newReading/consumption/unitPrice/amount) — there is no
+' separate MeterReading entity.
+
+actor Manager
+participant "Mobile App\n(MeterReadingScreen / UtilityBillingScreen)" as UI
+participant "Cloudinary" as Storage
+participant "UtilityInvoiceController" as Controller
+participant "InvoiceService" as Service
+database "Database" as DB
+participant "NotificationService" as Notify
+actor Tenant
+
+Manager -> UI : Enter/photograph electricity meter reading
+UI -> Storage : Upload meter photo (optional)
+Storage --> UI : meterImageUrl
+Manager -> UI : Confirm prevReading, newReading, unitPrice -> amount computed
+UI -> Controller : POST /api/v1/properties/{id}/rooms/{roomId}/utility-invoices\n{ type: ELECTRICITY, billingPeriod, prevReading, newReading,\n  consumption, unitPrice, amount, meterImageUrl }
+Controller -> Service : createUtilityInvoice(dto)
+Service -> DB : INSERT invoice (type=ELECTRICITY, status=PENDING)
+DB --> Service : saved
+Service -> Notify : notify(tenant, INVOICE_CREATED)
+Notify --> Tenant : Push notification "New electricity invoice"
+Service --> Controller : Invoice
+Controller --> UI : 201 Created
+
+== Repeat for water meter (type = WATER) ==
+
+@enduml

@@ -1,0 +1,28 @@
+@startuml ClassAuth
+title Class Diagram - Authentication / Authorization
+
+class AuthController {
+  +login(request) : AuthResponse
+  +changePassword(request)
+}
+class AuthService {
+  +login(username, password) : AuthResponse
+  +changePassword(userId, oldPassword, newPassword)
+}
+class UserRepository {
+  +findByUsername(String) : User
+  +save(User)
+}
+class User {
+  -id : Long
+  -username : String
+  -passwordHash : String
+  -role : String
+  -isFirstLogin : boolean
+}
+
+AuthController --> AuthService
+AuthService --> UserRepository
+AuthService --> User
+
+@enduml

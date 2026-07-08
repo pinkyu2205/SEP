@@ -1,0 +1,41 @@
+@startuml SequenceManagerVerifyPayment
+title Sequence Diagram - Manager Verifies Manual Payment / Marks Cash Paid
+' Grounded in managerInvoiceService.real.ts: listPayments/verifyPayment/rejectPayment/markInvoicePaid
+
+actor Manager
+participant "Mobile App\n(BillingManagementScreen)" as UI
+participant "ManagerPaymentController" as PayCtrl
+participant "ManagerInvoiceController" as InvCtrl
+participant "PaymentService" as Service
+database "Database" as DB
+actor Tenant
+participant "NotificationService" as Notify
+
+alt Tenant claims a manual bank transfer
+  Manager -> UI : Open "Pending Verify" payment list
+  UI -> PayCtrl : GET /api/v1/manager/payments?status=PENDING_VERIFY
+  PayCtrl --> UI : List<Payment>
+  Manager -> UI : Compare transferContent with bank statement
+  alt matches
+    Manager -> UI : Verify payment
+    UI -> PayCtrl : POST /api/v1/manager/payments/{id}/verify
+    PayCtrl -> Service : verify(paymentId)
+    Service -> DB : UPDATE payment status=VERIFIED, invoice status=PAID
+  else does not match
+    Manager -> UI : Reject payment
+    UI -> PayCtrl : POST /api/v1/manager/payments/{id}/reject { reason }
+    PayCtrl -> Service : reject(paymentId, reason)
+    Service -> DB : UPDATE payment status=REJECTED
+  end
+  Service -> Notify : notify(tenant, PAYMENT_VERIFIED_OR_REJECTED)
+  Notify --> Tenant : Push notification
+else Tenant paid cash / offline
+  Manager -> UI : Mark invoice as paid manually
+  UI -> InvCtrl : POST /api/v1/manager/invoices/{id}/mark-paid\n{ method: CASH, note }
+  InvCtrl -> Service : markPaidManually(invoiceId, method, note)
+  Service -> DB : UPDATE invoice status=PAID
+  Service -> Notify : notify(tenant, PAYMENT_CONFIRMED)
+  Notify --> Tenant : Push notification
+end
+
+@enduml

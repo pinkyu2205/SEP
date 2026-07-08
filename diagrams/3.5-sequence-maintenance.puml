@@ -1,0 +1,46 @@
+@startuml SequenceMaintenance
+title Sequence Diagram - Maintenance Request (Submit, Schedule, Resolve)
+' Grounded in mobile-app/src/services/maintenanceService.real.ts
+
+actor Tenant
+actor Manager
+participant "Mobile App" as UI
+participant "MaintenanceController" as Controller
+participant "MaintenanceService" as Service
+database "Database" as DB
+participant "NotificationService" as Notify
+
+Tenant -> UI : Submit request (description, category, photos)
+UI -> Controller : POST /api/v1/maintenance\n{ description, category, priority }
+Controller -> Service : createRequest(dto)
+Service -> DB : INSERT maintenance_request [status=PENDING]
+Service -> Notify : notify(manager, NEW_MAINTENANCE_REQUEST)
+Notify --> Manager : Push notification (priority)
+Service --> Controller : MaintenanceRequest
+Controller --> UI : 201 Created
+
+Manager -> UI : Review & schedule
+UI -> Controller : PUT /api/v1/maintenance/{id}/status\n{ status: IN_PROGRESS, note, scheduledDate }
+Controller -> Service : updateStatus(id, IN_PROGRESS, note, scheduledDate)
+Service -> DB : UPDATE maintenance_request
+
+Manager -> UI : Take "before" photos on-site
+UI -> Controller : POST /api/v1/maintenance/{id}/photos { type: BEFORE }
+Controller -> DB : UPDATE maintenance_request (photosBefore)
+
+Manager -> UI : Complete repair, take "after" photos, record cost
+UI -> Controller : POST /api/v1/maintenance/{id}/photos { type: AFTER }
+Controller -> DB : UPDATE maintenance_request (photosAfter)
+UI -> Controller : PUT /api/v1/maintenance/{id}/resolve\n{ repairCost, resolutionNote }
+Controller -> Service : resolve(id, dto)
+Service -> DB : UPDATE maintenance_request [status=RESOLVED]
+Service -> Service : createExpenseFromRepair(request)
+Service -> DB : INSERT expense
+Service -> Service : updateEquipmentHistory(equipmentId, request)
+Service -> DB : (see 3.6) UPDATE equipment lifecycle / history
+Service -> Notify : notify(tenant, REQUEST_RESOLVED)
+Notify --> Tenant : Push notification "Resolved"
+Service --> Controller : MaintenanceRequest
+Controller --> UI : 200 OK
+
+@enduml

@@ -1,0 +1,30 @@
+@startuml ComponentDiagram
+title Component Diagram
+
+package "Front-end Web" {
+  [UI Components] as WebUI
+  [API Client Services] as WebServices
+}
+
+package "Front-end Mobile" {
+  [UI Screens] as MobileUI
+  [API Client Services] as MobileServices
+}
+
+package "Back-end" {
+  [REST Controllers] as Controllers
+  [Service Layer] as Services
+  [Repository Layer] as Repositories
+}
+
+database "Database" as DB
+
+WebUI --> WebServices
+MobileUI --> MobileServices
+WebServices --> Controllers : HTTPS/JSON
+MobileServices --> Controllers : HTTPS/JSON
+Controllers --> Services
+Services --> Repositories
+Repositories --> DB
+
+@enduml

@@ -1,0 +1,37 @@
+@startuml SequenceCashFlow
+title Sequence Diagram - Cash Flow Reconciliation & Financial Reporting
+
+actor Admin
+participant "Web Admin Portal" as UI
+participant "ExpenseController" as ExpCtrl
+participant "CashFlowController" as CFCtrl
+participant "CashFlowService" as Service
+participant "ExpenseRepository" as ExpRepo
+database "Database" as DB
+
+Admin -> UI : Record large-house lease expense
+UI -> ExpCtrl : POST /api/properties/{id}/expenses
+ExpCtrl -> Service : recordExpense(dto)
+Service -> ExpRepo : save(Expense)
+ExpRepo -> DB : INSERT expense
+Service --> ExpCtrl : Expense saved
+ExpCtrl --> UI : 201 Created
+
+Admin -> UI : Open cash flow dashboard
+UI -> CFCtrl : GET /api/properties/{id}/cash-flow
+CFCtrl -> Service : getDashboard(propertyId)
+Service -> DB : query expenses + payments/invoices
+DB --> Service : raw data
+Service -> Service : reconcile(expenses, payments)
+Service --> CFCtrl : CashFlowSummary
+CFCtrl --> UI : 200 OK (revenue, expense, net profit)
+UI --> Admin : Render dashboard
+
+Admin -> UI : Export financial summary
+UI -> CFCtrl : GET /api/properties/{id}/cash-flow/export
+CFCtrl -> Service : exportToExcel(propertyId)
+Service --> CFCtrl : XLS file
+CFCtrl --> UI : File download
+UI --> Admin : Excel file downloaded
+
+@enduml

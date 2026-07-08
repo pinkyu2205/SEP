@@ -1,0 +1,40 @@
+@startuml SequencePayOsPayment
+title Sequence Diagram - Tenant Pays via PayOS
+' Grounded in tenantBillingService.real.ts: payInvoice() + checkInvoicePayment().
+' FE polls "payment/check" after returning from PayOS checkout; a PayOS webhook
+' to the backend (not visible from FE code) should also update status server-side.
+
+actor Tenant
+participant "Mobile App\n(InvoiceDetailScreen)" as UI
+participant "TenantInvoiceController" as Controller
+participant "PaymentService" as Service
+participant "PayOS Gateway" as PayOS
+database "Database" as DB
+participant "NotificationService" as Notify
+
+Tenant -> UI : Open unpaid invoice, tap "Pay"
+UI -> Controller : POST /api/v1/tenant/me/invoices/{id}/payment
+Controller -> Service : createPayOsCheckout(invoiceId)
+Service -> PayOS : Create payment link/order
+PayOS --> Service : payosCheckoutUrl, payosQrCode, payosOrderCode
+Service -> DB : UPDATE invoice (store PayOS fields)
+Service --> Controller : Invoice (with checkout URL/QR)
+Controller --> UI : 200 OK
+UI --> Tenant : Show PayOS QR / redirect to checkout page
+
+Tenant -> PayOS : Pay via banking app / QR
+PayOS -> Service : Webhook: payment success (server-to-server)
+Service -> DB : UPDATE invoice status = PAID
+Service -> Notify : notify(tenant, PAYMENT_CONFIRMED)
+
+Tenant -> UI : Return to app after paying
+UI -> Controller : POST /api/v1/tenant/me/invoices/{id}/payment/check
+Controller -> Service : syncPayOsStatus(invoiceId)
+Service -> PayOS : Query order status (fallback if webhook delayed)
+PayOS --> Service : status
+Service -> DB : UPDATE invoice status if changed
+Service --> Controller : Invoice [status]
+Controller --> UI : 200 OK
+UI --> Tenant : Show "Paid" confirmation
+
+@enduml

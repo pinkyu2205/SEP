@@ -1,0 +1,24 @@
+@startuml PackageDiagramWeb
+title Front-end Web - Package Diagram
+
+package "pages" {
+  package "onboarding" as pkgOnboarding
+  package "tenants" as pkgTenants
+  package "properties" as pkgProperties
+  package "billing" as pkgBilling
+}
+package "services" as pkgServices
+package "layouts" as pkgLayouts
+package "utils" as pkgUtils
+package "types" as pkgTypes
+
+pkgOnboarding ..> pkgServices : uses
+pkgTenants ..> pkgServices : uses
+pkgProperties ..> pkgServices : uses
+pkgBilling ..> pkgServices : uses
+pkgOnboarding ..> pkgUtils : uses (pdfExtract)
+pkgOnboarding ..> pkgLayouts : rendered in
+pkgTenants ..> pkgLayouts : rendered in
+pkgServices ..> pkgTypes : uses
+
+@enduml

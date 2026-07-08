@@ -1,0 +1,24 @@
+@startuml FlowchartBillingCycle
+title Monthly Billing Cycle - Flowchart
+
+start
+:Manager records electricity & water meter readings;
+if (Readings recorded for the period?) then (yes)
+  :System auto-generates invoice\n(rent + utilities + service fee + outstanding balance);
+  :Send invoice notification to tenant;
+  :Tenant pays via QR Code / Bank Transfer;
+  :Bank webhook validates payment;
+  if (Payment valid?) then (yes)
+    :Update invoice status to PAID;
+    :Record income;
+    :Update cash flow dashboard;
+  else (no)
+    :Keep invoice status UNPAID;
+    :Send automatic payment reminder near/after due date;
+  endif
+else (no)
+  :Block invoice generation until readings are recorded;
+endif
+stop
+
+@enduml

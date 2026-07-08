@@ -35,6 +35,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose }: Props) => {
 
   const [lookupRole, setLookupRole] = useState<string | null>(null);
   const [lookupChecked, setLookupChecked] = useState(false);
+  const [lookupEligible, setLookupEligible] = useState<boolean | null>(null);
 
   const [assignNow, setAssignNow] = useState(true);
   const [assignManagerId, setAssignManagerId] = useState('');
@@ -117,6 +118,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose }: Props) => {
       const r = await tenantService.lookupByPhone(phone);
       setLookupChecked(true);
       setLookupRole(r.exists ? r.role ?? null : null);
+      setLookupEligible(r.exists ? r.eligible ?? null : null);
       if (r.exists) {
         setForm((prev) => ({
           ...prev,
@@ -165,7 +167,10 @@ export const DraftContractFormModal = ({ onSuccess, onClose }: Props) => {
     }
   };
 
-  const roleWarning = lookupChecked && !isTenantEligibleRole(lookupRole ?? undefined);
+  // Ưu tiên cờ `eligible` do BE trả; nếu BE không trả thì tự suy từ role.
+  const roleWarning =
+    lookupChecked &&
+    (lookupEligible === null ? !isTenantEligibleRole(lookupRole ?? undefined) : !lookupEligible);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,7 +201,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose }: Props) => {
       );
       if (assignNow && assignManagerId) {
         await tenantService.assignManager(draft.id, {
-          managerId: assignManagerId,
+          assignedManagerId: assignManagerId,
           expectedReceptionDate: form.expectedReceptionDate || undefined,
         });
       }

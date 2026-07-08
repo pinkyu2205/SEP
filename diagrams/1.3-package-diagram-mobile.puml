@@ -1,0 +1,22 @@
+@startuml PackageDiagramMobile
+title Front-end Mobile - Package Diagram
+
+package "screens" {
+  package "auth" as pkgAuth
+  package "manager" as pkgManager
+  package "shared" as pkgShared
+}
+package "services" as pkgServices
+package "hooks" as pkgHooks
+package "navigation" as pkgNavigation
+
+pkgAuth ..> pkgServices : uses (realAuthService)
+pkgManager ..> pkgServices : uses (tenantService.real)
+pkgShared ..> pkgServices : uses (tenantSelfService.real)
+pkgAuth ..> pkgHooks : uses (useAuth)
+pkgManager ..> pkgHooks : uses (useAuth)
+pkgNavigation ..> pkgAuth : routes to
+pkgNavigation ..> pkgManager : routes to
+pkgNavigation ..> pkgShared : routes to
+
+@enduml

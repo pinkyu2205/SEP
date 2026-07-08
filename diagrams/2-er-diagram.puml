@@ -1,0 +1,134 @@
+@startuml ERDiagram
+title Database Design - Entity Relationship Diagram
+hide circle
+skinparam linetype ortho
+
+entity "users" as users {
+  * id : BIGINT <<PK>>
+  --
+  username : VARCHAR
+  password_hash : VARCHAR
+  role : VARCHAR
+  is_first_login : BOOLEAN
+}
+
+entity "property" as property {
+  * id : BIGINT <<PK>>
+  --
+  address : VARCHAR
+  owner_name : VARCHAR
+  lease_cost : DECIMAL
+  manager_id : BIGINT <<FK>>
+}
+
+entity "room" as room {
+  * id : BIGINT <<PK>>
+  --
+  property_id : BIGINT <<FK>>
+  name : VARCHAR
+  price : DECIMAL
+  status : VARCHAR
+}
+
+entity "equipment" as equipment {
+  * id : BIGINT <<PK>>
+  --
+  room_id : BIGINT <<FK>>
+  name : VARCHAR
+  installed_date : DATE
+  condition : VARCHAR
+}
+
+entity "tenant_contract" as tenant_contract {
+  * id : BIGINT <<PK>>
+  --
+  room_id : BIGINT <<FK>>
+  tenant_id : BIGINT <<FK>>
+  assigned_manager_id : BIGINT <<FK>>
+  status : VARCHAR
+  draft_contract_file_url : VARCHAR
+  expected_reception_date : DATE
+}
+
+entity "household_member" as household_member {
+  * id : BIGINT <<PK>>
+  --
+  tenant_contract_id : BIGINT <<FK>>
+  full_name : VARCHAR
+  id_card_number : VARCHAR
+}
+
+entity "invoice" as invoice {
+  * id : BIGINT <<PK>>
+  --
+  tenant_contract_id : BIGINT <<FK>>
+  period : VARCHAR
+  total_amount : DECIMAL
+  status : VARCHAR
+  due_date : DATE
+}
+
+entity "invoice_detail" as invoice_detail {
+  * id : BIGINT <<PK>>
+  --
+  invoice_id : BIGINT <<FK>>
+  item_type : VARCHAR
+  amount : DECIMAL
+}
+
+entity "payment" as payment {
+  * id : BIGINT <<PK>>
+  --
+  invoice_id : BIGINT <<FK>>
+  tenant_contract_id : BIGINT <<FK>>
+  method : VARCHAR
+  amount : DECIMAL
+  status : VARCHAR
+  paid_at : DATETIME
+}
+
+entity "maintenance_request" as maintenance_request {
+  * id : BIGINT <<PK>>
+  --
+  room_id : BIGINT <<FK>>
+  tenant_id : BIGINT <<FK>>
+  equipment_id : BIGINT <<FK>>
+  category : VARCHAR
+  status : VARCHAR
+  repair_cost : DECIMAL
+}
+
+entity "notification" as notification {
+  * id : BIGINT <<PK>>
+  --
+  recipient_id : BIGINT <<FK>>
+  type : VARCHAR
+  is_read : BOOLEAN
+}
+
+entity "expense" as expense {
+  * id : BIGINT <<PK>>
+  --
+  property_id : BIGINT <<FK>>
+  amount : DECIMAL
+  period : VARCHAR
+}
+
+users ||--o{ property : manages
+property ||--o{ room : contains
+room ||--o{ equipment : has
+room ||--o{ tenant_contract : leased_via
+users ||--o{ tenant_contract : "tenant"
+users ||--o{ tenant_contract : "assigned manager"
+tenant_contract ||--o{ household_member : includes
+tenant_contract ||--o{ invoice : generates
+invoice ||--o{ invoice_detail : contains
+invoice ||--o{ payment : paid_by
+tenant_contract ||--o{ payment : "deposit"
+room ||--o{ maintenance_request : reports
+users ||--o{ maintenance_request : submits
+equipment ||--o{ maintenance_request : concerns
+users ||--o{ notification : receives
+property ||--o{ expense : incurs
+
+@enduml
