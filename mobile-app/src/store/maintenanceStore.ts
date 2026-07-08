@@ -104,6 +104,7 @@ export type TicketStatus =
   | 'pending_approval'
   | 'done'
   | 'confirmed'
+  | 'reopened'   // tenant từ chối nghiệm thu → mở lại
   | 'accepted'   // legacy
   | 'resolved'   // legacy / terminal đường real-API
   | 'cancelled';

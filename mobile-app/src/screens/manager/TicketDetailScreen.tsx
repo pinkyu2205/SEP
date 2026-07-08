@@ -251,13 +251,19 @@ export const TicketDetailScreen: React.FC = () => {
     );
   }
 
-  const richMode    = !isReal;   // rich state machine chỉ chạy trên store/mock
+  // Rich state machine chạy cho CẢ ticket thật lẫn mock — BE đã có đủ API
+  // acknowledge/schedule/status/resolve, chỉ khác nơi ghi dữ liệu.
+  const richMode    = true;
   const cfg         = STATUS_CONFIG[ticket.status];
   const priorityCfg = PRIORITY_CONFIG[ticket.priority];
   const catCfg      = CATEGORY_CONFIG[ticket.category];
   const isTerminal  = ['confirmed', 'resolved', 'cancelled'].includes(ticket.status);
   const isEditMode  = !isTerminal;
   const hasPhoto    = (type: 'before' | 'after') => photos.some(p => p.type === type);
+  // Ticket thật: ảnh lúc tenant tạo được BE tính là ảnh "before".
+  const hasBeforePhoto = isReal ? (ticket.images?.length ?? 0) > 0 || hasPhoto('before') : hasPhoto('before');
+  const apiErrMsg = (e: any, fallback: string) =>
+    e?.response?.data?.error || e?.response?.data?.message || fallback;
 
   // Cập nhật store + append timeline (đường mock/rich).
   const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
@@ -290,18 +296,10 @@ export const TicketDetailScreen: React.FC = () => {
     }
   };
 
-  // ── Đường real-API (BE 3 trạng thái) ──────────────────────────────
-  const handleRealStart = async () => {
-    const note = noteInput.trim() || 'Đã tiếp nhận & bắt đầu xử lý';
-    try {
-      await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', note, scheduleSlots[0] || undefined);
-      await refreshReal();
-      setNoteInput('');
-    } catch { Alert.alert('Lỗi', 'Không thể cập nhật trạng thái. Vui lòng thử lại.'); }
-  };
+  // ── Resolve (ghi chi phí) qua API thật ────────────────────────────
   const handleRealResolve = async (cost: number, note: string) => {
     try {
-      await realMaintenanceService.resolve(idNum, {
+      const dto = await realMaintenanceService.resolve(idNum, {
         repairCost: cost, resolutionNote: note,
         costPaidBy: costPaidBy === 'host' ? 'HOST' : 'TENANT',
         cause: cause === 'misuse' ? 'MISUSE' : 'WEAR',  // MISUSE → BE trừ cọc lúc checkout
@@ -309,13 +307,29 @@ export const TicketDetailScreen: React.FC = () => {
       });
       await refreshReal();
       setShowCostInput(false);
-      Alert.alert('✅ Hoàn tất!', `Ticket ${ticket.ticketCode} đã đóng.\nChi phí: ${fmt(cost)}`);
-    } catch { Alert.alert('Lỗi', 'Không thể lưu kết quả. Vui lòng thử lại.'); }
+      if (dto.status === 'PENDING_APPROVAL') {
+        Alert.alert('🧾 Chờ duyệt', `Chi phí ${fmt(cost)} vượt ngưỡng — chờ chủ nhà/Admin duyệt trước khi đóng.`);
+      } else {
+        Alert.alert('🛠 Đã sửa xong', `Chi phí: ${fmt(cost)}.\nĐã gửi khách nghiệm thu — ticket đóng khi khách xác nhận.`);
+      }
+    } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể lưu kết quả. Vui lòng thử lại.')); }
   };
 
-  // ── Đường rich (mock/store) ───────────────────────────────────────
-  const handleAcknowledge = () => {
+  // ── Rich flow: ticket thật gọi API BE, ticket mock ghi store ──────
+  const handleAcknowledge = async () => {
     const techNote = selectedTech ? ` · giao ${selectedTech.name}` : '';
+    if (isReal) {
+      try {
+        await realMaintenanceService.acknowledge(
+          idNum,
+          noteInput.trim() || `Đã tiếp nhận yêu cầu${techNote}`,
+          selectedTech ? `${selectedTech.name} (${selectedTech.phone})` : assignInput || undefined,
+        );
+        await refreshReal();
+        setNoteInput('');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể tiếp nhận yêu cầu. Vui lòng thử lại.')); }
+      return;
+    }
     patchStore(
       { status: 'acknowledged', acknowledgedAt: today(),
         assignedTo: selectedTech ? `${selectedTech.name} (${selectedTech.phone})` : assignInput || ticket.assignedTo,
@@ -323,26 +337,59 @@ export const TicketDetailScreen: React.FC = () => {
       mkEntry('acknowledged', `Đã tiếp nhận yêu cầu${techNote}`),
     );
   };
-  const handleProposeSchedule = () => {
+  const handleProposeSchedule = async () => {
     if (scheduleSlots.length === 0) { Alert.alert('Chọn lịch', 'Hãy chọn ít nhất 1 khung thời gian đề xuất.'); return; }
+    if (isReal) {
+      try {
+        await realMaintenanceService.schedule(idNum, scheduleSlots, noteInput.trim() || undefined);
+        await refreshReal();
+        setNoteInput('');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể gửi lịch hẹn. Vui lòng thử lại.')); }
+      return;
+    }
     patchStore(
       { status: 'scheduled', scheduledSlots: scheduleSlots, estimatedDate: fmtSchedule(scheduleSlots[0]) },
       mkEntry('scheduled', `Đề xuất lịch: ${scheduleSlots.map(fmtSchedule).join(', ')} — chờ khách xác nhận`),
     );
   };
-  const handleStart = () => {
-    if (!hasPhoto('before')) { Alert.alert('Thiếu ảnh', 'Cần chụp ít nhất 1 ảnh hiện trạng (trước sửa) để bắt đầu.'); return; }
+  const handleStart = async () => {
+    if (!hasBeforePhoto) { Alert.alert('Thiếu ảnh', 'Cần chụp ít nhất 1 ảnh hiện trạng (trước sửa) để bắt đầu.'); return; }
     const note = noteInput.trim() || 'Bắt đầu thi công sửa chữa';
+    if (isReal) {
+      try {
+        await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', note);
+        await refreshReal();
+        setNoteInput('');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể cập nhật trạng thái. Vui lòng thử lại.')); }
+      return;
+    }
     patchStore({ status: 'in_progress' }, mkEntry('in_progress', note));
     setNoteInput('');
   };
-  const handleHold = () => {
+  const handleHold = async () => {
     if (!holdReason.trim()) { Alert.alert('Lý do', 'Nhập lý do tạm dừng (vd: chờ phụ tùng).'); return; }
-    patchStore({ status: 'on_hold', onHoldReason: holdReason.trim() }, mkEntry('on_hold', `Tạm dừng: ${holdReason.trim()}`));
+    const reason = holdReason.trim();
+    if (isReal) {
+      try {
+        await realMaintenanceService.updateStatus(idNum, 'ON_HOLD', `Tạm dừng: ${reason}`, reason);
+        await refreshReal();
+        setHoldReason('');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể tạm dừng. Vui lòng thử lại.')); }
+      return;
+    }
+    patchStore({ status: 'on_hold', onHoldReason: reason }, mkEntry('on_hold', `Tạm dừng: ${reason}`));
     setHoldReason('');
   };
-  const handleResume = () =>
+  const handleResume = async () => {
+    if (isReal) {
+      try {
+        await realMaintenanceService.updateStatus(idNum, 'IN_PROGRESS', 'Tiếp tục xử lý');
+        await refreshReal();
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể tiếp tục. Vui lòng thử lại.')); }
+      return;
+    }
     patchStore({ status: 'in_progress', onHoldReason: undefined }, mkEntry('in_progress', 'Tiếp tục xử lý'));
+  };
 
   const handleSubmitDone = () => {
     if (!hasPhoto('after')) { Alert.alert('Thiếu ảnh', 'Cần chụp ảnh sau sửa chữa để hoàn tất.'); return; }
@@ -486,7 +533,7 @@ export const TicketDetailScreen: React.FC = () => {
             onAdd={() => handleAddPhoto('before')}
             disabled={!isEditMode && !hasPhoto('before')}
           />
-          {['in_progress', 'on_hold', 'pending_approval', 'done', 'confirmed', 'resolved'].includes(ticket.status) && (
+          {['in_progress', 'on_hold', 'pending_approval', 'done', 'confirmed', 'reopened', 'resolved'].includes(ticket.status) && (
             <PhotoEvidenceRow
               type="after" photos={photos}
               onAdd={() => handleAddPhoto('after')}
@@ -496,7 +543,7 @@ export const TicketDetailScreen: React.FC = () => {
         </View>
 
         {/* ── Chọn kỹ thuật viên (rich, trước khi tiếp nhận) ───────── */}
-        {richMode && (ticket.status === 'pending' || ticket.status === 'acknowledged') && (
+        {richMode && (ticket.status === 'pending' || ticket.status === 'acknowledged' || ticket.status === 'reopened') && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Kỹ thuật viên phụ trách</Text>
             <View style={s.scheduleRow}>
@@ -586,19 +633,22 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Cổng duyệt chi phí (rich, pending_approval) ──────────── */}
+        {/* ── Cổng duyệt chi phí (pending_approval) ────────────────── */}
         {richMode && ticket.status === 'pending_approval' && (
           <View style={[s.card, { borderColor: '#EA580C', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>Chờ Admin duyệt chi phí</Text>
             <Text style={s.descText}>Chi phí {ticket.repairCost != null ? fmt(ticket.repairCost) : ''} vượt ngưỡng {fmt(MAINTENANCE_COST_APPROVAL_THRESHOLD)}.</Text>
-            <View style={[s.costPaidByRow, { marginTop: Spacing.sm }]}>
-              <TouchableOpacity style={[s.costPaidByBtn, { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={handleApprove}>
-                <Text style={[s.costPaidByText, { color: Colors.white }]}>✓ Duyệt (demo Admin)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[s.costPaidByBtn, { borderColor: Colors.error }]} onPress={handleReject}>
-                <Text style={[s.costPaidByText, { color: Colors.error }]}>✕ Từ chối</Text>
-              </TouchableOpacity>
-            </View>
+            {/* Ticket thật: quyền duyệt thuộc Admin (web); manager chỉ chờ. Nút demo chỉ cho mock. */}
+            {!isReal && (
+              <View style={[s.costPaidByRow, { marginTop: Spacing.sm }]}>
+                <TouchableOpacity style={[s.costPaidByBtn, { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={handleApprove}>
+                  <Text style={[s.costPaidByText, { color: Colors.white }]}>✓ Duyệt (demo Admin)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.costPaidByBtn, { borderColor: Colors.error }]} onPress={handleReject}>
+                  <Text style={[s.costPaidByText, { color: Colors.error }]}>✕ Từ chối</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
@@ -730,22 +780,12 @@ export const TicketDetailScreen: React.FC = () => {
           </>
         ) : (
           <>
-            {/* Đường real-API (BE 3 trạng thái) */}
-            {isReal && ticket.status === 'pending' && (
-              <TouchableOpacity style={s.advanceBtn} onPress={handleRealStart}>
-                <Text style={s.advanceBtnText}>🔧 Tiếp nhận & bắt đầu xử lý</Text>
-              </TouchableOpacity>
-            )}
-            {isReal && ticket.status === 'in_progress' && (
-              <TouchableOpacity style={s.advanceBtn} onPress={() => setShowCostInput(true)}>
-                <Text style={s.advanceBtnText}>✅ Đánh dấu đã sửa xong</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Đường rich (mock/store) */}
-            {richMode && ticket.status === 'pending' && (
+            {/* Rich flow — ticket thật gọi API BE, ticket mock ghi store */}
+            {richMode && (ticket.status === 'pending' || ticket.status === 'reopened') && (
               <TouchableOpacity style={s.advanceBtn} onPress={handleAcknowledge}>
-                <Text style={s.advanceBtnText}>📋 Tiếp nhận yêu cầu</Text>
+                <Text style={s.advanceBtnText}>
+                  {ticket.status === 'reopened' ? '↩️ Tiếp nhận xử lý lại' : '📋 Tiếp nhận yêu cầu'}
+                </Text>
               </TouchableOpacity>
             )}
             {richMode && ticket.status === 'acknowledged' && (

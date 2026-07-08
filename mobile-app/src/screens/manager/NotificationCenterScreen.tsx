@@ -158,6 +158,16 @@ export const NotificationCenterScreen: React.FC = () => {
 
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);
+    // Thông báo bảo trì: nếu body có "#<id>" thì mở thẳng ticket, không thì về tab bảo trì.
+    if (notif.type.startsWith('maintenance')) {
+      const m = notif.body?.match(/#(\d+)/);
+      if (m) {
+        navigation.navigate('MaintenanceTicketDetail', { ticketId: m[1] });
+      } else {
+        navigation.navigate('ManagerTabs', { screen: 'ManagerMaintenance' });
+      }
+      return;
+    }
     if (notif.actionRoute) {
       if (TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('ManagerTabs', { screen: notif.actionRoute });

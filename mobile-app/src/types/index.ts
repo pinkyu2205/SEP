@@ -127,6 +127,7 @@ export type MaintenanceStatus =
   | 'pending_approval'
   | 'done'
   | 'confirmed'
+  | 'reopened'
   | 'accepted'
   | 'resolved'
   | 'cancelled';
@@ -183,7 +184,11 @@ export interface CreateMaintenanceRequest {
 }
 
 // ===== Real API DTOs (theo Maintenance_BE_Contract.md) — enum UPPERCASE khớp BE =====
-export type MaintenanceReqStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
+// Đủ bộ enum MaintenanceStatus của BE. RESOLVED là giá trị legacy trong dữ liệu cũ.
+export type MaintenanceReqStatus =
+  | 'PENDING' | 'ACKNOWLEDGED' | 'SCHEDULED' | 'IN_PROGRESS' | 'ON_HOLD'
+  | 'PENDING_APPROVAL' | 'DONE' | 'CONFIRMED' | 'REOPENED' | 'CANCELLED'
+  | 'RESOLVED';
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceReqCategory =
   | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';

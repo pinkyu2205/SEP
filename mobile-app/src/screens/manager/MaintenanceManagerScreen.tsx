@@ -68,12 +68,14 @@ export const MaintenanceManagerScreen: React.FC = () => {
   };
 
   const stats = useMemo(() => {
-    const open = tickets.filter(t => t.status !== 'resolved' && t.status !== 'cancelled');
+    const open = tickets.filter(t => !TERMINAL.includes(t.status));
+    const WORKING = ['accepted', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval'];
+    const DONE_LIKE = ['done', 'confirmed', 'resolved'];
     return {
       urgentOpen:   open.filter(t => t.priority === 'urgent').length,
-      pendingNew:   tickets.filter(t => t.status === 'pending').length,
-      inProgress:   tickets.filter(t => t.status === 'accepted' || t.status === 'in_progress').length,
-      resolvedMonth:tickets.filter(t => t.status === 'resolved').length,
+      pendingNew:   tickets.filter(t => t.status === 'pending' || t.status === 'reopened').length,
+      inProgress:   tickets.filter(t => WORKING.includes(t.status)).length,
+      resolvedMonth:tickets.filter(t => DONE_LIKE.includes(t.status)).length,
       slaAtRisk:    tickets.filter(isOverdue).length,
       totalOpen:    open.length,
     };
@@ -83,7 +85,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
   const openQueue = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets
-      .filter(t => t.status !== 'resolved' && t.status !== 'cancelled')
+      .filter(t => !TERMINAL.includes(t.status))
       .filter(t => !q
         || t.title.toLowerCase().includes(q)
         || t.ticketCode.toLowerCase().includes(q)
@@ -120,8 +122,8 @@ export const MaintenanceManagerScreen: React.FC = () => {
       map.get(t.propertyId)!.tickets.push(t);
     });
     return Array.from(map.values()).sort((a, b) => {
-      const aU = a.tickets.filter(t => t.priority === 'urgent' && t.status !== 'resolved').length;
-      const bU = b.tickets.filter(t => t.priority === 'urgent' && t.status !== 'resolved').length;
+      const aU = a.tickets.filter(t => t.priority === 'urgent' && !TERMINAL.includes(t.status)).length;
+      const bU = b.tickets.filter(t => t.priority === 'urgent' && !TERMINAL.includes(t.status)).length;
       return bU - aU;
     });
   }, [tickets]);
@@ -272,11 +274,12 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
 
           {buildingGroups.map(group => {
-            const open      = group.tickets.filter(t => t.status !== 'resolved' && t.status !== 'cancelled');
+            const open      = group.tickets.filter(t => !TERMINAL.includes(t.status));
             const urgent    = open.filter(t => t.priority === 'urgent');
-            const inProg    = group.tickets.filter(t => t.status === 'in_progress' || t.status === 'accepted');
-            const resolved  = group.tickets.filter(t => t.status === 'resolved');
-            const pending   = group.tickets.filter(t => t.status === 'pending');
+            const inProg    = group.tickets.filter(t =>
+              ['in_progress', 'accepted', 'acknowledged', 'scheduled', 'on_hold', 'pending_approval'].includes(t.status));
+            const resolved  = group.tickets.filter(t => ['done', 'confirmed', 'resolved'].includes(t.status));
+            const pending   = group.tickets.filter(t => t.status === 'pending' || t.status === 'reopened');
             const slaRisk   = open.filter(isOverdue);
             const total     = group.tickets.length;
             const doneRate  = total > 0 ? Math.round((resolved.length / total) * 100) : 100;
