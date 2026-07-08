@@ -63,17 +63,51 @@ export const realMaintenanceService = {
     return data;
   },
 
-  /** Đổi trạng thái + lịch hẹn (review & schedule). */
+  /** PUT /{id}/acknowledge — tiếp nhận yêu cầu (PENDING → ACKNOWLEDGED). */
+  acknowledge: async (id: number, note?: string, technicianId?: string): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/acknowledge`, {
+      technicianId: technicianId ?? '',
+      note,
+    });
+    return data;
+  },
+
+  /** PUT /{id}/schedule — đề xuất các khung giờ sửa (→ SCHEDULED). */
+  schedule: async (id: number, scheduledSlots: string[], note?: string): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/schedule`, {
+      scheduledSlots,
+      note,
+    });
+    return data;
+  },
+
+  /** PUT /{id}/confirm-schedule — TENANT chọn 1 khung giờ trong các slot đề xuất. */
+  confirmSchedule: async (id: number, slot: string): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm-schedule`, {
+      slot,
+    });
+    return data;
+  },
+
+  /** PUT /{id}/confirm — TENANT nghiệm thu: accept=true → CONFIRMED, false → REOPENED. */
+  confirm: async (id: number, accept: boolean): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm`, {
+      accept,
+    });
+    return data;
+  },
+
+  /** Đổi trạng thái tự do (IN_PROGRESS / ON_HOLD / CANCELLED...). */
   updateStatus: async (
     id: number,
     status: MaintenanceReqStatus,
     note?: string,
-    scheduledDate?: string,
+    onHoldReason?: string,
   ): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/status`, {
       status,
       note,
-      scheduledDate,
+      onHoldReason,
     });
     return data;
   },

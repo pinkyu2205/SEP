@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -12,6 +12,8 @@ import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
 } from '@/constants/maintenance';
 import { useTenantRequests, tenantMaintenanceStore } from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
@@ -37,13 +39,44 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const allTenant = useTenantRequests();
   const live = allTenant.find(r => r.id === routeRequest.id);
   const isMock = !!live;
-  const request = live ?? routeRequest;
+
+  // Ticket thật (id số, không có trong store mock): nạp bản mới nhất từ BE
+  // để thao tác nghiệm thu/xác nhận lịch phản ánh đúng trạng thái server.
+  const idNum = Number(routeRequest.id);
+  const isRealId = !isMock && Number.isFinite(idNum) && idNum > 0;
+  const [realRequest, setRealRequest] = useState<MaintenanceRequest | undefined>(undefined);
+  useEffect(() => {
+    if (!isRealId) return;
+    let active = true;
+    realMaintenanceService.getDetail(idNum)
+      .then(dto => { if (active) setRealRequest(dtoToTenantRequest(dto)); })
+      .catch(() => { /* offline: dùng bản route param */ });
+    return () => { active = false; };
+  }, [idNum, isRealId]);
+
+  const request = live ?? realRequest ?? routeRequest;
+  const isReal = isRealId;
+
+  const refreshReal = async () => {
+    try { setRealRequest(dtoToTenantRequest(await realMaintenanceService.getDetail(idNum))); }
+    catch { /* bỏ qua */ }
+  };
+  const apiErrMsg = (e: any, fallback: string) =>
+    e?.response?.data?.error || e?.response?.data?.message || fallback;
 
   const currentStatusMeta = STATUS_META[request.status] || STATUS_META.pending;
   const currentStatusIdx = ORDERED_STATUSES.indexOf(request.status as MaintenanceStatus);
   const priorityColor = getMaintenancePriorityColor(request.priority);
 
-  const confirmSlot = (slot: string) => {
+  const confirmSlot = async (slot: string) => {
+    if (isReal) {
+      try {
+        await realMaintenanceService.confirmSchedule(idNum, slot);
+        await refreshReal();
+        Alert.alert('📅 Đã xác nhận', `Bạn đã chọn lịch: ${formatDate(slot)}. Quản lý sẽ đến đúng hẹn.`);
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể xác nhận lịch. Vui lòng thử lại.')); }
+      return;
+    }
     tenantMaintenanceStore.update(request.id, {
       confirmedSlot: formatDate(slot),
       estimatedCompletionDate: slot,
@@ -51,7 +84,14 @@ export const MaintenanceDetailScreen: React.FC = () => {
       updatedAt: nowIso().slice(0, 10),
     });
   };
-  const confirmDone = () => {
+  const confirmDone = async () => {
+    if (isReal) {
+      try {
+        await realMaintenanceService.confirm(idNum, true);
+        Alert.alert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể nghiệm thu. Vui lòng thử lại.')); }
+      return;
+    }
     tenantMaintenanceStore.update(request.id, {
       status: 'confirmed',
       tenantConfirmedAt: nowIso().slice(0, 10),
@@ -61,7 +101,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
     });
     Alert.alert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
   };
-  const reopen = () => {
+  const reopen = async () => {
+    if (isReal) {
+      try {
+        await realMaintenanceService.confirm(idNum, false); // accept=false → BE mở lại (REOPENED)
+        await refreshReal();
+        Alert.alert('Đã mở lại', 'Yêu cầu đã được mở lại, quản lý sẽ xử lý tiếp.');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể mở lại yêu cầu. Vui lòng thử lại.')); }
+      return;
+    }
     tenantMaintenanceStore.update(request.id, {
       status: 'in_progress',
       timeline: [...request.timeline, mkTenantEntry('in_progress', 'Khách phản hồi chưa đạt — mở lại yêu cầu')],
@@ -237,7 +285,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         </View>
 
         {/* Xác nhận lịch hẹn (khách chọn khung giờ manager đề xuất) */}
-        {isMock && request.status === 'scheduled' && (request.scheduledSlots?.length ?? 0) > 0 && !request.confirmedSlot && (
+        {request.status === 'scheduled' && (request.scheduledSlots?.length ?? 0) > 0 && !request.confirmedSlot && (
           <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>📅 Chọn khung giờ phù hợp</Text>
             {request.scheduledSlots!.map(slot => (
@@ -249,7 +297,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         )}
 
         {/* Nghiệm thu khi đã sửa xong (DONE) */}
-        {isMock && request.status === 'done' && (
+        {request.status === 'done' && (
           <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>🛠 Thợ báo đã sửa xong</Text>
             <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>

@@ -4,13 +4,12 @@
  * Nguồn sự thật duy nhất cho trạng thái / mức ưu tiên / loại sự cố, tránh mỗi
  * màn hình tự định nghĩa lại (lệch màu, lệch nhãn).
  *
- * LUỒNG CẢI THIỆN (rich state machine):
+ * LUỒNG CẢI THIỆN (rich state machine — BE đã hỗ trợ ĐỦ các trạng thái này):
  *   pending → acknowledged → scheduled → in_progress → done → confirmed
  *   nhánh phụ: on_hold (chờ phụ tùng), pending_approval (chờ duyệt chi phí),
- *              cancelled.
+ *              reopened (khách từ chối nghiệm thu), cancelled.
  *
- * Đường real-API (BE chỉ có PENDING/IN_PROGRESS/RESOLVED/CANCELLED) sẽ ánh xạ
- * các trạng thái mở rộng về trạng thái BE gần nhất — xem maintenanceMappers.
+ * Map BE enum ↔ FE key: xem BE_STATUS_MAP trong services/shared/maintenanceMappers.
  */
 
 export type MaintenanceStatusKey =
@@ -22,6 +21,7 @@ export type MaintenanceStatusKey =
   | 'pending_approval'
   | 'done'
   | 'confirmed'
+  | 'reopened'   // tenant từ chối nghiệm thu → mở lại
   | 'resolved'   // legacy / terminal đường real-API
   | 'cancelled';
 
@@ -55,6 +55,7 @@ export const MAINTENANCE_STATUS_META: Record<MaintenanceStatusKey, StatusMeta> =
   pending_approval: { label: 'Chờ duyệt chi',  color: '#EA580C', bg: '#FFF7ED', icon: '🧾', step: -1 },
   done:             { label: 'Chờ nghiệm thu', color: '#14B8A6', bg: '#F0FDFA', icon: '🛠', step: 4 },
   confirmed:        { label: 'Hoàn tất',       color: '#10B981', bg: '#F0FDF4', icon: '✅', step: 5 },
+  reopened:         { label: 'Mở lại',         color: '#EF4444', bg: '#FEF2F2', icon: '↩️', step: -1 },
   resolved:         { label: 'Hoàn tất',       color: '#10B981', bg: '#F0FDF4', icon: '✅', step: 5 },
   cancelled:        { label: 'Đã hủy',         color: '#6B7280', bg: '#F3F4F6', icon: '✕',  step: -1 },
 };
@@ -90,6 +91,7 @@ export const MAINTENANCE_NEXT_STATUS: Record<MaintenanceStatusKey, MaintenanceSt
   pending_approval: 'done',        // sau khi admin duyệt
   done:             'confirmed',   // tenant nghiệm thu
   confirmed:        null,
+  reopened:         'acknowledged', // xử lý lại từ đầu
   resolved:         null,
   cancelled:        null,
 };

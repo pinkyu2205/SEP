@@ -56,7 +56,10 @@ export const realNotificationService = {
       { params: { size: 50 } },
     );
     const rows = Array.isArray(data) ? data : data?.content ?? [];
-    return rows.map(mapRow);
+    // BE trả Page KHÔNG sort (id ASC — cũ nhất trước) và bỏ qua param `sort`,
+    // nên phải tự đảo về mới-nhất-trước. Lưu ý: khi user vượt 50 notif, page 0
+    // chỉ còn 50 cái CŨ nhất → cần BE sort DESC (đã gửi API-NOTIF-Sort-BE-TODO.md).
+    return rows.map(mapRow).sort((a, b) => b.id - a.id);
   },
 
   /** Số thông báo chưa đọc (cho badge). */

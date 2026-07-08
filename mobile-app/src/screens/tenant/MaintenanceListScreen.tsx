@@ -39,7 +39,7 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot:
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
 const ACTIVE: MaintenanceStatus[] = [
-  'pending', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval', 'done',
+  'pending', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval', 'done', 'reopened',
 ];
 const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
