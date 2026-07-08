@@ -15,6 +15,7 @@ import {
   Settings,
   Settings2,
   ShieldCheck,
+  UserPlus,
   Users,
   Wrench,
   X,
@@ -40,6 +41,10 @@ const navItems: SidebarItem[] = [
   { type: 'section', label: 'Quy trình tiếp nhận nhà' },
   { path: '/admin/buildings/draft', label: 'Khởi tạo nhà', icon: FilePlus },
   { path: '/admin/buildings/configuration', label: 'Cấu hình khai thác', icon: Settings2 },
+
+  // ── ĐÓN KHÁCH ────────────────────────────────────────────────────
+  { type: 'section', label: 'Đón khách' },
+  { path: '/admin/onboarding', label: 'Hợp đồng nháp', icon: UserPlus },
 
   // ── TÀI CHÍNH & HỢP ĐỒNG ─────────────────────────────────────────
   { type: 'section', label: 'Tài chính & Hợp đồng' },

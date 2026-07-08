@@ -107,7 +107,7 @@ export const ResumeContractScreen: React.FC = () => {
   if (selected) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Header onBack={() => setSelected(null)} title="Tiếp tục hợp đồng" />
+        <Header onBack={() => setSelected(null)} title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'} />
         <ContractActionPanel
           contract={selected}
           onDone={() => {
@@ -134,7 +134,13 @@ export const ResumeContractScreen: React.FC = () => {
           </View>
         ) : (
           list.map((c) => {
-            const meta = c.priceApprovalStatus ? STATUS_META[c.priceApprovalStatus] : null
+            const meta = c.priceApprovalStatus
+              ? STATUS_META[c.priceApprovalStatus]
+              : c.status === 'DRAFT'
+                ? { label: 'Nháp — chờ đón khách', color: '#D97706', bg: '#FFFBEB' }
+                : c.status === 'PENDING'
+                  ? { label: 'Chờ thu cọc', color: '#0891B2', bg: '#ECFEFF' }
+                  : null
             return (
               <TouchableOpacity
                 key={c.id}
@@ -315,6 +321,8 @@ const DepositOtpPanel: React.FC<{
   const [showWebView, setShowWebView] = useState(false)
   const [busy, setBusy] = useState(false)
   const [otp, setOtp] = useState('')
+  const [otpSending, setOtpSending] = useState(false)
+  const otpSentRef = React.useRef(false)
 
   // Poll trạng thái thanh toán (PayOS, local không có webhook).
   useEffect(() => {
@@ -332,6 +340,31 @@ const DepositOtpPanel: React.FC<{
     }, 5000)
     return () => clearInterval(timer)
   }, [method, paid, contract.id])
+
+  // Giữ OTP: khi đã thu cọc xong, tự gửi OTP tới SĐT khách để kích hoạt HĐ.
+  useEffect(() => {
+    if (!paid || otpSentRef.current) return
+    otpSentRef.current = true
+    setOtpSending(true)
+    realTenantService
+      .sendContractOtp(contract.id)
+      .catch(() => {
+        otpSentRef.current = false
+      })
+      .finally(() => setOtpSending(false))
+  }, [paid, contract.id])
+
+  const resendOtp = async () => {
+    try {
+      setOtpSending(true)
+      await realTenantService.sendContractOtp(contract.id)
+      Alert.alert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${contract.tenantPhone}.`)
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không gửi được OTP.'))
+    } finally {
+      setOtpSending(false)
+    }
+  }
 
   const createPayment = async () => {
     try {
@@ -360,7 +393,7 @@ const DepositOtpPanel: React.FC<{
   }
 
   const confirm = async () => {
-    if (otp !== '123456') return Alert.alert('Lỗi', 'Mã OTP không hợp lệ (demo: 123456).')
+    if (otp.length !== 6) return Alert.alert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
     try {
       setBusy(true)
       const res = await realTenantService.confirmContract(contract.id, { otp })
@@ -386,8 +419,10 @@ const DepositOtpPanel: React.FC<{
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
       <View style={[styles.banner, { backgroundColor: '#ECFEFF' }]}>
-        <Text style={styles.bannerIcon}>✅</Text>
-        <Text style={styles.bannerTitle}>Host đã duyệt giá</Text>
+        <Text style={styles.bannerIcon}>{contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? '✅' : '🤝'}</Text>
+        <Text style={styles.bannerTitle}>
+          {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu cọc'}
+        </Text>
         <Text style={styles.bannerDesc}>
           {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Tiến hành thu cọc{' '}
           {formatVnd(depositValue)} đ rồi xác thực OTP để kích hoạt hợp đồng.
@@ -478,7 +513,9 @@ const DepositOtpPanel: React.FC<{
             <Text style={styles.paidIcon}>✅</Text>
             <Text style={styles.paidText}>Đã ghi nhận thu cọc!</Text>
           </View>
-          <Text style={[styles.label, { marginTop: Spacing.md }]}>Mã OTP (demo: 123456)</Text>
+          <Text style={[styles.label, { marginTop: Spacing.md }]}>
+            Mã OTP gửi tới SĐT khách {contract.tenantPhone}
+          </Text>
           <TextInput
             style={[styles.input, styles.otpInput]}
             value={otp}
@@ -488,6 +525,11 @@ const DepositOtpPanel: React.FC<{
             placeholder="------"
             placeholderTextColor={Colors.textMuted}
           />
+          <TouchableOpacity onPress={resendOtp} disabled={otpSending} style={{ paddingVertical: Spacing.sm }}>
+            <Text style={{ color: Colors.primary, fontWeight: '600', textAlign: 'center' }}>
+              {otpSending ? 'Đang gửi OTP...' : 'Gửi lại OTP'}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.primaryBtn, (otp.length !== 6 || busy) && styles.btnDisabled]}
             onPress={confirm}

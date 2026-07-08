@@ -17,7 +17,7 @@ import {
 } from '@/services/manager/invoiceService';
 
 const QUICK_ACTIONS = [
-  { emoji: '🤝', label: 'Đón khách',  route: 'Onboarding',        color: Colors.primary },
+  { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },
   { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
   { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
   { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
@@ -25,7 +25,7 @@ const QUICK_ACTIONS = [
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
-  { emoji: '📨', label: 'Chờ duyệt', route: 'ResumeContract',     color: Colors.warning },
+  { emoji: '📨', label: 'Khách chờ đón', route: 'ResumeContract',  color: Colors.warning },
 ] as const;
 
 // ── Component ──────────────────────────────────────────────────────────────

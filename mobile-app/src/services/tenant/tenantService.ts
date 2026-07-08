@@ -110,6 +110,12 @@ export interface TenantLookupResponse {
   role?: string; // BE (khuyến nghị) trả role để FE hiển thị hint chính xác
 }
 
+// Onboarding v2: username khách thuê MỚI = SĐT thuần (BE bỏ tiền tố 't').
+// Xem BE-tenant-onboarding-v2-handoff.md §3.3/§4.7.
+// Dùng làm fallback khi confirm response không kèm tenantUsername.
+export const defaultTenantUsername = (phone: string): string =>
+  String(phone).replace(/\D/g, '');
+
 export const realTenantService = {
   onboardRoomTenant: async (
     propertyId: number,
@@ -179,6 +185,13 @@ export const realTenantService = {
     return data;
   },
 
+  // Gửi OTP xác nhận hợp đồng tới SĐT khách (BE: POST /tenant-contracts/{id}/send-otp).
+  // Dev OTP mode: BE không gửi SMS thật, confirm chấp nhận mọi mã 6 số. Prod (Twilio): bắt buộc
+  // gọi bước này trước confirm để có mã hợp lệ. Xem tài liệu tiếp khách §7.1.
+  sendContractOtp: async (contractId: number): Promise<void> => {
+    await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/send-otp`);
+  },
+
   // Hoàn tất HĐ sau khi đã thanh toán cọc + OTP.
   // BE: confirm(Long id, @RequestBody ConfirmContractRequest) -> BẮT BUỘC có body (chứa mã OTP).
   confirmContract: async (
@@ -194,10 +207,10 @@ export const realTenantService = {
 
   // ===== Duyệt giá (Case 2) — phụ thuộc BE, tên endpoint suy ra từ thiết kế =====
 
-  // Danh sách HĐ chờ xử lý của manager (chờ duyệt / đã duyệt-chờ cọc / bị từ chối).
-  // Chấp nhận cả response dạng array thuần lẫn Spring Page ({ content: [...] }).
+  // Danh sách HĐ chờ xử lý của manager: gồm DRAFT/PENDING được gán (đón khách v2)
+  // và các HĐ chờ/đã duyệt/bị từ chối giá. Chấp nhận array thuần lẫn Spring Page.
   listManagedContracts: async (
-    status?: ContractPriceApprovalStatus,
+    status?: ContractPriceApprovalStatus | 'DRAFT' | 'PENDING',
   ): Promise<TenantContractResponse[]> => {
     const { data } = await realApiClient.get<
       TenantContractResponse[] | { content?: TenantContractResponse[] }

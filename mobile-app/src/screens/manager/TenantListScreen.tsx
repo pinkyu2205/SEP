@@ -847,7 +847,7 @@ export const TenantListScreen: React.FC = () => {
             <Text style={styles.subtitle}>{filtered.length} kết quả · {stats.active} đang ở</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('Onboarding')}>
+        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('OnboardingV2')}>
           <Text style={styles.addBtnText}>+ Đón khách</Text>
         </TouchableOpacity>
       </View>
