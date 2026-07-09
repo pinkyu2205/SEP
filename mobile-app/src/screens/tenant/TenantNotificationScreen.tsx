@@ -155,6 +155,11 @@ export const TenantNotificationScreen: React.FC = () => {
       navigation.navigate('TenantTabs', { screen: 'MaintenanceList' });
       return;
     }
+    // Thông báo hóa đơn (cron nhắc nợ — API-CRON-NhacNo-LateFee-BE-TODO.md) → tab hóa đơn.
+    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
+      navigation.navigate('TenantTabs', { screen: 'InvoiceList' });
+      return;
+    }
     if (notif.actionRoute) {
       if (TENANT_TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('TenantTabs', { screen: notif.actionRoute });

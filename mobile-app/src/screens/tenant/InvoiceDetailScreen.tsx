@@ -22,6 +22,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF', gradientTop: '#7C3AED' },
   electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
   water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
+  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
 };
 
 const STATUS_CFG: Record<BillStatus, { label: string; color: string; bg: string; emoji: string }> = {

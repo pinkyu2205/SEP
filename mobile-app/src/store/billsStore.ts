@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 // ===================== TYPES =====================
 export type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 export type BillPaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet' | 'other';
-export type InvoiceType = 'rent' | 'electricity' | 'water';
+export type InvoiceType = 'rent' | 'electricity' | 'water' | 'maintenance';
 
 export interface BillItem {
   label: string;

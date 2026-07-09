@@ -12,6 +12,7 @@ const TYPE_CONFIG: Record<InvoiceType, { icon: string; label: string; color: str
   rent:        { icon: '🏠', label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },
   electricity: { icon: '⚡', label: 'Điện',       color: '#D97706', bg: '#FEF9C3' },
   water:       { icon: '💧', label: 'Nước',        color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { icon: '🔧', label: 'Phí bảo trì',  color: '#DC2626', bg: '#FEE2E2' },
 };
 
 const METHOD_LABEL: Record<string, string> = {

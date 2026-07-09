@@ -224,6 +224,12 @@ export interface MaintenanceRequestDto {
   repairCost?: number;
   resolutionNote?: string;
   resolvedAt?: string;
+  /** Ai trả phí sửa (BE trả từ 08/07): HOST = công ty, TENANT = khách làm hư. */
+  costPaidBy?: 'HOST' | 'TENANT';
+  /** Nguyên nhân hỏng: WEAR = hao mòn tự nhiên, MISUSE = lỗi sử dụng. */
+  cause?: 'WEAR' | 'MISUSE';
+  /** Số lần khách từ chối nghiệm thu (REOPENED). */
+  reopenCount?: number;
   images: string[];
   timeline: MaintenanceTimelineDto[];
   createdAt: string;
