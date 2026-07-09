@@ -14,6 +14,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
 };
 
 const QUICK_ACTIONS = [

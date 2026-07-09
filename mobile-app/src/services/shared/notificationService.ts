@@ -30,6 +30,9 @@ interface BeNotificationRow {
 
 /** Đổi type thô của BE về type UI (TYPE_CATEGORY/TYPE_ACCENT của các màn). */
 const normalizeType = (row: BeNotificationRow): string => {
+  // Cron nhắc nợ (API-CRON-NhacNo-LateFee-BE-TODO.md): BE ghi type BILLING_*.
+  if (row.type === 'BILLING_REMINDER') return 'new_bill';
+  if (row.type === 'BILLING_OVERDUE') return 'bill_overdue';
   if (row.type === 'MAINTENANCE') {
     // BE dùng chung 1 type — phân biệt qua nội dung: ticket mới / đã xong / cập nhật.
     if (/mới/i.test(row.title)) return 'maintenance_new';

@@ -168,6 +168,11 @@ export const NotificationCenterScreen: React.FC = () => {
       }
       return;
     }
+    // Thông báo hóa đơn (cron nhắc nợ) → tab billing của manager.
+    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
+      navigation.navigate('ManagerTabs', { screen: 'ManagerBilling' });
+      return;
+    }
     if (notif.actionRoute) {
       if (TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('ManagerTabs', { screen: notif.actionRoute });

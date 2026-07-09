@@ -13,6 +13,7 @@ import {
 } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
+import { realPendingChargeService, PendingCharge } from '@/services/manager/pendingChargeService';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, StatusMeta,
   MAINTENANCE_TECHNICIANS, MAINTENANCE_COST_APPROVAL_THRESHOLD,
@@ -238,6 +239,17 @@ export const TicketDetailScreen: React.FC = () => {
   const [holdReason,    setHoldReason]    = useState('');
   const [technicianId,  setTechnicianId]  = useState<string>(ticket?.technicianId || '');
 
+  // Khoản chờ thu (khách làm hư): ticket thật CONFIRMED + costPaidBy=tenant → nạp
+  // charge từ BE để manager phát hành hóa đơn MAINTENANCE ngay tại đây.
+  const [pendingCharge, setPendingCharge] = useState<PendingCharge | null>(null);
+  const [issuing,       setIssuing]       = useState(false);
+  useEffect(() => {
+    if (!isReal || ticket?.status !== 'confirmed' || ticket?.costPaidBy !== 'tenant') return;
+    realPendingChargeService.list({ propertyId: Number(ticket.propertyId) || undefined })
+      .then(list => setPendingCharge(list.find(c => (c.note || '').includes(`#${idNum}`)) ?? null))
+      .catch(() => { /* offline — ẩn khối thu tiền */ });
+  }, [isReal, idNum, ticket?.status, ticket?.costPaidBy, ticket?.propertyId]);
+
   if (!ticket) {
     return (
       <SafeAreaView style={s.safe}>
@@ -264,6 +276,25 @@ export const TicketDetailScreen: React.FC = () => {
   const hasBeforePhoto = isReal ? (ticket.images?.length ?? 0) > 0 || hasPhoto('before') : hasPhoto('before');
   const apiErrMsg = (e: any, fallback: string) =>
     e?.response?.data?.error || e?.response?.data?.message || fallback;
+
+  // Phát hành hóa đơn MAINTENANCE từ khoản chờ thu (khách làm hư).
+  const handleIssueInvoice = async () => {
+    if (!pendingCharge || issuing) return;
+    setIssuing(true);
+    try {
+      const inv = await realPendingChargeService.issueInvoice(pendingCharge.tenantContractId, {
+        chargeIds: [pendingCharge.id],
+        note: `Phí bảo trì ${ticket?.ticketCode || `ticket #${idNum}`} — khách làm hư`,
+      });
+      setPendingCharge({ ...pendingCharge, status: 'INVOICED', invoiceId: inv.id });
+      Alert.alert(
+        '🧾 Đã phát hành hóa đơn',
+        `Hóa đơn ${inv.code ?? `#${inv.id}`} (${fmt(Number(inv.grandTotal))}) đã gửi tới khách — khách thanh toán trong tab Hóa đơn.`,
+      );
+    } catch (e: any) {
+      Alert.alert('Lỗi', apiErrMsg(e, 'Không phát hành được hóa đơn. Vui lòng thử lại.'));
+    } finally { setIssuing(false); }
+  };
 
   // Cập nhật store + append timeline (đường mock/rich).
   const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
@@ -656,6 +687,34 @@ export const TicketDetailScreen: React.FC = () => {
         {richMode && ticket.status === 'done' && (
           <View style={[s.card, { backgroundColor: Colors.infoLight }]}>
             <Text style={[s.descText, { color: Colors.info }]}>⏳ Đã sửa xong — đang chờ khách nghiệm thu. Ticket sẽ tự đóng khi khách xác nhận.</Text>
+          </View>
+        )}
+
+        {/* ── Thu tiền khách làm hư (real, confirmed + costPaidBy=tenant) ── */}
+        {isReal && ticket.status === 'confirmed' && ticket.costPaidBy === 'tenant' && pendingCharge && (
+          <View style={[s.card, { borderColor: Colors.success, borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>Thu tiền khách (khách làm hư)</Text>
+            {pendingCharge.status === 'PENDING' ? (
+              <>
+                <Text style={s.descText}>
+                  Khoản chờ thu {fmt(Number(pendingCharge.amount))} đã ghi vào hợp đồng của khách.
+                  Phát hành hóa đơn để khách thanh toán ngay trên app.
+                </Text>
+                <TouchableOpacity
+                  style={[s.costPaidByBtn, { backgroundColor: Colors.success, borderColor: Colors.success, marginTop: Spacing.sm }]}
+                  onPress={handleIssueInvoice}
+                  disabled={issuing}
+                >
+                  <Text style={[s.costPaidByText, { color: Colors.white }]}>
+                    {issuing ? 'Đang phát hành…' : '🧾 Phát hành hóa đơn thu khách'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={s.descText}>
+                ✅ Đã phát hành hóa đơn{pendingCharge.invoiceId ? ` #${pendingCharge.invoiceId}` : ''} — chờ khách thanh toán.
+              </Text>
+            )}
           </View>
         )}
 
