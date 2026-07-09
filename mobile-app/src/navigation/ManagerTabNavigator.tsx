@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef } from 'react';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import {
-  Animated, LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View,
+  Animated, LayoutAnimation, Pressable, StyleSheet, Text, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ManagerHomeScreen } from '@/screens/manager/ManagerHomeScreen';
@@ -25,9 +25,8 @@ const TAB_META: Record<string, { label: string; icon: string; badge?: number }> 
   ManagerProfile: { label: 'Tài khoản', icon: '👤' },
 };
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// New Architecture (newArchEnabled: true) đã bật LayoutAnimation sẵn — không cần
+// gọi UIManager.setLayoutAnimationEnabledExperimental (nó là no-op và gây warning).
 
 const getVisibleRouteNames = (activeRouteName: string) => {
   if (FEATURE_ROUTES.includes(activeRouteName)) {

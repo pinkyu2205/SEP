@@ -1,0 +1,47 @@
+# Nginx cho SPA (React Router) + proxy API. ${BACKEND_URL} được envsubst lúc container start.
+server {
+    listen 80;
+    server_name _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # Nén cho text/js/css/json
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript application/xml image/svg+xml;
+
+    # Asset Vite có hash trong tên → cache dài hạn
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # API → Backend Spring (thay cho proxy Vite lúc dev: /api → localhost:8080)
+    location /api/ {
+        proxy_pass         ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+        client_max_body_size 25m;   # cho upload ảnh / scan hợp đồng qua BE
+    }
+
+    # Goong REST (autocomplete/geocode) — tương đương /goong-rest ở vite.config.
+    # LƯU Ý: bản build prod của goong.service GỌI THẲNG rsapi.goong.io (import.meta.env.DEV=false),
+    # nên block này chỉ có tác dụng nếu bạn sửa goong.service để luôn dùng '/goong-rest'.
+    location /goong-rest/ {
+        proxy_pass            https://rsapi.goong.io/;
+        proxy_ssl_server_name on;
+        proxy_set_header      Host rsapi.goong.io;
+    }
+
+    # SPA fallback — route còn lại trả index.html cho React Router
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

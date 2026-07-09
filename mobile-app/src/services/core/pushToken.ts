@@ -1,8 +1,9 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+// CHỈ import KIỂU — không nạp module lúc chạy (tránh Expo Go in ERROR/WARN khi import).
+import type * as NotificationsModule from 'expo-notifications';
 import realApiClient from '@/services/core/realApiClient';
 import { API_CONFIG } from '@/constants/api';
-import { setupAndroidChannel } from '@/services/core/notifications';
+import { setupAndroidChannel, isExpoGo } from '@/services/core/notifications';
 
 /**
  * Lấy EXPO PUSH TOKEN và gửi lên BE lưu vào user hiện tại.
@@ -14,6 +15,10 @@ import { setupAndroidChannel } from '@/services/core/notifications';
  */
 async function getExpoToken(): Promise<string | null> {
   if (Platform.OS === 'web') return null; // web không hỗ trợ push kiểu này
+  if (isExpoGo) return null; // Expo Go (SDK 53+) đã gỡ remote push -> bỏ qua, tránh log lỗi
+
+  // Lazy require: chỉ nạp expo-notifications khi thật sự cần (đã chắc chắn không phải Expo Go).
+  const Notifications = require('expo-notifications') as typeof NotificationsModule;
 
   await setupAndroidChannel();
 

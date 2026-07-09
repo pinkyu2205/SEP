@@ -30,13 +30,18 @@ import {
 import { userService } from '@/services/user.service';
 import type { UserResponse, UserStatus, CreateUserRequest } from '@/types/api.types';
 
+// Hệ thống CHỈ có 4 role (mỗi role = 1 loại tài khoản):
+//   admin=ROLE_ADMIN · host=ROLE_OWNER (Chủ nhà) · manager=ROLE_MANAGER · tenant=ROLE_TENANT (Khách thuê).
+// 'guest' chỉ là người xem trang public — KHÔNG có account/role.
 const roleMap: Record<string, { label: string; color: string }> = {
   'ROLE_ADMIN': { label: 'Admin Hệ Thống', color: 'bg-slate-950 text-white' },
   'ROLE_OWNER': { label: 'Chủ Nhà', color: 'bg-cyan-100 text-cyan-800' },
   'ROLE_MANAGER': { label: 'Quản Lý', color: 'bg-indigo-100 text-indigo-700' },
   'ROLE_TENANT': { label: 'Khách thuê', color: 'bg-emerald-100 text-emerald-700' },
-  'ROLE_USER': { label: 'Khách hàng', color: 'bg-amber-100 text-amber-700' },
 };
+
+// Admin (quyền cao nhất) tạo được cả 4 role trên.
+const CREATABLE_ROLES = ['ROLE_ADMIN', 'ROLE_OWNER', 'ROLE_MANAGER', 'ROLE_TENANT'] as const;
 
 const statusMap: Record<string, { label: string; color: string; dot: string }> = {
   'ACTIVE': { label: 'Đang hoạt động', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -48,11 +53,14 @@ const statusMap: Record<string, { label: string; color: string; dot: string }> =
 // Hồ sơ bổ sung hiển thị theo từng vai trò khi admin tạo tài khoản.
 type ExtraField = 'fullName' | 'email' | 'cccd';
 
+// /auth/register CHỈ lưu username/password/phoneNumber/role/fullName.
+// Ẩn 'email' và 'cccd' khỏi form vì register bỏ qua (không lưu) → điền vô vô nghĩa, dễ hiểu lầm.
+// CCCD của khách thuê nhập ở luồng Onboarding khách thuê, không phải ở màn tạo account này.
 const ROLE_EXTRA_FIELDS: Record<string, ExtraField[]> = {
-  ROLE_ADMIN: ['fullName', 'email'],
-  ROLE_MANAGER: ['fullName', 'email'],
-  ROLE_OWNER: ['fullName', 'email'],
-  ROLE_TENANT: ['fullName', 'cccd', 'email'],
+  ROLE_ADMIN: ['fullName'],
+  ROLE_MANAGER: ['fullName'],
+  ROLE_OWNER: ['fullName'],
+  ROLE_TENANT: ['fullName'],
 };
 
 const EXTRA_FIELD_CONFIG: Record<ExtraField, { label: string; placeholder: string; type: string; icon: LucideIcon }> = {
@@ -176,7 +184,10 @@ export const UserRoleManagement = () => {
       fetchUsers();
     } catch (err: any) {
       console.error(err);
-      setCreateError(err.response?.data?.message || 'Có lỗi xảy ra khi tạo tài khoản');
+      // register trả lỗi dạng { error, fieldErrors:{...} }; login/user trả { message }.
+      const data = err.response?.data;
+      const fieldErr = data?.fieldErrors ? Object.values(data.fieldErrors)[0] as string : undefined;
+      setCreateError(data?.message || data?.error || fieldErr || 'Có lỗi xảy ra khi tạo tài khoản');
     } finally {
       setIsSubmitting(false);
     }
@@ -400,7 +411,7 @@ export const UserRoleManagement = () => {
                       onChange={e => setCreateForm(prev => ({ ...prev, role: e.target.value }))}
                       className="input-field pl-10"
                     >
-                      {Object.entries(roleMap).map(([role, cfg]) => <option key={role} value={role}>{cfg.label}</option>)}
+                      {CREATABLE_ROLES.map(role => <option key={role} value={role}>{roleMap[role].label}</option>)}
                     </select>
                   </div>
                   <span className="mt-2 inline-block">

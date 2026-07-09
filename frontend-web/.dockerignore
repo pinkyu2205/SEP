@@ -1,0 +1,13 @@
+# KHÔNG copy vào build context (nhẹ + tránh lỗi):
+node_modules
+dist
+.git
+.gitignore
+*.log
+npm-debug.log*
+.vscode
+.idea
+Dockerfile
+.dockerignore
+
+# CHÚ Ý: KHÔNG ignore .env — Vite cần các biến VITE_* (Cloudinary, Goong) lúc build.
