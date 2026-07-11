@@ -125,6 +125,36 @@ export interface ContractDetailDto {
   pdfUrl?: string;
 }
 
+// ===== Biên bản bàn giao (đón khách) =====
+export interface HandoverEquipmentItem {
+  id: number;
+  name: string;
+  condition?: string;
+  quantity?: number;
+  source?: string;      // EXISTING = có sẵn trong nhà | ADDED = lắp thêm theo deal
+  scope?: string;       // ROOM = thuộc phòng | SHARED = khu vực chung
+  roomNumber?: string;
+  houseArea?: string;
+  cost?: number;        // chỉ có khi source = ADDED
+}
+
+export interface TenantHandoverResponse {
+  contractId: number;
+  contractCode: string;
+  propertyName?: string;
+  roomNumber?: string;
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
+  equipmentSnapshot?: string;
+  equipmentList?: HandoverEquipmentItem[];
+  acknowledged: boolean;
+  acknowledgedAt?: string;
+}
+
 export const realTenantSelfService = {
   // ---- Hồ sơ / tài khoản ----
   getMe: async (): Promise<AuthMe> => {
@@ -155,6 +185,19 @@ export const realTenantSelfService = {
 
   getContractDetail: async (id: number | string): Promise<ContractDetailDto> => {
     const { data } = await realApiClient.get<ContractDetailDto>(`/api/v1/tenant-contracts/${id}`);
+    return data;
+  },
+
+  // ---- Biên bản bàn giao (chỉ áp dụng cho HĐ đang ACTIVE) ----
+  getHandover: async (): Promise<TenantHandoverResponse> => {
+    const { data } = await realApiClient.get<TenantHandoverResponse>('/api/v1/tenant/me/handover');
+    return data;
+  },
+
+  // Xác nhận đã nhận đúng phòng/thiết bị như biên bản — chỉ gọi được 1 lần (BE chặn
+  // gọi lại nếu đã acknowledged).
+  acknowledgeHandover: async (): Promise<TenantHandoverResponse> => {
+    const { data } = await realApiClient.post<TenantHandoverResponse>('/api/v1/tenant/me/handover/acknowledge');
     return data;
   },
 };

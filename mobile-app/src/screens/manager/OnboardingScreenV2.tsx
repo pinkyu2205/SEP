@@ -27,14 +27,13 @@ import {
   realPropertyService,
 } from '@/services/manager/propertyApi'
 import {
+  ContractAddedEquipmentInput,
+  ContractAvailableEquipmentItem,
   defaultTenantUsername,
-  EquipmentSnapshotItem,
   OnboardTenantRequest,
   realTenantService,
   TenantContractResponse,
 } from '@/services/tenant/tenantService'
-import { realEquipmentService } from '@/services/manager/equipmentService'
-import type { EquipmentDto } from '../../types'
 
 type RentalMode = 'room' | 'whole_house'
 
@@ -81,15 +80,9 @@ const WHOLE_HOUSE_STEPS = [
 // Danh mục thiết bị cho phần "Khách lắp thêm" (đồng bộ với EquipmentScreen).
 const HANDOVER_CATEGORIES = ['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng']
 
-// Nhãn vị trí trong nhà (BE trả houseArea cho thiết bị nguyên căn).
-const HOUSE_AREA_LABEL: Record<string, string> = {
-  LIVING_ROOM: 'Phòng khách',
-  BEDROOM: 'Phòng ngủ',
-  KITCHEN: 'Bếp',
-  BATHROOM: 'Nhà tắm',
-  BALCONY: 'Ban công',
-  GARAGE: 'Gara',
-  OTHER: 'Khác',
+// Nhãn tình trạng thiết bị (contract-available-equipments trả `condition`).
+const EQUIPMENT_CONDITION_LABEL: Record<string, string> = {
+  NEW: 'Mới', GOOD: 'Tốt', DAMAGED: 'Hư hại', BROKEN: 'Hỏng',
 }
 
 // 1 thiết bị khách yêu cầu lắp thêm (chủ đầu tư mua → tài sản nhà).
@@ -246,7 +239,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [inspectionNotes, setInspectionNotes] = useState('')
 
   // Bàn giao thiết bị
-  const [availableEquipments, setAvailableEquipments] = useState<EquipmentDto[]>([])
+  const [availableEquipments, setAvailableEquipments] = useState<ContractAvailableEquipmentItem[]>([])
   const [loadingEquipments, setLoadingEquipments] = useState(false)
   // map equipmentId -> có bàn giao cho khách không (mặc định true)
   const [handoverSelected, setHandoverSelected] = useState<Record<number, boolean>>({})
@@ -441,19 +434,19 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     return () => clearInterval(t)
   }, [otpCooldown])
 
-  // Tải thiết bị sẵn có của phòng/nhà khi vào bước "Bàn giao thiết bị".
+  // Tải thiết bị có thể chọn khi vào bước "Bàn giao thiết bị" — đúng phạm vi HĐ (phòng +
+  // khu vực chung, hoặc cả căn nếu nguyên căn), khớp đúng danh sách BE sẽ validate lúc
+  // submit. Xem FE-contract-handover-equipment.md §3.1.
   useEffect(() => {
     if (currentLabel !== HANDOVER_STEP) return
     const roomId = rentalMode === 'room' ? Number(selectedRoomId) : null
     const propertyId =
       rentalMode === 'whole_house' ? Number(selectedWholeHouseId) : Number(selectedBuildingId)
+    if (!propertyId || (rentalMode === 'room' && !roomId)) return
     let active = true
     setLoadingEquipments(true)
-    const fetcher =
-      rentalMode === 'room' && roomId
-        ? realEquipmentService.getByRoom(roomId)
-        : realEquipmentService.getByProperty(propertyId)
-    fetcher
+    realTenantService
+      .getContractAvailableEquipments(propertyId, roomId)
       .then((list) => {
         if (!active) return
         setAvailableEquipments(list)
@@ -905,44 +898,24 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   // ===== Tạo HĐ + thanh toán =====
 
-  // BE trả tên thiết bị ở catalogName, mô tả ở note, vị trí ở houseArea (không có field category).
-  // Đọc linh hoạt để tránh hiển thị trống.
-  const equipName = (e: EquipmentDto): string =>
-    e.equipmentName || (e as any).name || (e as any).catalogName || 'Thiết bị'
-  const equipDetail = (e: EquipmentDto): string =>
-    (e as any).note ||
-    HOUSE_AREA_LABEL[(e as any).houseArea as keyof typeof HOUSE_AREA_LABEL] ||
-    e.category ||
-    ''
-  // Dùng cho snapshot (cần 1 nhãn "danh mục"): ưu tiên vị trí trong nhà.
-  const equipCategory = (e: EquipmentDto): string =>
-    HOUSE_AREA_LABEL[(e as any).houseArea as keyof typeof HOUSE_AREA_LABEL] ||
-    e.category ||
-    (e as any).catalogName ||
-    ''
+  // contract-available-equipments trả sẵn tên + tình trạng, không cần đọc linh hoạt nữa.
+  const equipName = (e: ContractAvailableEquipmentItem): string => e.name || 'Thiết bị'
+  const equipDetail = (e: ContractAvailableEquipmentItem): string =>
+    EQUIPMENT_CONDITION_LABEL[e.condition] ?? e.condition ?? ''
 
-  // Biên bản bàn giao thiết bị (snapshot theo hợp đồng): thiết bị sẵn có được tick
-  // + thiết bị khách lắp thêm (chủ đầu tư mua). Serialize thành JSON cho field equipmentSnapshot.
-  const buildEquipmentSnapshotItems = (): EquipmentSnapshotItem[] => [
-    ...availableEquipments
-      .filter((e) => handoverSelected[e.id])
-      .map((e): EquipmentSnapshotItem => ({
-        equipmentId: e.id,
-        name: equipName(e),
-        category: equipCategory(e),
-        quantity: 1,
-        source: 'EXISTING',
-        ownedBy: 'OWNER',
-      })),
-    ...addedEquipments.map((a): EquipmentSnapshotItem => ({
-      name: a.name.trim(),
-      category: a.category,
-      quantity: a.quantity,
-      cost: a.cost || undefined,
-      source: 'ADDED',
-      ownedBy: 'OWNER',
-    })),
-  ]
+  // Thiết bị lắp thêm theo yêu cầu khách — gửi kèm request tạo/sửa để BE link đúng vào
+  // hợp đồng (KHÔNG tạo qua endpoint equipment chung như trước). BE không có field
+  // quantity trên 1 dòng added-equipment nên lặp N dòng, chia đều chi phí.
+  const buildAddedEquipmentsPayload = (): ContractAddedEquipmentInput[] =>
+    addedEquipments.flatMap((a) => {
+      const qty = Math.max(1, a.quantity)
+      const perUnitCost = a.cost > 0 ? Math.round(a.cost / qty) : undefined
+      return Array.from({ length: qty }, () => ({
+        name: a.name.trim(),
+        category: a.category || undefined,
+        cost: perUnitCost,
+      }))
+    })
 
   const buildPayload = (): OnboardTenantRequest => ({
     fullName: tenantInfo.fullName.trim(),
@@ -968,14 +941,13 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         dateOfBirth: m.dateOfBirth ? toIsoDate(m.dateOfBirth) : undefined,
         cccd: m.cccd,
       })),
-    equipmentSnapshot: JSON.stringify({
-      handoverDate: toIsoDate(todayStr),
-      items: buildEquipmentSnapshotItems(),
-    }),
-    // Thiết bị sẵn có bị bỏ tick = khách không nhận -> BE gỡ khỏi phòng (DISABLED).
-    declinedEquipmentIds: availableEquipments
-      .filter((e) => !handoverSelected[e.id])
+    // Thiết bị sẵn có khách NHẬN (đã tick) — BE tự tính declined = phạm vi − đã chọn,
+    // tự sinh equipmentSnapshot (không tự gõ tay text nữa, xem ghi chú DEPRECATED ở type).
+    selectedEquipmentIds: availableEquipments
+      .filter((e) => handoverSelected[e.id])
       .map((e) => e.id),
+    // Thiết bị lắp thêm — gửi kèm ngay để BE link đúng vào HĐ (thay cho createAddedEquipments cũ).
+    addedEquipments: buildAddedEquipmentsPayload(),
     // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
     requireHostPriceApproval: priceMode === 'approval',
     // Case 1 thu cọc luôn theo phương thức đã chọn; Case 2 hoãn tới sau khi Host duyệt.
@@ -1003,9 +975,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
                 payload,
               )
         setContract(current)
-
-        // Tạo thiết bị lắp thêm thành tài sản nhà (chủ đầu tư mua) — best-effort, chỉ 1 lần.
-        await createAddedEquipments()
       }
 
       // Case 2: gửi Host duyệt giá -> KHÔNG thu cọc, dừng tại màn "chờ duyệt".
@@ -1035,30 +1004,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     } finally {
       setCreating(false)
     }
-  }
-
-  // Tạo các thiết bị khách lắp thêm thành tài sản của nhà/phòng. Best-effort:
-  // lỗi (BE chưa sẵn / không có quyền) không chặn luồng đón khách.
-  const createAddedEquipments = async () => {
-    if (addedEquipments.length === 0) return
-    const propertyId =
-      rentalMode === 'whole_house'
-        ? Number(selectedWholeHouseId)
-        : Number(selectedBuildingId)
-    const roomId = rentalMode === 'room' ? Number(selectedRoomId) : undefined
-    await Promise.all(
-      addedEquipments.map((a) =>
-        realEquipmentService
-          .create(propertyId, {
-            equipmentName: a.name.trim(),
-            category: a.category,
-            roomId,
-          })
-          .catch(() => {
-            /* best-effort: snapshot vẫn lưu kèm hợp đồng */
-          }),
-      ),
-    )
   }
 
   const checkPaidNow = async () => {
@@ -1800,14 +1745,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
                 {checked && <Text style={styles.checkboxTick}>✓</Text>}
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.handoverName}>{equipName(e)}</Text>
+                <Text style={styles.handoverName}>
+                  {equipName(e)}{e.quantity > 1 ? ` x${e.quantity}` : ''}
+                </Text>
                 {!!equipDetail(e) && (
                   <Text style={styles.handoverMeta}>{equipDetail(e)}</Text>
-                )}
-                {!!(e as any).houseArea && (
-                  <Text style={styles.handoverMeta}>
-                    📍 {HOUSE_AREA_LABEL[(e as any).houseArea] ?? (e as any).houseArea}
-                  </Text>
                 )}
               </View>
             </TouchableOpacity>
