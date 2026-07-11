@@ -89,6 +89,28 @@ export const tenantService = {
     return api.put(`/api/v1/tenant-contracts/${id}`, data);
   },
 
+  /**
+   * POST /tenant-contracts/{id}/draft-document — BE fill template DOCX từ dữ liệu
+   * hợp đồng nháp (contractId phải đang DRAFT), trả file binary — KHÔNG lưu trên BE.
+   * FE tự upload Cloudinary (resource_type raw) rồi PUT draftContractFileUrl.
+   */
+  generateDraftDocument: (id: number): Promise<Blob> => {
+    return api.post(`/api/v1/tenant-contracts/${id}/draft-document`, undefined, {
+      responseType: 'blob',
+    } as never);
+  },
+
+  /**
+   * GET /tenant-contracts/{id}/document/download — tải file HĐ đã lưu để xem
+   * (nút "Xem hợp đồng" / "File HĐ"). KHÔNG mở draftContractFileUrl/documentUrl
+   * trực tiếp — xem FE-view-contract.md. 422 nếu chưa có file.
+   */
+  viewContractDocument: (id: number): Promise<Blob> => {
+    return api.get(`/api/v1/tenant-contracts/${id}/document/download`, {
+      responseType: 'blob',
+    } as never);
+  },
+
   /** PATCH /tenant-contracts/{id}/assign-manager — gán manager đón khách + gửi thông báo. */
   assignManager: (
     id: number,

@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
 import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
+import * as Sharing from 'expo-sharing'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import {
   ContractPriceApprovalStatus,
@@ -46,6 +47,27 @@ export const ResumeContractScreen: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<TenantContractResponse | null>(null)
+  const [viewingContract, setViewingContract] = useState(false)
+
+  const handleViewContract = async () => {
+    if (!selected) return
+    setViewingContract(true)
+    try {
+      const uri = await realTenantService.downloadContractDocument(selected.id, selected.contractCode)
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          dialogTitle: 'Xem hợp đồng thuê',
+        })
+      } else {
+        Alert.alert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ file.')
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không mở được file hợp đồng.'))
+    } finally {
+      setViewingContract(false)
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -108,6 +130,23 @@ export const ResumeContractScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.safe}>
         <Header onBack={() => setSelected(null)} title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'} />
+        {selected.contractFileAvailable ? (
+          <TouchableOpacity
+            style={styles.viewContractBar}
+            onPress={handleViewContract}
+            disabled={viewingContract}
+          >
+            {viewingContract ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text style={styles.viewContractBarText}>📄 Xem hợp đồng — {selected.contractCode}</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.viewContractBarDisabled}>
+            <Text style={styles.viewContractBarDisabledText}>Chưa có file hợp đồng — tạo ở web admin</Text>
+          </View>
+        )}
         <ContractActionPanel
           contract={selected}
           onDone={() => {
@@ -572,6 +611,26 @@ const styles = StyleSheet.create({
   backBtn: { width: 70 },
   backText: { color: Colors.primary, fontWeight: '600' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary },
+
+  viewContractBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryBg,
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  viewContractBarText: { color: Colors.primary, fontWeight: '700', fontSize: 13 },
+  viewContractBarDisabled: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  viewContractBarDisabledText: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
 
   listBody: { padding: Spacing.lg, gap: Spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 80, gap: Spacing.md },
