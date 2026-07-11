@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,7 +18,11 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
 import * as Sharing from 'expo-sharing'
+import * as ImagePicker from 'expo-image-picker'
+import * as FileSystem from 'expo-file-system/legacy'
+import Signature from 'react-native-signature-canvas'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
+import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
   ContractPriceApprovalStatus,
   realTenantService,
@@ -29,8 +36,29 @@ const PAY_CANCEL_URL = 'https://slms.app/payment-cancel'
 const onlyDigits = (s: string) => String(s).replace(/[^\d]/g, '')
 const parseNum = (s: string) => Number(onlyDigits(s)) || 0
 const formatVnd = (v: number) => (v ? v.toLocaleString('vi-VN') : '0')
+const formatDateVi = (iso?: string): string => {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return d && m && y ? `${d}/${m}/${y}` : iso
+}
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback
+
+// Chữ ký (base64 PNG từ SignatureScreen.onOK) -> ghi file tạm -> upload Cloudinary.
+// BE không có field lưu chữ ký riêng nên chỉ dùng làm bằng chứng audit (best-effort,
+// đính vào roomConditionNote) — hành động XÁC NHẬN THẬT SỰ vẫn là gọi deposit-cash-paid,
+// lỗi ở bước upload này KHÔNG được chặn luồng xác nhận cọc.
+const uploadSignature = async (base64Png: string): Promise<string | null> => {
+  if (Platform.OS === 'web') return null
+  try {
+    const path = `${FileSystem.cacheDirectory}signature-${Date.now()}.png`
+    const raw = base64Png.replace(/^data:image\/png;base64,/, '')
+    await FileSystem.writeAsStringAsync(path, raw, { encoding: 'base64' })
+    return await uploadImageToCloudinary(path)
+  } catch {
+    return null
+  }
+}
 
 const STATUS_META: Record<ContractPriceApprovalStatus, { label: string; color: string; bg: string }> = {
   PENDING_PRICE_APPROVAL: { label: 'Chờ Host duyệt giá', color: '#D97706', bg: '#FFFBEB' },
@@ -71,7 +99,16 @@ export const ResumeContractScreen: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const data = await realTenantService.listManagedContracts()
+      // Gọi KHÔNG status chỉ trả về HĐ đang chờ/đã duyệt giá — HĐ nháp (DRAFT) mới gán
+      // bị BE loại ra mặc định, phải gọi thêm status=DRAFT riêng rồi gộp (dedupe theo id,
+      // ưu tiên nháp lên trước vì cần xử lý sớm nhất).
+      const [pending, drafts] = await Promise.all([
+        realTenantService.listManagedContracts(),
+        realTenantService.listManagedContracts('DRAFT'),
+      ])
+      const data = [...drafts, ...pending].filter(
+        (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
+      )
       setList(data)
 
       if (paramContractId != null) {
@@ -194,6 +231,9 @@ export const ResumeContractScreen: React.FC = () => {
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
                   </Text>
                   <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
+                  {!!c.expectedReceptionDate && (
+                    <Text style={styles.cardReception}>📅 Hẹn đón khách: {formatDateVi(c.expectedReceptionDate)}</Text>
+                  )}
                 </View>
                 {meta && (
                   <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
@@ -347,6 +387,337 @@ const RejectedPanel: React.FC<{
   )
 }
 
+// ===== Hiện trạng phòng + chỉ số điện nước (đón khách bước 2, có thể bổ sung/sửa
+// bất cứ lúc nào trước khi hoàn tất — không chặn luồng thu cọc bên dưới). =====
+const InspectionSection: React.FC<{
+  contract: TenantContractResponse
+  onChanged: (c: TenantContractResponse) => void
+}> = ({ contract, onChanged }) => {
+  const [expanded, setExpanded] = useState(false)
+  const [elecUrl, setElecUrl] = useState(contract.electricMeterImageUrl ?? '')
+  const [waterUrl, setWaterUrl] = useState(contract.waterMeterImageUrl ?? '')
+  const [elecReading, setElecReading] = useState(
+    contract.initialElectricReading != null ? String(contract.initialElectricReading) : '',
+  )
+  const [waterReading, setWaterReading] = useState(
+    contract.initialWaterReading != null ? String(contract.initialWaterReading) : '',
+  )
+  const [photos, setPhotos] = useState<string[]>(contract.roomConditionUrls ?? [])
+  const [note, setNote] = useState(contract.roomConditionNote ?? '')
+  const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const hasData = photos.length > 0 || !!elecReading || !!waterReading
+
+  const pickImage = async (useCamera: boolean): Promise<string | null> => {
+    if (useCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync()
+      if (perm.status !== 'granted') {
+        Alert.alert('Lỗi', 'Cần quyền camera.')
+        return null
+      }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
+      return r.canceled ? null : r.assets[0].uri
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
+    return r.canceled ? null : r.assets[0].uri
+  }
+
+  const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
+    const uri = await pickImage(useCamera)
+    if (!uri) return
+    try {
+      setOcrLoading(kind)
+      const url = await uploadImageToCloudinary(uri)
+      if (kind === 'elec') setElecUrl(url)
+      else setWaterUrl(url)
+      const ocr = await realTenantService.ocrMeter(url)
+      if (ocr.reading) {
+        if (kind === 'elec') setElecReading(ocr.reading)
+        else setWaterReading(ocr.reading)
+      }
+    } catch (err: any) {
+      Alert.alert('OCR', readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'))
+    } finally {
+      setOcrLoading(null)
+    }
+  }
+
+  const addConditionPhoto = async (useCamera: boolean) => {
+    let uris: string[] = []
+    if (useCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync()
+      if (perm.status !== 'granted') {
+        Alert.alert('Lỗi', 'Cần quyền camera.')
+        return
+      }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
+      if (!r.canceled) uris = [r.assets[0].uri]
+    } else {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.6,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+      })
+      if (!r.canceled) uris = r.assets.map((a) => a.uri)
+    }
+    if (uris.length === 0) return
+    try {
+      setPhotoUploading(true)
+      const urls = await Promise.all(uris.map((u) => uploadImageToCloudinary(u)))
+      setPhotos((prev) => [...prev, ...urls])
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  const save = async () => {
+    try {
+      setSaving(true)
+      const updated = await realTenantService.updateDraftContract(contract.id, {
+        initialElectricReading: elecReading ? Number(elecReading) : undefined,
+        initialWaterReading: waterReading ? Number(waterReading) : undefined,
+        electricMeterImageUrl: elecUrl || undefined,
+        waterMeterImageUrl: waterUrl || undefined,
+        roomConditionUrls: photos,
+        roomConditionNote: note || undefined,
+      })
+      onChanged(updated)
+      setExpanded(false)
+      Alert.alert('Đã lưu', 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.')
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không lưu được hiện trạng phòng.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <View style={styles.formCard}>
+      <TouchableOpacity style={styles.inspectionHeader} onPress={() => setExpanded((v) => !v)} activeOpacity={0.7}>
+        <Text style={styles.inspectionTitle}>{hasData ? '✅' : '📋'} Hiện trạng phòng & điện nước</Text>
+        <Text style={styles.inspectionToggle}>{expanded ? 'Thu gọn ▲' : 'Chỉnh sửa ▼'}</Text>
+      </TouchableOpacity>
+      {!expanded && (
+        <Text style={styles.inspectionSummary}>
+          {photos.length > 0 ? `${photos.length} ảnh hiện trạng` : 'Chưa có ảnh hiện trạng'}
+          {elecReading ? ` · Điện ${elecReading}` : ''}
+          {waterReading ? ` · Nước ${waterReading}` : ''}
+        </Text>
+      )}
+
+      {expanded && (
+        <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
+          {(['elec', 'water'] as const).map((kind) => (
+            <View key={kind} style={styles.meterCardSm}>
+              <Text style={styles.label}>{kind === 'elec' ? '⚡ Chỉ số điện (kWh)' : '💧 Chỉ số nước (m³)'}</Text>
+              <View style={styles.methodRow}>
+                <TouchableOpacity
+                  style={styles.secondaryBtnSm}
+                  onPress={() => captureMeter(kind, true)}
+                  disabled={ocrLoading !== null}
+                >
+                  <Text style={styles.secondaryBtnSmText}>📷 Chụp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondaryBtnSm}
+                  onPress={() => captureMeter(kind, false)}
+                  disabled={ocrLoading !== null}
+                >
+                  <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+                </TouchableOpacity>
+                {ocrLoading === kind && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
+              </View>
+              {!!(kind === 'elec' ? elecUrl : waterUrl) && (
+                <Image source={{ uri: kind === 'elec' ? elecUrl : waterUrl }} style={styles.meterThumb} />
+              )}
+              <TextInput
+                style={styles.input}
+                value={kind === 'elec' ? elecReading : waterReading}
+                onChangeText={kind === 'elec' ? setElecReading : setWaterReading}
+                keyboardType="numeric"
+                placeholder="OCR tự điền, có thể chỉnh"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+          ))}
+
+          <View>
+            <Text style={styles.label}>Ảnh hiện trạng phòng</Text>
+            <View style={styles.methodRow}>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(true)} disabled={photoUploading}>
+                <Text style={styles.secondaryBtnSmText}>📸 Chụp ảnh</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(false)} disabled={photoUploading}>
+                <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+              </TouchableOpacity>
+              {photoUploading && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
+            </View>
+            {photos.length > 0 && (
+              <View style={styles.photoGrid}>
+                {photos.map((uri, i) => (
+                  <View key={`${uri}-${i}`} style={styles.photoWrap}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                    <TouchableOpacity
+                      style={styles.removePhotoBtn}
+                      onPress={() => setPhotos((prev) => prev.filter((x) => x !== uri))}
+                    >
+                      <Text style={styles.removePhotoText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View>
+            <Text style={styles.label}>Ghi chú hiện trạng</Text>
+            <TextInput
+              style={[styles.input, styles.notesInput]}
+              value={note}
+              onChangeText={setNote}
+              multiline
+              placeholder="Tường sạch, cửa tốt, máy lạnh đã kiểm tra..."
+              placeholderTextColor={Colors.textMuted}
+            />
+          </View>
+
+          <TouchableOpacity style={[styles.primaryBtn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
+            {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.primaryBtnText}>💾 Lưu hiện trạng</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  )
+}
+
+const signaturePadWebStyle = `.m-signature-pad--footer { margin: 0; } .m-signature-pad--body { border: none; } body,html { width: 100%; height: 100%; }`
+
+// ===== Thu cọc tiền mặt tại chỗ: khách ký trên máy Manager rồi manager xác nhận đã
+// nhận tiền — xác nhận 2 chiều, thứ tự không bắt buộc (khớp BE tài liệu §3 nhánh B). =====
+const CashDepositFlow: React.FC<{
+  contract: TenantContractResponse
+  onChanged: (c: TenantContractResponse) => void
+}> = ({ contract, onChanged }) => {
+  const [tenantConfirmedAt, setTenantConfirmedAt] = useState(contract.depositCashTenantConfirmedAt ?? null)
+  const [managerConfirmedAt, setManagerConfirmedAt] = useState(contract.depositCashManagerConfirmedAt ?? null)
+  const [showPad, setShowPad] = useState(false)
+  const [busyTenant, setBusyTenant] = useState(false)
+  const [busyManager, setBusyManager] = useState(false)
+
+  const handleSignature = async (base64: string) => {
+    setShowPad(false)
+    setBusyTenant(true)
+    try {
+      const res = await realTenantService.confirmDepositCashByTenant(contract.id, contract.tenantPhone)
+      setTenantConfirmedAt(res.depositCashTenantConfirmedAt ?? new Date().toISOString())
+      setManagerConfirmedAt(res.depositCashManagerConfirmedAt ?? managerConfirmedAt)
+      onChanged(res)
+      // Lưu chữ ký làm bằng chứng audit (best-effort) — KHÔNG chặn luồng nếu lỗi,
+      // vì hành động xác nhận thật sự đã hoàn tất ở lệnh gọi deposit-cash-paid trên.
+      uploadSignature(base64).then((url) => {
+        if (!url) return
+        realTenantService
+          .updateDraftContract(contract.id, {
+            roomConditionNote: `${contract.roomConditionNote ? contract.roomConditionNote + '\n' : ''}Chữ ký khách xác nhận cọc tiền mặt: ${url}`,
+          })
+          .catch(() => {})
+      })
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không xác nhận được — kiểm tra lại SĐT khách trên hợp đồng.'))
+    } finally {
+      setBusyTenant(false)
+    }
+  }
+
+  const confirmManager = async () => {
+    try {
+      setBusyManager(true)
+      const res = await realTenantService.confirmDepositCashByManager(contract.id)
+      setManagerConfirmedAt(res.depositCashManagerConfirmedAt ?? new Date().toISOString())
+      setTenantConfirmedAt(res.depositCashTenantConfirmedAt ?? tenantConfirmedAt)
+      onChanged(res)
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không xác nhận được đã nhận tiền.'))
+    } finally {
+      setBusyManager(false)
+    }
+  }
+
+  return (
+    <View style={{ gap: Spacing.md, marginTop: Spacing.md }}>
+      <View style={styles.cashStepCard}>
+        <Text style={styles.cashStepTitle}>{tenantConfirmedAt ? '✅' : '1️⃣'} Khách ký xác nhận đã trả tiền</Text>
+        {tenantConfirmedAt ? (
+          <Text style={styles.cashStepDone}>
+            Đã xác nhận lúc {new Date(tenantConfirmedAt).toLocaleTimeString('vi-VN')}
+          </Text>
+        ) : (
+          <TouchableOpacity
+            style={[styles.primaryBtn, busyTenant && styles.btnDisabled]}
+            onPress={() => setShowPad(true)}
+            disabled={busyTenant}
+          >
+            {busyTenant ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.primaryBtnText}>✍️ Đưa máy cho khách ký</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.cashStepCard}>
+        <Text style={styles.cashStepTitle}>{managerConfirmedAt ? '✅' : '2️⃣'} Manager xác nhận đã nhận tiền</Text>
+        {managerConfirmedAt ? (
+          <Text style={styles.cashStepDone}>
+            Đã xác nhận lúc {new Date(managerConfirmedAt).toLocaleTimeString('vi-VN')}
+          </Text>
+        ) : (
+          <TouchableOpacity
+            style={[styles.primaryBtn, busyManager && styles.btnDisabled]}
+            onPress={confirmManager}
+            disabled={busyManager}
+          >
+            {busyManager ? (
+              <ActivityIndicator color={Colors.white} />
+            ) : (
+              <Text style={styles.primaryBtnText}>💵 Đã nhận đủ tiền cọc</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <Modal visible={showPad} animationType="slide" onRequestClose={() => setShowPad(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.white }}>
+          <View style={styles.signatureHeader}>
+            <Text style={styles.signatureHeaderTitle}>Chữ ký xác nhận — {contract.tenantFullName}</Text>
+            <TouchableOpacity onPress={() => setShowPad(false)}>
+              <Text style={styles.signatureCloseText}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.signatureHint}>
+            Đưa thiết bị cho khách ký xác nhận đã trả {formatVnd(contract.deposit)} đ tiền cọc mặt.
+          </Text>
+          <View style={{ flex: 1 }}>
+            <Signature
+              onOK={handleSignature}
+              onEmpty={() => Alert.alert('Chưa ký', 'Vui lòng ký vào khung bên trên.')}
+              descriptionText=""
+              clearText="Xóa"
+              confirmText="Xác nhận chữ ký"
+              webStyle={signaturePadWebStyle}
+            />
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </View>
+  )
+}
+
 // ===== Đã duyệt: thu cọc (PayOS/cash) + OTP =====
 const DepositOtpPanel: React.FC<{
   contract: TenantContractResponse
@@ -466,7 +837,14 @@ const DepositOtpPanel: React.FC<{
           {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Tiến hành thu cọc{' '}
           {formatVnd(depositValue)} đ rồi xác thực OTP để kích hoạt hợp đồng.
         </Text>
+        {!!contract.expectedReceptionDate && (
+          <Text style={styles.bannerReception}>
+            📅 Hẹn đón khách ngày {formatDateVi(contract.expectedReceptionDate)}
+          </Text>
+        )}
       </View>
+
+      <InspectionSection contract={contract} onChanged={onChanged} />
 
       {!paid ? (
         <>
@@ -491,9 +869,17 @@ const DepositOtpPanel: React.FC<{
           </View>
 
           {method === 'cash' ? (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setPaid(true)}>
-              <Text style={styles.primaryBtnText}>💵 Xác nhận đã thu cọc tiền mặt</Text>
-            </TouchableOpacity>
+            <CashDepositFlow
+              contract={contract}
+              onChanged={(c) => {
+                onChanged(c)
+                if (c.paymentStatus === 'PAID') {
+                  // BE tự gửi OTP ngay khi đủ 2 xác nhận tiền mặt — bỏ qua auto-send bên dưới.
+                  otpSentRef.current = true
+                  setPaid(true)
+                }
+              }}
+            />
           ) : (
             <>
               {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
@@ -651,6 +1037,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardPrice: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
+  cardReception: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   statusText: { fontSize: 11, fontWeight: '700' },
 
@@ -659,6 +1046,7 @@ const styles = StyleSheet.create({
   bannerIcon: { fontSize: 40 },
   bannerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
   bannerDesc: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
+  bannerReception: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
 
   formCard: {
     backgroundColor: Colors.white,
@@ -729,4 +1117,85 @@ const styles = StyleSheet.create({
   paidBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   paidIcon: { fontSize: 22 },
   paidText: { fontSize: 15, fontWeight: '700', color: Colors.success },
+
+  inspectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  inspectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  inspectionToggle: { fontSize: 12, fontWeight: '600', color: Colors.primary },
+  inspectionSummary: { marginTop: 4, fontSize: 12, color: Colors.textSecondary },
+  meterCardSm: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+  },
+  secondaryBtnSm: {
+    flex: 1,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  secondaryBtnSmText: { color: Colors.primary, fontSize: 13, fontWeight: '700' },
+  meterThumb: {
+    width: '100%',
+    height: 130,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.sm,
+    backgroundColor: Colors.divider,
+  },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
+  photoWrap: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    backgroundColor: Colors.divider,
+  },
+  photoThumb: { width: '100%', height: '100%', backgroundColor: Colors.divider },
+  removePhotoBtn: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
+  notesInput: { minHeight: 80, textAlignVertical: 'top' },
+
+  cashStepCard: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: Spacing.sm,
+  },
+  cashStepTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  cashStepDone: { fontSize: 12, color: Colors.success, fontWeight: '600' },
+
+  signatureHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  signatureHeaderTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1 },
+  signatureCloseText: { color: Colors.primary, fontWeight: '700', fontSize: 14 },
+  signatureHint: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
 })

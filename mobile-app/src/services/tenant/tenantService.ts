@@ -26,15 +26,40 @@ export interface EquipmentSnapshotItem {
   ownedBy: 'OWNER';
 }
 
+// Thiết bị có thể chọn cho HĐ (phạm vi phòng + khu vực chung, hoặc cả căn nếu nguyên
+// căn) — GET properties/{propertyId}/contract-available-equipments?roomId=.
+// Xem FE-contract-handover-equipment.md.
+export interface ContractAvailableEquipmentItem {
+  id: number;
+  name: string;
+  condition: string; // NEW | GOOD | DAMAGED | BROKEN
+  quantity: number;
+}
+
+// Thiết bị lắp thêm theo yêu cầu khách — chủ đầu tư mua, chưa có trong inventory lúc
+// submit. BE tự tạo EquipmentCatalog (nếu chưa có) + Equipment (source=ADDED_BY_TENANT)
+// và gộp vào equipmentSnapshot. KHÔNG có field quantity ở BE — FE tự lặp N dòng nếu
+// quantity > 1 (xem cách buildPayload dùng field này).
+export interface ContractAddedEquipmentInput {
+  name: string;
+  category?: string;
+  cost?: number;
+  roomId?: number;
+  condition?: 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
   phoneNumber: string;
+  dateOfBirth?: string; // yyyy-MM-dd
   moveInDate: string; // yyyy-MM-dd
   rentAmount: number;
   deposit: number;
   endDate?: string;
   // Biên bản bàn giao thiết bị: JSON.stringify({ handoverDate, items: EquipmentSnapshotItem[] }).
+  // ⚠️ DEPRECATED — BE tự sinh equipmentSnapshot từ selectedEquipmentIds/addedEquipments và
+  // GHI ĐÈ bất kỳ giá trị nào FE gửi lên nếu 1 trong 2 field đó có mặt. Không gửi field này nữa.
   equipmentSnapshot?: string;
 
   depositMonths?: number;
@@ -50,9 +75,15 @@ export interface OnboardTenantRequest {
   requireDepositPayment?: boolean;
   // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Host duyệt giá, CHƯA thu cọc.
   requireHostPriceApproval?: boolean;
-  // Thiết bị sẵn có khách KHÔNG nhận -> BE set operationalStatus=DISABLED (gỡ khỏi phòng),
-  // lưu disabled_reason + gắn contract; tự ACTIVE lại khi hết HĐ. Xem Phần C của plan.
+  // ⚠️ DEPRECATED (BE vẫn hỗ trợ tạm) — dùng selectedEquipmentIds thay thế, ưu tiên
+  // selectedEquipmentIds nếu cả 2 cùng có mặt. Xem FE-contract-handover-equipment.md §4.3.
   declinedEquipmentIds?: number[];
+  // Thiết bị sẵn có khách NHẬN (subset của contract-available-equipments) — BE tự tính
+  // declined = phạm vi − đã chọn, tự sinh equipmentSnapshot. [] = không nhận gì.
+  selectedEquipmentIds?: number[];
+  // Thiết bị lắp thêm theo yêu cầu khách — gửi kèm ngay trong request tạo/sửa để BE
+  // link đúng vào contract (KHÔNG tạo qua endpoint equipment chung riêng lẻ).
+  addedEquipments?: ContractAddedEquipmentInput[];
 }
 
 export interface TenantContractResponse {
@@ -70,11 +101,26 @@ export interface TenantContractResponse {
   moveInDate: string;
   startDate: string;
   endDate?: string;
+  expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
   paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+
+  // Cọc tiền mặt — xác nhận 2 chiều (khách + manager). BE KHÔNG trả boolean riêng,
+  // chỉ trả timestamp; suy ra "đã xác nhận" = giá trị khác null. Khi CẢ HAI đều có
+  // giá trị, BE tự chuyển paymentStatus=PAID và tự gửi OTP (xem confirmDepositCashByManager).
+  depositCashTenantConfirmedAt?: string | null;
+  depositCashManagerConfirmedAt?: string | null;
+
+  // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
 
   // File hợp đồng (nháp lẫn chính thức đều dùng chung 1 URL Cloudinary — BE không
   // render file mới sau ACTIVE, xem FE-tenant-draft-contract-document.md 2026-07-09).
@@ -130,6 +176,19 @@ export const defaultTenantUsername = (phone: string): string =>
   String(phone).replace(/\D/g, '');
 
 export const realTenantService = {
+  // Thiết bị có thể chọn cho HĐ theo đúng phạm vi (phòng + khu vực chung, hoặc cả căn
+  // nếu bỏ roomId) — xem FE-contract-handover-equipment.md §3.1.
+  getContractAvailableEquipments: async (
+    propertyId: number,
+    roomId?: number | null,
+  ): Promise<ContractAvailableEquipmentItem[]> => {
+    const { data } = await realApiClient.get<ContractAvailableEquipmentItem[]>(
+      `/api/v1/properties/${propertyId}/contract-available-equipments`,
+      { params: roomId != null ? { roomId } : {} },
+    );
+    return data ?? [];
+  },
+
   onboardRoomTenant: async (
     propertyId: number,
     roomId: number,
@@ -214,6 +273,42 @@ export const realTenantService = {
     const { data } = await realApiClient.post<TenantContractResponse>(
       `/api/v1/tenant-contracts/${contractId}/confirm`,
       body,
+    );
+    return data;
+  },
+
+  // PUT /tenant-contracts/{id} — cập nhật draft: ảnh hiện trạng phòng, chỉ số điện
+  // nước ban đầu, ghi chú... (xem tài liệu đón khách §2c/2d).
+  updateDraftContract: async (
+    contractId: number,
+    body: Partial<OnboardTenantRequest>,
+  ): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.put<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}`,
+      body,
+    );
+    return data;
+  },
+
+  // Khách xác nhận ĐÃ TRẢ cọc tiền mặt — endpoint BE public (không cần JWT), nhưng
+  // trong luồng ký tại chỗ thì gọi ngay trên máy Manager sau khi khách ký xác nhận.
+  // BE tự chuẩn hoá & so khớp phoneNumber với SĐT trên HĐ (0/84/+84 đều nhận).
+  confirmDepositCashByTenant: async (
+    contractId: number,
+    phoneNumber: string,
+  ): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.post<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}/deposit-cash-paid`,
+      { phoneNumber },
+    );
+    return data;
+  },
+
+  // Manager xác nhận ĐÃ NHẬN cọc tiền mặt. Khi cả 2 phía đã xác nhận, BE tự chuyển
+  // paymentStatus=PAID và TỰ GỬI OTP (Twilio) — FE không cần gọi lại sendContractOtp.
+  confirmDepositCashByManager: async (contractId: number): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.post<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}/deposit-cash-received`,
     );
     return data;
   },
