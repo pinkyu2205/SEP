@@ -785,6 +785,7 @@ export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
   phoneNumber: string;
+  dateOfBirth?: string;      // ISO date (yyyy-MM-dd) — ngày sinh khách chính, BE lưu vào draftTenantDob/Tenant.dateOfBirth
   moveInDate: string;        // ISO date (yyyy-MM-dd)
   rentAmount: number;
   deposit: number;
@@ -820,6 +821,7 @@ export interface TenantContractResponse {
   tenantFullName: string;
   tenantPhone: string;
   tenantCccd?: string;
+  tenantDateOfBirth?: string; // ISO date (yyyy-MM-dd) — ngày sinh khách chính
   contractCode: string;
   rentAmount: number;
   deposit: number;
@@ -836,6 +838,14 @@ export interface TenantContractResponse {
   assignedManagerId?: string;
   assignedManagerName?: string;
   draftContractFileUrl?: string;
+  // BE map sẵn = draftContractFileUrl (fallback field cũ nếu có) — dùng field nào
+  // cũng ra cùng 1 URL kể cả sau khi HĐ đã ACTIVE (BE không render file mới sau ký,
+  // xem FE-tenant-draft-contract-document.md 2026-07-09).
+  documentUrl?: string;
+  // true khi đã có file lưu (draftContractFileUrl không null) — dùng để bật nút "Xem hợp đồng",
+  // xem FE-view-contract.md. KHÔNG mở draftContractFileUrl/documentUrl trực tiếp, dùng
+  // GET /tenant-contracts/{id}/document/download (tenantService.viewContractDocument).
+  contractFileAvailable?: boolean;
   expectedReceptionDate?: string;
   priceApprovalStatus?: string;    // PENDING_PRICE_APPROVAL | APPROVED_AWAITING_DEPOSIT | PRICE_REJECTED
 }

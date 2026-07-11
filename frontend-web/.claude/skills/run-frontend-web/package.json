@@ -1,0 +1,9 @@
+{
+  "name": "run-frontend-web-driver",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright driver for the /run-frontend-web agent skill — not part of the app build.",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

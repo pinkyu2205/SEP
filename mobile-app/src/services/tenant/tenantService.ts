@@ -1,4 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import realApiClient from '@/services/core/realApiClient';
+import { API_CONFIG } from '@/constants/api';
 
 /**
  * Tenant onboarding service nối backend Spring THẬT.
@@ -72,6 +75,16 @@ export interface TenantContractResponse {
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+
+  // File hợp đồng (nháp lẫn chính thức đều dùng chung 1 URL Cloudinary — BE không
+  // render file mới sau ACTIVE, xem FE-tenant-draft-contract-document.md 2026-07-09).
+  // `documentUrl` là field BE map sẵn = draftContractFileUrl (ưu tiên) hoặc fallback cũ.
+  draftContractFileUrl?: string;
+  documentUrl?: string;
+  // true khi đã có file lưu — bật nút "Xem hợp đồng". KHÔNG mở draftContractFileUrl/
+  // documentUrl (Cloudinary) trực tiếp, dùng realTenantService.downloadContractDocument
+  // (GET .../document/download), xem FE-view-contract.md.
+  contractFileAvailable?: boolean;
 
   // Sau khi confirm: thông tin tài khoản tenant (BE bổ sung — xem MD work/Onboarding.md)
   tenantUsername?: string;
@@ -229,6 +242,22 @@ export const realTenantService = {
       body,
     );
     return data;
+  },
+
+  // Tải file HĐ đã lưu về máy để xem (nút "Xem hợp đồng") — KHÔNG mở
+  // draftContractFileUrl/documentUrl (Cloudinary) trực tiếp, xem FE-view-contract.md.
+  // Trả về local file uri; caller tự gọi Sharing.shareAsync để mở/chia sẻ.
+  downloadContractDocument: async (contractId: number, contractCode: string): Promise<string> => {
+    const token = await AsyncStorage.getItem('accessToken');
+    const url = `${API_CONFIG.REAL_BASE_URL}/api/v1/tenant-contracts/${contractId}/document/download`;
+    const localUri = `${FileSystem.cacheDirectory}${contractCode}.docx`;
+    const result = await FileSystem.downloadAsync(url, localUri, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status !== 200) {
+      throw new Error('Không tải được hợp đồng.');
+    }
+    return result.uri;
   },
 
   // Hủy hợp đồng (khi manager quyết định không tiếp tục onboarding).
