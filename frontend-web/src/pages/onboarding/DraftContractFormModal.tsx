@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
-import type { PropertyResponse, RoomResponse, OnboardTenantRequest, TenantContractResponse } from '../../types/api.types';
+import type {
+  PropertyResponse,
+  RoomResponse,
+  OnboardTenantRequest,
+  TenantContractResponse,
+  ContractAvailableEquipmentItem,
+} from '../../types/api.types';
 import { propertyService } from '../../services/property.service';
 import { tenantService, isTenantEligibleRole } from '../../services/tenant.service';
 import { uploadToCloudinary } from '../../services/upload.service';
 import { extractTenantContractData } from '../../utils/pdfExtract';
+import { draftBlobToFile, openContractBlob } from '../../utils/contractFile';
 
 interface Props {
   onSuccess: () => void;
@@ -23,15 +30,44 @@ const addYearsIso = (dateStr: string, years: number): string => {
   return d.toISOString().split('T')[0];
 };
 
+/** yyyy-MM-dd + n tháng → yyyy-MM-dd (dùng cho chip chọn nhanh ngày kết thúc). */
+const addMonthsIso = (dateStr: string, months: number): string => {
+  const d = new Date(dateStr);
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().split('T')[0];
+};
+
+/** yyyy-MM-dd → dd/MM/yyyy (hiển thị trong panel tóm tắt), rỗng → '—'. */
+const formatDateDisplay = (iso: string): string => {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+
 /** Giữ state raw là chuỗi CHỮ SỐ THUẦN (khớp Number(...) khi build payload); chỉ format lúc hiển thị. */
 const formatVndDisplay = (raw: string): string => (raw ? Number(raw).toLocaleString('vi-VN') : '');
 const parseVndInput = (displayValue: string): string => displayValue.replace(/\D/g, '');
 
+/** Tiền cọc luôn = giá thuê × số tháng cọc — tính lại mỗi khi 1 trong 2 giá trị đổi. */
+const calcDeposit = (rentRaw: string, monthsRaw: string): string =>
+  rentRaw ? String(Number(rentRaw) * (Number(monthsRaw) || 1)) : '';
+
+// SĐT di động VN: 10 số đầu 03/05/07/08/09, hoặc dạng +84 tương ứng.
+const VN_PHONE_RE = /^(0|\+84)(3|5|7|8|9)\d{8}$/;
+// CCCD 12 chữ số (chuẩn CCCD gắn chip hiện hành).
+const VN_CCCD_RE = /^\d{12}$/;
+const normalizePhone = (s: string): string => s.replace(/[\s.-]/g, '');
+
+// Ngày sinh hợp lệ: từ 1930 trở đi + khách phải đủ 18 tuổi mới ký được hợp đồng.
+const DOB_MIN = '1930-01-01';
+const DOB_MAX = addYearsIso(todayIso(), -18);
+
 /**
  * Modal tạo HỢP ĐỒNG NHÁP (DRAFT) cho luồng đón khách v2.
  * - Tab "Upload file": chọn file HĐ đã điền (DOCX/PDF) → tự bóc tách + upload lưu link → admin review/chỉnh.
- * - Tab "Nhập tay": admin nhập trực tiếp → sau khi lưu, BE tự fill dữ liệu vào template
- *   DOCX (POST .../draft-document) → FE upload Cloudinary → lưu draftContractFileUrl.
+ * - Tab "Nhập tay": admin nhập trực tiếp → sau khi lưu, BE fill dữ liệu vào template và
+ *   render PDF (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload
+ *   Cloudinary → lưu draftContractFileUrl.
  * Sau khi lưu TỰ ĐỘNG gán cho quản lý phụ trách nhà (operationManagerId của property) —
  * không cho chọn tay, vì nhà đã hoạt động thì admin đã gán quản lý sẵn từ trước.
  */
@@ -53,6 +89,37 @@ const tokenize = (s: string): string[] =>
     .split(' ')
     .filter((t) => t.length > 1 || /^[0-9]$/.test(t));
 
+// Khoảng cách sửa đổi (Levenshtein) có trần cắt sớm — chỉ cần biết "≤ max hay không".
+const editDistanceAtMost = (a: string, b: string, max: number): boolean => {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > max) return false;
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+};
+
+/**
+ * "Kiểm tra chính tả" cho tên nhà/địa chỉ bóc từ file: token khớp khi trùng tuyệt đối,
+ * HOẶC lệch tối đa 1 ký tự với token đủ dài (≥4) — chống gõ sai/OCR sai kiểu
+ * "Le Lloi" ~ "Le Loi". Token ngắn và token số phải khớp tuyệt đối ("Quận 1" ≠ "Quận 3").
+ */
+const tokenMatches = (t: string, candidates: Set<string>): boolean => {
+  if (candidates.has(t)) return true;
+  if (t.length < 4 || /\d/.test(t)) return false;
+  for (const c of candidates) {
+    if (c.length >= 4 && !/\d/.test(c) && editDistanceAtMost(t, c, 1)) return true;
+  }
+  return false;
+};
+
 /**
  * Gợi ý property khớp với địa chỉ bóc từ file HĐ (đoạn text tự do, không chuẩn hoá).
  * So khớp kiểu token-overlap trên propertyName + 2 field địa chỉ — đủ dùng cho danh
@@ -71,7 +138,7 @@ const suggestPropertyByAddress = (
     .map((p) => {
       const candidateTokens = new Set(tokenize(`${p.propertyName} ${p.fullAddress} ${p.shortAddress}`));
       let overlap = 0;
-      targetTokens.forEach((t) => { if (candidateTokens.has(t)) overlap += 1; });
+      targetTokens.forEach((t) => { if (tokenMatches(t, candidateTokens)) overlap += 1; });
       return { property: p, score: overlap / targetTokens.size };
     })
     .sort((a, b) => b.score - a.score);
@@ -88,6 +155,15 @@ const ROOM_STATUS_LABEL: Record<string, string> = {
   MAINTENANCE: 'đang bảo trì',
   DRAFT: 'chưa định giá',
   DISABLED: 'ngưng khai thác',
+  // Không phải status BE — key nội bộ đánh dấu phòng AVAILABLE nhưng đã có HĐ nháp chờ đón khách.
+  HAS_DRAFT: 'đã có hợp đồng nháp chờ đón khách',
+};
+
+const EQUIPMENT_CONDITION_LABEL: Record<string, string> = {
+  NEW: 'Mới',
+  GOOD: 'Tốt',
+  DAMAGED: 'Hư hại',
+  BROKEN: 'Hỏng',
 };
 
 const PROPERTY_STATUS_LABEL: Record<string, string> = {
@@ -127,11 +203,21 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
 
   const [submitting, setSubmitting] = useState(false);
   // Trạng thái từng bước của chuỗi submit (tạo → gán manager → sinh file → upload) —
-  // hiện text cụ thể vì bước sinh file DOCX + upload Cloudinary có thể mất vài giây.
+  // hiện text cụ thể vì bước render PDF + upload Cloudinary có thể mất vài giây.
   const [submitStage, setSubmitStage] = useState('');
   // Sau khi tạo thành công: hiện panel kết quả thay vì đóng modal ngay, để admin xem
-  // link hợp đồng (nếu có) trước khi đóng.
-  const [successView, setSuccessView] = useState<{ fileUrl: string | null; managerName: string | null } | null>(null);
+  // hợp đồng (nếu có file) trước khi đóng. Xem file qua BE /document/download —
+  // KHÔNG mở URL Cloudinary trực tiếp (FE-draft-contract-pdf.md).
+  const [successView, setSuccessView] = useState<{
+    draftId: number;
+    contractCode: string | null;
+    hasFile: boolean;
+    managerName: string | null;
+  } | null>(null);
+  const [viewingCreated, setViewingCreated] = useState(false);
+  // Submit chuỗi thao tác (tạo/sửa → gán manager → sinh file) khá tốn kém để làm lại
+  // nếu gõ nhầm — chặn lại 1 bước xác nhận cuối, hiện tóm tắt toàn bộ trước khi bắn API.
+  const [showSummary, setShowSummary] = useState(false);
 
   // Sửa hợp đồng nháp: pre-fill từ contract đã có (component remount mỗi lần mở modal
   // — xem cách DraftOnboardingList render {editing && <Modal .../>} — nên lazy
@@ -143,6 +229,8 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     phoneNumber: editContract.tenantPhone || '',
     dateOfBirth: editContract.tenantDateOfBirth || '',
     cccd: editContract.tenantCccd || '',
+    cccdIssueDate: editContract.tenantCccdIssueDate || '',
+    cccdIssuePlace: editContract.tenantCccdIssuePlace || '',
     rentAmount: editContract.rentAmount != null ? String(editContract.rentAmount) : '',
     deposit: editContract.deposit != null ? String(editContract.deposit) : '',
     depositMonths: editContract.depositMonths != null ? String(editContract.depositMonths) : '1',
@@ -155,6 +243,8 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     phoneNumber: '',
     dateOfBirth: '',
     cccd: '',
+    cccdIssueDate: '',
+    cccdIssuePlace: '',
     rentAmount: '',
     deposit: '',
     depositMonths: '1',
@@ -169,15 +259,40 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     [isEditMode, allProperties, editContract],
   );
 
+  // Phòng đang có HĐ nháp chờ đón khách — loại khỏi dropdown phòng (draft không đổi
+  // status phòng nên không lọc được bằng status). Nhà NGUYÊN CĂN có nháp thì ẩn cả nhà.
+  // Nháp bị hủy/chuyển ACTIVE thì tự hết chặn (biến mất khỏi listDrafts / status đổi).
+  const [draftRoomIds, setDraftRoomIds] = useState<Set<number>>(new Set());
+
+  // Nội thất trong phạm vi HĐ — CHỈ hiển thị read-only cho admin xem trước. BE tự gắn
+  // toàn bộ thiết bị ACTIVE (phòng + khu vực chung, hoặc cả căn) vào equipmentSnapshot
+  // khi tạo/sửa HĐ và khi render PDF — không còn checkbox chọn, không gửi
+  // selectedEquipmentIds (gửi [] bị hiểu là "không gắn gì"). Xem FE-contract-equipment-auto.md.
+  const [availableEquipments, setAvailableEquipments] = useState<ContractAvailableEquipmentItem[]>([]);
+  const [equipmentLoading, setEquipmentLoading] = useState(false);
+  const [equipmentLoaded, setEquipmentLoaded] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
-        const propPage = await propertyService.getProperties(0, 200);
+        const [propPage, drafts] = await Promise.all([
+          propertyService.getProperties(0, 200),
+          tenantService.listDrafts().catch(() => [] as TenantContractResponse[]),
+        ]);
         setAllProperties(propPage.content);
+        const draftPropertyIds = new Set<number>();
+        const roomIds = new Set<number>();
+        drafts.forEach((d) => {
+          if (d.roomId != null) roomIds.add(d.roomId);
+          else draftPropertyIds.add(d.propertyId);
+        });
+        setDraftRoomIds(roomIds);
         // Chỉ cho chọn nhà ACTIVE (không phải đang bảo trì/đã cho thuê nguyên căn/chưa
         // hoàn thiện onboarding...) — chặn từ gốc, không phải lọc UI đơn thuần vì BE
-        // cũng ràng buộc tương tự khi tạo hợp đồng.
-        setProperties(propPage.content.filter((p) => p.status === 'ACTIVE'));
+        // cũng ràng buộc tương tự khi tạo hợp đồng. Nhà nguyên căn đã có HĐ nháp cũng ẩn.
+        setProperties(propPage.content.filter(
+          (p) => p.status === 'ACTIVE' && !(p.wholeHouse === true && draftPropertyIds.has(p.id)),
+        ));
       } catch {
         /* interceptor đã toast */
       }
@@ -209,13 +324,52 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       .getRooms(selectedProperty.id)
       .then((rs) => {
         setAllRoomsInProperty(rs);
-        // Chỉ cho chọn phòng AVAILABLE — phòng đang có khách (RENTED) hoặc đang bảo
-        // trì (MAINTENANCE) không được vào dropdown. Lý do cụ thể hiện ở message bên dưới.
-        setRooms(rs.filter((r) => r.status === 'AVAILABLE'));
+        // Chỉ cho chọn phòng AVAILABLE — phòng đang có khách (RENTED), đang bảo trì
+        // (MAINTENANCE) hay ĐÃ CÓ HĐ NHÁP chờ đón khách không được vào dropdown.
+        // Lý do cụ thể hiện ở message bên dưới.
+        setRooms(rs.filter((r) => r.status === 'AVAILABLE' && !draftRoomIds.has(r.id)));
       })
       .catch(() => { setRooms([]); setAllRoomsInProperty([]); })
       .finally(() => setLoadingRooms(false));
-  }, [selectedProperty]);
+  }, [selectedProperty, draftRoomIds]);
+
+  // Sửa draft: lấy danh sách nội thất trong phạm vi HĐ từ chi tiết (editContract truyền
+  // vào có thể là bản rút gọn từ danh sách, gọi lại getById cho chắc mới nhất).
+  useEffect(() => {
+    if (!isEditMode || !editContract) return;
+    setEquipmentLoading(true);
+    setEquipmentLoaded(false);
+    tenantService
+      .getById(editContract.id)
+      .then((full) => {
+        setAvailableEquipments(full.availableEquipmentList ?? []);
+        setEquipmentLoaded(true);
+      })
+      .catch(() => { /* interceptor đã toast */ })
+      .finally(() => setEquipmentLoading(false));
+  }, [isEditMode, editContract]);
+
+  // Tạo mới: nạp danh sách nội thất theo phạm vi HĐ (phòng + khu vực chung, hoặc cả
+  // căn nếu nguyên căn) ngay khi đã đủ property (+ room nếu chia phòng) — chỉ để admin
+  // xem trước; BE sẽ tự gắn đúng danh sách ACTIVE này khi tạo HĐ.
+  useEffect(() => {
+    if (isEditMode) return;
+    if (!selectedProperty || (!isWholeHouse && !form.roomId)) {
+      setAvailableEquipments([]);
+      setEquipmentLoaded(false);
+      return;
+    }
+    setEquipmentLoading(true);
+    setEquipmentLoaded(false);
+    tenantService
+      .getContractAvailableEquipments(selectedProperty.id, isWholeHouse ? null : Number(form.roomId))
+      .then((list) => {
+        setAvailableEquipments(list);
+        setEquipmentLoaded(true);
+      })
+      .catch(() => { setAvailableEquipments([]); })
+      .finally(() => setEquipmentLoading(false));
+  }, [isEditMode, selectedProperty, isWholeHouse, form.roomId]);
 
   // Đếm phòng không-sẵn-sàng theo status để giải thích cho admin (thay vì chỉ báo
   // chung chung "hết phòng trống" — dễ khiến admin tưởng nhầm là lỗi hệ thống).
@@ -224,11 +378,12 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     const counts: Record<string, number> = {};
     allRoomsInProperty.forEach((r) => {
       if (r.status !== 'AVAILABLE') counts[r.status] = (counts[r.status] ?? 0) + 1;
+      else if (draftRoomIds.has(r.id)) counts.HAS_DRAFT = (counts.HAS_DRAFT ?? 0) + 1;
     });
     return Object.entries(counts)
       .map(([status, n]) => `${n} ${ROOM_STATUS_LABEL[status] ?? status.toLowerCase()}`)
       .join(', ');
-  }, [rooms, allRoomsInProperty]);
+  }, [rooms, allRoomsInProperty, draftRoomIds]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -238,12 +393,15 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const handleRoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const roomId = e.target.value;
     const room = rooms.find((r) => String(r.id) === roomId);
-    setForm((prev) => ({
-      ...prev,
-      roomId,
-      rentAmount: room?.price != null ? String(room.price) : prev.rentAmount,
-      deposit: room?.deposit != null ? String(room.deposit) : prev.deposit,
-    }));
+    setForm((prev) => {
+      const rentAmount = room?.price != null ? String(room.price) : prev.rentAmount;
+      return {
+        ...prev,
+        roomId,
+        rentAmount,
+        deposit: calcDeposit(rentAmount, prev.depositMonths) || prev.deposit,
+      };
+    });
   };
 
   // Tra cứu SĐT để cảnh báo role không hợp lệ (ADMIN/MANAGER/HOST).
@@ -260,6 +418,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           ...prev,
           fullName: prev.fullName || r.fullName || '',
           cccd: prev.cccd || r.cccd || '',
+          dateOfBirth: prev.dateOfBirth || r.dateOfBirth || '',
+          cccdIssueDate: prev.cccdIssueDate || r.cccdIssueDate || '',
+          cccdIssuePlace: prev.cccdIssuePlace || r.cccdIssuePlace || '',
         }));
       }
     } catch {
@@ -295,23 +456,30 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           endDate: extracted.endDate || prev.endDate,
         }));
 
-        // Gợi ý nhà theo địa chỉ bóc từ file — chỉ tự chọn nếu admin CHƯA chọn tay,
-        // và chỉ khớp trong danh sách nhà đang ACTIVE (sẵn sàng cho thuê).
-        if (extracted.address) {
-          const match = suggestPropertyByAddress(extracted.address, properties);
+        // Gợi ý nhà theo TÊN NHÀ + địa chỉ bóc từ file (so khớp mờ, chịu được sai
+        // chính tả 1 ký tự) — chỉ tự chọn nếu admin CHƯA chọn tay, và chỉ khớp trong
+        // danh sách nhà đang ACTIVE (sẵn sàng cho thuê).
+        const propertyHint = `${extracted.propertyName} ${extracted.address}`.trim();
+        if (propertyHint) {
+          const match = suggestPropertyByAddress(propertyHint, properties);
           if (match) {
             setForm((prev) => ({ ...prev, propertyId: prev.propertyId || String(match.property.id) }));
+            const exact =
+              extracted.propertyName &&
+              normalizeText(extracted.propertyName) === normalizeText(match.property.propertyName);
             setAddressSuggestion(
-              `Đã gợi ý nhà "${match.property.propertyName}" theo địa chỉ trong file — vui lòng kiểm tra lại.`,
+              exact
+                ? `Đã chọn nhà "${match.property.propertyName}" đúng theo tên ghi trong file.`
+                : `Đã gợi ý nhà "${match.property.propertyName}" theo tên/địa chỉ trong file (khớp gần đúng — có thể file ghi sai chính tả). Vui lòng kiểm tra lại.`,
             );
           } else {
             // Không khớp nhà nào đang sẵn sàng — thử tìm trong TOÀN BỘ danh sách để
             // báo rõ nguyên nhân (vd nhà đúng địa chỉ nhưng đang bảo trì/hết hạn).
-            const blocked = suggestPropertyByAddress(extracted.address, allProperties);
+            const blocked = suggestPropertyByAddress(propertyHint, allProperties);
             setAddressSuggestion(
               blocked
-                ? `Địa chỉ trong file khớp với nhà "${blocked.property.propertyName}" nhưng nhà này hiện KHÔNG sẵn sàng cho thuê (${PROPERTY_STATUS_LABEL[blocked.property.status] ?? blocked.property.status}). Vui lòng chọn nhà khác hoặc kiểm tra lại.`
-                : 'Không tự tìm được nhà khớp với địa chỉ trong file — vui lòng chọn tay.',
+                ? `Tên/địa chỉ trong file khớp với nhà "${blocked.property.propertyName}" nhưng nhà này hiện KHÔNG sẵn sàng cho thuê (${PROPERTY_STATUS_LABEL[blocked.property.status] ?? blocked.property.status}). Vui lòng chọn nhà khác hoặc kiểm tra lại.`
+                : 'Không tự tìm được nhà khớp với tên/địa chỉ trong file — vui lòng chọn tay.',
             );
           }
         } else {
@@ -331,7 +499,24 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     lookupChecked &&
     (lookupEligible === null ? !isTenantEligibleRole(lookupRole ?? undefined) : !lookupEligible);
 
-  // Sửa hợp đồng nháp: PUT thông tin → render lại DOCX → upload Cloudinary → PUT URL
+  // Validate realtime — chỉ báo lỗi khi ĐÃ nhập (không đỏ lòm form trống), chặn ở submit.
+  const phoneInvalid = form.phoneNumber.trim() !== '' && !VN_PHONE_RE.test(normalizePhone(form.phoneNumber.trim()));
+  const cccdInvalid = form.cccd.trim() !== '' && !VN_CCCD_RE.test(form.cccd.trim());
+  // So sánh chuỗi ISO yyyy-MM-dd trực tiếp — thứ tự từ điển trùng thứ tự thời gian.
+  const dobInvalid = !!form.dateOfBirth && (form.dateOfBirth < DOB_MIN || form.dateOfBirth > DOB_MAX);
+
+  // Cọc lệch chuẩn (giá thuê × số tháng cọc) — CHỈ CẢNH BÁO, không chặn submit vì có
+  // trường hợp hợp lệ admin cố ý thương lượng cọc khác chuẩn.
+  const standardDeposit = calcDeposit(form.rentAmount, form.depositMonths);
+  const depositMismatch = form.rentAmount !== '' && form.deposit !== '' && form.deposit !== standardDeposit;
+
+  // Tên phòng để hiện trong panel tóm tắt trước khi lưu.
+  const selectedRoomNumber = isEditMode
+    ? editContract!.roomNumber
+    : rooms.find((r) => String(r.id) === form.roomId)?.roomNumber;
+  const summaryPropertyName = isEditMode ? editPropertyInfo?.propertyName : selectedProperty?.propertyName;
+
+  // Sửa hợp đồng nháp: PUT thông tin → render lại PDF → upload Cloudinary → PUT URL
   // mới (đúng quy trình BE yêu cầu — không có bước này thì file cũ lệch dữ liệu mới).
   const handleUpdateSubmit = async () => {
     if (!editContract) return;
@@ -341,24 +526,27 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       await tenantService.updateDraft(editContract.id, {
         fullName: form.fullName.trim(),
         cccd: form.cccd.trim(),
-        phoneNumber: form.phoneNumber.trim(),
+        phoneNumber: normalizePhone(form.phoneNumber.trim()),
         dateOfBirth: form.dateOfBirth || undefined,
+        cccdIssueDate: form.cccdIssueDate || undefined,
+        cccdIssuePlace: form.cccdIssuePlace.trim() || undefined,
         moveInDate: form.expectedReceptionDate || undefined,
         rentAmount: Number(form.rentAmount),
         deposit: Number(form.deposit),
         depositMonths: Number(form.depositMonths) || 1,
         endDate: form.endDate || undefined,
         expectedReceptionDate: form.expectedReceptionDate || undefined,
+        // KHÔNG gửi selectedEquipmentIds — BE tự đồng bộ toàn bộ nội thất ACTIVE khi
+        // PUT draft / render PDF (FE-contract-equipment-auto.md).
       });
 
       setSubmitStage('Đang tạo lại file hợp đồng...');
       try {
         const blob = await tenantService.generateDraftDocument(editContract.id);
-        const docxFile = new File([blob], `DRAFT-${editContract.contractCode}.docx`, {
-          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        });
+        // PDF theo spec mới — draftBlobToFile tự nhận diện, vẫn đúng nếu BE còn trả DOCX.
+        const pdfFile = await draftBlobToFile(blob, editContract.contractCode);
         setSubmitStage('Đang tải file lên...');
-        const url = await uploadToCloudinary(docxFile, 'raw');
+        const url = await uploadToCloudinary(pdfFile, 'raw');
         await tenantService.updateDraft(editContract.id, { draftContractFileUrl: url });
         toast.success('Đã cập nhật hợp đồng nháp & tạo lại file.');
       } catch {
@@ -374,20 +562,34 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Validate toàn bộ form rồi mở panel tóm tắt — CHƯA gọi API. Bấm "Xác nhận & Lưu" ở
+  // panel đó mới thực sự chạy chuỗi submit (xem confirmSubmit bên dưới).
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (phoneInvalid) return toast.error('SĐT không đúng định dạng Việt Nam (10 số, đầu 03/05/07/08/09).');
+    if (cccdInvalid) return toast.error('CCCD phải gồm đúng 12 chữ số.');
+    if (dobInvalid) return toast.error('Ngày sinh không hợp lệ — khách phải sinh từ 1930 và đủ 18 tuổi.');
     if (roleWarning) return toast.error('SĐT thuộc tài khoản nội bộ — không thể onboard làm khách.');
-    if (isEditMode) return handleUpdateSubmit();
+    if (!isEditMode) {
+      if (!selectedProperty) return toast.error('Vui lòng chọn bất động sản');
+      if (!isWholeHouse && !form.roomId) return toast.error('Vui lòng chọn phòng');
+    }
+    setShowSummary(true);
+  };
 
-    if (!selectedProperty) return toast.error('Vui lòng chọn bất động sản');
-    if (!isWholeHouse && !form.roomId) return toast.error('Vui lòng chọn phòng');
+  const confirmSubmit = async () => {
+    setShowSummary(false);
+    if (isEditMode) return handleUpdateSubmit();
+    if (!selectedProperty) return;
 
     const moveInDate = form.expectedReceptionDate || todayIso();
     const payload: OnboardTenantRequest = {
       fullName: form.fullName.trim(),
       cccd: form.cccd.trim(),
-      phoneNumber: form.phoneNumber.trim(),
+      phoneNumber: normalizePhone(form.phoneNumber.trim()),
       dateOfBirth: form.dateOfBirth || undefined,
+      cccdIssueDate: form.cccdIssueDate || undefined,
+      cccdIssuePlace: form.cccdIssuePlace.trim() || undefined,
       moveInDate,
       rentAmount: Number(form.rentAmount),
       deposit: Number(form.deposit),
@@ -395,6 +597,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       endDate: form.endDate || undefined,
       expectedReceptionDate: form.expectedReceptionDate || undefined,
       draftContractFileUrl: draftFileUrl || undefined,
+      // Nội thất có sẵn: BE tự gắn toàn bộ ACTIVE trong phạm vi HĐ — không gửi gì.
     };
 
     setSubmitting(true);
@@ -424,7 +627,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         }
       }
 
-      // Tạo tay (không phải import file có sẵn) → tự sinh file DOCX từ dữ liệu vừa
+      // Tạo tay (không phải import file có sẵn) → BE render PDF từ dữ liệu vừa
       // nhập, upload Cloudinary, lưu URL — admin có thể xem lại ngay. Import file thì
       // đã có draftFileUrl từ bước upload trong handleFileUpload, không sinh lại.
       let finalFileUrl = draftFileUrl || null;
@@ -432,11 +635,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         setSubmitStage('Đang tạo file hợp đồng...');
         try {
           const blob = await tenantService.generateDraftDocument(draft.id);
-          const docxFile = new File([blob], `DRAFT-${draft.contractCode}.docx`, {
-            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          });
+          const pdfFile = await draftBlobToFile(blob, draft.contractCode);
           setSubmitStage('Đang tải file lên...');
-          const url = await uploadToCloudinary(docxFile, 'raw');
+          const url = await uploadToCloudinary(pdfFile, 'raw');
           await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
           finalFileUrl = url;
         } catch {
@@ -450,7 +651,12 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           : 'Đã tạo hợp đồng nháp. Nhà này chưa có quản lý phụ trách — vào danh sách nháp để gán tay.',
       );
       onSuccess();
-      setSuccessView({ fileUrl: finalFileUrl, managerName });
+      setSuccessView({
+        draftId: draft.id,
+        contractCode: draft.contractCode || null,
+        hasFile: Boolean(finalFileUrl),
+        managerName,
+      });
     } catch {
       /* interceptor đã toast */
     } finally {
@@ -461,6 +667,17 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
 
   // Sau khi tạo thành công — panel kết quả thay cho form (view file + đóng).
   if (successView) {
+    const viewCreatedContract = async () => {
+      setViewingCreated(true);
+      try {
+        const blob = await tenantService.viewContractDocument(successView.draftId);
+        openContractBlob(blob, successView.contractCode);
+      } catch {
+        toast.error('Không tải được file hợp đồng.');
+      } finally {
+        setViewingCreated(false);
+      }
+    };
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
@@ -473,17 +690,101 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 ? `Đã gửi thông báo cho ${successView.managerName}.`
                 : 'Nhà này chưa có quản lý phụ trách — vào danh sách nháp để gán tay.'}
             </p>
-            {successView.fileUrl && (
-              <a
-                href={successView.fileUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+            {successView.hasFile && (
+              <button
+                onClick={viewCreatedContract}
+                disabled={viewingCreated}
+                className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-60"
               >
-                <FileText className="h-4 w-4" /> Xem hợp đồng nháp <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+                <FileText className="h-4 w-4" />
+                {viewingCreated ? 'Đang tải...' : 'Xem hợp đồng nháp'}
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
             )}
             <button onClick={onClose} className="btn-primary mt-2 w-full">Đóng</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Panel tóm tắt — bước xác nhận cuối trước khi thực sự gọi API (tạo/sửa + gán
+  // manager + render PDF là 1 chuỗi tốn kém, sai sót phát hiện muộn khó sửa).
+  if (showSummary) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+        <div className="relative mx-4 max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+          <h2 className="text-lg font-bold text-slate-900">Xác nhận thông tin</h2>
+          <p className="mt-0.5 text-xs text-slate-500">Kiểm tra lại trước khi lưu — sau bước này sẽ tạo/gán manager/sinh file.</p>
+
+          <dl className="mt-4 space-y-2.5 text-sm">
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Bất động sản</dt>
+              <dd className="text-right font-medium text-slate-800">
+                {summaryPropertyName || '—'}{selectedRoomNumber ? ` — P.${selectedRoomNumber}` : ' — Nguyên căn'}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Khách thuê</dt>
+              <dd className="text-right font-medium text-slate-800">{form.fullName || '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">SĐT / CCCD</dt>
+              <dd className="text-right font-medium text-slate-800">{normalizePhone(form.phoneNumber)} / {form.cccd}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Ngày sinh</dt>
+              <dd className="text-right font-medium text-slate-800">{formatDateDisplay(form.dateOfBirth)}</dd>
+            </div>
+            {(form.cccdIssueDate || form.cccdIssuePlace) && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">CCCD cấp</dt>
+                <dd className="text-right font-medium text-slate-800">
+                  {formatDateDisplay(form.cccdIssueDate)}{form.cccdIssuePlace ? ` — ${form.cccdIssuePlace}` : ''}
+                </dd>
+              </div>
+            )}
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Giá thuê</dt>
+              <dd className="text-right font-medium text-slate-800">{formatVndDisplay(form.rentAmount)} đ/tháng</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Tiền cọc</dt>
+              <dd className="text-right font-medium text-slate-800">
+                {formatVndDisplay(form.deposit)} đ ({form.depositMonths} tháng)
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Đón khách</dt>
+              <dd className="text-right font-medium text-slate-800">{formatDateDisplay(form.expectedReceptionDate)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Kết thúc HĐ</dt>
+              <dd className="text-right font-medium text-slate-800">{formatDateDisplay(form.endDate)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Nội thất bàn giao</dt>
+              <dd className="text-right font-medium text-slate-800">
+                {equipmentLoaded ? `${availableEquipments.length} món (tự gắn toàn bộ)` : '—'}
+              </dd>
+            </div>
+          </dl>
+
+          {depositMismatch && (
+            <div className="mt-4 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+              <ShieldAlert className="h-4 w-4 flex-shrink-0" />
+              <p>Cọc đang khác chuẩn (giá thuê × số tháng = {formatVndDisplay(standardDeposit)} đ) — vẫn tiếp tục nếu đây là chủ ý.</p>
+            </div>
+          )}
+
+          <div className="mt-5 flex justify-end gap-3 border-t border-slate-200 pt-4">
+            <button type="button" onClick={() => setShowSummary(false)} className="btn-secondary" disabled={submitting}>
+              Quay lại sửa
+            </button>
+            <button type="button" onClick={confirmSubmit} className="btn-primary" disabled={submitting}>
+              {submitting ? (submitStage || 'Đang lưu...') : 'Xác nhận & Lưu'}
+            </button>
           </div>
         </div>
       </div>
@@ -616,7 +917,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                   {rooms.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.roomNumber}
-                      {r.price != null ? ` — ${r.price.toLocaleString('vi-VN')}đ` : ''}
                     </option>
                   ))}
                 </select>
@@ -637,7 +937,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
             </label>
             <input name="fullName" value={form.fullName} onChange={handleChange} className="input-field" required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 Số điện thoại <span className="text-rose-500">*</span>
@@ -648,28 +948,73 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 value={form.phoneNumber}
                 onChange={handleChange}
                 onBlur={handlePhoneBlur}
-                className="input-field"
+                maxLength={12}
+                placeholder="09xxxxxxxx"
+                className={`input-field ${phoneInvalid ? 'border-rose-400' : ''}`}
                 required
               />
+              {phoneInvalid && (
+                <p className="mt-1 text-xs text-rose-500">SĐT VN gồm 10 số, đầu 03/05/07/08/09.</p>
+              )}
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 CCCD <span className="text-rose-500">*</span>
               </label>
-              <input name="cccd" value={form.cccd} onChange={handleChange} className="input-field" required />
+              <input
+                name="cccd"
+                value={form.cccd}
+                onChange={handleChange}
+                inputMode="numeric"
+                maxLength={12}
+                placeholder="12 chữ số"
+                className={`input-field ${cccdInvalid ? 'border-rose-400' : ''}`}
+                required
+              />
+              {cccdInvalid && (
+                <p className="mt-1 text-xs text-rose-500">CCCD phải đủ 12 chữ số.</p>
+              )}
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày sinh</label>
+              <input
+                type="date"
+                name="dateOfBirth"
+                value={form.dateOfBirth}
+                onChange={handleChange}
+                min={DOB_MIN}
+                max={DOB_MAX}
+                className={`input-field ${dobInvalid ? 'border-rose-400' : ''}`}
+              />
+              {dobInvalid && (
+                <p className="mt-1 text-xs text-rose-500">Từ 1930 & khách đủ 18 tuổi.</p>
+              )}
             </div>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày sinh</label>
-            <input
-              type="date"
-              name="dateOfBirth"
-              value={form.dateOfBirth}
-              onChange={handleChange}
-              max={todayIso()}
-              className="input-field"
-            />
+          {/* Ngày cấp / Nơi cấp CCCD — optional, in lên PDF hợp đồng (BE 15/07) */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày cấp CCCD</label>
+              <input
+                type="date"
+                name="cccdIssueDate"
+                value={form.cccdIssueDate}
+                onChange={handleChange}
+                max={todayIso()}
+                className="input-field"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Nơi cấp CCCD</label>
+              <input
+                name="cccdIssuePlace"
+                value={form.cccdIssuePlace}
+                onChange={handleChange}
+                placeholder="VD: CA TP. Hồ Chí Minh"
+                className="input-field"
+              />
+            </div>
           </div>
 
           {roleWarning && (
@@ -690,7 +1035,11 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 inputMode="numeric"
                 name="rentAmount"
                 value={formatVndDisplay(form.rentAmount)}
-                onChange={(e) => setForm((prev) => ({ ...prev, rentAmount: parseVndInput(e.target.value) }))}
+                onChange={(e) => setForm((prev) => {
+                  const rentAmount = parseVndInput(e.target.value);
+                  // Giá thuê đổi → cọc tự tính lại = giá thuê × số tháng cọc.
+                  return { ...prev, rentAmount, deposit: calcDeposit(rentAmount, prev.depositMonths) };
+                })}
                 className="input-field text-right"
                 placeholder="0"
                 required
@@ -706,14 +1055,29 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 name="deposit"
                 value={formatVndDisplay(form.deposit)}
                 onChange={(e) => setForm((prev) => ({ ...prev, deposit: parseVndInput(e.target.value) }))}
-                className="input-field text-right"
+                className={`input-field text-right ${depositMismatch ? 'border-amber-400' : ''}`}
                 placeholder="0"
                 required
               />
+              {depositMismatch && (
+                <p className="mt-1 text-xs text-amber-600">
+                  Khác chuẩn (giá thuê × số tháng = {formatVndDisplay(standardDeposit)}đ).
+                </p>
+              )}
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">Số tháng cọc</label>
-              <select name="depositMonths" value={form.depositMonths} onChange={handleChange} className="input-field text-right">
+              <select
+                name="depositMonths"
+                value={form.depositMonths}
+                onChange={(e) => setForm((prev) => ({
+                  ...prev,
+                  depositMonths: e.target.value,
+                  // Đổi số tháng cọc → cọc tự tính lại theo giá thuê hiện tại (nếu đã có giá).
+                  deposit: calcDeposit(prev.rentAmount, e.target.value) || prev.deposit,
+                }))}
+                className="input-field text-right"
+              >
                 <option value="1">1 tháng</option>
                 <option value="2">2 tháng</option>
               </select>
@@ -737,7 +1101,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày kết thúc (tuỳ chọn)</label>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                Ngày kết thúc {!isEditMode && <span className="text-rose-500">*</span>}
+              </label>
               <input
                 type="date"
                 name="endDate"
@@ -746,14 +1112,80 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 min={form.expectedReceptionDate || (isEditMode ? undefined : todayIso())}
                 max={addYearsIso(todayIso(), 5)}
                 className="input-field"
+                required={!isEditMode}
               />
+              {/* Chip chọn nhanh — tính từ ngày dự kiến đón khách (hoặc hôm nay nếu chưa chọn). */}
+              <div className="mt-1.5 flex gap-1.5">
+                {[
+                  { label: '6 tháng', endDate: addMonthsIso(form.expectedReceptionDate || todayIso(), 6) },
+                  { label: '1 năm', endDate: addYearsIso(form.expectedReceptionDate || todayIso(), 1) },
+                  { label: '2 năm', endDate: addYearsIso(form.expectedReceptionDate || todayIso(), 2) },
+                ].map((chip) => (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => setForm((prev) => ({ ...prev, endDate: chip.endDate }))}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      form.endDate === chip.endDate
+                        ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+
+          {/* Nội thất bàn giao — READ-ONLY: BE tự gắn toàn bộ thiết bị ACTIVE trong phạm
+              vi HĐ vào equipmentSnapshot/PDF, không còn checkbox chọn từng món (xem
+              FE-contract-equipment-auto.md). Hiện danh sách để admin biết PDF sẽ có gì. */}
+          {(isEditMode || (selectedProperty && (isWholeHouse || form.roomId))) && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                Nội thất bàn giao
+                {equipmentLoaded && (
+                  <span className="ml-1.5 font-normal text-slate-400">
+                    ({availableEquipments.length} món — tự gắn toàn bộ)
+                  </span>
+                )}
+              </label>
+              {equipmentLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Đang tải danh sách nội thất...
+                </div>
+              ) : availableEquipments.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  Nhà/phòng chưa có nội thất trong hệ thống — hợp đồng sẽ không có mục nội thất.
+                  Cần thì nhập thiết bị vào nhà trước.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+                  {availableEquipments.map((eq) => (
+                    <div key={eq.id} className="flex items-center gap-2 text-sm text-slate-700">
+                      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />
+                      {eq.name}{' '}
+                      <span className="text-xs text-slate-400">
+                        ({EQUIPMENT_CONDITION_LABEL[eq.condition] ?? eq.condition}{eq.quantity > 1 ? ` x${eq.quantity}` : ''})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {availableEquipments.length > 0 && (
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Toàn bộ nội thất có sẵn được tự động ghi vào hợp đồng — muốn thay đổi, cập nhật
+                  thiết bị của nhà/phòng trong mục Quản lý thiết bị.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" onClick={onClose} className="btn-secondary">Hủy</button>
             <button type="submit" className="btn-primary" disabled={submitting || extracting}>
-              {submitting ? (submitStage || 'Đang lưu...') : (isEditMode ? 'Cập nhật & tạo lại file' : 'Lưu hợp đồng nháp')}
+              Xem lại & Lưu
             </button>
           </div>
         </form>

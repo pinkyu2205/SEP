@@ -56,10 +56,13 @@ export const maintenanceStatusMap = {
 type Badge = { label: string; color: string; dot: string };
 
 export const maintenanceReqStatusMap: Record<string, Badge> = {
-  PENDING:     { label: 'Chờ xử lý',     color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
-  IN_PROGRESS: { label: 'Đang xử lý',    color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
-  RESOLVED:    { label: 'Đã hoàn thành', color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
-  CANCELLED:   { label: 'Đã hủy',        color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
+  PENDING:          { label: 'Chờ xử lý',        color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
+  IN_PROGRESS:      { label: 'Đang xử lý',       color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
+  // Chi phí vượt ngưỡng — cần Admin duyệt trên web (PUT /maintenance/{id}/approve).
+  // Trước đây bị normalize nuốt về "Chờ xử lý" nên không ai thấy để duyệt → ticket treo.
+  PENDING_APPROVAL: { label: 'Chờ duyệt chi phí', color: 'bg-amber-50 text-amber-700 border border-amber-200',    dot: 'bg-amber-500' },
+  RESOLVED:         { label: 'Đã hoàn thành',    color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
+  CANCELLED:        { label: 'Đã hủy',           color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
 };
 
 export const maintenanceReqPriorityMap: Record<string, Badge> = {
@@ -87,19 +90,27 @@ export const equipmentLifecycleMap: Record<string, Badge> = {
 /** Map mọi trạng thái BE (kể cả ASSIGNED/WAITING_PARTS nếu có) về 4 trạng thái spec */
 export function normalizeMaintenanceStatus(
   s: string | undefined,
-): 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' {
+): 'PENDING' | 'IN_PROGRESS' | 'PENDING_APPROVAL' | 'RESOLVED' | 'CANCELLED' {
   switch ((s ?? '').toUpperCase()) {
     case 'PENDING':
     case 'OPEN':
+    case 'REOPENED':
       return 'PENDING';
     case 'ASSIGNED':
     case 'ACCEPTED':
+    case 'ACKNOWLEDGED':
+    case 'SCHEDULED':
     case 'IN_PROGRESS':
     case 'WAITING_PARTS':
+    case 'ON_HOLD':
       return 'IN_PROGRESS';
+    // Giữ riêng — cần Admin duyệt chi phí, không được gom về PENDING.
+    case 'PENDING_APPROVAL':
+      return 'PENDING_APPROVAL';
     case 'RESOLVED':
     case 'DONE':
     case 'COMPLETED':
+    case 'CONFIRMED':
       return 'RESOLVED';
     case 'CANCELLED':
     case 'CANCELED':

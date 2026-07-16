@@ -73,13 +73,6 @@ export const LoginScreen: React.FC = () => {
           <Text style={styles.appSlogan}>Quản lý phòng trọ thông minh</Text>
         </View>
 
-        {/* Demo Credentials Info */}
-        <View style={styles.demoBox}>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager (API thật):</Text> long2 / 123456</Text>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Manager (mock):</Text> 0909876543 / manager123</Text>
-          <Text style={styles.demoText}><Text style={{fontWeight: 'bold'}}>Tenant mock:</Text> 0901234567 / tenant123</Text>
-        </View>
-
         {/* Login Form */}
         <View style={styles.formCard}>
           <Text style={styles.formTitle}>Đăng nhập</Text>

@@ -1,5 +1,5 @@
 import api from './api';
-import type { OnboardTenantRequest, TenantContractResponse } from '@/types/api.types';
+import type { ContractAvailableEquipmentItem, OnboardTenantRequest, TenantContractResponse } from '@/types/api.types';
 
 const BASE = '/api/v1/properties';
 
@@ -10,6 +10,9 @@ export interface TenantLookupResponse {
   fullName?: string;
   phoneNumber?: string;
   cccd?: string;
+  dateOfBirth?: string;      // ISO date — BE trả thêm từ 15/07 (bulk import commit)
+  cccdIssueDate?: string;    // ISO date — ngày cấp CCCD
+  cccdIssuePlace?: string;   // nơi cấp CCCD
   role?: string; // ROLE_USER | ROLE_TENANT | ROLE_ADMIN | ROLE_MANAGER | ROLE_OWNER
 }
 
@@ -84,15 +87,32 @@ export const tenantService = {
     return api.get(`/api/v1/tenant-contracts/${id}`);
   },
 
+  /**
+   * (CHỈ hiển thị read-only — BE tự gắn toàn bộ thiết bị ACTIVE vào HĐ, không còn
+   * checkbox chọn; xem FE-contract-equipment-auto.md 2026-07.)
+   * GET /properties/{propertyId}/contract-available-equipments?roomId= — thiết bị
+   * có thể chọn cho HĐ (phòng + khu vực chung, hoặc cả căn nếu thuê nguyên căn — bỏ
+   * roomId). Xem FE-contract-handover-equipment.md §3.1.
+   */
+  getContractAvailableEquipments: (
+    propertyId: number,
+    roomId?: number | null,
+  ): Promise<ContractAvailableEquipmentItem[]> => {
+    return api.get(`${BASE}/${propertyId}/contract-available-equipments`, {
+      params: roomId != null ? { roomId } : {},
+    } as never);
+  },
+
   /** PUT /tenant-contracts/{id} — sửa hợp đồng nháp (admin chỉnh field). */
   updateDraft: (id: number, data: Partial<OnboardTenantRequest>): Promise<TenantContractResponse> => {
     return api.put(`/api/v1/tenant-contracts/${id}`, data);
   },
 
   /**
-   * POST /tenant-contracts/{id}/draft-document — BE fill template DOCX từ dữ liệu
+   * POST /tenant-contracts/{id}/draft-document — BE render PDF từ template + dữ liệu
    * hợp đồng nháp (contractId phải đang DRAFT), trả file binary — KHÔNG lưu trên BE.
-   * FE tự upload Cloudinary (resource_type raw) rồi PUT draftContractFileUrl.
+   * FE tự upload Cloudinary (resource_type raw, filename .pdf) rồi PUT
+   * draftContractFileUrl — xem FE-draft-contract-pdf.md (breaking change từ DOCX).
    */
   generateDraftDocument: (id: number): Promise<Blob> => {
     return api.post(`/api/v1/tenant-contracts/${id}/draft-document`, undefined, {
@@ -104,6 +124,8 @@ export const tenantService = {
    * GET /tenant-contracts/{id}/document/download — tải file HĐ đã lưu để xem
    * (nút "Xem hợp đồng" / "File HĐ"). KHÔNG mở draftContractFileUrl/documentUrl
    * trực tiếp — xem FE-view-contract.md. 422 nếu chưa có file.
+   * File mới là PDF, HĐ cũ có thể còn DOCX — đừng hard-code MIME, đọc blob.type
+   * (axios set từ Content-Type response); dùng openContractBlob() để mở đúng cách.
    */
   viewContractDocument: (id: number): Promise<Blob> => {
     return api.get(`/api/v1/tenant-contracts/${id}/document/download`, {

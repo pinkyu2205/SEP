@@ -34,6 +34,7 @@ import { TenantContractDetailScreen } from '@/screens/manager/TenantContractDeta
 import { TenantMaintenanceScreen } from '@/screens/manager/TenantMaintenanceScreen';
 import { InspectionDetailScreen } from '@/screens/manager/InspectionDetailScreen';
 import { ResumeContractScreen } from '@/screens/manager/ResumeContractScreen';
+import { CheckoutRequestsScreen } from '@/screens/manager/CheckoutRequestsScreen';
 
 // Tenant-specific screens
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
@@ -145,6 +146,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="TenantMaintenance" component={TenantMaintenanceScreen} />
             <Stack.Screen name="InspectionDetail" component={InspectionDetailScreen} />
             <Stack.Screen name="ResumeContract" component={ResumeContractScreen} />
+            <Stack.Screen name="CheckoutRequests" component={CheckoutRequestsScreen} />
           </Stack.Group>
         ) : (
           // Tenant stack — tabs + all detail screens
