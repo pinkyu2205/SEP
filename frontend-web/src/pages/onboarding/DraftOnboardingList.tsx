@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
-  FilePlus, RefreshCw, UserPlus, Trash2, Building2, Phone, CalendarClock, CheckCircle2, X, FileDown, Pencil,
+  FilePlus, FileSpreadsheet, RefreshCw, UserPlus, Trash2, Building2, Phone, CalendarClock, CheckCircle2, X, FileDown, Pencil,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { TenantContractResponse } from '../../types/api.types';
 import { tenantService } from '../../services/tenant.service';
 import { propertyService } from '../../services/property.service';
 import { formatCurrency } from '../../utils';
+import { openContractBlob } from '../../utils/contractFile';
 import { DraftContractFormModal } from './DraftContractFormModal';
+import { DraftContractImportModal } from './DraftContractImportModal';
 
 type ManagerItem = { id: string; fullName: string; username: string };
 
@@ -20,6 +22,7 @@ export const DraftOnboardingList = () => {
   const [managers, setManagers] = useState<ManagerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<TenantContractResponse | null>(null);
   const [assigning, setAssigning] = useState<TenantContractResponse | null>(null);
   const [assignManagerId, setAssignManagerId] = useState('');
@@ -71,9 +74,8 @@ export const DraftOnboardingList = () => {
     setViewingId(d.id);
     try {
       const blob = await tenantService.viewContractDocument(d.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      // PDF (file mới) preview tab mới; DOCX (HĐ cũ) tải về — theo Content-Type.
+      openContractBlob(blob, d.contractCode);
     } catch {
       toast.error('Không tải được file hợp đồng.');
     } finally {
@@ -108,6 +110,12 @@ export const DraftOnboardingList = () => {
             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
           >
             <RefreshCw className="h-4 w-4" /> Làm mới
+          </button>
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" /> Import Excel
           </button>
           <button
             onClick={() => setShowCreate(true)}
@@ -203,6 +211,9 @@ export const DraftOnboardingList = () => {
 
       {showCreate && (
         <DraftContractFormModal onClose={() => setShowCreate(false)} onSuccess={fetchData} />
+      )}
+      {showImport && (
+        <DraftContractImportModal onClose={() => setShowImport(false)} onImported={fetchData} />
       )}
 
       {editing && (

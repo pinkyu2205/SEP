@@ -172,6 +172,8 @@ export interface MaintenanceRequest {
   confirmedSlot?: string;
   doneAt?: string;
   tenantConfirmedAt?: string;
+  /** Ai trả phí sửa: HOST = công ty · TENANT = khách làm hư (sẽ vào pending charge). */
+  costPaidBy?: 'HOST' | 'TENANT';
 }
 
 export interface CreateMaintenanceRequest {

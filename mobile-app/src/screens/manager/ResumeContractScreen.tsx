@@ -81,10 +81,16 @@ export const ResumeContractScreen: React.FC = () => {
     if (!selected) return
     setViewingContract(true)
     try {
-      const uri = await realTenantService.downloadContractDocument(selected.id, selected.contractCode)
+      // mimeType theo Content-Type BE trả: PDF (file mới) / DOCX (HĐ cũ) —
+      // xem FE-draft-contract-pdf.md.
+      const { uri, mimeType } = await realTenantService.downloadContractDocument(
+        selected.id,
+        selected.contractCode,
+      )
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
-          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          mimeType,
+          UTI: mimeType === 'application/pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
           dialogTitle: 'Xem hợp đồng thuê',
         })
       } else {

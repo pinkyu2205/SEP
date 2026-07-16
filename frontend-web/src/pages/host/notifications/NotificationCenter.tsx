@@ -16,6 +16,12 @@ const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
   MAINTENANCE_DELAY: 'maintenance_delay',
   OCCUPANCY_ALERT: 'occupancy_alert',
   LOSS_ALERT: 'occupancy_alert',
+  // Type BE thực tế gửi cho host (duyệt giá HĐ, bảo trì vượt ngưỡng, nhắc nợ) —
+  // trước đây đều rơi vào fallback approval_needed, map tường minh cho đúng nhãn.
+  CONTRACT: 'approval_needed',
+  MAINTENANCE: 'maintenance_delay',
+  BILLING_REMINDER: 'unpaid_invoice',
+  BILLING_OVERDUE: 'unpaid_invoice',
 };
 const dtoToNotification = (d: HostNotificationDto): PortalNotification => ({
   id: d.id,

@@ -66,8 +66,9 @@ export const realEquipmentService = {
 
   /**
    * Bật/tắt hiện diện thiết bị trong phòng (trục độc lập với status vật lý).
-   * ACTIVE = đang lắp · DISABLED = đã gỡ. Dùng cho thao tác thủ công ngoài onboarding;
-   * luồng đón khách thì BE tự xử lý qua declinedEquipmentIds. (Endpoint BE đang bổ sung.)
+   * ACTIVE = đang lắp · DISABLED = đã gỡ. Chỉ cho thao tác thủ công — luồng đón khách
+   * không còn khái niệm "khách từ chối thiết bị" (BE tự gắn toàn bộ nội thất ACTIVE
+   * vào HĐ, xem FE-contract-equipment-auto.md). (Endpoint BE đang bổ sung.)
    */
   setOperationalStatus: async (
     id: number,

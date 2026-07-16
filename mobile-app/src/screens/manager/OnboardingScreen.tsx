@@ -932,14 +932,10 @@ export const OnboardingScreen: React.FC<any> = ({ navigation }) => {
         dateOfBirth: m.dateOfBirth ? toIsoDate(m.dateOfBirth) : undefined,
         cccd: m.cccd,
       })),
-    equipmentSnapshot: JSON.stringify({
-      handoverDate: toIsoDate(todayStr),
-      items: buildEquipmentSnapshotItems(),
-    }),
-    // Thiết bị sẵn có bị bỏ tick = khách không nhận -> BE gỡ khỏi phòng (DISABLED).
-    declinedEquipmentIds: availableEquipments
-      .filter((e) => !handoverSelected[e.id])
-      .map((e) => e.id),
+    // Nội thất: KHÔNG còn gửi equipmentSnapshot/declinedEquipmentIds — BE tự gắn toàn
+    // bộ thiết bị ACTIVE và tự sinh snapshot (FE-contract-equipment-auto.md 2026-07).
+    // Màn hình này là bản cũ (điều hướng thật đã dùng OnboardingScreenV2) — tick chọn
+    // ở UI chỉ còn tính tham khảo, không ảnh hưởng hợp đồng.
     // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
     requireHostPriceApproval: priceMode === 'approval',
     // Case 1 thu cọc luôn theo phương thức đã chọn; Case 2 hoãn tới sau khi Host duyệt.

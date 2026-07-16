@@ -223,6 +223,17 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   </Text>
                 </View>
               )}
+              {/* Khách làm hư → chi phí sẽ vào hóa đơn kỳ tới (pending charge) — báo
+                  trước để không bất ngờ khi hóa đơn MAINTENANCE xuất hiện. */}
+              {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
+                (request.repairCost ?? 0) > 0 && (
+                <View style={styles.tenantPayNote}>
+                  <Text style={styles.tenantPayNoteText}>
+                    💰 Chi phí sửa chữa này do bạn chi trả (hư hỏng do sử dụng) — sẽ được
+                    đưa vào hóa đơn kỳ tới. Xem trước ở tab Hóa đơn, mục "Khoản chờ thu".
+                  </Text>
+                </View>
+              )}
               {request.resolvedAt && (
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>Hoàn thành</Text>
@@ -380,6 +391,12 @@ const styles = StyleSheet.create({
   metaItem: { width: '47%' },
   metaLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
   metaValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  tenantPayNote: {
+    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.md,
+    borderWidth: 1, borderColor: '#FDE68A',
+    padding: Spacing.md, marginTop: Spacing.sm,
+  },
+  tenantPayNoteText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
 
   imagesRow: { marginTop: Spacing.sm },
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm },

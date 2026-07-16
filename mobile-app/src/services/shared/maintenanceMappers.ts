@@ -97,6 +97,7 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
     estimatedCompletionDate: schedule.confirmedSlot ?? dto.scheduledDate,
     scheduledSlots: schedule.scheduledSlots,
     confirmedSlot: schedule.confirmedSlot,
+    costPaidBy: dto.costPaidBy,
   };
 };
 

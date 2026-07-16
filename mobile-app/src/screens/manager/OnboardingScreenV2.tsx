@@ -238,11 +238,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [photoUploading, setPhotoUploading] = useState(false)
   const [inspectionNotes, setInspectionNotes] = useState('')
 
-  // Bàn giao thiết bị
+  // Bàn giao thiết bị — nội thất có sẵn CHỈ hiển thị read-only: BE tự gắn toàn bộ
+  // thiết bị ACTIVE trong phạm vi HĐ, không còn tick chọn/bỏ từng món
+  // (FE-contract-equipment-auto.md 2026-07). Lắp thêm vẫn thao tác được.
   const [availableEquipments, setAvailableEquipments] = useState<ContractAvailableEquipmentItem[]>([])
   const [loadingEquipments, setLoadingEquipments] = useState(false)
-  // map equipmentId -> có bàn giao cho khách không (mặc định true)
-  const [handoverSelected, setHandoverSelected] = useState<Record<number, boolean>>({})
   const [addedEquipments, setAddedEquipments] = useState<AddedEquipmentForm[]>([])
   const [showAddEquipModal, setShowAddEquipModal] = useState(false)
 
@@ -434,9 +434,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     return () => clearInterval(t)
   }, [otpCooldown])
 
-  // Tải thiết bị có thể chọn khi vào bước "Bàn giao thiết bị" — đúng phạm vi HĐ (phòng +
-  // khu vực chung, hoặc cả căn nếu nguyên căn), khớp đúng danh sách BE sẽ validate lúc
-  // submit. Xem FE-contract-handover-equipment.md §3.1.
+  // Tải danh sách nội thất khi vào bước "Bàn giao thiết bị" — đúng phạm vi HĐ (phòng +
+  // khu vực chung, hoặc cả căn nếu nguyên căn). Chỉ để hiển thị đối chiếu: BE tự gắn
+  // toàn bộ danh sách ACTIVE này vào HĐ (FE-contract-equipment-auto.md).
   useEffect(() => {
     if (currentLabel !== HANDOVER_STEP) return
     const roomId = rentalMode === 'room' ? Number(selectedRoomId) : null
@@ -448,16 +448,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     realTenantService
       .getContractAvailableEquipments(propertyId, roomId)
       .then((list) => {
-        if (!active) return
-        setAvailableEquipments(list)
-        // Mặc định bàn giao tất cả thiết bị sẵn có (giữ lựa chọn cũ nếu đã có).
-        setHandoverSelected((prev) => {
-          const next = { ...prev }
-          list.forEach((e) => {
-            if (next[e.id] === undefined) next[e.id] = true
-          })
-          return next
-        })
+        if (active) setAvailableEquipments(list)
       })
       .catch(() => active && setAvailableEquipments([]))
       .finally(() => active && setLoadingEquipments(false))
@@ -492,7 +483,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     setWaterMeterUrl(d.waterMeterUrl ?? '')
     setConditionPhotos(d.conditionPhotos ?? [])
     setInspectionNotes(d.inspectionNotes ?? '')
-    setHandoverSelected(d.handoverSelected ?? {})
     setAddedEquipments(d.addedEquipments ?? [])
     setPriceMode(d.priceMode ?? 'agreed')
     setContract(d.contract ?? null)
@@ -557,7 +547,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       waterMeterUrl,
       conditionPhotos,
       inspectionNotes,
-      handoverSelected,
       addedEquipments,
       priceMode,
       contract,
@@ -583,7 +572,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     waterMeterUrl,
     conditionPhotos,
     inspectionNotes,
-    handoverSelected,
     addedEquipments,
     priceMode,
     contract,
@@ -941,17 +929,16 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         dateOfBirth: m.dateOfBirth ? toIsoDate(m.dateOfBirth) : undefined,
         cccd: m.cccd,
       })),
-    // Thiết bị sẵn có khách NHẬN (đã tick) — BE tự tính declined = phạm vi − đã chọn,
-    // tự sinh equipmentSnapshot (không tự gõ tay text nữa, xem ghi chú DEPRECATED ở type).
-    selectedEquipmentIds: availableEquipments
-      .filter((e) => handoverSelected[e.id])
-      .map((e) => e.id),
+    // Nội thất có sẵn: KHÔNG gửi selectedEquipmentIds — BE tự gắn toàn bộ thiết bị
+    // ACTIVE trong phạm vi HĐ và tự sinh equipmentSnapshot (FE-contract-equipment-auto.md).
     // Thiết bị lắp thêm — gửi kèm ngay để BE link đúng vào HĐ (thay cho createAddedEquipments cũ).
     addedEquipments: buildAddedEquipmentsPayload(),
     // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
     requireHostPriceApproval: priceMode === 'approval',
-    // Case 1 thu cọc luôn theo phương thức đã chọn; Case 2 hoãn tới sau khi Host duyệt.
-    requireDepositPayment: priceMode === 'agreed' && depositMethod === 'payos',
+    // Case 1: HĐ tạo ở PENDING chờ thu cọc + OTP với CẢ payos lẫn tiền mặt — trước
+    // đây cash gửi false làm HĐ ACTIVE ngay không OTP/không ghi nhận cọc, lệch hẳn
+    // luồng chuẩn (cash giờ đi qua deposit-cash-paid/received + OTP ở ResumeContract).
+    requireDepositPayment: priceMode === 'agreed',
   })
 
   const createContractAndPayment = async () => {
@@ -984,9 +971,19 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         return
       }
 
-      // Thu cọc tiền mặt -> bỏ qua PayOS, sang bước xác nhận thu cọc thủ công.
+      // Thu cọc tiền mặt -> chuyển sang màn xử lý HĐ (ResumeContract) dùng chung
+      // luồng chuẩn: khách ký xác nhận đã trả + manager xác nhận đã nhận
+      // (deposit-cash-paid/received) rồi OTP kích hoạt — không nhân bản UI ở đây.
       if (depositMethod === 'cash') {
-        setStep((prev) => prev + 1)
+        const created = current
+        completedRef.current = true // bỏ qua cảnh báo thoát
+        clearDraft()
+        Alert.alert(
+          'Đã tạo hợp đồng ' + (created.contractCode || ''),
+          'Tiếp tục thu cọc tiền mặt: khách ký xác nhận, bạn xác nhận đã nhận tiền, rồi nhập OTP kích hoạt hợp đồng.',
+          [{ text: 'Tiếp tục thu cọc', onPress: () => navigation.replace('ResumeContract', { contractId: created.id }) }],
+          { cancelable: false },
+        )
         return
       }
 
@@ -1066,25 +1063,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     } finally {
       setConfirming(false)
     }
-  }
-
-  // Cọc tiền mặt + đã thống nhất giá => BE tạo HĐ ACTIVE ngay (requireDepositPayment=false,
-  // không duyệt giá — xem ma trận §8). Không cần PayOS/OTP: chỉ xác nhận đã thu tiền rồi sang
-  // màn thành công. Dùng dữ liệu từ response onboard (HĐ đã active, tài khoản đã tạo lúc onboard).
-  const finalizeCashOnboard = () => {
-    if (!contract) return
-    completedRef.current = true // bỏ qua cảnh báo thoát
-    clearDraft()
-    navigation.navigate('OnboardingSuccess', {
-      contractCode: contract.contractCode,
-      tenantFullName: contract.tenantFullName,
-      roomNumber: contract.roomNumber,
-      phone: tenantInfo.phone,
-      username: contract.tenantUsername ?? defaultTenantUsername(tenantInfo.phone),
-      accountCreated: contract.tenantAccountCreated ?? !lookupFound,
-      rolePromoted:
-        contract.tenantRolePromoted ?? (lookupFound && lookupRole === 'ROLE_USER'),
-    })
   }
 
   // ===== RENDER STEPS =====
@@ -1714,47 +1692,36 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Bàn giao thiết bị</Text>
       <Text style={styles.hint}>
-        Chọn đúng thiết bị bàn giao cho khách. Bỏ tick món khách không nhận — thiết bị đó sẽ được gỡ
-        khỏi phòng (giữ nguyên tình trạng, tự lắp lại khi hết hợp đồng). Có thể thêm thiết bị khách yêu
-        cầu lắp thêm — do chủ đầu tư mua, tính là tài sản của nhà.
+        Toàn bộ nội thất có sẵn của phòng/nhà được tự động ghi vào hợp đồng — danh sách dưới chỉ để
+        đối chiếu khi bàn giao, không cần tick chọn. Có thể thêm thiết bị khách yêu cầu lắp thêm — do
+        chủ đầu tư mua, tính là tài sản của nhà.
       </Text>
 
-      {/* Thiết bị sẵn có */}
-      <Text style={styles.handoverGroupTitle}>Thiết bị sẵn có</Text>
+      {/* Nội thất sẵn có — read-only, BE tự gắn toàn bộ (FE-contract-equipment-auto.md) */}
+      <Text style={styles.handoverGroupTitle}>Nội thất sẵn có (tự ghi vào hợp đồng)</Text>
       {loadingEquipments ? (
         <View style={styles.emptyBox}>
           <ActivityIndicator color={Colors.primary} />
         </View>
       ) : availableEquipments.length === 0 ? (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>Phòng/nhà này chưa có thiết bị sẵn có.</Text>
+          <Text style={styles.emptyText}>
+            Phòng/nhà chưa có nội thất trong hệ thống — hợp đồng sẽ không có mục nội thất.
+          </Text>
         </View>
       ) : (
-        availableEquipments.map((e) => {
-          const checked = handoverSelected[e.id] ?? true
-          return (
-            <TouchableOpacity
-              key={e.id}
-              style={[styles.handoverRow, checked && styles.handoverRowActive]}
-              onPress={() =>
-                setHandoverSelected((prev) => ({ ...prev, [e.id]: !checked }))
-              }
-              activeOpacity={0.85}
-            >
-              <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-                {checked && <Text style={styles.checkboxTick}>✓</Text>}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.handoverName}>
-                  {equipName(e)}{e.quantity > 1 ? ` x${e.quantity}` : ''}
-                </Text>
-                {!!equipDetail(e) && (
-                  <Text style={styles.handoverMeta}>{equipDetail(e)}</Text>
-                )}
-              </View>
-            </TouchableOpacity>
-          )
-        })
+        availableEquipments.map((e) => (
+          <View key={e.id} style={styles.handoverRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.handoverName}>
+                {equipName(e)}{e.quantity > 1 ? ` x${e.quantity}` : ''}
+              </Text>
+              {!!equipDetail(e) && (
+                <Text style={styles.handoverMeta}>{equipDetail(e)}</Text>
+              )}
+            </View>
+          </View>
+        ))
       )}
 
       {/* Thiết bị lắp thêm */}
@@ -1934,7 +1901,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <Text style={styles.hint}>
             {depositMethod === 'payos'
               ? 'Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.'
-              : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng rồi xác nhận đã thu cọc.'}
+              : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng — sau đó khách ký xác nhận đã trả, bạn xác nhận đã nhận tiền, rồi OTP kích hoạt.'}
           </Text>
         </>
       ) : (
@@ -1946,21 +1913,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     )
   }
 
-  const renderCashDepositStep = () => (
-    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Thu cọc tiền mặt</Text>
-      <Text style={styles.hint}>
-        Xác nhận đã nhận đủ tiền cọc {formatVnd(depositValue)} đ bằng tiền mặt
-        từ khách. Hợp đồng đã được kích hoạt — không cần xác thực OTP.
-      </Text>
-      <TouchableOpacity style={styles.payBtn} onPress={finalizeCashOnboard}>
-        <Text style={styles.payBtnText}>💵 Đã thu cọc — Hoàn tất kích hoạt</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  )
-
+  // (Nhánh tiền mặt không còn render bước riêng — sau khi tạo HĐ sẽ chuyển sang
+  // ResumeContract để ký + xác nhận 2 chiều + OTP như luồng chuẩn.)
   const renderPaymentStep = () => {
-    if (depositMethod === 'cash') return renderCashDepositStep()
     return (
       <ScrollView
         style={styles.stepContent}

@@ -155,6 +155,43 @@ export interface TenantHandoverResponse {
   acknowledgedAt?: string;
 }
 
+// ===== Yêu cầu trả phòng (checkout-request) =====
+// BE: TenantMeLifecycleController /api/v1/tenant/me/checkout-requests (tenant) +
+// CheckoutRequestController /api/v1/checkout-requests (manager duyệt).
+// Luồng: PENDING → APPROVED → COMPLETED (complete tự terminate HĐ + giải phóng
+// phòng/thiết bị); PENDING → REJECTED; tenant tự hủy khi còn PENDING.
+export type CheckoutRequestStatus =
+  | 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
+
+export interface CheckoutRequestDto {
+  id: number;
+  contractId: number;
+  contractCode?: string;
+  propertyName?: string;
+  roomNumber?: string;
+  tenantFullName?: string;
+  tenantPhone?: string;
+  expectedMoveOutDate?: string; // yyyy-MM-dd
+  reason?: string;
+  note?: string;
+  status: CheckoutRequestStatus | string;
+  createdAt?: string;
+  reviewedAt?: string;
+  reviewedByName?: string;
+  managerNote?: string;
+  rejectReason?: string;
+  completedAt?: string;
+}
+
+export interface CreateCheckoutRequestBody {
+  contractId: number;
+  expectedMoveOutDate: string; // yyyy-MM-dd
+  reason: string;
+  // BE chưa có field riêng cho TK hoàn cọc/ảnh — FE gộp thông tin TK vào note
+  // (đã đề nghị field riêng trong API-ProcessGaps-BE-TODO.md).
+  note?: string;
+}
+
 export const realTenantSelfService = {
   // ---- Hồ sơ / tài khoản ----
   getMe: async (): Promise<AuthMe> => {
@@ -198,6 +235,28 @@ export const realTenantSelfService = {
   // gọi lại nếu đã acknowledged).
   acknowledgeHandover: async (): Promise<TenantHandoverResponse> => {
     const { data } = await realApiClient.post<TenantHandoverResponse>('/api/v1/tenant/me/handover/acknowledge');
+    return data;
+  },
+
+  // ---- Yêu cầu trả phòng ----
+  createCheckoutRequest: async (body: CreateCheckoutRequestBody): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.post<CheckoutRequestDto>('/api/v1/tenant/me/checkout-requests', body);
+    return data;
+  },
+
+  listMyCheckoutRequests: async (): Promise<CheckoutRequestDto[]> => {
+    const { data } = await realApiClient.get<CheckoutRequestDto[]>('/api/v1/tenant/me/checkout-requests');
+    return data ?? [];
+  },
+
+  getMyCheckoutRequest: async (id: number): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.get<CheckoutRequestDto>(`/api/v1/tenant/me/checkout-requests/${id}`);
+    return data;
+  },
+
+  /** Tenant tự hủy yêu cầu đang PENDING. */
+  cancelCheckoutRequest: async (id: number): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.delete<CheckoutRequestDto>(`/api/v1/tenant/me/checkout-requests/${id}`);
     return data;
   },
 };

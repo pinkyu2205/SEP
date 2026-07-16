@@ -10,6 +10,8 @@ const LEASE_ENDPOINT = '/api/v1/import/lease-excel';
 const RENOVATION_ENDPOINT = '/api/v1/import/renovation-excel';
 // Cải tạo bổ sung (session v2+) — sau khi nhà ACTIVE + đã gọi renovation/start.
 const RENOVATION_SUPPLEMENT_ENDPOINT = '/api/v1/import/renovation-supplement-excel';
+// Hợp đồng thuê nháp (DRAFT) hàng loạt — luồng Đón khách (FE-import-tenant-draft-contracts.md).
+const TENANT_DRAFT_ENDPOINT = '/api/v1/import/tenant-draft-contracts-excel';
 const IMAGES_ZIP_ENDPOINT = '/api/v1/import/property-images-zip';
 
 /**
@@ -126,6 +128,19 @@ export const importService = {
    */
   importRenovationSupplementExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
     return postExcel(RENOVATION_SUPPLEMENT_ENDPOINT, file, dryRun);
+  },
+
+  /**
+   * POST /api/v1/import/tenant-draft-contracts-excel?dryRun=... — luồng "Đón khách".
+   * Mỗi dòng sheet `1. Hop_Dong_Nhap_Khach` = 1 HĐ thuê nháp (DRAFT), tương đương tạo
+   * tay: BE tự gắn nội thất ACTIVE, tự notify manager nếu có cột SĐT quản lý.
+   * Tiên quyết: BĐS đã ACTIVE (map theo Mã HĐ inbound / Mã BĐS / Tên tòa nhà).
+   * LƯU Ý: import KHÔNG sinh file PDF — HĐ tạo xong contractFileAvailable=false,
+   * render + upload file làm sau (nút Sửa hoặc luồng tạo file ở danh sách nháp).
+   * @throws BulkImportErrorResult khi HTTP != 2xx
+   */
+  importTenantDraftContractsExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
+    return postExcel(TENANT_DRAFT_ENDPOINT, file, dryRun);
   },
 
   /**

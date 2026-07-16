@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Wrench, CheckCircle, Clock, AlertTriangle,
   DollarSign, Eye, X, Calendar, User, Building2,
-  FileText, Info, MapPin, Loader2, Package,
+  FileText, Info, MapPin, Loader2, Package, CheckCircle2, XCircle,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useWebAuth } from '@/auth/WebAuthContext';
 import { maintenanceService } from '@/services/maintenance.service';
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
@@ -29,11 +31,17 @@ const fmtDate = (iso?: string): string => {
 };
 
 // ── Modal chi tiết ────────────────────────────────────────────────────────────
-const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse; onClose: () => void }) => {
+const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
+  request: MaintenanceRequestResponse;
+  isAdmin: boolean;
+  onDecided: () => void;
+  onClose: () => void;
+}) => {
   const status = normalizeMaintenanceStatus(request.status);
   const pBadge = maintenanceReqPriorityMap[request.priority] ?? maintenanceReqPriorityMap.LOW;
   const sBadge = maintenanceReqStatusMap[status];
   const [history, setHistory] = useState<EquipmentMaintenanceHistoryResponse[]>([]);
+  const [deciding, setDeciding] = useState(false);
 
   useEffect(() => {
     if (!request.equipmentId) return;
@@ -41,6 +49,22 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
       .then(setHistory)
       .catch(() => setHistory([]));
   }, [request.equipmentId]);
+
+  // Duyệt/từ chối chi phí vượt ngưỡng — trước đây không nơi nào duyệt được ticket
+  // PENDING_APPROVAL thật (mobile chỉ có nút cho mock) → ticket treo vô hạn.
+  const decideCost = async (approve: boolean) => {
+    const label = approve ? 'DUYỆT' : 'TỪ CHỐI';
+    if (!window.confirm(`${label} chi phí ${request.repairCost != null ? formatCurrency(request.repairCost) : ''} cho yêu cầu ${request.requestCode}?`)) return;
+    setDeciding(true);
+    try {
+      await maintenanceService.decideCost(request.id, approve);
+      toast.success(approve ? 'Đã duyệt chi phí — quản lý sẽ tiếp tục xử lý.' : 'Đã từ chối chi phí.');
+      onDecided();
+      onClose();
+    } catch { /* interceptor đã toast */ } finally {
+      setDeciding(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -146,6 +170,37 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
             )}
           </div>
 
+          {/* Duyệt chi phí vượt ngưỡng */}
+          {status === 'PENDING_APPROVAL' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5" /> Chi phí vượt ngưỡng — cần phê duyệt
+              </p>
+              {isAdmin ? (
+                <div className="mt-3 flex gap-2.5">
+                  <button
+                    onClick={() => decideCost(true)}
+                    disabled={deciding}
+                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {deciding ? 'Đang xử lý...' : 'Duyệt chi phí'}
+                  </button>
+                  <button
+                    onClick={() => decideCost(false)}
+                    disabled={deciding}
+                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-rose-600 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> Từ chối
+                  </button>
+                </div>
+              ) : (
+                <p className="text-xs text-amber-800 mt-1.5">
+                  Đang chờ <strong>Admin</strong> duyệt trên web — quyền duyệt hiện giới hạn tài khoản Admin.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Timeline */}
           {request.timeline?.length > 0 && (
             <div>
@@ -206,6 +261,8 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
 
 // ── Component chính ───────────────────────────────────────────────────────────
 export const MaintenanceList = () => {
+  const { user } = useWebAuth();
+  const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<MaintenanceRequestResponse[]>([]);
   const [dashboard, setDashboard] = useState<MaintenanceDashboardResponse | null>(null);
@@ -218,22 +275,21 @@ export const MaintenanceList = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
 
-  useEffect(() => {
-    let cancelled = false;
+  // Tách thành hàm để modal duyệt chi phí gọi lại sau khi approve/reject.
+  const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       maintenanceService.getRequests({}, 0, 200).catch(() => ({ content: [] as MaintenanceRequestResponse[] })),
       maintenanceService.getDashboard().catch(() => null),
       propertyService.getProperties(0, 200).catch(() => ({ content: [] as PropertyResponse[] })),
     ]).then(([reqPage, dash, propPage]) => {
-      if (cancelled) return;
       setRequests((reqPage as { content: MaintenanceRequestResponse[] }).content ?? []);
       setDashboard(dash as MaintenanceDashboardResponse | null);
       setProperties((propPage as { content: PropertyResponse[] }).content ?? []);
       setLoading(false);
     });
-    return () => { cancelled = true; };
   }, []);
+  useEffect(() => { load(); }, [load]);
 
   const stats = useMemo(() => {
     if (dashboard) return dashboard;
@@ -438,7 +494,14 @@ export const MaintenanceList = () => {
         </div>
       </div>
 
-      {selected && <DetailModal request={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <DetailModal
+          request={selected}
+          isAdmin={isAdmin}
+          onDecided={load}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 };

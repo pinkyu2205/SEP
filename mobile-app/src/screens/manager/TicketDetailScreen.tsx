@@ -668,8 +668,11 @@ export const TicketDetailScreen: React.FC = () => {
         {richMode && ticket.status === 'pending_approval' && (
           <View style={[s.card, { borderColor: '#EA580C', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>Chờ Admin duyệt chi phí</Text>
-            <Text style={s.descText}>Chi phí {ticket.repairCost != null ? fmt(ticket.repairCost) : ''} vượt ngưỡng {fmt(MAINTENANCE_COST_APPROVAL_THRESHOLD)}.</Text>
-            {/* Ticket thật: quyền duyệt thuộc Admin (web); manager chỉ chờ. Nút demo chỉ cho mock. */}
+            <Text style={s.descText}>
+              Chi phí {ticket.repairCost != null ? fmt(ticket.repairCost) : ''} vượt ngưỡng {fmt(MAINTENANCE_COST_APPROVAL_THRESHOLD)} — Admin
+              duyệt tại web (Giám sát bảo trì → mở ticket → Duyệt chi phí). Bạn sẽ nhận thông báo khi có kết quả.
+            </Text>
+            {/* Ticket thật: quyền duyệt thuộc Admin (web /host/maintenance). Nút demo chỉ cho mock. */}
             {!isReal && (
               <View style={[s.costPaidByRow, { marginTop: Spacing.sm }]}>
                 <TouchableOpacity style={[s.costPaidByBtn, { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={handleApprove}>
