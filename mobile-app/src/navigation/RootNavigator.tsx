@@ -7,7 +7,6 @@ import { ChangePasswordScreen } from '@/screens/auth/ChangePasswordScreen';
 import { TutorialScreen } from '@/screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
-import { OnboardingScreen } from '@/screens/manager/OnboardingScreen';
 import { OnboardingScreenV2 } from '@/screens/manager/OnboardingScreenV2';
 import { OnboardingSuccessScreen } from '@/screens/manager/OnboardingSuccessScreen';
 import { MeterReadingScreen } from '@/screens/manager/MeterReadingScreen';
@@ -115,7 +114,6 @@ export const RootNavigator: React.FC = () => {
         ) : user?.role === 'manager' ? (
           <Stack.Group screenOptions={baseStackOptions}>
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} options={{ animation: 'fade' }} />
-            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
             <Stack.Screen name="OnboardingV2" component={OnboardingScreenV2} />
             <Stack.Screen name="OnboardingSuccess" component={OnboardingSuccessScreen} options={{ gestureEnabled: false }} />
             <Stack.Screen name="MeterReading" component={MeterReadingScreen} />

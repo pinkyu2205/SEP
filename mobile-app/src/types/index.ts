@@ -117,21 +117,16 @@ export interface PaymentTransaction {
 }
 
 // ======================== MAINTENANCE (Bảo trì) ========================
-// Luồng cải thiện (rich). 'accepted' giữ lại như legacy.
+// Flow mới 17/07 (FE-maintenance-flow): PENDING → APPROVED → WAITING_TENANT_CONFIRM
+// → CLOSED, nhánh REJECTED (tenant từ chối) + CANCELLED. Status cũ đã migrate.
 export type MaintenanceStatus =
-  | 'pending'
-  | 'acknowledged'
-  | 'scheduled'
-  | 'in_progress'
-  | 'on_hold'
-  | 'pending_approval'
-  | 'done'
-  | 'confirmed'
-  | 'reopened'
-  | 'accepted'
-  | 'resolved'
+  | 'pending'          // chờ manager duyệt
+  | 'approved'         // đã duyệt, chờ thợ ngoài sửa
+  | 'waiting_confirm'  // manager báo xong, chờ tenant xác nhận (auto-close 3 ngày)
+  | 'rejected'         // tenant từ chối kèm lý do + ảnh, chờ manager xem xét
+  | 'closed'           // kết thúc
   | 'cancelled';
-export type MaintenanceCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'other';
+export type MaintenanceCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'structural' | 'other';
 export type MaintenancePriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface MaintenanceTimeline {
@@ -153,10 +148,19 @@ export interface MaintenanceRequest {
   tenantPhone?: string;
   title: string;
   description: string;
-  category: MaintenanceCategory;
-  priority: MaintenancePriority;
+  /** null khi ticket còn PENDING — manager gán lúc duyệt (flow 17/07 chiều). */
+  category?: MaintenanceCategory;
+  /** Optional — manager có thể gán khi duyệt, không bắt buộc. */
+  priority?: MaintenancePriority;
   status: MaintenanceStatus;
   images: string[];
+  /** Ảnh phân loại theo flow mới — ưu tiên dùng thay cho `images` (gộp cả 3). */
+  beforeImages?: string[];
+  afterImages?: string[];
+  rejectImages?: string[];
+  /** Lý do tenant từ chối nghiệm thu (status = rejected). */
+  rejectReason?: string;
+  resolutionNote?: string;
   assignedTo?: string;
   repairCost?: number;
   resolvedAt?: string;
@@ -167,37 +171,36 @@ export interface MaintenanceRequest {
   updatedAt: string;
   estimatedCompletionDate?: string;
   actualCompletionDate?: string;
-  // ── Luồng cải thiện ──
-  scheduledSlots?: string[];
-  confirmedSlot?: string;
   doneAt?: string;
   tenantConfirmedAt?: string;
-  /** Ai trả phí sửa: HOST = công ty · TENANT = khách làm hư (sẽ vào pending charge). */
+  /** Ai trả phí sửa (luồng hóa đơn sau CLOSED): HOST = công ty · TENANT = khách làm hư. */
   costPaidBy?: 'HOST' | 'TENANT';
+  /** Số lần tenant đã từ chối nghiệm thu. */
+  reopenCount?: number;
 }
 
 export interface CreateMaintenanceRequest {
   title: string;
   description: string;
-  category: MaintenanceCategory;
-  priority: MaintenancePriority;
   images: string[];
   equipmentId?: string;
 }
 
-// ===== Real API DTOs (theo Maintenance_BE_Contract.md) — enum UPPERCASE khớp BE =====
-// Đủ bộ enum MaintenanceStatus của BE. RESOLVED là giá trị legacy trong dữ liệu cũ.
+// ===== Real API DTOs (FE-maintenance-flow 17/07) — enum UPPERCASE khớp BE =====
+// BE đã migrate status legacy (ACKNOWLEDGED/SCHEDULED/...) về bộ 6 giá trị này;
+// mapper vẫn nhận string legacy phòng dữ liệu cũ (xem BE_STATUS_MAP).
 export type MaintenanceReqStatus =
-  | 'PENDING' | 'ACKNOWLEDGED' | 'SCHEDULED' | 'IN_PROGRESS' | 'ON_HOLD'
-  | 'PENDING_APPROVAL' | 'DONE' | 'CONFIRMED' | 'REOPENED' | 'CANCELLED'
-  | 'RESOLVED';
+  | 'PENDING' | 'APPROVED' | 'WAITING_TENANT_CONFIRM'
+  | 'REJECTED' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceReqCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
+  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
 
 export interface MaintenanceTimelineDto {
-  oldStatus?: MaintenanceReqStatus;
-  newStatus: MaintenanceReqStatus;
+  // string (không phải MaintenanceReqStatus) vì timeline cũ còn chứa status legacy
+  // trước migrate (ACKNOWLEDGED, SCHEDULED, DONE...) — mapper tự quy về bộ mới.
+  oldStatus?: string;
+  newStatus: string;
   note?: string;
   changedBy?: string;
   changedByName?: string;
@@ -207,9 +210,13 @@ export interface MaintenanceTimelineDto {
 export interface MaintenanceRequestDto {
   id: number;
   requestCode: string;
+  /** Tiêu đề sự cố tenant nhập (flow 17/07 chiều — field riêng, không còn ghép vào description). */
+  title?: string;
   status: MaintenanceReqStatus;
-  category: MaintenanceReqCategory;
-  priority: MaintenanceReqPriority;
+  /** null khi PENDING — manager gán lúc duyệt. */
+  category?: MaintenanceReqCategory | null;
+  /** null trừ khi manager gán lúc duyệt (optional). */
+  priority?: MaintenanceReqPriority | null;
   description: string;
   tenantId: number;
   tenantName: string;
@@ -222,43 +229,49 @@ export interface MaintenanceRequestDto {
   equipmentName?: string;
   assignedManagerId?: number;
   assignedManagerName?: string;
-  scheduledDate?: string;
-  repairCost?: number;
   resolutionNote?: string;
-  resolvedAt?: string;
-  /** Ai trả phí sửa (BE trả từ 08/07): HOST = công ty, TENANT = khách làm hư. */
-  costPaidBy?: 'HOST' | 'TENANT';
-  /** Nguyên nhân hỏng: WEAR = hao mòn tự nhiên, MISUSE = lỗi sử dụng. */
-  cause?: 'WEAR' | 'MISUSE';
-  /** Số lần khách từ chối nghiệm thu (REOPENED). */
+  /** Lý do tenant từ chối (status REJECTED). */
+  rejectReason?: string;
+  /** Số lần tenant đã từ chối nghiệm thu. */
   reopenCount?: number;
+  /** Ảnh phân loại — ưu tiên hiển thị 3 field này; `images` là gộp cả ba (legacy). */
+  beforeImages?: string[];
+  afterImages?: string[];
+  rejectImages?: string[];
   images: string[];
+  acknowledgedAt?: string;
+  resolvedAt?: string;
+  tenantConfirmedAt?: string;
   timeline: MaintenanceTimelineDto[];
   createdAt: string;
   updatedAt: string;
+  // Field cũ có thể còn trên response nhưng KHÔNG dùng trong flow này (billing sau CLOSED)
+  repairCost?: number;
+  costPaidBy?: 'HOST' | 'TENANT';
+  cause?: 'WEAR' | 'MISUSE';
+  scheduledDate?: string;
 }
 
+// Flow 17/07 chiều: tenant KHÔNG gửi category/priority — manager gán khi duyệt.
 export interface CreateMaintenanceRequestDto {
   roomId: number;
   equipmentId?: number;
-  category: MaintenanceReqCategory;
-  priority: MaintenanceReqPriority;
+  /** Bắt buộc, ≤200 ký tự — hiển thị trên list/detail. */
+  title: string;
   description: string;
   images: string[];
 }
 
-export interface ResolveMaintenanceRequestDto {
-  repairCost: number;
+/** PUT /{id}/approve — manager duyệt: BẮT BUỘC gán category, priority tùy chọn. */
+export interface ApproveMaintenanceRequestDto {
+  category: MaintenanceReqCategory;
+  priority?: MaintenanceReqPriority;
+}
+
+/** PUT /{id}/complete — manager báo sửa xong (cần ảnh AFTER trước hoặc gửi kèm). */
+export interface CompleteMaintenanceRequestDto {
   resolutionNote?: string;
-  /**
-   * Ai chịu chi phí sửa chữa. BE chỉ ghi expense (tính vào chi phí nhà) khi
-   * HOST. Nếu TENANT thì không tạo expense để net profit không bị sai.
-   */
-  costPaidBy?: 'HOST' | 'TENANT';
-  /** Nguyên nhân hư hỏng (phục vụ trừ cọc khi MISUSE). */
-  cause?: 'WEAR' | 'MISUSE';
-  /** Thiết bị liên quan — BE bật cờ recommendReplacement nếu chi phí > 1tr. */
-  equipmentId?: number;
+  afterImages?: string[];
 }
 
 export interface MaintenanceDashboardDto {
@@ -270,21 +283,38 @@ export interface MaintenanceDashboardDto {
   totalRepairCost: number;
 }
 
-export type EquipmentLifecycleStatus = 'GOOD' | 'MAINTENANCE' | 'BROKEN' | 'DISPOSED';
+export type EquipmentLifecycleStatus = 'NEW' | 'GOOD' | 'DAMAGED' | 'MAINTENANCE' | 'BROKEN' | 'DISPOSED';
 
+// Khớp EquipmentResponse (BE) — dùng chung cho manager + tenant equipment API.
+// equipmentName/category thường null với thiết bị bàn giao ban đầu; tên thật nằm ở
+// catalogName (vd "Điều hòa", "Giường"). Field nào BE chưa chắc luôn trả → optional.
 export interface EquipmentDto {
   id: number;
-  equipmentName: string;
-  category: string;
+  equipmentName?: string | null;
+  category?: string | null;
   qrCode?: string;
   status: EquipmentLifecycleStatus;
-  roomId?: number;
-  roomName?: string;
+  roomId?: number | null;
+  roomName?: string | null;
+  roomNumber?: string | null;
   propertyId: number;
-  installationDate: string;
-  warrantyExpiredDate?: string;
+  catalogId?: number;
+  catalogName?: string;
+  houseArea?: string;
+  source?: string;
+  price?: number | null;
+  note?: string | null;
+  installationDate?: string | null;
+  warrantyExpiredDate?: string | null;
+  warrantyMonths?: number | null;
+  warrantyStartDate?: string | null;
+  warrantyEndDate?: string | null;
+  /** Mức phạt cố định (VNĐ) khi hết bảo hành mà khách làm hư. */
+  penaltyFee?: number | null;
   maintenanceCount: number;
-  lastMaintenanceDate?: string;
+  lastMaintenanceDate?: string | null;
+  operationalStatus?: string;
+  currentEffective?: boolean;
 }
 
 export interface EquipmentMaintenanceHistoryDto {
@@ -341,45 +371,6 @@ export interface PropertyMeterRecord {
   invoicesGenerated: boolean;
   isAbnormalElec?: boolean;
   isAbnormalWater?: boolean;
-}
-
-// ======================== EQUIPMENT (Trang thiết bị) ========================
-export type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired' | 'broken' | 'needs_check';
-
-export interface EquipmentMaintenanceRecord {
-  id: string;
-  date: string;
-  type: 'repair' | 'maintenance' | 'replacement';
-  description: string;
-  cost: number;
-  performedBy: string;
-  ticketId?: string;
-}
-
-export interface Equipment {
-  id: string;
-  assetId: string;
-  name: string;
-  houseId: string;
-  houseName?: string;
-  roomId?: string;
-  roomName?: string;
-  category: string;
-  qrCode: string;
-  status: EquipmentStatus;
-  brand?: string;
-  model?: string;
-  serialNumber?: string;
-  purchasePrice?: number;
-  purchaseDate?: string;
-  installationDate: string;
-  warrantyExpiry?: string;
-  lastMaintenanceAt?: string;
-  maintenanceHistory: EquipmentMaintenanceRecord[];
-  currentTenantId?: string;
-  currentTenantName?: string;
-  notes?: string;
-  images?: string[];
 }
 
 // ======================== CONTRACT ========================

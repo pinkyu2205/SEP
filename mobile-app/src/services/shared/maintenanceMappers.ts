@@ -1,34 +1,36 @@
 /**
- * Mapper: DTO real API (Maintenance_BE_Contract.md) -> shape mock sẵn có,
+ * Mapper: DTO real API (FE-maintenance-flow 17/07) -> model FE,
  * để các màn hình giữ nguyên UI mà chỉ đổi nguồn dữ liệu.
  */
 import type { MaintenanceRequestDto, MaintenanceTimelineDto } from '@/types';
 import type { MaintenanceRequest, MaintenanceStatus, MaintenanceCategory, MaintenancePriority } from '@/types';
 import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority, TimelineEntry } from '@/store/maintenanceStore';
 
-// Map 1-1 đủ bộ enum BE → status FE, giữ nguyên độ chi tiết để UI hiển thị đúng
-// "Đã tiếp nhận / Đã hẹn lịch / Chờ nghiệm thu..." (trước đây bị bóp hết về 4 loại
-// nên khách đã được hẹn lịch vẫn thấy "Chờ xử lý", và DONE thành resolved làm
-// tenant mất nút nghiệm thu).
+// Flow mới chỉ còn 6 status; các giá trị legacy (trước migrate 17/07) quy về
+// status mới gần nhất để timeline/dữ liệu cũ vẫn hiển thị đúng.
 const BE_STATUS_MAP: Record<string, MaintenanceStatus> = {
+  // Bộ chính thức
   PENDING: 'pending',
-  ACKNOWLEDGED: 'acknowledged',
-  SCHEDULED: 'scheduled',
-  IN_PROGRESS: 'in_progress',
-  ON_HOLD: 'on_hold',
-  PENDING_APPROVAL: 'pending_approval',
-  DONE: 'done',
-  CONFIRMED: 'confirmed',
-  REOPENED: 'reopened',
+  APPROVED: 'approved',
+  WAITING_TENANT_CONFIRM: 'waiting_confirm',
+  REJECTED: 'rejected',
+  CLOSED: 'closed',
   CANCELLED: 'cancelled',
-  // legacy / alias còn gặp trong dữ liệu cũ
-  RESOLVED: 'resolved',
-  COMPLETED: 'resolved',
+  // Legacy (đã migrate phía BE, còn gặp trong timeline cũ)
+  ACKNOWLEDGED: 'approved',
+  SCHEDULED: 'approved',
+  IN_PROGRESS: 'approved',
+  ON_HOLD: 'approved',
+  REOPENED: 'approved',
+  PENDING_APPROVAL: 'waiting_confirm',
+  DONE: 'waiting_confirm',
+  CONFIRMED: 'closed',
+  RESOLVED: 'closed',
+  COMPLETED: 'closed',
   OPEN: 'pending',
-  ASSIGNED: 'acknowledged',
-  ACCEPTED: 'acknowledged',
+  ASSIGNED: 'approved',
+  ACCEPTED: 'approved',
   CANCELED: 'cancelled',
-  REJECTED: 'cancelled',
 };
 
 export const mapBeStatus = (s: string | undefined): MaintenanceStatus =>
@@ -36,17 +38,9 @@ export const mapBeStatus = (s: string | undefined): MaintenanceStatus =>
 
 const lc = (s: string | undefined): string => (s ?? '').toLowerCase();
 
-// BE trả scheduledDate = confirmedSlot (nếu khách đã chọn) hoặc chuỗi slot đề xuất
-// phân tách bằng dấu phẩy. Khách đã chọn hay chưa suy từ timeline ("Khách chọn lịch: ...").
-const deriveSchedule = (
-  dto: MaintenanceRequestDto,
-): { scheduledSlots?: string[]; confirmedSlot?: string } => {
-  if (!dto.scheduledDate) return {};
-  const slots = dto.scheduledDate.split(',').map(s => s.trim()).filter(Boolean);
-  if (slots.length === 0) return {};
-  const confirmed = (dto.timeline ?? []).some(t => (t.note ?? '').startsWith('Khách chọn lịch'));
-  return confirmed ? { scheduledSlots: slots, confirmedSlot: slots[0] } : { scheduledSlots: slots };
-};
+// category/priority null khi ticket PENDING (manager gán lúc duyệt) → undefined để UI ẩn badge.
+const lcOrUndef = <T extends string>(s: string | null | undefined): T | undefined =>
+  s ? (s.toLowerCase() as T) : undefined;
 
 const mapTimeline = (timeline: MaintenanceTimelineDto[] = []): TimelineEntry[] =>
   timeline.map(t => ({
@@ -57,81 +51,82 @@ const mapTimeline = (timeline: MaintenanceTimelineDto[] = []): TimelineEntry[] =
   }));
 
 const deriveTitle = (dto: MaintenanceRequestDto): string => {
+  if (dto.title) return dto.title;
   if (dto.equipmentName) return dto.equipmentName;
   const head = dto.description?.split('—')[0]?.trim();
   return head || 'Yêu cầu sửa chữa';
 };
 
 /** DTO -> MaintenanceRequest (tenant model) */
-export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceRequest => {
-  const schedule = deriveSchedule(dto);
-  return {
-    id: String(dto.id),
-    ticketCode: dto.requestCode,
-    roomId: String(dto.roomId),
-    roomName: dto.roomName,
-    propertyId: dto.propertyId != null ? String(dto.propertyId) : undefined,
-    propertyName: dto.propertyName,
-    tenantId: String(dto.tenantId),
-    tenantName: dto.tenantName,
-    tenantPhone: dto.tenantPhone,
-    title: deriveTitle(dto),
-    description: dto.description,
-    category: lc(dto.category) as MaintenanceCategory,
-    priority: lc(dto.priority) as MaintenancePriority,
-    status: mapBeStatus(dto.status),
-    images: dto.images ?? [],
-    assignedTo: dto.assignedManagerName,
-    repairCost: dto.repairCost,
-    resolvedAt: dto.resolvedAt,
-    timeline: mapTimeline(dto.timeline).map(t => ({
-      status: t.status as MaintenanceStatus,
-      note: t.note,
-      updatedBy: t.updatedBy,
-      updatedAt: t.updatedAt,
-    })),
-    equipmentId: dto.equipmentId != null ? String(dto.equipmentId) : undefined,
-    equipmentName: dto.equipmentName,
-    createdAt: dto.createdAt,
-    updatedAt: dto.updatedAt,
-    estimatedCompletionDate: schedule.confirmedSlot ?? dto.scheduledDate,
-    scheduledSlots: schedule.scheduledSlots,
-    confirmedSlot: schedule.confirmedSlot,
-    costPaidBy: dto.costPaidBy,
-  };
-};
+export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceRequest => ({
+  id: String(dto.id),
+  ticketCode: dto.requestCode,
+  roomId: String(dto.roomId),
+  roomName: dto.roomName,
+  propertyId: dto.propertyId != null ? String(dto.propertyId) : undefined,
+  propertyName: dto.propertyName,
+  tenantId: String(dto.tenantId),
+  tenantName: dto.tenantName,
+  tenantPhone: dto.tenantPhone,
+  title: deriveTitle(dto),
+  description: dto.description,
+  category: lcOrUndef<MaintenanceCategory>(dto.category),
+  priority: lcOrUndef<MaintenancePriority>(dto.priority),
+  status: mapBeStatus(dto.status),
+  images: dto.images ?? [],
+  beforeImages: dto.beforeImages ?? dto.images ?? [],
+  afterImages: dto.afterImages ?? [],
+  rejectImages: dto.rejectImages ?? [],
+  rejectReason: dto.rejectReason,
+  resolutionNote: dto.resolutionNote,
+  assignedTo: dto.assignedManagerName,
+  repairCost: dto.repairCost,
+  resolvedAt: dto.resolvedAt,
+  tenantConfirmedAt: dto.tenantConfirmedAt,
+  timeline: mapTimeline(dto.timeline).map(t => ({
+    status: t.status as MaintenanceStatus,
+    note: t.note,
+    updatedBy: t.updatedBy,
+    updatedAt: t.updatedAt,
+  })),
+  equipmentId: dto.equipmentId != null ? String(dto.equipmentId) : undefined,
+  equipmentName: dto.equipmentName,
+  createdAt: dto.createdAt,
+  updatedAt: dto.updatedAt,
+  costPaidBy: dto.costPaidBy,
+  reopenCount: dto.reopenCount,
+});
 
 /** DTO -> MaintenanceTicket (manager model) */
-export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => {
-  const schedule = deriveSchedule(dto);
-  return {
-    id: String(dto.id),
-    ticketCode: dto.requestCode,
-    propertyId: dto.propertyId != null ? String(dto.propertyId) : '',
-    propertyName: dto.propertyName,
-    roomName: dto.roomName,
-    tenantName: dto.tenantName,
-    tenantPhone: dto.tenantPhone ?? '',
-    title: deriveTitle(dto),
-    description: dto.description,
-    category: lc(dto.category) as TicketCategory,
-    priority: lc(dto.priority) as TicketPriority,
-    status: mapBeStatus(dto.status) as TicketStatus,
-    images: dto.images ?? [],
-    photos: [],
-    assignedTo: dto.assignedManagerName,
-    repairCost: dto.repairCost,
-    costPaidBy: dto.costPaidBy ? (lc(dto.costPaidBy) as 'host' | 'tenant') : undefined,
-    cause: dto.cause ? (lc(dto.cause) as 'wear' | 'misuse') : undefined,
-    reopenCount: dto.reopenCount ?? undefined,
-    estimatedDate: schedule.confirmedSlot ?? dto.scheduledDate,
-    resolvedAt: dto.resolvedAt,
-    timeline: mapTimeline(dto.timeline),
-    equipmentName: dto.equipmentName,
-    maintenanceCount: undefined,
-    createdAt: dto.createdAt,
-    updatedAt: dto.updatedAt,
-    scheduledSlots: schedule.scheduledSlots,
-    confirmedSlot: schedule.confirmedSlot,
-  };
-};
+export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
+  id: String(dto.id),
+  ticketCode: dto.requestCode,
+  propertyId: dto.propertyId != null ? String(dto.propertyId) : '',
+  propertyName: dto.propertyName,
+  roomName: dto.roomName,
+  tenantName: dto.tenantName,
+  tenantPhone: dto.tenantPhone ?? '',
+  title: deriveTitle(dto),
+  description: dto.description,
+  category: lcOrUndef<TicketCategory>(dto.category),
+  priority: lcOrUndef<TicketPriority>(dto.priority),
+  status: mapBeStatus(dto.status) as TicketStatus,
+  images: dto.images ?? [],
+  beforeImages: dto.beforeImages ?? dto.images ?? [],
+  afterImages: dto.afterImages ?? [],
+  rejectImages: dto.rejectImages ?? [],
+  rejectReason: dto.rejectReason,
+  resolutionNote: dto.resolutionNote,
+  photos: [],
+  assignedTo: dto.assignedManagerName,
+  repairCost: dto.repairCost,
+  costPaidBy: dto.costPaidBy ? (lc(dto.costPaidBy) as 'host' | 'tenant') : undefined,
+  reopenCount: dto.reopenCount ?? undefined,
+  resolvedAt: dto.resolvedAt,
+  tenantConfirmedAt: dto.tenantConfirmedAt,
+  timeline: mapTimeline(dto.timeline),
+  equipmentName: dto.equipmentName,
+  maintenanceCount: undefined,
+  createdAt: dto.createdAt,
+  updatedAt: dto.updatedAt,
+});

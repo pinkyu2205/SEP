@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { MaintenanceRequest, MaintenanceStatus, MaintenanceTimeline } from '@/types';
 import {
@@ -10,10 +11,12 @@ import {
 } from '@/utils';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
+  MAINTENANCE_AUTO_CONFIRM_DAYS,
 } from '@/constants/maintenance';
 import { useTenantRequests, tenantMaintenanceStore } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
+import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
@@ -28,7 +31,7 @@ const ORDERED_STATUSES = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
 const nowIso = () => new Date().toISOString();
 const mkTenantEntry = (status: MaintenanceStatus, note: string): MaintenanceTimeline =>
-  ({ status, note, updatedBy: 'Nguyễn Văn A', updatedAt: nowIso() });
+  ({ status, note, updatedBy: 'Khách thuê', updatedAt: nowIso() });
 
 export const MaintenanceDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -40,8 +43,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const live = allTenant.find(r => r.id === routeRequest.id);
   const isMock = !!live;
 
-  // Ticket thật (id số, không có trong store mock): nạp bản mới nhất từ BE
-  // để thao tác nghiệm thu/xác nhận lịch phản ánh đúng trạng thái server.
+  // Ticket thật (id số, không có trong store mock): nạp bản mới nhất từ BE.
   const idNum = Number(routeRequest.id);
   const isRealId = !isMock && Number.isFinite(idNum) && idNum > 0;
   const [realRequest, setRealRequest] = useState<MaintenanceRequest | undefined>(undefined);
@@ -64,58 +66,84 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const apiErrMsg = (e: any, fallback: string) =>
     e?.response?.data?.error || e?.response?.data?.message || fallback;
 
+  // Form từ chối nghiệm thu (reason + ảnh minh chứng, bắt buộc cả hai).
+  const [rejectMode,   setRejectMode]   = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectUris,   setRejectUris]   = useState<string[]>([]);
+  const [busy,         setBusy]         = useState(false);
+  const [cameraOpen,   setCameraOpen]   = useState(false);
+
   const currentStatusMeta = STATUS_META[request.status] || STATUS_META.pending;
   const currentStatusIdx = ORDERED_STATUSES.indexOf(request.status as MaintenanceStatus);
   const priorityColor = getMaintenancePriorityColor(request.priority);
 
-  const confirmSlot = async (slot: string) => {
-    if (isReal) {
-      try {
-        await realMaintenanceService.confirmSchedule(idNum, slot);
-        await refreshReal();
-        Alert.alert('📅 Đã xác nhận', `Bạn đã chọn lịch: ${formatDate(slot)}. Quản lý sẽ đến đúng hẹn.`);
-      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể xác nhận lịch. Vui lòng thử lại.')); }
-      return;
-    }
-    tenantMaintenanceStore.update(request.id, {
-      confirmedSlot: formatDate(slot),
-      estimatedCompletionDate: slot,
-      timeline: [...request.timeline, mkTenantEntry('scheduled', `Khách xác nhận lịch hẹn: ${formatDate(slot)}`)],
-      updatedAt: nowIso().slice(0, 10),
-    });
-  };
+  // ── Actions ────────────────────────────────────────────────────────
+
+  /** Tenant xác nhận đã sửa xong → CLOSED. */
   const confirmDone = async () => {
+    if (busy) return;
     if (isReal) {
       try {
-        await realMaintenanceService.confirm(idNum, true);
+        setBusy(true);
+        await realMaintenanceService.confirm(idNum);
         Alert.alert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể nghiệm thu. Vui lòng thử lại.')); }
+      finally { setBusy(false); }
       return;
     }
     tenantMaintenanceStore.update(request.id, {
-      status: 'confirmed',
+      status: 'closed',
       tenantConfirmedAt: nowIso().slice(0, 10),
       resolvedAt: nowIso().slice(0, 10),
-      timeline: [...request.timeline, mkTenantEntry('confirmed', 'Khách đã nghiệm thu, đồng ý hoàn tất')],
+      timeline: [...request.timeline, mkTenantEntry('closed', 'Khách đã nghiệm thu, đồng ý hoàn tất')],
       updatedAt: nowIso().slice(0, 10),
     });
     Alert.alert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
   };
-  const reopen = async () => {
+
+  const pickRejectImages = () => {
+    Alert.alert('Thêm ảnh minh chứng', undefined, [
+      { text: 'Chụp ảnh', onPress: async () => {
+        if (Platform.OS === 'web') { setCameraOpen(true); return; }
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (perm.status !== 'granted') { Alert.alert('Lỗi', 'Cần quyền camera.'); return; }
+        const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+        if (!r.canceled && r.assets[0]) setRejectUris(prev => [...prev, r.assets[0].uri]);
+      }},
+      { text: 'Chọn từ thư viện', onPress: async () => {
+        const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
+        if (!r.canceled) setRejectUris(prev => [...prev, ...r.assets.map(a => a.uri)]);
+      }},
+      { text: 'Đóng', style: 'cancel' },
+    ]);
+  };
+
+  /** Tenant từ chối nghiệm thu (bắt buộc lý do + ≥1 ảnh) → REJECTED. */
+  const submitReject = async () => {
+    if (busy) return;
+    const reason = rejectReason.trim();
+    if (!reason) { Alert.alert('Thiếu lý do', 'Vui lòng nhập lý do chưa đạt.'); return; }
+    if (rejectUris.length === 0) { Alert.alert('Thiếu ảnh', 'Cần ít nhất 1 ảnh minh chứng.'); return; }
     if (isReal) {
       try {
-        await realMaintenanceService.confirm(idNum, false); // accept=false → BE mở lại (REOPENED)
+        setBusy(true);
+        await realMaintenanceService.reject(idNum, reason, rejectUris);
         await refreshReal();
-        Alert.alert('Đã mở lại', 'Yêu cầu đã được mở lại, quản lý sẽ xử lý tiếp.');
-      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể mở lại yêu cầu. Vui lòng thử lại.')); }
+        setRejectMode(false); setRejectReason(''); setRejectUris([]);
+        Alert.alert('Đã gửi phản hồi', 'Quản lý sẽ xem xét và xử lý lại.');
+      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể gửi phản hồi. Vui lòng thử lại.')); }
+      finally { setBusy(false); }
       return;
     }
     tenantMaintenanceStore.update(request.id, {
-      status: 'in_progress',
-      timeline: [...request.timeline, mkTenantEntry('in_progress', 'Khách phản hồi chưa đạt — mở lại yêu cầu')],
+      status: 'rejected',
+      rejectReason: reason,
+      rejectImages: rejectUris,
+      timeline: [...request.timeline, mkTenantEntry('rejected', `Khách từ chối: ${reason}`)],
       updatedAt: nowIso().slice(0, 10),
     });
-    Alert.alert('Đã mở lại', 'Yêu cầu đã được mở lại để xử lý tiếp.');
+    setRejectMode(false); setRejectReason(''); setRejectUris([]);
+    Alert.alert('Đã gửi phản hồi', 'Quản lý sẽ xem xét và xử lý lại.');
   };
 
   return (
@@ -143,7 +171,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         </View>
 
         {/* Thanh tiến độ */}
-        {request.status !== 'cancelled' && (
+        {request.status !== 'cancelled' && request.status !== 'rejected' && (
           <View style={styles.progressSection}>
             <Text style={styles.progressTitle}>Tiến độ xử lý</Text>
             <View style={styles.progressBar}>
@@ -175,16 +203,19 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
           <View style={styles.infoCard}>
             <View style={styles.titleRow}>
-              <Text style={styles.categoryEmoji}>{CATEGORY_EMOJI[request.category]}</Text>
+              <Text style={styles.categoryEmoji}>{(request.category && CATEGORY_EMOJI[request.category]) ?? '🔧'}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.requestTitle}>{request.title}</Text>
                 <Text style={styles.requestCategory}>{getMaintenanceCategoryLabel(request.category)}</Text>
               </View>
-              <View style={[styles.priorityBadge, { backgroundColor: priorityColor + '20' }]}>
-                <Text style={[styles.priorityText, { color: priorityColor }]}>
-                  {getMaintenancePriorityLabel(request.priority)}
-                </Text>
-              </View>
+              {/* priority do manager gán lúc duyệt — ẩn khi chưa có */}
+              {!!request.priority && (
+                <View style={[styles.priorityBadge, { backgroundColor: priorityColor + '20' }]}>
+                  <Text style={[styles.priorityText, { color: priorityColor }]}>
+                    {getMaintenancePriorityLabel(request.priority)}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.divider} />
@@ -203,16 +234,8 @@ export const MaintenanceDetailScreen: React.FC = () => {
               </View>
               {request.assignedTo && (
                 <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>Thợ phụ trách</Text>
-                  <Text style={styles.metaValue}>👷 {request.assignedTo}</Text>
-                </View>
-              )}
-              {request.estimatedCompletionDate && (
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>Lịch hẹn sửa</Text>
-                  <Text style={[styles.metaValue, { color: Colors.primary }]}>
-                    {formatDate(request.estimatedCompletionDate)}
-                  </Text>
+                  <Text style={styles.metaLabel}>Quản lý phụ trách</Text>
+                  <Text style={styles.metaValue}>👤 {request.assignedTo}</Text>
                 </View>
               )}
               {request.repairCost !== undefined && (
@@ -223,8 +246,13 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   </Text>
                 </View>
               )}
-              {/* Khách làm hư → chi phí sẽ vào hóa đơn kỳ tới (pending charge) — báo
-                  trước để không bất ngờ khi hóa đơn MAINTENANCE xuất hiện. */}
+              {!!request.reopenCount && request.reopenCount > 0 && (
+                <View style={styles.metaItem}>
+                  <Text style={styles.metaLabel}>Đã từ chối</Text>
+                  <Text style={[styles.metaValue, { color: Colors.error }]}>{request.reopenCount} lần</Text>
+                </View>
+              )}
+              {/* Khách làm hư → chi phí sẽ vào hóa đơn kỳ tới (luồng hóa đơn sau CLOSED). */}
               {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
                 (request.repairCost ?? 0) > 0 && (
                 <View style={styles.tenantPayNote}>
@@ -246,12 +274,24 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Ảnh đính kèm */}
-        {request.images && request.images.length > 0 && (
+        {/* Ảnh hiện trạng (BEFORE) */}
+        {(request.beforeImages?.length ?? request.images.length) > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🖼️ Ảnh đính kèm</Text>
+            <Text style={styles.sectionTitle}>🖼️ Ảnh hiện trạng</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
-              {request.images.map((uri, i) => (
+              {(request.beforeImages?.length ? request.beforeImages : request.images).map((uri, i) => (
+                <Image key={i} source={{ uri }} style={styles.attachmentImage} />
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Ảnh sau sửa (AFTER) — hiện khi manager đã báo xong */}
+        {(request.afterImages?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🛠 Ảnh sau sửa chữa</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
+              {request.afterImages!.map((uri, i) => (
                 <Image key={i} source={{ uri }} style={styles.attachmentImage} />
               ))}
             </ScrollView>
@@ -295,45 +335,100 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Xác nhận lịch hẹn (khách chọn khung giờ manager đề xuất) */}
-        {request.status === 'scheduled' && (request.scheduledSlots?.length ?? 0) > 0 && !request.confirmedSlot && (
+        {/* Nghiệm thu (WAITING_TENANT_CONFIRM) */}
+        {request.status === 'waiting_confirm' && !rejectMode && (
           <View style={styles.actionSection}>
-            <Text style={styles.sectionTitle}>📅 Chọn khung giờ phù hợp</Text>
-            {request.scheduledSlots!.map(slot => (
-              <TouchableOpacity key={slot} style={styles.slotBtn} onPress={() => confirmSlot(slot)}>
-                <Text style={styles.slotBtnText}>Xác nhận: {formatDate(slot)}</Text>
-              </TouchableOpacity>
-            ))}
+            <Text style={styles.sectionTitle}>🛠 Quản lý báo đã sửa xong</Text>
+            {!!request.resolutionNote && (
+              <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.sm }]}>
+                📝 {request.resolutionNote}
+              </Text>
+            )}
+            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
+              Vui lòng kiểm tra và xác nhận. Không phản hồi sau {MAINTENANCE_AUTO_CONFIRM_DAYS} ngày,
+              hệ thống sẽ tự xác nhận hoàn tất.
+            </Text>
+            <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone} disabled={busy}>
+              <Text style={styles.confirmBtnText}>✅ Đã OK — xác nhận hoàn tất</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reopenBtn} onPress={() => setRejectMode(true)}>
+              <Text style={styles.reopenBtnText}>↩ Chưa ổn — gửi phản hồi</Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        {/* Nghiệm thu khi đã sửa xong (DONE) */}
-        {request.status === 'done' && (
+        {/* Form từ chối nghiệm thu */}
+        {request.status === 'waiting_confirm' && rejectMode && (
           <View style={styles.actionSection}>
-            <Text style={styles.sectionTitle}>🛠 Thợ báo đã sửa xong</Text>
-            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
-              Vui lòng kiểm tra và xác nhận. Nếu chưa đạt, bạn có thể mở lại yêu cầu.
+            <Text style={styles.sectionTitle}>↩ Chưa ổn — cho biết lý do</Text>
+            <TextInput
+              style={styles.rejectInput}
+              value={rejectReason}
+              onChangeText={setRejectReason}
+              placeholder="VD: Máy vẫn không lạnh sau khi thợ đến..."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+            <View style={styles.rejectImagesRow}>
+              {rejectUris.map((uri, i) => (
+                <View key={`${uri}-${i}`} style={styles.rejectThumbWrap}>
+                  <Image source={{ uri }} style={styles.rejectThumb} />
+                  <TouchableOpacity
+                    style={styles.rejectThumbRemove}
+                    onPress={() => setRejectUris(prev => prev.filter((_, idx) => idx !== i))}
+                  >
+                    <Text style={styles.rejectThumbRemoveText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <TouchableOpacity style={styles.rejectAddBtn} onPress={pickRejectImages}>
+                <Text style={styles.rejectAddBtnText}>＋{'\n'}Ảnh</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.helpText, { color: Colors.textMuted, marginBottom: Spacing.md }]}>
+              Cần ít nhất 1 ảnh minh chứng để quản lý xem xét.
             </Text>
-            <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone}>
-              <Text style={styles.confirmBtnText}>✅ Xác nhận đã ổn, hoàn tất</Text>
+            <TouchableOpacity style={styles.rejectSubmitBtn} onPress={submitReject} disabled={busy}>
+              <Text style={styles.confirmBtnText}>{busy ? 'Đang gửi...' : 'Gửi phản hồi chưa đạt'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.reopenBtn} onPress={reopen}>
-              <Text style={styles.reopenBtnText}>↩ Chưa đạt — mở lại yêu cầu</Text>
+            <TouchableOpacity style={styles.reopenBtn} onPress={() => setRejectMode(false)}>
+              <Text style={[styles.reopenBtnText, { color: Colors.textSecondary }]}>← Quay lại</Text>
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Đã từ chối — chờ manager xem xét */}
+        {request.status === 'rejected' && (
+          <View style={styles.actionSection}>
+            <View style={[styles.helpCard, { backgroundColor: '#FEF2F2' }]}>
+              <Text style={[styles.helpText, { color: '#B91C1C' }]}>
+                ↩ Bạn đã từ chối nghiệm thu{request.rejectReason ? `: "${request.rejectReason}"` : ''}.
+                Quản lý đang xem xét — bạn sẽ nhận thông báo khi có kết quả.
+              </Text>
+            </View>
           </View>
         )}
 
         {/* Nút liên hệ nếu đang xử lý */}
-        {(request.status === 'pending' || request.status === 'in_progress') && (
+        {(request.status === 'pending' || request.status === 'approved') && (
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
               <Text style={styles.helpText}>
-                ❓ Cần hỗ trợ gấp? Liên hệ quản lý.
+                {request.status === 'pending'
+                  ? '⏳ Yêu cầu đang chờ quản lý duyệt. Cần hỗ trợ gấp? Liên hệ quản lý.'
+                  : '🔧 Đã duyệt — thợ sẽ đến sửa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
               </Text>
             </View>
           </View>
         )}
       </ScrollView>
+
+      <CameraCaptureModal
+        visible={cameraOpen}
+        multi
+        onCapture={(uri) => setRejectUris(prev => [...prev, uri])}
+        onClose={() => setCameraOpen(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -399,7 +494,7 @@ const styles = StyleSheet.create({
   tenantPayNoteText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
 
   imagesRow: { marginTop: Spacing.sm },
-  attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm },
+  attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
 
   timelineCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm },
   timelineItem: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.md },
@@ -417,11 +512,6 @@ const styles = StyleSheet.create({
   helpCard: { backgroundColor: Colors.infoLight, borderRadius: BorderRadius.md, padding: Spacing.md },
   helpText: { fontSize: 13, color: Colors.info, lineHeight: 20 },
 
-  slotBtn: {
-    backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.primary,
-    borderRadius: BorderRadius.md, paddingVertical: Spacing.md, alignItems: 'center', marginBottom: Spacing.sm,
-  },
-  slotBtnText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
   confirmBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
     paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.sm, ...Shadow.sm,
@@ -429,4 +519,27 @@ const styles = StyleSheet.create({
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
   reopenBtn: { alignItems: 'center', paddingVertical: Spacing.md },
   reopenBtnText: { fontSize: 14, fontWeight: '600', color: Colors.error },
+
+  rejectInput: {
+    backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, padding: Spacing.md, fontSize: 14, color: Colors.textPrimary,
+    minHeight: 80, textAlignVertical: 'top', marginBottom: Spacing.md,
+  },
+  rejectImagesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
+  rejectThumbWrap: { width: 72, height: 72, borderRadius: BorderRadius.md, overflow: 'hidden' },
+  rejectThumb: { width: '100%', height: '100%', backgroundColor: Colors.divider },
+  rejectThumbRemove: {
+    position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 10,
+    backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',
+  },
+  rejectThumbRemoveText: { color: Colors.white, fontSize: 14, fontWeight: '900', lineHeight: 16 },
+  rejectAddBtn: {
+    width: 72, height: 72, borderRadius: BorderRadius.md, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
+  },
+  rejectAddBtnText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 16 },
+  rejectSubmitBtn: {
+    backgroundColor: Colors.error, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.sm, ...Shadow.sm,
+  },
 });

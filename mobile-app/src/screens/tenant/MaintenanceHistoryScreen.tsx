@@ -1,17 +1,21 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import {
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatDate, getMaintenanceCategoryLabel } from '@/utils';
 import { MaintenanceRequest, MaintenanceStatus } from '@/types';
-import { useTenantRequests } from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 
-const HISTORY_STATUSES: MaintenanceStatus[] = ['resolved', 'cancelled'];
+// Lịch sử = ticket đã kết thúc (flow mới: closed hoặc cancelled).
+const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  resolved: { label: 'Hoàn tất', color: Colors.success, bg: Colors.successLight },
-  cancelled: { label: 'Đã hủy', color: Colors.textMuted, bg: Colors.divider },
+  closed:    { label: 'Hoàn tất', color: Colors.success, bg: Colors.successLight },
+  cancelled: { label: 'Đã hủy',   color: Colors.textMuted, bg: Colors.divider },
 };
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -20,14 +24,34 @@ const CATEGORY_EMOJI: Record<string, string> = {
 
 export const MaintenanceHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const allRequests = useTenantRequests();
+  // Dữ liệu THẬT từ my-requests (trước đây đọc store mock thuần — khác hẳn màn
+  // List/Detail cùng luồng đã nối real).
+  const [allRequests, setAllRequests] = useState<MaintenanceRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const page = await realMaintenanceService.getMyRequests({ size: 200 });
+      setAllRequests((page.content ?? []).map(dtoToTenantRequest));
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
   const historyItems = allRequests.filter(r =>
     HISTORY_STATUSES.includes(r.status as MaintenanceStatus)
   );
 
   const renderItem = ({ item }: { item: MaintenanceRequest }) => {
     const cfg = STATUS_CONFIG[item.status] ?? STATUS_CONFIG.cancelled;
-    const resolvedEntry = item.timeline.find(t => t.status === 'resolved' || t.status === 'cancelled');
+    const resolvedEntry = item.timeline.find(t => t.status === 'closed' || t.status === 'cancelled');
 
     return (
       <TouchableOpacity
@@ -37,7 +61,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
       >
         <View style={styles.cardTop}>
           <View style={[styles.categoryBadge, { backgroundColor: Colors.primaryBg }]}>
-            <Text style={{ fontSize: 20 }}>{CATEGORY_EMOJI[item.category] || '🔧'}</Text>
+            <Text style={{ fontSize: 20 }}>{(item.category && CATEGORY_EMOJI[item.category]) || '🔧'}</Text>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
@@ -56,7 +80,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
           </Text>
           {(item.resolvedAt || resolvedEntry?.updatedAt) && (
             <Text style={styles.metaText}>
-              ✅ {item.status === 'resolved' ? 'Hoàn tất' : 'Hủy'}: {formatDate((item.resolvedAt ?? resolvedEntry?.updatedAt ?? '').slice(0, 10))}
+              ✅ {item.status === 'closed' ? 'Hoàn tất' : 'Hủy'}: {formatDate((item.resolvedAt ?? resolvedEntry?.updatedAt ?? '').slice(0, 10))}
             </Text>
           )}
         </View>
@@ -101,13 +125,28 @@ export const MaintenanceHistoryScreen: React.FC = () => {
         keyExtractor={i => i.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>🔧</Text>
-            <Text style={styles.emptyTitle}>Chưa có lịch sử</Text>
-            <Text style={styles.emptyDesc}>Các yêu cầu đã hoàn tất hoặc hủy sẽ hiển thị ở đây.</Text>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={Colors.primary} size="large" />
+            </View>
+          ) : loadError ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyTitle}>Không tải được lịch sử</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
+                <Text style={styles.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>🔧</Text>
+              <Text style={styles.emptyTitle}>Chưa có lịch sử</Text>
+              <Text style={styles.emptyDesc}>Các yêu cầu đã nghiệm thu, hoàn tất hoặc hủy sẽ hiển thị ở đây.</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>
@@ -166,4 +205,9 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },
   emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center' },
+  retryBtn: {
+    marginTop: Spacing.sm, backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+  },
+  retryBtnText: { color: Colors.white, fontWeight: '700' },
 });

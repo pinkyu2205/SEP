@@ -107,12 +107,6 @@ export interface TenantContractResponse {
   payosCheckoutUrl?: string;
   payosQrCode?: string;
 
-  // Cọc tiền mặt — xác nhận 2 chiều (khách + manager). BE KHÔNG trả boolean riêng,
-  // chỉ trả timestamp; suy ra "đã xác nhận" = giá trị khác null. Khi CẢ HAI đều có
-  // giá trị, BE tự chuyển paymentStatus=PAID và tự gửi OTP (xem confirmDepositCashByManager).
-  depositCashTenantConfirmedAt?: string | null;
-  depositCashManagerConfirmedAt?: string | null;
-
   // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
   initialElectricReading?: number;
   initialWaterReading?: number;
@@ -296,29 +290,6 @@ export const realTenantService = {
     return data;
   },
 
-  // Khách xác nhận ĐÃ TRẢ cọc tiền mặt — endpoint BE public (không cần JWT), nhưng
-  // trong luồng ký tại chỗ thì gọi ngay trên máy Manager sau khi khách ký xác nhận.
-  // BE tự chuẩn hoá & so khớp phoneNumber với SĐT trên HĐ (0/84/+84 đều nhận).
-  confirmDepositCashByTenant: async (
-    contractId: number,
-    phoneNumber: string,
-  ): Promise<TenantContractResponse> => {
-    const { data } = await realApiClient.post<TenantContractResponse>(
-      `/api/v1/tenant-contracts/${contractId}/deposit-cash-paid`,
-      { phoneNumber },
-    );
-    return data;
-  },
-
-  // Manager xác nhận ĐÃ NHẬN cọc tiền mặt. Khi cả 2 phía đã xác nhận, BE tự chuyển
-  // paymentStatus=PAID và TỰ GỬI OTP (Twilio) — FE không cần gọi lại sendContractOtp.
-  confirmDepositCashByManager: async (contractId: number): Promise<TenantContractResponse> => {
-    const { data } = await realApiClient.post<TenantContractResponse>(
-      `/api/v1/tenant-contracts/${contractId}/deposit-cash-received`,
-    );
-    return data;
-  },
-
   // ===== Duyệt giá (Case 2) — phụ thuộc BE, tên endpoint suy ra từ thiết kế =====
 
   // Danh sách HĐ chờ xử lý của manager: gồm DRAFT/PENDING được gán (đón khách v2)
@@ -381,8 +352,9 @@ export const realTenantService = {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/cancel`);
   },
 
-  // Trả phòng / trả nhà: kết thúc HĐ đang hiệu lực (manager). Phòng tự về AVAILABLE.
-  // (BE TODO nếu chưa có endpoint này — FE gọi sẵn.)
+  // Thanh lý HĐ ACTIVE/EXPIRED (manager chủ động, không qua checkout-request).
+  // BE tự trả phòng về AVAILABLE + restore thiết bị (verify PASS 10/07/2026).
+  // Luồng khách tự xin trả phòng dùng checkout-request (checkoutService/selfService).
   terminateContract: async (contractId: number, reason?: string): Promise<void> => {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/terminate`, { reason });
   },

@@ -2,10 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Wrench, CheckCircle, Clock, AlertTriangle,
   DollarSign, Eye, X, Calendar, User, Building2,
-  FileText, Info, MapPin, Loader2, Package, CheckCircle2, XCircle,
+  FileText, Info, MapPin, Loader2, Package,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useWebAuth } from '@/auth/WebAuthContext';
 import { maintenanceService } from '@/services/maintenance.service';
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
@@ -31,17 +29,18 @@ const fmtDate = (iso?: string): string => {
 };
 
 // ── Modal chi tiết ────────────────────────────────────────────────────────────
-const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
+// Flow mới 17/07: duyệt request/báo xong/review-reject làm trên mobile manager;
+// web host chỉ giám sát. (Khối "duyệt chi phí PENDING_APPROVAL" cũ đã bỏ — chi phí
+// chuyển sang luồng hóa đơn sau CLOSED, và PUT /approve giờ nghĩa là duyệt request.)
+const DetailModal = ({ request, onClose }: {
   request: MaintenanceRequestResponse;
-  isAdmin: boolean;
-  onDecided: () => void;
   onClose: () => void;
 }) => {
   const status = normalizeMaintenanceStatus(request.status);
-  const pBadge = maintenanceReqPriorityMap[request.priority] ?? maintenanceReqPriorityMap.LOW;
+  // priority/category null khi ticket PENDING — manager gán lúc duyệt (flow 17/07 chiều)
+  const pBadge = request.priority ? maintenanceReqPriorityMap[request.priority] : undefined;
   const sBadge = maintenanceReqStatusMap[status];
   const [history, setHistory] = useState<EquipmentMaintenanceHistoryResponse[]>([]);
-  const [deciding, setDeciding] = useState(false);
 
   useEffect(() => {
     if (!request.equipmentId) return;
@@ -49,22 +48,6 @@ const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
       .then(setHistory)
       .catch(() => setHistory([]));
   }, [request.equipmentId]);
-
-  // Duyệt/từ chối chi phí vượt ngưỡng — trước đây không nơi nào duyệt được ticket
-  // PENDING_APPROVAL thật (mobile chỉ có nút cho mock) → ticket treo vô hạn.
-  const decideCost = async (approve: boolean) => {
-    const label = approve ? 'DUYỆT' : 'TỪ CHỐI';
-    if (!window.confirm(`${label} chi phí ${request.repairCost != null ? formatCurrency(request.repairCost) : ''} cho yêu cầu ${request.requestCode}?`)) return;
-    setDeciding(true);
-    try {
-      await maintenanceService.decideCost(request.id, approve);
-      toast.success(approve ? 'Đã duyệt chi phí — quản lý sẽ tiếp tục xử lý.' : 'Đã từ chối chi phí.');
-      onDecided();
-      onClose();
-    } catch { /* interceptor đã toast */ } finally {
-      setDeciding(false);
-    }
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -75,13 +58,17 @@ const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
           <div className="flex-1 min-w-0 pr-4">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="font-mono text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{request.requestCode}</span>
-              <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
-              </span>
+              {pBadge && (
+                <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
+                </span>
+              )}
               <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${sBadge.color}`}>
                 {sBadge.label}
               </span>
-              <span className="text-xs text-slate-500">{maintenanceCategoryMap[request.category] ?? request.category}</span>
+              <span className="text-xs text-slate-500">
+                {request.category ? (maintenanceCategoryMap[request.category] ?? request.category) : 'Chưa phân loại'}
+              </span>
             </div>
             <h2 className="text-base font-bold text-slate-900 leading-snug">
               {request.equipmentName ?? request.roomName}
@@ -165,41 +152,15 @@ const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
                 <strong>{request.costPaidBy === 'HOST' ? '🏠 Chủ nhà (tính vào chi phí)' : '👤 Khách thuê'}</strong>
               </p>
             )}
+            {!!request.reopenCount && request.reopenCount > 0 && (
+              <p className="text-xs text-rose-700 mt-1.5">
+                🔄 Khách đã từ chối nghiệm thu <strong>{request.reopenCount} lần</strong>
+              </p>
+            )}
             {request.resolutionNote && (
               <p className="text-sm text-emerald-900 mt-2 leading-relaxed">{request.resolutionNote}</p>
             )}
           </div>
-
-          {/* Duyệt chi phí vượt ngưỡng */}
-          {status === 'PENDING_APPROVAL' && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" /> Chi phí vượt ngưỡng — cần phê duyệt
-              </p>
-              {isAdmin ? (
-                <div className="mt-3 flex gap-2.5">
-                  <button
-                    onClick={() => decideCost(true)}
-                    disabled={deciding}
-                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" /> {deciding ? 'Đang xử lý...' : 'Duyệt chi phí'}
-                  </button>
-                  <button
-                    onClick={() => decideCost(false)}
-                    disabled={deciding}
-                    className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-rose-600 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    <XCircle className="w-3.5 h-3.5" /> Từ chối
-                  </button>
-                </div>
-              ) : (
-                <p className="text-xs text-amber-800 mt-1.5">
-                  Đang chờ <strong>Admin</strong> duyệt trên web — quyền duyệt hiện giới hạn tài khoản Admin.
-                </p>
-              )}
-            </div>
-          )}
 
           {/* Timeline */}
           {request.timeline?.length > 0 && (
@@ -261,8 +222,6 @@ const DetailModal = ({ request, isAdmin, onDecided, onClose }: {
 
 // ── Component chính ───────────────────────────────────────────────────────────
 export const MaintenanceList = () => {
-  const { user } = useWebAuth();
-  const isAdmin = user?.role === 'admin';
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<MaintenanceRequestResponse[]>([]);
   const [dashboard, setDashboard] = useState<MaintenanceDashboardResponse | null>(null);
@@ -435,14 +394,15 @@ export const MaintenanceList = () => {
               )}
               {!loading && filtered.map(req => {
                 const status = normalizeMaintenanceStatus(req.status);
-                const pBadge = maintenanceReqPriorityMap[req.priority] ?? maintenanceReqPriorityMap.LOW;
+                // priority/category null khi PENDING — manager gán lúc duyệt
+                const pBadge = req.priority ? maintenanceReqPriorityMap[req.priority] : undefined;
                 const sBadge = maintenanceReqStatusMap[status];
                 return (
                   <tr key={req.id} className="transition-colors hover:bg-slate-50/80 cursor-pointer" onClick={() => setSelected(req)}>
                     <td className="px-5 py-4">
                       <p className="font-mono text-[10px] text-slate-400">{req.requestCode}</p>
                       <p className="font-semibold text-slate-900 mt-0.5 leading-snug line-clamp-2 max-w-[220px]">
-                        {req.equipmentName ?? req.description}
+                        {req.title ?? req.equipmentName ?? req.description}
                       </p>
                     </td>
                     <td className="px-5 py-4">
@@ -454,11 +414,17 @@ export const MaintenanceList = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-xs text-slate-600">{maintenanceCategoryMap[req.category] ?? req.category}</td>
+                    <td className="px-5 py-4 text-xs text-slate-600">
+                      {req.category ? (maintenanceCategoryMap[req.category] ?? req.category) : <span className="text-slate-400">Chưa phân loại</span>}
+                    </td>
                     <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
-                      </span>
+                      {pBadge ? (
+                        <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${sBadge.color}`}>{sBadge.label}</span>
@@ -497,8 +463,6 @@ export const MaintenanceList = () => {
       {selected && (
         <DetailModal
           request={selected}
-          isAdmin={isAdmin}
-          onDecided={load}
           onClose={() => setSelected(null)}
         />
       )}

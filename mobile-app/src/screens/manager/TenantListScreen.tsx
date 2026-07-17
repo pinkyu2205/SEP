@@ -790,11 +790,11 @@ export const TenantListScreen: React.FC = () => {
             load();
             Alert.alert('Thành công', `Đã ${isWH ? 'trả nhà' : 'trả phòng'} cho ${tenant.fullName}.`);
           } catch (e: any) {
-            Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không kết thúc được hợp đồng (BE chưa có endpoint trả phòng?).');
+            Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không kết thúc được hợp đồng — thử lại hoặc kiểm tra trạng thái HĐ.');
           }
         };
-        const title = isWH ? 'Xác nhận trả nhà' : 'Xác nhận trả phòng';
-        const msg = `${tenant.fullName} - ${isWH ? tenant.propertyName : tenant.roomName}\n\nĐảm bảo hóa đơn và tiền cọc đã được xử lý trước khi xác nhận.`;
+        const title = isWH ? 'Thanh lý ngay — trả nhà' : 'Thanh lý ngay — trả phòng';
+        const msg = `${tenant.fullName} - ${isWH ? tenant.propertyName : tenant.roomName}\n\nThanh lý HĐ NGAY không qua yêu cầu trả phòng của khách (khách gửi yêu cầu thì duyệt ở màn "Trả phòng" ngoài trang chủ). Đảm bảo hóa đơn và tiền cọc đã xử lý xong.`;
         // Web: Alert nhiều nút không chạy callback → dùng window.confirm.
         if (Platform.OS === 'web') {
           if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${msg}`)) doCheckout();

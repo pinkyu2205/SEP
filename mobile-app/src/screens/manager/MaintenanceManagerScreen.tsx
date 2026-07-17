@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { useTickets, MaintenanceTicket } from '@/store/maintenanceStore';
+import type { MaintenanceTicket } from '@/store/maintenanceStore';
 import { getPropertyById } from '@/data/managedProperties';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
@@ -16,10 +16,8 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string
     Object.entries(MAINTENANCE_PRIORITY_META).map(([k, m]) => [k, { label: m.label, color: m.color, bg: m.bg }]),
   );
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-  ...MAINTENANCE_STATUS_META,
-  accepted: MAINTENANCE_STATUS_META.acknowledged,
-};
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> =
+  MAINTENANCE_STATUS_META;
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -30,9 +28,10 @@ const daysBetween = (from: string) => {
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-const TERMINAL = ['resolved', 'confirmed', 'cancelled'];
+const TERMINAL = ['closed', 'cancelled'];
 // Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
-const isOverdue = (t: { status: string; priority: string; createdAt: string }) =>
+// Ticket chưa duyệt (priority null) tính theo ngưỡng mặc định 7 ngày.
+const isOverdue = (t: { status: string; priority?: string; createdAt: string }) =>
   !TERMINAL.includes(t.status)
   && daysBetween(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
 
@@ -45,22 +44,33 @@ const monthLabel = () => {
 
 export const MaintenanceManagerScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const mockTickets = useTickets();
   const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
   const [search, setSearch] = useState('');
+  // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
+  // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
+  const [loadError, setLoadError] = useState(false);
 
-  // Lấy danh sách thật cho OM; lỗi → fallback store mock.
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
       realMaintenanceService.listForManager()
-        .then(page => { if (active) setRemote(page.content.map(dtoToTicket)); })
-        .catch(() => { if (active) setRemote(null); });
+        .then(page => {
+          if (!active) return;
+          setRemote(page.content.map(dtoToTicket));
+          setLoadError(false);
+        })
+        .catch(() => {
+          if (!active) return;
+          setRemote(prev => {
+            if (prev == null) setLoadError(true);
+            return prev;
+          });
+        });
       return () => { active = false; };
     }, []),
   );
 
-  const tickets = remote ?? mockTickets;
+  const tickets = remote ?? [];
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
@@ -69,13 +79,18 @@ export const MaintenanceManagerScreen: React.FC = () => {
 
   const stats = useMemo(() => {
     const open = tickets.filter(t => !TERMINAL.includes(t.status));
-    const WORKING = ['accepted', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval'];
-    const DONE_LIKE = ['done', 'confirmed', 'resolved'];
+    // Khớp dashboard BE: inProgress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED.
+    const WORKING = ['approved', 'waiting_confirm', 'rejected'];
+    const now = new Date();
+    const isThisMonth = (iso: string) => {
+      const d = new Date(iso);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    };
     return {
       urgentOpen:   open.filter(t => t.priority === 'urgent').length,
-      pendingNew:   tickets.filter(t => t.status === 'pending' || t.status === 'reopened').length,
+      pendingNew:   tickets.filter(t => t.status === 'pending').length,
       inProgress:   tickets.filter(t => WORKING.includes(t.status)).length,
-      resolvedMonth:tickets.filter(t => DONE_LIKE.includes(t.status)).length,
+      resolvedMonth:tickets.filter(t => t.status === 'closed' && isThisMonth(t.updatedAt)).length,
       slaAtRisk:    tickets.filter(isOverdue).length,
       totalOpen:    open.length,
     };
@@ -93,7 +108,8 @@ export const MaintenanceManagerScreen: React.FC = () => {
         || t.roomName.toLowerCase().includes(q)
         || (t.tenantName ?? '').toLowerCase().includes(q))
       .sort((a, b) => {
-        const p = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
+        const p = (a.priority ? PRIORITY_ORDER[a.priority] ?? 9 : 9)
+          - (b.priority ? PRIORITY_ORDER[b.priority] ?? 9 : 9);
         return p !== 0 ? p : b.updatedAt.localeCompare(a.updatedAt);
       });
   }, [tickets, search]);
@@ -150,7 +166,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
           <View style={[s.statCard, { borderTopColor: Colors.warning }]}>
             <Text style={[s.statNum, { color: Colors.warning }]}>{stats.pendingNew}</Text>
-            <Text style={s.statLabel}>Chờ tiếp nhận</Text>
+            <Text style={s.statLabel}>Chờ duyệt</Text>
           </View>
           <View style={[s.statCard, { borderTopColor: '#8B5CF6' }]}>
             <Text style={[s.statNum, { color: '#8B5CF6' }]}>{stats.inProgress}</Text>
@@ -158,7 +174,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
           <View style={[s.statCard, { borderTopColor: Colors.success }]}>
             <Text style={[s.statNum, { color: Colors.success }]}>{stats.resolvedMonth}</Text>
-            <Text style={s.statLabel}>Hoàn tất T5</Text>
+            <Text style={s.statLabel}>Hoàn tất T{new Date().getMonth() + 1}</Text>
           </View>
           {stats.slaAtRisk > 0 && (
             <View style={[s.statCard, { borderTopColor: Colors.error, backgroundColor: Colors.errorLight }]}>
@@ -192,7 +208,11 @@ export const MaintenanceManagerScreen: React.FC = () => {
             placeholderTextColor={Colors.textMuted}
           />
           <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
-            {openQueue.length === 0 ? (
+            {loadError ? (
+              <View style={s.queueEmpty}>
+                <Text style={s.queueEmptyText}>⚠️ Không tải được danh sách ticket — kiểm tra mạng rồi mở lại màn này.</Text>
+              </View>
+            ) : openQueue.length === 0 ? (
               <View style={s.queueEmpty}>
                 <Text style={s.queueEmptyText}>
                   {search.trim() ? 'Không tìm thấy ticket phù hợp.' : '🎉 Không có ticket nào đang mở.'}
@@ -200,7 +220,10 @@ export const MaintenanceManagerScreen: React.FC = () => {
               </View>
             ) : openQueue.slice(0, 8).map((t, i) => {
               const cfg    = STATUS_CONFIG[t.status];
-              const priCfg = PRIORITY_CONFIG[t.priority];
+              // priority null khi chưa duyệt → badge "Chờ phân loại" trung tính.
+              const priCfg = t.priority
+                ? PRIORITY_CONFIG[t.priority]
+                : { label: 'Chưa phân loại', color: Colors.textMuted, bg: Colors.divider };
               const isLast = i === Math.min(openQueue.length, 8) - 1;
               const overdue = isOverdue(t);
               return (
@@ -235,7 +258,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
           <View style={s.activityCard}>
             {recentActivity.map((t, i) => {
               const cfg       = STATUS_CONFIG[t.status];
-              const priCfg    = PRIORITY_CONFIG[t.priority];
+              const priCfg    = t.priority
+                ? PRIORITY_CONFIG[t.priority]
+                : { label: 'Chưa phân loại', color: Colors.textMuted, bg: Colors.divider };
               const isLast    = i === recentActivity.length - 1;
               return (
                 <TouchableOpacity
@@ -277,9 +302,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
             const open      = group.tickets.filter(t => !TERMINAL.includes(t.status));
             const urgent    = open.filter(t => t.priority === 'urgent');
             const inProg    = group.tickets.filter(t =>
-              ['in_progress', 'accepted', 'acknowledged', 'scheduled', 'on_hold', 'pending_approval'].includes(t.status));
-            const resolved  = group.tickets.filter(t => ['done', 'confirmed', 'resolved'].includes(t.status));
-            const pending   = group.tickets.filter(t => t.status === 'pending' || t.status === 'reopened');
+              ['approved', 'waiting_confirm', 'rejected'].includes(t.status));
+            const resolved  = group.tickets.filter(t => t.status === 'closed');
+            const pending   = group.tickets.filter(t => t.status === 'pending');
             const slaRisk   = open.filter(isOverdue);
             const total     = group.tickets.length;
             const doneRate  = total > 0 ? Math.round((resolved.length / total) * 100) : 100;
@@ -335,7 +360,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
                     <Text style={[s.buildingStatNum, { color: pending.length > 0 ? Colors.warning : Colors.textMuted }]}>
                       {pending.length}
                     </Text>
-                    <Text style={s.buildingStatLbl}>Chờ nhận</Text>
+                    <Text style={s.buildingStatLbl}>Chờ duyệt</Text>
                   </View>
                   <View style={s.statSep} />
                   <View style={s.buildingStat}>

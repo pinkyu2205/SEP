@@ -3,8 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,8 +17,6 @@ import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
 import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
-import * as FileSystem from 'expo-file-system/legacy'
-import Signature from 'react-native-signature-canvas'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
@@ -43,22 +39,6 @@ const formatDateVi = (iso?: string): string => {
 }
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback
-
-// Chữ ký (base64 PNG từ SignatureScreen.onOK) -> ghi file tạm -> upload Cloudinary.
-// BE không có field lưu chữ ký riêng nên chỉ dùng làm bằng chứng audit (best-effort,
-// đính vào roomConditionNote) — hành động XÁC NHẬN THẬT SỰ vẫn là gọi deposit-cash-paid,
-// lỗi ở bước upload này KHÔNG được chặn luồng xác nhận cọc.
-const uploadSignature = async (base64Png: string): Promise<string | null> => {
-  if (Platform.OS === 'web') return null
-  try {
-    const path = `${FileSystem.cacheDirectory}signature-${Date.now()}.png`
-    const raw = base64Png.replace(/^data:image\/png;base64,/, '')
-    await FileSystem.writeAsStringAsync(path, raw, { encoding: 'base64' })
-    return await uploadImageToCloudinary(path)
-  } catch {
-    return null
-  }
-}
 
 const STATUS_META: Record<ContractPriceApprovalStatus, { label: string; color: string; bg: string }> = {
   PENDING_PRICE_APPROVAL: { label: 'Chờ Host duyệt giá', color: '#D97706', bg: '#FFFBEB' },
@@ -600,138 +580,13 @@ const InspectionSection: React.FC<{
   )
 }
 
-const signaturePadWebStyle = `.m-signature-pad--footer { margin: 0; } .m-signature-pad--body { border: none; } body,html { width: 100%; height: 100%; }`
-
-// ===== Thu cọc tiền mặt tại chỗ: khách ký trên máy Manager rồi manager xác nhận đã
-// nhận tiền — xác nhận 2 chiều, thứ tự không bắt buộc (khớp BE tài liệu §3 nhánh B). =====
-const CashDepositFlow: React.FC<{
-  contract: TenantContractResponse
-  onChanged: (c: TenantContractResponse) => void
-}> = ({ contract, onChanged }) => {
-  const [tenantConfirmedAt, setTenantConfirmedAt] = useState(contract.depositCashTenantConfirmedAt ?? null)
-  const [managerConfirmedAt, setManagerConfirmedAt] = useState(contract.depositCashManagerConfirmedAt ?? null)
-  const [showPad, setShowPad] = useState(false)
-  const [busyTenant, setBusyTenant] = useState(false)
-  const [busyManager, setBusyManager] = useState(false)
-
-  const handleSignature = async (base64: string) => {
-    setShowPad(false)
-    setBusyTenant(true)
-    try {
-      const res = await realTenantService.confirmDepositCashByTenant(contract.id, contract.tenantPhone)
-      setTenantConfirmedAt(res.depositCashTenantConfirmedAt ?? new Date().toISOString())
-      setManagerConfirmedAt(res.depositCashManagerConfirmedAt ?? managerConfirmedAt)
-      onChanged(res)
-      // Lưu chữ ký làm bằng chứng audit (best-effort) — KHÔNG chặn luồng nếu lỗi,
-      // vì hành động xác nhận thật sự đã hoàn tất ở lệnh gọi deposit-cash-paid trên.
-      uploadSignature(base64).then((url) => {
-        if (!url) return
-        realTenantService
-          .updateDraftContract(contract.id, {
-            roomConditionNote: `${contract.roomConditionNote ? contract.roomConditionNote + '\n' : ''}Chữ ký khách xác nhận cọc tiền mặt: ${url}`,
-          })
-          .catch(() => {})
-      })
-    } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không xác nhận được — kiểm tra lại SĐT khách trên hợp đồng.'))
-    } finally {
-      setBusyTenant(false)
-    }
-  }
-
-  const confirmManager = async () => {
-    try {
-      setBusyManager(true)
-      const res = await realTenantService.confirmDepositCashByManager(contract.id)
-      setManagerConfirmedAt(res.depositCashManagerConfirmedAt ?? new Date().toISOString())
-      setTenantConfirmedAt(res.depositCashTenantConfirmedAt ?? tenantConfirmedAt)
-      onChanged(res)
-    } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không xác nhận được đã nhận tiền.'))
-    } finally {
-      setBusyManager(false)
-    }
-  }
-
-  return (
-    <View style={{ gap: Spacing.md, marginTop: Spacing.md }}>
-      <View style={styles.cashStepCard}>
-        <Text style={styles.cashStepTitle}>{tenantConfirmedAt ? '✅' : '1️⃣'} Khách ký xác nhận đã trả tiền</Text>
-        {tenantConfirmedAt ? (
-          <Text style={styles.cashStepDone}>
-            Đã xác nhận lúc {new Date(tenantConfirmedAt).toLocaleTimeString('vi-VN')}
-          </Text>
-        ) : (
-          <TouchableOpacity
-            style={[styles.primaryBtn, busyTenant && styles.btnDisabled]}
-            onPress={() => setShowPad(true)}
-            disabled={busyTenant}
-          >
-            {busyTenant ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.primaryBtnText}>✍️ Đưa máy cho khách ký</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.cashStepCard}>
-        <Text style={styles.cashStepTitle}>{managerConfirmedAt ? '✅' : '2️⃣'} Manager xác nhận đã nhận tiền</Text>
-        {managerConfirmedAt ? (
-          <Text style={styles.cashStepDone}>
-            Đã xác nhận lúc {new Date(managerConfirmedAt).toLocaleTimeString('vi-VN')}
-          </Text>
-        ) : (
-          <TouchableOpacity
-            style={[styles.primaryBtn, busyManager && styles.btnDisabled]}
-            onPress={confirmManager}
-            disabled={busyManager}
-          >
-            {busyManager ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.primaryBtnText}>💵 Đã nhận đủ tiền cọc</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <Modal visible={showPad} animationType="slide" onRequestClose={() => setShowPad(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: Colors.white }}>
-          <View style={styles.signatureHeader}>
-            <Text style={styles.signatureHeaderTitle}>Chữ ký xác nhận — {contract.tenantFullName}</Text>
-            <TouchableOpacity onPress={() => setShowPad(false)}>
-              <Text style={styles.signatureCloseText}>Đóng</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.signatureHint}>
-            Đưa thiết bị cho khách ký xác nhận đã trả {formatVnd(contract.deposit)} đ tiền cọc mặt.
-          </Text>
-          <View style={{ flex: 1 }}>
-            <Signature
-              onOK={handleSignature}
-              onEmpty={() => Alert.alert('Chưa ký', 'Vui lòng ký vào khung bên trên.')}
-              descriptionText=""
-              clearText="Xóa"
-              confirmText="Xác nhận chữ ký"
-              webStyle={signaturePadWebStyle}
-            />
-          </View>
-        </SafeAreaView>
-      </Modal>
-    </View>
-  )
-}
-
-// ===== Đã duyệt: thu cọc (PayOS/cash) + OTP =====
+// ===== Đã duyệt: thu cọc PayOS + OTP (hệ thống thu cọc 100% chuyển khoản) =====
 const DepositOtpPanel: React.FC<{
   contract: TenantContractResponse
   onDone: () => void
   onChanged: (c: TenantContractResponse) => void
 }> = ({ contract, onChanged }) => {
   const navigation = useNavigation<any>()
-  const [method, setMethod] = useState<'payos' | 'cash'>('payos')
   const [payInfo, setPayInfo] = useState<TenantContractResponse>(contract)
   const [paid, setPaid] = useState(contract.paymentStatus === 'PAID')
   const [showWebView, setShowWebView] = useState(false)
@@ -742,7 +597,7 @@ const DepositOtpPanel: React.FC<{
 
   // Poll trạng thái thanh toán (PayOS, local không có webhook).
   useEffect(() => {
-    if (method !== 'payos' || paid) return
+    if (paid) return
     const timer = setInterval(async () => {
       try {
         const c = await realTenantService.checkPayment(contract.id)
@@ -755,7 +610,7 @@ const DepositOtpPanel: React.FC<{
       }
     }, 5000)
     return () => clearInterval(timer)
-  }, [method, paid, contract.id])
+  }, [paid, contract.id])
 
   // Giữ OTP: khi đã thu cọc xong, tự gửi OTP tới SĐT khách để kích hoạt HĐ.
   useEffect(() => {
@@ -855,87 +710,61 @@ const DepositOtpPanel: React.FC<{
       {!paid ? (
         <>
           <Text style={styles.label}>Hình thức thu cọc</Text>
+          {/* Hệ thống thu cọc 100% chuyển khoản qua PayOS — không còn tiền mặt */}
           <View style={styles.methodRow}>
-            <TouchableOpacity
-              style={[styles.methodChip, method === 'payos' && styles.methodChipActive]}
-              onPress={() => setMethod('payos')}
-            >
-              <Text style={[styles.methodText, method === 'payos' && styles.methodTextActive]}>
+            <View style={[styles.methodChip, styles.methodChipActive]}>
+              <Text style={[styles.methodText, styles.methodTextActive]}>
                 💳 Chuyển khoản (PayOS)
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.methodChip, method === 'cash' && styles.methodChipActive]}
-              onPress={() => setMethod('cash')}
-            >
-              <Text style={[styles.methodText, method === 'cash' && styles.methodTextActive]}>
-                💵 Tiền mặt
-              </Text>
-            </TouchableOpacity>
+            </View>
           </View>
 
-          {method === 'cash' ? (
-            <CashDepositFlow
-              contract={contract}
-              onChanged={(c) => {
-                onChanged(c)
-                if (c.paymentStatus === 'PAID') {
-                  // BE tự gửi OTP ngay khi đủ 2 xác nhận tiền mặt — bỏ qua auto-send bên dưới.
-                  otpSentRef.current = true
-                  setPaid(true)
-                }
-              }}
-            />
-          ) : (
-            <>
-              {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
-                <TouchableOpacity
-                  style={[styles.primaryBtn, busy && styles.btnDisabled]}
-                  onPress={createPayment}
-                  disabled={busy}
-                >
-                  {busy ? (
-                    <ActivityIndicator color={Colors.white} />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>Tạo mã thanh toán cọc</Text>
-                  )}
-                </TouchableOpacity>
+          {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, busy && styles.btnDisabled]}
+              onPress={createPayment}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.primaryBtnText}>Tạo mã thanh toán cọc</Text>
               )}
-              {!!payInfo.payosQrCode && !showWebView && (
-                <View style={styles.qrBox}>
-                  <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
-                  <View style={styles.qrWrap}>
-                    <QRCode value={payInfo.payosQrCode} size={200} />
-                  </View>
-                  <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
-                </View>
-              )}
-              {!!payInfo.payosCheckoutUrl && !showWebView && (
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowWebView(true)}>
-                  <Text style={styles.primaryBtnText}>💳 Mở trang thanh toán PayOS</Text>
-                </TouchableOpacity>
-              )}
-              {showWebView && !!payInfo.payosCheckoutUrl && (
-                <View style={styles.webviewBox}>
-                  <WebView
-                    source={{ uri: payInfo.payosCheckoutUrl }}
-                    onNavigationStateChange={(nav) => {
-                      if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
-                        setShowWebView(false)
-                        checkPaidNow()
-                      } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
-                        setShowWebView(false)
-                      }
-                    }}
-                  />
-                </View>
-              )}
-              {(!!payInfo.payosQrCode || !!payInfo.payosCheckoutUrl) && (
-                <TouchableOpacity style={styles.secondaryBtn} onPress={checkPaidNow}>
-                  <Text style={styles.secondaryBtnText}>Tôi đã chuyển khoản — Kiểm tra</Text>
-                </TouchableOpacity>
-              )}
-            </>
+            </TouchableOpacity>
+          )}
+          {!!payInfo.payosQrCode && !showWebView && (
+            <View style={styles.qrBox}>
+              <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
+              <View style={styles.qrWrap}>
+                <QRCode value={payInfo.payosQrCode} size={200} />
+              </View>
+              <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
+            </View>
+          )}
+          {!!payInfo.payosCheckoutUrl && !showWebView && (
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowWebView(true)}>
+              <Text style={styles.primaryBtnText}>💳 Mở trang thanh toán PayOS</Text>
+            </TouchableOpacity>
+          )}
+          {showWebView && !!payInfo.payosCheckoutUrl && (
+            <View style={styles.webviewBox}>
+              <WebView
+                source={{ uri: payInfo.payosCheckoutUrl }}
+                onNavigationStateChange={(nav) => {
+                  if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
+                    setShowWebView(false)
+                    checkPaidNow()
+                  } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
+                    setShowWebView(false)
+                  }
+                }}
+              />
+            </View>
+          )}
+          {(!!payInfo.payosQrCode || !!payInfo.payosCheckoutUrl) && (
+            <TouchableOpacity style={styles.secondaryBtn} onPress={checkPaidNow}>
+              <Text style={styles.secondaryBtnText}>Tôi đã chuyển khoản — Kiểm tra</Text>
+            </TouchableOpacity>
           )}
         </>
       ) : (
@@ -1174,34 +1003,4 @@ const styles = StyleSheet.create({
   },
   removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
   notesInput: { minHeight: 80, textAlignVertical: 'top' },
-
-  cashStepCard: {
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: Spacing.sm,
-  },
-  cashStepTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  cashStepDone: { fontSize: 12, color: Colors.success, fontWeight: '600' },
-
-  signatureHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  signatureHeaderTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1 },
-  signatureCloseText: { color: Colors.primary, fontWeight: '700', fontSize: 14 },
-  signatureHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-  },
 })

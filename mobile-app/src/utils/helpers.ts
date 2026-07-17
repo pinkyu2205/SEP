@@ -65,15 +65,17 @@ export const getMaintenanceStatusLabel = (status: string): string => {
 /**
  * Lấy text hiển thị cho loại sửa chữa
  */
-export const getMaintenanceCategoryLabel = (category: string): string => {
+export const getMaintenanceCategoryLabel = (category?: string): string => {
   const labels: Record<string, string> = {
     electrical: 'Điện',
     plumbing: 'Nước',
     furniture: 'Nội thất',
-    appliance: 'Thiết bị',
+    appliance: 'Trang thiết bị',
+    structural: 'Kết cấu / công trình',
     other: 'Khác',
   };
-  return labels[category] || category;
+  // category null khi ticket PENDING (manager gán lúc duyệt)
+  return category ? (labels[category] || category) : 'Chưa phân loại';
 };
 
 /**
@@ -119,24 +121,25 @@ export const getContractStatusColor = (status: string): string => {
   return colors[status] || '#94A3B8';
 };
 
-export const getMaintenancePriorityLabel = (priority: string): string => {
+export const getMaintenancePriorityLabel = (priority?: string): string => {
   const labels: Record<string, string> = {
     low: 'Thấp',
     medium: 'Trung bình',
     high: 'Cao',
     urgent: 'Khẩn cấp',
   };
-  return labels[priority] || priority;
+  // priority null khi manager chưa gán lúc duyệt (optional theo flow 17/07 chiều)
+  return priority ? (labels[priority] || priority) : '—';
 };
 
-export const getMaintenancePriorityColor = (priority: string): string => {
+export const getMaintenancePriorityColor = (priority?: string): string => {
   const colors: Record<string, string> = {
     low: '#10B981',
     medium: '#F59E0B',
     high: '#EF4444',
     urgent: '#7C3AED',
   };
-  return colors[priority] || '#94A3B8';
+  return priority ? (colors[priority] || '#94A3B8') : '#94A3B8';
 };
 
 // ===== Real API enums (UPPERCASE, theo Maintenance_BE_Contract.md) =====
@@ -207,25 +210,72 @@ export const getReqPriorityColor = (priority: string): string => {
   return colors[(priority ?? '').toUpperCase()] || '#94A3B8';
 };
 
-export const getReqCategoryLabel = (category: string): string => {
+export const getReqCategoryLabel = (category?: string | null): string => {
   const labels: Record<string, string> = {
     ELECTRICAL: 'Điện',
     PLUMBING: 'Nước',
     FURNITURE: 'Nội thất',
-    APPLIANCE: 'Thiết bị',
+    APPLIANCE: 'Trang thiết bị',
+    STRUCTURAL: 'Kết cấu / công trình',
     OTHER: 'Khác',
   };
-  return labels[(category ?? '').toUpperCase()] || category;
+  return category ? (labels[category.toUpperCase()] || category) : 'Chưa phân loại';
 };
 
 export const getEquipmentLifecycleLabel = (status: string): string => {
   const labels: Record<string, string> = {
+    NEW: 'Mới lắp đặt',
     GOOD: 'Hoạt động tốt',
+    DAMAGED: 'Hỏng hóc',
     MAINTENANCE: 'Đang bảo trì',
     BROKEN: 'Đang hỏng',
     DISPOSED: 'Đã thanh lý',
   };
   return labels[(status ?? '').toUpperCase()] || status;
+};
+
+export const getEquipmentLifecycleColor = (status: string): { bg: string; text: string } => {
+  const colors: Record<string, { bg: string; text: string }> = {
+    NEW:         { bg: '#EFF6FF', text: '#2563EB' },
+    GOOD:        { bg: '#F0FDF4', text: '#10B981' },
+    DAMAGED:     { bg: '#FEF2F2', text: '#EF4444' },
+    MAINTENANCE: { bg: '#FFFBEB', text: '#F59E0B' },
+    BROKEN:      { bg: '#FEF2F2', text: '#EF4444' },
+    DISPOSED:    { bg: '#F1F5F9', text: '#64748B' },
+  };
+  return colors[(status ?? '').toUpperCase()] || colors.GOOD;
+};
+
+/** Thiết bị cần chú ý (hiện trong ô "Cần kiểm tra" của danh sách thiết bị phòng). */
+export const equipmentNeedsAttention = (status: string): boolean =>
+  ['DAMAGED', 'MAINTENANCE', 'BROKEN'].includes((status ?? '').toUpperCase());
+
+export const getHouseAreaLabel = (area?: string): string => {
+  const labels: Record<string, string> = {
+    LIVING_ROOM: 'Phòng khách',
+    BEDROOM: 'Phòng ngủ',
+    KITCHEN: 'Nhà bếp',
+    BATHROOM: 'Nhà vệ sinh',
+    BALCONY: 'Ban công',
+    GARAGE: 'Nhà xe',
+    OTHER: 'Khác',
+  };
+  return labels[(area ?? '').toUpperCase()] || 'Khác';
+};
+
+/**
+ * Đoán loại sự cố (cho form báo hỏng) từ tên thiết bị thật (catalogName của BE,
+ * vd "Điều hòa", "Vòi sen + bồn cầu") — BE không lưu category dạng phân loại sẵn.
+ */
+export const guessEquipmentCategory = (
+  equipmentName: string,
+): 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'other' => {
+  const n = (equipmentName ?? '').toLowerCase();
+  if (/vòi|bồn|ống nước|nóng lạnh|bơm nước/.test(n)) return 'plumbing';
+  if (/đèn|ổ cắm|ổ điện|dây điện|công tắc/.test(n)) return 'electrical';
+  if (/tủ|giường|bàn|ghế|kệ|sofa|rèm/.test(n)) return 'furniture';
+  if (/điều hòa|quạt|tivi|tv|máy giặt|tủ lạnh|máy nước/.test(n)) return 'appliance';
+  return 'other';
 };
 
 export const getNotificationTypeEmoji = (type: string): string => {
