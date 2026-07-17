@@ -1,24 +1,21 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, ScrollView, TextInput,
+  Alert, ScrollView, TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import {
-  useTickets, maintenanceStore,
-  MaintenanceTicket, TicketStatus, TicketCategory,
-} from '@/store/maintenanceStore';
+import type { MaintenanceTicket, TicketStatus, TicketCategory } from '@/store/maintenanceStore';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { getPropertyById } from '@/data/managedProperties';
 import { MAINTENANCE_STATUS_META } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: string }> = {
-  ...MAINTENANCE_STATUS_META,
-  accepted: MAINTENANCE_STATUS_META.acknowledged,
-};
+const STATUS_CONFIG: Record<TicketStatus, { label: string; color: string; bg: string; icon: string }> =
+  MAINTENANCE_STATUS_META;
 
 const PRIORITY_CONFIG = {
   urgent: { label: '🚨 Khẩn cấp',  color: '#EF4444', bg: '#FEF2F2' },
@@ -28,27 +25,32 @@ const PRIORITY_CONFIG = {
 } as const;
 
 const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> = {
-  electrical: { label: 'Điện',     icon: '⚡' },
-  plumbing:   { label: 'Nước',     icon: '🚰' },
-  furniture:  { label: 'Nội thất', icon: '🪑' },
-  appliance:  { label: 'Thiết bị', icon: '📺' },
-  other:      { label: 'Khác',     icon: '🔧' },
+  electrical: { label: 'Điện',           icon: '⚡' },
+  plumbing:   { label: 'Nước',           icon: '🚰' },
+  furniture:  { label: 'Nội thất',       icon: '🪑' },
+  appliance:  { label: 'Trang thiết bị', icon: '📺' },
+  structural: { label: 'Kết cấu',        icon: '🧱' },
+  other:      { label: 'Khác',           icon: '🔧' },
 };
 
-const NEXT_STATUS: Partial<Record<TicketStatus, TicketStatus | null>> = {
-  pending: 'in_progress', accepted: 'in_progress', in_progress: 'resolved',
-  resolved: null, cancelled: null,
-};
-const NEXT_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
-  pending:     '🔧 Tiếp nhận & xử lý',
-  accepted:    '🔧 Bắt đầu xử lý',
-  in_progress: '✅ Hoàn tất',
-  resolved: '', cancelled: '',
+// Quick action trên card: PENDING → mở màn chi tiết để duyệt (duyệt BẮT BUỘC
+// chọn category — flow 17/07 chiều — nên không duyệt nhanh ngay trên card được).
+const QUICK_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
+  pending: '✅ Duyệt yêu cầu',
 };
 
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-type StatusFilter   = 'all' | TicketStatus;
+// Gom status về 4 nhóm cho filter chips/stats (khớp dashboard BE:
+// inProgress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED).
+type StatusBucket = 'pending' | 'in_progress' | 'resolved' | 'cancelled';
+const bucketOf = (st: TicketStatus): StatusBucket =>
+  st === 'pending' ? 'pending'
+    : st === 'closed' ? 'resolved'
+    : st === 'cancelled' ? 'cancelled'
+    : 'in_progress';
+
+type StatusFilter   = 'all' | StatusBucket;
 type CategoryFilter = 'all' | TicketCategory;
 
 // ── Ticket Card ──────────────────────────────────────────────────────────────
@@ -59,12 +61,13 @@ const TicketCard: React.FC<{
   onAction: (ticket: MaintenanceTicket) => void;
 }> = ({ ticket, onPress, onAction }) => {
   const cfg        = STATUS_CONFIG[ticket.status];
-  const priCfg     = PRIORITY_CONFIG[ticket.priority];
-  const catCfg     = CATEGORY_CONFIG[ticket.category];
+  // priority/category null khi ticket chưa duyệt → ẩn badge tương ứng.
+  const priCfg     = ticket.priority ? PRIORITY_CONFIG[ticket.priority] : undefined;
+  const catCfg     = ticket.category ? CATEGORY_CONFIG[ticket.category] : undefined;
   const isUrgentOpen = ticket.priority === 'urgent'
-    && ticket.status !== 'resolved'
-    && ticket.status !== 'cancelled';
-  const nextAct    = NEXT_STATUS[ticket.status] ? NEXT_ACTION_LABEL[ticket.status] : null;
+    && bucketOf(ticket.status) !== 'resolved'
+    && bucketOf(ticket.status) !== 'cancelled';
+  const nextAct    = QUICK_ACTION_LABEL[ticket.status] ?? null;
 
   return (
     <TouchableOpacity
@@ -75,9 +78,11 @@ const TicketCard: React.FC<{
       {/* Row 1: Code · Priority · Status */}
       <View style={s.cardRow1}>
         <Text style={s.cardCode}>{ticket.ticketCode}</Text>
-        <View style={[s.priBadge, { backgroundColor: priCfg.bg }]}>
-          <Text style={[s.priBadgeText, { color: priCfg.color }]}>{priCfg.label}</Text>
-        </View>
+        {priCfg && (
+          <View style={[s.priBadge, { backgroundColor: priCfg.bg }]}>
+            <Text style={[s.priBadgeText, { color: priCfg.color }]}>{priCfg.label}</Text>
+          </View>
+        )}
         <View style={s.row1Spacer} />
         <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
           <Text style={s.statusIcon}>{cfg.icon}</Text>
@@ -96,7 +101,7 @@ const TicketCard: React.FC<{
         <Text style={s.metaDot}>·</Text>
         <Text style={s.metaItem}>👤 {ticket.tenantName}</Text>
         <Text style={s.metaDot}>·</Text>
-        <Text style={s.metaItem}>{catCfg.icon} {catCfg.label}</Text>
+        <Text style={s.metaItem}>{catCfg ? `${catCfg.icon} ${catCfg.label}` : '🏷 Chưa phân loại'}</Text>
       </View>
 
       {/* Row 4: Date + assigned */}
@@ -105,7 +110,7 @@ const TicketCard: React.FC<{
         {ticket.assignedTo && (
           <Text style={s.cardAssigned} numberOfLines={1}>🔧 {ticket.assignedTo.split(' ')[0]}</Text>
         )}
-        {ticket.repairCost !== undefined && ticket.status === 'resolved' && (
+        {ticket.repairCost !== undefined && ticket.status === 'closed' && (
           <Text style={s.cardCost}>{ticket.repairCost.toLocaleString('vi-VN')}đ</Text>
         )}
       </View>
@@ -135,9 +140,35 @@ export const BuildingMaintenanceScreen: React.FC = () => {
   const prop = getPropertyById(propertyId);
   const isWholeHouse = prop?.propertyType === 'WHOLE_HOUSE';
 
-  const allTickets = useTickets(propertyId);
-  const propertyName = route.params?.propertyName ||
-    (allTickets.length > 0 ? allTickets[0].propertyName : '');
+  const propertyName = route.params?.propertyName || prop?.name || '';
+
+  // Ticket THẬT của nhà này — trước đây màn đọc store mock (useTickets) nên drill từ
+  // dashboard thật vào lại thấy dữ liệu giả. Filter propertyId server-side; id không
+  // phải số (dữ liệu mock cũ) thì lấy hết rồi lọc client theo tên nhà.
+  const [allTickets, setAllTickets] = useState<MaintenanceTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const numericId = Number(propertyId);
+      const page = await realMaintenanceService.listForManager({
+        size: 200,
+        ...(Number.isFinite(numericId) ? { propertyId: numericId } : {}),
+      });
+      let rows = page.content ?? [];
+      if (!Number.isFinite(numericId) && propertyName) {
+        rows = rows.filter((d) => d.propertyName === propertyName);
+      }
+      setAllTickets(rows.map(dtoToTicket));
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [propertyId, propertyName]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const [search,         setSearch]         = useState('');
   const [statusFilter,   setStatusFilter]   = useState<StatusFilter>('all');
@@ -145,7 +176,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
 
   const filteredTickets = useMemo(() => {
     let list = allTickets;
-    if (statusFilter !== 'all')   list = list.filter(t => t.status === statusFilter);
+    if (statusFilter !== 'all')   list = list.filter(t => bucketOf(t.status) === statusFilter);
     if (categoryFilter !== 'all') list = list.filter(t => t.category === categoryFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -156,62 +187,30 @@ export const BuildingMaintenanceScreen: React.FC = () => {
         t.ticketCode.toLowerCase().includes(q),
       );
     }
-    return [...list].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+    // Ticket chưa duyệt (priority null) xếp cuối nhóm ưu tiên (9).
+    return [...list].sort((a, b) =>
+      (a.priority ? PRIORITY_ORDER[a.priority] : 9) - (b.priority ? PRIORITY_ORDER[b.priority] : 9));
   }, [allTickets, statusFilter, categoryFilter, search]);
 
   const stats = useMemo(() => {
-    const open = allTickets.filter(t => t.status !== 'resolved' && t.status !== 'cancelled');
+    const open = allTickets.filter(t => bucketOf(t.status) === 'pending' || bucketOf(t.status) === 'in_progress');
     return {
       total:    allTickets.length,
       open:     open.length,
       urgent:   open.filter(t => t.priority === 'urgent').length,
-      pending:  allTickets.filter(t => t.status === 'pending').length,
-      inProg:   allTickets.filter(t => t.status === 'accepted' || t.status === 'in_progress').length,
-      resolved: allTickets.filter(t => t.status === 'resolved').length,
+      pending:  allTickets.filter(t => bucketOf(t.status) === 'pending').length,
+      inProg:   allTickets.filter(t => bucketOf(t.status) === 'in_progress').length,
+      resolved: allTickets.filter(t => bucketOf(t.status) === 'resolved').length,
     };
   }, [allTickets]);
 
   const doneRate = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 100;
   const barColor = stats.urgent > 0 ? Colors.error : doneRate >= 70 ? Colors.success : Colors.warning;
 
+  // Duyệt BẮT BUỘC chọn category (flow 17/07 chiều) → quick action mở màn chi tiết
+  // (có picker phân loại) thay vì gọi approve trực tiếp.
   const handleQuickAction = (ticket: MaintenanceTicket) => {
-    const nextStatus = NEXT_STATUS[ticket.status];
-    if (!nextStatus) return;
-
-    if (nextStatus === 'resolved') {
-      Alert.alert(
-        '✅ Đánh dấu hoàn tất?',
-        'Mở chi tiết để điền chi phí & ghi chú, hoặc xác nhận nhanh (chi phí 0đ).',
-        [
-          { text: 'Mở chi tiết', onPress: () =>
-              navigation.navigate('MaintenanceTicketDetail', { ticketId: ticket.id }) },
-          { text: 'Hoàn tất (0đ)', onPress: () =>
-              maintenanceStore.updateTicket(ticket.id, {
-                status:    'resolved',
-                repairCost: 0,
-                resolvedAt: new Date().toISOString().split('T')[0],
-                timeline:  [...ticket.timeline, {
-                  status: 'resolved', note: 'Hoàn tất xử lý',
-                  updatedBy: 'Manager', updatedAt: new Date().toLocaleString('vi-VN'),
-                }],
-                updatedAt: new Date().toISOString().split('T')[0],
-              }) },
-          { text: 'Hủy', style: 'cancel' },
-        ],
-      );
-      return;
-    }
-
-    maintenanceStore.updateTicket(ticket.id, {
-      status:   nextStatus,
-      timeline: [...ticket.timeline, {
-        status: nextStatus,
-        note:   `Cập nhật: ${STATUS_CONFIG[nextStatus].label}`,
-        updatedBy: 'Manager',
-        updatedAt: new Date().toLocaleString('vi-VN'),
-      }],
-      updatedAt: new Date().toISOString().split('T')[0],
-    });
+    navigation.navigate('MaintenanceTicketDetail', { ticketId: ticket.id });
   };
 
   const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
@@ -331,11 +330,25 @@ export const BuildingMaintenanceScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         ListEmptyComponent={
-          <View style={s.emptyState}>
-            <Text style={{ fontSize: 40 }}>🔧</Text>
-            <Text style={s.emptyText}>Không có ticket phù hợp</Text>
-            <Text style={s.emptySubText}>Thử thay đổi bộ lọc hoặc tìm kiếm</Text>
-          </View>
+          loading ? (
+            <View style={s.emptyState}>
+              <ActivityIndicator color={Colors.primary} size="large" />
+            </View>
+          ) : loadError ? (
+            <View style={s.emptyState}>
+              <Text style={{ fontSize: 40 }}>⚠️</Text>
+              <Text style={s.emptyText}>Không tải được danh sách ticket</Text>
+              <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); load(); }}>
+                <Text style={s.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={s.emptyState}>
+              <Text style={{ fontSize: 40 }}>🔧</Text>
+              <Text style={s.emptyText}>Không có ticket phù hợp</Text>
+              <Text style={s.emptySubText}>Thử thay đổi bộ lọc hoặc tìm kiếm</Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>
@@ -439,4 +452,9 @@ const s = StyleSheet.create({
   emptyState:   { alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyText:    { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
   emptySubText: { fontSize: 12, color: Colors.textMuted },
+  retryBtn: {
+    marginTop: 4, backgroundColor: Colors.primary,
+    paddingHorizontal: 24, paddingVertical: 9, borderRadius: BorderRadius.lg,
+  },
+  retryBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
 });

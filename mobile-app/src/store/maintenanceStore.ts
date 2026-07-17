@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 
 // ===================== TENANT MAINTENANCE REQUESTS =====================
+// Seed mock theo flow mới 17/07: pending → approved → waiting_confirm → closed
+// (nhánh rejected/cancelled). Chỉ dùng khi offline/demo không có BE.
 const SEED_TENANT_REQUESTS: MaintenanceRequest[] = [
   {
     id: '1', ticketCode: 'TK-T-001', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
@@ -13,57 +15,41 @@ const SEED_TENANT_REQUESTS: MaintenanceRequest[] = [
   {
     id: '2', ticketCode: 'TK-T-002', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Ổ cắm điện bị cháy', description: 'Ổ cắm bên cạnh bàn học bị cháy, có mùi khét, không dùng được.',
-    category: 'electrical', priority: 'urgent', status: 'in_progress', images: [],
-    assignedTo: 'Thợ điện Nguyễn Quốc',
+    category: 'electrical', priority: 'urgent', status: 'approved', images: [],
     timeline: [
       { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-25T08:00:00Z' },
-      { status: 'in_progress', note: 'Quản lý đã tiếp nhận và phân công thợ', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-25T10:00:00Z' },
-      { status: 'in_progress', note: 'Thợ đang kiểm tra và sửa chữa', updatedBy: 'Thợ điện Nguyễn Quốc', updatedAt: '2026-04-27T14:00:00Z' },
+      { status: 'approved', note: 'Quản lý đã duyệt, đang chờ thợ ngoài sửa', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-25T10:00:00Z' },
     ],
-    createdAt: '2026-04-25', updatedAt: '2026-04-27', estimatedCompletionDate: '2026-04-30',
-  },
-  {
-    id: '4', ticketCode: 'TK-T-004', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
-    title: 'Máy lạnh kêu to', description: 'Máy lạnh phát ra tiếng kêu lớn khi vận hành.',
-    category: 'appliance', priority: 'medium', status: 'scheduled', images: [],
-    assignedTo: 'KTV điện lạnh Phạm Tú (0906123456)',
-    scheduledSlots: ['2026-06-26', '2026-06-27'],
-    timeline: [
-      { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-06-24T09:00:00Z' },
-      { status: 'acknowledged', note: 'Quản lý đã tiếp nhận, giao KTV Phạm Tú', updatedBy: 'Trần Văn Minh', updatedAt: '2026-06-24T10:00:00Z' },
-      { status: 'scheduled', note: 'Đề xuất lịch: 26/06, 27/06 — chờ khách xác nhận', updatedBy: 'Trần Văn Minh', updatedAt: '2026-06-24T10:30:00Z' },
-    ],
-    createdAt: '2026-06-24', updatedAt: '2026-06-24',
+    createdAt: '2026-04-25', updatedAt: '2026-04-27',
   },
   {
     id: '5', ticketCode: 'TK-T-005', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Bóng đèn nhà tắm cháy', description: 'Bóng đèn LED nhà tắm bị cháy, đã thay mới.',
-    category: 'electrical', priority: 'low', status: 'done', images: [], repairCost: 80000,
-    assignedTo: 'Thợ điện Nguyễn Quốc', doneAt: '2026-06-24',
+    category: 'electrical', priority: 'low', status: 'waiting_confirm', images: [],
+    resolutionNote: 'Đã thay bóng LED mới, bật sáng bình thường',
     timeline: [
       { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-06-23T09:00:00Z' },
-      { status: 'in_progress', note: 'Thợ đang thay bóng', updatedBy: 'Thợ điện Nguyễn Quốc', updatedAt: '2026-06-24T08:00:00Z' },
-      { status: 'done', note: 'Đã thay bóng mới. Chi phí 80.000đ — chủ nhà trả', updatedBy: 'Thợ điện Nguyễn Quốc', updatedAt: '2026-06-24T09:00:00Z' },
+      { status: 'approved', note: 'Quản lý đã duyệt', updatedBy: 'Trần Văn Minh', updatedAt: '2026-06-24T08:00:00Z' },
+      { status: 'waiting_confirm', note: 'Đã thay bóng mới — chờ khách nghiệm thu', updatedBy: 'Trần Văn Minh', updatedAt: '2026-06-24T09:00:00Z' },
     ],
     createdAt: '2026-06-23', updatedAt: '2026-06-24',
   },
   {
     id: '3', ticketCode: 'TK-T-003', roomId: 'r1', roomName: 'Phòng 201', tenantId: 't1', tenantName: 'Nguyễn Văn A',
     title: 'Tủ quần áo bị hỏng bản lề', description: 'Bản lề cánh tủ trái bị gãy, không đóng được.',
-    category: 'furniture', priority: 'low', status: 'resolved', images: [], repairCost: 150000,
+    category: 'furniture', priority: 'low', status: 'closed', images: [],
     timeline: [
       { status: 'pending', note: 'Yêu cầu đã được tạo', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-20T09:00:00Z' },
-      { status: 'in_progress', note: 'Đã tiếp nhận', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-20T11:00:00Z' },
-      { status: 'resolved', note: 'Đã thay bản lề mới, tủ đóng mở bình thường', updatedBy: 'Thợ mộc', updatedAt: '2026-04-22T16:00:00Z' },
+      { status: 'approved', note: 'Đã duyệt', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-20T11:00:00Z' },
+      { status: 'waiting_confirm', note: 'Đã thay bản lề mới, tủ đóng mở bình thường', updatedBy: 'Trần Văn Minh', updatedAt: '2026-04-22T15:00:00Z' },
+      { status: 'closed', note: 'Khách xác nhận hoàn tất', updatedBy: 'Nguyễn Văn A', updatedAt: '2026-04-22T16:00:00Z' },
     ],
     createdAt: '2026-04-20', updatedAt: '2026-04-22', resolvedAt: '2026-04-22',
   },
 ];
 
-const ACTIVE_STATUSES: MaintenanceStatus[] = [
-  'pending', 'accepted', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval', 'done',
-];
-const HISTORY_STATUSES: MaintenanceStatus[] = ['confirmed', 'resolved', 'cancelled'];
+const ACTIVE_STATUSES: MaintenanceStatus[] = ['pending', 'approved', 'waiting_confirm', 'rejected'];
+const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
 
 let _tenantRequests: MaintenanceRequest[] = [...SEED_TENANT_REQUESTS];
 const _tenantListeners = new Set<() => void>();
@@ -94,25 +80,17 @@ export const useTenantRequests = () => {
 };
 
 // ===================== TYPES =====================
-// Luồng cải thiện (rich). 'accepted' giữ lại như legacy.
+// Flow mới 17/07 — khớp MaintenanceStatus bên types/index.ts.
 export type TicketStatus =
-  | 'pending'
-  | 'acknowledged'
-  | 'scheduled'
-  | 'in_progress'
-  | 'on_hold'
-  | 'pending_approval'
-  | 'done'
-  | 'confirmed'
-  | 'reopened'   // tenant từ chối nghiệm thu → mở lại
-  | 'accepted'   // legacy
-  | 'resolved'   // legacy / terminal đường real-API
+  | 'pending'          // chờ manager duyệt
+  | 'approved'         // đã duyệt, chờ thợ ngoài sửa
+  | 'waiting_confirm'  // báo xong, chờ tenant xác nhận
+  | 'rejected'         // tenant từ chối kèm lý do + ảnh
+  | 'closed'
   | 'cancelled';
-export type TicketCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'other';
+export type TicketCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'structural' | 'other';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type CostPaidBy     = 'host' | 'tenant';
-export type DamageCause    = 'wear' | 'misuse';
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export interface TimelineEntry {
   status: TicketStatus;
@@ -123,7 +101,7 @@ export interface TimelineEntry {
 
 export interface PhotoEvidence {
   id: string;
-  type: 'before' | 'after';
+  type: 'before' | 'after' | 'reject';
   uri: string;
   caption?: string;
   capturedAt: string;
@@ -140,34 +118,31 @@ export interface MaintenanceTicket {
   tenantPhone: string;
   title: string;
   description: string;
-  category: TicketCategory;
-  priority: TicketPriority;
+  /** null/undefined khi PENDING — manager gán lúc duyệt (flow 17/07 chiều). */
+  category?: TicketCategory;
+  /** Optional — manager có thể gán khi duyệt. */
+  priority?: TicketPriority;
   status: TicketStatus;
+  /** Ảnh gộp (legacy) — ưu tiên 3 field phân loại bên dưới. */
   images: string[];
+  beforeImages?: string[];
+  afterImages?: string[];
+  rejectImages?: string[];
+  rejectReason?: string;
+  resolutionNote?: string;
   photos: PhotoEvidence[];
   assignedTo?: string;
-  technicianId?: string;
+  /** Chi phí thuộc luồng hóa đơn sau CLOSED — chỉ hiển thị nếu BE còn trả. */
   repairCost?: number;
   costPaidBy?: CostPaidBy;
-  cause?: DamageCause;
-  estimatedDate?: string;
   resolvedAt?: string;
+  tenantConfirmedAt?: string;
+  reopenCount?: number;
   timeline: TimelineEntry[];
   equipmentName?: string;
   equipmentQr?: string;
   maintenanceCount?: number;
   lastRepairDate?: string;
-  // ── Luồng cải thiện ──
-  acknowledgedAt?: string;
-  /** các khung giờ manager đề xuất, chờ tenant chọn */
-  scheduledSlots?: string[];
-  /** khung giờ tenant đã xác nhận */
-  confirmedSlot?: string;
-  onHoldReason?: string;
-  approvalStatus?: ApprovalStatus;
-  doneAt?: string;
-  tenantConfirmedAt?: string;
-  reopenCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -180,18 +155,15 @@ const SEED: MaintenanceTicket[] = [
     roomName: 'P102', tenantName: 'Lê Thị B', tenantPhone: '0901111002',
     title: 'Điều hòa không lạnh',
     description: 'Bật điều hòa nhưng không ra hơi lạnh, máy vẫn chạy bình thường.',
-    category: 'appliance', priority: 'high', status: 'in_progress',
-    assignedTo: 'Thợ Minh (0909123456)',
-    estimatedDate: '18/05/2026',
+    category: 'appliance', priority: 'high', status: 'approved',
     images: [],
     photos: [{ id: 'ph1', type: 'before', uri: '', caption: 'Điều hòa bị chảy nước', capturedAt: '2026-05-10 09:30' }],
     equipmentName: 'Điều hòa Panasonic 9000BTU',
     equipmentQr: 'QR-NT-102-AC',
     maintenanceCount: 2, lastRepairDate: '2025-11-10',
     timeline: [
-      { status: 'pending',     note: 'Khách tạo yêu cầu',                                         updatedBy: 'Lê Thị B', updatedAt: '2026-05-10 08:30' },
-      { status: 'in_progress',    note: 'Manager tiếp nhận và sẽ liên hệ thợ',                       updatedBy: 'Manager',  updatedAt: '2026-05-10 09:00' },
-      { status: 'in_progress', note: 'Đã giao thợ Minh xử lý, đang chờ phụ kiện board mạch',     updatedBy: 'Manager',  updatedAt: '2026-05-11 14:00' },
+      { status: 'pending',  note: 'Khách tạo yêu cầu',                    updatedBy: 'Lê Thị B', updatedAt: '2026-05-10 08:30' },
+      { status: 'approved', note: 'Manager duyệt, chờ thợ ngoài đến sửa', updatedBy: 'Manager',  updatedAt: '2026-05-10 09:00' },
     ],
     createdAt: '2026-05-10', updatedAt: '2026-05-11',
   },
@@ -212,13 +184,13 @@ const SEED: MaintenanceTicket[] = [
     roomName: 'P201', tenantName: 'Phạm Văn C', tenantPhone: '0901111003',
     title: 'Ổ cắm điện bị cháy',
     description: 'Ổ cắm điện bên cạnh bàn học bị cháy đen, có mùi khét.',
-    category: 'electrical', priority: 'urgent', status: 'in_progress',
-    assignedTo: 'Thợ điện Hùng (0908765432)',
-    estimatedDate: '17/05/2026',
+    category: 'electrical', priority: 'urgent', status: 'waiting_confirm',
+    resolutionNote: 'Đã thay ổ cắm mới, kiểm tra an toàn điện OK',
     images: [], photos: [], maintenanceCount: 0,
     timeline: [
-      { status: 'pending',  note: 'Khách tạo yêu cầu',                                          updatedBy: 'Phạm Văn C', updatedAt: '2026-05-14 07:00' },
-      { status: 'in_progress', note: 'Khẩn cấp - đã giao thợ điện Hùng đến ngay buổi chiều',      updatedBy: 'Manager',    updatedAt: '2026-05-14 08:00' },
+      { status: 'pending',         note: 'Khách tạo yêu cầu',                     updatedBy: 'Phạm Văn C', updatedAt: '2026-05-14 07:00' },
+      { status: 'approved',        note: 'Khẩn cấp — duyệt ngay, gọi thợ điện',   updatedBy: 'Manager',    updatedAt: '2026-05-14 08:00' },
+      { status: 'waiting_confirm', note: 'Đã thay ổ cắm — chờ khách nghiệm thu',  updatedBy: 'Manager',    updatedAt: '2026-05-14 15:00' },
     ],
     createdAt: '2026-05-14', updatedAt: '2026-05-14',
   },
@@ -228,18 +200,18 @@ const SEED: MaintenanceTicket[] = [
     roomName: 'P101', tenantName: 'Bùi Văn H', tenantPhone: '0901111008',
     title: 'Cửa phòng tắm bị kẹt',
     description: 'Chốt cửa phòng tắm bị hỏng, không khóa được từ bên trong.',
-    category: 'furniture', priority: 'medium', status: 'resolved',
-    repairCost: 250000, costPaidBy: 'host', resolvedAt: '2026-05-08',
+    category: 'furniture', priority: 'medium', status: 'closed',
+    resolvedAt: '2026-05-08',
     photos: [
       { id: 'ph2', type: 'before', uri: '', caption: 'Chốt cửa bị gãy', capturedAt: '2026-05-07 15:00' },
       { id: 'ph3', type: 'after',  uri: '', caption: 'Đã thay chốt mới', capturedAt: '2026-05-08 11:00' },
     ],
     images: [], maintenanceCount: 1, lastRepairDate: '2026-05-08',
     timeline: [
-      { status: 'pending',     note: 'Khách tạo yêu cầu',                                                              updatedBy: 'Bùi Văn H', updatedAt: '2026-05-07 14:00' },
-      { status: 'in_progress',    note: 'Đã liên hệ thợ mộc',                                                             updatedBy: 'Manager',   updatedAt: '2026-05-07 15:00' },
-      { status: 'in_progress', note: 'Thợ mộc đang thi công thay chốt',                                                updatedBy: 'Manager',   updatedAt: '2026-05-08 09:00' },
-      { status: 'resolved',    note: 'Hoàn tất, đã thay chốt mới loại tốt. Chi phí 250,000đ — chủ nhà trả',           updatedBy: 'Manager',   updatedAt: '2026-05-08 11:00' },
+      { status: 'pending',         note: 'Khách tạo yêu cầu',                          updatedBy: 'Bùi Văn H', updatedAt: '2026-05-07 14:00' },
+      { status: 'approved',        note: 'Đã duyệt, liên hệ thợ mộc',                  updatedBy: 'Manager',   updatedAt: '2026-05-07 15:00' },
+      { status: 'waiting_confirm', note: 'Đã thay chốt mới loại tốt — chờ nghiệm thu', updatedBy: 'Manager',   updatedAt: '2026-05-08 11:00' },
+      { status: 'closed',          note: 'Khách xác nhận hoàn tất',                    updatedBy: 'Bùi Văn H', updatedAt: '2026-05-08 12:00' },
     ],
     createdAt: '2026-05-07', updatedAt: '2026-05-08',
   },
@@ -249,21 +221,17 @@ const SEED: MaintenanceTicket[] = [
     roomName: 'P301', tenantName: 'Ngô Thị D', tenantPhone: '0901111004',
     title: 'Đèn phòng ngủ bị hỏng',
     description: 'Đèn LED âm trần phòng ngủ tắt đột ngột, không bật được.',
-    category: 'electrical', priority: 'low', status: 'pending',
+    category: 'electrical', priority: 'low', status: 'rejected',
+    rejectReason: 'Đèn sáng lại được 1 hôm rồi tắt tiếp',
+    reopenCount: 1,
     images: [], photos: [], maintenanceCount: 0,
-    timeline: [{ status: 'pending', note: 'Khách tạo yêu cầu', updatedBy: 'Ngô Thị D', updatedAt: '2026-05-15 20:00' }],
-    createdAt: '2026-05-15', updatedAt: '2026-05-15',
-  },
-  {
-    id: 't6', ticketCode: 'TK-2026-006',
-    propertyId: 'prop-3', propertyName: 'Nhà CMT8',
-    roomName: 'P201', tenantName: 'Bùi Văn H', tenantPhone: '0901111008',
-    title: 'Máy bơm nước hỏng',
-    description: 'Máy bơm nước tầng 2 bị hỏng, áp lực nước yếu toàn tầng.',
-    category: 'plumbing', priority: 'urgent', status: 'pending',
-    images: [], photos: [], maintenanceCount: 0,
-    timeline: [{ status: 'pending', note: 'Khách báo áp lực nước yếu liên tục', updatedBy: 'Bùi Văn H', updatedAt: '2026-05-18 07:30' }],
-    createdAt: '2026-05-18', updatedAt: '2026-05-18',
+    timeline: [
+      { status: 'pending',         note: 'Khách tạo yêu cầu',                       updatedBy: 'Ngô Thị D', updatedAt: '2026-05-15 20:00' },
+      { status: 'approved',        note: 'Đã duyệt',                                updatedBy: 'Manager',   updatedAt: '2026-05-16 08:00' },
+      { status: 'waiting_confirm', note: 'Đã thay đèn — chờ khách nghiệm thu',      updatedBy: 'Manager',   updatedAt: '2026-05-16 15:00' },
+      { status: 'rejected',        note: 'Khách từ chối: đèn lại tắt sau 1 ngày',   updatedBy: 'Ngô Thị D', updatedAt: '2026-05-18 09:00' },
+    ],
+    createdAt: '2026-05-15', updatedAt: '2026-05-18',
   },
   {
     id: 't-house-1', ticketCode: 'TK-NVC-001', propertyType: 'WHOLE_HOUSE',
@@ -271,18 +239,15 @@ const SEED: MaintenanceTicket[] = [
     roomName: 'Toàn bộ nhà', tenantName: 'Gia đình anh Minh', tenantPhone: '0909111222',
     title: 'Rò nước khu bếp',
     description: 'Người đại diện báo khu vực bếp bị rò nước nhẹ dưới bồn rửa.',
-    category: 'plumbing', priority: 'medium', status: 'in_progress',
-    assignedTo: 'Thợ nước Bình (0908123456)',
-    estimatedDate: '22/05/2026',
+    category: 'plumbing', priority: 'medium', status: 'approved',
     images: [],
     photos: [{ id: 'wh-ph1', type: 'before', uri: '', caption: 'Rò nước dưới bồn rửa', capturedAt: '2026-05-20 08:00' }],
     equipmentName: 'Bồn rửa bếp',
     equipmentQr: 'QR-NVC-SINK-01',
     maintenanceCount: 1,
     timeline: [
-      { status: 'pending', note: 'Người đại diện thuê nhà tạo yêu cầu', updatedBy: 'Anh Minh', updatedAt: '2026-05-20 08:00' },
-      { status: 'in_progress', note: 'Manager đã tiếp nhận', updatedBy: 'Manager', updatedAt: '2026-05-20 08:20' },
-      { status: 'in_progress', note: 'Đã giao thợ nước kiểm tra', updatedBy: 'Manager', updatedAt: '2026-05-20 09:00' },
+      { status: 'pending',  note: 'Người đại diện thuê nhà tạo yêu cầu', updatedBy: 'Anh Minh', updatedAt: '2026-05-20 08:00' },
+      { status: 'approved', note: 'Manager đã duyệt, chờ thợ nước',      updatedBy: 'Manager',  updatedAt: '2026-05-20 08:20' },
     ],
     createdAt: '2026-05-20', updatedAt: '2026-05-20',
   },

@@ -3,10 +3,9 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
-import { MOCK_EQUIPMENT_DB } from '@/store/equipmentStore';
+import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 
 const parseParams = (raw: string): Record<string, string> => {
   try {
@@ -30,8 +29,7 @@ const parseMaintenanceQr = (raw: string): { equipmentId: string; roomId?: string
   return { equipmentId: p['equipmentId'], roomId: p['roomId'], name: p['name'], cat: p['cat'] };
 };
 
-// Định dạng cũ (mock):
-//   slms://tenant/maintenance-report?assetId=eq1&qr=EQ-101-AC  hoặc  EQ-101-AC
+// QR dán trực tiếp trên thiết bị (BE sinh, dạng "EQ-<id>") — tra cứu qua API thật.
 const resolveEquipmentCode = (raw: string): string => {
   if (raw.startsWith('slms://')) return parseParams(raw)['qr'] ?? '';
   return raw;
@@ -40,7 +38,7 @@ const resolveEquipmentCode = (raw: string): string => {
 export const ScanScreen: React.FC = () => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scannedCode, setScannedCode] = useState<string | null>(null);
-  const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const navigation = useNavigation<any>();
 
   if (!permission) return <View />;
@@ -60,59 +58,41 @@ export const ScanScreen: React.FC = () => {
     );
   }
 
-  const handleBarCodeScanned = ({ data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
     if (scannedCode) return;
     setScannedCode(data);
 
-    // 1) QR tem thiết bị thật → mở màn tạo yêu cầu bảo trì (điền sẵn phòng + thiết bị)
+    // 1) QR tem thiết bị dạng deep-link (web sinh) → mở thẳng màn báo hỏng, điền sẵn phòng + thiết bị.
     const mqr = parseMaintenanceQr(data);
     if (mqr) {
+      const idNum = Number(mqr.equipmentId);
+      const roomIdNum = Number(mqr.roomId);
       navigation.replace('MaintenanceCreate', {
         equipment: {
-          id: mqr.equipmentId,
-          roomId: mqr.roomId,
-          name: mqr.name || 'Thiết bị',
-          category: mqr.cat || mqr.name || 'Khác',
+          id: Number.isFinite(idNum) ? idNum : undefined,
+          roomId: Number.isFinite(roomIdNum) ? roomIdNum : undefined,
+          equipmentName: mqr.name || 'Thiết bị',
+          catalogName: mqr.name,
         },
       });
       return;
     }
 
-    // 2) Định dạng cũ (mock) → mở chi tiết thiết bị demo
+    // 2) QR dán trên thiết bị thật (dạng "EQ-<id>") → tra cứu qua API, mở chi tiết thiết bị.
     const code = resolveEquipmentCode(data);
-    const found = MOCK_EQUIPMENT_DB[code];
-    if (found) {
-      navigation.replace('EquipmentDetail', { equipment: found });
-    } else {
-      Alert.alert(
-        'Không tìm thấy thiết bị',
-        `Mã "${code || data}" không thuộc thiết bị nào trong hệ thống. Vui lòng quét lại hoặc liên hệ quản lý.`,
-        [{ text: 'Quét lại', onPress: () => setScannedCode(null) }]
-      );
+    setVerifying(true);
+    try {
+      const equipment = await realTenantEquipmentService.getByQrCode(code || data);
+      navigation.replace('EquipmentDetail', { equipment });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.response?.data?.message
+        || `Mã "${code || data}" không thuộc thiết bị nào trong phòng bạn đang thuê.`;
+      Alert.alert('Không tìm thấy thiết bị', msg, [
+        { text: 'Quét lại', onPress: () => setScannedCode(null) },
+      ]);
+    } finally {
+      setVerifying(false);
     }
-  };
-
-  const pickImageToScan = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Cần quyền truy cập', 'Vui lòng cấp quyền truy cập thư viện ảnh để sử dụng tính năng này.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
-    if (result.canceled || !result.assets[0]) return;
-
-    setAnalyzingImage(true);
-    // Simulate QR decoding from image (1.2s delay for realism)
-    setTimeout(() => {
-      setAnalyzingImage(false);
-      const mockCode = 'EQ-101-AC';
-      const found = MOCK_EQUIPMENT_DB[mockCode];
-      if (found) {
-        navigation.replace('EquipmentDetail', { equipment: found });
-      } else {
-        Alert.alert('Không tìm thấy mã QR', 'Không nhận diện được mã QR trong ảnh. Vui lòng chụp rõ hơn hoặc quét trực tiếp.', [{ text: 'Thử lại' }]);
-      }
-    }, 1200);
   };
 
   return (
@@ -140,24 +120,13 @@ export const ScanScreen: React.FC = () => {
           <Text style={styles.scanHint}>
             Hướng camera vào mã QR dán trên thiết bị để xem thông tin và báo hỏng
           </Text>
-
-          <View style={styles.scanDividerRow}>
-            <View style={styles.scanDividerLine} />
-            <Text style={styles.scanDividerText}>hoặc</Text>
-            <View style={styles.scanDividerLine} />
-          </View>
-
-          <TouchableOpacity style={styles.pickImageBtn} onPress={pickImageToScan}>
-            <Text style={styles.pickImageBtnIcon}>🖼️</Text>
-            <Text style={styles.pickImageBtnText}>Chọn ảnh từ thư viện</Text>
-          </TouchableOpacity>
         </View>
       </CameraView>
 
-      {analyzingImage && (
+      {verifying && (
         <View style={styles.analyzingOverlay}>
           <ActivityIndicator size="large" color={Colors.white} />
-          <Text style={styles.analyzingText}>Đang nhận diện mã QR...</Text>
+          <Text style={styles.analyzingText}>Đang tra cứu thiết bị...</Text>
         </View>
       )}
     </View>
@@ -184,12 +153,6 @@ const styles = StyleSheet.create({
   scanHint: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22, marginBottom: Spacing.xl },
   closeBtn: { position: 'absolute', top: 52, left: Spacing.lg, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
   closeBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
-  scanDividerRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, marginBottom: Spacing.lg, width: '70%' },
-  scanDividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.3)' },
-  scanDividerText: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '600' },
-  pickImageBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
-  pickImageBtnIcon: { fontSize: 18 },
-  pickImageBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
   analyzingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
   analyzingText: { color: Colors.white, fontSize: 15, fontWeight: '600' },
 });

@@ -22,19 +22,12 @@ export interface MaintenanceDashboardFilters {
 }
 
 /**
- * Maintenance service (Web Admin) — chủ yếu đọc; thao tác assign/resolve thực hiện
- * ở mobile Operations Manager. Ngoại lệ: DUYỆT CHI PHÍ vượt ngưỡng (PENDING_APPROVAL)
- * làm trên web vì BE giới hạn ROLE_ADMIN (đề nghị mở HOST trong API-ProcessGaps-BE-TODO.md).
+ * Maintenance service (Web) — CHỈ ĐỌC/giám sát. Flow mới 17/07: mọi thao tác
+ * (duyệt request, báo xong, review-reject, hủy) làm trên mobile manager.
+ * LƯU Ý: PUT /{id}/approve giờ nghĩa là DUYỆT REQUEST (không còn duyệt chi phí) —
+ * web không được gọi; chi phí thuộc luồng hóa đơn sau khi ticket CLOSED.
  */
 export const maintenanceService = {
-  /**
-   * PUT /api/v1/maintenance/{id}/approve — duyệt/từ chối chi phí sửa chữa vượt
-   * ngưỡng (ticket PENDING_APPROVAL). BE hiện chỉ cho ROLE_ADMIN.
-   */
-  decideCost: (id: number, approve: boolean): Promise<MaintenanceRequestResponse> => {
-    return api.put(`${BASE}/${id}/approve`, { approve });
-  },
-
   /** GET /api/v1/maintenance/dashboard */
   getDashboard: (filters: MaintenanceDashboardFilters = {}): Promise<MaintenanceDashboardResponse> => {
     return api.get(`${BASE}/dashboard`, { params: filters });

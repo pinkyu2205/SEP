@@ -35,15 +35,18 @@ interface MaintenanceTicket {
   relatedEquipment?: string;
 }
 
-// ── Map DTO thật (10 status BE) → view model 5 nhóm của màn tóm tắt này ────
+// ── Map DTO thật (flow mới 17/07 + legacy) → view model 5 nhóm màn tóm tắt ──
 // Chi tiết/thao tác đầy đủ nằm ở MaintenanceTicketDetail (đã nối real).
 const STATUS_FROM_BE: Record<string, TicketStatus> = {
-  PENDING: 'pending', REOPENED: 'pending',
-  ACKNOWLEDGED: 'accepted', ACCEPTED: 'accepted',
+  PENDING: 'pending',
+  APPROVED: 'in_progress', WAITING_TENANT_CONFIRM: 'in_progress', REJECTED: 'in_progress',
+  CLOSED: 'resolved',
+  CANCELLED: 'cancelled',
+  // legacy trước migrate
+  REOPENED: 'in_progress', ACKNOWLEDGED: 'accepted', ACCEPTED: 'accepted',
   SCHEDULED: 'in_progress', IN_PROGRESS: 'in_progress',
   ON_HOLD: 'in_progress', PENDING_APPROVAL: 'in_progress',
-  DONE: 'resolved', RESOLVED: 'resolved', CONFIRMED: 'resolved',
-  CANCELLED: 'cancelled', REJECTED: 'cancelled',
+  DONE: 'in_progress', RESOLVED: 'resolved', CONFIRMED: 'resolved',
 };
 const CATEGORY_SET = new Set<TicketCategory>(['electrical', 'plumbing', 'furniture', 'appliance', 'other']);
 const PRIORITY_SET = new Set<TicketPriority>(['urgent', 'high', 'medium', 'low']);
@@ -332,7 +335,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
         renderItem={({ item }) => (
           <TicketCard
             ticket={item}
-            // Mở màn chi tiết THẬT (đủ thao tác ack/schedule/resolve) thay vì modal tóm tắt.
+            // Mở màn chi tiết THẬT (đủ thao tác duyệt/báo xong/review-reject) thay vì modal tóm tắt.
             onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: item.id })}
           />
         )}

@@ -9,38 +9,35 @@ import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import {
   getMaintenancePriorityLabel, getMaintenancePriorityColor, formatDate,
 } from '@/utils';
-import { useTenantRequests } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
 } from '@/constants/maintenance';
 
-// ─── Filter tabs ───────────────────────────────────────────
+// ─── Filter tabs (flow mới: pending → approved → waiting_confirm → closed) ───
 type FilterKey = 'active' | 'completed' | MaintenanceStatus;
 const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'active',      label: 'Đang xử lý'   },
-  { key: 'pending',     label: 'Chờ tiếp nhận' },
-  { key: 'in_progress', label: 'Đang sửa'     },
-  { key: 'done',        label: 'Chờ nghiệm thu' },
-  { key: 'completed',   label: 'Hoàn tất'     },
+  { key: 'active',          label: 'Đang xử lý'    },
+  { key: 'pending',         label: 'Chờ duyệt'     },
+  { key: 'approved',        label: 'Đang sửa'      },
+  { key: 'waiting_confirm', label: 'Chờ nghiệm thu' },
+  { key: 'completed',       label: 'Hoàn tất'      },
 ];
 
-const COMPLETED: MaintenanceStatus[] = ['confirmed', 'resolved'];
+const COMPLETED: MaintenanceStatus[] = ['closed'];
 
-// ─── Status config (3 bước, khớp BE) ───────────────────────
+// ─── Status config ─────────────────────────────────────────
 const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> =
   Object.fromEntries(
     Object.entries(MAINTENANCE_STATUS_META).map(([k, m]) => [
-      k, { label: k === 'in_progress' ? 'Đang sửa' : m.label, bg: m.bg, text: m.color, dot: m.color },
+      k, { label: m.label, bg: m.bg, text: m.color, dot: m.color },
     ]),
   );
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
-const ACTIVE: MaintenanceStatus[] = [
-  'pending', 'acknowledged', 'scheduled', 'in_progress', 'on_hold', 'pending_approval', 'done', 'reopened',
-];
+const ACTIVE: MaintenanceStatus[] = ['pending', 'approved', 'waiting_confirm', 'rejected'];
 const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
 // ─── Card ──────────────────────────────────────────────────
@@ -56,7 +53,7 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       {/* ── Top row: icon · title · status badge ── */}
       <View style={styles.cardTop}>
         <View style={[styles.catIcon, { backgroundColor: cfg.bg }]}>
-          <Text style={{ fontSize: 20 }}>{CATEGORY_EMOJI[item.category] ?? '🔧'}</Text>
+          <Text style={{ fontSize: 20 }}>{(item.category && CATEGORY_EMOJI[item.category]) ?? '🔧'}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
@@ -78,17 +75,19 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       {/* ── Description ── */}
       <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
 
-      {/* ── Meta chips ── */}
+      {/* ── Meta chips (priority ẩn khi manager chưa gán) ── */}
       <View style={styles.chipRow}>
-        <View style={[styles.priorityChip, { backgroundColor: priorityColor + '18' }]}>
-          <Text style={[styles.priorityText, { color: priorityColor }]}>
-            {getMaintenancePriorityLabel(item.priority)}
-          </Text>
-        </View>
+        {!!item.priority && (
+          <View style={[styles.priorityChip, { backgroundColor: priorityColor + '18' }]}>
+            <Text style={[styles.priorityText, { color: priorityColor }]}>
+              {getMaintenancePriorityLabel(item.priority)}
+            </Text>
+          </View>
+        )}
         {item.assignedTo && (
           <Text style={styles.techText}>👷 {item.assignedTo}</Text>
         )}
-        {item.estimatedCompletionDate && item.status === 'in_progress' && (
+        {item.estimatedCompletionDate && item.status === 'approved' && (
           <Text style={styles.etaText}>⏱ {formatDate(item.estimatedCompletionDate)}</Text>
         )}
       </View>
@@ -120,7 +119,7 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       )}
 
       {/* ── Cost banner for completed ── */}
-      {(item.status === 'resolved' || item.status === 'confirmed') && item.repairCost ? (
+      {item.status === 'closed' && item.repairCost ? (
         <View style={styles.resolvedBanner}>
           <Text style={styles.resolvedText}>
             ✅ Hoàn tất · Chi phí: {item.repairCost.toLocaleString('vi-VN')} đ
@@ -135,17 +134,29 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
 export const MaintenanceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [filter, setFilter] = useState<FilterKey>('active');
-  const mockAll = useTenantRequests();
   const [remote, setRemote] = useState<MaintenanceRequest[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Lỗi API → báo rõ ràng thay vì âm thầm hiện dữ liệu seed (mock) làm user tưởng
+  // ticket của mình biến mất / thấy ticket "Nguyễn Văn A" lạ hoắc.
+  const [loadError, setLoadError] = useState(false);
 
-  // Lấy danh sách thật từ BE; nếu lỗi (BE chưa sẵn sàng) → dùng store mock.
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
       realMaintenanceService.getMyRequests()
-        .then(page => { if (active) setRemote(page.content.map(dtoToTenantRequest)); })
-        .catch(() => { if (active) setRemote(null); });
+        .then(page => {
+          if (!active) return;
+          setRemote(page.content.map(dtoToTenantRequest));
+          setLoadError(false);
+        })
+        .catch(() => {
+          if (!active) return;
+          // Chỉ báo lỗi khi chưa từng tải được gì — đã có dữ liệu thì giữ nguyên.
+          setRemote(prev => {
+            if (prev == null) setLoadError(true);
+            return prev;
+          });
+        });
       return () => { active = false; };
     }, []),
   );
@@ -153,12 +164,12 @@ export const MaintenanceListScreen: React.FC = () => {
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
     realMaintenanceService.getMyRequests()
-      .then(page => setRemote(page.content.map(dtoToTenantRequest)))
+      .then(page => { setRemote(page.content.map(dtoToTenantRequest)); setLoadError(false); })
       .catch(() => { /* giữ dữ liệu hiện tại */ })
       .finally(() => setRefreshing(false));
   }, []);
 
-  const all = remote ?? mockAll;
+  const all = remote ?? [];
 
   const active   = all.filter(r => ACTIVE.includes(r.status as MaintenanceStatus));
   const filtered =
@@ -248,23 +259,34 @@ export const MaintenanceListScreen: React.FC = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyEmoji}>🔧</Text>
-            <Text style={styles.emptyTitle}>Không có yêu cầu nào đang hoạt động</Text>
-            <Text style={styles.emptyDesc}>
-              Báo hỏng thiết bị trực tiếp từ màn hình{' '}
-              <Text style={{ color: Colors.primary, fontWeight: '700' }}>Thiết bị</Text>
-              {' '}hoặc quét{' '}
-              <Text style={{ color: Colors.primary, fontWeight: '700' }}>mã QR</Text>
-              {' '}dán trên thiết bị.
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyScanBtn}
-              onPress={() => navigation.navigate('Scan')}
-            >
-              <Text style={styles.emptyScanText}>📷 Quét QR thiết bị</Text>
-            </TouchableOpacity>
-          </View>
+          loadError ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Text style={styles.emptyTitle}>Không tải được danh sách</Text>
+              <Text style={styles.emptyDesc}>Kiểm tra kết nối mạng rồi kéo xuống để thử lại.</Text>
+              <TouchableOpacity style={styles.emptyScanBtn} onPress={onRefresh}>
+                <Text style={styles.emptyScanText}>🔄 Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>🔧</Text>
+              <Text style={styles.emptyTitle}>Không có yêu cầu nào đang hoạt động</Text>
+              <Text style={styles.emptyDesc}>
+                Báo hỏng thiết bị trực tiếp từ màn hình{' '}
+                <Text style={{ color: Colors.primary, fontWeight: '700' }}>Thiết bị</Text>
+                {' '}hoặc quét{' '}
+                <Text style={{ color: Colors.primary, fontWeight: '700' }}>mã QR</Text>
+                {' '}dán trên thiết bị.
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyScanBtn}
+                onPress={() => navigation.navigate('Scan')}
+              >
+                <Text style={styles.emptyScanText}>📷 Quét QR thiết bị</Text>
+              </TouchableOpacity>
+            </View>
+          )
         }
       />
 

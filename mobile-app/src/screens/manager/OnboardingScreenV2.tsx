@@ -8,6 +8,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,6 +19,7 @@ import {
 import QRCode from 'react-native-qrcode-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
+import { CameraCaptureModal } from '../../components/common/CameraCaptureModal'
 import { DatePickerField } from '../../components/common/DatePickerField'
 import { BorderRadius, Colors, Shadow, Spacing } from '../../constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
@@ -181,16 +183,38 @@ const formatVnd = (v: string | number) => {
 const isValidVnPhone = (s: string) => /^0\d{9}$/.test(onlyDigits(s))
 const isValidCccd = (s: string) => /^\d{12}$/.test(onlyDigits(s))
 
-type DepositMethod = 'payos' | 'cash'
-
-// Khoá lưu nháp onboarding (1 phiên đón khách dở dang)
-const DRAFT_KEY = 'onboarding_draft_v2'
+// Khoá lưu nháp onboarding — dict LƯU THEO PHÒNG/CĂN để đón khách thứ 2 không đè
+// mất nháp khách thứ 1 đang dở (key cũ 'onboarding_draft_v2' chỉ có 1 slot).
+// Nháp chưa chọn phòng nằm tạm ở slot '_new'.
+const DRAFT_KEY = 'onboarding_drafts_v3'
+const LEGACY_DRAFT_KEY = 'onboarding_draft_v2'
+type DraftSlots = Record<string, any>
+const slotOf = (d: {
+  rentalMode?: string | null
+  selectedWholeHouseId?: unknown
+  selectedBuildingId?: unknown
+  selectedRoomId?: unknown
+}): string =>
+  d.rentalMode === 'whole_house'
+    ? `wh:${d.selectedWholeHouseId ?? 'new'}`
+    : d.rentalMode === 'room'
+      ? `room:${d.selectedBuildingId ?? 'new'}:${d.selectedRoomId ?? 'new'}`
+      : '_new'
+const draftLabel = (d: any): string => {
+  const who = d?.tenantInfo?.fullName?.trim() || d?.tenantInfo?.phone || 'khách chưa nhập tên'
+  const where =
+    d?.rentalMode === 'whole_house' ? 'nguyên căn'
+      : d?.selectedRoomId ? `phòng #${d.selectedRoomId}`
+      : 'chưa chọn phòng'
+  return `${who} · ${where}`
+}
+const DRAFT_TTL_MS = 3 * 24 * 3600 * 1000 // nháp quá 3 ngày tự dọn
 
 // Cooldown gửi lại OTP (giây)
 const OTP_RESEND_COOLDOWN = 30
 
 // OnboardingScreenV2 — bản đón khách khớp đầy đủ backend (xem kế hoạch tiếp khách):
-// nối đúng luồng send-otp, fallback username = t{phone}, cọc tiền mặt => HĐ ACTIVE ngay (bỏ OTP),
+// nối đúng luồng send-otp, fallback username = t{phone}, thu cọc 100% chuyển khoản PayOS,
 // chặn submit khi role lookup không hợp lệ. Màn cũ OnboardingScreen được giữ làm dự phòng.
 export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [step, setStep] = useState(0)
@@ -215,7 +239,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   })
   const [endDate, setEndDate] = useState('') // dd/MM/yyyy — ngày kết thúc hợp đồng
   const [depositMonths, setDepositMonths] = useState(1)
-  const [depositMethod, setDepositMethod] = useState<DepositMethod>('payos') // PayOS hoặc thu tiền mặt
   const [householdMembers, setHouseholdMembers] = useState<
     HouseholdMemberForm[]
   >([])
@@ -236,6 +259,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // Ảnh hiện trạng (Cloudinary URLs)
   const [conditionPhotos, setConditionPhotos] = useState<string[]>([])
   const [photoUploading, setPhotoUploading] = useState(false)
+  // Camera in-app (web không mở được camera qua ImagePicker) + xem ảnh phóng to
+  const [cameraTarget, setCameraTarget] = useState<
+    'elec' | 'water' | 'condition' | null
+  >(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [inspectionNotes, setInspectionNotes] = useState('')
 
   // Bàn giao thiết bị — nội thất có sẵn CHỈ hiển thị read-only: BE tự gắn toàn bộ
@@ -476,7 +504,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     if (d.tenantInfo) setTenantInfo(d.tenantInfo)
     setEndDate(d.endDate ?? '')
     setDepositMonths(d.depositMonths ?? 1)
-    setDepositMethod(d.depositMethod ?? 'payos')
     setHouseholdMembers(d.householdMembers ?? [])
     setMeters(d.meters ?? { elec: '', water: '' })
     setElecMeterUrl(d.elecMeterUrl ?? '')
@@ -493,29 +520,49 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   useEffect(() => {
     ;(async () => {
       try {
-        const raw = await AsyncStorage.getItem(DRAFT_KEY)
-        const d = raw ? JSON.parse(raw) : null
-        if (d && d.rentalMode) {
+        const [legacyRaw, raw] = await Promise.all([
+          AsyncStorage.getItem(LEGACY_DRAFT_KEY),
+          AsyncStorage.getItem(DRAFT_KEY),
+        ])
+        const slots: DraftSlots = raw ? JSON.parse(raw) : {}
+        // Migrate nháp đơn từ key cũ (1 lần)
+        if (legacyRaw) {
+          try {
+            const legacy = JSON.parse(legacyRaw)
+            if (legacy?.rentalMode) slots[slotOf(legacy)] = { ...legacy, savedAt: Date.now() }
+          } catch { /* ignore */ }
+          AsyncStorage.removeItem(LEGACY_DRAFT_KEY).catch(() => {})
+        }
+        // Dọn nháp quá hạn
+        const now = Date.now()
+        for (const k of Object.keys(slots)) {
+          if (now - (slots[k]?.savedAt ?? 0) > DRAFT_TTL_MS) delete slots[k]
+        }
+        AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(slots)).catch(() => {})
+
+        const entries = Object.entries(slots).filter(([, d]) => d?.rentalMode)
+        if (entries.length > 0) {
+          // Hỏi nháp MỚI NHẤT, hiện rõ của ai/phòng nào; các nháp khác vẫn giữ,
+          // sẽ được hỏi lại lần mở sau (khi nháp này xong/xóa).
+          entries.sort((a, b) => (b[1]?.savedAt ?? 0) - (a[1]?.savedAt ?? 0))
+          const [key, d] = entries[0]
+          const others = entries.length - 1
           await new Promise<void>((resolve) => {
             Alert.alert(
               'Tiếp tục đón khách?',
-              'Có một phiên đón khách đang dở. Bạn muốn tiếp tục hay làm mới?',
+              `Phiên đang dở: ${draftLabel(d)}.${others > 0 ? `\nCòn ${others} nháp khác đang chờ.` : ''}`,
               [
                 {
-                  text: 'Làm mới',
+                  text: 'Xóa nháp này',
                   style: 'destructive',
                   onPress: () => {
-                    AsyncStorage.removeItem(DRAFT_KEY).catch(() => {})
+                    delete slots[key]
+                    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(slots)).catch(() => {})
                     resolve()
                   },
                 },
-                {
-                  text: 'Tiếp tục',
-                  onPress: () => {
-                    restoreDraft(d)
-                    resolve()
-                  },
-                },
+                { text: 'Để sau (đón khách mới)', onPress: () => resolve() },
+                { text: 'Tiếp tục', onPress: () => { restoreDraft(d); resolve() } },
               ],
               { cancelable: false },
             )
@@ -540,7 +587,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       tenantInfo,
       endDate,
       depositMonths,
-      depositMethod,
       householdMembers,
       meters,
       elecMeterUrl,
@@ -551,9 +597,18 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       priceMode,
       contract,
       paid,
+      savedAt: Date.now(),
     }
-    const t = setTimeout(() => {
-      AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot)).catch(() => {})
+    const t = setTimeout(async () => {
+      try {
+        const raw = await AsyncStorage.getItem(DRAFT_KEY)
+        const slots: DraftSlots = raw ? JSON.parse(raw) : {}
+        const key = slotOf(snapshot)
+        // Đã chọn phòng/căn → nháp tạm '_new' chuyển hẳn về slot cụ thể
+        if (key !== '_new') delete slots['_new']
+        slots[key] = snapshot
+        await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(slots))
+      } catch { /* ignore */ }
     }, 500)
     return () => clearTimeout(t)
   }, [
@@ -565,7 +620,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     tenantInfo,
     endDate,
     depositMonths,
-    depositMethod,
     householdMembers,
     meters,
     elecMeterUrl,
@@ -579,7 +633,16 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   ])
 
   const clearDraft = () => {
-    AsyncStorage.removeItem(DRAFT_KEY).catch(() => {})
+    ;(async () => {
+      try {
+        const raw = await AsyncStorage.getItem(DRAFT_KEY)
+        if (!raw) return
+        const slots: DraftSlots = JSON.parse(raw)
+        delete slots[slotOf({ rentalMode, selectedWholeHouseId, selectedBuildingId, selectedRoomId })]
+        delete slots['_new']
+        await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(slots))
+      } catch { /* ignore */ }
+    })()
   }
 
   // Cảnh báo khi thoát giữa chừng (nếu đã có tiến trình & chưa hoàn tất)
@@ -620,7 +683,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     setLookupFound(false)
     setLookupChecked(false)
     setLookupRole(null)
-    setDepositMethod('payos')
   }
 
   const updateTenantInfo = (key: keyof typeof tenantInfo, value: string) =>
@@ -782,23 +844,19 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   }
 
   // ===== Ảnh + OCR =====
-  const pickImage = async (useCamera: boolean) => {
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync()
-      if (perm.status !== 'granted') {
-        Alert.alert('Lỗi', 'Cần quyền camera.')
-        return null
-      }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      return r.canceled ? null : r.assets[0].uri
+  // Trên web, launchCameraAsync chỉ mở file picker -> dùng CameraCaptureModal (expo-camera).
+  const pickFromNativeCamera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync()
+    if (perm.status !== 'granted') {
+      Alert.alert('Lỗi', 'Cần quyền camera.')
+      return null
     }
-    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
+    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
     return r.canceled ? null : r.assets[0].uri
   }
 
-  const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
-    const uri = await pickImage(useCamera)
-    if (!uri) return
+  // Upload ảnh đồng hồ + OCR tự điền chỉ số
+  const processMeterImage = async (kind: 'elec' | 'water', uri: string) => {
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
@@ -819,26 +877,23 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     }
   }
 
-  const addConditionPhoto = async (useCamera: boolean) => {
-    let uris: string[] = []
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync()
-      if (perm.status !== 'granted') {
-        Alert.alert('Lỗi', 'Cần quyền camera.')
-        return
-      }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      if (!r.canceled) uris = [r.assets[0].uri]
-    } else {
-      // Cho chọn nhiều ảnh cùng lúc từ thư viện
-      const r = await ImagePicker.launchImageLibraryAsync({
-        quality: 0.6,
-        allowsMultipleSelection: true,
-        selectionLimit: 10,
-      })
-      if (!r.canceled) uris = r.assets.map((a) => a.uri)
+  const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
+    if (useCamera && Platform.OS === 'web') {
+      setCameraTarget(kind)
+      return
     }
-    if (uris.length === 0) return
+    let uri: string | null
+    if (useCamera) {
+      uri = await pickFromNativeCamera()
+    } else {
+      const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
+      uri = r.canceled ? null : r.assets[0].uri
+    }
+    if (!uri) return
+    await processMeterImage(kind, uri)
+  }
+
+  const uploadConditionPhotos = async (uris: string[]) => {
     try {
       setPhotoUploading(true)
       const urls = await Promise.all(
@@ -849,6 +904,40 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
       setPhotoUploading(false)
+    }
+  }
+
+  const addConditionPhoto = async (useCamera: boolean) => {
+    if (useCamera && Platform.OS === 'web') {
+      setCameraTarget('condition')
+      return
+    }
+    let uris: string[] = []
+    if (useCamera) {
+      const uri = await pickFromNativeCamera()
+      if (uri) uris = [uri]
+    } else {
+      // Cho chọn nhiều ảnh cùng lúc từ thư viện
+      const r = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.6,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+      })
+      if (!r.canceled) uris = r.assets.map((a) => a.uri)
+    }
+    if (uris.length === 0) return
+    await uploadConditionPhotos(uris)
+  }
+
+  // Ảnh chụp từ CameraCaptureModal: đồng hồ chụp 1 ảnh rồi đóng,
+  // hiện trạng cho chụp liên tiếp nhiều ảnh (modal tự giữ mở).
+  const handleCameraCapture = (uri: string) => {
+    if (cameraTarget === 'elec' || cameraTarget === 'water') {
+      const kind = cameraTarget
+      setCameraTarget(null)
+      void processMeterImage(kind, uri)
+    } else if (cameraTarget === 'condition') {
+      void uploadConditionPhotos([uri])
     }
   }
 
@@ -935,9 +1024,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     addedEquipments: buildAddedEquipmentsPayload(),
     // Case 2: chưa chắc giá -> gửi Host duyệt, BE tạo HĐ chờ duyệt và CHƯA thu cọc.
     requireHostPriceApproval: priceMode === 'approval',
-    // Case 1: HĐ tạo ở PENDING chờ thu cọc + OTP với CẢ payos lẫn tiền mặt — trước
-    // đây cash gửi false làm HĐ ACTIVE ngay không OTP/không ghi nhận cọc, lệch hẳn
-    // luồng chuẩn (cash giờ đi qua deposit-cash-paid/received + OTP ở ResumeContract).
+    // Case 1: HĐ tạo ở PENDING chờ thu cọc PayOS + OTP (hệ thống thu cọc 100% chuyển khoản).
     requireDepositPayment: priceMode === 'agreed',
   })
 
@@ -968,22 +1055,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       if (priceMode === 'approval') {
         completedRef.current = true // bỏ qua cảnh báo thoát
         clearDraft()
-        return
-      }
-
-      // Thu cọc tiền mặt -> chuyển sang màn xử lý HĐ (ResumeContract) dùng chung
-      // luồng chuẩn: khách ký xác nhận đã trả + manager xác nhận đã nhận
-      // (deposit-cash-paid/received) rồi OTP kích hoạt — không nhân bản UI ở đây.
-      if (depositMethod === 'cash') {
-        const created = current
-        completedRef.current = true // bỏ qua cảnh báo thoát
-        clearDraft()
-        Alert.alert(
-          'Đã tạo hợp đồng ' + (created.contractCode || ''),
-          'Tiếp tục thu cọc tiền mặt: khách ký xác nhận, bạn xác nhận đã nhận tiền, rồi nhập OTP kích hoạt hợp đồng.',
-          [{ text: 'Tiếp tục thu cọc', onPress: () => navigation.replace('ResumeContract', { contractId: created.id }) }],
-          { cancelable: false },
-        )
         return
       }
 
@@ -1586,7 +1657,24 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             />
           )}
         </View>
-        {!!url && <Image source={{ uri: url }} style={styles.meterThumb} />}
+        {!!url && (
+          <View style={styles.meterThumbWrap}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setPreviewUrl(url)}
+            >
+              <Image source={{ uri: url }} style={styles.meterThumb} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.removePhotoBtn}
+              onPress={() =>
+                kind === 'elec' ? setElecMeterUrl('') : setWaterMeterUrl('')
+              }
+            >
+              <Text style={styles.removePhotoText}>×</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         <TextInput
           style={styles.input}
           value={meters[kind]}
@@ -1652,7 +1740,13 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <View style={styles.photoGrid}>
             {conditionPhotos.map((uri, i) => (
               <View key={`${uri}-${i}`} style={styles.photoWrap}>
-                <Image source={{ uri }} style={styles.photoThumb} />
+                <TouchableOpacity
+                  style={styles.photoThumbTouch}
+                  activeOpacity={0.85}
+                  onPress={() => setPreviewUrl(uri)}
+                >
+                  <Image source={{ uri }} style={styles.photoThumb} />
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.removePhotoBtn}
                   onPress={() =>
@@ -1861,47 +1955,17 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <Text style={[styles.label, { marginTop: Spacing.base }]}>
             Hình thức thu cọc
           </Text>
+          {/* Hệ thống thu cọc 100% chuyển khoản qua PayOS — không còn tiền mặt */}
           <View style={styles.methodRow}>
-            <TouchableOpacity
-              style={[
-                styles.methodChip,
-                depositMethod === 'payos' && styles.methodChipActive,
-              ]}
-              onPress={() => setDepositMethod('payos')}
-              activeOpacity={0.85}
-            >
-              <Text
-                style={[
-                  styles.methodChipText,
-                  depositMethod === 'payos' && styles.methodChipTextActive,
-                ]}
-              >
+            <View style={[styles.methodChip, styles.methodChipActive]}>
+              <Text style={[styles.methodChipText, styles.methodChipTextActive]}>
                 💳 Chuyển khoản (PayOS)
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.methodChip,
-                depositMethod === 'cash' && styles.methodChipActive,
-              ]}
-              onPress={() => setDepositMethod('cash')}
-              activeOpacity={0.85}
-            >
-              <Text
-                style={[
-                  styles.methodChipText,
-                  depositMethod === 'cash' && styles.methodChipTextActive,
-                ]}
-              >
-                💵 Tiền mặt
-              </Text>
-            </TouchableOpacity>
+            </View>
           </View>
 
           <Text style={styles.hint}>
-            {depositMethod === 'payos'
-              ? 'Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.'
-              : 'Khách nộp cọc tiền mặt trực tiếp. Nhấn "Tiếp tục" để tạo hợp đồng — sau đó khách ký xác nhận đã trả, bạn xác nhận đã nhận tiền, rồi OTP kích hoạt.'}
+            Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.
           </Text>
         </>
       ) : (
@@ -1913,8 +1977,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     )
   }
 
-  // (Nhánh tiền mặt không còn render bước riêng — sau khi tạo HĐ sẽ chuyển sang
-  // ResumeContract để ký + xác nhận 2 chiều + OTP như luồng chuẩn.)
   const renderPaymentStep = () => {
     return (
       <ScrollView
@@ -2146,6 +2208,41 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           </View>
         </View>
       )}
+
+      <CameraCaptureModal
+        visible={cameraTarget !== null}
+        multi={cameraTarget === 'condition'}
+        onCapture={handleCameraCapture}
+        onClose={() => setCameraTarget(null)}
+      />
+
+      {/* Xem ảnh phóng to — chạm bất kỳ đâu để đóng */}
+      <Modal
+        visible={!!previewUrl}
+        transparent
+        animationType='fade'
+        onRequestClose={() => setPreviewUrl(null)}
+      >
+        <TouchableOpacity
+          style={styles.previewBackdrop}
+          activeOpacity={1}
+          onPress={() => setPreviewUrl(null)}
+        >
+          {!!previewUrl && (
+            <Image
+              source={{ uri: previewUrl }}
+              style={styles.previewImage}
+              resizeMode='contain'
+            />
+          )}
+          <TouchableOpacity
+            style={styles.previewCloseBtn}
+            onPress={() => setPreviewUrl(null)}
+          >
+            <Text style={styles.previewCloseText}>✕</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -2626,11 +2723,14 @@ const styles = StyleSheet.create({
   meterTextBlock: { flex: 1 },
   meterTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   meterHint: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  meterThumbWrap: {
+    position: 'relative',
+    marginBottom: Spacing.md,
+  },
   meterThumb: {
     width: '100%',
     height: 150,
     borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
     backgroundColor: Colors.divider,
   },
   ocrBtnRow: {
@@ -2681,6 +2781,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: Colors.divider,
   },
+  photoThumbTouch: {
+    width: '100%',
+    height: '100%',
+  },
   photoThumb: {
     width: '100%',
     height: '100%',
@@ -2702,6 +2806,32 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     lineHeight: 21,
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: '85%',
+  },
+  previewCloseBtn: {
+    position: 'absolute',
+    top: Spacing.xl,
+    right: Spacing.base,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCloseText: {
+    color: Colors.white,
+    fontSize: 18,
+    fontWeight: '700',
   },
   notesInput: {
     minHeight: 92,

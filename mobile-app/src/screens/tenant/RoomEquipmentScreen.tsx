@@ -1,62 +1,60 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, StatusBar,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { Equipment } from '@/types';
-import { useRoomEquipment } from '@/store/equipmentStore';
-import { formatDate } from '@/utils';
-
-// Tenant's room — in a real app this comes from auth context
-const TENANT_ROOM_ID = 'r1';
-
-const STATUS_LABEL: Record<string, string> = {
-  active: 'Hoạt động tốt',
-  repairing: 'Đang sửa chữa',
-  damaged: 'Hỏng hóc',
-  needs_check: 'Cần kiểm tra',
-  replaced: 'Đã thay thế',
-  retired: 'Đã thanh lý',
-};
-
-const STATUS_COLOR: Record<string, { bg: string; text: string }> = {
-  active:      { bg: Colors.successLight, text: Colors.success },
-  repairing:   { bg: Colors.warningLight, text: Colors.warning },
-  damaged:     { bg: Colors.errorLight,   text: Colors.error   },
-  needs_check: { bg: '#FEF3C7',           text: '#D97706'      },
-  replaced:    { bg: Colors.divider,      text: Colors.textMuted },
-  retired:     { bg: Colors.divider,      text: Colors.textMuted },
-};
+import { EquipmentDto } from '@/types';
+import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
+import {
+  formatDate, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
+  equipmentNeedsAttention, guessEquipmentCategory,
+} from '@/utils';
 
 const CATEGORY_ICON: Record<string, string> = {
-  'Điện lạnh': '❄️',
-  'Điện':      '⚡',
-  'Điện tử':   '📺',
-  'Nội thất':  '🛋️',
-  'Vệ sinh':   '🚿',
-  'Cơ học':    '⚙️',
+  electrical: '⚡',
+  plumbing: '🚰',
+  furniture: '🛋️',
+  appliance: '❄️',
+  other: '🔧',
 };
 
-const getCategoryIcon = (category: string) => CATEGORY_ICON[category] ?? '🔧';
-
-const needsMaintenance = (eq: Equipment) =>
-  eq.status === 'damaged' || eq.status === 'repairing' || eq.status === 'needs_check';
+const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
+const getIcon = (e: EquipmentDto) => CATEGORY_ICON[guessEquipmentCategory(equipName(e))] ?? '🔧';
 
 export const RoomEquipmentScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const equipment = useRoomEquipment(TENANT_ROOM_ID);
+  const [equipment, setEquipment] = useState<EquipmentDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  const stats = useMemo(() => ({
+  const load = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    try {
+      const list = await realTenantEquipmentService.getMyEquipments();
+      setEquipment(list);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const stats = {
     total: equipment.length,
-    active: equipment.filter(e => e.status === 'active').length,
-    needsMaint: equipment.filter(needsMaintenance).length,
-  }), [equipment]);
+    active: equipment.filter(e => !equipmentNeedsAttention(e.status)).length,
+    needsMaint: equipment.filter(e => equipmentNeedsAttention(e.status)).length,
+  };
 
-  const renderItem = ({ item }: { item: Equipment }) => {
-    const statusStyle = STATUS_COLOR[item.status] ?? STATUS_COLOR.active;
-    const icon = getCategoryIcon(item.category);
+  const renderItem = ({ item }: { item: EquipmentDto }) => {
+    const statusStyle = getEquipmentLifecycleColor(item.status);
+    const icon = getIcon(item);
 
     return (
       <TouchableOpacity
@@ -72,20 +70,20 @@ export const RoomEquipmentScreen: React.FC = () => {
 
         <View style={styles.cardBody}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.equipName} numberOfLines={1}>{item.name}</Text>
+            <Text style={styles.equipName} numberOfLines={1}>{equipName(item)}</Text>
             <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
               <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                {STATUS_LABEL[item.status] ?? item.status}
+                {getEquipmentLifecycleLabel(item.status)}
               </Text>
             </View>
           </View>
 
-          <Text style={styles.equipCode}>{item.assetId}</Text>
+          <Text style={styles.equipCode}>{item.qrCode}</Text>
 
           <View style={styles.cardMeta}>
             <Text style={styles.metaText}>
-              {item.lastMaintenanceAt
-                ? `Bảo trì: ${formatDate(item.lastMaintenanceAt)}`
+              {item.lastMaintenanceDate
+                ? `Bảo trì: ${formatDate(item.lastMaintenanceDate)}`
                 : 'Chưa bảo trì lần nào'}
             </Text>
             <View style={styles.qrChip}>
@@ -134,20 +132,31 @@ export const RoomEquipmentScreen: React.FC = () => {
       </View>
 
       {/* Equipment List */}
-      <FlatList
-        data={equipment}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>🔧</Text>
-            <Text style={styles.emptyText}>Phòng chưa có thiết bị nào được ghi nhận</Text>
-          </View>
-        }
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-      />
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={Colors.primary} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={equipment}
+          keyExtractor={item => String(item.id)}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>{loadError ? '⚠️' : '🔧'}</Text>
+              <Text style={styles.emptyText}>
+                {loadError
+                  ? 'Không tải được danh sách thiết bị. Kéo xuống để thử lại.'
+                  : 'Phòng chưa có thiết bị nào được ghi nhận'}
+              </Text>
+            </View>
+          }
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -176,7 +185,8 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 11, color: Colors.textMuted, marginTop: 2, textAlign: 'center' },
   summaryDivider: { width: 1, backgroundColor: Colors.divider, marginVertical: 4 },
 
-  listContent: { padding: Spacing.lg, paddingTop: Spacing.md },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  listContent: { padding: Spacing.lg, paddingTop: Spacing.md, flexGrow: 1 },
 
   card: {
     flexDirection: 'row', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
@@ -208,5 +218,5 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: 'center', paddingTop: 80 },
   emptyIcon: { fontSize: 48, marginBottom: Spacing.md },
-  emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center' },
+  emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.xl },
 });

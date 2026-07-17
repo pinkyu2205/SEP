@@ -802,6 +802,7 @@ export interface OnboardTenantRequest {
   dateOfBirth?: string;      // ISO date (yyyy-MM-dd) — ngày sinh khách chính, BE lưu vào draftTenantDob/Tenant.dateOfBirth
   cccdIssueDate?: string;    // ISO date — ngày cấp CCCD (in trên PDF HĐ: ${tenantCccdIssueDate})
   cccdIssuePlace?: string;   // nơi cấp CCCD (${tenantCccdIssuePlace})
+  permanentAddress?: string; // hộ khẩu thường trú (field mới 16/07, in trên PDF HĐ: HKTT ${tenantAddress})
   moveInDate: string;        // ISO date (yyyy-MM-dd)
   rentAmount: number;
   deposit: number;
@@ -843,6 +844,7 @@ export interface TenantContractResponse {
   tenantDateOfBirth?: string; // ISO date (yyyy-MM-dd) — ngày sinh khách chính
   tenantCccdIssueDate?: string;  // ISO date — ngày cấp CCCD (field mới 15/07, in trên PDF HĐ)
   tenantCccdIssuePlace?: string; // nơi cấp CCCD
+  tenantPermanentAddress?: string; // hộ khẩu thường trú (field mới 16/07)
   contractCode: string;
   rentAmount: number;
   deposit: number;
@@ -879,6 +881,7 @@ export interface TenantContractResponse {
   contractFileAvailable?: boolean;
   expectedReceptionDate?: string;
   priceApprovalStatus?: string;    // PENDING_PRICE_APPROVAL | APPROVED_AWAITING_DEPOSIT | PRICE_REJECTED
+  householdMembers?: HouseholdMemberInput[];
 }
 
 // =============================================================================
@@ -961,17 +964,22 @@ export interface PropertyPurgeResponse {
 }
 
 // =============================================================================
-// MAINTENANCE — Bảo trì / Sửa chữa (theo Maintenance_BE_Contract.md)
+// MAINTENANCE — Bảo trì / Sửa chữa (flow mới 17/07: PENDING → APPROVED →
+// WAITING_TENANT_CONFIRM → CLOSED, nhánh REJECTED/CANCELLED; web chỉ giám sát)
 // =============================================================================
 
-export type MaintenanceRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
+export type MaintenanceRequestStatus =
+  | 'PENDING' | 'APPROVED' | 'WAITING_TENANT_CONFIRM' | 'REJECTED' | 'CLOSED' | 'CANCELLED'
+  // legacy trước migrate — normalizeMaintenanceStatus tự quy về bucket hiển thị
+  | 'IN_PROGRESS' | 'RESOLVED';
 export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceRequestCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
+  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
 
 export interface MaintenanceTimelineEntry {
-  oldStatus?: MaintenanceRequestStatus;
-  newStatus: MaintenanceRequestStatus;
+  // string vì timeline cũ còn chứa status legacy trước migrate
+  oldStatus?: string;
+  newStatus: string;
   note?: string;
   changedBy?: string;
   changedByName?: string;
@@ -981,9 +989,13 @@ export interface MaintenanceTimelineEntry {
 export interface MaintenanceRequestResponse {
   id: number;
   requestCode: string;
+  /** Tiêu đề tenant nhập (field mới 17/07 chiều). */
+  title?: string;
   status: MaintenanceRequestStatus;
-  category: MaintenanceRequestCategory;
-  priority: MaintenanceRequestPriority;
+  /** null khi PENDING — manager gán lúc duyệt. */
+  category?: MaintenanceRequestCategory | null;
+  /** null trừ khi manager gán lúc duyệt (tùy chọn). */
+  priority?: MaintenanceRequestPriority | null;
   description: string;
   tenantId: number;
   tenantName: string;
@@ -1001,6 +1013,8 @@ export interface MaintenanceRequestResponse {
   resolutionNote?: string;
   /** Ai chịu chi phí: HOST = tính vào expense nhà, TENANT = khách tự trả. */
   costPaidBy?: 'HOST' | 'TENANT';
+  /** Số lần khách từ chối nghiệm thu (REOPENED) — đã đề nghị BE expose. */
+  reopenCount?: number;
   resolvedAt?: string;
   images: string[];
   timeline: MaintenanceTimelineEntry[];

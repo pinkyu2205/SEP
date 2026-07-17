@@ -13,6 +13,7 @@ export interface TenantLookupResponse {
   dateOfBirth?: string;      // ISO date — BE trả thêm từ 15/07 (bulk import commit)
   cccdIssueDate?: string;    // ISO date — ngày cấp CCCD
   cccdIssuePlace?: string;   // nơi cấp CCCD
+  permanentAddress?: string; // hộ khẩu thường trú (field mới 16/07)
   role?: string; // ROLE_USER | ROLE_TENANT | ROLE_ADMIN | ROLE_MANAGER | ROLE_OWNER
 }
 

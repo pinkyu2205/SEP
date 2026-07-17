@@ -7,6 +7,7 @@ import type {
   OnboardTenantRequest,
   TenantContractResponse,
   ContractAvailableEquipmentItem,
+  HouseholdMemberInput,
 } from '../../types/api.types';
 import { propertyService } from '../../services/property.service';
 import { tenantService, isTenantEligibleRole } from '../../services/tenant.service';
@@ -197,6 +198,23 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const [fileName, setFileName] = useState('');
   const [draftFileUrl, setDraftFileUrl] = useState('');
 
+  // Thành viên ở cùng (householdMembers) — trước đây chỉ mobile walk-in thu được,
+  // nhánh admin-tạo-draft mất hẳn dữ liệu này (ResumeContract cũng không thu).
+  const [members, setMembers] = useState<Array<{ key: string; fullName: string; relation: string; phone: string }>>([]);
+  const addMember = () =>
+    setMembers((prev) => [...prev, { key: `m-${Date.now()}`, fullName: '', relation: '', phone: '' }]);
+  const removeMember = (key: string) => setMembers((prev) => prev.filter((m) => m.key !== key));
+  const patchMember = (key: string, patch: Partial<{ fullName: string; relation: string; phone: string }>) =>
+    setMembers((prev) => prev.map((m) => (m.key === key ? { ...m, ...patch } : m)));
+  const membersPayload = (): HouseholdMemberInput[] =>
+    members
+      .filter((m) => m.fullName.trim())
+      .map((m) => ({
+        fullName: m.fullName.trim(),
+        relation: m.relation.trim() || undefined,
+        phone: m.phone.trim() || undefined,
+      }));
+
   const [lookupRole, setLookupRole] = useState<string | null>(null);
   const [lookupChecked, setLookupChecked] = useState(false);
   const [lookupEligible, setLookupEligible] = useState<boolean | null>(null);
@@ -231,6 +249,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     cccd: editContract.tenantCccd || '',
     cccdIssueDate: editContract.tenantCccdIssueDate || '',
     cccdIssuePlace: editContract.tenantCccdIssuePlace || '',
+    permanentAddress: editContract.tenantPermanentAddress || '',
     rentAmount: editContract.rentAmount != null ? String(editContract.rentAmount) : '',
     deposit: editContract.deposit != null ? String(editContract.deposit) : '',
     depositMonths: editContract.depositMonths != null ? String(editContract.depositMonths) : '1',
@@ -245,6 +264,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     cccd: '',
     cccdIssueDate: '',
     cccdIssuePlace: '',
+    permanentAddress: '',
     rentAmount: '',
     deposit: '',
     depositMonths: '1',
@@ -343,6 +363,12 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       .getById(editContract.id)
       .then((full) => {
         setAvailableEquipments(full.availableEquipmentList ?? []);
+        setMembers((full.householdMembers ?? []).map((m, i) => ({
+          key: `m-${i}`,
+          fullName: m.fullName ?? '',
+          relation: m.relation ?? '',
+          phone: m.phone ?? '',
+        })));
         setEquipmentLoaded(true);
       })
       .catch(() => { /* interceptor đã toast */ })
@@ -421,6 +447,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           dateOfBirth: prev.dateOfBirth || r.dateOfBirth || '',
           cccdIssueDate: prev.cccdIssueDate || r.cccdIssueDate || '',
           cccdIssuePlace: prev.cccdIssuePlace || r.cccdIssuePlace || '',
+          permanentAddress: prev.permanentAddress || r.permanentAddress || '',
         }));
       }
     } catch {
@@ -485,7 +512,19 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         } else {
           setAddressSuggestion('');
         }
-        toast.success('Đã bóc tách thông tin từ file — vui lòng kiểm tra lại.');
+        // Đếm field chính bóc được — bóc rỗng mà vẫn toast success làm admin tưởng
+        // đã đủ dữ liệu rồi lưu thiếu.
+        const gotCount = [
+          extracted.tenantName, extracted.tenantCccd, extracted.tenantPhone,
+          extracted.rentAmount > 0 ? 'x' : '', extracted.deposit > 0 ? 'x' : '',
+        ].filter(Boolean).length;
+        if (gotCount === 0) {
+          toast('Đã lưu file nhưng KHÔNG bóc tách được thông tin nào — vui lòng nhập tay.', { icon: '⚠️' });
+        } else if (gotCount < 3) {
+          toast(`Chỉ bóc tách được ${gotCount}/5 thông tin chính — kiểm tra và bổ sung phần còn thiếu.`, { icon: '⚠️' });
+        } else {
+          toast.success('Đã bóc tách thông tin từ file — vui lòng kiểm tra lại.');
+        }
       }
     } catch {
       toast.error('Không xử lý được file — kiểm tra lại định dạng (nên dùng DOCX/PDF số hoá).');
@@ -530,12 +569,15 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         dateOfBirth: form.dateOfBirth || undefined,
         cccdIssueDate: form.cccdIssueDate || undefined,
         cccdIssuePlace: form.cccdIssuePlace.trim() || undefined,
+        permanentAddress: form.permanentAddress.trim() || undefined,
         moveInDate: form.expectedReceptionDate || undefined,
         rentAmount: Number(form.rentAmount),
         deposit: Number(form.deposit),
         depositMonths: Number(form.depositMonths) || 1,
         endDate: form.endDate || undefined,
         expectedReceptionDate: form.expectedReceptionDate || undefined,
+        // Chỉ gửi khi đã prefill xong từ getById — gửi sớm sẽ xóa nhầm thành viên cũ.
+        householdMembers: equipmentLoaded ? membersPayload() : undefined,
         // KHÔNG gửi selectedEquipmentIds — BE tự đồng bộ toàn bộ nội thất ACTIVE khi
         // PUT draft / render PDF (FE-contract-equipment-auto.md).
       });
@@ -590,6 +632,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       dateOfBirth: form.dateOfBirth || undefined,
       cccdIssueDate: form.cccdIssueDate || undefined,
       cccdIssuePlace: form.cccdIssuePlace.trim() || undefined,
+      permanentAddress: form.permanentAddress.trim() || undefined,
       moveInDate,
       rentAmount: Number(form.rentAmount),
       deposit: Number(form.deposit),
@@ -597,6 +640,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       endDate: form.endDate || undefined,
       expectedReceptionDate: form.expectedReceptionDate || undefined,
       draftContractFileUrl: draftFileUrl || undefined,
+      householdMembers: membersPayload().length > 0 ? membersPayload() : undefined,
       // Nội thất có sẵn: BE tự gắn toàn bộ ACTIVE trong phạm vi HĐ — không gửi gì.
     };
 
@@ -743,6 +787,12 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 <dd className="text-right font-medium text-slate-800">
                   {formatDateDisplay(form.cccdIssueDate)}{form.cccdIssuePlace ? ` — ${form.cccdIssuePlace}` : ''}
                 </dd>
+              </div>
+            )}
+            {form.permanentAddress && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-slate-500">Hộ khẩu thường trú</dt>
+                <dd className="text-right font-medium text-slate-800">{form.permanentAddress}</dd>
               </div>
             )}
             <div className="flex justify-between gap-3">
@@ -1017,6 +1067,18 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
             </div>
           </div>
 
+          {/* Hộ khẩu thường trú — optional, in lên PDF hợp đồng dòng HKTT (BE 16/07) */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">Hộ khẩu thường trú</label>
+            <input
+              name="permanentAddress"
+              value={form.permanentAddress}
+              onChange={handleChange}
+              placeholder="VD: 25 Nguyễn Trãi, P. Bến Thành, Q.1, TP. Hồ Chí Minh"
+              className="input-field"
+            />
+          </div>
+
           {roleWarning && (
             <div className="flex gap-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
               <ShieldAlert className="h-5 w-5 flex-shrink-0 text-rose-500" />
@@ -1136,6 +1198,64 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* Thành viên ở cùng — ghi vào householdMembers của HĐ (hộ gia đình/nguyên căn) */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-sm font-medium text-slate-700">
+                Thành viên ở cùng
+                <span className="ml-1.5 font-normal text-slate-400">(không bắt buộc)</span>
+              </label>
+              <button
+                type="button"
+                onClick={addMember}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-700"
+              >
+                + Thêm thành viên
+              </button>
+            </div>
+            {members.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                Khách ở cùng gia đình/bạn — thêm để ghi nhận vào hợp đồng.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {members.map((m) => (
+                  <div key={m.key} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={m.fullName}
+                      onChange={(e) => patchMember(m.key, { fullName: e.target.value })}
+                      placeholder="Họ tên"
+                      className="input-field flex-1 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={m.relation}
+                      onChange={(e) => patchMember(m.key, { relation: e.target.value })}
+                      placeholder="Quan hệ (vợ/con...)"
+                      className="input-field w-36 text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={m.phone}
+                      onChange={(e) => patchMember(m.key, { phone: e.target.value })}
+                      placeholder="SĐT (nếu có)"
+                      className="input-field w-32 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeMember(m.key)}
+                      className="rounded-lg p-2 text-rose-500 hover:bg-rose-50"
+                      title="Xóa thành viên"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Nội thất bàn giao — READ-ONLY: BE tự gắn toàn bộ thiết bị ACTIVE trong phạm
