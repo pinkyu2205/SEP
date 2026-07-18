@@ -1,66 +1,42 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  Image, Alert,
+  Image, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import {
-  MaintenanceCategory, MaintenancePriority, Equipment,
-  CreateMaintenanceRequestDto, MaintenanceReqCategory, MaintenanceReqPriority,
-} from '@/types';
+import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
 import { formatDate } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
+import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
-const CATEGORIES: { key: MaintenanceCategory; label: string; emoji: string }[] = [
-  { key: 'electrical', label: 'Điện', emoji: '⚡' },
-  { key: 'plumbing', label: 'Nước / Ống', emoji: '🚰' },
-  { key: 'furniture', label: 'Nội thất', emoji: '🪑' },
-  { key: 'appliance', label: 'Thiết bị', emoji: '📺' },
-  { key: 'other', label: 'Khác', emoji: '🔧' },
-];
-
-const PRIORITIES: { key: MaintenancePriority; label: string; color: string; desc: string }[] = [
-  { key: 'low', label: 'Thấp', color: Colors.success, desc: 'Không ảnh hưởng sinh hoạt' },
-  { key: 'medium', label: 'Trung bình', color: Colors.warning, desc: 'Bất tiện nhưng vẫn dùng được' },
-  { key: 'high', label: 'Cao', color: Colors.error, desc: 'Cần xử lý sớm' },
-  { key: 'urgent', label: 'Khẩn cấp', color: '#7C3AED', desc: 'Nguy hiểm, cần xử lý ngay' },
-];
-
-const mapEquipmentCategory = (eqCategory: string): MaintenanceCategory => {
-  const lower = eqCategory.toLowerCase();
-  if (lower.includes('điện') && !lower.includes('lạnh')) return 'electrical';
-  if (lower.includes('nước') || lower.includes('ống')) return 'plumbing';
-  if (lower.includes('nội thất') || lower.includes('furniture')) return 'furniture';
-  return 'appliance';
-};
+const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
 export const MaintenanceCreateScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const equipment: Equipment | undefined = route.params?.equipment;
+  const equipment: EquipmentDto | undefined = route.params?.equipment;
 
-  const [title, setTitle] = useState(equipment?.name ?? '');
+  const [title, setTitle] = useState(equipment ? equipName(equipment) : '');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<MaintenanceCategory | null>(
-    equipment ? mapEquipmentCategory(equipment.category) : null
-  );
-  const [priority, setPriority] = useState<MaintenancePriority>('medium');
   const [images, setImages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const pickImage = async () => {
     if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: false, quality: 0.6 });
-    if (!result.canceled && result.assets[0]) setImages(prev => [...prev, result.assets[0].uri]);
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 5 - images.length, quality: 0.6 });
+    if (!result.canceled) setImages(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, 5));
   };
 
   const takePhoto = async () => {
     if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+    // Web: launchCameraAsync chỉ mở file picker → dùng camera modal in-app.
+    if (Platform.OS === 'web') { setCameraOpen(true); return; }
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
     if (!result.canceled && result.assets[0]) setImages(prev => [...prev, result.assets[0].uri]);
   };
@@ -70,13 +46,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const handleSubmit = async () => {
     if (!title.trim()) { Alert.alert('Lỗi', 'Vui lòng nhập tiêu đề sự cố.'); return; }
     if (!description.trim()) { Alert.alert('Lỗi', 'Vui lòng mô tả chi tiết sự cố.'); return; }
-    if (!category) { Alert.alert('Lỗi', 'Vui lòng chọn loại sự cố.'); return; }
+    // Flow mới: BE bắt buộc ≥1 ảnh hiện trạng (BEFORE) khi tạo yêu cầu.
+    if (images.length === 0) { Alert.alert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hiện trạng để tạo yêu cầu.'); return; }
 
     setSubmitting(true);
 
     try {
       // roomId: ưu tiên từ QR thiết bị; không có thì lấy phòng của HĐ ACTIVE qua dashboard.
-      let roomIdNum = Number(equipment?.roomId);
+      let roomIdNum = Number(equipment?.roomId ?? NaN);
       if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
         const dash = await realTenantSelfService.getDashboard();
         roomIdNum = Number(dash.room?.id);
@@ -91,13 +68,19 @@ export const MaintenanceCreateScreen: React.FC = () => {
       for (const uri of images) {
         try { uploaded.push(await uploadImageToCloudinary(uri)); } catch { /* bỏ ảnh lỗi */ }
       }
-      const equipmentIdNum = Number(equipment?.id);
+      if (uploaded.length === 0) {
+        setSubmitting(false);
+        Alert.alert('Lỗi', 'Không tải được ảnh lên máy chủ — cần ít nhất 1 ảnh hiện trạng. Vui lòng thử lại.');
+        return;
+      }
+      const equipmentIdNum = Number(equipment?.id ?? NaN);
+      // Flow 17/07 chiều: tenant chỉ gửi title + description + ảnh — category/priority
+      // do manager gán khi duyệt (BE trả lỗi nếu gửi thiếu title hoặc title >200 ký tự).
       const body: CreateMaintenanceRequestDto = {
         roomId: roomIdNum,
         equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
-        category: category!.toUpperCase() as MaintenanceReqCategory,
-        priority: priority.toUpperCase() as MaintenanceReqPriority,
-        description: `${title.trim()} — ${description.trim()}`,
+        title: title.trim(),
+        description: description.trim(),
         images: uploaded,
       };
       await realMaintenanceService.createRequest(body);
@@ -115,7 +98,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
     }
   };
 
-  const isValid = title.trim() && description.trim() && category;
+  const isValid = title.trim() && description.trim() && images.length > 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -139,10 +122,9 @@ export const MaintenanceCreateScreen: React.FC = () => {
                 <Text style={{ fontSize: 22 }}>⚙️</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.equipmentName}>{equipment.name}</Text>
-                <Text style={styles.equipmentMeta}>Mã: {equipment.assetId}</Text>
-                {equipment.roomName && (
-                  <Text style={styles.equipmentMeta}>📍 {equipment.roomName}{equipment.houseName ? ` · ${equipment.houseName}` : ''}</Text>
+                <Text style={styles.equipmentName}>{equipName(equipment)}</Text>
+                {(equipment.roomName || equipment.roomNumber) && (
+                  <Text style={styles.equipmentMeta}>📍 {equipment.roomName ?? equipment.roomNumber}</Text>
                 )}
                 {equipment.qrCode && (
                   <Text style={styles.equipmentQr}>QR: {equipment.qrCode}</Text>
@@ -162,29 +144,13 @@ export const MaintenanceCreateScreen: React.FC = () => {
                   <Text style={styles.equipmentInfoValue}>{formatDate(equipment.installationDate)}</Text>
                 </View>
               )}
-              {equipment.lastMaintenanceAt && (
-                <View style={styles.equipmentInfoItem}>
-                  <Text style={styles.equipmentInfoLabel}>Bảo trì gần nhất</Text>
-                  <Text style={styles.equipmentInfoValue}>{formatDate(equipment.lastMaintenanceAt)}</Text>
-                </View>
-              )}
-              {!equipment.lastMaintenanceAt && (
-                <View style={styles.equipmentInfoItem}>
-                  <Text style={styles.equipmentInfoLabel}>Bảo trì gần nhất</Text>
-                  <Text style={[styles.equipmentInfoValue, { color: Colors.textMuted }]}>Chưa có</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Last maintenance note */}
-            {equipment.maintenanceHistory && equipment.maintenanceHistory.length > 0 && (
-              <View style={styles.lastRepairNote}>
-                <Text style={styles.lastRepairLabel}>Lần sửa trước:</Text>
-                <Text style={styles.lastRepairText} numberOfLines={2}>
-                  {equipment.maintenanceHistory[0].description}
+              <View style={styles.equipmentInfoItem}>
+                <Text style={styles.equipmentInfoLabel}>Bảo trì gần nhất</Text>
+                <Text style={[styles.equipmentInfoValue, !equipment.lastMaintenanceDate && { color: Colors.textMuted }]}>
+                  {equipment.lastMaintenanceDate ? formatDate(equipment.lastMaintenanceDate) : 'Chưa có'}
                 </Text>
               </View>
-            )}
+            </View>
           </View>
         )}
 
@@ -196,51 +162,8 @@ export const MaintenanceCreateScreen: React.FC = () => {
             placeholder="Ví dụ: Vòi nước bị rỉ, Ổ cắm hỏng..."
             value={title}
             onChangeText={setTitle}
-            maxLength={100}
+            maxLength={200}
           />
-        </View>
-
-        {/* Loại sự cố */}
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Loại sự cố <Text style={styles.required}>*</Text></Text>
-          <View style={styles.categoryGrid}>
-            {CATEGORIES.map(cat => (
-              <TouchableOpacity
-                key={cat.key}
-                style={[styles.categoryItem, category === cat.key && styles.categoryItemActive]}
-                onPress={() => setCategory(cat.key)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
-                <Text style={[styles.categoryLabel, category === cat.key && styles.categoryLabelActive]}>
-                  {cat.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        {/* Mức độ ưu tiên */}
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Mức độ ưu tiên <Text style={styles.required}>*</Text></Text>
-          <View style={styles.priorityList}>
-            {PRIORITIES.map(p => (
-              <TouchableOpacity
-                key={p.key}
-                style={[styles.priorityItem, priority === p.key && { borderColor: p.color, backgroundColor: p.color + '10' }]}
-                onPress={() => setPriority(p.key)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.priorityRadio, priority === p.key && { borderColor: p.color }]}>
-                  {priority === p.key && <View style={[styles.priorityRadioDot, { backgroundColor: p.color }]} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.priorityLabel, { color: p.color }]}>{p.label}</Text>
-                  <Text style={styles.priorityDesc}>{p.desc}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
         </View>
 
         {/* Mô tả chi tiết */}
@@ -249,7 +172,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
           <TextInput
             style={[styles.input, styles.textArea]}
             placeholder={equipment
-              ? `Mô tả sự cố của ${equipment.name}: triệu chứng, thời điểm phát sinh, mức độ ảnh hưởng...`
+              ? `Mô tả sự cố của ${equipName(equipment)}: triệu chứng, thời điểm phát sinh, mức độ ảnh hưởng...`
               : 'Mô tả rõ tình trạng sự cố: vị trí, triệu chứng, thời điểm phát sinh...'}
             multiline
             numberOfLines={5}
@@ -263,7 +186,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
         {/* Ảnh đính kèm */}
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Ảnh hiện trạng <Text style={styles.optional}>(Không bắt buộc)</Text></Text>
+          <Text style={styles.fieldLabel}>Ảnh hiện trạng <Text style={styles.required}>*</Text></Text>
           <View style={styles.imageRow}>
             <TouchableOpacity style={styles.imageAddBtn} onPress={takePhoto}>
               <Text style={styles.imageAddEmoji}>📷</Text>
@@ -286,14 +209,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
               ))}
             </ScrollView>
           )}
-          <Text style={styles.imageHint}>Tối đa 5 ảnh · {images.length}/5</Text>
+          <Text style={styles.imageHint}>Bắt buộc ít nhất 1 ảnh · Tối đa 5 ảnh · {images.length}/5</Text>
         </View>
 
         {/* Lưu ý */}
         <View style={styles.noticeCard}>
           <Text style={styles.noticeText}>
             {equipment
-              ? `💡 Thông tin thiết bị "${equipment.name}" sẽ được gửi kèm yêu cầu giúp quản lý xử lý nhanh hơn.`
+              ? `💡 Thông tin thiết bị "${equipName(equipment)}" sẽ được gửi kèm yêu cầu giúp quản lý xử lý nhanh hơn.`
               : '💡 Sau khi gửi, quản lý sẽ tiếp nhận và phân công thợ trong vòng 24-48 giờ làm việc. Bạn sẽ nhận thông báo khi có cập nhật.'}
           </Text>
         </View>
@@ -308,6 +231,13 @@ export const MaintenanceCreateScreen: React.FC = () => {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <CameraCaptureModal
+        visible={cameraOpen}
+        multi
+        onCapture={(uri) => setImages(prev => (prev.length >= 5 ? prev : [...prev, uri]))}
+        onClose={() => setCameraOpen(false)}
+      />
     </SafeAreaView>
   );
 };
@@ -350,12 +280,6 @@ const styles = StyleSheet.create({
   equipmentInfoItem: { flex: 1 },
   equipmentInfoLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
   equipmentInfoValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  lastRepairNote: {
-    marginTop: Spacing.sm, backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md, padding: Spacing.sm,
-  },
-  lastRepairLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted, marginBottom: 2 },
-  lastRepairText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
 
   field: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg },
   fieldLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
@@ -368,27 +292,6 @@ const styles = StyleSheet.create({
   },
   textArea: { height: 120, textAlignVertical: 'top' },
   charCount: { fontSize: 11, color: Colors.textMuted, textAlign: 'right', marginTop: 4 },
-
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  categoryItem: {
-    width: '18%', aspectRatio: 1, borderRadius: BorderRadius.md, backgroundColor: Colors.white,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: Colors.border,
-  },
-  categoryItemActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  categoryEmoji: { fontSize: 22 },
-  categoryLabel: { fontSize: 10, fontWeight: '600', color: Colors.textMuted, marginTop: 2 },
-  categoryLabelActive: { color: Colors.primary },
-
-  priorityList: { gap: Spacing.sm },
-  priorityItem: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.md, padding: Spacing.md,
-    borderWidth: 1.5, borderColor: Colors.border,
-  },
-  priorityRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: Colors.border, alignItems: 'center', justifyContent: 'center' },
-  priorityRadioDot: { width: 10, height: 10, borderRadius: 5 },
-  priorityLabel: { fontSize: 14, fontWeight: '700' },
-  priorityDesc: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
 
   imageRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.sm },
   imageAddBtn: {

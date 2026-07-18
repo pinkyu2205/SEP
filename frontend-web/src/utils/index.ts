@@ -55,11 +55,13 @@ export const maintenanceStatusMap = {
 
 type Badge = { label: string; color: string; dot: string };
 
+// Flow bảo trì mới 17/07: PENDING → APPROVED → WAITING_TENANT_CONFIRM → CLOSED
+// (nhánh REJECTED/CANCELLED). Web host chỉ giám sát — gom về 4 bucket hiển thị.
 export const maintenanceReqStatusMap: Record<string, Badge> = {
-  PENDING:     { label: 'Chờ xử lý',     color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
-  IN_PROGRESS: { label: 'Đang xử lý',    color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
+  PENDING:     { label: 'Chờ duyệt',    color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
+  IN_PROGRESS: { label: 'Đang xử lý',   color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
   RESOLVED:    { label: 'Đã hoàn thành', color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
-  CANCELLED:   { label: 'Đã hủy',        color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
+  CANCELLED:   { label: 'Đã hủy',       color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
 };
 
 export const maintenanceReqPriorityMap: Record<string, Badge> = {
@@ -73,7 +75,8 @@ export const maintenanceCategoryMap: Record<string, string> = {
   ELECTRICAL: 'Điện',
   PLUMBING:   'Nước',
   FURNITURE:  'Nội thất',
-  APPLIANCE:  'Thiết bị',
+  APPLIANCE:  'Trang thiết bị',
+  STRUCTURAL: 'Kết cấu / công trình',
   OTHER:      'Khác',
 };
 
@@ -84,7 +87,10 @@ export const equipmentLifecycleMap: Record<string, Badge> = {
   DISPOSED:    { label: 'Đã thanh lý',   color: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
 };
 
-/** Map mọi trạng thái BE (kể cả ASSIGNED/WAITING_PARTS nếu có) về 4 trạng thái spec */
+/**
+ * Map trạng thái BE (flow mới + legacy trước migrate) về 4 bucket giám sát.
+ * IN_PROGRESS = APPROVED + WAITING_TENANT_CONFIRM + REJECTED (khớp dashboard BE).
+ */
 export function normalizeMaintenanceStatus(
   s: string | undefined,
 ): 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' {
@@ -92,18 +98,28 @@ export function normalizeMaintenanceStatus(
     case 'PENDING':
     case 'OPEN':
       return 'PENDING';
+    case 'APPROVED':
+    case 'WAITING_TENANT_CONFIRM':
+    case 'REJECTED':
+    // legacy trước migrate 17/07
     case 'ASSIGNED':
     case 'ACCEPTED':
+    case 'ACKNOWLEDGED':
+    case 'SCHEDULED':
     case 'IN_PROGRESS':
     case 'WAITING_PARTS':
-      return 'IN_PROGRESS';
-    case 'RESOLVED':
+    case 'ON_HOLD':
+    case 'PENDING_APPROVAL':
+    case 'REOPENED':
     case 'DONE':
+      return 'IN_PROGRESS';
+    case 'CLOSED':
+    case 'RESOLVED':
     case 'COMPLETED':
+    case 'CONFIRMED':
       return 'RESOLVED';
     case 'CANCELLED':
     case 'CANCELED':
-    case 'REJECTED':
       return 'CANCELLED';
     default:
       return 'PENDING';

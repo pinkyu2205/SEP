@@ -1,4 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import realApiClient from '@/services/core/realApiClient';
+import { API_CONFIG } from '@/constants/api';
 
 /**
  * Tenant onboarding service nối backend Spring THẬT.
@@ -23,16 +26,45 @@ export interface EquipmentSnapshotItem {
   ownedBy: 'OWNER';
 }
 
+// Nội thất trong phạm vi HĐ (phòng + khu vực chung, hoặc cả căn nếu nguyên căn) —
+// GET properties/{propertyId}/contract-available-equipments?roomId=. CHỈ để hiển thị
+// read-only: BE tự gắn toàn bộ thiết bị ACTIVE vào HĐ, không còn tick chọn
+// (FE-contract-equipment-auto.md 2026-07).
+export interface ContractAvailableEquipmentItem {
+  id: number;
+  name: string;
+  condition: string; // NEW | GOOD | DAMAGED | BROKEN
+  quantity: number;
+  scope?: 'ROOM' | 'SHARED'; // thiết bị của phòng hay khu vực chung
+  roomNumber?: string;
+  houseArea?: string;
+}
+
+// Thiết bị lắp thêm theo yêu cầu khách — chủ đầu tư mua, chưa có trong inventory lúc
+// submit. BE tự tạo EquipmentCatalog (nếu chưa có) + Equipment (source=ADDED_BY_TENANT)
+// và gộp vào equipmentSnapshot. KHÔNG có field quantity ở BE — FE tự lặp N dòng nếu
+// quantity > 1 (xem cách buildPayload dùng field này).
+export interface ContractAddedEquipmentInput {
+  name: string;
+  category?: string;
+  cost?: number;
+  roomId?: number;
+  condition?: 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
   phoneNumber: string;
+  dateOfBirth?: string; // yyyy-MM-dd
   moveInDate: string; // yyyy-MM-dd
   rentAmount: number;
   deposit: number;
   endDate?: string;
-  // Biên bản bàn giao thiết bị: JSON.stringify({ handoverDate, items: EquipmentSnapshotItem[] }).
-  equipmentSnapshot?: string;
+  // Nội thất có sẵn: KHÔNG còn field nào để gửi — equipmentSnapshot/selectedEquipmentIds/
+  // declinedEquipmentIds đã bỏ hẳn khỏi type. BE tự gắn TOÀN BỘ thiết bị ACTIVE trong
+  // phạm vi HĐ và tự sinh equipmentSnapshot khi tạo/PUT/render PDF; gửi
+  // selectedEquipmentIds=[] còn bị hiểu là "không gắn gì" (FE-contract-equipment-auto.md 2026-07).
 
   depositMonths?: number;
   initialElectricReading?: number;
@@ -47,9 +79,10 @@ export interface OnboardTenantRequest {
   requireDepositPayment?: boolean;
   // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Host duyệt giá, CHƯA thu cọc.
   requireHostPriceApproval?: boolean;
-  // Thiết bị sẵn có khách KHÔNG nhận -> BE set operationalStatus=DISABLED (gỡ khỏi phòng),
-  // lưu disabled_reason + gắn contract; tự ACTIVE lại khi hết HĐ. Xem Phần C của plan.
-  declinedEquipmentIds?: number[];
+  // Thiết bị lắp thêm theo yêu cầu khách (vẫn được gửi) — gửi kèm ngay trong request
+  // tạo/sửa để BE link đúng vào contract (KHÔNG tạo qua endpoint equipment chung riêng
+  // lẻ). null/omit = giữ lắp thêm cũ; [] = xóa hết lắp thêm.
+  addedEquipments?: ContractAddedEquipmentInput[];
 }
 
 export interface TenantContractResponse {
@@ -67,11 +100,33 @@ export interface TenantContractResponse {
   moveInDate: string;
   startDate: string;
   endDate?: string;
+  expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
   paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+
+  // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
+
+  // File hợp đồng (nháp lẫn chính thức đều dùng chung 1 URL Cloudinary — BE không
+  // render file mới sau ACTIVE, xem FE-tenant-draft-contract-document.md 2026-07-09).
+  // `documentUrl` là field BE map sẵn = draftContractFileUrl (ưu tiên) hoặc fallback cũ.
+  // File giờ là PDF (BE đổi từ DOCX 2026-07-14, xem FE-draft-contract-pdf.md) —
+  // HĐ cũ có thể còn .docx; downloadContractDocument tự phân nhánh theo Content-Type.
+  draftContractFileUrl?: string;
+  documentUrl?: string;
+  pdfUrl?: string; // alias BE thêm 2026-07-14 — cùng URL với documentUrl
+  // true khi đã có file lưu — bật nút "Xem hợp đồng". KHÔNG mở draftContractFileUrl/
+  // documentUrl (Cloudinary) trực tiếp, dùng realTenantService.downloadContractDocument
+  // (GET .../document/download), xem FE-view-contract.md.
+  contractFileAvailable?: boolean;
 
   // Sau khi confirm: thông tin tài khoản tenant (BE bổ sung — xem MD work/Onboarding.md)
   tenantUsername?: string;
@@ -81,7 +136,11 @@ export interface TenantContractResponse {
   // Duyệt giá (Case 2). Tên field suy ra từ thiết kế — chỉnh nếu BE đặt khác.
   priceApprovalStatus?: ContractPriceApprovalStatus;
   priceRejectReason?: string;
-  equipmentSnapshot?: string;
+  // Nội thất HĐ — read-only, BE tự gắn toàn bộ EXISTING ACTIVE (FE-contract-equipment-auto.md):
+  equipmentSnapshot?: string; // text BE sinh cho PDF, vd "Giường (Tốt) x1, Tủ lạnh (Mới) x1"
+  equipmentList?: ContractAvailableEquipmentItem[];          // thiết bị đã gắn HĐ (EXISTING + ADDED)
+  availableEquipmentList?: ContractAvailableEquipmentItem[]; // inventory nhà trong phạm vi HĐ
+  selectedExistingIds?: number[]; // ID nội thất có sẵn đã gắn (≈ toàn bộ available)
 }
 
 // Trạng thái duyệt giá của hợp đồng (Case 2 — gửi Host duyệt).
@@ -117,6 +176,19 @@ export const defaultTenantUsername = (phone: string): string =>
   String(phone).replace(/\D/g, '');
 
 export const realTenantService = {
+  // Thiết bị có thể chọn cho HĐ theo đúng phạm vi (phòng + khu vực chung, hoặc cả căn
+  // nếu bỏ roomId) — xem FE-contract-handover-equipment.md §3.1.
+  getContractAvailableEquipments: async (
+    propertyId: number,
+    roomId?: number | null,
+  ): Promise<ContractAvailableEquipmentItem[]> => {
+    const { data } = await realApiClient.get<ContractAvailableEquipmentItem[]>(
+      `/api/v1/properties/${propertyId}/contract-available-equipments`,
+      { params: roomId != null ? { roomId } : {} },
+    );
+    return data ?? [];
+  },
+
   onboardRoomTenant: async (
     propertyId: number,
     roomId: number,
@@ -205,6 +277,19 @@ export const realTenantService = {
     return data;
   },
 
+  // PUT /tenant-contracts/{id} — cập nhật draft: ảnh hiện trạng phòng, chỉ số điện
+  // nước ban đầu, ghi chú... (xem tài liệu đón khách §2c/2d).
+  updateDraftContract: async (
+    contractId: number,
+    body: Partial<OnboardTenantRequest>,
+  ): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.put<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}`,
+      body,
+    );
+    return data;
+  },
+
   // ===== Duyệt giá (Case 2) — phụ thuộc BE, tên endpoint suy ra từ thiết kế =====
 
   // Danh sách HĐ chờ xử lý của manager: gồm DRAFT/PENDING được gán (đón khách v2)
@@ -231,13 +316,45 @@ export const realTenantService = {
     return data;
   },
 
+  // Tải file HĐ đã lưu về máy để xem (nút "Xem hợp đồng") — KHÔNG mở
+  // draftContractFileUrl/documentUrl (Cloudinary) trực tiếp, xem FE-view-contract.md.
+  // File mới là PDF, HĐ cũ có thể còn DOCX (FE-draft-contract-pdf.md) — đặt đuôi file
+  // theo Content-Type response rồi trả kèm mimeType cho caller Sharing.shareAsync.
+  downloadContractDocument: async (
+    contractId: number,
+    contractCode: string,
+  ): Promise<{ uri: string; mimeType: string }> => {
+    const token = await AsyncStorage.getItem('accessToken');
+    const url = `${API_CONFIG.REAL_BASE_URL}/api/v1/tenant-contracts/${contractId}/document/download`;
+    // Tải về tên tạm — chưa biết PDF hay DOCX trước khi đọc header response.
+    const tmpUri = `${FileSystem.cacheDirectory}${contractCode}.tmp`;
+    const result = await FileSystem.downloadAsync(url, tmpUri, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (result.status !== 200) {
+      throw new Error('Không tải được hợp đồng.');
+    }
+    const contentType =
+      result.headers['Content-Type'] ?? result.headers['content-type'] ?? '';
+    // Header thiếu/octet-stream → mặc định PDF theo spec BE mới.
+    const isDocx = contentType.includes('wordprocessingml') || contentType.includes('msword');
+    const mimeType = isDocx
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'application/pdf';
+    const finalUri = `${FileSystem.cacheDirectory}${contractCode}.${isDocx ? 'docx' : 'pdf'}`;
+    await FileSystem.deleteAsync(finalUri, { idempotent: true });
+    await FileSystem.moveAsync({ from: result.uri, to: finalUri });
+    return { uri: finalUri, mimeType };
+  },
+
   // Hủy hợp đồng (khi manager quyết định không tiếp tục onboarding).
   cancelContract: async (contractId: number): Promise<void> => {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/cancel`);
   },
 
-  // Trả phòng / trả nhà: kết thúc HĐ đang hiệu lực (manager). Phòng tự về AVAILABLE.
-  // (BE TODO nếu chưa có endpoint này — FE gọi sẵn.)
+  // Thanh lý HĐ ACTIVE/EXPIRED (manager chủ động, không qua checkout-request).
+  // BE tự trả phòng về AVAILABLE + restore thiết bị (verify PASS 10/07/2026).
+  // Luồng khách tự xin trả phòng dùng checkout-request (checkoutService/selfService).
   terminateContract: async (contractId: number, reason?: string): Promise<void> => {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/terminate`, { reason });
   },

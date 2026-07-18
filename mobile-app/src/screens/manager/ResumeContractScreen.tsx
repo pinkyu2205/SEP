@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,10 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
 import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
+import * as Sharing from 'expo-sharing'
+import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
+import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
   ContractPriceApprovalStatus,
   realTenantService,
@@ -28,6 +32,11 @@ const PAY_CANCEL_URL = 'https://slms.app/payment-cancel'
 const onlyDigits = (s: string) => String(s).replace(/[^\d]/g, '')
 const parseNum = (s: string) => Number(onlyDigits(s)) || 0
 const formatVnd = (v: number) => (v ? v.toLocaleString('vi-VN') : '0')
+const formatDateVi = (iso?: string): string => {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-')
+  return d && m && y ? `${d}/${m}/${y}` : iso
+}
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback
 
@@ -46,10 +55,46 @@ export const ResumeContractScreen: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<TenantContractResponse | null>(null)
+  const [viewingContract, setViewingContract] = useState(false)
+
+  const handleViewContract = async () => {
+    if (!selected) return
+    setViewingContract(true)
+    try {
+      // mimeType theo Content-Type BE trả: PDF (file mới) / DOCX (HĐ cũ) —
+      // xem FE-draft-contract-pdf.md.
+      const { uri, mimeType } = await realTenantService.downloadContractDocument(
+        selected.id,
+        selected.contractCode,
+      )
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType,
+          UTI: mimeType === 'application/pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
+          dialogTitle: 'Xem hợp đồng thuê',
+        })
+      } else {
+        Alert.alert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ file.')
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không mở được file hợp đồng.'))
+    } finally {
+      setViewingContract(false)
+    }
+  }
 
   const load = useCallback(async () => {
     try {
-      const data = await realTenantService.listManagedContracts()
+      // Gọi KHÔNG status chỉ trả về HĐ đang chờ/đã duyệt giá — HĐ nháp (DRAFT) mới gán
+      // bị BE loại ra mặc định, phải gọi thêm status=DRAFT riêng rồi gộp (dedupe theo id,
+      // ưu tiên nháp lên trước vì cần xử lý sớm nhất).
+      const [pending, drafts] = await Promise.all([
+        realTenantService.listManagedContracts(),
+        realTenantService.listManagedContracts('DRAFT'),
+      ])
+      const data = [...drafts, ...pending].filter(
+        (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
+      )
       setList(data)
 
       if (paramContractId != null) {
@@ -108,6 +153,23 @@ export const ResumeContractScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.safe}>
         <Header onBack={() => setSelected(null)} title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'} />
+        {selected.contractFileAvailable ? (
+          <TouchableOpacity
+            style={styles.viewContractBar}
+            onPress={handleViewContract}
+            disabled={viewingContract}
+          >
+            {viewingContract ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text style={styles.viewContractBarText}>📄 Xem hợp đồng — {selected.contractCode}</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.viewContractBarDisabled}>
+            <Text style={styles.viewContractBarDisabledText}>Chưa có file hợp đồng — tạo ở web admin</Text>
+          </View>
+        )}
         <ContractActionPanel
           contract={selected}
           onDone={() => {
@@ -155,6 +217,9 @@ export const ResumeContractScreen: React.FC = () => {
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
                   </Text>
                   <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
+                  {!!c.expectedReceptionDate && (
+                    <Text style={styles.cardReception}>📅 Hẹn đón khách: {formatDateVi(c.expectedReceptionDate)}</Text>
+                  )}
                 </View>
                 {meta && (
                   <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
@@ -308,14 +373,220 @@ const RejectedPanel: React.FC<{
   )
 }
 
-// ===== Đã duyệt: thu cọc (PayOS/cash) + OTP =====
+// ===== Hiện trạng phòng + chỉ số điện nước (đón khách bước 2, có thể bổ sung/sửa
+// bất cứ lúc nào trước khi hoàn tất — không chặn luồng thu cọc bên dưới). =====
+const InspectionSection: React.FC<{
+  contract: TenantContractResponse
+  onChanged: (c: TenantContractResponse) => void
+}> = ({ contract, onChanged }) => {
+  const [expanded, setExpanded] = useState(false)
+  const [elecUrl, setElecUrl] = useState(contract.electricMeterImageUrl ?? '')
+  const [waterUrl, setWaterUrl] = useState(contract.waterMeterImageUrl ?? '')
+  const [elecReading, setElecReading] = useState(
+    contract.initialElectricReading != null ? String(contract.initialElectricReading) : '',
+  )
+  const [waterReading, setWaterReading] = useState(
+    contract.initialWaterReading != null ? String(contract.initialWaterReading) : '',
+  )
+  const [photos, setPhotos] = useState<string[]>(contract.roomConditionUrls ?? [])
+  const [note, setNote] = useState(contract.roomConditionNote ?? '')
+  const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const hasData = photos.length > 0 || !!elecReading || !!waterReading
+
+  const pickImage = async (useCamera: boolean): Promise<string | null> => {
+    if (useCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync()
+      if (perm.status !== 'granted') {
+        Alert.alert('Lỗi', 'Cần quyền camera.')
+        return null
+      }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
+      return r.canceled ? null : r.assets[0].uri
+    }
+    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
+    return r.canceled ? null : r.assets[0].uri
+  }
+
+  const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
+    const uri = await pickImage(useCamera)
+    if (!uri) return
+    try {
+      setOcrLoading(kind)
+      const url = await uploadImageToCloudinary(uri)
+      if (kind === 'elec') setElecUrl(url)
+      else setWaterUrl(url)
+      const ocr = await realTenantService.ocrMeter(url)
+      if (ocr.reading) {
+        if (kind === 'elec') setElecReading(ocr.reading)
+        else setWaterReading(ocr.reading)
+      }
+    } catch (err: any) {
+      Alert.alert('OCR', readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'))
+    } finally {
+      setOcrLoading(null)
+    }
+  }
+
+  const addConditionPhoto = async (useCamera: boolean) => {
+    let uris: string[] = []
+    if (useCamera) {
+      const perm = await ImagePicker.requestCameraPermissionsAsync()
+      if (perm.status !== 'granted') {
+        Alert.alert('Lỗi', 'Cần quyền camera.')
+        return
+      }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
+      if (!r.canceled) uris = [r.assets[0].uri]
+    } else {
+      const r = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.6,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+      })
+      if (!r.canceled) uris = r.assets.map((a) => a.uri)
+    }
+    if (uris.length === 0) return
+    try {
+      setPhotoUploading(true)
+      const urls = await Promise.all(uris.map((u) => uploadImageToCloudinary(u)))
+      setPhotos((prev) => [...prev, ...urls])
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  const save = async () => {
+    try {
+      setSaving(true)
+      const updated = await realTenantService.updateDraftContract(contract.id, {
+        initialElectricReading: elecReading ? Number(elecReading) : undefined,
+        initialWaterReading: waterReading ? Number(waterReading) : undefined,
+        electricMeterImageUrl: elecUrl || undefined,
+        waterMeterImageUrl: waterUrl || undefined,
+        roomConditionUrls: photos,
+        roomConditionNote: note || undefined,
+      })
+      onChanged(updated)
+      setExpanded(false)
+      Alert.alert('Đã lưu', 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.')
+    } catch (err: any) {
+      Alert.alert('Lỗi', readErr(err, 'Không lưu được hiện trạng phòng.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <View style={styles.formCard}>
+      <TouchableOpacity style={styles.inspectionHeader} onPress={() => setExpanded((v) => !v)} activeOpacity={0.7}>
+        <Text style={styles.inspectionTitle}>{hasData ? '✅' : '📋'} Hiện trạng phòng & điện nước</Text>
+        <Text style={styles.inspectionToggle}>{expanded ? 'Thu gọn ▲' : 'Chỉnh sửa ▼'}</Text>
+      </TouchableOpacity>
+      {!expanded && (
+        <Text style={styles.inspectionSummary}>
+          {photos.length > 0 ? `${photos.length} ảnh hiện trạng` : 'Chưa có ảnh hiện trạng'}
+          {elecReading ? ` · Điện ${elecReading}` : ''}
+          {waterReading ? ` · Nước ${waterReading}` : ''}
+        </Text>
+      )}
+
+      {expanded && (
+        <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
+          {(['elec', 'water'] as const).map((kind) => (
+            <View key={kind} style={styles.meterCardSm}>
+              <Text style={styles.label}>{kind === 'elec' ? '⚡ Chỉ số điện (kWh)' : '💧 Chỉ số nước (m³)'}</Text>
+              <View style={styles.methodRow}>
+                <TouchableOpacity
+                  style={styles.secondaryBtnSm}
+                  onPress={() => captureMeter(kind, true)}
+                  disabled={ocrLoading !== null}
+                >
+                  <Text style={styles.secondaryBtnSmText}>📷 Chụp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondaryBtnSm}
+                  onPress={() => captureMeter(kind, false)}
+                  disabled={ocrLoading !== null}
+                >
+                  <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+                </TouchableOpacity>
+                {ocrLoading === kind && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
+              </View>
+              {!!(kind === 'elec' ? elecUrl : waterUrl) && (
+                <Image source={{ uri: kind === 'elec' ? elecUrl : waterUrl }} style={styles.meterThumb} />
+              )}
+              <TextInput
+                style={styles.input}
+                value={kind === 'elec' ? elecReading : waterReading}
+                onChangeText={kind === 'elec' ? setElecReading : setWaterReading}
+                keyboardType="numeric"
+                placeholder="OCR tự điền, có thể chỉnh"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+          ))}
+
+          <View>
+            <Text style={styles.label}>Ảnh hiện trạng phòng</Text>
+            <View style={styles.methodRow}>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(true)} disabled={photoUploading}>
+                <Text style={styles.secondaryBtnSmText}>📸 Chụp ảnh</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(false)} disabled={photoUploading}>
+                <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+              </TouchableOpacity>
+              {photoUploading && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
+            </View>
+            {photos.length > 0 && (
+              <View style={styles.photoGrid}>
+                {photos.map((uri, i) => (
+                  <View key={`${uri}-${i}`} style={styles.photoWrap}>
+                    <Image source={{ uri }} style={styles.photoThumb} />
+                    <TouchableOpacity
+                      style={styles.removePhotoBtn}
+                      onPress={() => setPhotos((prev) => prev.filter((x) => x !== uri))}
+                    >
+                      <Text style={styles.removePhotoText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View>
+            <Text style={styles.label}>Ghi chú hiện trạng</Text>
+            <TextInput
+              style={[styles.input, styles.notesInput]}
+              value={note}
+              onChangeText={setNote}
+              multiline
+              placeholder="Tường sạch, cửa tốt, máy lạnh đã kiểm tra..."
+              placeholderTextColor={Colors.textMuted}
+            />
+          </View>
+
+          <TouchableOpacity style={[styles.primaryBtn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
+            {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.primaryBtnText}>💾 Lưu hiện trạng</Text>}
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  )
+}
+
+// ===== Đã duyệt: thu cọc PayOS + OTP (hệ thống thu cọc 100% chuyển khoản) =====
 const DepositOtpPanel: React.FC<{
   contract: TenantContractResponse
   onDone: () => void
   onChanged: (c: TenantContractResponse) => void
 }> = ({ contract, onChanged }) => {
   const navigation = useNavigation<any>()
-  const [method, setMethod] = useState<'payos' | 'cash'>('payos')
   const [payInfo, setPayInfo] = useState<TenantContractResponse>(contract)
   const [paid, setPaid] = useState(contract.paymentStatus === 'PAID')
   const [showWebView, setShowWebView] = useState(false)
@@ -326,7 +597,7 @@ const DepositOtpPanel: React.FC<{
 
   // Poll trạng thái thanh toán (PayOS, local không có webhook).
   useEffect(() => {
-    if (method !== 'payos' || paid) return
+    if (paid) return
     const timer = setInterval(async () => {
       try {
         const c = await realTenantService.checkPayment(contract.id)
@@ -339,7 +610,7 @@ const DepositOtpPanel: React.FC<{
       }
     }, 5000)
     return () => clearInterval(timer)
-  }, [method, paid, contract.id])
+  }, [paid, contract.id])
 
   // Giữ OTP: khi đã thu cọc xong, tự gửi OTP tới SĐT khách để kích hoạt HĐ.
   useEffect(() => {
@@ -427,84 +698,73 @@ const DepositOtpPanel: React.FC<{
           {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Tiến hành thu cọc{' '}
           {formatVnd(depositValue)} đ rồi xác thực OTP để kích hoạt hợp đồng.
         </Text>
+        {!!contract.expectedReceptionDate && (
+          <Text style={styles.bannerReception}>
+            📅 Hẹn đón khách ngày {formatDateVi(contract.expectedReceptionDate)}
+          </Text>
+        )}
       </View>
+
+      <InspectionSection contract={contract} onChanged={onChanged} />
 
       {!paid ? (
         <>
           <Text style={styles.label}>Hình thức thu cọc</Text>
+          {/* Hệ thống thu cọc 100% chuyển khoản qua PayOS — không còn tiền mặt */}
           <View style={styles.methodRow}>
-            <TouchableOpacity
-              style={[styles.methodChip, method === 'payos' && styles.methodChipActive]}
-              onPress={() => setMethod('payos')}
-            >
-              <Text style={[styles.methodText, method === 'payos' && styles.methodTextActive]}>
+            <View style={[styles.methodChip, styles.methodChipActive]}>
+              <Text style={[styles.methodText, styles.methodTextActive]}>
                 💳 Chuyển khoản (PayOS)
               </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.methodChip, method === 'cash' && styles.methodChipActive]}
-              onPress={() => setMethod('cash')}
-            >
-              <Text style={[styles.methodText, method === 'cash' && styles.methodTextActive]}>
-                💵 Tiền mặt
-              </Text>
-            </TouchableOpacity>
+            </View>
           </View>
 
-          {method === 'cash' ? (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setPaid(true)}>
-              <Text style={styles.primaryBtnText}>💵 Xác nhận đã thu cọc tiền mặt</Text>
+          {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, busy && styles.btnDisabled]}
+              onPress={createPayment}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.primaryBtnText}>Tạo mã thanh toán cọc</Text>
+              )}
             </TouchableOpacity>
-          ) : (
-            <>
-              {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
-                <TouchableOpacity
-                  style={[styles.primaryBtn, busy && styles.btnDisabled]}
-                  onPress={createPayment}
-                  disabled={busy}
-                >
-                  {busy ? (
-                    <ActivityIndicator color={Colors.white} />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>Tạo mã thanh toán cọc</Text>
-                  )}
-                </TouchableOpacity>
-              )}
-              {!!payInfo.payosQrCode && !showWebView && (
-                <View style={styles.qrBox}>
-                  <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
-                  <View style={styles.qrWrap}>
-                    <QRCode value={payInfo.payosQrCode} size={200} />
-                  </View>
-                  <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
-                </View>
-              )}
-              {!!payInfo.payosCheckoutUrl && !showWebView && (
-                <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowWebView(true)}>
-                  <Text style={styles.primaryBtnText}>💳 Mở trang thanh toán PayOS</Text>
-                </TouchableOpacity>
-              )}
-              {showWebView && !!payInfo.payosCheckoutUrl && (
-                <View style={styles.webviewBox}>
-                  <WebView
-                    source={{ uri: payInfo.payosCheckoutUrl }}
-                    onNavigationStateChange={(nav) => {
-                      if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
-                        setShowWebView(false)
-                        checkPaidNow()
-                      } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
-                        setShowWebView(false)
-                      }
-                    }}
-                  />
-                </View>
-              )}
-              {(!!payInfo.payosQrCode || !!payInfo.payosCheckoutUrl) && (
-                <TouchableOpacity style={styles.secondaryBtn} onPress={checkPaidNow}>
-                  <Text style={styles.secondaryBtnText}>Tôi đã chuyển khoản — Kiểm tra</Text>
-                </TouchableOpacity>
-              )}
-            </>
+          )}
+          {!!payInfo.payosQrCode && !showWebView && (
+            <View style={styles.qrBox}>
+              <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
+              <View style={styles.qrWrap}>
+                <QRCode value={payInfo.payosQrCode} size={200} />
+              </View>
+              <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
+            </View>
+          )}
+          {!!payInfo.payosCheckoutUrl && !showWebView && (
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowWebView(true)}>
+              <Text style={styles.primaryBtnText}>💳 Mở trang thanh toán PayOS</Text>
+            </TouchableOpacity>
+          )}
+          {showWebView && !!payInfo.payosCheckoutUrl && (
+            <View style={styles.webviewBox}>
+              <WebView
+                source={{ uri: payInfo.payosCheckoutUrl }}
+                onNavigationStateChange={(nav) => {
+                  if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
+                    setShowWebView(false)
+                    checkPaidNow()
+                  } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
+                    setShowWebView(false)
+                  }
+                }}
+              />
+            </View>
+          )}
+          {(!!payInfo.payosQrCode || !!payInfo.payosCheckoutUrl) && (
+            <TouchableOpacity style={styles.secondaryBtn} onPress={checkPaidNow}>
+              <Text style={styles.secondaryBtnText}>Tôi đã chuyển khoản — Kiểm tra</Text>
+            </TouchableOpacity>
           )}
         </>
       ) : (
@@ -573,6 +833,26 @@ const styles = StyleSheet.create({
   backText: { color: Colors.primary, fontWeight: '600' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary },
 
+  viewContractBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryBg,
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+    borderRadius: BorderRadius.md,
+  },
+  viewContractBarText: { color: Colors.primary, fontWeight: '700', fontSize: 13 },
+  viewContractBarDisabled: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+    marginHorizontal: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  viewContractBarDisabledText: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
+
   listBody: { padding: Spacing.lg, gap: Spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 80, gap: Spacing.md },
   emptyIcon: { fontSize: 44 },
@@ -592,6 +872,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardPrice: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
+  cardReception: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   statusText: { fontSize: 11, fontWeight: '700' },
 
@@ -600,6 +881,7 @@ const styles = StyleSheet.create({
   bannerIcon: { fontSize: 40 },
   bannerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
   bannerDesc: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
+  bannerReception: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
 
   formCard: {
     backgroundColor: Colors.white,
@@ -670,4 +952,55 @@ const styles = StyleSheet.create({
   paidBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   paidIcon: { fontSize: 22 },
   paidText: { fontSize: 15, fontWeight: '700', color: Colors.success },
+
+  inspectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  inspectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  inspectionToggle: { fontSize: 12, fontWeight: '600', color: Colors.primary },
+  inspectionSummary: { marginTop: 4, fontSize: 12, color: Colors.textSecondary },
+  meterCardSm: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    padding: Spacing.md,
+  },
+  secondaryBtnSm: {
+    flex: 1,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  secondaryBtnSmText: { color: Colors.primary, fontSize: 13, fontWeight: '700' },
+  meterThumb: {
+    width: '100%',
+    height: 130,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.sm,
+    backgroundColor: Colors.divider,
+  },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
+  photoWrap: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: BorderRadius.md,
+    overflow: 'hidden',
+    backgroundColor: Colors.divider,
+  },
+  photoThumb: { width: '100%', height: '100%', backgroundColor: Colors.divider },
+  removePhotoBtn: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
+  notesInput: { minHeight: 80, textAlignVertical: 'top' },
 })

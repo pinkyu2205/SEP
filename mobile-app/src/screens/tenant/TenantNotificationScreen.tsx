@@ -8,6 +8,8 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { AppNotification } from '@/types';
 import { formatRelativeTime } from '@/utils';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
 const mapApiNotif = (n: ApiNotification): AppNotification => ({
@@ -137,8 +139,27 @@ export const TenantNotificationScreen: React.FC = () => {
 
   const TENANT_TAB_ROUTES = ['Home', 'InvoiceList', 'MaintenanceList', 'TenantContracts', 'Profile'];
 
-  const handleNotifPress = (notif: AppNotification) => {
+  const handleNotifPress = async (notif: AppNotification) => {
     markRead(notif.id);
+    // Thông báo bảo trì: BE không gửi payload điều hướng, nhưng body luôn có
+    // "Yêu cầu #<id> ..." → parse id, nạp chi tiết rồi mở thẳng màn ticket.
+    if (notif.type.startsWith('maintenance')) {
+      const m = notif.body?.match(/#(\d+)/);
+      if (m) {
+        try {
+          const dto = await realMaintenanceService.getDetail(Number(m[1]));
+          navigation.navigate('MaintenanceDetail', { request: dtoToTenantRequest(dto) });
+          return;
+        } catch { /* ticket không đọc được → rơi xuống danh sách */ }
+      }
+      navigation.navigate('TenantTabs', { screen: 'MaintenanceList' });
+      return;
+    }
+    // Thông báo hóa đơn (cron nhắc nợ — API-CRON-NhacNo-LateFee-BE-TODO.md) → tab hóa đơn.
+    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
+      navigation.navigate('TenantTabs', { screen: 'InvoiceList' });
+      return;
+    }
     if (notif.actionRoute) {
       if (TENANT_TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('TenantTabs', { screen: notif.actionRoute });

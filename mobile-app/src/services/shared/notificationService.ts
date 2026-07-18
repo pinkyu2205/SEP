@@ -30,12 +30,24 @@ interface BeNotificationRow {
 
 /** Đổi type thô của BE về type UI (TYPE_CATEGORY/TYPE_ACCENT của các màn). */
 const normalizeType = (row: BeNotificationRow): string => {
-  if (row.type === 'MAINTENANCE') {
+  const raw = (row.type || '').toUpperCase();
+  // Cron nhắc nợ (API-CRON-NhacNo-LateFee-BE-TODO.md): BE ghi type BILLING_*.
+  if (raw === 'BILLING_REMINDER') return 'new_bill';
+  if (raw === 'BILLING_OVERDUE') return 'bill_overdue';
+  if (raw === 'MAINTENANCE') {
     // BE dùng chung 1 type — phân biệt qua nội dung: ticket mới / đã xong / cập nhật.
     if (/mới/i.test(row.title)) return 'maintenance_new';
     if (/DONE|CONFIRMED/.test(row.content)) return 'maintenance_resolved';
     return 'maintenance_accepted';
   }
+  // Trả phòng (checkout-request) — nhận diện rộng vì chưa chốt chuỗi type BE.
+  if (raw.includes('CHECKOUT') || /trả phòng/i.test(row.title)) return 'checkout_request';
+  // Gán đón khách / hợp đồng (assign-manager, duyệt giá...) → mở ResumeContract.
+  if (raw.includes('CONTRACT') || raw.includes('ASSIGN') || raw.includes('ONBOARD') ||
+      /đón khách|hợp đồng/i.test(row.title)) {
+    return 'contract_assigned';
+  }
+  // Type lạ giữ nguyên — UI có fallback (icon 🔔 Hệ thống), KHÔNG được crash.
   return row.type;
 };
 
@@ -56,7 +68,10 @@ export const realNotificationService = {
       { params: { size: 50 } },
     );
     const rows = Array.isArray(data) ? data : data?.content ?? [];
-    return rows.map(mapRow);
+    // BE trả Page KHÔNG sort (id ASC — cũ nhất trước) và bỏ qua param `sort`,
+    // nên phải tự đảo về mới-nhất-trước. Lưu ý: khi user vượt 50 notif, page 0
+    // chỉ còn 50 cái CŨ nhất → cần BE sort DESC (đã gửi API-NOTIF-Sort-BE-TODO.md).
+    return rows.map(mapRow).sort((a, b) => b.id - a.id);
   },
 
   /** Số thông báo chưa đọc (cho badge). */

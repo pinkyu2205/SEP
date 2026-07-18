@@ -9,7 +9,7 @@ import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/s
  * xem doc/BE-TODO-tenant-portal-2026-06-29.md. Khi BE làm xong là chạy ngay, không sửa FE.
  */
 
-export type TenantInvoiceType = 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'OTHER';
+export type TenantInvoiceType = 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'MAINTENANCE' | 'OTHER';
 export type TenantInvoiceStatus = 'PENDING' | 'PAID' | 'OVERDUE' | 'PARTIAL' | 'CANCELLED';
 
 export interface TenantInvoiceItem {
@@ -100,11 +100,22 @@ export const realTenantBillingService = {
     );
     return unwrap(data);
   },
+
+  // GET /api/v1/tenant/me/pending-charges -> khoản chờ thu (phí bảo trì khách làm hư
+  // đã nghiệm thu nhưng chưa phát hành hóa đơn). status: PENDING | INVOICED.
+  listPendingCharges: async (): Promise<Array<{
+    id: number; tenantContractId: number; invoiceId?: number | null;
+    amount: number; category: string; note?: string; status: string; createdAt: string;
+  }>> => {
+    const { data } = await realApiClient.get(`${BASE}/pending-charges`);
+    return Array.isArray(data) ? data : [];
+  },
 };
 
 // ===== Mappers: TenantInvoice (BE) -> SharedBill (shape UI đang dùng) =====
 const TYPE_MAP: Record<TenantInvoiceType, InvoiceType> = {
   RENT: 'rent', SERVICE: 'rent', OTHER: 'rent', ELECTRICITY: 'electricity', WATER: 'water',
+  MAINTENANCE: 'maintenance',
 };
 const STATUS_MAP: Record<TenantInvoiceStatus, BillStatus> = {
   PENDING: 'pending', PAID: 'paid', OVERDUE: 'overdue', PARTIAL: 'partial', CANCELLED: 'cancelled',

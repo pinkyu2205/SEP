@@ -108,6 +108,8 @@ export interface TenantContractExtracted {
   startDate: string; // yyyy-MM-dd
   endDate: string;   // yyyy-MM-dd
   address: string;
+  /** Tên nhà/tòa nhà ghi rõ trong HĐ (nhãn "Tên nhà/Tòa nhà/BĐS: ...") — có thể rỗng nếu HĐ chỉ ghi địa chỉ. */
+  propertyName: string;
 }
 
 /** "01/08/2026" hoặc "01-08-2026" → "2026-08-01" */
@@ -158,7 +160,15 @@ function parseTenantContractText(text: string): TenantContractExtracted {
     text.match(/c[ăa]n\s*h[ộo][^\n:]*s[ốo]\s*[:.]?\s*([^\n]+)/i);
   const address = addrMatch ? addrMatch[1].split(/[,;]/)[0].replace(/\.{2,}.*$/, '').trim() : '';
 
-  return { tenantName, tenantCccd, tenantPhone, rentAmount, deposit, startDate, endDate, address };
+  // Tên BĐS ghi rõ bằng nhãn — mạnh hơn địa chỉ vì so được thẳng với propertyName trong hệ thống.
+  const propNameMatch = text.match(
+    /t[êe]n\s*(?:nh[àa]|t[òo]a\s*nh[àa]|b[ấa]t\s*đ[ộo]ng\s*s[ảa]n|BĐS)\s*[:.]?\s*([^\n]+)/i,
+  );
+  const propertyName = propNameMatch
+    ? propNameMatch[1].split(/[,;(]/)[0].replace(/\.{2,}.*$/, '').trim()
+    : '';
+
+  return { tenantName, tenantCccd, tenantPhone, rentAmount, deposit, startDate, endDate, address, propertyName };
 }
 
 export async function extractTenantContractData(file: File): Promise<TenantContractExtracted> {

@@ -35,6 +35,7 @@ const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: str
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
 };
 
 const TYPE_FILTER_TABS: { key: TypeFilter; label: string }[] = [
@@ -51,9 +52,18 @@ const STATUS_FILTER_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'all',     label: 'Tất cả' },
 ];
 
+type PendingCharge = Awaited<ReturnType<typeof realTenantBillingService.listPendingCharges>>[number];
+
+const PENDING_CHARGE_CATEGORY: Record<string, string> = {
+  MAINTENANCE: 'Phí sửa chữa (khách làm hư)',
+};
+
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [invoices, setInvoices] = useState<SharedBill[]>([]);
+  // Khoản chờ thu (đã nghiệm thu, CHƯA phát hành hóa đơn) — hiện trước để khách không
+  // bất ngờ khi hóa đơn MAINTENANCE xuất hiện kỳ tới.
+  const [pendingCharges, setPendingCharges] = useState<PendingCharge[]>([]);
   const [loading, setLoading]   = useState(true);
   const [typeFilter, setTypeFilter]     = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('unpaid');
@@ -62,12 +72,19 @@ export const InvoiceListScreen: React.FC = () => {
 
   const reload = useCallback(() => {
     setLoading(true);
-    realTenantBillingService.listInvoices()
-      .then(r => setInvoices(r.map(toSharedBill)))
-      .catch(() => setInvoices([]))
+    Promise.all([
+      realTenantBillingService.listInvoices().catch(() => []),
+      realTenantBillingService.listPendingCharges().catch(() => [] as PendingCharge[]),
+    ])
+      .then(([inv, charges]) => {
+        setInvoices(inv.map(toSharedBill));
+        setPendingCharges(charges.filter(c => (c.status || '').toUpperCase() === 'PENDING'));
+      })
       .finally(() => setLoading(false));
   }, []);
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
+
+  const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 
   const filtered = invoices.filter(i => {
     if (typeFilter !== 'all' && i.invoiceType !== typeFilter) return false;
@@ -279,6 +296,30 @@ export const InvoiceListScreen: React.FC = () => {
         keyExtractor={i => i.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          pendingCharges.length > 0 ? (
+            <View style={styles.pendingChargeCard}>
+              <Text style={styles.pendingChargeTitle}>
+                ⏳ Khoản chờ thu kỳ tới — {formatCurrency(pendingChargeTotal)}
+              </Text>
+              <Text style={styles.pendingChargeDesc}>
+                Các khoản dưới đây đã được xác nhận và sẽ được đưa vào hóa đơn kỳ tới.
+              </Text>
+              {pendingCharges.map(c => (
+                <View key={c.id} style={styles.pendingChargeRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pendingChargeName}>
+                      {PENDING_CHARGE_CATEGORY[(c.category || '').toUpperCase()] ?? c.category ?? 'Khoản thu khác'}
+                    </Text>
+                    {!!c.note && <Text style={styles.pendingChargeNote} numberOfLines={2}>{c.note}</Text>}
+                    {!!c.createdAt && <Text style={styles.pendingChargeNote}>Ghi nhận {formatDate(c.createdAt)}</Text>}
+                  </View>
+                  <Text style={styles.pendingChargeAmount}>{formatCurrency(c.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
         ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
         ListEmptyComponent={
           loading ? (
@@ -450,6 +491,23 @@ const styles = StyleSheet.create({
   filterTextActive: { color: Colors.white },
 
   list: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
+
+  // Khoản chờ thu (pending charges — chưa thành hóa đơn)
+  pendingChargeCard: {
+    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: '#FDE68A',
+    padding: Spacing.base, marginBottom: Spacing.base,
+  },
+  pendingChargeTitle: { fontSize: 14, fontWeight: '700', color: '#92400E' },
+  pendingChargeDesc: { fontSize: 12, color: '#B45309', marginTop: 2, lineHeight: 18 },
+  pendingChargeRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginTop: Spacing.sm, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: '#FDE68A',
+  },
+  pendingChargeName: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  pendingChargeNote: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  pendingChargeAmount: { fontSize: 14, fontWeight: '800', color: '#B45309' },
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.md, overflow: 'hidden' },
   cardOverdue: { borderWidth: 1.5, borderColor: Colors.error + '60' },
   overdueStripe: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, backgroundColor: Colors.error },

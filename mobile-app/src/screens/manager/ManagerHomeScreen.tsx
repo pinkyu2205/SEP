@@ -26,6 +26,7 @@ const QUICK_ACTIONS = [
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
   { emoji: '📨', label: 'Khách chờ đón', route: 'ResumeContract',  color: Colors.warning },
+  { emoji: '🚪', label: 'Trả phòng',  route: 'CheckoutRequests',   color: Colors.error },
 ] as const;
 
 // ── Component ──────────────────────────────────────────────────────────────

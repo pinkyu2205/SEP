@@ -10,7 +10,8 @@ import { realNotificationService, ApiNotification } from '@/services/shared/noti
 // ===================== TYPES =====================
 type NotifType =
   | 'new_bill' | 'bill_overdue' | 'payment_success' | 'payment_pending_verify'
-  | 'contract_expiring' | 'maintenance_new' | 'maintenance_resolved'
+  | 'contract_expiring' | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
+  | 'contract_assigned' | 'checkout_request'
   | 'equipment_damaged' | 'tenant_onboarded' | 'system';
 
 type NotifPriority = 'high' | 'normal' | 'low';
@@ -37,10 +38,15 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   contract_expiring: { icon: '📋', color: Colors.info, bg: Colors.infoLight, category: 'Hợp đồng' },
   maintenance_new: { icon: '🔧', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
   maintenance_resolved: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
+  maintenance_accepted: { icon: '🔧', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },
+  contract_assigned: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
+  checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Trả phòng' },
   equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
   tenant_onboarded: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Khách thuê' },
   system: { icon: '🔔', color: Colors.textSecondary, bg: Colors.divider, category: 'Hệ thống' },
 };
+// BE có thể gửi type FE chưa biết — luôn fallback, KHÔNG để cfg undefined làm crash render.
+const cfgOf = (type: string) => TYPE_CONFIG[type as NotifType] ?? TYPE_CONFIG.system;
 
 const FILTER_TABS = [
   { key: 'all', label: 'Tất cả' },
@@ -69,7 +75,7 @@ const NotifCard: React.FC<{
   onPress: () => void;
   onMarkRead: () => void;
 }> = ({ notif, onPress, onMarkRead }) => {
-  const cfg = TYPE_CONFIG[notif.type];
+  const cfg = cfgOf(notif.type);
   return (
     <TouchableOpacity
       style={[styles.card, !notif.isRead && styles.cardUnread]}
@@ -158,6 +164,32 @@ export const NotificationCenterScreen: React.FC = () => {
 
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);
+    // Thông báo bảo trì: nếu body có "#<id>" thì mở thẳng ticket, không thì về tab bảo trì.
+    if (notif.type.startsWith('maintenance')) {
+      const m = notif.body?.match(/#(\d+)/);
+      if (m) {
+        navigation.navigate('MaintenanceTicketDetail', { ticketId: m[1] });
+      } else {
+        navigation.navigate('ManagerTabs', { screen: 'ManagerMaintenance' });
+      }
+      return;
+    }
+    // Thông báo hóa đơn (cron nhắc nợ) → tab billing của manager.
+    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
+      navigation.navigate('ManagerTabs', { screen: 'ManagerBilling' });
+      return;
+    }
+    // Gán đón khách / hợp đồng: có "#<id>" thì mở thẳng HĐ trong ResumeContract.
+    if (notif.type === 'contract_assigned' || notif.type === 'tenant_onboarded') {
+      const m = notif.body?.match(/#(\d+)/) ?? notif.title?.match(/#(\d+)/);
+      navigation.navigate('ResumeContract', m ? { contractId: Number(m[1]) } : undefined);
+      return;
+    }
+    // Yêu cầu trả phòng → màn duyệt checkout-request.
+    if (notif.type === 'checkout_request') {
+      navigation.navigate('CheckoutRequests');
+      return;
+    }
     if (notif.actionRoute) {
       if (TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('ManagerTabs', { screen: notif.actionRoute });

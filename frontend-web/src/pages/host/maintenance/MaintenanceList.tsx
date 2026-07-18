@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Wrench, CheckCircle, Clock, AlertTriangle,
   DollarSign, Eye, X, Calendar, User, Building2,
@@ -29,9 +29,16 @@ const fmtDate = (iso?: string): string => {
 };
 
 // ── Modal chi tiết ────────────────────────────────────────────────────────────
-const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse; onClose: () => void }) => {
+// Flow mới 17/07: duyệt request/báo xong/review-reject làm trên mobile manager;
+// web host chỉ giám sát. (Khối "duyệt chi phí PENDING_APPROVAL" cũ đã bỏ — chi phí
+// chuyển sang luồng hóa đơn sau CLOSED, và PUT /approve giờ nghĩa là duyệt request.)
+const DetailModal = ({ request, onClose }: {
+  request: MaintenanceRequestResponse;
+  onClose: () => void;
+}) => {
   const status = normalizeMaintenanceStatus(request.status);
-  const pBadge = maintenanceReqPriorityMap[request.priority] ?? maintenanceReqPriorityMap.LOW;
+  // priority/category null khi ticket PENDING — manager gán lúc duyệt (flow 17/07 chiều)
+  const pBadge = request.priority ? maintenanceReqPriorityMap[request.priority] : undefined;
   const sBadge = maintenanceReqStatusMap[status];
   const [history, setHistory] = useState<EquipmentMaintenanceHistoryResponse[]>([]);
 
@@ -51,13 +58,17 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
           <div className="flex-1 min-w-0 pr-4">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="font-mono text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded">{request.requestCode}</span>
-              <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
-              </span>
+              {pBadge && (
+                <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
+                </span>
+              )}
               <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${sBadge.color}`}>
                 {sBadge.label}
               </span>
-              <span className="text-xs text-slate-500">{maintenanceCategoryMap[request.category] ?? request.category}</span>
+              <span className="text-xs text-slate-500">
+                {request.category ? (maintenanceCategoryMap[request.category] ?? request.category) : 'Chưa phân loại'}
+              </span>
             </div>
             <h2 className="text-base font-bold text-slate-900 leading-snug">
               {request.equipmentName ?? request.roomName}
@@ -141,6 +152,11 @@ const DetailModal = ({ request, onClose }: { request: MaintenanceRequestResponse
                 <strong>{request.costPaidBy === 'HOST' ? '🏠 Chủ nhà (tính vào chi phí)' : '👤 Khách thuê'}</strong>
               </p>
             )}
+            {!!request.reopenCount && request.reopenCount > 0 && (
+              <p className="text-xs text-rose-700 mt-1.5">
+                🔄 Khách đã từ chối nghiệm thu <strong>{request.reopenCount} lần</strong>
+              </p>
+            )}
             {request.resolutionNote && (
               <p className="text-sm text-emerald-900 mt-2 leading-relaxed">{request.resolutionNote}</p>
             )}
@@ -218,22 +234,21 @@ export const MaintenanceList = () => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
 
-  useEffect(() => {
-    let cancelled = false;
+  // Tách thành hàm để modal duyệt chi phí gọi lại sau khi approve/reject.
+  const load = useCallback(() => {
     setLoading(true);
     Promise.all([
       maintenanceService.getRequests({}, 0, 200).catch(() => ({ content: [] as MaintenanceRequestResponse[] })),
       maintenanceService.getDashboard().catch(() => null),
       propertyService.getProperties(0, 200).catch(() => ({ content: [] as PropertyResponse[] })),
     ]).then(([reqPage, dash, propPage]) => {
-      if (cancelled) return;
       setRequests((reqPage as { content: MaintenanceRequestResponse[] }).content ?? []);
       setDashboard(dash as MaintenanceDashboardResponse | null);
       setProperties((propPage as { content: PropertyResponse[] }).content ?? []);
       setLoading(false);
     });
-    return () => { cancelled = true; };
   }, []);
+  useEffect(() => { load(); }, [load]);
 
   const stats = useMemo(() => {
     if (dashboard) return dashboard;
@@ -379,14 +394,15 @@ export const MaintenanceList = () => {
               )}
               {!loading && filtered.map(req => {
                 const status = normalizeMaintenanceStatus(req.status);
-                const pBadge = maintenanceReqPriorityMap[req.priority] ?? maintenanceReqPriorityMap.LOW;
+                // priority/category null khi PENDING — manager gán lúc duyệt
+                const pBadge = req.priority ? maintenanceReqPriorityMap[req.priority] : undefined;
                 const sBadge = maintenanceReqStatusMap[status];
                 return (
                   <tr key={req.id} className="transition-colors hover:bg-slate-50/80 cursor-pointer" onClick={() => setSelected(req)}>
                     <td className="px-5 py-4">
                       <p className="font-mono text-[10px] text-slate-400">{req.requestCode}</p>
                       <p className="font-semibold text-slate-900 mt-0.5 leading-snug line-clamp-2 max-w-[220px]">
-                        {req.equipmentName ?? req.description}
+                        {req.title ?? req.equipmentName ?? req.description}
                       </p>
                     </td>
                     <td className="px-5 py-4">
@@ -398,11 +414,17 @@ export const MaintenanceList = () => {
                         </div>
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-xs text-slate-600">{maintenanceCategoryMap[req.category] ?? req.category}</td>
+                    <td className="px-5 py-4 text-xs text-slate-600">
+                      {req.category ? (maintenanceCategoryMap[req.category] ?? req.category) : <span className="text-slate-400">Chưa phân loại</span>}
+                    </td>
                     <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
-                      </span>
+                      {pBadge ? (
+                        <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${pBadge.color}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${pBadge.dot}`} />{pBadge.label}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full ${sBadge.color}`}>{sBadge.label}</span>
@@ -438,7 +460,12 @@ export const MaintenanceList = () => {
         </div>
       </div>
 
-      {selected && <DetailModal request={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <DetailModal
+          request={selected}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 };

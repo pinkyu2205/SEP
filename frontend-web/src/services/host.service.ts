@@ -97,8 +97,13 @@ export interface HostContractDto {
   roomCode?: string; lessorName?: string;
   rentAmount: number; deposit?: number;
   moveInDate?: string; startDate: string; endDate?: string;
-  status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
-  // Biên bản bàn giao thiết bị (JSON string) — để Host xem thiết bị đề xuất khi duyệt giá.
+  status: 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED' | 'DRAFT';
+  // Trạng thái duyệt giá (Case 2 — manager gửi Host duyệt). Optional: đã đề nghị BE
+  // expose trong API-ProcessGaps-BE-TODO.md; chưa có thì FE fallback theo status PENDING.
+  priceApprovalStatus?: 'PENDING_PRICE_APPROVAL' | 'APPROVED_AWAITING_DEPOSIT' | 'PRICE_REJECTED';
+  priceRejectReason?: string;
+  // Biên bản bàn giao thiết bị — HĐ cũ là JSON string, HĐ mới là text BE sinh
+  // ("Giường (Tốt) x1, ..."); FE parse phòng thủ cả 2 (snapshotToLines).
   equipmentSnapshot?: string;
 }
 

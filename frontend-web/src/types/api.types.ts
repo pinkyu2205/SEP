@@ -781,16 +781,37 @@ export interface HouseholdMemberInput {
   cccd?: string;
 }
 
+// Nội thất trong phạm vi HĐ (phòng + khu vực chung, hoặc cả căn nếu nguyên căn) —
+// GET /properties/{propertyId}/contract-available-equipments?roomId=. CHỈ để hiển thị
+// read-only: BE tự gắn toàn bộ thiết bị ACTIVE vào HĐ, không còn checkbox chọn
+// (FE-contract-equipment-auto.md 2026-07).
+export interface ContractAvailableEquipmentItem {
+  id: number;
+  name: string;
+  condition: string; // NEW | GOOD | DAMAGED | BROKEN
+  quantity: number;
+  scope?: 'ROOM' | 'SHARED'; // thiết bị của phòng hay khu vực chung
+  roomNumber?: string;
+  houseArea?: string;
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
   phoneNumber: string;
+  dateOfBirth?: string;      // ISO date (yyyy-MM-dd) — ngày sinh khách chính, BE lưu vào draftTenantDob/Tenant.dateOfBirth
+  cccdIssueDate?: string;    // ISO date — ngày cấp CCCD (in trên PDF HĐ: ${tenantCccdIssueDate})
+  cccdIssuePlace?: string;   // nơi cấp CCCD (${tenantCccdIssuePlace})
+  permanentAddress?: string; // hộ khẩu thường trú (field mới 16/07, in trên PDF HĐ: HKTT ${tenantAddress})
   moveInDate: string;        // ISO date (yyyy-MM-dd)
   rentAmount: number;
   deposit: number;
   endDate?: string;          // optional
-  equipmentSnapshot?: string;
   roomConditionUrl?: string;
+  // Nội thất có sẵn: KHÔNG còn field nào để gửi — BE tự gắn toàn bộ thiết bị ACTIVE
+  // trong phạm vi HĐ và tự sinh equipmentSnapshot (FE-contract-equipment-auto.md 2026-07).
+  // `selectedEquipmentIds`/`equipmentSnapshot` request đã bỏ hẳn khỏi type: gửi
+  // selectedEquipmentIds=[] còn bị BE hiểu là "không gắn nội thất nào".
 
   // --- Onboarding v2: field mở rộng (khớp mobile OnboardTenantRequest) ---
   depositMonths?: number;
@@ -820,6 +841,10 @@ export interface TenantContractResponse {
   tenantFullName: string;
   tenantPhone: string;
   tenantCccd?: string;
+  tenantDateOfBirth?: string; // ISO date (yyyy-MM-dd) — ngày sinh khách chính
+  tenantCccdIssueDate?: string;  // ISO date — ngày cấp CCCD (field mới 15/07, in trên PDF HĐ)
+  tenantCccdIssuePlace?: string; // nơi cấp CCCD
+  tenantPermanentAddress?: string; // hộ khẩu thường trú (field mới 16/07)
   contractCode: string;
   rentAmount: number;
   deposit: number;
@@ -827,7 +852,13 @@ export interface TenantContractResponse {
   startDate: string;
   endDate?: string;
   status: ContractStatus;
+  // Text BE sinh cho PDF, vd "Giường (Tốt) x1, Tủ lạnh (Mới) x1" (+ dòng "Lắp thêm: ...").
   equipmentSnapshot?: string;
+  // Nội thất HĐ — đều read-only, BE tự gắn toàn bộ EXISTING ACTIVE (FE-contract-equipment-auto.md):
+  availableEquipmentList?: ContractAvailableEquipmentItem[]; // inventory nhà trong phạm vi HĐ
+  selectedExistingIds?: number[];   // ID nội thất có sẵn đã gắn (≈ toàn bộ available)
+  selectedEquipmentIds?: number[];  // field cũ — BE có thể còn trả, chỉ đọc
+  equipmentList?: ContractAvailableEquipmentItem[]; // thiết bị đã gắn HĐ (EXISTING + ADDED)
 
   // --- Onboarding v2 ---
   paymentStatus?: string;          // PENDING | PAID | FAILED | CANCELLED
@@ -835,9 +866,22 @@ export interface TenantContractResponse {
   tenantUsername?: string;         // sau confirm — username khách (= SĐT)
   assignedManagerId?: string;
   assignedManagerName?: string;
+  // File HĐ giờ là PDF (BE đổi từ DOCX 2026-07-14, xem FE-draft-contract-pdf.md);
+  // HĐ tạo trước đó có thể còn trỏ file .docx cũ trên Cloudinary.
   draftContractFileUrl?: string;
+  // BE map sẵn = draftContractFileUrl (fallback field cũ nếu có) — dùng field nào
+  // cũng ra cùng 1 URL kể cả sau khi HĐ đã ACTIVE (BE không render file mới sau ký,
+  // xem FE-tenant-draft-contract-document.md 2026-07-09).
+  documentUrl?: string;
+  pdfUrl?: string; // alias BE thêm 2026-07-14 — cùng URL với documentUrl/draftContractFileUrl
+  // true khi đã có file lưu (draftContractFileUrl không null) — dùng để bật nút "Xem hợp đồng",
+  // xem FE-view-contract.md. KHÔNG mở draftContractFileUrl/documentUrl trực tiếp, dùng
+  // GET /tenant-contracts/{id}/document/download (tenantService.viewContractDocument) —
+  // file mới trả application/pdf, HĐ cũ có thể trả DOCX, phân nhánh theo Content-Type.
+  contractFileAvailable?: boolean;
   expectedReceptionDate?: string;
   priceApprovalStatus?: string;    // PENDING_PRICE_APPROVAL | APPROVED_AWAITING_DEPOSIT | PRICE_REJECTED
+  householdMembers?: HouseholdMemberInput[];
 }
 
 // =============================================================================
@@ -920,17 +964,22 @@ export interface PropertyPurgeResponse {
 }
 
 // =============================================================================
-// MAINTENANCE — Bảo trì / Sửa chữa (theo Maintenance_BE_Contract.md)
+// MAINTENANCE — Bảo trì / Sửa chữa (flow mới 17/07: PENDING → APPROVED →
+// WAITING_TENANT_CONFIRM → CLOSED, nhánh REJECTED/CANCELLED; web chỉ giám sát)
 // =============================================================================
 
-export type MaintenanceRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED';
+export type MaintenanceRequestStatus =
+  | 'PENDING' | 'APPROVED' | 'WAITING_TENANT_CONFIRM' | 'REJECTED' | 'CLOSED' | 'CANCELLED'
+  // legacy trước migrate — normalizeMaintenanceStatus tự quy về bucket hiển thị
+  | 'IN_PROGRESS' | 'RESOLVED';
 export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceRequestCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'OTHER';
+  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
 
 export interface MaintenanceTimelineEntry {
-  oldStatus?: MaintenanceRequestStatus;
-  newStatus: MaintenanceRequestStatus;
+  // string vì timeline cũ còn chứa status legacy trước migrate
+  oldStatus?: string;
+  newStatus: string;
   note?: string;
   changedBy?: string;
   changedByName?: string;
@@ -940,9 +989,13 @@ export interface MaintenanceTimelineEntry {
 export interface MaintenanceRequestResponse {
   id: number;
   requestCode: string;
+  /** Tiêu đề tenant nhập (field mới 17/07 chiều). */
+  title?: string;
   status: MaintenanceRequestStatus;
-  category: MaintenanceRequestCategory;
-  priority: MaintenanceRequestPriority;
+  /** null khi PENDING — manager gán lúc duyệt. */
+  category?: MaintenanceRequestCategory | null;
+  /** null trừ khi manager gán lúc duyệt (tùy chọn). */
+  priority?: MaintenanceRequestPriority | null;
   description: string;
   tenantId: number;
   tenantName: string;
@@ -960,6 +1013,8 @@ export interface MaintenanceRequestResponse {
   resolutionNote?: string;
   /** Ai chịu chi phí: HOST = tính vào expense nhà, TENANT = khách tự trả. */
   costPaidBy?: 'HOST' | 'TENANT';
+  /** Số lần khách từ chối nghiệm thu (REOPENED) — đã đề nghị BE expose. */
+  reopenCount?: number;
   resolvedAt?: string;
   images: string[];
   timeline: MaintenanceTimelineEntry[];

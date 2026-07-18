@@ -22,8 +22,10 @@ export interface MaintenanceDashboardFilters {
 }
 
 /**
- * Maintenance service (Web Admin) — chỉ đọc.
- * Thao tác assign/resolve thực hiện ở mobile Operations Manager.
+ * Maintenance service (Web) — CHỈ ĐỌC/giám sát. Flow mới 17/07: mọi thao tác
+ * (duyệt request, báo xong, review-reject, hủy) làm trên mobile manager.
+ * LƯU Ý: PUT /{id}/approve giờ nghĩa là DUYỆT REQUEST (không còn duyệt chi phí) —
+ * web không được gọi; chi phí thuộc luồng hóa đơn sau khi ticket CLOSED.
  */
 export const maintenanceService = {
   /** GET /api/v1/maintenance/dashboard */
