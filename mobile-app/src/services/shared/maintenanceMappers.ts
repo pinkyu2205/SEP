@@ -95,6 +95,7 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   updatedAt: dto.updatedAt,
   costPaidBy: dto.costPaidBy,
   reopenCount: dto.reopenCount,
+  photoHistory: dto.photoHistory,
 });
 
 /** DTO -> MaintenanceTicket (manager model) */
@@ -129,4 +130,5 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   maintenanceCount: undefined,
   createdAt: dto.createdAt,
   updatedAt: dto.updatedAt,
+  photoHistory: dto.photoHistory,
 });

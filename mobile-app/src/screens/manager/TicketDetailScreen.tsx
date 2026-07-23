@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, TextInput, Image, Platform,
+  TextInput, Image, Platform, Modal, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -17,6 +17,9 @@ import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { realPendingChargeService, PendingCharge } from '@/services/manager/pendingChargeService';
 import { realEquipmentService } from '@/services/manager/equipmentService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
+import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
+import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
+import { showAlert } from '@/utils';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, StatusMeta,
   MAINTENANCE_AUTO_CONFIRM_DAYS, EQUIPMENT_REPLACE_SUGGEST_COUNT,
@@ -138,64 +141,6 @@ const phs = StyleSheet.create({
   photoDate:            { fontSize: 9, color: Colors.textMuted, paddingHorizontal: 4, paddingBottom: 4 },
 });
 
-// ── Ticket Timeline ──────────────────────────────────────────────────────────
-
-const TicketTimeline: React.FC<{ timeline: TimelineEntry[]; currentStatus: TicketStatus }> = ({ timeline, currentStatus }) => (
-  <View style={tls.container}>
-    {STATUS_FLOW.map((status, i) => {
-      const currentStep = STATUS_CONFIG[currentStatus].step;
-      const isCompleted = STATUS_CONFIG[status].step >= 0 && currentStep >= 0 && STATUS_CONFIG[status].step < currentStep;
-      const isActive    = status === currentStatus;
-      const entry       = timeline.find(t => t.status === status);
-      return (
-        <View key={status} style={tls.step}>
-          <View style={tls.stepLeft}>
-            <View style={[tls.dot, isCompleted && tls.dotCompleted, isActive && tls.dotActive]}>
-              {isCompleted && <Text style={tls.dotCheck}>✓</Text>}
-              {isActive    && <Text style={tls.dotActiveText}>{STATUS_CONFIG[status].icon}</Text>}
-              {!isCompleted && !isActive && <Text style={tls.dotNum}>{i + 1}</Text>}
-            </View>
-            {i < STATUS_FLOW.length - 1 && (
-              <View style={[tls.line, isCompleted && tls.lineCompleted]} />
-            )}
-          </View>
-          <View style={tls.stepBody}>
-            <Text style={[tls.stepLabel, isActive && tls.stepLabelActive, isCompleted && tls.stepLabelDone]}>
-              {STATUS_CONFIG[status].label}
-            </Text>
-            {entry && (
-              <>
-                <Text style={tls.stepNote}>{entry.note}</Text>
-                <Text style={tls.stepMeta}>{entry.updatedBy} · {entry.updatedAt}</Text>
-              </>
-            )}
-          </View>
-        </View>
-      );
-    })}
-  </View>
-);
-
-const tls = StyleSheet.create({
-  container:       { paddingVertical: Spacing.sm },
-  step:            { flexDirection: 'row', gap: Spacing.md, minHeight: 60 },
-  stepLeft:        { alignItems: 'center', width: 32 },
-  dot:             { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center' },
-  dotCompleted:    { backgroundColor: Colors.success, borderColor: Colors.success },
-  dotActive:       { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dotCheck:        { fontSize: 14, color: Colors.white, fontWeight: '700' },
-  dotActiveText:   { fontSize: 14 },
-  dotNum:          { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
-  line:            { width: 2, flex: 1, backgroundColor: Colors.border, marginVertical: 2 },
-  lineCompleted:   { backgroundColor: Colors.success },
-  stepBody:        { flex: 1, paddingBottom: Spacing.lg },
-  stepLabel:       { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
-  stepLabelActive: { color: Colors.primary, fontWeight: '700' },
-  stepLabelDone:   { color: Colors.success },
-  stepNote:        { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  stepMeta:        { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-});
-
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export const TicketDetailScreen: React.FC = () => {
@@ -235,9 +180,13 @@ export const TicketDetailScreen: React.FC = () => {
   const [busy,      setBusy]      = useState(false);
   // Camera in-app cho web (launchCameraAsync trên web chỉ mở file picker)
   const [cameraFor, setCameraFor] = useState<'before' | 'after' | null>(null);
+  const [photoMenuFor, setPhotoMenuFor] = useState<'before' | 'after' | null>(null);
   // Flow 17/07 chiều: manager BẮT BUỘC gán category khi duyệt, priority tùy chọn.
   const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(null);
   const [approvePriority, setApprovePriority] = useState<TicketPriority | null>(null);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const [otherCategoryText, setOtherCategoryText] = useState('');
 
   // Vòng đời thiết bị trên dữ liệu THẬT: đếm từ lịch sử bảo trì, loại chính ticket này.
   const [equipRepairCount, setEquipRepairCount] = useState<number | undefined>(undefined);
@@ -310,12 +259,12 @@ export const TicketDetailScreen: React.FC = () => {
         note: `Phí bảo trì ${ticket?.ticketCode || `ticket #${idNum}`} — khách làm hư`,
       });
       setPendingCharge({ ...pendingCharge, status: 'INVOICED', invoiceId: inv.id });
-      Alert.alert(
+      showAlert(
         '🧾 Đã phát hành hóa đơn',
         `Hóa đơn ${inv.code ?? `#${inv.id}`} (${fmt(Number(inv.grandTotal))}) đã gửi tới khách — khách thanh toán trong tab Hóa đơn.`,
       );
     } catch (e: any) {
-      Alert.alert('Lỗi', apiErrMsg(e, 'Không phát hành được hóa đơn. Vui lòng thử lại.'));
+      showAlert('Lỗi', apiErrMsg(e, 'Không phát hành được hóa đơn. Vui lòng thử lại.'));
     } finally { setIssuing(false); }
   };
 
@@ -340,26 +289,25 @@ export const TicketDetailScreen: React.FC = () => {
         await realMaintenanceService.uploadPhotos(idNum, [uri], type === 'before' ? 'BEFORE' : 'AFTER');
         await refreshReal();
       } catch {
-        Alert.alert('Lỗi tải ảnh', 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.');
+        showAlert('Lỗi tải ảnh', 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.');
       }
     }
   };
 
-  const handleAddPhoto = (type: 'before' | 'after') => {
-    Alert.alert('Thêm ảnh', undefined, [
-      { text: 'Chụp ảnh', onPress: async () => {
-        if (Platform.OS === 'web') { setCameraFor(type); return; }
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (perm.status !== 'granted') { Alert.alert('Lỗi', 'Cần quyền camera.'); return; }
-        const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-        if (!r.canceled && r.assets[0]) await addLocalPhoto(type, r.assets[0].uri);
-      }},
-      { text: 'Chọn từ thư viện', onPress: async () => {
-        const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
-        if (!r.canceled) for (const a of r.assets) await addLocalPhoto(type, a.uri);
-      }},
-      { text: 'Đóng', style: 'cancel' },
-    ]);
+  // Menu "Thêm ảnh" trong UI (không dùng Alert.alert 3 nút) — Alert.alert là no-op
+  // trên react-native-web nên menu Chụp ảnh/Thư viện trước đây không bấm được trên web.
+  const pickPhotoFromCamera = async (type: 'before' | 'after') => {
+    setPhotoMenuFor(null);
+    if (Platform.OS === 'web') { setCameraFor(type); return; }
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
+    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+    if (!r.canceled && r.assets[0]) await addLocalPhoto(type, r.assets[0].uri);
+  };
+  const pickPhotoFromLibrary = async (type: 'before' | 'after') => {
+    setPhotoMenuFor(null);
+    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
+    if (!r.canceled) for (const a of r.assets) await addLocalPhoto(type, a.uri);
   };
 
   // ── Actions theo flow mới ──────────────────────────────────────────
@@ -368,7 +316,7 @@ export const TicketDetailScreen: React.FC = () => {
   const handleApprove = async () => {
     if (busy) return;
     if (!approveCategory) {
-      Alert.alert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
+      showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
       return;
     }
     if (isReal) {
@@ -379,8 +327,8 @@ export const TicketDetailScreen: React.FC = () => {
           priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
         });
         await refreshReal();
-        Alert.alert('✅ Đã duyệt', 'Yêu cầu đã được duyệt — liên hệ thợ ngoài đến sửa, xong thì bấm "Báo sửa xong".');
-      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
+        showAlert('✅ Đã duyệt', 'Yêu cầu đã được duyệt — liên hệ thợ ngoài đến sửa, xong thì bấm "Báo sửa xong".');
+      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
     }
@@ -395,7 +343,7 @@ export const TicketDetailScreen: React.FC = () => {
   const handleComplete = async () => {
     if (busy) return;
     if (!hasAfterPhoto) {
-      Alert.alert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa trước khi báo xong.');
+      showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa trước khi báo xong.');
       return;
     }
     const note = noteInput.trim();
@@ -405,8 +353,8 @@ export const TicketDetailScreen: React.FC = () => {
         await realMaintenanceService.complete(idNum, note ? { resolutionNote: note } : {});
         await refreshReal();
         setNoteInput('');
-        Alert.alert('🛠 Đã báo sửa xong', `Đã gửi khách nghiệm thu. Khách không phản hồi sau ${MAINTENANCE_AUTO_CONFIRM_DAYS} ngày thì ticket tự đóng.`);
-      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
+        showAlert('🛠 Đã báo sửa xong', `Đã gửi khách nghiệm thu. Khách không phản hồi sau ${MAINTENANCE_AUTO_CONFIRM_DAYS} ngày thì ticket tự đóng.`);
+      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
     }
@@ -425,13 +373,13 @@ export const TicketDetailScreen: React.FC = () => {
         setBusy(true);
         await realMaintenanceService.reviewReject(idNum, approve);
         await refreshReal();
-        Alert.alert(
+        showAlert(
           approve ? '🔧 Sửa lại' : 'Giữ kết quả',
           approve
             ? 'Đã chấp nhận phản hồi của khách — ảnh AFTER cũ bị xóa, sửa lại xong hãy báo xong lần nữa.'
             : 'Đã giữ nguyên kết quả — khách xác nhận lại hoặc hệ thống tự đóng sau 3 ngày.',
         );
-      } catch (e: any) { Alert.alert('Lỗi', apiErrMsg(e, 'Không thể xử lý. Vui lòng thử lại.')); }
+      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể xử lý. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
     }
@@ -450,7 +398,7 @@ export const TicketDetailScreen: React.FC = () => {
   };
 
   const handleCancel = () => {
-    Alert.alert('Hủy yêu cầu?', 'Bạn có chắc muốn hủy ticket này?', [
+    showAlert('Hủy yêu cầu?', 'Bạn có chắc muốn hủy ticket này?', [
       { text: 'Không', style: 'cancel' },
       { text: 'Hủy ticket', style: 'destructive', onPress: async () => {
         if (isReal) {
@@ -460,7 +408,7 @@ export const TicketDetailScreen: React.FC = () => {
           } catch (e: any) {
             const msg = e?.response?.data?.message
               || (e?.response?.status === 403 ? 'Bạn không có quyền hủy yêu cầu này.' : 'Không thể hủy yêu cầu. Vui lòng thử lại.');
-            Alert.alert('Không thể hủy', msg);
+            showAlert('Không thể hủy', msg);
           }
           return;
         }
@@ -569,19 +517,23 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Photos ─────────────────────────────────────────────── */}
         <View style={s.card}>
           <Text style={s.cardSectionTitle}>Hình ảnh / Bằng chứng</Text>
+          {/* Ảnh TRƯỚC sửa chữa là bằng chứng hiện trạng do TENANT chụp lúc tạo yêu cầu —
+              manager không được thêm/sửa để tránh có ý đồ xấu (ngụy tạo hiện trạng). */}
           <PhotoEvidenceRow
             type="before" urls={beforeUrls} photos={photos}
-            onAdd={() => handleAddPhoto('before')}
-            disabled={isTerminal}
+            onAdd={() => {}}
+            disabled
           />
           {['approved', 'waiting_confirm', 'rejected', 'closed'].includes(ticket.status) && (
             <PhotoEvidenceRow
               type="after" urls={ticket.afterImages} photos={photos}
-              onAdd={() => handleAddPhoto('after')}
+              onAdd={() => setPhotoMenuFor('after')}
               disabled={ticket.status !== 'approved'}
             />
           )}
         </View>
+
+        <MaintenancePhotoHistory photos={ticket.photoHistory} />
 
         {/* ── Khách từ chối (rejected): lý do + ảnh minh chứng ─────── */}
         {ticket.status === 'rejected' && (
@@ -643,41 +595,81 @@ export const TicketDetailScreen: React.FC = () => {
         {ticket.status === 'pending' && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Phân loại sự cố (bắt buộc khi duyệt)</Text>
-            <View style={s.pickRow}>
-              {APPROVE_CATEGORY_KEYS.map(key => {
-                const c = CATEGORY_CONFIG[key];
-                const active = approveCategory === key;
-                return (
-                  <TouchableOpacity
-                    key={key}
-                    style={[s.pickChip, active && s.pickChipActive]}
-                    onPress={() => setApproveCategory(active ? null : key)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[s.pickChipText, active && s.pickChipTextActive]}>{c.icon} {c.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <TouchableOpacity
+              style={s.dropdownBtn}
+              onPress={() => setCategoryMenuOpen(o => !o)}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.dropdownBtnText, !approveCategory && s.dropdownBtnPlaceholder]}>
+                {approveCategory ? `${CATEGORY_CONFIG[approveCategory].icon} ${CATEGORY_CONFIG[approveCategory].label}` : 'Chọn danh mục sự cố'}
+              </Text>
+              <Text style={s.dropdownChevron}>{categoryMenuOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {categoryMenuOpen && (
+              <View style={s.dropdownList}>
+                {APPROVE_CATEGORY_KEYS.map(key => {
+                  const c = CATEGORY_CONFIG[key];
+                  const active = approveCategory === key;
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[s.dropdownItem, active && s.dropdownItemActive]}
+                      onPress={() => { setApproveCategory(key); setCategoryMenuOpen(false); }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[s.dropdownItemText, active && s.dropdownItemTextActive]}>{c.icon} {c.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+            {approveCategory === 'other' && (
+              <TextInput
+                style={[s.textInput, { marginTop: Spacing.sm }]}
+                value={otherCategoryText}
+                onChangeText={(t) => { setOtherCategoryText(t); setNoteInput(t); }}
+                placeholder="Mô tả cụ thể sự cố (vd: mối mọt, nấm mốc...)"
+                placeholderTextColor={Colors.textMuted}
+              />
+            )}
             <Text style={s.pickHint}>Phân loại dùng cho báo cáo chi phí sau sửa chữa.</Text>
 
             <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Mức độ ưu tiên (tùy chọn)</Text>
-            <View style={s.pickRow}>
-              {APPROVE_PRIORITY_KEYS.map(key => {
-                const p = PRIORITY_CONFIG[key];
-                const active = approvePriority === key;
-                return (
-                  <TouchableOpacity
-                    key={key}
-                    style={[s.pickChip, active && { borderColor: p.color, backgroundColor: p.bg }]}
-                    onPress={() => setApprovePriority(active ? null : key)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[s.pickChipText, active && { color: p.color, fontWeight: '700' }]}>{p.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <TouchableOpacity
+              style={s.dropdownBtn}
+              onPress={() => setPriorityMenuOpen(o => !o)}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.dropdownBtnText, !approvePriority && s.dropdownBtnPlaceholder, approvePriority && { color: PRIORITY_CONFIG[approvePriority].color, fontWeight: '700' }]}>
+                {approvePriority ? PRIORITY_CONFIG[approvePriority].label : '— Không chọn —'}
+              </Text>
+              <Text style={s.dropdownChevron}>{priorityMenuOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {priorityMenuOpen && (
+              <View style={s.dropdownList}>
+                <TouchableOpacity
+                  style={s.dropdownItem}
+                  onPress={() => { setApprovePriority(null); setPriorityMenuOpen(false); }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={s.dropdownItemText}>— Không chọn —</Text>
+                </TouchableOpacity>
+                {APPROVE_PRIORITY_KEYS.map(key => {
+                  const p = PRIORITY_CONFIG[key];
+                  const active = approvePriority === key;
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[s.dropdownItem, active && { backgroundColor: p.bg }]}
+                      onPress={() => { setApprovePriority(key); setPriorityMenuOpen(false); }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[s.dropdownItemText, active && { color: p.color, fontWeight: '700' }]}>{p.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
           </View>
         )}
 
@@ -699,7 +691,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Timeline ────────────────────────────────────────────── */}
         <View style={s.card}>
           <Text style={s.cardSectionTitle}>Tiến trình xử lý</Text>
-          <TicketTimeline timeline={ticket.timeline} currentStatus={ticket.status} />
+          <MaintenanceProgressTimeline timeline={ticket.timeline} currentStatus={ticket.status} />
         </View>
 
         {/* ── Actions theo status ─────────────────────────────────── */}
@@ -756,6 +748,24 @@ export const TicketDetailScreen: React.FC = () => {
         onCapture={(uri) => { const t = cameraFor; setCameraFor(null); if (t) void addLocalPhoto(t, uri); }}
         onClose={() => setCameraFor(null)}
       />
+
+      {/* Menu "Thêm ảnh" — thay Alert.alert (no-op trên web) bằng modal trong UI. */}
+      <Modal visible={photoMenuFor !== null} transparent animationType="fade" onRequestClose={() => setPhotoMenuFor(null)}>
+        <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
+          <Pressable style={s.photoMenuCard} onPress={() => {}}>
+            <Text style={s.photoMenuTitle}>Thêm ảnh</Text>
+            <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor)}>
+              <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
+              <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
+              <Text style={s.photoMenuCancelText}>Đóng</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -807,15 +817,27 @@ const s = StyleSheet.create({
 
   rejectImage: { width: 110, height: 110, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
 
-  pickRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  pickChip: {
-    paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white,
+  pickHint: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm },
+
+  dropdownBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1.5, borderColor: Colors.border, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 12, backgroundColor: Colors.white,
   },
-  pickChipActive:     { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  pickChipText:       { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  pickChipTextActive: { color: Colors.primary, fontWeight: '700' },
-  pickHint:           { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm },
+  dropdownBtnText:        { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
+  dropdownBtnPlaceholder: { color: Colors.textMuted, fontWeight: '400' },
+  dropdownChevron:        { fontSize: 11, color: Colors.textMuted },
+  dropdownList: {
+    borderWidth: 1.5, borderColor: Colors.border, borderRadius: BorderRadius.md,
+    marginTop: Spacing.xs, overflow: 'hidden', backgroundColor: Colors.white,
+  },
+  dropdownItem: {
+    paddingHorizontal: Spacing.md, paddingVertical: 12,
+    borderBottomWidth: 1, borderColor: Colors.divider,
+  },
+  dropdownItemActive:     { backgroundColor: Colors.primaryBg },
+  dropdownItemText:       { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
+  dropdownItemTextActive: { color: Colors.primary, fontWeight: '700' },
 
   reviewRow:     { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   reviewBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
@@ -826,4 +848,12 @@ const s = StyleSheet.create({
   btnDisabled:   { opacity: 0.55 },
   cancelBtn:     { alignItems: 'center', paddingVertical: Spacing.sm },
   cancelBtnText: { fontSize: 13, fontWeight: '600', color: Colors.error },
+
+  photoMenuBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
+  photoMenuCard: { backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, paddingBottom: Spacing.xl },
+  photoMenuTitle: { fontSize: 14, fontWeight: '700', color: Colors.textMuted, marginBottom: Spacing.md, textAlign: 'center' },
+  photoMenuOption: { paddingVertical: Spacing.md, borderRadius: BorderRadius.md, alignItems: 'center', backgroundColor: Colors.background, marginBottom: Spacing.sm },
+  photoMenuOptionText: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
+  photoMenuCancel: { paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.xs },
+  photoMenuCancelText: { fontSize: 14, fontWeight: '600', color: Colors.error },
 });

@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import type { EvidencePhoto } from './tenantService';
 
 /**
  * Service cho dữ liệu "của chính tenant đang đăng nhập" (nối backend Spring THẬT).
@@ -122,6 +123,7 @@ export interface ContractDetailDto {
   signedAt?: string;
   terminatedAt?: string;
   terminationReason?: string;
+  terminationType?: string;
   pdfUrl?: string;
 }
 
@@ -146,8 +148,11 @@ export interface TenantHandoverResponse {
   initialElectricReading?: number;
   initialWaterReading?: number;
   electricMeterImageUrl?: string;
+  electricMeterCapturedAt?: string;
   waterMeterImageUrl?: string;
+  waterMeterCapturedAt?: string;
   roomConditionUrls?: string[];
+  roomConditionPhotos?: EvidencePhoto[];
   roomConditionNote?: string;
   equipmentSnapshot?: string;
   equipmentList?: HandoverEquipmentItem[];

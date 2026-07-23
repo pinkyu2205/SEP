@@ -109,6 +109,19 @@ export const getContractStatusLabel = (status: string): string => {
   return labels[status] || status;
 };
 
+/** Lý do chấm dứt HĐ (kể cả tự động NO_SHOW do BE cron — hợp đồng nháp/chờ kích
+ * hoạt quá 10 ngày sau ngày vào ở dự kiến mà khách không tới xác nhận). */
+export const getContractTerminationTypeLabel = (type?: string): string => {
+  const labels: Record<string, string> = {
+    EARLY_MOVE_OUT: 'Trả phòng sớm',
+    VIOLATION: 'Vi phạm hợp đồng',
+    MUTUAL_AGREEMENT: 'Hai bên thỏa thuận',
+    NO_SHOW: 'Không đến nhận nhà (tự động hủy)',
+    OTHER: 'Khác',
+  };
+  return type ? (labels[type.toUpperCase()] || 'Khác') : 'Khác';
+};
+
 export const getContractStatusColor = (status: string): string => {
   const colors: Record<string, string> = {
     draft: '#94A3B8',

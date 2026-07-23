@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 21.1.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_REAL_API_BASE_URL": "https://sub-leasing-managemant-system.onrender.com",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dtcdo6jtd",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "ml_default"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_REAL_API_BASE_URL": "https://sub-leasing-managemant-system.onrender.com",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dtcdo6jtd",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "ml_default"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_REAL_API_BASE_URL": "https://sub-leasing-managemant-system.onrender.com",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dtcdo6jtd",
+        "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "ml_default"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

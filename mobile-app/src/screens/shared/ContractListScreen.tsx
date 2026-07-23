@@ -10,6 +10,7 @@ import { DatePickerField } from '@/components/common/DatePickerField';
 import { ManagedProperty } from '@/data/managedProperties';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { getContractTerminationTypeLabel } from '@/utils';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
@@ -76,6 +77,7 @@ interface Contract {
   signedAt?: string;
   terminatedAt?: string;
   terminationReason?: string;
+  terminationType?: string;
   approvalHistory: ApprovalEntry[];
   createdAt: string;
   updatedAt: string;
@@ -213,6 +215,9 @@ const mapApiToContract = (c: TenantContractResponse, propertyName: string): Cont
     approvalHistory: [],
     createdAt: fmtIsoDate(c.startDate),
     updatedAt: fmtIsoDate(c.startDate),
+    terminatedAt: c.terminatedAt,
+    terminationReason: c.terminationReason,
+    terminationType: c.terminationType,
     _propertyId: String(c.propertyId),
   };
 };
@@ -581,6 +586,7 @@ const ContractDetailView: React.FC<{
           {contract.status === 'terminated' && contract.terminatedAt && (
             <View style={detailStyles.section}>
               <SectionHeader title="Thông tin thanh lý" />
+              <InfoRow label="Loại" value={getContractTerminationTypeLabel(contract.terminationType)} />
               <InfoRow label="Ngày thanh lý" value={contract.terminatedAt} />
               {contract.terminationReason && (
                 <InfoRow label="Lý do" value={contract.terminationReason} />

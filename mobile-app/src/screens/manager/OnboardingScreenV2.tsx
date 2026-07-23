@@ -255,15 +255,22 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [elecMeterUrl, setElecMeterUrl] = useState('')
   const [waterMeterUrl, setWaterMeterUrl] = useState('')
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
+  // Ngày giờ chụp (client-side, lúc ảnh upload xong) — làm bằng chứng đối soát
+  // sau này, hiện ngay trên UI cạnh ảnh/số đọc (feedback thầy 19/07).
+  const [meterCapturedAt, setMeterCapturedAt] = useState<{ elec?: string; water?: string }>({})
 
-  // Ảnh hiện trạng (Cloudinary URLs)
+  // Ảnh hiện trạng (Cloudinary URLs) — conditionPhotosCapturedAt cùng thứ tự/độ dài với
+  // conditionPhotos (index tương ứng), gửi lên BE dạng roomConditionPhotos (bằng chứng
+  // ngày giờ chụp, FE-onboard-photo-timestamp.md).
   const [conditionPhotos, setConditionPhotos] = useState<string[]>([])
+  const [conditionPhotosCapturedAt, setConditionPhotosCapturedAt] = useState<string[]>([])
   const [photoUploading, setPhotoUploading] = useState(false)
   // Camera in-app (web không mở được camera qua ImagePicker) + xem ảnh phóng to
   const [cameraTarget, setCameraTarget] = useState<
     'elec' | 'water' | 'condition' | null
   >(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewCapturedAt, setPreviewCapturedAt] = useState<string | undefined>(undefined)
   const [inspectionNotes, setInspectionNotes] = useState('')
 
   // Bàn giao thiết bị — nội thất có sẵn CHỈ hiển thị read-only: BE tự gắn toàn bộ
@@ -508,7 +515,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     setMeters(d.meters ?? { elec: '', water: '' })
     setElecMeterUrl(d.elecMeterUrl ?? '')
     setWaterMeterUrl(d.waterMeterUrl ?? '')
+    setMeterCapturedAt(d.meterCapturedAt ?? {})
     setConditionPhotos(d.conditionPhotos ?? [])
+    setConditionPhotosCapturedAt(d.conditionPhotosCapturedAt ?? [])
     setInspectionNotes(d.inspectionNotes ?? '')
     setAddedEquipments(d.addedEquipments ?? [])
     setPriceMode(d.priceMode ?? 'agreed')
@@ -591,7 +600,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       meters,
       elecMeterUrl,
       waterMeterUrl,
+      meterCapturedAt,
       conditionPhotos,
+      conditionPhotosCapturedAt,
       inspectionNotes,
       addedEquipments,
       priceMode,
@@ -624,7 +635,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     meters,
     elecMeterUrl,
     waterMeterUrl,
+    meterCapturedAt,
     conditionPhotos,
+    conditionPhotosCapturedAt,
     inspectionNotes,
     addedEquipments,
     priceMode,
@@ -674,7 +687,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     setMeters({ elec: '', water: '' })
     setElecMeterUrl('')
     setWaterMeterUrl('')
+    setMeterCapturedAt({})
     setConditionPhotos([])
+    setConditionPhotosCapturedAt([])
     setInspectionNotes('')
     setOtp('')
     setEndDate('')
@@ -862,6 +877,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       const url = await uploadImageToCloudinary(uri)
       if (kind === 'elec') setElecMeterUrl(url)
       else setWaterMeterUrl(url)
+      setMeterCapturedAt((prev) => ({ ...prev, [kind]: new Date().toISOString() }))
       // OCR đọc số
       const ocr = await realTenantService.ocrMeter(url)
       if (ocr.reading) {
@@ -899,7 +915,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       const urls = await Promise.all(
         uris.map((u) => uploadImageToCloudinary(u)),
       )
+      const now = new Date().toISOString()
       setConditionPhotos((prev) => [...prev, ...urls])
+      setConditionPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
     } catch (err: any) {
       Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
@@ -1006,8 +1024,14 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     initialElectricReading: parseNum(meters.elec),
     initialWaterReading: parseNum(meters.water),
     electricMeterImageUrl: elecMeterUrl || undefined,
+    electricMeterCapturedAt: meterCapturedAt.elec,
     waterMeterImageUrl: waterMeterUrl || undefined,
+    waterMeterCapturedAt: meterCapturedAt.water,
     roomConditionUrls: conditionPhotos,
+    roomConditionPhotos: conditionPhotos.map((url, i) => ({
+      url,
+      capturedAt: conditionPhotosCapturedAt[i] || new Date().toISOString(),
+    })),
     roomConditionNote: inspectionNotes?.trim() || undefined,
     householdMembers: householdMembers
       .filter((m) => m.name.trim())
@@ -1661,19 +1685,26 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <View style={styles.meterThumbWrap}>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setPreviewUrl(url)}
+              onPress={() => { setPreviewUrl(url); setPreviewCapturedAt(meterCapturedAt[kind]) }}
             >
               <Image source={{ uri: url }} style={styles.meterThumb} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.removePhotoBtn}
-              onPress={() =>
-                kind === 'elec' ? setElecMeterUrl('') : setWaterMeterUrl('')
-              }
+              onPress={() => {
+                if (kind === 'elec') setElecMeterUrl('')
+                else setWaterMeterUrl('')
+                setMeterCapturedAt((prev) => ({ ...prev, [kind]: undefined }))
+              }}
             >
               <Text style={styles.removePhotoText}>×</Text>
             </TouchableOpacity>
           </View>
+        )}
+        {!!meterCapturedAt[kind] && (
+          <Text style={styles.meterCapturedAt}>
+            🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
+          </Text>
         )}
         <TextInput
           style={styles.input}
@@ -1690,6 +1721,16 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const renderMeterStep = () => (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Ghi nhận điện nước ban đầu</Text>
+      {/* Luôn hiện rõ đang ghi cho phòng/nhà nào — tránh nhầm chỉ số khi
+          manager ghi liên tiếp nhiều phòng trong 1 buổi (feedback 19/07). */}
+      <View style={styles.meterRoomBadge}>
+        <Text style={styles.meterRoomBadgeText}>
+          📍{' '}
+          {rentalMode === 'whole_house'
+            ? selectedWholeHouse?.name ?? 'Nguyên căn'
+            : `${selectedBuilding?.name ?? ''} · Phòng ${selectedRoom?.code ?? '—'}`}
+        </Text>
+      </View>
       <Text style={styles.hint}>
         Chụp/chọn ảnh đồng hồ — hệ thống OCR tự điền chỉ số, bạn có thể chỉnh
         lại. Ảnh được lưu kèm hợp đồng.
@@ -1743,15 +1784,16 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
                 <TouchableOpacity
                   style={styles.photoThumbTouch}
                   activeOpacity={0.85}
-                  onPress={() => setPreviewUrl(uri)}
+                  onPress={() => { setPreviewUrl(uri); setPreviewCapturedAt(conditionPhotosCapturedAt[i]) }}
                 >
                   <Image source={{ uri }} style={styles.photoThumb} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.removePhotoBtn}
-                  onPress={() =>
-                    setConditionPhotos((prev) => prev.filter((x) => x !== uri))
-                  }
+                  onPress={() => {
+                    setConditionPhotos((prev) => prev.filter((_, idx) => idx !== i))
+                    setConditionPhotosCapturedAt((prev) => prev.filter((_, idx) => idx !== i))
+                  }}
                 >
                   <Text style={styles.removePhotoText}>×</Text>
                 </TouchableOpacity>
@@ -2235,6 +2277,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
               resizeMode='contain'
             />
           )}
+          {!!previewCapturedAt && (
+            <Text style={styles.previewCapturedAt}>
+              🕒 Chụp lúc {new Date(previewCapturedAt).toLocaleString('vi-VN')}
+            </Text>
+          )}
           <TouchableOpacity
             style={styles.previewCloseBtn}
             onPress={() => setPreviewUrl(null)}
@@ -2705,6 +2752,16 @@ const styles = StyleSheet.create({
   removeText: { fontSize: 13, fontWeight: '700', color: Colors.error },
   memberInputGap: { height: Spacing.sm },
 
+  meterRoomBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.primaryBg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    marginBottom: Spacing.sm,
+  },
+  meterRoomBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: 6 },
   meterCard: {
     backgroundColor: Colors.white,
     padding: Spacing.base,
@@ -2832,6 +2889,11 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 18,
     fontWeight: '700',
+  },
+  previewCapturedAt: {
+    marginTop: Spacing.sm,
+    color: Colors.white,
+    fontSize: 13,
   },
   notesInput: {
     minHeight: 92,

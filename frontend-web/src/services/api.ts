@@ -1,9 +1,12 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
+// Local dev: để trống, dùng proxy /api của Vite (xem vite.config.ts).
+// Trên Vercel: set VITE_API_URL trỏ thẳng vào domain backend tương ứng (prod/dev).
 const api = axios.create({
-  baseURL: '',
-  timeout: 10000,
+  baseURL: import.meta.env.VITE_API_URL || '',
+  // Render free tier sleep sau ~15 phút không traffic, request đầu dậy lại có thể mất 30-60s.
+  timeout: 90000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -37,13 +40,14 @@ async function resolveErrorMessage(error: {
     try {
       const text = await data.text();
       const parsed = JSON.parse(text);
-      return parsed?.message || parsed?.error || text || error.message || 'Lỗi kết nối đến máy chủ';
+      return parsed?.error || parsed?.message || text || error.message || 'Lỗi kết nối đến máy chủ';
     } catch {
       // Blob không phải JSON đọc được (vd đúng là file PDF hỏng) — dùng message mặc định.
     }
   }
+  // BE trả lỗi chuẩn dùng field `error`; một số handler (Map-based) chỉ có `message` — ưu tiên error trước.
   const json = data as { message?: string; error?: string } | undefined;
-  return json?.message || json?.error || error.message || 'Lỗi kết nối đến máy chủ';
+  return json?.error || json?.message || error.message || 'Lỗi kết nối đến máy chủ';
 }
 
 // Response interceptor
