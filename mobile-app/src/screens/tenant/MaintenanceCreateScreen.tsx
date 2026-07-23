@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  Image, Alert, Platform,
+  Image, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
-import { formatDate } from '@/utils';
+import { formatDate, showAlert } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
+import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
@@ -28,13 +29,13 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const [cameraOpen, setCameraOpen] = useState(false);
 
   const pickImage = async () => {
-    if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+    if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 5 - images.length, quality: 0.6 });
     if (!result.canceled) setImages(prev => [...prev, ...result.assets.map(a => a.uri)].slice(0, 5));
   };
 
   const takePhoto = async () => {
-    if (images.length >= 5) { Alert.alert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+    if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
     // Web: launchCameraAsync chỉ mở file picker → dùng camera modal in-app.
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
@@ -44,10 +45,10 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const removeImage = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async () => {
-    if (!title.trim()) { Alert.alert('Lỗi', 'Vui lòng nhập tiêu đề sự cố.'); return; }
-    if (!description.trim()) { Alert.alert('Lỗi', 'Vui lòng mô tả chi tiết sự cố.'); return; }
+    if (!title.trim()) { showAlert('Lỗi', 'Vui lòng nhập tiêu đề sự cố.'); return; }
+    if (!description.trim()) { showAlert('Lỗi', 'Vui lòng mô tả chi tiết sự cố.'); return; }
     // Flow mới: BE bắt buộc ≥1 ảnh hiện trạng (BEFORE) khi tạo yêu cầu.
-    if (images.length === 0) { Alert.alert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hiện trạng để tạo yêu cầu.'); return; }
+    if (images.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hiện trạng để tạo yêu cầu.'); return; }
 
     setSubmitting(true);
 
@@ -58,9 +59,18 @@ export const MaintenanceCreateScreen: React.FC = () => {
         const dash = await realTenantSelfService.getDashboard();
         roomIdNum = Number(dash.room?.id);
       }
+      // Nhà nguyên căn: HĐ không gán roomId nên dashboard trả room.id=null dù phòng
+      // thực tế vẫn tồn tại (thiết bị được gán vào phòng đó) — fallback lấy roomId
+      // từ thiết bị đầu tiên của HĐ hiện tại thay vì báo lỗi "không xác định được phòng".
+      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
+        try {
+          const myEquip = await realTenantEquipmentService.getMyEquipments();
+          roomIdNum = Number(myEquip.find(e => Number(e.roomId) > 0)?.roomId ?? NaN);
+        } catch { /* giữ nguyên NaN, rơi xuống báo lỗi bên dưới */ }
+      }
       if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
         setSubmitting(false);
-        Alert.alert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng kiểm tra hợp đồng đang hiệu lực.');
+        showAlert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng kiểm tra hợp đồng đang hiệu lực.');
         return;
       }
 
@@ -70,7 +80,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
       }
       if (uploaded.length === 0) {
         setSubmitting(false);
-        Alert.alert('Lỗi', 'Không tải được ảnh lên máy chủ — cần ít nhất 1 ảnh hiện trạng. Vui lòng thử lại.');
+        showAlert('Lỗi', 'Không tải được ảnh lên máy chủ — cần ít nhất 1 ảnh hiện trạng. Vui lòng thử lại.');
         return;
       }
       const equipmentIdNum = Number(equipment?.id ?? NaN);
@@ -85,7 +95,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
       };
       await realMaintenanceService.createRequest(body);
       setSubmitting(false);
-      Alert.alert(
+      showAlert(
         '🔧 Gửi yêu cầu thành công!',
         'Yêu cầu sửa chữa của bạn đã được gửi. Quản lý vận hành sẽ tiếp nhận và phản hồi sớm nhất.',
         [{ text: 'OK', onPress: () => navigation.goBack() }],
@@ -94,7 +104,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
     } catch (e: any) {
       setSubmitting(false);
       const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Không thể kết nối máy chủ.';
-      Alert.alert('Gửi yêu cầu thất bại', msg);
+      showAlert('Gửi yêu cầu thất bại', msg);
     }
   };
 
