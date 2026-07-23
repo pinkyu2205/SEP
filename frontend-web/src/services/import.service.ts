@@ -2,6 +2,13 @@ import type {
   BulkImportResponse, BulkImportError, PropertyPurgeResponse, BulkImportImagesResponse,
 } from '@/types/api.types';
 
+// Base URL của backend — cùng nguồn với axios instance (services/api.ts). BẮT BUỘC dùng ở
+// đây vì các hàm dưới tự gọi `fetch()` (không qua axios instance) để tránh axios ép
+// Content-Type JSON làm hỏng FormData; nếu thiếu prefix này thì local dev vẫn chạy được
+// (Vite proxy /api che giấu), nhưng trên Vercel prod request lại gọi vào chính domain FE
+// (chỉ có SPA rewrite trả index.html) → lỗi 405 (xem vercel.json + services/api.ts).
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const ENDPOINT = '/api/v1/import/onboarding-excel';
 // Endpoint MỚI (BE đang làm — xem doc/BE-tach-import-khoi-tao-va-cai-tao.md):
 //  - lease-excel:      module Khởi tạo nhà — file chỉ có hợp đồng thuê + thiết bị bàn giao (hiển thị).
@@ -56,7 +63,7 @@ async function postExcel(endpoint: string, file: File, dryRun: boolean): Promise
 
   const token = localStorage.getItem('access_token');
 
-  const res = await fetch(`${endpoint}?dryRun=${dryRun}`, {
+  const res = await fetch(`${API_BASE}${endpoint}?dryRun=${dryRun}`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: form,
@@ -155,7 +162,7 @@ export const importService = {
 
     const token = localStorage.getItem('access_token');
 
-    const res = await fetch(`${IMAGES_ZIP_ENDPOINT}?dryRun=${dryRun}`, {
+    const res = await fetch(`${API_BASE}${IMAGES_ZIP_ENDPOINT}?dryRun=${dryRun}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
@@ -188,7 +195,7 @@ export const importService = {
    */
   async deleteImportedContract(contractCode: string): Promise<PropertyPurgeResponse> {
     const token = localStorage.getItem('access_token');
-    const res = await fetch(`${ENDPOINT}/contracts/${encodeURIComponent(contractCode)}`, {
+    const res = await fetch(`${API_BASE}${ENDPOINT}/contracts/${encodeURIComponent(contractCode)}`, {
       method: 'DELETE',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
