@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, FlatList, ActivityIndicator, Image, Platform,
@@ -94,42 +94,76 @@ const groupThousands = (s: string) => {
   return d ? Number(d).toLocaleString('vi-VN') : '';
 };
 
+// Dải dấu thanh/dấu phụ Unicode (U+0300–U+036F) mà NFD tách ra khỏi nguyên âm.
+// Viết bằng escape ASCII để dấu tổ hợp không nằm trần trong source.
+const COMBINING_MARKS = new RegExp('[\\u0300-\\u036f]', 'g');
+
+// Bỏ dấu tiếng Việt: dùng cho cả tìm kiếm nhà lẫn dò nhãn trên text OCR.
+const normalizeVi = (s: string) =>
+  (s || '')
+    .normalize('NFD')
+    .replace(COMBINING_MARKS, '')
+    .replace(/đ/gi, 'd')   // đ/Đ không phải tổ hợp nên NFD không tách được
+    .toLowerCase()
+    .trim();
+
+// Ngưỡng lọc số vô lý khi đọc hoá đơn (số bảng kê, mã số thuế, năm... hay bị OCR trộn vào).
+const MAX_PLAUSIBLE_KWH = 100_000;
+
 /**
  * Đọc best-effort hoá đơn EVN từ kết quả OCR (endpoint /ocr/meter trả rawText + numbers).
  * EVN tính điện bậc thang nên KHÔNG có đơn giá sẵn → chỉ lấy Tổng kWh, Tổng tiền, Kỳ.
  * Luôn cần manager xác nhận lại (BE chưa có parser hoá đơn riêng — xem doc/ gap #8).
+ *
+ * Dò nhãn trên bản BỎ DẤU vì nhiều OCR trả tiếng Việt mất dấu; chữ số không đổi khi bỏ dấu
+ * nên vẫn lấy đúng giá trị.
  */
 const parseEvnInvoice = (
   ocr: { reading?: string; numbers?: string[]; rawText?: string },
 ): { totalKwh: string; totalAmount: string; billingPeriod: string } => {
-  const text = (ocr.rawText || '').replace(/\s+/g, ' ');
+  const flat = normalizeVi((ocr.rawText || '').replace(/\s+/g, ' '));
   const out = { totalKwh: '', totalAmount: '', billingPeriod: '' };
 
-  // Kỳ hoá đơn: "từ 07/04/2022 đến 06/05/2022" hoặc "Tháng 5/2022"
-  const range = text.match(/từ\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*đến\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  // ── Kỳ hoá đơn: "tu 07/04/2022 den 06/05/2022", hoặc fallback "thang 5/2022" ──
+  const range = flat.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:den|-|–|~)\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
   if (range) out.billingPeriod = `${range[1]} – ${range[2]}`;
   else {
-    const m = text.match(/Tháng\s*(\d{1,2})\s*\/\s*(\d{4})/i);
+    const m = flat.match(/thang\s*(\d{1,2})\s*\/\s*(\d{4})/);
     if (m) out.billingPeriod = `Tháng ${m[1]}/${m[2]}`;
   }
 
-  // Tổng tiền thanh toán (ưu tiên dòng "Tổng cộng tiền thanh toán")
+  // ── Tổng tiền: ưu tiên dòng "tổng cộng tiền thanh toán" / "total payment" ──
   const amt =
-    text.match(/Tổng cộng tiền thanh toán[^\d]*([\d.,]+)/i) ||
-    text.match(/Tổng cộng[^\d]*([\d.,]+)/i);
+    flat.match(/tong cong tien thanh toan[^\d]*([\d.,]+)/) ||
+    flat.match(/total payment[^\d]*([\d.,]+)/) ||
+    flat.match(/tong cong[^\d]*([\d.,]+)/) ||
+    flat.match(/cong tien hang[^\d]*([\d.,]+)/);
   if (amt) out.totalAmount = onlyDigits(amt[1]);
+
   if (!out.totalAmount && ocr.numbers?.length) {
-    const nums = ocr.numbers.map(n => Number(onlyDigits(n))).filter(n => n > 0);
-    if (nums.length) out.totalAmount = String(Math.max(...nums)); // tổng tiền thường là số lớn nhất
+    // Fallback: chỉ tin số có dấu phân cách nghìn ("399.585"). Loại được số bảng kê /
+    // mã số thuế viết liền (11818865) vốn hay lớn hơn cả tổng tiền.
+    const moneyLike = ocr.numbers
+      .filter(n => /\d{1,3}([.,]\d{3})+/.test(n))
+      .map(n => Number(onlyDigits(n)))
+      .filter(n => n > 0);
+    if (moneyLike.length) out.totalAmount = String(Math.max(...moneyLike));
   }
 
-  // Tổng kWh: số gần chữ "kWh" (trước HOẶC sau, do thứ tự cột OCR khác nhau),
-  // hoặc số sau "Điện tiêu thụ".
+  // ── Tổng kWh ──
+  // Xoá ngày tháng TRƯỚC khi dò, nếu không "2022" trong "06/05/2022 kWh" bị đọc thành số kWh
+  // → đơn giá sai cả chục lần. Sau đó ưu tiên "kwh <số>" (cột ĐVT rồi tới cột Số lượng).
+  const noDates = flat
+    .replace(/\d{1,2}\/\d{1,2}\/\d{4}/g, ' ')
+    .replace(/\d{1,2}\/\d{4}/g, ' ');
   const kwh =
-    text.match(/([\d.,]+)\s*kWh/i) ||
-    text.match(/kWh[^\d]*([\d.,]+)/i) ||
-    text.match(/tiêu thụ[^\d]*?([\d.,]+)\s*kWh/i);
-  if (kwh) out.totalKwh = onlyDigits(kwh[1]);
+    noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/) ||
+    noDates.match(/([\d.,]+)\s*kwh/) ||
+    noDates.match(/tieu thu[^\d]*?([\d.,]+)/);
+  if (kwh) {
+    const n = Number(onlyDigits(kwh[1]));
+    if (n > 0 && n <= MAX_PLAUSIBLE_KWH) out.totalKwh = String(n);
+  }
 
   return out;
 };
@@ -150,14 +184,17 @@ const mapBillingProperty = (
   const isWhole = p.wholeHouse === true;
 
   if (isWhole) {
-    const tenant = active[0]?.tenantFullName || 'Chưa có khách thuê';
+    // Không có hợp đồng ACTIVE = nhà đang trống -> rooms rỗng để bị lọc khỏi danh sách tính tiền.
+    const tenant = active[0]?.tenantFullName;
     return {
       id: String(p.id),
       name: p.propertyName,
       type: 'whole_house',
       electricityRate: 0,
       waterRate: 0,
-      rooms: [{ id: `house-${p.id}-unit`, code: 'Nhà nguyên căn', tenantName: tenant, prevElec: 0, prevWater: 0 }],
+      rooms: tenant
+        ? [{ id: `house-${p.id}-unit`, code: 'Nhà nguyên căn', tenantName: tenant, prevElec: 0, prevWater: 0 }]
+        : [],
     };
   }
 
@@ -228,7 +265,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           return mapBillingProperty(p, rooms, contracts);
         }),
       );
-      setProperties(mapped);
+      // Chỉ giữ nhà đang có khách thuê (multi-room: có phòng RENTED; nguyên căn: có HĐ ACTIVE).
+      // Nhà trống không phát sinh tiền điện/nước nên bỏ khỏi cả tab Điện lẫn tab Nước.
+      setProperties(mapped.filter(p => p.rooms.length > 0));
     } catch (e: any) {
       setErrorProps(e?.response?.data?.message || e?.message || 'Không tải được danh sách tòa nhà');
     } finally {
@@ -287,11 +326,35 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setEvnImageUrl(url);
 
       let parsed = { totalKwh: '', totalAmount: '', billingPeriod: '' };
+      // Khi không đọc được, phải phân biệt được 3 nguyên nhân (API lỗi / OCR trả rỗng /
+      // parser không khớp) — nếu không thì mọi trường hợp đều ra cùng một thông báo vô dụng.
+      let diag = '';
       try {
-        const ocr = await realTenantService.ocrMeter(url);
+        // Dùng /ocr/evn-bill (isTable=true, đọc bảng hoá đơn) chứ KHÔNG phải /ocr/meter
+        // vốn dành cho ảnh đồng hồ.
+        const ocr = await realTenantService.ocrEvnBill(url);
+        const rawLen = (ocr?.rawText || '').length;
+        if (__DEV__) console.log('[EVN OCR] response:', JSON.stringify(ocr));
+
+        // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên với
+        // dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Chỉ dùng số của BE để bù ô còn trống.
         parsed = parseEvnInvoice(ocr);
-      } catch {
-        /* OCR lỗi -> để manager nhập tay */
+        const beKwh = Number(ocr?.totalKwh ?? 0);
+        const beAmt = Number(ocr?.totalAmount ?? 0);
+        if (!parsed.totalKwh && beKwh > 0 && beKwh <= MAX_PLAUSIBLE_KWH) parsed.totalKwh = String(beKwh);
+        if (!parsed.totalAmount && beAmt > 0) parsed.totalAmount = String(beAmt);
+        if (!parsed.billingPeriod && ocr?.billingPeriod) parsed.billingPeriod = ocr.billingPeriod;
+
+        if (__DEV__) console.log('[EVN OCR] parsed:', parsed);
+        diag = rawLen === 0
+          ? 'OCR chạy xong nhưng không trả về chữ nào (rawText rỗng) → engine OCR bên BE không đọc được ảnh này.'
+          : `OCR đọc được ${rawLen} ký tự nhưng không khớp mẫu hoá đơn EVN (xem log [EVN OCR] trong terminal).`;
+      } catch (err: any) {
+        const status = err?.response?.status;
+        diag = `Gọi API OCR lỗi${status ? ` (HTTP ${status})` : ''}: ${
+          err?.response?.data?.message || err?.message || 'không rõ'
+        }`;
+        if (__DEV__) console.warn('[EVN OCR] lỗi:', diag, err);
       }
 
       setEvnEditForm(parsed);
@@ -307,13 +370,52 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         got ? 'Đã quét hoá đơn' : 'Đã tải hoá đơn',
         got
           ? 'Hệ thống đã đọc sơ bộ. Vui lòng KIỂM TRA và sửa lại tổng kWh / tổng tiền / kỳ cho đúng hoá đơn.'
-          : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay tổng kWh, tổng tiền và kỳ thanh toán.',
+          : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay tổng kWh, tổng tiền và kỳ thanh toán.'
+            + (__DEV__ && diag ? `\n\n[DEV] ${diag}` : ''),
       );
     } catch {
       Alert.alert('Lỗi', 'Không tải/đọc được ảnh hoá đơn. Bạn có thể nhập tay số liệu.');
     } finally {
       setEvnScanning(false);
     }
+  };
+
+  // Xoá ảnh hoá đơn EVN đã tải nhầm/chụp mờ + số liệu OCR đọc từ nó, đưa bước 2 về trạng thái đầu.
+  // (Alert nhiều nút không chạy callback trên web — xoá thẳng như chooseImageSource đang làm.)
+  const clearEvnImage = () => {
+    const doClear = () => {
+      setEvnImageUrl('');
+      setEvnData(null);
+      setEvnEditForm({ totalKwh: '', totalAmount: '', billingPeriod: '' });
+      setEditingEvn(false);
+    };
+    if (Platform.OS === 'web') { doClear(); return; }
+    Alert.alert(
+      'Xoá ảnh hoá đơn EVN?',
+      'Ảnh và số liệu đã nhận diện (kWh, tổng tiền, kỳ) sẽ bị xoá. Bạn có thể tải/chụp lại ảnh khác.',
+      [
+        { text: 'Huỷ', style: 'cancel' },
+        { text: 'Xoá', style: 'destructive', onPress: doClear },
+      ],
+    );
+  };
+
+  // Xoá ảnh đồng hồ của 1 phòng. Giữ nguyên chỉ số đã nhập vì manager có thể nhập tay
+  // — chỉ gỡ ảnh để không gửi ảnh sai lên hoá đơn.
+  const clearRoomMeterPhoto = (roomId: string) => {
+    const doClear = () =>
+      setRoomElecReadings(prev => prev.map(r =>
+        r.roomId === roomId ? { ...r, hasPhoto: false, meterImageUrl: undefined } : r,
+      ));
+    if (Platform.OS === 'web') { doClear(); return; }
+    Alert.alert(
+      'Xoá ảnh đồng hồ?',
+      'Ảnh sẽ không được gửi kèm hoá đơn. Chỉ số đã nhập vẫn được giữ.',
+      [
+        { text: 'Huỷ', style: 'cancel' },
+        { text: 'Xoá ảnh', style: 'destructive', onPress: doClear },
+      ],
+    );
   };
 
   const saveEvnEdit = () => {
@@ -576,6 +678,27 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   // ───────────────────────────── RENDER ──────────────────────────────────────
 
+  // Ảnh đồng hồ đã chụp của 1 phòng + nút xoá (ảnh này được gửi kèm hoá đơn nên phải sửa được).
+  const renderMeterPhoto = (r: RoomMeterReading) => {
+    if (!r.meterImageUrl) return null;
+    return (
+      <View style={styles.meterThumbRow}>
+        <Image source={{ uri: r.meterImageUrl }} style={styles.meterThumb} resizeMode="cover" />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.meterThumbLabel}>Ảnh đồng hồ đã chụp</Text>
+          <Text style={styles.meterThumbHint}>Sẽ gửi kèm hoá đơn</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.meterThumbRemove}
+          onPress={() => clearRoomMeterPhoto(r.roomId)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.meterThumbRemoveText}>🗑 Xoá</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   const renderElecTab = () => {
     if (elecStep === 'done') {
       const sentCount = roomElecReadings.filter(r => r.sent).length;
@@ -670,7 +793,33 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 </View>
               )}
 
-              {!!evnImageUrl && <Image source={{ uri: evnImageUrl }} style={styles.evnThumb} resizeMode="contain" />}
+              {!!evnImageUrl && (
+                <View style={styles.thumbWrap}>
+                  <Image source={{ uri: evnImageUrl }} style={styles.evnThumb} resizeMode="contain" />
+                  <TouchableOpacity
+                    style={styles.thumbRemoveBtn}
+                    onPress={clearEvnImage}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.thumbRemoveIcon}>✕</Text>
+                  </TouchableOpacity>
+                  <View style={styles.thumbActions}>
+                    <TouchableOpacity
+                      style={styles.thumbActionBtn}
+                      onPress={() => chooseImageSource(scanEvnInvoice)}
+                      disabled={evnScanning}
+                    >
+                      <Text style={styles.thumbActionText}>🔄 Chụp lại</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.thumbActionBtn, styles.thumbActionDanger]}
+                      onPress={clearEvnImage}
+                    >
+                      <Text style={[styles.thumbActionText, styles.thumbActionDangerText]}>🗑 Xoá ảnh</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
               {evnData && !editingEvn && (
                 <View style={styles.evnResult}>
@@ -780,6 +929,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         </TouchableOpacity>
                       </View>
                       <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
+                      {renderMeterPhoto(r)}
                       {r.newReading && Number(r.newReading) > r.prevReading && (
                         <View style={styles.calcPreview}>
                           <Text style={styles.calcPreviewText}>
@@ -880,6 +1030,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                           </TouchableOpacity>
                         </View>
                         <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
+                        {renderMeterPhoto(r)}
                         {r.newReading && Number(r.newReading) > r.prevReading && (() => {
                           const unitPrice = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
                           const consumption = Number(r.newReading) - r.prevReading;
@@ -1247,7 +1398,13 @@ const SentInvoicePanel: React.FC<{
   );
 };
 
+const PICKER_PAGE_SIZE = 8; // số nhà hiện ban đầu; còn lại mở dần qua nút "Xem thêm"
+
+type PickerFilter = 'all' | PropType;
+
 // Bộ chọn nhà (nhiều phòng / nguyên căn) + xử lý loading / lỗi / rỗng — dùng chung 2 tab.
+// Danh sách có thể lên tới hàng trăm nhà nên có tìm kiếm, lọc theo loại, phân trang,
+// và tự thu gọn còn 1 thẻ sau khi đã chọn.
 const PropertyPicker: React.FC<{
   properties: BillingProperty[];
   loading: boolean;
@@ -1257,6 +1414,28 @@ const PropertyPicker: React.FC<{
   onRetry: () => void;
   showRoomCodes?: boolean;
 }> = ({ properties, loading, error, selectedId, onSelect, onRetry, showRoomCodes }) => {
+  const [query,      setQuery]      = useState('');
+  const [typeFilter, setTypeFilter] = useState<PickerFilter>('all');
+  const [pageSize,   setPageSize]   = useState(PICKER_PAGE_SIZE);
+  const [expanded,   setExpanded]   = useState(false); // mở lại danh sách khi bấm "Đổi"
+
+  const selected = properties.find(p => p.id === selectedId) ?? null;
+
+  // Đổi bộ lọc thì xem lại từ đầu, tránh giữ trạng thái "đã mở rộng" của lần tìm trước.
+  useEffect(() => { setPageSize(PICKER_PAGE_SIZE); }, [query, typeFilter]);
+
+  const q = normalizeVi(query);
+
+  const filtered = useMemo(() => {
+    return properties.filter(p => {
+      if (typeFilter !== 'all' && p.type !== typeFilter) return false;
+      if (!q) return true;
+      if (normalizeVi(p.name).includes(q)) return true;
+      // tìm được cả khi manager chỉ nhớ mã phòng hoặc tên khách thuê
+      return p.rooms.some(r => normalizeVi(r.code).includes(q) || normalizeVi(r.tenantName).includes(q));
+    });
+  }, [properties, q, typeFilter]);
+
   if (loading) {
     return (
       <View style={styles.pickerState}>
@@ -1280,42 +1459,165 @@ const PropertyPicker: React.FC<{
     return (
       <View style={styles.pickerState}>
         <Text style={styles.pickerStateEmoji}>🏢</Text>
-        <Text style={styles.pickerStateText}>Chưa có tòa nhà được giao</Text>
+        <Text style={styles.pickerStateText}>
+          Chưa có nhà nào đang có khách thuê.{'\n'}
+          Nhà trống không hiển thị vì không phát sinh tiền điện / nước.
+        </Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={onRetry}>
+          <Text style={styles.retryBtnText}>Tải lại</Text>
+        </TouchableOpacity>
       </View>
     );
   }
 
-  const multi = properties.filter(p => p.type === 'multi_room');
-  const whole = properties.filter(p => p.type === 'whole_house');
-  const row = (prop: BillingProperty, meta: string) => (
-    <TouchableOpacity
-      key={prop.id}
-      style={[styles.propertyRow, selectedId === prop.id && styles.propertyRowActive]}
-      onPress={() => onSelect(prop.id)}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={styles.propertyName}>{prop.name}</Text>
-        <Text style={styles.propertyMeta}>{meta}</Text>
+  const metaOf = (p: BillingProperty) =>
+    p.type === 'whole_house'
+      ? `Nguyên căn · ${p.rooms[0]?.tenantName ?? 'Chưa có khách thuê'}`
+      : showRoomCodes && p.rooms.length > 0
+        ? `${p.rooms.length} phòng · ${p.rooms.map(r => r.code).join(', ')}`
+        : `${p.rooms.length} phòng đang thuê`;
+
+  // ── Đã chọn: thu gọn còn 1 thẻ, giấu cả danh sách đi ──
+  if (selected && !expanded) {
+    return (
+      <View style={styles.selectedCard}>
+        <Text style={styles.selectedIcon}>{selected.type === 'whole_house' ? '🏠' : '🏢'}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.selectedName} numberOfLines={1}>{selected.name}</Text>
+          <Text style={styles.selectedMeta} numberOfLines={1}>{metaOf(selected)}</Text>
+        </View>
+        <TouchableOpacity style={styles.changeBtn} onPress={() => setExpanded(true)}>
+          <Text style={styles.changeBtnText}>Đổi</Text>
+        </TouchableOpacity>
       </View>
-      {selectedId === prop.id && <Text style={styles.checkMark}>✓</Text>}
+    );
+  }
+
+  const visible = filtered.slice(0, pageSize);
+  const multi   = visible.filter(p => p.type === 'multi_room');
+  const whole   = visible.filter(p => p.type === 'whole_house');
+  const counts  = {
+    all: properties.length,
+    multi_room: properties.filter(p => p.type === 'multi_room').length,
+    whole_house: properties.filter(p => p.type === 'whole_house').length,
+  };
+
+  const pick = (id: string) => {
+    onSelect(id);
+    setExpanded(false);
+    setQuery('');
+  };
+
+  const row = (prop: BillingProperty) => {
+    // Khi khớp nhờ phòng/khách thuê thì nói rõ khớp ở đâu, không bắt manager tự đoán.
+    const hits = q && !normalizeVi(prop.name).includes(q)
+      ? prop.rooms
+          .filter(r => normalizeVi(r.code).includes(q) || normalizeVi(r.tenantName).includes(q))
+          .slice(0, 3)
+          .map(r => `${r.code} · ${r.tenantName}`)
+      : [];
+    return (
+      <TouchableOpacity
+        key={prop.id}
+        style={[styles.propertyRow, selectedId === prop.id && styles.propertyRowActive]}
+        onPress={() => pick(prop.id)}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.propertyName} numberOfLines={1}>{prop.name}</Text>
+          <Text style={styles.propertyMeta} numberOfLines={1}>{metaOf(prop)}</Text>
+          {hits.length > 0 && (
+            <Text style={styles.propertyHit} numberOfLines={1}>🔎 Khớp: {hits.join(' · ')}</Text>
+          )}
+        </View>
+        {selectedId === prop.id && <Text style={styles.checkMark}>✓</Text>}
+      </TouchableOpacity>
+    );
+  };
+
+  const chip = (key: PickerFilter, label: string, n: number) => (
+    <TouchableOpacity
+      key={key}
+      style={[styles.chip, typeFilter === key && styles.chipActive]}
+      onPress={() => setTypeFilter(key)}
+    >
+      <Text style={[styles.chipText, typeFilter === key && styles.chipTextActive]}>{label} {n}</Text>
     </TouchableOpacity>
   );
 
   return (
     <>
-      {multi.length > 0 && <Text style={styles.groupLabel}>🏢 Nhà nhiều phòng</Text>}
-      {multi.map(prop =>
-        row(
-          prop,
-          showRoomCodes && prop.rooms.length > 0
-            ? `${prop.rooms.length} phòng · ${prop.rooms.map(r => r.code).join(', ')}`
-            : `${prop.rooms.length} phòng`,
-        ),
+      <View style={styles.searchWrap}>
+        <Text style={styles.searchIcon}>🔍</Text>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Tìm theo tên nhà, phòng, khách thuê..."
+          placeholderTextColor={Colors.textMuted}
+          value={query}
+          onChangeText={setQuery}
+          autoCorrect={false}
+          returnKeyType="search"
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.searchClear}>✕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.chipRow}>
+        {chip('all', 'Tất cả', counts.all)}
+        {chip('multi_room', '🏢 Nhiều phòng', counts.multi_room)}
+        {chip('whole_house', '🏠 Nguyên căn', counts.whole_house)}
+      </View>
+
+      {filtered.length === 0 ? (
+        <View style={styles.pickerState}>
+          <Text style={styles.pickerStateEmoji}>🔍</Text>
+          <Text style={styles.pickerStateText}>
+            Không tìm thấy nhà nào khớp{query ? ` “${query}”` : ''}.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => { setQuery(''); setTypeFilter('all'); }}
+          >
+            <Text style={styles.retryBtnText}>Xoá bộ lọc</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <Text style={styles.resultCount}>
+            Hiện {visible.length}/{filtered.length} nhà
+            {filtered.length !== properties.length ? ` (lọc từ ${properties.length})` : ''}
+          </Text>
+
+          {multi.length > 0 && <Text style={styles.groupLabel}>🏢 Nhà nhiều phòng</Text>}
+          {multi.map(row)}
+
+          {whole.length > 0 && (
+            <Text style={[styles.groupLabel, multi.length > 0 && { marginTop: Spacing.md }]}>
+              🏠 Nhà nguyên căn
+            </Text>
+          )}
+          {whole.map(row)}
+
+          {filtered.length > visible.length && (
+            <TouchableOpacity
+              style={styles.moreBtn}
+              onPress={() => setPageSize(n => n + PICKER_PAGE_SIZE)}
+            >
+              <Text style={styles.moreBtnText}>
+                Xem thêm {Math.min(PICKER_PAGE_SIZE, filtered.length - visible.length)} nhà ↓
+              </Text>
+            </TouchableOpacity>
+          )}
+        </>
       )}
-      {whole.length > 0 && (
-        <Text style={[styles.groupLabel, { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>
+
+      {selected && (
+        <TouchableOpacity style={styles.cancelChangeBtn} onPress={() => setExpanded(false)}>
+          <Text style={styles.cancelChangeText}>Huỷ đổi · giữ “{selected.name}”</Text>
+        </TouchableOpacity>
       )}
-      {whole.map(prop => row(prop, `Nguyên căn · ${prop.rooms[0]?.tenantName ?? ''}`))}
     </>
   );
 };
@@ -1361,6 +1663,39 @@ const styles = StyleSheet.create({
   scanningText:  { fontSize: 13, color: Colors.primary, fontWeight: '600' },
   evnThumb:      { width: '100%', height: 200, borderRadius: BorderRadius.md, marginBottom: Spacing.md, backgroundColor: Colors.background },
 
+  // ── Ảnh đã tải: nút gỡ / chụp lại ──
+  thumbWrap: { position: 'relative', marginBottom: Spacing.sm },
+  thumbRemoveBtn: {
+    position: 'absolute', top: Spacing.xs, right: Spacing.xs,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center',
+  },
+  thumbRemoveIcon: { color: Colors.white, fontSize: 14, fontWeight: '900', lineHeight: 16 },
+  thumbActions:    { flexDirection: 'row', gap: Spacing.sm },
+  thumbActionBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  thumbActionText:       { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  thumbActionDanger:     { borderColor: Colors.error },
+  thumbActionDangerText: { color: Colors.error },
+
+  // Ảnh đồng hồ 1 phòng (gửi kèm hoá đơn)
+  meterThumbRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
+    padding: Spacing.sm, marginTop: Spacing.xs,
+  },
+  meterThumb:      { width: 48, height: 48, borderRadius: BorderRadius.sm, backgroundColor: Colors.border },
+  meterThumbLabel: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
+  meterThumbHint:  { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  meterThumbRemove: {
+    paddingHorizontal: Spacing.sm, paddingVertical: 6,
+    borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.error,
+  },
+  meterThumbRemoveText: { fontSize: 12, fontWeight: '700', color: Colors.error },
+
   evnResult: {
     backgroundColor: '#F0FDF4', borderRadius: BorderRadius.md,
     padding: Spacing.base, marginTop: Spacing.sm,
@@ -1393,7 +1728,56 @@ const styles = StyleSheet.create({
 
   propertyName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   propertyMeta: { fontSize: 12, color: Colors.textMuted, marginRight: Spacing.sm },
+  propertyHit:  { fontSize: 11, color: Colors.primary, marginTop: 2, marginRight: Spacing.sm },
   checkMark:    { fontSize: 16, color: Colors.primary, fontWeight: '900' },
+
+  // ── Bộ chọn nhà: tìm kiếm / lọc / phân trang ──
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  searchIcon:  { fontSize: 14, marginRight: Spacing.xs },
+  searchInput: { flex: 1, paddingVertical: Spacing.sm, fontSize: 14, color: Colors.textPrimary },
+  searchClear: { fontSize: 15, color: Colors.textMuted, paddingHorizontal: Spacing.xs, fontWeight: '700' },
+
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs, marginBottom: Spacing.sm },
+  chip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+    borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  chipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText:       { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  chipTextActive: { color: Colors.white },
+
+  resultCount: { fontSize: 11, color: Colors.textMuted, marginBottom: Spacing.xs },
+
+  moreBtn: {
+    alignItems: 'center', paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md, borderWidth: 1, borderStyle: 'dashed',
+    borderColor: Colors.primary, marginTop: Spacing.xs,
+  },
+  moreBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+
+  // Thẻ gọn hiển thị nhà đang chọn (thay cho cả danh sách dài)
+  selectedCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.primaryBg, borderWidth: 1, borderColor: Colors.primary,
+    borderRadius: BorderRadius.md, padding: Spacing.md,
+  },
+  selectedIcon: { fontSize: 22 },
+  selectedName: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  selectedMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  changeBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6,
+    borderRadius: BorderRadius.full, backgroundColor: Colors.primary,
+  },
+  changeBtnText: { fontSize: 12, fontWeight: '800', color: Colors.white },
+
+  cancelChangeBtn:  { alignItems: 'center', paddingVertical: Spacing.sm, marginTop: Spacing.xs },
+  cancelChangeText: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
 
   progressRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',

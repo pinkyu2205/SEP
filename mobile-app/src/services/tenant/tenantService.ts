@@ -155,6 +155,15 @@ export interface OcrMeterResponse {
   rawText: string;
 }
 
+// BE: OcrEvnBillResponse — endpoint riêng cho ảnh HOÁ ĐƠN EVN (gọi OCR.space với isTable=true,
+// đọc bảng tốt hơn /ocr/meter vốn dành cho ảnh đồng hồ). BigDecimal serialize ra number.
+export interface OcrEvnBillResponse {
+  totalKwh: number | null;
+  totalAmount: number | null;
+  billingPeriod: string;
+  rawText: string;
+}
+
 // Body cho POST /tenant-contracts/{id}/confirm (BE: ConfirmContractRequest).
 // ⚠️ Tên field 'otp' suy ra từ DTO BE — nếu BE đặt tên khác (vd otpCode) thì đổi lại cho khớp.
 export interface ConfirmContractRequest {
@@ -222,6 +231,12 @@ export const realTenantService = {
   // OCR chỉ số đồng hồ từ ảnh đã upload Cloudinary
   ocrMeter: async (imageUrl: string): Promise<OcrMeterResponse> => {
     const { data } = await realApiClient.post<OcrMeterResponse>('/api/v1/ocr/meter', { imageUrl });
+    return data;
+  },
+
+  // OCR hoá đơn EVN — dùng cho ảnh hoá đơn, KHÔNG dùng ocrMeter (khác cấu hình isTable).
+  ocrEvnBill: async (imageUrl: string): Promise<OcrEvnBillResponse> => {
+    const { data } = await realApiClient.post<OcrEvnBillResponse>('/api/v1/ocr/evn-bill', { imageUrl });
     return data;
   },
 
