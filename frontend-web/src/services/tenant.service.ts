@@ -83,6 +83,15 @@ export const tenantService = {
     } as never);
   },
 
+  /** GET /tenant-contracts[?status=] — DS TOÀN BỘ hợp đồng (mọi trạng thái nếu
+   *  không truyền status), dùng cho trang theo dõi hợp đồng admin. */
+  listByStatus: (status?: string): Promise<TenantContractResponse[]> => {
+    return api.get('/api/v1/tenant-contracts', {
+      params: status ? { status } : {},
+      skipErrorToast: true,
+    } as never);
+  },
+
   /** GET /tenant-contracts/{id} — chi tiết hợp đồng. */
   getById: (id: number): Promise<TenantContractResponse> => {
     return api.get(`/api/v1/tenant-contracts/${id}`);

@@ -52,6 +52,15 @@ export interface ContractAddedEquipmentInput {
   condition?: 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
 }
 
+// Ảnh bằng chứng onboard (đồng hồ điện/nước, hiện trạng phòng) kèm thời điểm chụp —
+// BE ưu tiên field capturedAt do FE gửi (thời điểm chụp trên thiết bị); nếu không
+// gửi thì BE tự ghi LocalDateTime.now() lúc lưu (chỉ là thời điểm ghi nhận, không
+// chính xác bằng chứng bằng thời điểm chụp thật). Xem FE-onboard-photo-timestamp.md.
+export interface EvidencePhoto {
+  url: string;
+  capturedAt: string; // ISO-8601, vd new Date().toISOString() ngay lúc upload xong
+}
+
 export interface OnboardTenantRequest {
   fullName: string;
   cccd: string;
@@ -70,8 +79,11 @@ export interface OnboardTenantRequest {
   initialElectricReading?: number;
   initialWaterReading?: number;
   electricMeterImageUrl?: string;
+  electricMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ điện
   waterMeterImageUrl?: string;
-  roomConditionUrls?: string[];
+  waterMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ nước
+  roomConditionUrls?: string[]; // legacy — vẫn gửi được, BE tự set capturedAt = lúc lưu
+  roomConditionPhotos?: EvidencePhoto[]; // ưu tiên field này — có capturedAt từng ảnh
   roomConditionNote?: string;
   householdMembers?: HouseholdMemberInput[];
 
@@ -103,6 +115,11 @@ export interface TenantContractResponse {
   expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
   paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
+  // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
+  // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
+  terminatedAt?: string;
+  terminationReason?: string;
+  terminationType?: string; // EARLY_MOVE_OUT | VIOLATION | MUTUAL_AGREEMENT | NO_SHOW | OTHER
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
@@ -111,8 +128,11 @@ export interface TenantContractResponse {
   initialElectricReading?: number;
   initialWaterReading?: number;
   electricMeterImageUrl?: string;
+  electricMeterCapturedAt?: string;
   waterMeterImageUrl?: string;
+  waterMeterCapturedAt?: string;
   roomConditionUrls?: string[];
+  roomConditionPhotos?: EvidencePhoto[];
   roomConditionNote?: string;
 
   // File hợp đồng (nháp lẫn chính thức đều dùng chung 1 URL Cloudinary — BE không

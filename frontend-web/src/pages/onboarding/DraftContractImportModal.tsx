@@ -2,9 +2,12 @@ import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning,
-  Loader2, RotateCcw, Send, Upload, X,
+  Loader2, RotateCcw, Send, Upload, X, Printer,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '@/services/import.service';
+import { tenantService } from '@/services/tenant.service';
+import { uploadToCloudinary } from '@/services/upload.service';
+import { draftBlobToFile } from '@/utils/contractFile';
 import type { BulkImportError, BulkImportResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 
@@ -12,15 +15,17 @@ const TEMPLATE_URL = '/templates/SLMS2026_import_tenant_draft_contracts.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
 
 type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
+type PrintPhase = 'idle' | 'printing' | 'done';
 
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
 /**
  * Modal "Import hợp đồng nháp từ Excel" — luồng Đón khách.
- * Mỗi dòng file = 1 HĐ DRAFT (BE tự gắn nội thất, notify manager theo cột SĐT).
- * Import xong file HĐ CHƯA có (contractFileAvailable=false) — admin sinh file sau
- * qua nút Sửa từng HĐ (xem FE-import-tenant-draft-contracts.md).
+ * Mỗi dòng file = 1 HĐ DRAFT (BE tự gắn nội thất, tự gán quản lý phụ trách của
+ * nhà và gửi thông báo). Import xong FE tự động render + upload PDF cho từng HĐ
+ * (autoPrintFiles) — admin chỉ cần vào "Sửa" nếu muốn CHỈNH nội dung (sửa xong tự
+ * render lại file), không cần tự tạo file tay như trước (FE-import-tenant-draft-contracts.md).
  */
 export const DraftContractImportModal = ({
   onClose,
@@ -39,6 +44,61 @@ export const DraftContractImportModal = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // Tự động render + upload PDF cho từng HĐ vừa import (hướng A — giữ nguyên kiến
+  // trúc "BE chỉ render, FE tự upload Cloudinary" đã dùng cho luồng "Sửa" 1 HĐ,
+  // không cần BE thêm khả năng upload). Chạy tuần tự (không phải để tránh quá tải
+  // BE cùng lúc N request render+upload nặng).
+  const [printPhase, setPrintPhase] = useState<PrintPhase>('idle');
+  const [printDone, setPrintDone] = useState(0);
+  const [printTotal, setPrintTotal] = useState(0);
+  const [printFailed, setPrintFailed] = useState<string[]>([]);
+
+  const autoPrintFiles = async (importResult: BulkImportResponse) => {
+    const imported = importResult.results.filter((r) => r.importStatus === 'IMPORTED');
+    if (imported.length === 0) return;
+    setPrintPhase('printing');
+    setPrintDone(0);
+    setPrintTotal(imported.length);
+    setPrintFailed([]);
+
+    let drafts;
+    try {
+      drafts = await tenantService.listDrafts();
+    } catch {
+      setPrintFailed(imported.map((r) => r.contractCode));
+      setPrintPhase('done');
+      return;
+    }
+    const byCode = new Map(drafts.map((d) => [d.contractCode, d]));
+
+    const failed: string[] = [];
+    for (const r of imported) {
+      const draft = byCode.get(r.contractCode);
+      if (!draft) {
+        failed.push(r.contractCode);
+        setPrintDone((n) => n + 1);
+        continue;
+      }
+      try {
+        const blob = await tenantService.generateDraftDocument(draft.id);
+        const pdfFile = await draftBlobToFile(blob, draft.contractCode);
+        const url = await uploadToCloudinary(pdfFile, 'raw');
+        await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
+      } catch {
+        failed.push(r.contractCode);
+      }
+      setPrintDone((n) => n + 1);
+    }
+    setPrintFailed(failed);
+    setPrintPhase('done');
+    if (failed.length === 0) {
+      toast.success('Đã tự động tạo file hợp đồng cho toàn bộ.');
+    } else {
+      toast.error(`Tạo file thất bại cho ${failed.length} hợp đồng — vào "Sửa" từng dòng để tạo lại.`);
+    }
+    onImported?.();
+  };
+
   const pickFile = (f: File | null | undefined) => {
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
@@ -47,6 +107,7 @@ export const DraftContractImportModal = ({
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
+    setPrintPhase('idle'); setPrintDone(0); setPrintTotal(0); setPrintFailed([]);
     if (inputRef.current) inputRef.current.value = '';
   };
 
@@ -64,6 +125,7 @@ export const DraftContractImportModal = ({
         setPhase('done');
         toast.success(`Đã tạo ${res.results.length} hợp đồng nháp.`);
         onImported?.();
+        void autoPrintFiles(res);
       }
     } catch (err) {
       if (isBulkImportError(err)) {
@@ -88,10 +150,10 @@ export const DraftContractImportModal = ({
           <div>
             <h2 className="text-lg font-bold text-slate-900">Import hợp đồng nháp từ Excel</h2>
             <p className="mt-1 max-w-xl text-sm text-slate-500">
-              Mỗi dòng = 1 hợp đồng nháp. BĐS phải <b className="text-slate-600">đang hoạt động</b> (map
-              theo Mã HĐ inbound / Mã BĐS / Tên tòa nhà); có cột SĐT quản lý thì hệ thống tự gán &
-              gửi thông báo. Sau khi import, mở <b className="text-slate-600">Sửa</b> từng hợp đồng để
-              sinh file PDF.
+              Mỗi dòng = 1 hợp đồng nháp. BĐS phải <b className="text-slate-600">đang hoạt động và đã có quản lý phụ trách</b> (map
+              theo Mã HĐ inbound / Mã BĐS / Tên tòa nhà) — hệ thống tự gán quản lý phụ trách của nhà
+              và gửi thông báo, đồng thời <b className="text-slate-600">tự tạo file PDF hợp đồng</b> cho từng dòng.
+              Muốn chỉnh nội dung thì mở <b className="text-slate-600">Sửa</b> — sửa xong tự render lại file.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -201,9 +263,28 @@ export const DraftContractImportModal = ({
           {phase === 'done' && result && (
             <div className="mt-5 space-y-4">
               <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" /> Đã tạo {result.contractsProcessed} hợp đồng nháp — mở "Sửa" từng
-                hợp đồng để sinh file PDF.
+                <CheckCircle2 className="h-4 w-4" /> Đã tạo {result.contractsProcessed} hợp đồng nháp.
               </div>
+
+              {printPhase === 'printing' && (
+                <div className="flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-700">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Đang tự động tạo file hợp đồng: {printDone}/{printTotal}...
+                </div>
+              )}
+              {printPhase === 'done' && (
+                printFailed.length === 0 ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+                    <Printer className="h-4 w-4" /> Đã tự động tạo file PDF cho toàn bộ {printTotal} hợp đồng.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    <p className="flex items-center gap-2 font-semibold">
+                      <AlertTriangle className="h-4 w-4" /> Tạo file thất bại cho {printFailed.length}/{printTotal} hợp đồng — vào "Sửa" từng dòng để tạo lại:
+                    </p>
+                    <p className="mt-1 font-mono text-xs">{printFailed.join(', ')}</p>
+                  </div>
+                )
+              )}
 
               {result.results.length > 0 && (
                 <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -243,7 +324,7 @@ export const DraftContractImportModal = ({
           title="Xác nhận import hợp đồng nháp?"
           message={
             <>Hệ thống sẽ tạo <b className="text-slate-700">{result?.contractsProcessed ?? 0} hợp đồng nháp</b> từ
-            file <b className="text-slate-700">{file?.name}</b>. Quản lý có trong file sẽ nhận thông báo đón khách.</>
+            file <b className="text-slate-700">{file?.name}</b>. Quản lý phụ trách của từng nhà sẽ nhận thông báo đón khách.</>
           }
           confirmText="Import"
           loading={phase === 'importing'}

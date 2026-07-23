@@ -70,9 +70,11 @@ export interface AuthResponse {
 
 export interface ZoneRequest {
   name: string;
-  description?: string;
+  description?: string | null;
   level: number; // 1 = Tỉnh/TP, 2 = Quận/Huyện
   parentId?: string | null; // UUID
+  latitude?: number | null;
+  longitude?: number | null; // phải cùng null hoặc cùng có với latitude
 }
 
 export interface ZoneResponse {
@@ -83,6 +85,81 @@ export interface ZoneResponse {
   parentId?: string;
   parentName?: string;
   fullName: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+// =============================================================================
+// ZONE — Import Excel + Geocode tâm khu vực (Goong)
+// =============================================================================
+
+export interface ZoneImportResult {
+  sheet: string;          // "1. Tinh_Thanh" | "2. Quan_Huyen"
+  rowNumber: number;      // 1-based (dòng Excel)
+  action: 'CREATED' | 'SKIPPED' | 'UPDATED';
+  zoneName: string;
+  level: 1 | 2;
+  message: string;
+}
+
+export interface ZoneBulkImportResponse {
+  dryRun: boolean;
+  citiesCreated: number;
+  citiesSkipped: number;
+  districtsCreated: number;
+  districtsSkipped: number;
+  districtsUpdated: number;
+  districtsWithCoords: number;
+  districtsMissingCoords: number;
+  results: ZoneImportResult[];
+  errors: [];
+}
+
+export interface ZoneGeocodeCenterResponse {
+  id: string;
+  name: string;
+  parentName: string | null;
+  fullName: string;
+  level: 2;
+  latitude: number;
+  longitude: number;
+  geocodeQuery: string;
+  geocodeSource: 'GOONG';
+}
+
+export interface ZoneGeocodeResultItem {
+  zoneId: string;
+  zoneName: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  latitude: number | null;
+  longitude: number | null;
+  message: string | null;
+}
+
+export interface ZoneGeocodeBatchResponse {
+  requested: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  results: ZoneGeocodeResultItem[];
+}
+
+// =============================================================================
+// MANAGER ZONES — gán khu vực phụ trách cho quản lý vận hành
+// =============================================================================
+
+export interface ManagerZonesResponse {
+  managerId: string; // UUID, = User.id
+  fullName: string;
+  phoneNumber: string;
+  username: string;
+  role: 'ROLE_MANAGER';
+  status: UserStatus;
+  zones: ZoneResponse[];
+}
+
+export interface AssignManagerZonesRequest {
+  zoneIds: string[]; // [] = gỡ hết
 }
 
 // =============================================================================
@@ -882,6 +959,11 @@ export interface TenantContractResponse {
   expectedReceptionDate?: string;
   priceApprovalStatus?: string;    // PENDING_PRICE_APPROVAL | APPROVED_AWAITING_DEPOSIT | PRICE_REJECTED
   householdMembers?: HouseholdMemberInput[];
+  // Chấm dứt HĐ — tự động (NO_SHOW, BE cron quá 10 ngày sau moveInDate chưa kích
+  // hoạt) hoặc thanh lý tay đều populate 3 field này.
+  terminatedAt?: string;
+  terminationReason?: string;
+  terminationType?: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'NO_SHOW' | 'OTHER';
 }
 
 // =============================================================================

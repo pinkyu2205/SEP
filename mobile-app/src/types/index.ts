@@ -415,6 +415,8 @@ export interface Contract {
   signedAt?: string;
   terminatedAt?: string;
   terminationReason?: string;
+  /** EARLY_MOVE_OUT | VIOLATION | MUTUAL_AGREEMENT | NO_SHOW | OTHER — xem getContractTerminationTypeLabel. */
+  terminationType?: string;
   renewalReminderSent?: boolean;
   autoRenew?: boolean;
   daysUntilExpiry?: number;

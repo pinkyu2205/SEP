@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Contract } from '@/types';
-import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil } from '@/utils';
+import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil, getContractTerminationTypeLabel } from '@/utils';
 import {
   realTenantSelfService, ContractDetailDto, mapBeContractStatus,
 } from '@/services/tenant/selfService';
@@ -253,7 +253,9 @@ export const ContractDetailScreen: React.FC = () => {
             <View style={styles.historyItem}>
               <View style={[styles.historyDot, { backgroundColor: Colors.error }]} />
               <View>
-                <Text style={styles.historyTitle}>Chấm dứt hợp đồng</Text>
+                <Text style={styles.historyTitle}>
+                  Chấm dứt hợp đồng · {getContractTerminationTypeLabel(contract.terminationType)}
+                </Text>
                 <Text style={styles.historyDate}>{formatDate(contract.terminatedAt)}</Text>
                 {contract.terminationReason && (
                   <Text style={styles.historyNote}>{contract.terminationReason}</Text>

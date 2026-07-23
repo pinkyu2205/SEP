@@ -93,6 +93,15 @@ const COMMANDS = {
     catch (e) { console.log('fill', sel, '→ ERROR:', e.message.split('\n')[0]); }
   },
 
+  async upload(rest) {
+    if (!page) return console.log('ERROR: launch first');
+    const sp = rest.indexOf(' ');
+    const sel = sp === -1 ? rest : rest.slice(0, sp);
+    const filePath = sp === -1 ? '' : rest.slice(sp + 1);
+    try { await page.setInputFiles(sel, filePath, { timeout: 10_000 }); console.log('upload', sel, filePath, '→ OK'); }
+    catch (e) { console.log('upload', sel, '→ ERROR:', e.message.split('\n')[0]); }
+  },
+
   async press(key) { if (page) await page.keyboard.press(key); },
 
   async 'wait-for'(sel) {

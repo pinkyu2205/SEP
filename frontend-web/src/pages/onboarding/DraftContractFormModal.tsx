@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink } from 'lucide-react';
+import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
   PropertyResponse,
@@ -69,8 +69,9 @@ const DOB_MAX = addYearsIso(todayIso(), -18);
  * - Tab "Nhập tay": admin nhập trực tiếp → sau khi lưu, BE fill dữ liệu vào template và
  *   render PDF (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload
  *   Cloudinary → lưu draftContractFileUrl.
- * Sau khi lưu TỰ ĐỘNG gán cho quản lý phụ trách nhà (operationManagerId của property) —
- * không cho chọn tay, vì nhà đã hoạt động thì admin đã gán quản lý sẵn từ trước.
+ * Quản lý phụ trách LUÔN LÀ operationManagerId có sẵn của nhà (BE tự set) — không cho
+ * chọn tay ở đây nữa. Nhà chưa có quản lý phụ trách thì KHÔNG cho tạo hợp đồng (phải
+ * gán quản lý cho nhà trước, ở trang Zone/Quản lý).
  */
 // Bỏ dấu tiếng Việt + hạ chữ thường + gom khoảng trắng, phục vụ so khớp địa chỉ.
 const normalizeText = (s: string): string =>
@@ -230,7 +231,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     draftId: number;
     contractCode: string | null;
     hasFile: boolean;
-    managerName: string | null;
+    managerName: string;
   } | null>(null);
   const [viewingCreated, setViewingCreated] = useState(false);
   // Submit chuỗi thao tác (tạo/sửa → gán manager → sinh file) khá tốn kém để làm lại
@@ -271,6 +272,13 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     expectedReceptionDate: '',
     endDate: '',
   });
+
+  // Dữ liệu định danh (SĐT/CCCD/ngày sinh/ngày-nơi cấp CCCD) mặc định bị làm mờ
+  // và khoá khi sửa hợp đồng nháp — chỉ mở ra sau khi admin tick xác nhận, tránh
+  // sửa nhầm dữ liệu định danh khách (giống bước xác nhận của Coursera).
+  const [sensitiveUnlocked, setSensitiveUnlocked] = useState(false);
+  const [confirmSensitiveEdit, setConfirmSensitiveEdit] = useState(false);
+  const sensitiveLocked = isEditMode && !sensitiveUnlocked;
 
   // Tên nhà để hiện read-only khi sửa — tra trong danh sách ĐẦY ĐỦ (không lọc ACTIVE)
   // vì property có thể đã đổi status sau khi tạo draft, vẫn phải hiện được tên.
@@ -549,6 +557,17 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const standardDeposit = calcDeposit(form.rentAmount, form.depositMonths);
   const depositMismatch = form.rentAmount !== '' && form.deposit !== '' && form.deposit !== standardDeposit;
 
+  // Có field định danh nào thực sự bị đổi so với dữ liệu gốc không — chỉ khi
+  // TRUE mới bắt buộc phải tick xác nhận trước khi lưu (sửa các field khác của
+  // HĐ không cần xác nhận lại).
+  const sensitiveFieldsChanged = isEditMode && editContract
+    ? normalizePhone(form.phoneNumber.trim()) !== normalizePhone(editContract.tenantPhone || '') ||
+      form.cccd.trim() !== (editContract.tenantCccd || '') ||
+      form.dateOfBirth !== (editContract.tenantDateOfBirth || '') ||
+      form.cccdIssueDate !== (editContract.tenantCccdIssueDate || '') ||
+      form.cccdIssuePlace.trim() !== (editContract.tenantCccdIssuePlace || '')
+    : false;
+
   // Tên phòng để hiện trong panel tóm tắt trước khi lưu.
   const selectedRoomNumber = isEditMode
     ? editContract!.roomNumber
@@ -612,9 +631,15 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     if (cccdInvalid) return toast.error('CCCD phải gồm đúng 12 chữ số.');
     if (dobInvalid) return toast.error('Ngày sinh không hợp lệ — khách phải sinh từ 1930 và đủ 18 tuổi.');
     if (roleWarning) return toast.error('SĐT thuộc tài khoản nội bộ — không thể onboard làm khách.');
+    if (sensitiveFieldsChanged && !confirmSensitiveEdit) {
+      return toast.error('Vui lòng tick xác nhận trước khi lưu thay đổi thông tin định danh (SĐT/CCCD/ngày sinh).');
+    }
     if (!isEditMode) {
       if (!selectedProperty) return toast.error('Vui lòng chọn bất động sản');
       if (!isWholeHouse && !form.roomId) return toast.error('Vui lòng chọn phòng');
+      if (!selectedProperty.operationManagerId) {
+        return toast.error('Nhà này chưa có quản lý phụ trách — vui lòng gán quản lý cho nhà trước khi tạo hợp đồng.');
+      }
     }
     setShowSummary(true);
   };
@@ -653,23 +678,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         payload,
       );
 
-      // Nhà đã đi vào hoạt động → đã có sẵn quản lý phụ trách (operationManagerId).
-      // Gán tự động, không hỏi lại admin. Nhà nào chưa có quản lý thì báo để admin gán
-      // tay sau ở danh sách nháp (nút "Gán/Đổi quản lý" vẫn giữ nguyên làm phương án dự phòng).
-      let managerName: string | null = null;
-      const operationManagerId = selectedProperty.operationManagerId;
-      if (operationManagerId) {
-        setSubmitStage('Đang gán quản lý & gửi thông báo...');
-        try {
-          await tenantService.assignManager(draft.id, {
-            assignedManagerId: operationManagerId,
-            expectedReceptionDate: form.expectedReceptionDate || undefined,
-          });
-          managerName = selectedProperty.operationManagerName || 'quản lý phụ trách';
-        } catch {
-          /* interceptor đã toast; không chặn luồng tạo hợp đồng */
-        }
-      }
+      // handleSubmit đã chặn khi property chưa có operationManagerId, nên tới đây
+      // BE luôn tự gán quản lý phụ trách nhà cho hợp đồng — không cần gọi API riêng.
+      const managerName = selectedProperty.operationManagerName || 'quản lý phụ trách';
 
       // Tạo tay (không phải import file có sẵn) → BE render PDF từ dữ liệu vừa
       // nhập, upload Cloudinary, lưu URL — admin có thể xem lại ngay. Import file thì
@@ -689,11 +700,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         }
       }
 
-      toast.success(
-        managerName
-          ? `Đã tạo hợp đồng nháp & gửi thông báo cho ${managerName}.`
-          : 'Đã tạo hợp đồng nháp. Nhà này chưa có quản lý phụ trách — vào danh sách nháp để gán tay.',
-      );
+      toast.success(`Đã tạo hợp đồng nháp & gửi thông báo cho ${managerName}.`);
       onSuccess();
       setSuccessView({
         draftId: draft.id,
@@ -729,11 +736,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           <div className="flex flex-col items-center gap-3 text-center">
             <CheckCircle2 className="h-12 w-12 text-emerald-500" />
             <h2 className="text-lg font-bold text-slate-900">Đã tạo hợp đồng nháp</h2>
-            <p className="text-sm text-slate-500">
-              {successView.managerName
-                ? `Đã gửi thông báo cho ${successView.managerName}.`
-                : 'Nhà này chưa có quản lý phụ trách — vào danh sách nháp để gán tay.'}
-            </p>
+            <p className="text-sm text-slate-500">Đã gửi thông báo cho {successView.managerName}.</p>
             {successView.hasFile && (
               <button
                 onClick={viewCreatedContract}
@@ -845,7 +848,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative mx-4 max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-xl">
+      <div className={`relative mx-4 max-h-[92vh] w-full overflow-y-auto rounded-2xl bg-white shadow-xl ${isEditMode ? 'max-w-3xl' : 'max-w-2xl'}`}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900">{isEditMode ? 'Sửa hợp đồng nháp' : 'Tạo hợp đồng nháp'}</h2>
@@ -944,8 +947,8 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                     Quản lý phụ trách: <span className="font-medium text-slate-700">{selectedProperty.operationManagerName || '—'}</span> (tự động gán + gửi thông báo sau khi lưu)
                   </p>
                 ) : (
-                  <p className="mt-1.5 text-xs text-amber-600">
-                    ⚠️ Nhà này chưa có quản lý phụ trách — sau khi tạo cần vào danh sách nháp để gán tay.
+                  <p className="mt-1.5 text-xs font-medium text-rose-600">
+                    ⚠️ Nhà này chưa có quản lý phụ trách — không thể tạo hợp đồng. Vui lòng gán quản lý cho nhà trước.
                   </p>
                 )
               )}
@@ -987,83 +990,125 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
             </label>
             <input name="fullName" value={form.fullName} onChange={handleChange} className="input-field" required />
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                Số điện thoại <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="tel"
-                name="phoneNumber"
-                value={form.phoneNumber}
-                onChange={handleChange}
-                onBlur={handlePhoneBlur}
-                maxLength={12}
-                placeholder="09xxxxxxxx"
-                className={`input-field ${phoneInvalid ? 'border-rose-400' : ''}`}
-                required
-              />
-              {phoneInvalid && (
-                <p className="mt-1 text-xs text-rose-500">SĐT VN gồm 10 số, đầu 03/05/07/08/09.</p>
-              )}
+          {/* Thông tin định danh (SĐT/CCCD/ngày sinh) — khi SỬA hợp đồng nháp, mặc định
+              làm mờ + khoá để tránh sửa nhầm dữ liệu định danh khách; admin phải bấm
+              "Sửa thông tin định danh" rồi tick xác nhận mới lưu được thay đổi. */}
+          {isEditMode && (
+            sensitiveLocked ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  <Lock className="h-4 w-4 text-slate-400" />
+                  Thông tin định danh đang bị ẩn để tránh sửa nhầm.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSensitiveUnlocked(true)}
+                  className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700"
+                >
+                  Sửa thông tin định danh
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <label className="flex items-start gap-2.5 text-sm text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={confirmSensitiveEdit}
+                    onChange={(e) => setConfirmSensitiveEdit(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>
+                    <span className="flex items-center gap-1.5 font-bold"><ShieldCheck className="h-4 w-4" /> Xác nhận sửa thông tin định danh</span>
+                    Tôi đảm bảo những gì tôi sửa (SĐT/CCCD/ngày sinh) đều chính xác và tôi chịu trách nhiệm về thay đổi này.
+                  </span>
+                </label>
+              </div>
+            )
+          )}
+          <div className={sensitiveLocked ? 'pointer-events-none select-none space-y-4 opacity-60 blur-[3px]' : 'space-y-4'}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Số điện thoại <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="tel"
+                  name="phoneNumber"
+                  value={form.phoneNumber}
+                  onChange={handleChange}
+                  onBlur={handlePhoneBlur}
+                  maxLength={12}
+                  placeholder="09xxxxxxxx"
+                  disabled={sensitiveLocked}
+                  className={`input-field ${phoneInvalid ? 'border-rose-400' : ''}`}
+                  required
+                />
+                {phoneInvalid && (
+                  <p className="mt-1 text-xs text-rose-500">SĐT VN gồm 10 số, đầu 03/05/07/08/09.</p>
+                )}
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  CCCD <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  name="cccd"
+                  value={form.cccd}
+                  onChange={handleChange}
+                  inputMode="numeric"
+                  maxLength={12}
+                  placeholder="12 chữ số"
+                  disabled={sensitiveLocked}
+                  className={`input-field ${cccdInvalid ? 'border-rose-400' : ''}`}
+                  required
+                />
+                {cccdInvalid && (
+                  <p className="mt-1 text-xs text-rose-500">CCCD phải đủ 12 chữ số.</p>
+                )}
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày sinh</label>
+                <input
+                  type="date"
+                  name="dateOfBirth"
+                  value={form.dateOfBirth}
+                  onChange={handleChange}
+                  min={DOB_MIN}
+                  max={DOB_MAX}
+                  disabled={sensitiveLocked}
+                  className={`input-field ${dobInvalid ? 'border-rose-400' : ''}`}
+                />
+                {dobInvalid && (
+                  <p className="mt-1 text-xs text-rose-500">Từ 1930 & khách đủ 18 tuổi.</p>
+                )}
+              </div>
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                CCCD <span className="text-rose-500">*</span>
-              </label>
-              <input
-                name="cccd"
-                value={form.cccd}
-                onChange={handleChange}
-                inputMode="numeric"
-                maxLength={12}
-                placeholder="12 chữ số"
-                className={`input-field ${cccdInvalid ? 'border-rose-400' : ''}`}
-                required
-              />
-              {cccdInvalid && (
-                <p className="mt-1 text-xs text-rose-500">CCCD phải đủ 12 chữ số.</p>
-              )}
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày sinh</label>
-              <input
-                type="date"
-                name="dateOfBirth"
-                value={form.dateOfBirth}
-                onChange={handleChange}
-                min={DOB_MIN}
-                max={DOB_MAX}
-                className={`input-field ${dobInvalid ? 'border-rose-400' : ''}`}
-              />
-              {dobInvalid && (
-                <p className="mt-1 text-xs text-rose-500">Từ 1930 & khách đủ 18 tuổi.</p>
-              )}
-            </div>
-          </div>
 
-          {/* Ngày cấp / Nơi cấp CCCD — optional, in lên PDF hợp đồng (BE 15/07) */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày cấp CCCD</label>
-              <input
-                type="date"
-                name="cccdIssueDate"
-                value={form.cccdIssueDate}
-                onChange={handleChange}
-                max={todayIso()}
-                className="input-field"
-              />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">Nơi cấp CCCD</label>
-              <input
-                name="cccdIssuePlace"
-                value={form.cccdIssuePlace}
-                onChange={handleChange}
-                placeholder="VD: CA TP. Hồ Chí Minh"
-                className="input-field"
-              />
+            {/* Ngày cấp / Nơi cấp CCCD — optional, in lên PDF hợp đồng (BE 15/07) */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày cấp CCCD</label>
+                <input
+                  type="date"
+                  name="cccdIssueDate"
+                  value={form.cccdIssueDate}
+                  onChange={handleChange}
+                  max={todayIso()}
+                  disabled={sensitiveLocked}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">Nơi cấp CCCD</label>
+                <input
+                  name="cccdIssuePlace"
+                  value={form.cccdIssuePlace}
+                  onChange={handleChange}
+                  placeholder="VD: CA TP. Hồ Chí Minh"
+                  disabled={sensitiveLocked}
+                  className="input-field"
+                />
+              </div>
             </div>
           </div>
 
@@ -1199,6 +1244,18 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               </div>
             </div>
           </div>
+
+          {/* Quản lý phụ trách — luôn = operationManagerId của nhà, chỉ hiển thị
+              read-only. Đổi quản lý cho nhà thì làm ở trang Zone/Quản lý, không đổi
+              riêng cho từng hợp đồng. */}
+          {isEditMode && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">Quản lý phụ trách</label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700">
+                {editPropertyInfo?.operationManagerName || editContract!.assignedManagerName || '—'}
+              </div>
+            </div>
+          )}
 
           {/* Thành viên ở cùng — ghi vào householdMembers của HĐ (hộ gia đình/nguyên căn) */}
           <div>

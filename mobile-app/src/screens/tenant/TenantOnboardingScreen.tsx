@@ -173,24 +173,40 @@ export const TenantOnboardingScreen: React.FC = () => {
               <Text style={styles.meterLabel}>⚡ Điện (kWh)</Text>
               <Text style={styles.meterValue}>{data.initialElectricReading ?? '—'}</Text>
               {!!data.electricMeterImageUrl && (
-                <Image source={{ uri: data.electricMeterImageUrl }} style={styles.meterThumb} />
+                <>
+                  <Image source={{ uri: data.electricMeterImageUrl }} style={styles.meterThumb} />
+                  <Text style={styles.capturedAtText}>🕒 {formatDateTime(data.electricMeterCapturedAt)}</Text>
+                </>
               )}
             </View>
             <View style={styles.meterCol}>
               <Text style={styles.meterLabel}>💧 Nước (m³)</Text>
               <Text style={styles.meterValue}>{data.initialWaterReading ?? '—'}</Text>
               {!!data.waterMeterImageUrl && (
-                <Image source={{ uri: data.waterMeterImageUrl }} style={styles.meterThumb} />
+                <>
+                  <Image source={{ uri: data.waterMeterImageUrl }} style={styles.meterThumb} />
+                  <Text style={styles.capturedAtText}>🕒 {formatDateTime(data.waterMeterCapturedAt)}</Text>
+                </>
               )}
             </View>
           </View>
         </View>
 
-        {/* Hiện trạng phòng */}
-        {((data.roomConditionUrls?.length ?? 0) > 0 || !!data.roomConditionNote) && (
+        {/* Hiện trạng phòng — ưu tiên roomConditionPhotos (có capturedAt từng ảnh),
+            fallback roomConditionUrls cho HĐ cũ chưa có timestamp. */}
+        {((data.roomConditionPhotos?.length ?? data.roomConditionUrls?.length ?? 0) > 0 || !!data.roomConditionNote) && (
           <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>🏠 Hiện trạng phòng lúc nhận</Text>
-            {(data.roomConditionUrls?.length ?? 0) > 0 && (
+            {(data.roomConditionPhotos?.length ?? 0) > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageRow}>
+                {data.roomConditionPhotos!.map((p, i) => (
+                  <View key={`${p.url}-${i}`} style={styles.thumbWrap}>
+                    <Image source={{ uri: p.url }} style={styles.thumbImage} />
+                    <Text style={styles.capturedAtText}>🕒 {formatDateTime(p.capturedAt)}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (data.roomConditionUrls?.length ?? 0) > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageRow}>
                 {data.roomConditionUrls!.map((uri, i) => (
                   <Image key={`${uri}-${i}`} source={{ uri }} style={styles.thumbImage} />
@@ -291,6 +307,8 @@ const styles = StyleSheet.create({
 
   imageRow: { marginBottom: Spacing.sm },
   thumbImage: { width: 90, height: 90, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+  thumbWrap: { marginRight: Spacing.sm, width: 90 },
+  capturedAtText: { fontSize: 10, color: Colors.textMuted, marginTop: 4 },
   noteText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 20 },
 
   subLabel: { fontSize: 12, fontWeight: '700', color: Colors.textMuted, marginTop: Spacing.sm, marginBottom: 4, textTransform: 'uppercase' },
