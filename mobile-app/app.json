@@ -32,6 +32,9 @@
         "projectId": "accd0c29-d1f8-4dd5-90b6-ee372d65932a"
       }
     },
-    "owner": "pinkyus-team"
+    "owner": "pinkyus-team",
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
