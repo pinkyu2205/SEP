@@ -177,6 +177,8 @@ export interface MaintenanceRequest {
   costPaidBy?: 'HOST' | 'TENANT';
   /** Số lần tenant đã từ chối nghiệm thu. */
   reopenCount?: number;
+  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  photoHistory?: MaintenancePhotoHistoryDto[];
 }
 
 export interface CreateMaintenanceRequest {
@@ -195,6 +197,12 @@ export type MaintenanceReqStatus =
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceReqCategory =
   | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
+
+export interface MaintenancePhotoHistoryDto {
+  type: 'BEFORE' | 'AFTER' | 'REJECT';
+  url: string;
+  createdAt: string;
+}
 
 export interface MaintenanceTimelineDto {
   // string (không phải MaintenanceReqStatus) vì timeline cũ còn chứa status legacy
@@ -239,6 +247,8 @@ export interface MaintenanceRequestDto {
   afterImages?: string[];
   rejectImages?: string[];
   images: string[];
+  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  photoHistory?: MaintenancePhotoHistoryDto[];
   acknowledgedAt?: string;
   resolvedAt?: string;
   tenantConfirmedAt?: string;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, RefreshControl,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, RefreshControl, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -136,6 +136,7 @@ export const MaintenanceListScreen: React.FC = () => {
   const [filter, setFilter] = useState<FilterKey>('active');
   const [remote, setRemote] = useState<MaintenanceRequest[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [fabOpen, setFabOpen] = useState(false);
   // Lỗi API → báo rõ ràng thay vì âm thầm hiện dữ liệu seed (mock) làm user tưởng
   // ticket của mình biến mất / thấy ticket "Nguyễn Văn A" lạ hoắc.
   const [loadError, setLoadError] = useState(false);
@@ -290,6 +291,40 @@ export const MaintenanceListScreen: React.FC = () => {
         }
       />
 
+      {/* ── FAB: Tạo mới ── */}
+      {fabOpen && (
+        <Pressable style={styles.fabBackdrop} onPress={() => setFabOpen(false)} />
+      )}
+      <View style={styles.fabWrap} pointerEvents="box-none">
+        {fabOpen && (
+          <>
+            <TouchableOpacity
+              style={styles.fabOption}
+              activeOpacity={0.8}
+              onPress={() => { setFabOpen(false); navigation.navigate('Scan'); }}
+            >
+              <Text style={styles.fabOptionLabel}>Quét mã QR</Text>
+              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📷</Text></View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.fabOption}
+              activeOpacity={0.8}
+              onPress={() => { setFabOpen(false); navigation.navigate('MaintenanceCreate'); }}
+            >
+              <Text style={styles.fabOptionLabel}>Tạo yêu cầu mới</Text>
+              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📝</Text></View>
+            </TouchableOpacity>
+          </>
+        )}
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.85}
+          onPress={() => setFabOpen(o => !o)}
+        >
+          <Text style={styles.fabIcon}>{fabOpen ? '×' : '+'}</Text>
+        </TouchableOpacity>
+      </View>
+
     </SafeAreaView>
   );
 };
@@ -310,6 +345,32 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+
+  // ── FAB (Tạo mới) ──
+  fabBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+  },
+  fabWrap: {
+    position: 'absolute', right: Spacing.lg, bottom: Spacing.xl,
+    alignItems: 'flex-end',
+  },
+  fabOption: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm, ...Shadow.md,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  fabOptionLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  fabOptionIcon: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.primaryBg,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  fab: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primary,
+    alignItems: 'center', justifyContent: 'center', ...Shadow.md,
+  },
+  fabIcon: { fontSize: 26, fontWeight: '700', color: Colors.white, marginTop: -2 },
 
   summaryRow: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.sm, marginBottom: Spacing.sm },
   summaryCard: { flex: 1, borderRadius: BorderRadius.lg, padding: Spacing.sm, alignItems: 'center' },

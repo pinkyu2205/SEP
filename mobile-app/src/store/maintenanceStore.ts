@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MaintenanceRequest, MaintenanceStatus } from '@/types';
+import { MaintenanceRequest, MaintenanceStatus, MaintenancePhotoHistoryDto } from '@/types';
 
 // ===================== TENANT MAINTENANCE REQUESTS =====================
 // Seed mock theo flow mới 17/07: pending → approved → waiting_confirm → closed
@@ -145,6 +145,8 @@ export interface MaintenanceTicket {
   lastRepairDate?: string;
   createdAt: string;
   updatedAt: string;
+  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  photoHistory?: MaintenancePhotoHistoryDto[];
 }
 
 // ===================== SEED DATA =====================
