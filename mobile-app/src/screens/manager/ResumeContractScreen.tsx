@@ -388,7 +388,17 @@ const InspectionSection: React.FC<{
   const [waterReading, setWaterReading] = useState(
     contract.initialWaterReading != null ? String(contract.initialWaterReading) : '',
   )
+  // Ngày giờ chụp (client-side, lúc ảnh upload xong) — làm bằng chứng đối soát,
+  // gửi kèm lên BE (FE-onboard-photo-timestamp.md). Prefill từ contract nếu đã có
+  // sẵn dữ liệu (mở lại HĐ đã từng nhập trước đó).
+  const [meterCapturedAt, setMeterCapturedAt] = useState<{ elec?: string; water?: string }>({
+    elec: contract.electricMeterCapturedAt,
+    water: contract.waterMeterCapturedAt,
+  })
   const [photos, setPhotos] = useState<string[]>(contract.roomConditionUrls ?? [])
+  const [photosCapturedAt, setPhotosCapturedAt] = useState<string[]>(
+    (contract.roomConditionPhotos ?? []).map((p) => p.capturedAt),
+  )
   const [note, setNote] = useState(contract.roomConditionNote ?? '')
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
   const [photoUploading, setPhotoUploading] = useState(false)
@@ -416,8 +426,9 @@ const InspectionSection: React.FC<{
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
-      if (kind === 'elec') setElecUrl(url)
-      else setWaterUrl(url)
+      const capturedAt = new Date().toISOString()
+      if (kind === 'elec') { setElecUrl(url); setMeterCapturedAt((prev) => ({ ...prev, elec: capturedAt })) }
+      else { setWaterUrl(url); setMeterCapturedAt((prev) => ({ ...prev, water: capturedAt })) }
       const ocr = await realTenantService.ocrMeter(url)
       if (ocr.reading) {
         if (kind === 'elec') setElecReading(ocr.reading)
@@ -452,7 +463,9 @@ const InspectionSection: React.FC<{
     try {
       setPhotoUploading(true)
       const urls = await Promise.all(uris.map((u) => uploadImageToCloudinary(u)))
+      const now = new Date().toISOString()
       setPhotos((prev) => [...prev, ...urls])
+      setPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
     } catch (err: any) {
       Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
@@ -467,8 +480,14 @@ const InspectionSection: React.FC<{
         initialElectricReading: elecReading ? Number(elecReading) : undefined,
         initialWaterReading: waterReading ? Number(waterReading) : undefined,
         electricMeterImageUrl: elecUrl || undefined,
+        electricMeterCapturedAt: meterCapturedAt.elec,
         waterMeterImageUrl: waterUrl || undefined,
+        waterMeterCapturedAt: meterCapturedAt.water,
         roomConditionUrls: photos,
+        roomConditionPhotos: photos.map((url, i) => ({
+          url,
+          capturedAt: photosCapturedAt[i] || new Date().toISOString(),
+        })),
         roomConditionNote: note || undefined,
       })
       onChanged(updated)
@@ -520,6 +539,11 @@ const InspectionSection: React.FC<{
               {!!(kind === 'elec' ? elecUrl : waterUrl) && (
                 <Image source={{ uri: kind === 'elec' ? elecUrl : waterUrl }} style={styles.meterThumb} />
               )}
+              {!!meterCapturedAt[kind] && (
+                <Text style={styles.meterCapturedAt}>
+                  🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
+                </Text>
+              )}
               <TextInput
                 style={styles.input}
                 value={kind === 'elec' ? elecReading : waterReading}
@@ -549,7 +573,10 @@ const InspectionSection: React.FC<{
                     <Image source={{ uri }} style={styles.photoThumb} />
                     <TouchableOpacity
                       style={styles.removePhotoBtn}
-                      onPress={() => setPhotos((prev) => prev.filter((x) => x !== uri))}
+                      onPress={() => {
+                        setPhotos((prev) => prev.filter((_, idx) => idx !== i))
+                        setPhotosCapturedAt((prev) => prev.filter((_, idx) => idx !== i))
+                      }}
                     >
                       <Text style={styles.removePhotoText}>×</Text>
                     </TouchableOpacity>
@@ -981,6 +1008,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     backgroundColor: Colors.divider,
   },
+  meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: -Spacing.xs, marginBottom: Spacing.sm },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
   photoWrap: {
     width: '31%',

@@ -15,6 +15,7 @@ import { managerPropertyService } from '@/services/manager/propertyService';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 
 const QUICK_ACTIONS = [
   { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },
@@ -38,20 +39,23 @@ export const ManagerHomeScreen: React.FC = () => {
   const [properties, setProperties] = useState<ManagedProperty[]>([]);
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
+  const [draftContracts, setDraftContracts] = useState<TenantContractResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → 0)
 
   const load = useCallback(async () => {
     try {
-      const [props, inv, pay] = await Promise.all([
+      const [props, inv, pay, drafts] = await Promise.all([
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
+        realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
       ]);
       setProperties(props);
       setInvoices(inv);
       setPayments(pay);
+      setDraftContracts(drafts);
     } catch {
       // Lỗi đã được xử lý/log ở service; giữ dữ liệu cũ.
     } finally {
@@ -93,7 +97,15 @@ export const ManagerHomeScreen: React.FC = () => {
   const unpaidCount   = invoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
+  // Lịch đón khách hôm nay — hợp đồng nháp đã gán cho manager này, có ngày dự
+  // kiến đón = hôm nay (dữ liệu thật từ /tenant-contracts/managed?status=DRAFT,
+  // không cần API riêng — feedback thầy yêu cầu hiện ngay ở màn đầu, không phải
+  // bấm vào mới thấy).
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const receptionToday = draftContracts.filter(c => c.expectedReceptionDate === todayIso);
+
   const priorityItems = [
+    { id: 'p0', icon: '🤝', label: 'Đón khách hôm nay',         count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
     { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
     { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
@@ -147,6 +159,84 @@ export const ManagerHomeScreen: React.FC = () => {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* ── My Task hôm nay — luôn hiện đầu trang, không cần bấm vào ── */}
+        <View style={s.sectionRow}>
+          <Text style={s.sectionTitle}>My Task — hôm nay</Text>
+          {urgentTotal > 0 && (
+            <View style={s.urgentPill}>
+              <Text style={s.urgentPillText}>{urgentTotal} khẩn</Text>
+            </View>
+          )}
+        </View>
+
+        {activeItems.length === 0 ? (
+          /* ── All clear state ── */
+          <View style={s.clearCard}>
+            <Text style={s.clearText}>✅  Mọi thứ ổn định hôm nay</Text>
+          </View>
+        ) : (
+          <>
+            {/* ── Featured critical cards (2-column grid) ──────────── */}
+            {criticalItems.length > 0 && (
+              <View style={s.featuredGrid}>
+                {criticalItems.slice(0, 2).map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[s.featuredCard, {
+                      backgroundColor : item.color + '0C',
+                      borderColor     : item.color + '2E',
+                    }]}
+                    onPress={() => navigation.navigate(item.route)}
+                    activeOpacity={0.72}
+                  >
+                    {/* Icon + count badge */}
+                    <View style={s.featuredTop}>
+                      <View style={[s.featuredIconWrap, { backgroundColor: item.color + '1A' }]}>
+                        <Text style={s.featuredEmoji}>{item.icon}</Text>
+                      </View>
+                      <View style={[s.featuredCountBadge, { backgroundColor: item.color }]}>
+                        <Text style={s.featuredCountText}>{item.count}</Text>
+                      </View>
+                    </View>
+
+                    {/* Label */}
+                    <Text style={s.featuredLabel} numberOfLines={2}>{item.label}</Text>
+
+                    {/* CTA */}
+                    <Text style={[s.featuredCta, { color: item.color }]}>Xử lý →</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* ── Secondary items — compact grouped list ────────────── */}
+            {secondaryItems.length > 0 && (
+              <View style={s.secondaryCard}>
+                {secondaryItems.map((item, i) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      s.secondaryRow,
+                      i < secondaryItems.length - 1 && s.secondaryRowBorder,
+                    ]}
+                    onPress={() => navigation.navigate(item.route)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[s.secondaryIconWrap, { backgroundColor: item.color + '14' }]}>
+                      <Text style={s.secondaryEmoji}>{item.icon}</Text>
+                    </View>
+                    <Text style={s.secondaryLabel}>{item.label}</Text>
+                    <View style={[s.secondaryBadge, { backgroundColor: item.color + '15' }]}>
+                      <Text style={[s.secondaryBadgeText, { color: item.color }]}>{item.count}</Text>
+                    </View>
+                    <Text style={s.chevron}>›</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </>
+        )}
 
         {/* ── Overview Card ─────────────────────────────────────────── */}
         <View style={s.ovCard}>
@@ -244,84 +334,6 @@ export const ManagerHomeScreen: React.FC = () => {
 
 
         </View>
-
-        {/* ── Cần xử lý hôm nay ─────────────────────────────────────── */}
-        <View style={s.sectionRow}>
-          <Text style={s.sectionTitle}>Cần xử lý hôm nay</Text>
-          {urgentTotal > 0 && (
-            <View style={s.urgentPill}>
-              <Text style={s.urgentPillText}>{urgentTotal} khẩn</Text>
-            </View>
-          )}
-        </View>
-
-        {activeItems.length === 0 ? (
-          /* ── All clear state ── */
-          <View style={s.clearCard}>
-            <Text style={s.clearText}>✅  Mọi thứ ổn định hôm nay</Text>
-          </View>
-        ) : (
-          <>
-            {/* ── Featured critical cards (2-column grid) ──────────── */}
-            {criticalItems.length > 0 && (
-              <View style={s.featuredGrid}>
-                {criticalItems.slice(0, 2).map(item => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[s.featuredCard, {
-                      backgroundColor : item.color + '0C',
-                      borderColor     : item.color + '2E',
-                    }]}
-                    onPress={() => navigation.navigate(item.route)}
-                    activeOpacity={0.72}
-                  >
-                    {/* Icon + count badge */}
-                    <View style={s.featuredTop}>
-                      <View style={[s.featuredIconWrap, { backgroundColor: item.color + '1A' }]}>
-                        <Text style={s.featuredEmoji}>{item.icon}</Text>
-                      </View>
-                      <View style={[s.featuredCountBadge, { backgroundColor: item.color }]}>
-                        <Text style={s.featuredCountText}>{item.count}</Text>
-                      </View>
-                    </View>
-
-                    {/* Label */}
-                    <Text style={s.featuredLabel} numberOfLines={2}>{item.label}</Text>
-
-                    {/* CTA */}
-                    <Text style={[s.featuredCta, { color: item.color }]}>Xử lý →</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* ── Secondary items — compact grouped list ────────────── */}
-            {secondaryItems.length > 0 && (
-              <View style={s.secondaryCard}>
-                {secondaryItems.map((item, i) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      s.secondaryRow,
-                      i < secondaryItems.length - 1 && s.secondaryRowBorder,
-                    ]}
-                    onPress={() => navigation.navigate(item.route)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[s.secondaryIconWrap, { backgroundColor: item.color + '14' }]}>
-                      <Text style={s.secondaryEmoji}>{item.icon}</Text>
-                    </View>
-                    <Text style={s.secondaryLabel}>{item.label}</Text>
-                    <View style={[s.secondaryBadge, { backgroundColor: item.color + '15' }]}>
-                      <Text style={[s.secondaryBadgeText, { color: item.color }]}>{item.count}</Text>
-                    </View>
-                    <Text style={s.chevron}>›</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </>
-        )}
 
         {/* ── Thao tác nhanh ────────────────────────────────────────── */}
         <View style={[s.sectionRow, { marginTop: Spacing.lg }]}>

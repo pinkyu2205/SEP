@@ -27,6 +27,7 @@ import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
 import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from '@/pages/admin/zones/ZoneManagement';
+import { ManagerZoneAssignment } from '@/pages/admin/zones/ManagerZoneAssignment';
 import { TaoDraftPage } from '@/pages/admin/onboarding/CreateDraftPage';
 import { DraftOnboardingList } from '@/pages/onboarding/DraftOnboardingList';
 import { CauHinhKhaiThacPage } from '@/pages/admin/onboarding/OperationConfigPage';
@@ -78,6 +79,7 @@ function App() {
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
+            <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/settings" element={<SystemConfiguration />} />

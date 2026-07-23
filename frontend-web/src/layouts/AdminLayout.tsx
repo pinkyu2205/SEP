@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   UserPlus,
   Users,
+  UserRound,
   Wrench,
   X,
 } from 'lucide-react';
@@ -54,6 +55,7 @@ const navItems: SidebarItem[] = [
   // ── VẬN HÀNH ─────────────────────────────────────────────────────
   { type: 'section', label: 'Vận hành' },
   { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
+  { path: '/admin/zones/managers', label: 'Khu vực Manager', icon: UserRound },
   { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
   { path: '/admin/equipments', label: 'Danh mục thiết bị', icon: Package },
 

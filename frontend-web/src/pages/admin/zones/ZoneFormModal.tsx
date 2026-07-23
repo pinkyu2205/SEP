@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import type { ZoneRequest } from '@/types/api.types';
+import type { ZoneRequest, ZoneResponse } from '@/types/api.types';
 
 interface ZoneFormModalProps {
   isOpen: boolean;
@@ -9,6 +9,8 @@ interface ZoneFormModalProps {
   level: number;
   parentId: string | null;
   parentName?: string;
+  /** Có giá trị → SỬA zone đã tồn tại (prefill name/description/lat/lng) thay vì tạo mới. */
+  editZone?: ZoneResponse | null;
 }
 
 export const ZoneFormModal: React.FC<ZoneFormModalProps> = ({
@@ -18,27 +20,41 @@ export const ZoneFormModal: React.FC<ZoneFormModalProps> = ({
   level,
   parentId,
   parentName,
+  editZone,
 }) => {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
+  const isEdit = !!editZone;
+  const [name, setName] = useState(editZone?.name ?? '');
+  const [description, setDescription] = useState(editZone?.description ?? '');
+  const [latitude, setLatitude] = useState(editZone?.latitude != null ? String(editZone.latitude) : '');
+  const [longitude, setLongitude] = useState(editZone?.longitude != null ? String(editZone.longitude) : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Modal component ở đây được remount mỗi lần mở (parent render {isOpen && <...>} hoặc
+  // key đổi theo editZone.id) nên lazy state theo props ban đầu là đủ, không cần useEffect.
 
   if (!isOpen) return null;
 
+  // BE yêu cầu lat/lng phải cùng có hoặc cùng null — chặn ngay ở FE trước khi gửi.
+  const coordsMismatch = (latitude.trim() === '') !== (longitude.trim() === '');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || coordsMismatch) return;
 
     setIsSubmitting(true);
     try {
       await onSubmit({
         name: name.trim(),
-        description: description.trim(),
+        description: description.trim() || null,
         level,
         parentId,
+        latitude: latitude.trim() === '' ? null : Number(latitude),
+        longitude: longitude.trim() === '' ? null : Number(longitude),
       });
       setName('');
       setDescription('');
+      setLatitude('');
+      setLongitude('');
       onClose();
     } catch (error) {
       console.error(error);
@@ -59,7 +75,7 @@ export const ZoneFormModal: React.FC<ZoneFormModalProps> = ({
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h2 className="text-lg font-bold text-slate-800">
-            Thêm mới {getLevelLabel()}
+            {isEdit ? `Sửa ${getLevelLabel()}` : `Thêm mới ${getLevelLabel()}`}
           </h2>
           <button
             onClick={onClose}
@@ -103,6 +119,35 @@ export const ZoneFormModal: React.FC<ZoneFormModalProps> = ({
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all min-h-[100px] resize-none"
               />
             </div>
+
+            {level === 2 && (
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Toạ độ tâm (tùy chọn — có thể dùng nút Geocode thay vì nhập tay)
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    step="any"
+                    value={latitude}
+                    onChange={(e) => setLatitude(e.target.value)}
+                    placeholder="Vĩ độ (lat)"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    value={longitude}
+                    onChange={(e) => setLongitude(e.target.value)}
+                    placeholder="Kinh độ (lng)"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                  />
+                </div>
+                {coordsMismatch && (
+                  <p className="mt-1.5 text-xs text-rose-500">Điền cả vĩ độ và kinh độ, hoặc để trống cả hai.</p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="mt-8 flex items-center justify-end gap-3">
@@ -116,11 +161,11 @@ export const ZoneFormModal: React.FC<ZoneFormModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={!name.trim() || isSubmitting}
+              disabled={!name.trim() || isSubmitting || coordsMismatch}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Xác nhận thêm
+              {isEdit ? 'Lưu thay đổi' : 'Xác nhận thêm'}
             </button>
           </div>
         </form>
