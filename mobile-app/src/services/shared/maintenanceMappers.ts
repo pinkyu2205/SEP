@@ -61,7 +61,8 @@ const deriveTitle = (dto: MaintenanceRequestDto): string => {
 export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceRequest => ({
   id: String(dto.id),
   ticketCode: dto.requestCode,
-  roomId: String(dto.roomId),
+  // roomId null khi ticket thuộc HĐ nguyên căn (WHOLE_HOUSE) — giữ '' thay vì chuỗi "null".
+  roomId: dto.roomId != null ? String(dto.roomId) : '',
   roomName: dto.roomName,
   propertyId: dto.propertyId != null ? String(dto.propertyId) : undefined,
   propertyName: dto.propertyName,

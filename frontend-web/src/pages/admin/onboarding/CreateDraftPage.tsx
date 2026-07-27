@@ -79,6 +79,7 @@ export const TaoDraftPage = () => {
   // ─── building list ────────────────────────────────────────────────
   const [buildings, setBuildings] = useState<PropertyResponse[]>([]);
   const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   // Sắp xếp danh sách. BE không trả createdAt nên dùng id (auto-increment):
@@ -113,11 +114,14 @@ export const TaoDraftPage = () => {
 
   const fetchBuildings = async () => {
     setListLoading(true);
+    setListError(false);
     try {
       const res = await propertyService.getProperties(0, 100);
       setBuildings(res.content);
-    } catch (e) { console.error(e); }
-    finally { setListLoading(false); }
+    } catch (e) {
+      console.error(e);
+      setListError(true);
+    } finally { setListLoading(false); }
   };
 
   useEffect(() => {
@@ -903,6 +907,15 @@ export const TaoDraftPage = () => {
 
       {listLoading ? (
         <div className="py-16 text-center text-slate-400">Đang tải dữ liệu...</div>
+      ) : listError ? (
+        <div className="py-16 text-center text-slate-400">
+          <XCircle className="mx-auto h-10 w-10 mb-3 text-rose-300" />
+          <p className="text-sm font-semibold text-rose-500">Không tải được danh sách tòa nhà. Máy chủ có thể đang khởi động lại.</p>
+          <button onClick={fetchBuildings}
+            className="mt-4 btn-primary flex items-center gap-2 mx-auto rounded-xl px-5 py-2.5 text-sm">
+            Thử lại
+          </button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="py-16 text-center text-slate-400">
           <Building2 className="mx-auto h-10 w-10 mb-3 opacity-30" />

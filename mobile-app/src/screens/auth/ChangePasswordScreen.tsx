@@ -1,20 +1,23 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { Button, Input } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { useNavigation } from '@react-navigation/native';
 import { realAuthService } from '@/services/auth/realAuthService';
+import { showAlert } from '@/utils';
 
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;
 
+// Màn này giờ chỉ còn áp dụng cho role KHÔNG phải tenant (manager/owner cấp mật khẩu tạm
+// khi tạo tài khoản) — tenant lần đầu đã bị BE chặn login trước khi tới được màn này,
+// phải qua TenantActivateScreen (SĐT + OTP + tự đặt mật khẩu), không còn mật khẩu mặc định.
 export const ChangePasswordScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
 
-  // Mật khẩu hiện tại: lần đầu khách được cấp mặc định là tenant123.
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -22,16 +25,16 @@ export const ChangePasswordScreen: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!currentPassword) {
-      return Alert.alert('Lỗi', 'Vui lòng nhập mật khẩu hiện tại (mặc định tenant123).');
+      return showAlert('Lỗi', 'Vui lòng nhập mật khẩu tạm thời đã được cấp.');
     }
     if (newPassword.length < 6) {
-      return Alert.alert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
+      return showAlert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
     }
     if (newPassword !== confirmPassword) {
-      return Alert.alert('Lỗi', 'Mật khẩu xác nhận không khớp.');
+      return showAlert('Lỗi', 'Mật khẩu xác nhận không khớp.');
     }
     if (newPassword === currentPassword) {
-      return Alert.alert('Lỗi', 'Mật khẩu mới phải khác mật khẩu hiện tại.');
+      return showAlert('Lỗi', 'Mật khẩu mới phải khác mật khẩu hiện tại.');
     }
 
     setLoading(true);
@@ -40,7 +43,7 @@ export const ChangePasswordScreen: React.FC = () => {
       // BE đã set is_first_login=false. Sang Tutorial; Tutorial sẽ clear cờ isFirstLogin ở client.
       navigation.navigate('Tutorial');
     } catch (err: any) {
-      Alert.alert('Đổi mật khẩu thất bại', readErr(err, 'Không đổi được mật khẩu. Vui lòng thử lại.'));
+      showAlert('Đổi mật khẩu thất bại', readErr(err, 'Không đổi được mật khẩu. Vui lòng thử lại.'));
     } finally {
       setLoading(false);
     }
@@ -61,7 +64,7 @@ export const ChangePasswordScreen: React.FC = () => {
         <View style={styles.form}>
           <Input
             label="Mật khẩu hiện tại"
-            placeholder="Mặc định tenant123"
+            placeholder="Mật khẩu tạm thời đã được cấp"
             value={currentPassword}
             onChangeText={setCurrentPassword}
             secureTextEntry

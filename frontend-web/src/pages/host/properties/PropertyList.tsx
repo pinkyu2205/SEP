@@ -185,6 +185,7 @@ export const PropertyList = () => {
   const navigate = useNavigate();
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [showPending, setShowPending] = useState(false);
@@ -195,6 +196,7 @@ export const PropertyList = () => {
 
   const fetchProperties = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const [res, mgrs] = await Promise.all([
         propertyService.getProperties(0, 100),
@@ -208,8 +210,10 @@ export const PropertyList = () => {
           : p
       );
       setProperties(content);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error(e);
+      setLoadError(true);
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchProperties(); }, []);
@@ -388,6 +392,16 @@ export const PropertyList = () => {
           <div className="flex flex-col items-center justify-center py-24">
             <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600 mb-4" />
             <p className="text-sm font-medium text-slate-400">Đang tải dữ liệu...</p>
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="p-5 rounded-2xl bg-rose-50 mb-4">
+              <AlertCircle className="w-10 h-10 text-rose-300" />
+            </div>
+            <p className="text-rose-500 font-semibold">Không tải được danh sách tòa nhà. Máy chủ có thể đang khởi động lại.</p>
+            <button onClick={fetchProperties} className="mt-3 text-sm font-semibold text-indigo-600 hover:underline">
+              Thử lại
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">

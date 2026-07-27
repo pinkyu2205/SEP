@@ -32,7 +32,7 @@ export interface ChangePasswordRequest {
 
 // ===== Dashboard =====
 export interface DashboardRoom {
-  id: number;
+  id: number | null; // null khi HĐ nguyên căn (WHOLE_HOUSE) — roomNumber = tên property
   roomNumber: string | null;
   floor?: number;
   area?: number;
@@ -41,7 +41,7 @@ export interface DashboardRoom {
 export interface DashboardContract {
   id: number;
   code: string;
-  type?: string;            // WHOLE_HOUSE | ROOM
+  type?: 'ROOM' | 'WHOLE_HOUSE';
   startDate: string;
   endDate: string;
   daysLeft: number;
