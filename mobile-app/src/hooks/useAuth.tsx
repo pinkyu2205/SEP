@@ -14,6 +14,9 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (phone: string, password: string) => Promise<void>;
+  // Kích hoạt tài khoản tenant lần đầu (SĐT + OTP + mật khẩu mới) — thành công thì vào
+  // thẳng app luôn, giống hệt login (BE trả response cùng shape).
+  activateTenant: (phoneNumber: string, otp: string, newPassword: string, confirmPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
 }
@@ -23,6 +26,7 @@ const AuthContext = createContext<AuthContextType>({
   isLoading: true,
   isAuthenticated: false,
   login: async () => {},
+  activateTenant: async () => {},
   logout: async () => {},
   updateUser: () => {},
 });
@@ -83,6 +87,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
   // ============================
 
+  // Dùng chung cho cả login() lẫn activateTenant() — cả 2 endpoint BE đều trả cùng
+  // shape AuthResponse (token/username/role/firstLogin), nên set user y hệt nhau.
+  const applyRealAuthResponse = async (res: { username: string; role: string; firstLogin?: boolean }, phoneFallback: string) => {
+    const role: UserRole = res.role && res.role.includes('TENANT') ? 'tenant' : 'manager';
+
+    // Lấy hồ sơ đầy đủ từ /auth/me (fullName, phone, id thật...) — token đã được lưu trước đó.
+    // Nếu /auth/me chưa sẵn sàng thì fallback về dữ liệu tối thiểu từ response.
+    let profile: Partial<User> = {};
+    try {
+      const me = await realTenantSelfService.getMe();
+      profile = {
+        id: me.id ?? res.username,
+        email: me.email ?? '',
+        fullName: me.fullName || me.username || res.username,
+        phone: me.phone ?? (/^[0-9]{10}$/.test(phoneFallback) ? phoneFallback : ''),
+      };
+    } catch {
+      profile = {
+        id: res.username,
+        email: '',
+        fullName: res.username,
+        phone: /^[0-9]{10}$/.test(phoneFallback) ? phoneFallback : '',
+      };
+    }
+
+    setUser({
+      id: profile.id!,
+      email: profile.email ?? '',
+      fullName: profile.fullName!,
+      phone: profile.phone ?? '',
+      role,
+      isFirstLogin: res.firstLogin ?? false,
+      createdAt: new Date().toISOString(),
+    });
+    // Đăng ký Expo push token để nhận thông báo (cả tenant lẫn manager) — best-effort
+    registerPushToken();
+  };
+
   const login = async (identifier: string, password: string) => {
     const id = identifier.trim();
 
@@ -98,45 +140,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Các tài khoản còn lại -> đăng nhập backend Spring THẬT (vd manager "long2")
     try {
       const res = await realAuthService.login(id, password);
-      const role: UserRole = res.role && res.role.includes('TENANT') ? 'tenant' : 'manager';
-
-      // Lấy hồ sơ đầy đủ từ /auth/me (fullName, phone, id thật...) — token đã được lưu ở bước login.
-      // Nếu /auth/me chưa sẵn sàng thì fallback về dữ liệu tối thiểu từ response login.
-      let profile: Partial<User> = {};
-      try {
-        const me = await realTenantSelfService.getMe();
-        profile = {
-          id: me.id ?? res.username,
-          email: me.email ?? '',
-          fullName: me.fullName || me.username || res.username,
-          phone: me.phone ?? (/^[0-9]{10}$/.test(id) ? id : ''),
-        };
-      } catch {
-        profile = {
-          id: res.username,
-          email: '',
-          fullName: res.username,
-          phone: /^[0-9]{10}$/.test(id) ? id : '',
-        };
-      }
-
-      setUser({
-        id: profile.id!,
-        email: profile.email ?? '',
-        fullName: profile.fullName!,
-        phone: profile.phone ?? '',
-        role,
-        // Khách vừa được cấp tài khoản (SĐT/tenant123) -> bắt buộc đổi mật khẩu lần đầu.
-        isFirstLogin: res.firstLogin ?? false,
-        createdAt: new Date().toISOString(),
-      });
-      // Đăng ký Expo push token để nhận thông báo (cả tenant lẫn manager) — best-effort
-      registerPushToken();
+      await applyRealAuthResponse(res, id);
     } catch (err: any) {
       const msg =
         err?.response?.data?.error ||
         err?.response?.data?.message ||
         'Sai tài khoản hoặc mật khẩu. Vui lòng thử lại.';
+      throw new Error(msg);
+    }
+  };
+
+  // Kích hoạt tenant lần đầu: SĐT + OTP + mật khẩu mới -> BE trả token luôn (không cần
+  // login lại). Lỗi thường gặp: OTP sai/hết hạn, xác nhận mật khẩu không khớp, chưa
+  // đủ điều kiện kích hoạt (do check() throw trước) — đều là BusinessException 422.
+  const activateTenant = async (
+    phoneNumber: string,
+    otp: string,
+    newPassword: string,
+    confirmPassword: string,
+  ) => {
+    try {
+      const res = await realAuthService.tenantActivateConfirm({
+        phoneNumber, otp, newPassword, confirmPassword,
+      });
+      await applyRealAuthResponse(res, phoneNumber);
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        'Kích hoạt tài khoản thất bại. Vui lòng thử lại.';
       throw new Error(msg);
     }
   };
@@ -164,6 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         isAuthenticated: !!user,
         login,
+        activateTenant,
         logout,
         updateUser,
       }}

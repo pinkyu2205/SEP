@@ -89,6 +89,9 @@ export const ScanScreen: React.FC = () => {
         || `Mã "${code || data}" không thuộc thiết bị nào trong phòng bạn đang thuê.`;
       Alert.alert('Không tìm thấy thiết bị', msg, [
         { text: 'Quét lại', onPress: () => setScannedCode(null) },
+        // QR lỗi/mờ/không đọc được — dẫn thẳng sang danh sách thiết bị của tenant để
+        // chọn thay vì phải quét lại nhiều lần hoặc bí đường.
+        { text: 'Chọn từ danh sách thiết bị', onPress: () => navigation.replace('RoomEquipment') },
       ]);
     } finally {
       setVerifying(false);

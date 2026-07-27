@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -403,14 +404,25 @@ const InspectionSection: React.FC<{
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
   const [photoUploading, setPhotoUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Nút "Chọn ảnh" từ thư viện CHỈ hiện sau khi chụp bằng camera bị lỗi — tránh
+  // manager tiện tay chọn ảnh cũ thay vì chụp tại chỗ (feedback demo).
+  const [gallerySOS, setGallerySOS] = useState<{ elec?: boolean; water?: boolean }>({})
+  // true khi manager tự gõ/sửa số (khác với OCR tự điền) — bắt buộc tick xác nhận
+  // chịu trách nhiệm trước khi được lưu (feedback demo).
+  const [manualEdited, setManualEdited] = useState<{ elec?: boolean; water?: boolean }>({})
+  const [manualConfirmed, setManualConfirmed] = useState<{ elec?: boolean; water?: boolean }>({})
+  // Xem ảnh phóng to (đồng hồ điện/nước + hiện trạng phòng) — chạm bất kỳ đâu để đóng.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewCapturedAt, setPreviewCapturedAt] = useState<string | undefined>(undefined)
 
   const hasData = photos.length > 0 || !!elecReading || !!waterReading
 
-  const pickImage = async (useCamera: boolean): Promise<string | null> => {
+  const pickImage = async (useCamera: boolean, onDenied?: () => void): Promise<string | null> => {
     if (useCamera) {
       const perm = await ImagePicker.requestCameraPermissionsAsync()
       if (perm.status !== 'granted') {
-        Alert.alert('Lỗi', 'Cần quyền camera.')
+        Alert.alert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
+        onDenied?.()
         return null
       }
       const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
@@ -421,8 +433,12 @@ const InspectionSection: React.FC<{
   }
 
   const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
-    const uri = await pickImage(useCamera)
+    if (!useCamera && !gallerySOS[kind]) return
+    const uri = await pickImage(useCamera, () => setGallerySOS((prev) => ({ ...prev, [kind]: true })))
     if (!uri) return
+    // Ảnh mới chụp — tin OCR trở lại, bỏ yêu cầu xác nhận nhập tay của lần trước.
+    setManualEdited((prev) => ({ ...prev, [kind]: false }))
+    setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
@@ -474,6 +490,13 @@ const InspectionSection: React.FC<{
   }
 
   const save = async () => {
+    if (
+      (manualEdited.elec && !manualConfirmed.elec) ||
+      (manualEdited.water && !manualConfirmed.water)
+    ) {
+      Alert.alert('Thiếu xác nhận', 'Vui lòng tick xác nhận chịu trách nhiệm cho số đã nhập tay trước khi lưu.')
+      return
+    }
     try {
       setSaving(true)
       const updated = await realTenantService.updateDraftContract(contract.id, {
@@ -516,6 +539,9 @@ const InspectionSection: React.FC<{
 
       {expanded && (
         <View style={{ marginTop: Spacing.md, gap: Spacing.md }}>
+          <Text style={styles.meterHintText}>
+            Chỉ cần chụp rõ phần hiển thị số trên đồng hồ (không cần lấy trọn cả đồng hồ).
+          </Text>
           {(['elec', 'water'] as const).map((kind) => (
             <View key={kind} style={styles.meterCardSm}>
               <Text style={styles.label}>{kind === 'elec' ? '⚡ Chỉ số điện (kWh)' : '💧 Chỉ số nước (m³)'}</Text>
@@ -527,17 +553,44 @@ const InspectionSection: React.FC<{
                 >
                   <Text style={styles.secondaryBtnSmText}>📷 Chụp</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.secondaryBtnSm}
-                  onPress={() => captureMeter(kind, false)}
-                  disabled={ocrLoading !== null}
-                >
-                  <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
-                </TouchableOpacity>
+                {gallerySOS[kind] && (
+                  <TouchableOpacity
+                    style={styles.secondaryBtnSm}
+                    onPress={() => captureMeter(kind, false)}
+                    disabled={ocrLoading !== null}
+                  >
+                    <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+                  </TouchableOpacity>
+                )}
                 {ocrLoading === kind && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
               </View>
+              {!gallerySOS[kind] && (
+                <TouchableOpacity onPress={() => setGallerySOS((prev) => ({ ...prev, [kind]: true }))}>
+                  <Text style={styles.galleryFallbackLink}>Camera không dùng được? Chọn ảnh từ thư viện</Text>
+                </TouchableOpacity>
+              )}
               {!!(kind === 'elec' ? elecUrl : waterUrl) && (
-                <Image source={{ uri: kind === 'elec' ? elecUrl : waterUrl }} style={styles.meterThumb} />
+                <View style={styles.meterThumbWrap}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setPreviewUrl(kind === 'elec' ? elecUrl : waterUrl)
+                      setPreviewCapturedAt(meterCapturedAt[kind])
+                    }}
+                  >
+                    <Image source={{ uri: kind === 'elec' ? elecUrl : waterUrl }} style={styles.meterThumb} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.removePhotoBtn}
+                    onPress={() => {
+                      if (kind === 'elec') setElecUrl('')
+                      else setWaterUrl('')
+                      setMeterCapturedAt((prev) => ({ ...prev, [kind]: undefined }))
+                    }}
+                  >
+                    <Text style={styles.removePhotoText}>×</Text>
+                  </TouchableOpacity>
+                </View>
               )}
               {!!meterCapturedAt[kind] && (
                 <Text style={styles.meterCapturedAt}>
@@ -547,11 +600,30 @@ const InspectionSection: React.FC<{
               <TextInput
                 style={styles.input}
                 value={kind === 'elec' ? elecReading : waterReading}
-                onChangeText={kind === 'elec' ? setElecReading : setWaterReading}
+                onChangeText={(v) => {
+                  if (kind === 'elec') setElecReading(v)
+                  else setWaterReading(v)
+                  setManualEdited((prev) => ({ ...prev, [kind]: true }))
+                  setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+                }}
                 keyboardType="numeric"
                 placeholder="OCR tự điền, có thể chỉnh"
                 placeholderTextColor={Colors.textMuted}
               />
+              {manualEdited[kind] && (
+                <TouchableOpacity
+                  style={styles.confirmRow}
+                  activeOpacity={0.7}
+                  onPress={() => setManualConfirmed((prev) => ({ ...prev, [kind]: !prev[kind] }))}
+                >
+                  <View style={[styles.checkbox, manualConfirmed[kind] && styles.checkboxChecked]}>
+                    {manualConfirmed[kind] && <Text style={styles.checkboxTick}>✓</Text>}
+                  </View>
+                  <Text style={styles.confirmText}>
+                    Tôi xác nhận đã nhập đúng số liệu (nhập tay, khác/thay OCR) và chịu trách nhiệm.
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
 
@@ -570,7 +642,13 @@ const InspectionSection: React.FC<{
               <View style={styles.photoGrid}>
                 {photos.map((uri, i) => (
                   <View key={`${uri}-${i}`} style={styles.photoWrap}>
-                    <Image source={{ uri }} style={styles.photoThumb} />
+                    <TouchableOpacity
+                      style={styles.photoThumbTouch}
+                      activeOpacity={0.85}
+                      onPress={() => { setPreviewUrl(uri); setPreviewCapturedAt(photosCapturedAt[i]) }}
+                    >
+                      <Image source={{ uri }} style={styles.photoThumb} />
+                    </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.removePhotoBtn}
                       onPress={() => {
@@ -603,6 +681,32 @@ const InspectionSection: React.FC<{
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Xem ảnh phóng to — chạm bất kỳ đâu để đóng */}
+      <Modal
+        visible={!!previewUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewUrl(null)}
+      >
+        <TouchableOpacity
+          style={styles.previewBackdrop}
+          activeOpacity={1}
+          onPress={() => setPreviewUrl(null)}
+        >
+          {!!previewUrl && (
+            <Image source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="contain" />
+          )}
+          {!!previewCapturedAt && (
+            <Text style={styles.previewCapturedAt}>
+              🕒 Chụp lúc {new Date(previewCapturedAt).toLocaleString('vi-VN')}
+            </Text>
+          )}
+          <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewUrl(null)}>
+            <Text style={styles.previewCloseText}>✕</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   )
 }
@@ -1000,6 +1104,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   secondaryBtnSmText: { color: Colors.primary, fontSize: 13, fontWeight: '700' },
+  meterThumbWrap: { position: 'relative' },
   meterThumb: {
     width: '100%',
     height: 130,
@@ -1009,6 +1114,16 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.divider,
   },
   meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: -Spacing.xs, marginBottom: Spacing.sm },
+  galleryFallbackLink: { fontSize: 11, color: Colors.textMuted, textDecorationLine: 'underline', marginTop: 4, marginBottom: 4 },
+  meterHintText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 2,
+    borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
+  },
+  checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxTick: { color: Colors.white, fontSize: 13, fontWeight: '800' },
+  confirmRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  confirmText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
   photoWrap: {
     width: '31%',
@@ -1017,6 +1132,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: Colors.divider,
   },
+  photoThumbTouch: { width: '100%', height: '100%' },
   photoThumb: { width: '100%', height: '100%', backgroundColor: Colors.divider },
   removePhotoBtn: {
     position: 'absolute',
@@ -1031,4 +1147,24 @@ const styles = StyleSheet.create({
   },
   removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
   notesInput: { minHeight: 80, textAlignVertical: 'top' },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewImage: { width: '100%', height: '85%' },
+  previewCloseBtn: {
+    position: 'absolute',
+    top: Spacing.xl,
+    right: Spacing.base,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCloseText: { color: Colors.white, fontSize: 18, fontWeight: '700' },
+  previewCapturedAt: { marginTop: Spacing.sm, color: Colors.white, fontSize: 13 },
 })

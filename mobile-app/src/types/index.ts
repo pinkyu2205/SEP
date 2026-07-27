@@ -229,7 +229,8 @@ export interface MaintenanceRequestDto {
   tenantId: number;
   tenantName: string;
   tenantPhone?: string;
-  roomId: number;
+  /** null khi ticket thuộc HĐ nguyên căn (WHOLE_HOUSE) — dùng roomName/propertyName để hiển thị. */
+  roomId: number | null;
   roomName: string;
   propertyId: number;
   propertyName: string;
@@ -263,8 +264,10 @@ export interface MaintenanceRequestDto {
 }
 
 // Flow 17/07 chiều: tenant KHÔNG gửi category/priority — manager gán khi duyệt.
+// roomId optional từ 26/07: HĐ nguyên căn (WHOLE_HOUSE) không có phòng, BE tự lấy
+// property từ HĐ ACTIVE (xác nhận qua test API thật với BE, không có doc riêng).
 export interface CreateMaintenanceRequestDto {
-  roomId: number;
+  roomId?: number;
   equipmentId?: number;
   /** Bắt buộc, ≤200 ký tự — hiển thị trên list/detail. */
   title: string;

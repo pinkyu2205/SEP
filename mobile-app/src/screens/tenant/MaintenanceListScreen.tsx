@@ -303,15 +303,25 @@ export const MaintenanceListScreen: React.FC = () => {
               activeOpacity={0.8}
               onPress={() => { setFabOpen(false); navigation.navigate('Scan'); }}
             >
-              <Text style={styles.fabOptionLabel}>Quét mã QR</Text>
+              <Text style={styles.fabOptionLabel}>Quét mã QR thiết bị</Text>
               <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📷</Text></View>
+            </TouchableOpacity>
+            {/* Sự cố liên quan thiết bị nhưng không có/không quét được QR — chọn đúng
+                thiết bị từ danh sách thay vì gõ tay tên thiết bị (feedback demo). */}
+            <TouchableOpacity
+              style={styles.fabOption}
+              activeOpacity={0.8}
+              onPress={() => { setFabOpen(false); navigation.navigate('RoomEquipment'); }}
+            >
+              <Text style={styles.fabOptionLabel}>Chọn thiết bị từ danh sách</Text>
+              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📦</Text></View>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.fabOption}
               activeOpacity={0.8}
               onPress={() => { setFabOpen(false); navigation.navigate('MaintenanceCreate'); }}
             >
-              <Text style={styles.fabOptionLabel}>Tạo yêu cầu mới</Text>
+              <Text style={styles.fabOptionLabel}>Sự cố khác (sàn, tường, cửa...)</Text>
               <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📝</Text></View>
             </TouchableOpacity>
           </>

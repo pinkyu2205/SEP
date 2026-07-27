@@ -6,18 +6,23 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Button, Input } from '@/components/common';
 import { useAuth } from '@/hooks';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { showAlert } from '@/utils';
+
+// BE (26/07) chặn login cho tenant chưa kích hoạt (isFirstLogin=true) bằng 422 kèm
+// message này — bắt đúng chuỗi để đề nghị chuyển sang màn Kích hoạt thay vì chỉ báo lỗi.
+const NOT_ACTIVATED_HINT = 'chưa kích hoạt';
 
 export const LoginScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const { login } = useAuth();
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState<string>(route.params?.phone ?? '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,10 +54,15 @@ export const LoginScreen: React.FC = () => {
       await login(phone.trim(), password);
       // Navigation sẽ tự chuyển sang Home thông qua RootNavigator (dựa vào cờ isFirstLogin và isAuthenticated)
     } catch (error: any) {
-      Alert.alert(
-        'Đăng nhập thất bại',
-        error.message || 'Sai số điện thoại hoặc mật khẩu. Vui lòng thử lại.'
-      );
+      const msg: string = error?.message || 'Sai số điện thoại hoặc mật khẩu. Vui lòng thử lại.';
+      if (msg.toLowerCase().includes(NOT_ACTIVATED_HINT)) {
+        showAlert('Tài khoản chưa kích hoạt', msg, [
+          { text: 'Để sau', style: 'cancel' },
+          { text: 'Kích hoạt ngay', onPress: () => navigation.navigate('TenantActivate', { phone: phone.trim() }) },
+        ]);
+      } else {
+        showAlert('Đăng nhập thất bại', msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -113,6 +123,15 @@ export const LoginScreen: React.FC = () => {
             size="lg"
             style={styles.loginButton}
           />
+
+          <TouchableOpacity
+            style={styles.activateLink}
+            onPress={() => navigation.navigate('TenantActivate', { phone: phone.trim() })}
+          >
+            <Text style={styles.activateLinkText}>
+              Lần đầu thuê? <Text style={styles.activateLinkTextBold}>Kích hoạt tài khoản</Text>
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Footer */}
@@ -216,6 +235,19 @@ const styles = StyleSheet.create({
   },
   loginButton: {
     marginTop: Spacing.sm,
+  },
+  activateLink: {
+    alignSelf: 'center',
+    marginTop: Spacing.lg,
+    padding: Spacing.sm,
+  },
+  activateLinkText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  activateLinkTextBold: {
+    color: Colors.primary,
+    fontWeight: '700',
   },
   // Footer
   footer: {
