@@ -190,6 +190,8 @@ export const PropertyList = () => {
   const [showPending, setShowPending] = useState(false);
   const [typeFilter, setTypeFilter] = useState<'all' | 'whole' | 'room'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  // Sắp xếp: BE không trả createdAt nên dùng id (auto-increment) — id lớn = thêm sau.
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest');
 
   const fetchProperties = async () => {
     setLoading(true);
@@ -218,7 +220,7 @@ export const PropertyList = () => {
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
-    return active.filter(p => {
+    const list = active.filter(p => {
       const matchType =
         typeFilter === 'all' ||
         (typeFilter === 'whole' && p.wholeHouse === true) ||
@@ -228,9 +230,13 @@ export const PropertyList = () => {
         [p.propertyName, p.shortAddress, p.fullAddress, p.zoneName].some(v => v?.toLowerCase().includes(kw));
       return matchType && matchStatus && matchSearch;
     });
-  }, [active, typeFilter, statusFilter, search]);
+    return [...list].sort((a, b) => {
+      if (sortBy === 'name') return a.propertyName.localeCompare(b.propertyName, 'vi');
+      return sortBy === 'oldest' ? a.id - b.id : b.id - a.id;
+    });
+  }, [active, typeFilter, statusFilter, search, sortBy]);
 
-  useEffect(() => { setPage(0); }, [search, typeFilter, statusFilter]);
+  useEffect(() => { setPage(0); }, [search, typeFilter, statusFilter, sortBy]);
 
   // Thống kê theo loại hình
   const wholeCount = useMemo(() => active.filter(p => p.wholeHouse === true).length, [active]);
@@ -356,6 +362,12 @@ export const PropertyList = () => {
               <option value="PENDING_OPERATION_MANAGER">Chờ gán quản lý</option>
               <option value="UNDER_RENOVATION">Đang cải tạo</option>
               <option value="DISABLED">Vô hiệu</option>
+            </select>
+            <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+              <option value="newest">Mới thêm gần nhất</option>
+              <option value="oldest">Thêm sớm nhất</option>
+              <option value="name">Tên A → Z</option>
             </select>
             <div className="relative flex-1 lg:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />

@@ -11,7 +11,7 @@ import type { BulkImportError, BulkImportResponse, BulkImportImagesResponse } fr
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { inspectZipImages, type ZipImagePreview } from '@/utils/zipImageInspect';
 
-const TEMPLATE_URL = '/templates/SLMS2026_import_dot1_khoi_tao.xlsx';
+const TEMPLATE_URL = '/templates/SLMS2026_import_matrix_dot1.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
 const MAX_ZIP_BYTES = 200 * 1024 * 1024; // BE multipart max-file-size = 200MB
 

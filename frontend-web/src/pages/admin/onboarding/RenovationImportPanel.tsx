@@ -8,7 +8,7 @@ import { importService, isBulkImportError } from '@/services/import.service';
 import type { BulkImportError, BulkImportResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 
-const TEMPLATE_URL = '/templates/SLMS2026_import_dot2_cai_tao.xlsx';
+const TEMPLATE_URL = '/templates/SLMS2026_import_matrix_dot2.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
 
 type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';

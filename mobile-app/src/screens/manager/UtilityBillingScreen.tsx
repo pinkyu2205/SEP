@@ -71,8 +71,11 @@ interface BillingRoom {
   id: string;
   code: string;
   tenantName: string;
-  prevElec: number;   // BE chưa có lịch sử chỉ số → tạm 0 (xem doc/ gap)
-  prevWater: number;  // BE chưa có lịch sử chỉ số → tạm 0
+  // Chỉ số cũ mặc định = chỉ số ghi lúc ĐÓN KHÁCH (initialElectric/WaterReading trên HĐ).
+  // Đây là mốc cho hoá đơn KỲ ĐẦU. Kỳ 2 trở đi lẽ ra lấy chỉ số kỳ trước — BE chưa có
+  // endpoint đọc lại chỉ số kỳ gần nhất, nên manager sửa tay (xem doc/ gap).
+  prevElec: number;
+  prevWater: number;
 }
 
 interface BillingProperty {
@@ -177,23 +180,40 @@ const mapBillingProperty = (
   const active = contracts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE');
   const tenantByRoomId = new Map<number, string>();
   const tenantByRoomNo = new Map<string, string>();
+  // Chỉ số điện/nước lúc đón khách (lưu trên HĐ) → mốc "chỉ số cũ" cho hoá đơn kỳ đầu.
+  const elecInitByRoomId  = new Map<number, number>();
+  const elecInitByRoomNo  = new Map<string, number>();
+  const waterInitByRoomId = new Map<number, number>();
+  const waterInitByRoomNo = new Map<string, number>();
   active.forEach(c => {
     if (c.roomId != null) tenantByRoomId.set(c.roomId, c.tenantFullName);
     if (c.roomNumber) tenantByRoomNo.set(c.roomNumber, c.tenantFullName);
+    if (c.initialElectricReading != null) {
+      if (c.roomId != null) elecInitByRoomId.set(c.roomId, c.initialElectricReading);
+      if (c.roomNumber) elecInitByRoomNo.set(c.roomNumber, c.initialElectricReading);
+    }
+    if (c.initialWaterReading != null) {
+      if (c.roomId != null) waterInitByRoomId.set(c.roomId, c.initialWaterReading);
+      if (c.roomNumber) waterInitByRoomNo.set(c.roomNumber, c.initialWaterReading);
+    }
   });
   const isWhole = p.wholeHouse === true;
 
   if (isWhole) {
     // Không có hợp đồng ACTIVE = nhà đang trống -> rooms rỗng để bị lọc khỏi danh sách tính tiền.
-    const tenant = active[0]?.tenantFullName;
+    const unit = active[0];
     return {
       id: String(p.id),
       name: p.propertyName,
       type: 'whole_house',
       electricityRate: 0,
       waterRate: 0,
-      rooms: tenant
-        ? [{ id: `house-${p.id}-unit`, code: 'Nhà nguyên căn', tenantName: tenant, prevElec: 0, prevWater: 0 }]
+      rooms: unit
+        ? [{
+            id: `house-${p.id}-unit`, code: 'Nhà nguyên căn', tenantName: unit.tenantFullName,
+            prevElec:  unit.initialElectricReading ?? 0,
+            prevWater: unit.initialWaterReading ?? 0,
+          }]
         : [],
     };
   }
@@ -211,8 +231,8 @@ const mapBillingProperty = (
         id: String(r.id),
         code: r.roomNumber,
         tenantName: tenantByRoomId.get(r.id) ?? tenantByRoomNo.get(r.roomNumber) ?? 'Chưa có khách thuê',
-        prevElec: 0,
-        prevWater: 0,
+        prevElec:  elecInitByRoomId.get(r.id)  ?? elecInitByRoomNo.get(r.roomNumber)  ?? 0,
+        prevWater: waterInitByRoomId.get(r.id) ?? waterInitByRoomNo.get(r.roomNumber) ?? 0,
       })),
   };
 };

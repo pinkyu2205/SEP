@@ -81,6 +81,9 @@ export const TaoDraftPage = () => {
   const [listLoading, setListLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Sắp xếp danh sách. BE không trả createdAt nên dùng id (auto-increment):
+  // id lớn hơn = thêm sau → 'newest' = id giảm dần.
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest');
   const [submittedDrafts, setSubmittedDrafts] = useState<number[]>(() => readSubmittedDrafts());
 
   // Badge: DRAFT đã bấm "Xác nhận" bước cuối → "Đã khởi tạo", DRAFT đang tạo dở → "Nháp"
@@ -142,7 +145,7 @@ export const TaoDraftPage = () => {
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
-    return buildings.filter(b => {
+    const list = buildings.filter(b => {
       // Draft đã bấm "Xác nhận" bước cuối → nhóm lọc riêng "Đã khởi tạo" (FE-side, không phải status BE)
       const effectiveStatus = b.status === 'DRAFT' && submittedDrafts.includes(b.id)
         ? 'INITIALIZED' : b.status;
@@ -151,13 +154,18 @@ export const TaoDraftPage = () => {
         .some(v => v?.toLowerCase().includes(kw));
       return matchStatus && matchSearch;
     });
-  }, [buildings, statusFilter, search, submittedDrafts]);
+    // Sắp xếp: newest/oldest theo id (auto-increment), name theo bảng chữ cái VN.
+    return [...list].sort((a, b) => {
+      if (sortBy === 'name') return a.propertyName.localeCompare(b.propertyName, 'vi');
+      return sortBy === 'oldest' ? a.id - b.id : b.id - a.id;
+    });
+  }, [buildings, statusFilter, search, submittedDrafts, sortBy]);
 
   // ─── phân trang (9 / trang) ───────────────────────────────────────
   const PER_PAGE = 9;
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, sortBy]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
@@ -885,6 +893,11 @@ export const TaoDraftPage = () => {
           <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
+        </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)} className="input-field w-52">
+          <option value="newest">Mới thêm gần nhất</option>
+          <option value="oldest">Thêm sớm nhất</option>
+          <option value="name">Tên A → Z</option>
         </select>
       </div>
 

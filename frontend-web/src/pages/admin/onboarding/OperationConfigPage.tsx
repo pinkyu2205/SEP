@@ -535,6 +535,8 @@ export const CauHinhKhaiThacPage = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  // Sắp xếp: BE không trả createdAt nên dùng id (auto-increment) — id lớn = thêm sau.
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest');
   const [renoTarget, setRenoTarget] = useState<PropertyResponse | null>(null);
   const [completingReno, setCompletingReno] = useState(false);
 
@@ -577,19 +579,23 @@ export const CauHinhKhaiThacPage = () => {
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
-    return buildings.filter(b => {
+    const list = buildings.filter(b => {
       const matchStatus = statusFilter === 'all' || b.status === statusFilter;
       const matchSearch = !kw || [b.propertyName, b.shortAddress, b.fullAddress, b.zoneName]
         .some(v => v?.toLowerCase().includes(kw));
       return matchStatus && matchSearch;
     });
-  }, [buildings, statusFilter, search]);
+    return [...list].sort((a, b) => {
+      if (sortBy === 'name') return a.propertyName.localeCompare(b.propertyName, 'vi');
+      return sortBy === 'oldest' ? a.id - b.id : b.id - a.id;
+    });
+  }, [buildings, statusFilter, search, sortBy]);
 
   // ─── phân trang (9 / trang) ───────────────────────────────────────
   const PER_PAGE = 9;
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, sortBy]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
@@ -723,6 +729,11 @@ export const CauHinhKhaiThacPage = () => {
           <option value="PENDING_HOST_REVIEW">Đã cải tạo xong</option>
           <option value="ACTIVE">Đang kinh doanh</option>
           <option value="DISABLED">Đã vô hiệu</option>
+        </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)} className="input-field w-52">
+          <option value="newest">Mới thêm gần nhất</option>
+          <option value="oldest">Thêm sớm nhất</option>
+          <option value="name">Tên A → Z</option>
         </select>
       </div>
 
