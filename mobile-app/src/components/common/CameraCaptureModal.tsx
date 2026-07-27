@@ -21,6 +21,8 @@ interface CameraCaptureModalProps {
   multi?: boolean
   onCapture: (uri: string) => void
   onClose: () => void
+  /** Camera không dùng được (mất quyền vĩnh viễn) — cho lối thoát chọn ảnh thư viện thay thế. */
+  onUseGalleryInstead?: () => void
 }
 
 export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
@@ -28,6 +30,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   multi = false,
   onCapture,
   onClose,
+  onUseGalleryInstead,
 }) => {
   const camRef = useRef<CameraView>(null)
   const [permission, requestPermission] = useCameraPermissions()
@@ -76,6 +79,13 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             >
               <Text style={styles.permissionBtnText}>Cấp quyền camera</Text>
             </TouchableOpacity>
+            {onUseGalleryInstead && (
+              <TouchableOpacity
+                onPress={() => { onUseGalleryInstead(); handleClose() }}
+              >
+                <Text style={styles.permissionCancel}>Camera không dùng được? Chọn ảnh từ thư viện</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity onPress={handleClose}>
               <Text style={styles.permissionCancel}>Đóng</Text>
             </TouchableOpacity>

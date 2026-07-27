@@ -11,7 +11,6 @@ import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
 import { formatDate, showAlert } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
-import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
@@ -53,25 +52,32 @@ export const MaintenanceCreateScreen: React.FC = () => {
     setSubmitting(true);
 
     try {
-      // roomId: ưu tiên từ QR thiết bị; không có thì lấy phòng của HĐ ACTIVE qua dashboard.
-      let roomIdNum = Number(equipment?.roomId ?? NaN);
-      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
+      // roomId: ưu tiên từ QR thiết bị. Không có thì dùng dashboard — nguồn sự thật duy
+      // nhất — KHÔNG suy ra từ list thiết bị (phòng trống nội thất vẫn hợp lệ).
+      // BE (26/07) hỗ trợ HĐ nguyên căn (WHOLE_HOUSE): roomId để trống, BE tự lấy
+      // property từ HĐ ACTIVE.
+      let roomIdNum: number | undefined = Number(equipment?.roomId ?? NaN);
+      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) roomIdNum = undefined;
+
+      if (roomIdNum === undefined) {
         const dash = await realTenantSelfService.getDashboard();
-        roomIdNum = Number(dash.room?.id);
-      }
-      // Nhà nguyên căn: HĐ không gán roomId nên dashboard trả room.id=null dù phòng
-      // thực tế vẫn tồn tại (thiết bị được gán vào phòng đó) — fallback lấy roomId
-      // từ thiết bị đầu tiên của HĐ hiện tại thay vì báo lỗi "không xác định được phòng".
-      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
-        try {
-          const myEquip = await realTenantEquipmentService.getMyEquipments();
-          roomIdNum = Number(myEquip.find(e => Number(e.roomId) > 0)?.roomId ?? NaN);
-        } catch { /* giữ nguyên NaN, rơi xuống báo lỗi bên dưới */ }
-      }
-      if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) {
-        setSubmitting(false);
-        showAlert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng kiểm tra hợp đồng đang hiệu lực.');
-        return;
+
+        if (!dash.contract) {
+          setSubmitting(false);
+          showAlert('Lỗi', 'Không tìm thấy hợp đồng đang hiệu lực. Vui lòng kiểm tra hợp đồng của bạn.');
+          return;
+        }
+
+        if (dash.contract.type === 'ROOM') {
+          const dashRoomId = Number(dash.room?.id ?? NaN);
+          if (!Number.isFinite(dashRoomId) || dashRoomId <= 0) {
+            setSubmitting(false);
+            showAlert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng liên hệ quản lý vận hành để được hỗ trợ.');
+            return;
+          }
+          roomIdNum = dashRoomId;
+        }
+        // WHOLE_HOUSE: roomIdNum giữ nguyên undefined — không gửi roomId lên BE.
       }
 
       const uploaded: string[] = [];

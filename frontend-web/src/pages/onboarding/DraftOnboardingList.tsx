@@ -226,9 +226,9 @@ export const DraftOnboardingList = () => {
           <p className="font-medium">Không khớp kết quả.</p>
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           {groups.map(({ propertyId, property, items }) => (
-            <div key={propertyId} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div key={propertyId} className="h-fit overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               {/* Group header */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-3">
                 <div className="min-w-0">

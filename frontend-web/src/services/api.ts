@@ -54,16 +54,35 @@ async function resolveErrorMessage(error: {
 api.interceptors.response.use(
   (response) => response.data,
   async (error) => {
+    const status = error.response?.status;
+    const config = error.config as
+      | { method?: string; _authRetried?: boolean; skipErrorToast?: boolean }
+      | undefined;
+
+    // BE free-tier hay "cold start" (sleep sau ~15p không traffic): vài giây đầu app
+    // vừa dậy, JWT filter/DB pool chưa ổn định khiến request GET có token hợp lệ vẫn
+    // rớt 401/403 thoáng qua. Thử lại đúng 1 lần cho GET trước khi coi là lỗi thật —
+    // tránh hiện "danh sách trống" oan trong lúc chờ backend dậy hẳn.
+    if (
+      (status === 401 || status === 403) &&
+      config &&
+      config.method?.toLowerCase() === 'get' &&
+      !config._authRetried
+    ) {
+      config._authRetried = true;
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return api(config);
+    }
+
     const message = await resolveErrorMessage(error);
 
-    const status = error.response?.status;
     // Cho phép call chủ động tắt toast lỗi (truyền config { skipErrorToast: true })
-    const skip = (error.config as { skipErrorToast?: boolean } | undefined)?.skipErrorToast;
+    const skip = config?.skipErrorToast;
     if (status !== 401 && status !== 403 && status !== 404 && !skip) {
       toast.error(message);
     }
 
-    if (error.response?.status === 401) {
+    if (status === 401) {
       // Xử lý logic đăng xuất khi hết hạn token (sẽ làm sau)
       console.warn('Unauthorized. Need to login again.');
     }

@@ -55,9 +55,10 @@ export const OnboardingSuccessScreen: React.FC<any> = ({ navigation, route }) =>
           {isNewAccount ? (
             <>
               <Row label="Tài khoản" value={loginUsername || '—'} />
-              <Row label="Mật khẩu mặc định" value="tenant123" />
               <Text style={styles.note}>
-                Tài khoản mới đã được tạo. Nhắc khách đổi mật khẩu sau lần đăng nhập đầu tiên.
+                Tài khoản mới đã được tạo — KHÔNG có mật khẩu mặc định. Nhờ khách mở app
+                → chọn "Kích hoạt tài khoản" → nhập số điện thoại {loginUsername || 'trên hợp đồng'} →
+                xác nhận OTP → tự đặt mật khẩu.
               </Text>
             </>
           ) : (

@@ -6,6 +6,7 @@ import { SearchResultScreen } from '@/screens/guest/SearchResultScreen';
 import { PropertyDetailScreen } from '@/screens/guest/PropertyDetailScreen';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { ForgotPasswordScreen } from '@/screens/auth/ForgotPasswordScreen';
+import { TenantActivateScreen } from '@/screens/auth/TenantActivateScreen';
 import { SearchFilters } from '@/types';
 
 export type GuestStackParamList = {
@@ -13,8 +14,9 @@ export type GuestStackParamList = {
   Search: { cityId?: string; wardId?: string; priceMin?: number; priceMax?: number } | undefined;
   SearchResult: { filters: SearchFilters };
   PropertyDetail: { propertyId: string };
-  Login: undefined;
+  Login: { phone?: string } | undefined;
   ForgotPassword: undefined;
+  TenantActivate: { phone?: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<GuestStackParamList>();
@@ -27,5 +29,6 @@ export const GuestStackNavigator: React.FC = () => (
     <Stack.Screen name="PropertyDetail" component={PropertyDetailScreen} options={{ animation: 'slide_from_right' }} />
     <Stack.Screen name="Login" component={LoginScreen} />
     <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+    <Stack.Screen name="TenantActivate" component={TenantActivateScreen} />
   </Stack.Navigator>
 );

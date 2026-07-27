@@ -258,6 +258,13 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // Ngày giờ chụp (client-side, lúc ảnh upload xong) — làm bằng chứng đối soát
   // sau này, hiện ngay trên UI cạnh ảnh/số đọc (feedback thầy 19/07).
   const [meterCapturedAt, setMeterCapturedAt] = useState<{ elec?: string; water?: string }>({})
+  // Nút "Chọn ảnh" từ thư viện CHỈ hiện sau khi chụp bằng camera bị lỗi (mất quyền/không
+  // dùng được) — feedback demo: tránh manager tiện tay chọn ảnh cũ thay vì chụp tại chỗ.
+  const [gallerySOS, setGallerySOS] = useState<{ elec?: boolean; water?: boolean }>({})
+  // true khi manager tự gõ/sửa số (khác với OCR tự điền) — bắt buộc tick xác nhận
+  // chịu trách nhiệm trước khi được lưu (feedback demo).
+  const [manualEdited, setManualEdited] = useState<{ elec?: boolean; water?: boolean }>({})
+  const [manualConfirmed, setManualConfirmed] = useState<{ elec?: boolean; water?: boolean }>({})
 
   // Ảnh hiện trạng (Cloudinary URLs) — conditionPhotosCapturedAt cùng thứ tự/độ dài với
   // conditionPhotos (index tương ứng), gửi lên BE dạng roomConditionPhotos (bằng chứng
@@ -708,7 +715,12 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     !!tenantInfo.phone.trim() &&
     !!tenantInfo.cccd.trim() &&
     rentValue > 0
-  const hasRequiredMeters = () => !!meters.elec.trim() && !!meters.water.trim()
+  // Nhập tay (gõ đè lên số OCR đọc, hoặc OCR fail phải tự gõ) bắt buộc tick xác nhận
+  // chịu trách nhiệm — feedback demo: không được lưu số nhập tay mà không cam kết.
+  const hasRequiredMeters = () =>
+    !!meters.elec.trim() && !!meters.water.trim() &&
+    (!manualEdited.elec || manualConfirmed.elec) &&
+    (!manualEdited.water || manualConfirmed.water)
 
   const handleNext = async () => {
     switch (currentLabel) {
@@ -860,10 +872,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   // ===== Ảnh + OCR =====
   // Trên web, launchCameraAsync chỉ mở file picker -> dùng CameraCaptureModal (expo-camera).
-  const pickFromNativeCamera = async () => {
+  const pickFromNativeCamera = async (onDenied?: () => void) => {
     const perm = await ImagePicker.requestCameraPermissionsAsync()
     if (perm.status !== 'granted') {
-      Alert.alert('Lỗi', 'Cần quyền camera.')
+      Alert.alert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
+      onDenied?.()
       return null
     }
     const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
@@ -872,6 +885,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   // Upload ảnh đồng hồ + OCR tự điền chỉ số
   const processMeterImage = async (kind: 'elec' | 'water', uri: string) => {
+    // Ảnh mới chụp — tin OCR trở lại, bỏ yêu cầu xác nhận nhập tay của lần trước.
+    setManualEdited((prev) => ({ ...prev, [kind]: false }))
+    setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
@@ -900,13 +916,21 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     }
     let uri: string | null
     if (useCamera) {
-      uri = await pickFromNativeCamera()
+      uri = await pickFromNativeCamera(() => reportCameraBroken(kind))
     } else {
+      // Chỉ cho chọn ảnh từ thư viện sau khi đã xác nhận camera lỗi (gallerySOS).
+      if (!gallerySOS[kind]) return
       const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
       uri = r.canceled ? null : r.assets[0].uri
     }
     if (!uri) return
     await processMeterImage(kind, uri)
+  }
+
+  // Camera không dùng được (mất quyền, lỗi thiết bị...) — manager tự báo để mở khoá
+  // nút chọn ảnh thư viện, thay vì hiện sẵn 2 lựa chọn ngang nhau.
+  const reportCameraBroken = (kind: 'elec' | 'water') => {
+    setGallerySOS((prev) => ({ ...prev, [kind]: true }))
   }
 
   const uploadConditionPhotos = async (uris: string[]) => {
@@ -1667,13 +1691,17 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           >
             <Text style={styles.ocrBtnText}>📷 Chụp</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.ocrBtn}
-            onPress={() => captureMeter(kind, false)}
-            disabled={ocrLoading !== null}
-          >
-            <Text style={styles.ocrBtnText}>🖼 Chọn ảnh</Text>
-          </TouchableOpacity>
+          {/* Chỉ hiện "Chọn ảnh" sau khi báo camera lỗi — tránh tiện tay chọn ảnh cũ
+              thay vì chụp tại chỗ (feedback demo). */}
+          {gallerySOS[kind] && (
+            <TouchableOpacity
+              style={styles.ocrBtn}
+              onPress={() => captureMeter(kind, false)}
+              disabled={ocrLoading !== null}
+            >
+              <Text style={styles.ocrBtnText}>🖼 Chọn ảnh</Text>
+            </TouchableOpacity>
+          )}
           {ocrLoading === kind && (
             <ActivityIndicator
               color={Colors.primary}
@@ -1681,6 +1709,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             />
           )}
         </View>
+        {!gallerySOS[kind] && (
+          <TouchableOpacity onPress={() => reportCameraBroken(kind)}>
+            <Text style={styles.galleryFallbackLink}>Camera không dùng được? Chọn ảnh từ thư viện</Text>
+          </TouchableOpacity>
+        )}
         {!!url && (
           <View style={styles.meterThumbWrap}>
             <TouchableOpacity
@@ -1709,11 +1742,29 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         <TextInput
           style={styles.input}
           value={meters[kind]}
-          onChangeText={(v) => setMeters((prev) => ({ ...prev, [kind]: v }))}
+          onChangeText={(v) => {
+            setMeters((prev) => ({ ...prev, [kind]: v }))
+            setManualEdited((prev) => ({ ...prev, [kind]: true }))
+            setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+          }}
           keyboardType='numeric'
           placeholder='OCR tự điền, có thể chỉnh'
           placeholderTextColor={Colors.textMuted}
         />
+        {manualEdited[kind] && (
+          <TouchableOpacity
+            style={styles.confirmRow}
+            activeOpacity={0.7}
+            onPress={() => setManualConfirmed((prev) => ({ ...prev, [kind]: !prev[kind] }))}
+          >
+            <View style={[styles.checkbox, manualConfirmed[kind] && styles.checkboxChecked]}>
+              {manualConfirmed[kind] && <Text style={styles.checkboxTick}>✓</Text>}
+            </View>
+            <Text style={styles.confirmText}>
+              Tôi xác nhận đã nhập đúng số liệu (nhập tay, khác/thay OCR) và chịu trách nhiệm.
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     )
   }
@@ -1732,8 +1783,8 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         </Text>
       </View>
       <Text style={styles.hint}>
-        Chụp/chọn ảnh đồng hồ — hệ thống OCR tự điền chỉ số, bạn có thể chỉnh
-        lại. Ảnh được lưu kèm hợp đồng.
+        Chỉ cần chụp rõ phần hiển thị số trên đồng hồ (không cần lấy trọn cả đồng hồ) —
+        hệ thống OCR tự điền chỉ số, bạn có thể chỉnh lại. Ảnh được lưu kèm hợp đồng.
       </Text>
       {renderMeterInput('elec')}
       {renderMeterInput('water')}
@@ -2256,6 +2307,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         multi={cameraTarget === 'condition'}
         onCapture={handleCameraCapture}
         onClose={() => setCameraTarget(null)}
+        onUseGalleryInstead={
+          cameraTarget === 'elec' || cameraTarget === 'water'
+            ? () => reportCameraBroken(cameraTarget)
+            : undefined
+        }
       />
 
       {/* Xem ảnh phóng to — chạm bất kỳ đâu để đóng */}
@@ -2762,6 +2818,7 @@ const styles = StyleSheet.create({
   },
   meterRoomBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
   meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: 6 },
+  galleryFallbackLink: { fontSize: 11, color: Colors.textMuted, textDecorationLine: 'underline', marginTop: 4 },
   meterCard: {
     backgroundColor: Colors.white,
     padding: Spacing.base,
@@ -3075,6 +3132,8 @@ const styles = StyleSheet.create({
   },
   checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   checkboxTick: { color: Colors.white, fontSize: 14, fontWeight: '800' },
+  confirmRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
+  confirmText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   handoverName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   handoverMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   handoverAddHeader: {
