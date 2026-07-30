@@ -4,6 +4,8 @@ import type {
   CreateMaintenanceRequestDto,
   ApproveMaintenanceRequestDto,
   CompleteMaintenanceRequestDto,
+  ConfirmMaintenanceRequestDto,
+  ResolveCostRequestDto,
   MaintenanceDashboardDto,
 } from '@/types';
 
@@ -78,9 +80,15 @@ export const realMaintenanceService = {
   },
 
   /** PUT /{id}/confirm — TENANT xác nhận đã sửa xong (chỉ accept=true). → CLOSED */
-  confirm: async (id: number): Promise<MaintenanceRequestDto> => {
+  /**
+   * agreeToCharge bắt buộc khi ticket có costAgreementStatus=PENDING (khách làm hư,
+   * đang chờ đồng ý bồi thường) — BE ném BusinessException nếu thiếu. Response có thể
+   * kèm `issuedInvoice` (agreeToCharge=true) để FE điều hướng thẳng tới màn hoá đơn/QR.
+   */
+  confirm: async (id: number, body: ConfirmMaintenanceRequestDto = {}): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm`, {
       accept: true,
+      ...body,
     });
     return data;
   },
@@ -132,12 +140,38 @@ export const realMaintenanceService = {
    * PUT /{id}/review-reject — manager xem xét từ chối của tenant.
    * approve=true → APPROVED (sửa lại, ảnh AFTER cũ bị xóa);
    * approve=false → WAITING_TENANT_CONFIRM (giữ kết quả, chờ tenant/auto-confirm).
+   * BE 30/07: approve=false BẮT BUỘC kèm note (lý do giữ nguyên kết quả) — thiếu là 422.
    */
-  reviewReject: async (id: number, approve: boolean): Promise<MaintenanceRequestDto> => {
+  reviewReject: async (id: number, approve: boolean, note?: string): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/review-reject`, {
       approve,
+      ...(note ? { note } : {}),
     });
     return data;
+  },
+
+  /**
+   * PUT /{id}/resolve-cost — manager xử lý khoản bồi thường treo (PENDING/DISPUTED),
+   * dùng được cả trên ticket đã CLOSED/CANCELLED. CHARGE trả kèm issuedInvoice.
+   */
+  resolveCost: async (id: number, body: ResolveCostRequestDto): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(
+      `${BASE}/${id}/resolve-cost`, body,
+    );
+    return data;
+  },
+
+  /**
+   * GET /pending-cost-resolution — ticket còn khoản bồi thường treo (mọi status,
+   * kể cả CLOSED/CANCELLED — vd khách khiếu nại xong ticket đã đóng, hoặc auto-confirm).
+   */
+  getPendingCostResolution: async (
+    params: { propertyId?: number; roomId?: number } = {},
+  ): Promise<MaintenanceRequestDto[]> => {
+    const { data } = await realApiClient.get<MaintenanceRequestDto[]>(
+      `${BASE}/pending-cost-resolution`, { params },
+    );
+    return data ?? [];
   },
 
   /** PUT /{id}/cancel — manager hủy (mọi trạng thái trừ CLOSED/CANCELLED). */

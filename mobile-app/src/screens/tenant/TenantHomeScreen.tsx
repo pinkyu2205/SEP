@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { useAuth } from '@/hooks';
+import { useAuth, useTenantContract } from '@/hooks';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
@@ -35,29 +35,51 @@ export const TenantHomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [actionsExpanded, setActionsExpanded] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông từ BE
+  // 1 account có thể có nhiều HĐ ACTIVE (nhà/phòng khác nhau) — xem
+  // docs/FE-multi-contract-per-phone.md (repo BE). selectedContractId dùng chung
+  // cho mọi màn (dashboard, bàn giao, thiết bị, tạo bảo trì...).
+  const { selectedContractId, setSelectedContractId, restoring } = useTenantContract();
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // ── Dashboard + hoá đơn thật của tenant ──
   const [dash, setDash] = useState<TenantDashboard | null>(null);
   const [allBills, setAllBills] = useState<SharedBill[]>([]);
   const [loading, setLoading] = useState(true);
+  // Phân biệt "BE trả hợp lệ, tenant thật sự chưa có HĐ active" (dash=null, không lỗi)
+  // với "gọi API lỗi" (mất mạng/401/500...) — trước đây gộp chung 1 kiểu `null` nên
+  // lúc lỗi mạng lại hiện lầm màn "Bạn chưa có phòng đang thuê" dù tài khoản có HĐ.
+  const [dashError, setDashError] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      let active = true;
-      setLoading(true);
-      Promise.all([
-        realTenantSelfService.getDashboard().catch(() => null),
-        realTenantBillingService.listInvoices().then(r => r.map(toSharedBill)).catch(() => [] as SharedBill[]),
-      ])
-        .then(([d, bills]) => {
-          if (!active) return;
-          setDash(d);
-          setAllBills(bills);
-        })
-        .finally(() => { if (active) setLoading(false); });
-      return () => { active = false; };
-    }, []),
-  );
+  const loadDashboard = useCallback(() => {
+    if (restoring) return () => {}; // chờ đọc xong lựa chọn cũ từ AsyncStorage trước khi gọi API
+    let active = true;
+    setLoading(true);
+    setDashError(false);
+    Promise.all([
+      realTenantSelfService.getDashboard(selectedContractId ?? undefined)
+        .then(d => ({ ok: true as const, d }))
+        .catch(() => ({ ok: false as const, d: null })),
+      realTenantBillingService.listInvoices().then(r => r.map(toSharedBill)).catch(() => [] as SharedBill[]),
+    ])
+      .then(([dashResult, bills]) => {
+        if (!active) return;
+        setDash(dashResult.d);
+        setDashError(!dashResult.ok);
+        setAllBills(bills);
+        // Lần đầu (chưa từng chọn) → chốt primary BE trả về làm mặc định, để các
+        // màn khác (handover/thiết bị/bảo trì) dùng chung ngay từ lần vào đầu tiên.
+        if (selectedContractId == null && dashResult.d?.contract?.id != null) {
+          setSelectedContractId(dashResult.d.contract.id);
+        }
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [selectedContractId, restoring]);
+
+  useFocusEffect(useCallback(() => loadDashboard(), [loadDashboard]));
+
+  const contractOptions = dash?.contracts ?? [];
+  const hasMultipleContracts = contractOptions.length > 1;
 
   // Có hợp đồng/phòng đang hiệu lực hay không (BE trả null khi chưa có)
   const hasRoom = !!dash?.contract;
@@ -115,7 +137,9 @@ export const TenantHomeScreen: React.FC = () => {
     .filter(Boolean) as SharedBill[];
 
   const hasMaintenance      = data.maintenance.pending > 0 || data.maintenance.inProgress > 0;
-  const contractExpiringSoon = data.contract.daysLeft <= 60;
+  // Chỉ tính "sắp hết hạn" khi CÓ dữ liệu HĐ thật — tránh hiện nhầm "còn 0 ngày"
+  // khi dash chưa tải được (daysLeft mặc định 0 lúc đó không phải giá trị thật).
+  const contractExpiringSoon = hasRoom && data.contract.daysLeft <= 60;
 
   const alerts = [
     hasOverdue        && { id: 'overdue',  icon: '🚨', text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
@@ -153,53 +177,49 @@ export const TenantHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {!hasRoom ? (
-          <View style={styles.emptyRoomCard}>
-            <Text style={styles.emptyRoomIcon}>🏠</Text>
-            <Text style={styles.emptyRoomTitle}>Bạn chưa có phòng đang thuê</Text>
-            <Text style={styles.emptyRoomText}>
-              Khi hợp đồng của bạn có hiệu lực, thông tin phòng và tòa nhà sẽ hiển thị tại đây.
+        {/* Picker "Nhà đang thuê" — chỉ hiện khi account có ≥2 HĐ ACTIVE */}
+        {hasMultipleContracts && (
+          <TouchableOpacity style={styles.contractPickerBtn} onPress={() => setPickerOpen(true)} activeOpacity={0.8}>
+            <Text style={styles.contractPickerLabel}>🏠 Nhà đang xem</Text>
+            <Text style={styles.contractPickerValue} numberOfLines={1}>
+              {dash?.contract?.propertyName ?? data.room.name}
+              {dash?.contract?.roomNumber ? ` · ${dash.contract.roomNumber}` : ''}
             </Text>
-          </View>
+            <Text style={styles.contractPickerChevron}>▾</Text>
+          </TouchableOpacity>
+        )}
+
+        {!hasRoom ? (
+          dashError ? (
+            <View style={styles.emptyRoomCard}>
+              <Text style={styles.emptyRoomIcon}>⚠️</Text>
+              <Text style={styles.emptyRoomTitle}>Không tải được dữ liệu</Text>
+              <Text style={styles.emptyRoomText}>
+                Có lỗi khi tải thông tin phòng/hợp đồng. Vui lòng kiểm tra mạng và thử lại.
+              </Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={loadDashboard}>
+                <Text style={styles.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.emptyRoomCard}>
+              <Text style={styles.emptyRoomIcon}>🏠</Text>
+              <Text style={styles.emptyRoomTitle}>Bạn chưa có phòng đang thuê</Text>
+              <Text style={styles.emptyRoomText}>
+                Khi hợp đồng của bạn có hiệu lực, thông tin phòng và tòa nhà sẽ hiển thị tại đây.
+              </Text>
+            </View>
+          )
         ) : (
         <>
-        {/* Room Banner */}
+        {/* Room Banner — chỉ giữ vài số liệu quan trọng nhất để dễ nhìn lướt qua;
+            chi tiết (diện tích/tầng/cọc) chuyển xuống card "Thông tin tòa nhà" bên dưới. */}
         <View style={styles.roomCard}>
-          <View style={styles.roomTop}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={styles.roomLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
-              <Text style={styles.roomName}>{data.room.name}</Text>
-              <Text style={styles.roomProperty}>{data.room.property}</Text>
-              <View style={styles.addressRow}>
-                <Text style={styles.addressIcon}>📍</Text>
-                <Text style={styles.addressText} numberOfLines={2}>{buildingInfo.address}</Text>
-              </View>
-            </View>
-            <View style={styles.roomStats}>
-              <View style={styles.roomStatRow}>
-                <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>{data.room.area}m²</Text>
-                  <Text style={styles.roomStatLabel}>Diện tích</Text>
-                </View>
-                <View style={styles.roomStat}>
-                  {/* Toàn nhà: số tầng của nhà; Theo phòng: tầng phòng nằm */}
-                  <Text style={styles.roomStatValue}>
-                    {isWholeHouse ? `${buildingInfo.totalFloors} tầng` : `Tầng ${data.room.floor}`}
-                  </Text>
-                  <Text style={styles.roomStatLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
-                </View>
-              </View>
-              <View style={[styles.roomStatRow, { marginTop: 8 }]}>
-                <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>{buildingInfo.totalFloors} tầng</Text>
-                  <Text style={styles.roomStatLabel}>Tòa nhà</Text>
-                </View>
-                <View style={styles.roomStat}>
-                  <Text style={styles.roomStatValue}>{formatCurrency(data.depositAmount).replace(' đ', 'đ')}</Text>
-                  <Text style={styles.roomStatLabel}>Tiền cọc</Text>
-                </View>
-              </View>
-            </View>
+          <Text style={styles.roomLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
+          <Text style={styles.roomName}>{data.room.name}</Text>
+          <View style={styles.addressRow}>
+            <Text style={styles.addressIcon}>📍</Text>
+            <Text style={styles.addressText} numberOfLines={2}>{buildingInfo.address}</Text>
           </View>
           <View style={styles.contractBar}>
             <Text style={styles.contractBarText}>📋 HĐ {data.contract.code}</Text>
@@ -209,15 +229,35 @@ export const TenantHomeScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Building info card — thông tin do host/admin cài đặt */}
+        {/* Building info card — thông tin do host/admin cài đặt + chi tiết phòng/nhà */}
         <View style={styles.buildingCard}>
           <View style={styles.buildingCardHeader}>
-            <Text style={styles.buildingCardTitle}>🏢 Thông tin tòa nhà</Text>
+            <Text style={styles.buildingCardTitle} numberOfLines={1}>
+              🏢 {buildingInfo.name || 'Thông tin tòa nhà'}
+            </Text>
             <Text style={styles.buildingCardSub}>Cài đặt bởi Host</Text>
           </View>
           <View style={styles.buildingAddressRow}>
             <Text style={styles.buildingAddressIcon}>📍</Text>
             <Text style={styles.buildingAddress}>{buildingInfo.address}</Text>
+          </View>
+          <View style={styles.buildingRatesRow}>
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateValue}>{data.room.area}m²</Text>
+              <Text style={styles.buildingRateLabel}>Diện tích</Text>
+            </View>
+            <View style={styles.buildingRateDivider} />
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateValue}>
+                {isWholeHouse ? `${buildingInfo.totalFloors} tầng` : `Tầng ${data.room.floor}`}
+              </Text>
+              <Text style={styles.buildingRateLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
+            </View>
+            <View style={styles.buildingRateDivider} />
+            <View style={styles.buildingRate}>
+              <Text style={styles.buildingRateValue}>{formatCurrency(data.depositAmount).replace(' đ', 'đ')}</Text>
+              <Text style={styles.buildingRateLabel}>Tiền cọc</Text>
+            </View>
           </View>
           {/* Điện/nước tính theo hóa đơn nhà nước (EVN) mỗi kỳ — không hiển thị đơn giá cố định. */}
           <View style={styles.buildingNoteRow}>
@@ -378,6 +418,33 @@ export const TenantHomeScreen: React.FC = () => {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Picker chọn nhà đang thuê */}
+      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
+        <TouchableOpacity style={styles.pickerBackdrop} activeOpacity={1} onPress={() => setPickerOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <Text style={styles.pickerTitle}>Chọn nhà đang thuê</Text>
+            {contractOptions.map((c) => {
+              const active = c.id === selectedContractId;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.pickerRow, active && styles.pickerRowActive]}
+                  onPress={() => { setSelectedContractId(c.id); setPickerOpen(false); }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pickerRowTitle}>
+                      {c.propertyName ?? c.code}{c.roomNumber ? ` · ${c.roomNumber}` : ''}
+                    </Text>
+                    <Text style={styles.pickerRowSub}>HĐ {c.code} · còn {c.daysLeft} ngày</Text>
+                  </View>
+                  {active && <Text style={styles.pickerCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -386,6 +453,31 @@ export const TenantHomeScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safe:   { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing['3xl'] },
+
+  // Picker "Nhà đang thuê" (multi-contract)
+  contractPickerBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  contractPickerLabel: { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
+  contractPickerValue: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  contractPickerChevron: { fontSize: 14, color: Colors.textMuted },
+  pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  pickerSheet: {
+    backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
+    padding: Spacing.lg, paddingBottom: Spacing['2xl'],
+  },
+  pickerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.md },
+  pickerRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  pickerRowActive: { backgroundColor: Colors.primaryBg, marginHorizontal: -Spacing.lg, paddingHorizontal: Spacing.lg, borderRadius: BorderRadius.md },
+  pickerRowTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  pickerRowSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  pickerCheck: { fontSize: 16, fontWeight: '800', color: Colors.primary },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   // Empty state (chưa có phòng/hợp đồng)
@@ -396,6 +488,8 @@ const styles = StyleSheet.create({
   emptyRoomIcon: { fontSize: 40, marginBottom: Spacing.sm },
   emptyRoomTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.xs },
   emptyRoomText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
+  retryBtn: { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  retryBtnText: { color: Colors.white, fontSize: 13, fontWeight: '700' },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.lg },
@@ -405,20 +499,14 @@ const styles = StyleSheet.create({
   notifBadge: { position: 'absolute', top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   notifBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
 
-  // Room card
+  // Room card — gọn lại chỉ còn tên phòng/nhà + địa chỉ + đếm ngày HĐ; chi tiết
+  // (diện tích/tầng/cọc) chuyển xuống "Thông tin tòa nhà" (buildingRatesRow bên dưới).
   roomCard: { borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.md, backgroundColor: 'rgba(79,70,229,0.95)', padding: Spacing.lg, ...Shadow.md },
-  roomTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
   roomLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
   roomName: { fontSize: 26, fontWeight: '800', color: Colors.white, marginTop: 2 },
-  roomProperty: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  addressRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5, gap: 3 },
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5, gap: 3, marginBottom: Spacing.md },
   addressIcon: { fontSize: 11, marginTop: 1 },
   addressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', flex: 1, lineHeight: 16 },
-  roomStats: { alignItems: 'flex-end', gap: 6 },
-  roomStatRow: { flexDirection: 'row', gap: 16, justifyContent: 'flex-end' },
-  roomStat: { alignItems: 'flex-end' },
-  roomStatValue: { fontSize: 13, fontWeight: '700', color: Colors.white },
-  roomStatLabel: { fontSize: 10, color: 'rgba(255,255,255,0.6)' },
   contractBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 6 },
   contractBarText: { fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
   contractBarDays: { fontSize: 11, fontWeight: '700', color: Colors.white },

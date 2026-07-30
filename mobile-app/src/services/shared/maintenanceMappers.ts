@@ -38,6 +38,11 @@ export const mapBeStatus = (s: string | undefined): MaintenanceStatus =>
 
 const lc = (s: string | undefined): string => (s ?? '').toLowerCase();
 
+const mapCostAgreement = (
+  s: string | undefined,
+): 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived' | undefined =>
+  s ? (s.toLowerCase() as 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived') : undefined;
+
 // category/priority null khi ticket PENDING (manager gán lúc duyệt) → undefined để UI ẩn badge.
 const lcOrUndef = <T extends string>(s: string | null | undefined): T | undefined =>
   s ? (s.toLowerCase() as T) : undefined;
@@ -95,6 +100,9 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   createdAt: dto.createdAt,
   updatedAt: dto.updatedAt,
   costPaidBy: dto.costPaidBy,
+  cause: dto.cause ? (lc(dto.cause) as 'wear' | 'misuse') : undefined,
+  costAgreementStatus: mapCostAgreement(dto.costAgreementStatus),
+  costDisputeReason: dto.costDisputeReason,
   reopenCount: dto.reopenCount,
   photoHistory: dto.photoHistory,
 });
@@ -123,6 +131,9 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   assignedTo: dto.assignedManagerName,
   repairCost: dto.repairCost,
   costPaidBy: dto.costPaidBy ? (lc(dto.costPaidBy) as 'host' | 'tenant') : undefined,
+  cause: dto.cause ? (lc(dto.cause) as 'wear' | 'misuse') : undefined,
+  costAgreementStatus: mapCostAgreement(dto.costAgreementStatus),
+  costDisputeReason: dto.costDisputeReason,
   reopenCount: dto.reopenCount ?? undefined,
   resolvedAt: dto.resolvedAt,
   tenantConfirmedAt: dto.tenantConfirmedAt,

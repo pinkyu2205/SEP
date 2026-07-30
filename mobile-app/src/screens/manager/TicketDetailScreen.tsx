@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Platform, Modal, Pressable,
+  TextInput, Image, Platform, Modal, Pressable, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -11,7 +11,7 @@ import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, TicketCategory, TicketPriority, PhotoEvidence, TimelineEntry,
 } from '@/store/maintenanceStore';
-import type { MaintenanceReqCategory, MaintenanceReqPriority } from '@/types';
+import type { MaintenanceReqCategory, MaintenanceReqPriority, EquipmentDto } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { realPendingChargeService, PendingCharge } from '@/services/manager/pendingChargeService';
@@ -182,11 +182,126 @@ export const TicketDetailScreen: React.FC = () => {
   const [cameraFor, setCameraFor] = useState<'before' | 'after' | null>(null);
   const [photoMenuFor, setPhotoMenuFor] = useState<'before' | 'after' | null>(null);
   // Flow 17/07 chiều: manager BẮT BUỘC gán category khi duyệt, priority tùy chọn.
-  const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(null);
+  // 27/07: tenant có thể đã tự chọn category lúc tạo (báo hỏng không gắn thiết bị) —
+  // prefill sẵn, manager vẫn đổi được (xem docs/FE-maintenance-non-equipment-create.md).
+  const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(ticket?.category ?? null);
   const [approvePriority, setApprovePriority] = useState<TicketPriority | null>(null);
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const [otherCategoryText, setOtherCategoryText] = useState('');
+  // Ticket tạo qua QR/chọn thiết bị luôn gắn equipmentId nhưng BE để category=null (tenant
+  // không được chọn category khi có equipment — xem resolveCreateCategory ở BE). 90%+ ticket
+  // có equipmentId là hư trang thiết bị, nên tự gợi ý sẵn 'appliance' để manager đỡ phải bấm
+  // dropdown mỗi lần — vẫn đổi được (vd nếu thực ra là nội thất) trước khi duyệt.
+  useEffect(() => {
+    if (!realTicket || realTicket.category || realEquipmentId == null) return;
+    setApproveCategory(c => c ?? 'appliance');
+  }, [realTicket, realEquipmentId]);
+
+  // Prefill số tiền chốt thu = repairCost đang treo trên ticket (manager sửa được).
+  useEffect(() => {
+    if (realTicket?.repairCost != null) {
+      setResolveAmountText(prev => (prev === '' ? String(realTicket.repairCost) : prev));
+    }
+  }, [realTicket?.repairCost]);
+
+  // Chi phí & bên chịu trách nhiệm (28/07/2026 — BE-DONE-maintenance-damage-compensation).
+  // Gợi ý số tiền: còn bảo hành → khấu hao còn lại theo price/warrantyStartDate/warrantyEndDate;
+  // hết bảo hành → penaltyFee cố định; không equipmentId → để trống, manager nhập tay.
+  const [costPaidBy, setCostPaidBy] = useState<'host' | 'tenant'>('host');
+  const [damageCause, setDamageCause] = useState<'wear' | 'misuse' | null>(null);
+  const [repairCostText, setRepairCostText] = useState('');
+  const [costSuggestionNote, setCostSuggestionNote] = useState<string | null>(null);
+  const [loadingPricing, setLoadingPricing] = useState(false);
+  const [pricingFetched, setPricingFetched] = useState(false);
+  // Manager phải tick xác nhận đã thoả thuận trực tiếp với khách về số tiền TRƯỚC khi gửi —
+  // tránh trường hợp tự đặt số tiền rồi mới báo khách (khách vẫn có bước Đồng ý/Khiếu nại
+  // riêng sau đó, đây là lớp cam kết bổ sung phía manager). Reset khi đổi số tiền/đổi bên chịu
+  // để cam kết luôn khớp đúng con số cuối cùng gửi đi.
+  const [costCommitConfirmed, setCostCommitConfirmed] = useState(false);
+
+  // "Giữ kết quả" (review-reject approve=false) cần lý do bắt buộc — mở ô nhập trước khi gửi.
+  const [keepResultOpen, setKeepResultOpen] = useState(false);
+  const [keepResultNote, setKeepResultNote] = useState('');
+
+  // Khoản bồi thường treo (costAgreementStatus pending/disputed trên ticket đã đóng/hủy) —
+  // BE 30/07 /resolve-cost: CHARGE (chốt thu, sửa được số tiền) hoặc WAIVE (miễn thu).
+  const [resolveAmountText, setResolveAmountText] = useState('');
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolving, setResolving] = useState(false);
+
+  const handleResolveCost = async (action: 'CHARGE' | 'WAIVE') => {
+    if (resolving) return;
+    const amount = Number(resolveAmountText.replace(/[^0-9]/g, ''));
+    if (action === 'CHARGE' && (!Number.isFinite(amount) || amount <= 0)) {
+      showAlert('Lỗi', 'Số tiền thu phải lớn hơn 0.');
+      return;
+    }
+    const doSend = async () => {
+      try {
+        setResolving(true);
+        const dto = await realMaintenanceService.resolveCost(idNum, {
+          action,
+          ...(action === 'CHARGE' ? { repairCost: amount } : {}),
+          ...(resolveNote.trim() ? { note: resolveNote.trim() } : {}),
+        });
+        await refreshReal();
+        showAlert(
+          action === 'CHARGE' ? '🧾 Đã chốt thu' : 'Đã miễn thu',
+          action === 'CHARGE'
+            ? `Đã phát hành hóa đơn${dto.issuedInvoice ? ` ${dto.issuedInvoice.code ?? '#' + dto.issuedInvoice.id}` : ''} ${fmt(amount)} — khách thanh toán ngay trên app.`
+            : 'Khoản bồi thường đã được miễn — không thu tiền khách.',
+        );
+      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể xử lý khoản bồi thường.')); }
+      finally { setResolving(false); }
+    };
+    if (action === 'WAIVE') {
+      showAlert('Miễn thu khoản bồi thường?', `Sẽ không thu ${ticket?.repairCost ? fmt(ticket.repairCost) : 'khoản này'} của khách nữa.`, [
+        { text: 'Không', style: 'cancel' },
+        { text: 'Miễn thu', style: 'destructive', onPress: () => void doSend() },
+      ]);
+    } else {
+      await doSend();
+    }
+  };
+
+  const computeSuggestedCost = (eq: EquipmentDto): { amount: number; note: string } | null => {
+    if (!eq.price || !eq.warrantyEndDate) return null;
+    const today = new Date();
+    const end = new Date(eq.warrantyEndDate);
+    if (today > end) {
+      return eq.penaltyFee != null
+        ? { amount: eq.penaltyFee, note: `Hết bảo hành — mức phạt cố định ${fmt(eq.penaltyFee)}` }
+        : null;
+    }
+    if (!eq.warrantyStartDate) return null;
+    const start = new Date(eq.warrantyStartDate);
+    const totalDays = (end.getTime() - start.getTime()) / 86_400_000;
+    if (totalDays <= 0) return null;
+    const usedDays = (today.getTime() - start.getTime()) / 86_400_000;
+    const ratio = Math.max(0, (totalDays - usedDays) / totalDays);
+    const amount = Math.round((eq.price * ratio) / 1000) * 1000;
+    return { amount, note: `Còn bảo hành — khấu hao còn lại (${Math.round(ratio * 100)}%)` };
+  };
+
+  useEffect(() => {
+    if (costPaidBy !== 'tenant' || !realEquipmentId || pricingFetched) return;
+    let active = true;
+    setLoadingPricing(true);
+    realEquipmentService.getById(realEquipmentId)
+      .then(eq => {
+        if (!active) return;
+        const suggested = computeSuggestedCost(eq);
+        if (suggested) {
+          setRepairCostText(String(suggested.amount));
+          setCostSuggestionNote(suggested.note);
+        }
+      })
+      .catch(() => { /* không có dữ liệu giá — để manager nhập tay */ })
+      .finally(() => { if (active) { setLoadingPricing(false); setPricingFetched(true); } });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costPaidBy, realEquipmentId, pricingFetched]);
 
   // Vòng đời thiết bị trên dữ liệu THẬT: đếm từ lịch sử bảo trì, loại chính ticket này.
   const [equipRepairCount, setEquipRepairCount] = useState<number | undefined>(undefined);
@@ -278,8 +393,9 @@ export const TicketDetailScreen: React.FC = () => {
     });
 
   const addLocalPhoto = async (type: 'before' | 'after', uri: string) => {
+    const localId = `ph-${Date.now()}`;
     setPhotos(prev => [...prev, {
-      id: `ph-${Date.now()}`, type, uri,
+      id: localId, type, uri,
       caption:    type === 'before' ? 'Ảnh hiện trạng' : 'Ảnh sau sửa chữa',
       capturedAt: now(),
     }]);
@@ -288,6 +404,10 @@ export const TicketDetailScreen: React.FC = () => {
       try {
         await realMaintenanceService.uploadPhotos(idNum, [uri], type === 'before' ? 'BEFORE' : 'AFTER');
         await refreshReal();
+        // refreshReal() vừa nạp lại beforeImages/afterImages từ BE — đã CHỨA ảnh vừa
+        // upload, nên bỏ bản optimistic cục bộ để tránh hiện trùng ảnh (server + local
+        // cùng render 1 ảnh, khiến "Ảnh sau sửa chữa" hiện dư so với lịch sử thật).
+        setPhotos(prev => prev.filter(p => p.id !== localId));
       } catch {
         showAlert('Lỗi tải ảnh', 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.');
       }
@@ -346,14 +466,41 @@ export const TicketDetailScreen: React.FC = () => {
       showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa trước khi báo xong.');
       return;
     }
+    const repairCostValue = Number(repairCostText.replace(/[^\d]/g, '')) || 0;
+    if (costPaidBy === 'tenant') {
+      if (!damageCause) {
+        showAlert('Thiếu thông tin', 'Vui lòng chọn nguyên nhân hư hỏng (hao mòn tự nhiên / khách làm hư).');
+        return;
+      }
+      if (repairCostValue <= 0) {
+        showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền bồi thường hợp lệ (> 0).');
+        return;
+      }
+      if (!costCommitConfirmed) {
+        showAlert('Thiếu xác nhận', 'Vui lòng tick xác nhận đã thoả thuận số tiền bồi thường với khách trước khi gửi.');
+        return;
+      }
+    }
     const note = noteInput.trim();
     if (isReal) {
       try {
         setBusy(true);
-        await realMaintenanceService.complete(idNum, note ? { resolutionNote: note } : {});
+        await realMaintenanceService.complete(idNum, {
+          ...(note ? { resolutionNote: note } : {}),
+          ...(costPaidBy === 'tenant' ? {
+            costPaidBy: 'TENANT',
+            cause: damageCause === 'wear' ? 'WEAR' : 'MISUSE',
+            repairCost: repairCostValue,
+          } : {}),
+        });
         await refreshReal();
         setNoteInput('');
-        showAlert('🛠 Đã báo sửa xong', `Đã gửi khách nghiệm thu. Khách không phản hồi sau ${MAINTENANCE_AUTO_CONFIRM_DAYS} ngày thì ticket tự đóng.`);
+        showAlert(
+          '🛠 Đã báo sửa xong',
+          costPaidBy === 'tenant'
+            ? `Đã gửi khách nghiệm thu kèm yêu cầu bồi thường ${fmt(repairCostValue)}. Khách cần đồng ý trước khi hệ thống tạo hoá đơn — không tự động thu.`
+            : `Đã gửi khách nghiệm thu. Khách không phản hồi sau ${MAINTENANCE_AUTO_CONFIRM_DAYS} ngày thì ticket tự đóng.`,
+        );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
@@ -365,14 +512,20 @@ export const TicketDetailScreen: React.FC = () => {
     setNoteInput('');
   };
 
-  /** REJECTED → manager xem xét: approve=true sửa lại, false giữ kết quả. */
-  const handleReviewReject = async (approve: boolean) => {
+  /**
+   * REJECTED → manager xem xét: approve=true sửa lại, false giữ kết quả.
+   * BE 30/07: approve=false BẮT BUỘC note (lý do giữ nguyên) — thiếu là 422; đồng thời
+   * lần từ chối thứ 2 trở đi BE tự báo Host. UI: nút "Giữ kết quả" mở ô nhập lý do trước.
+   */
+  const handleReviewReject = async (approve: boolean, note?: string) => {
     if (busy) return;
     if (isReal) {
       try {
         setBusy(true);
-        await realMaintenanceService.reviewReject(idNum, approve);
+        await realMaintenanceService.reviewReject(idNum, approve, note);
         await refreshReal();
+        setKeepResultOpen(false);
+        setKeepResultNote('');
         showAlert(
           approve ? '🔧 Sửa lại' : 'Giữ kết quả',
           approve
@@ -591,10 +744,79 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* ── Khoản bồi thường TREO (BE 30/07 /resolve-cost) — ticket đã đóng/hủy nhưng
+            costAgreementStatus còn pending (khách im lặng / auto-confirm) hoặc disputed
+            (khách khiếu nại). Manager chốt thu (sửa được số tiền) hoặc miễn thu. ── */}
+        {isReal && ['closed', 'cancelled'].includes(ticket.status)
+          && (ticket.costAgreementStatus === 'pending' || ticket.costAgreementStatus === 'disputed') && (
+          <View style={[s.card, { borderColor: Colors.warning, borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>⚠️ Khoản bồi thường chưa xử lý</Text>
+            <Text style={s.descText}>
+              {ticket.costAgreementStatus === 'disputed'
+                ? `Khách khiếu nại số tiền ${ticket.repairCost ? fmt(ticket.repairCost) : ''}${ticket.costDisputeReason ? ` — "${ticket.costDisputeReason}"` : ''}.`
+                : `Ticket đã đóng nhưng khách chưa phản hồi về khoản bồi thường ${ticket.repairCost ? fmt(ticket.repairCost) : ''}.`}
+              {' '}Thỏa thuận với khách rồi chốt thu (sửa được số tiền) hoặc miễn thu.
+            </Text>
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Số tiền chốt thu</Text>
+            <TextInput
+              style={s.textInput}
+              value={resolveAmountText}
+              onChangeText={setResolveAmountText}
+              keyboardType="numeric"
+              placeholder="VNĐ"
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={[s.textInput, { marginTop: Spacing.sm }]}
+              value={resolveNote}
+              onChangeText={setResolveNote}
+              placeholder="Ghi chú (vd: đã thỏa thuận lại với khách qua điện thoại…)"
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+            <View style={[s.reviewRow, { marginTop: Spacing.sm }]}>
+              <TouchableOpacity
+                style={[s.reviewBtn, { backgroundColor: Colors.success, borderColor: Colors.success }]}
+                onPress={() => handleResolveCost('CHARGE')}
+                disabled={resolving}
+              >
+                <Text style={[s.reviewBtnText, { color: Colors.white }]}>
+                  {resolving ? 'Đang xử lý…' : '🧾 Chốt thu & phát hóa đơn'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.reviewBtn}
+                onPress={() => handleResolveCost('WAIVE')}
+                disabled={resolving}
+              >
+                <Text style={s.reviewBtnText}>Miễn thu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* ── Đã xử lý khoản treo: hiện kết cục để manager khỏi thắc mắc ── */}
+        {isReal && ticket.costAgreementStatus === 'waived' && (
+          <View style={[s.card, { backgroundColor: Colors.infoLight }]}>
+            <Text style={[s.descText, { color: Colors.info }]}>
+              ℹ️ Khoản bồi thường{ticket.repairCost ? ` ${fmt(ticket.repairCost)}` : ''} đã được miễn thu
+              {ticket.costDisputeReason ? ` — ${ticket.costDisputeReason}` : ''}.
+            </Text>
+          </View>
+        )}
+
         {/* ── Phân loại khi duyệt (PENDING): category BẮT BUỘC, priority tùy chọn ── */}
         {ticket.status === 'pending' && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>Phân loại sự cố (bắt buộc khi duyệt)</Text>
+            <Text style={s.cardSectionTitle}>
+              {ticket.category ? 'Phân loại sự cố' : 'Phân loại sự cố (bắt buộc khi duyệt)'}
+            </Text>
+            {!!ticket.category && (
+              <Text style={s.pickHint}>Khách thuê đã chọn khi tạo yêu cầu — bạn vẫn có thể đổi.</Text>
+            )}
+            {!ticket.category && !!realEquipmentId && (
+              <Text style={s.pickHint}>Gợi ý sẵn "Trang thiết bị" vì yêu cầu có gắn thiết bị — đổi lại nếu không đúng.</Text>
+            )}
             <TouchableOpacity
               style={s.dropdownBtn}
               onPress={() => setCategoryMenuOpen(o => !o)}
@@ -607,7 +829,11 @@ export const TicketDetailScreen: React.FC = () => {
             </TouchableOpacity>
             {categoryMenuOpen && (
               <View style={s.dropdownList}>
-                {APPROVE_CATEGORY_KEYS.map(key => {
+                {/* Ticket không gắn thiết bị: BE chặn APPLIANCE/FURNITURE lúc tạo — ẩn luôn
+                    ở bước duyệt cho khớp invariant (hư thiết bị/nội thất phải có equipmentId). */}
+                {APPROVE_CATEGORY_KEYS
+                  .filter(key => realEquipmentId != null || (key !== 'appliance' && key !== 'furniture'))
+                  .map(key => {
                   const c = CATEGORY_CONFIG[key];
                   const active = approveCategory === key;
                   return (
@@ -688,6 +914,74 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* ── Chi phí & bên chịu trách nhiệm (chỉ lúc chuẩn bị báo sửa xong) ── */}
+        {ticket.status === 'approved' && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>💰 Chi phí & bên chịu trách nhiệm</Text>
+            <View style={s.costToggleRow}>
+              <TouchableOpacity
+                style={[s.costToggleBtn, costPaidBy === 'host' && s.costToggleBtnActive]}
+                onPress={() => { setCostPaidBy('host'); setDamageCause(null); setCostCommitConfirmed(false); }}
+              >
+                <Text style={[s.costToggleText, costPaidBy === 'host' && s.costToggleTextActive]}>Chủ nhà chịu</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.costToggleBtn, costPaidBy === 'tenant' && s.costToggleBtnActive]}
+                onPress={() => { setCostPaidBy('tenant'); setDamageCause('misuse'); }}
+              >
+                <Text style={[s.costToggleText, costPaidBy === 'tenant' && s.costToggleTextActive]}>Khách thuê chịu</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.costHint}>
+              💡 Hao mòn tự nhiên (thiết bị cũ, xuống cấp theo thời gian) luôn là trách nhiệm chủ nhà —
+              chỉ chọn "Khách thuê chịu" khi xác định khách dùng sai/bất cẩn làm hư.
+            </Text>
+
+            {costPaidBy === 'tenant' && (
+              <>
+                <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Nguyên nhân</Text>
+                <View style={[s.costChip, s.costChipActive, { flex: undefined, alignSelf: 'flex-start', paddingHorizontal: Spacing.md }]}>
+                  <Text style={[s.costChipText, s.costChipTextActive]}>Khách làm hư</Text>
+                </View>
+
+                <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Số tiền bồi thường (đ)</Text>
+                {loadingPricing ? (
+                  <ActivityIndicator size="small" color={Colors.primary} style={{ marginBottom: Spacing.sm }} />
+                ) : (
+                  <TextInput
+                    style={s.textInput}
+                    value={repairCostText}
+                    onChangeText={(t) => { setRepairCostText(t); setCostCommitConfirmed(false); }}
+                    placeholder="Nhập số tiền..."
+                    placeholderTextColor={Colors.textMuted}
+                    keyboardType="numeric"
+                  />
+                )}
+                {costSuggestionNote && (
+                  <Text style={s.costHint}>💡 Gợi ý: {costSuggestionNote} — có thể sửa lại trước khi gửi.</Text>
+                )}
+                {!realEquipmentId && (
+                  <Text style={s.costHint}>Ticket không gắn thiết bị — nhập tay theo báo giá thực tế.</Text>
+                )}
+                <Text style={s.costHint}>Khách phải bấm "Đồng ý" mới tạo hoá đơn — hệ thống không tự động thu tiền.</Text>
+
+                <TouchableOpacity
+                  style={s.confirmRow}
+                  activeOpacity={0.7}
+                  onPress={() => setCostCommitConfirmed(prev => !prev)}
+                >
+                  <View style={[s.checkbox, costCommitConfirmed && s.checkboxChecked]}>
+                    {costCommitConfirmed && <Text style={s.checkboxTick}>✓</Text>}
+                  </View>
+                  <Text style={s.confirmText}>
+                    Tôi cam kết số tiền tôi nhập vào đã có sự thỏa thuận giữa hai bên và khách đã đồng ý với số tiền bồi thường đó.
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
+
         {/* ── Timeline ────────────────────────────────────────────── */}
         <View style={s.card}>
           <Text style={s.cardSectionTitle}>Tiến trình xử lý</Text>
@@ -716,22 +1010,45 @@ export const TicketDetailScreen: React.FC = () => {
           </TouchableOpacity>
         )}
         {ticket.status === 'rejected' && (
-          <View style={s.reviewRow}>
-            <TouchableOpacity
-              style={[s.reviewBtn, { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
-              onPress={() => handleReviewReject(true)}
-              disabled={busy}
-            >
-              <Text style={[s.reviewBtnText, { color: Colors.white }]}>🔧 Chấp nhận — sửa lại</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.reviewBtn}
-              onPress={() => handleReviewReject(false)}
-              disabled={busy}
-            >
-              <Text style={s.reviewBtnText}>Giữ kết quả</Text>
-            </TouchableOpacity>
-          </View>
+          <>
+            <View style={s.reviewRow}>
+              <TouchableOpacity
+                style={[s.reviewBtn, { backgroundColor: Colors.primary, borderColor: Colors.primary }]}
+                onPress={() => handleReviewReject(true)}
+                disabled={busy}
+              >
+                <Text style={[s.reviewBtnText, { color: Colors.white }]}>🔧 Chấp nhận — sửa lại</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reviewBtn, keepResultOpen && { borderColor: Colors.primary }]}
+                onPress={() => setKeepResultOpen(o => !o)}
+                disabled={busy}
+              >
+                <Text style={s.reviewBtnText}>Giữ kết quả{keepResultOpen ? ' ▲' : ''}</Text>
+              </TouchableOpacity>
+            </View>
+            {/* BE bắt buộc lý do khi giữ nguyên kết quả (422 nếu thiếu) — từ chối lần 2 trở đi Host cũng được báo. */}
+            {keepResultOpen && (
+              <View style={[s.card, { marginTop: Spacing.sm }]}>
+                <Text style={s.cardSectionTitle}>Lý do giữ nguyên kết quả (bắt buộc)</Text>
+                <TextInput
+                  style={s.textInput}
+                  value={keepResultNote}
+                  onChangeText={setKeepResultNote}
+                  placeholder="Vd: thợ đã kiểm tra lại, thiết bị hoạt động bình thường…"
+                  placeholderTextColor={Colors.textMuted}
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[s.advanceBtn, !keepResultNote.trim() && s.btnDisabled, { marginTop: Spacing.sm }]}
+                  onPress={() => handleReviewReject(false, keepResultNote.trim())}
+                  disabled={busy || !keepResultNote.trim()}
+                >
+                  <Text style={s.advanceBtnText}>Xác nhận giữ kết quả</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
         )}
 
         {!isTerminal && (
@@ -842,6 +1159,25 @@ const s = StyleSheet.create({
   reviewRow:     { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   reviewBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
   reviewBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+
+  costToggleRow:      { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
+  costToggleBtn:       { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: BorderRadius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
+  costToggleBtnActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
+  costToggleText:      { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  costToggleTextActive:{ color: Colors.primary, fontWeight: '700' },
+  costChip:            { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: BorderRadius.full, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
+  costChipActive:      { backgroundColor: '#FEF2F2', borderColor: '#DC2626' },
+  costChipText:        { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  costChipTextActive:  { color: '#DC2626', fontWeight: '700' },
+  costHint:            { fontSize: 12, color: Colors.textMuted, marginTop: Spacing.sm, lineHeight: 17 },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 2,
+    borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
+  },
+  checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  checkboxTick:    { color: Colors.white, fontSize: 13, fontWeight: '800' },
+  confirmRow:      { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.md },
+  confirmText:     { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
 
   advanceBtn:    { backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, paddingVertical: 14, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md },
   advanceBtnText:{ fontSize: 15, fontWeight: '700', color: Colors.white },

@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useTenantContract } from '@/hooks';
 import {
   realTenantSelfService,
   TenantHandoverResponse,
@@ -33,6 +34,7 @@ const formatDateTime = (iso?: string): string => {
  */
 export const TenantOnboardingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const { selectedContractId } = useTenantContract();
   const [data, setData] = useState<TenantHandoverResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -43,19 +45,24 @@ export const TenantOnboardingScreen: React.FC = () => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     setNotFound(false);
     try {
-      const res = await realTenantSelfService.getHandover();
+      const res = await realTenantSelfService.getHandover(selectedContractId ?? undefined);
       setData(res);
     } catch (err: any) {
       if (err?.response?.status === 404) {
         setNotFound(true);
       } else {
-        Alert.alert('Lỗi', readErr(err, 'Không tải được biên bản bàn giao.'));
+        // Account có nhiều HĐ ACTIVE nhưng chưa chọn nhà nào (hiếm — Home luôn chốt
+        // sẵn primary) — hướng dẫn quay lại Trang chủ để chọn qua picker.
+        const msg = readErr(err, 'Không tải được biên bản bàn giao.');
+        Alert.alert('Lỗi', msg.includes('thuê nhiều nhà')
+          ? `${msg} Vào Trang chủ để chọn nhà đang xem.`
+          : msg);
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedContractId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -73,7 +80,7 @@ export const TenantOnboardingScreen: React.FC = () => {
   const doAcknowledge = async () => {
     try {
       setConfirming(true);
-      const res = await realTenantSelfService.acknowledgeHandover();
+      const res = await realTenantSelfService.acknowledgeHandover(selectedContractId ?? undefined);
       setData(res);
       Alert.alert('Đã xác nhận ✅', 'Cảm ơn bạn đã xác nhận biên bản bàn giao.');
     } catch (err: any) {

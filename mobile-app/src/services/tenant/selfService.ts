@@ -46,6 +46,12 @@ export interface DashboardContract {
   endDate: string;
   daysLeft: number;
   status: string;
+  // 27/07 — 1 account có thể có nhiều HĐ ACTIVE (nhà/phòng khác nhau). Có trong
+  // từng phần tử của `contracts[]`, dùng để hiện picker "Nhà đang thuê".
+  propertyId?: number;
+  propertyName?: string;
+  roomId?: number;
+  roomNumber?: string;
 }
 export interface DashboardBuilding {
   propertyId: number;
@@ -70,10 +76,13 @@ export interface DashboardSummary {
   unreadNotifications: number;
 }
 export interface TenantDashboard {
+  /** HĐ đang chọn (primary) — không truyền contractId thì BE tự chọn HĐ mới nhất. */
   room: DashboardRoom | null;
   contract: DashboardContract | null;
   building: DashboardBuilding | null;
   summary: DashboardSummary | null;
+  /** Toàn bộ HĐ ACTIVE của account — FE hiện picker "Nhà đang thuê" khi length > 1. */
+  contracts?: DashboardContract[];
 }
 
 // ===== Hợp đồng của tôi =====
@@ -117,7 +126,12 @@ export interface ContractDetailDto {
   startDate: string;
   endDate: string;
   rentAmount: number;
-  depositAmount: number;
+  // BE (TenantContractResponse) trả field thật là `deposit`, KHÔNG phải `depositAmount`
+  // (khác `MyContractListItem` của API list — đã verify 27/07/2026 bằng curl thật).
+  // depositAmount giữ lại làm optional phòng khi BE đổi tên; luôn đọc qua fallback
+  // ở ContractDetailScreen.mapDetail, không dùng field này trực tiếp.
+  deposit?: number;
+  depositAmount?: number;
   equipmentList?: ContractEquipmentDto[];
   notes?: string;
   signedAt?: string;
@@ -214,8 +228,12 @@ export const realTenantSelfService = {
   },
 
   // ---- Dashboard trang chủ ----
-  getDashboard: async (): Promise<TenantDashboard> => {
-    const { data } = await realApiClient.get<TenantDashboard>('/api/v1/tenant/me/dashboard');
+  // contractId: chọn HĐ nào làm primary khi account có nhiều HĐ ACTIVE (nhà/phòng
+  // khác nhau). Bỏ trống thì BE tự chọn HĐ mới nhất (tương thích ngược).
+  getDashboard: async (contractId?: number): Promise<TenantDashboard> => {
+    const { data } = await realApiClient.get<TenantDashboard>('/api/v1/tenant/me/dashboard', {
+      params: contractId != null ? { contractId } : undefined,
+    });
     return data;
   },
 
@@ -231,15 +249,23 @@ export const realTenantSelfService = {
   },
 
   // ---- Biên bản bàn giao (chỉ áp dụng cho HĐ đang ACTIVE) ----
-  getHandover: async (): Promise<TenantHandoverResponse> => {
-    const { data } = await realApiClient.get<TenantHandoverResponse>('/api/v1/tenant/me/handover');
+  // contractId: BẮT BUỘC nếu account có ≥2 HĐ ACTIVE (BE ném lỗi "Bạn đang thuê
+  // nhiều nhà..." nếu thiếu) — optional nếu chỉ có 1.
+  getHandover: async (contractId?: number): Promise<TenantHandoverResponse> => {
+    const { data } = await realApiClient.get<TenantHandoverResponse>('/api/v1/tenant/me/handover', {
+      params: contractId != null ? { contractId } : undefined,
+    });
     return data;
   },
 
   // Xác nhận đã nhận đúng phòng/thiết bị như biên bản — chỉ gọi được 1 lần (BE chặn
   // gọi lại nếu đã acknowledged).
-  acknowledgeHandover: async (): Promise<TenantHandoverResponse> => {
-    const { data } = await realApiClient.post<TenantHandoverResponse>('/api/v1/tenant/me/handover/acknowledge');
+  acknowledgeHandover: async (contractId?: number): Promise<TenantHandoverResponse> => {
+    const { data } = await realApiClient.post<TenantHandoverResponse>(
+      '/api/v1/tenant/me/handover/acknowledge',
+      undefined,
+      { params: contractId != null ? { contractId } : undefined },
+    );
     return data;
   },
 
@@ -267,21 +293,28 @@ export const realTenantSelfService = {
 };
 
 /**
- * Map enum status của BE (PENDING|ACTIVE|EXPIRED|TERMINATED) -> ContractStatus của FE.
+ * Map enum status của BE (DRAFT|PENDING|ACTIVE|EXPIRED|TERMINATED) -> ContractStatus của FE.
  * BE không có 'expiring_soon' → tự suy từ endDate (còn ≤ 30 ngày & chưa hết hạn).
+ *
+ * LƯU Ý: tenant KHÔNG tự ký/kích hoạt hợp đồng qua app — toàn bộ action liên quan
+ * (send-otp, confirm, resubmit-approval, cancel, terminate) đều @PreAuthorize
+ * hasAnyRole('MANAGER','ADMIN') phía BE (verify 27/07/2026, TenantContractActionController).
+ * Vì vậy PENDING không map thành 'waiting_sign' (ngụ ý tenant tự ký được — sai) mà
+ * thành 'pending_host_approval' (chỉ để xem, không có action tự thực hiện).
  */
 export const mapBeContractStatus = (
   beStatus: string,
   daysUntilExpiry?: number,
-): 'waiting_sign' | 'active' | 'expiring_soon' | 'expired' | 'terminated' => {
+): 'draft' | 'pending_host_approval' | 'active' | 'expiring_soon' | 'expired' | 'terminated' => {
   switch ((beStatus || '').toUpperCase()) {
-    case 'PENDING': return 'waiting_sign';
+    case 'DRAFT': return 'draft';
+    case 'PENDING': return 'pending_host_approval';
     case 'TERMINATED': return 'terminated';
     case 'EXPIRED': return 'expired';
     case 'ACTIVE':
       return daysUntilExpiry !== undefined && daysUntilExpiry >= 0 && daysUntilExpiry <= 30
         ? 'expiring_soon'
         : 'active';
-    default: return 'active';
+    default: return 'draft';
   }
 };

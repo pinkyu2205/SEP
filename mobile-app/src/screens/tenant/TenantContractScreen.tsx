@@ -46,7 +46,7 @@ const toCardContract = (it: MyContractListItem): CardContract => {
 
 const statusFilterList: { key: 'all' | ContractStatus; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
-  { key: 'waiting_sign', label: 'Chờ ký' },
+  { key: 'pending_host_approval', label: 'Đang xử lý' },
   { key: 'active', label: 'Hiệu lực' },
   { key: 'expiring_soon', label: 'Sắp hết hạn' },
   { key: 'expired', label: 'Hết hạn' },
@@ -88,8 +88,6 @@ export const TenantContractScreen: React.FC = () => {
 
   const renderContract = ({ item }: { item: CardContract }) => {
     const isActive = item.status === 'active';
-    const isExpiringSoon = item.status === 'expiring_soon';
-    const canSign = item.status === 'waiting_sign';
 
     return (
       <TouchableOpacity
@@ -146,6 +144,9 @@ export const TenantContractScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Tenant chỉ xem — action thật (Yêu cầu trả phòng) nằm trong màn chi tiết,
+            không đặt "Gia hạn/Chấm dứt" ở đây vì trước đó chỉ điều hướng trùng lặp
+            sang chi tiết mà không làm gì khác (không có action thật kèm theo). */}
         <View style={styles.cardActions}>
           <TouchableOpacity
             style={styles.actionBtnOutline}
@@ -153,24 +154,6 @@ export const TenantContractScreen: React.FC = () => {
           >
             <Text style={styles.actionBtnOutlineText}>Xem chi tiết</Text>
           </TouchableOpacity>
-
-          {canSign && (
-            <TouchableOpacity
-              style={styles.actionBtnPrimary}
-              onPress={() => navigation.navigate('ContractDetail', { contractId: item.id, autoScrollSign: true })}
-            >
-              <Text style={styles.actionBtnPrimaryText}>✍️ Ký hợp đồng</Text>
-            </TouchableOpacity>
-          )}
-
-          {isActive && (
-            <TouchableOpacity
-              style={styles.actionBtnPrimary}
-              onPress={() => navigation.navigate('ContractDetail', { contractId: item.id })}
-            >
-              <Text style={styles.actionBtnPrimaryText}>Gia hạn / Chấm dứt</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </TouchableOpacity>
     );

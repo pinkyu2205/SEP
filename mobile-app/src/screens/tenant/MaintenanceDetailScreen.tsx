@@ -16,6 +16,7 @@ import {
 import { tenantMaintenanceStore } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
+import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
@@ -69,6 +70,12 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const [rejectUris,   setRejectUris]   = useState<string[]>([]);
   const [busy,         setBusy]         = useState(false);
   const [cameraOpen,   setCameraOpen]   = useState(false);
+
+  // Bồi thường khách làm hư (28/07/2026) — TÁCH RIÊNG khỏi nghiệm thu chất lượng sửa
+  // ở trên: "sửa tốt không" và "đồng ý trả tiền" là 2 việc khác nhau, không gộp 1 nút.
+  const [disputeMode,   setDisputeMode]   = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [chargeBusy,    setChargeBusy]    = useState(false);
 
   const currentStatusMeta = STATUS_META[request.status] || STATUS_META.pending;
   const priorityColor = getMaintenancePriorityColor(request.priority);
@@ -140,6 +147,36 @@ export const MaintenanceDetailScreen: React.FC = () => {
     });
     setRejectMode(false); setRejectReason(''); setRejectUris([]);
     showAlert('Đã gửi phản hồi', 'Quản lý sẽ xem xét và xử lý lại.');
+  };
+
+  /** Khách đồng ý trả khoản bồi thường → BE tự tạo hoá đơn + QR PayOS, điều hướng thẳng tới đó. */
+  const agreeToCharge = async () => {
+    if (chargeBusy) return;
+    try {
+      setChargeBusy(true);
+      const res = await realMaintenanceService.confirm(idNum, { agreeToCharge: true });
+      if (res.issuedInvoice) {
+        navigation.navigate('InvoiceDetail', { invoice: toSharedBill(res.issuedInvoice as unknown as TenantInvoice) });
+      } else {
+        showAlert('✅ Đã đồng ý', 'Hoá đơn đang được tạo — xem ở tab Hoá đơn.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      }
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể xác nhận. Vui lòng thử lại.')); }
+    finally { setChargeBusy(false); }
+  };
+
+  /** Khách khiếu nại số tiền — ticket vẫn đóng (sửa đã xong), KHÔNG tạo hoá đơn. */
+  const submitChargeDispute = async () => {
+    if (chargeBusy) return;
+    try {
+      setChargeBusy(true);
+      await realMaintenanceService.confirm(idNum, {
+        agreeToCharge: false,
+        chargeDisputeReason: disputeReason.trim() || undefined,
+      });
+      setDisputeMode(false); setDisputeReason('');
+      showAlert('Đã gửi khiếu nại', 'Quản lý sẽ xem xét và liên hệ lại với bạn.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi khiếu nại. Vui lòng thử lại.')); }
+    finally { setChargeBusy(false); }
   };
 
   return (
@@ -228,13 +265,23 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   <Text style={[styles.metaValue, { color: Colors.error }]}>{request.reopenCount} lần</Text>
                 </View>
               )}
-              {/* Khách làm hư → chi phí sẽ vào hóa đơn kỳ tới (luồng hóa đơn sau CLOSED). */}
+              {/* Khách làm hư — trạng thái đồng ý bồi thường. Lúc PENDING không hiện note
+                  này nữa, khối hành động riêng bên dưới (💰 Yêu cầu bồi thường) xử lý. */}
               {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
-                (request.repairCost ?? 0) > 0 && (
+                (request.repairCost ?? 0) > 0 &&
+                request.costAgreementStatus === 'agreed' && (
                 <View style={styles.tenantPayNote}>
                   <Text style={styles.tenantPayNoteText}>
-                    💰 Chi phí sửa chữa này do bạn chi trả (hư hỏng do sử dụng) — sẽ được
-                    đưa vào hóa đơn kỳ tới. Xem trước ở tab Hóa đơn, mục "Khoản chờ thu".
+                    ✅ Bạn đã đồng ý bồi thường {request.repairCost!.toLocaleString('vi-VN')} đ — hoá đơn đã tạo, xem ở tab Hoá đơn.
+                  </Text>
+                </View>
+              )}
+              {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
+                (request.repairCost ?? 0) > 0 &&
+                request.costAgreementStatus === 'disputed' && (
+                <View style={[styles.tenantPayNote, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
+                  <Text style={[styles.tenantPayNoteText, { color: '#B91C1C' }]}>
+                    ↩ Bạn đã khiếu nại khoản bồi thường {request.repairCost!.toLocaleString('vi-VN')} đ — quản lý sẽ liên hệ lại.
                   </Text>
                 </View>
               )}
@@ -276,7 +323,10 @@ export const MaintenanceDetailScreen: React.FC = () => {
 
         <MaintenancePhotoHistory photos={request.photoHistory} />
 
-        {/* Nghiệm thu (WAITING_TENANT_CONFIRM) */}
+        {/* Nghiệm thu chất lượng sửa (WAITING_TENANT_CONFIRM) — TÁCH RIÊNG khỏi việc
+            đồng ý bồi thường (khối 💰 bên dưới). Khi còn khoản bồi thường PENDING, ẩn nút
+            "Đã OK" ở đây vì BE bắt buộc phải trả lời agreeToCharge cùng lúc — dùng 2 nút
+            ở khối bồi thường bên dưới thay thế (vừa xác nhận sửa tốt, vừa trả lời tiền). */}
         {request.status === 'waiting_confirm' && !rejectMode && (
           <View style={styles.actionSection}>
             <Text style={styles.sectionTitle}>🛠 Quản lý báo đã sửa xong</Text>
@@ -289,11 +339,54 @@ export const MaintenanceDetailScreen: React.FC = () => {
               Vui lòng kiểm tra và xác nhận. Không phản hồi sau {MAINTENANCE_AUTO_CONFIRM_DAYS} ngày,
               hệ thống sẽ tự xác nhận hoàn tất.
             </Text>
-            <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone} disabled={busy}>
-              <Text style={styles.confirmBtnText}>✅ Đã OK — xác nhận hoàn tất</Text>
-            </TouchableOpacity>
+            {request.costAgreementStatus !== 'pending' && (
+              <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone} disabled={busy}>
+                <Text style={styles.confirmBtnText}>✅ Đã OK — xác nhận hoàn tất</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.reopenBtn} onPress={() => setRejectMode(true)}>
               <Text style={styles.reopenBtnText}>↩ Chưa ổn — gửi phản hồi</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 💰 Yêu cầu bồi thường — độc lập với nghiệm thu chất lượng ở trên. */}
+        {request.status === 'waiting_confirm' && !rejectMode &&
+          request.costAgreementStatus === 'pending' && !disputeMode && (
+          <View style={styles.chargeSection}>
+            <Text style={styles.sectionTitle}>💰 Yêu cầu bồi thường</Text>
+            <Text style={styles.chargeAmount}>{(request.repairCost ?? 0).toLocaleString('vi-VN')} đ</Text>
+            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
+              Nguyên nhân: {request.cause === 'wear' ? 'Hao mòn tự nhiên' : 'Khách làm hư'}. Đồng ý để hệ
+              thống tạo hoá đơn + mã QR thanh toán ngay, hoặc khiếu nại nếu bạn thấy không hợp lý.
+            </Text>
+            <TouchableOpacity style={styles.confirmBtn} onPress={agreeToCharge} disabled={chargeBusy}>
+              <Text style={styles.confirmBtnText}>{chargeBusy ? 'Đang xử lý...' : '✅ Đồng ý thanh toán'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reopenBtn} onPress={() => setDisputeMode(true)} disabled={chargeBusy}>
+              <Text style={styles.reopenBtnText}>↩ Khiếu nại số tiền</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Form khiếu nại số tiền bồi thường */}
+        {request.status === 'waiting_confirm' && !rejectMode &&
+          request.costAgreementStatus === 'pending' && disputeMode && (
+          <View style={styles.chargeSection}>
+            <Text style={styles.sectionTitle}>↩ Khiếu nại — cho biết lý do</Text>
+            <TextInput
+              style={styles.rejectInput}
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              placeholder="VD: Máy lạnh đã cũ, không phải do tôi làm hư..."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+            <TouchableOpacity style={styles.rejectSubmitBtn} onPress={submitChargeDispute} disabled={chargeBusy}>
+              <Text style={styles.confirmBtnText}>{chargeBusy ? 'Đang gửi...' : 'Gửi khiếu nại'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.reopenBtn} onPress={() => setDisputeMode(false)}>
+              <Text style={[styles.reopenBtnText, { color: Colors.textSecondary }]}>← Quay lại</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -451,6 +544,11 @@ const styles = StyleSheet.create({
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
 
   actionSection: { paddingHorizontal: Spacing.base, paddingBottom: 40 },
+  chargeSection: {
+    marginHorizontal: Spacing.base, marginBottom: Spacing.md, padding: Spacing.base,
+    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: '#FDE68A',
+  },
+  chargeAmount: { fontSize: 22, fontWeight: '800', color: '#B45309', marginBottom: Spacing.sm },
   helpCard: { backgroundColor: Colors.infoLight, borderRadius: BorderRadius.md, padding: Spacing.md },
   helpText: { fontSize: 13, color: Colors.info, lineHeight: 20 },
 
