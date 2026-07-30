@@ -62,9 +62,12 @@ export const propertyService = {
     return api.put(`${BASE}/${id}`, data);
   },
 
-  /** DELETE /properties/{id} — xóa cứng căn nhà + toàn bộ dữ liệu con (BE bulk delete). Trả 204. */
-  deleteProperty: (id: number): Promise<void> => {
-    return api.delete(`${BASE}/${id}`);
+  /**
+   * DELETE /properties/{id} — xóa cứng căn nhà + toàn bộ dữ liệu con (BE bulk delete). Trả 204.
+   * `silent`: tắt toast lỗi của interceptor — dùng khi xóa hàng loạt để tự tổng hợp kết quả.
+   */
+  deleteProperty: (id: number, opts?: { silent?: boolean }): Promise<void> => {
+    return api.delete(`${BASE}/${id}`, opts?.silent ? ({ skipErrorToast: true } as never) : undefined);
   },
 
   /** DELETE /properties/{id}/purge — như deleteProperty nhưng trả số bản ghi đã xóa (ADMIN). */
@@ -290,9 +293,9 @@ export const propertyService = {
   // Vô hiệu hóa
   // =========================================================================
 
-  /** POST /properties/{id}/disable */
-  disableProperty: (id: number): Promise<PropertyResponse> => {
-    return api.post(`${BASE}/${id}/disable`);
+  /** POST /properties/{id}/disable — `silent` tắt toast lỗi khi chạy hàng loạt. */
+  disableProperty: (id: number, opts?: { silent?: boolean }): Promise<PropertyResponse> => {
+    return api.post(`${BASE}/${id}/disable`, undefined, opts?.silent ? ({ skipErrorToast: true } as never) : undefined);
   },
 
   /**

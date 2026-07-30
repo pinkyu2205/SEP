@@ -61,9 +61,8 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
 
   // Khóa chỉnh sửa Hợp đồng + Thiết bị khi tòa nhà KHÔNG còn là nháp (DRAFT):
   // đã "Cấu hình khai thác" / đang "Chờ duyệt" (PENDING_HOST_REVIEW) / đang kinh doanh.
+  // Chỉ khóa input (disabled) — không hiển thị badge/banner cảnh báo cho đỡ rối.
   const locked = property.status !== 'DRAFT';
-  const inBusiness = property.status === 'ACTIVE' || property.status === 'RENTED';
-  const lockBadgeLabel = inBusiness ? 'Đang kinh doanh — khóa chỉnh sửa' : 'Đã gửi duyệt — khóa chỉnh sửa';
 
   const formatVND = (value: number) =>
     value > 0 ? value.toLocaleString('vi-VN') : '';
@@ -252,22 +251,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <h3 className="font-bold text-slate-800">Hợp đồng với chủ nhà</h3>
             {contract && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
-          {locked && (
-            <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${inBusiness ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
-              <Lock className="h-3.5 w-3.5" /> {lockBadgeLabel}
-            </span>
-          )}
         </div>
-        {locked && (
-          <div className="mx-5 mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-700">
-            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              {inBusiness
-                ? <>Tòa nhà đã ở trạng thái <b>Đang kinh doanh</b> nên hợp đồng và thiết bị được khóa, không thể chỉnh sửa.</>
-                : <>Tòa nhà đã được <b>cấu hình khai thác / gửi Host duyệt</b> nên hợp đồng và thiết bị được khóa, không thể chỉnh sửa.</>}
-            </span>
-          </div>
-        )}
         <form onSubmit={saveContract} className="p-5">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
             <label className="block">
@@ -360,11 +344,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <h3 className="font-bold text-slate-800">Khai báo trang thiết bị có sẵn</h3>
             {manifestSaved && <Check className="h-4 w-4 text-emerald-500 ml-2" />}
           </div>
-          {locked ? (
-            <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${inBusiness ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
-              <Lock className="h-3.5 w-3.5" /> {lockBadgeLabel}
-            </span>
-          ) : (
+          {!locked && (
             <button onClick={saveManifest} disabled={isSavingManifest} className="btn-primary py-1.5 px-4 text-sm rounded-lg flex items-center gap-2">
               {isSavingManifest ? 'Đang lưu...' : <><Save className="w-4 h-4" /> Lưu Thiết bị</>}
             </button>

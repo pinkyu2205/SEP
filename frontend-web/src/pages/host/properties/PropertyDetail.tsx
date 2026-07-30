@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
-  Zap, Droplets, RefreshCw, Home, UserCog, X, CheckCircle2,
+  Zap, RefreshCw, Home, UserCog, X, CheckCircle2,
   Wrench, CircleCheck, Layers, BadgeDollarSign, Wallet, Phone, CalendarClock, UserRound,
-  Package, FileText, TrendingUp, Link2,
+  Package, Image as ImageIcon, ChevronLeft, ChevronRight, Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '@/services/property.service';
@@ -12,11 +12,25 @@ import { tenantService } from '@/services/tenant.service';
 import { hostService, type HostContractDto } from '@/services/host.service';
 import type {
   PropertyResponse, RoomResponse, TenantContractResponse, ContractStatus,
-  PricingCalculationResponse, InboundContractResponse,
 } from '@/types/api.types';
 import { OperationalEquipmentPanel } from '@/pages/admin/onboarding/OperationalEquipmentPanel';
 import { PropertyMap } from '@/components/PropertyMap';
 import { formatCurrency } from '@/utils';
+import { normalizeVi } from '@/utils/helpers';
+
+// ─── Tab của màn chi tiết ────────────────────────────────────────────────────
+// Tài chính & hợp đồng chủ nhà đã có trang riêng ở sidebar (Quản lý tài chính /
+// Quản lý hợp đồng) nên không lặp lại ở đây.
+type DetailTab = 'overview' | 'units' | 'equipment';
+
+/** Kiểu sắp xếp danh sách phòng. */
+type RoomSort = 'number' | 'number_desc' | 'price_desc' | 'price_asc' | 'area_desc';
+
+const DETAIL_TABS: { key: DetailTab; label: string; icon: typeof Home }[] = [
+  { key: 'overview',  label: 'Tổng quan', icon: MapPin },
+  { key: 'units',     label: 'Phòng',     icon: DoorOpen },
+  { key: 'equipment', label: 'Thiết bị',  icon: Package },
+];
 
 /**
  * Host portal: endpoint /properties/{id}/tenant-contracts chỉ cho MANAGER/ADMIN (host bị 403),
@@ -49,8 +63,16 @@ const hostContractToTenant = (hc: HostContractDto, rooms: RoomResponse[]): Tenan
 const fmtDate = (iso?: string) =>
   iso ? new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
 
-/** formatCurrency an toàn: trả '—' khi null/undefined (dữ liệu định giá cũ có thể thiếu field). */
-const money = (n?: number | null) => (n == null ? '—' : formatCurrency(n));
+/**
+ * Diện tích gọn: BE chia đều diện tích sàn cho số phòng nên hay ra số lẻ dài
+ * (45.55555555555556) — làm tròn 1 chữ số thập phân, bỏ ",0" nếu tròn.
+ */
+const fmtArea = (n?: number | null): string => {
+  if (n == null) return '—';
+  const r = Math.round(n * 10) / 10;
+  return `${Number.isInteger(r) ? r : r.toFixed(1).replace('.', ',')} m²`;
+};
+
 
 const roomStatusMap: Record<string, { label: string; cls: string; dot: string; border: string }> = {
   AVAILABLE:   { label: 'Phòng trống',   cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500', border: 'border-emerald-200 hover:border-emerald-400' },
@@ -68,6 +90,62 @@ const propertyStatusLabel: Record<string, { label: string; cls: string }> = {
   UNDER_RENOVATION:          { label: 'Đang cải tạo',       cls: 'bg-blue-500 text-white' },
   DISABLED:                  { label: 'Đã vô hiệu',         cls: 'bg-rose-500 text-white' },
 };
+
+// ─── Xem ảnh phóng to (ESC đóng, ← → chuyển ảnh) ─────────────────────────────
+function ImageLightbox({ urls, index, onIndexChange, onClose }: {
+  urls: string[];
+  index: number;
+  onIndexChange: (i: number) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight') onIndexChange((index + 1) % urls.length);
+      if (e.key === 'ArrowLeft') onIndexChange((index - 1 + urls.length) % urls.length);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [index, urls.length, onClose, onIndexChange]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 p-4" onClick={onClose}>
+      <button onClick={onClose} title="Đóng (Esc)"
+        className="absolute right-4 top-4 rounded-xl bg-white/10 p-2.5 text-white transition hover:bg-white/20">
+        <X className="h-5 w-5" />
+      </button>
+
+      {urls.length > 1 && (
+        <>
+          <button title="Ảnh trước (←)"
+            onClick={e => { e.stopPropagation(); onIndexChange((index - 1 + urls.length) % urls.length); }}
+            className="absolute left-4 rounded-xl bg-white/10 p-2.5 text-white transition hover:bg-white/20">
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <button title="Ảnh sau (→)"
+            onClick={e => { e.stopPropagation(); onIndexChange((index + 1) % urls.length); }}
+            className="absolute right-4 top-1/2 -translate-y-1/2 rounded-xl bg-white/10 p-2.5 text-white transition hover:bg-white/20">
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        </>
+      )}
+
+      <div className="flex max-h-full max-w-5xl flex-col items-center gap-3" onClick={e => e.stopPropagation()}>
+        <img src={urls[index]} alt={`Ảnh ${index + 1}`}
+          className="max-h-[80vh] rounded-2xl object-contain shadow-2xl" />
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold text-white">
+            {index + 1} / {urls.length}
+          </span>
+          <a href={urls[index]} target="_blank" rel="noreferrer"
+            className="rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-white transition hover:bg-white/20">
+            Mở ảnh gốc
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ManagerItem = { id: string; fullName: string; username: string };
 
@@ -180,16 +258,6 @@ function InfoCell({ icon: Icon, label, value, highlight, className }: { icon: ty
   );
 }
 
-// Ô chỉ số tài chính nhỏ gọn cho thẻ "Phân tích tài chính & định giá"
-function FinStat({ label, value, tone }: { label: string; value: string; tone?: 'indigo' | 'emerald' }) {
-  const color = tone === 'indigo' ? 'text-indigo-600' : tone === 'emerald' ? 'text-emerald-600' : 'text-slate-800';
-  return (
-    <div className="rounded-xl bg-slate-50 px-3.5 py-3">
-      <p className="text-[11px] text-slate-400 leading-tight">{label}</p>
-      <p className={`mt-1 font-extrabold text-sm ${color}`}>{value}</p>
-    </div>
-  );
-}
 
 function RoomDetailModal({
   room, tenant, canChange, onClose, onConfirmStatus,
@@ -204,6 +272,13 @@ function RoomDetailModal({
   const [selected, setSelected] = useState<string>(room.status);
   const [saving, setSaving] = useState(false);
   const dirty = selected !== room.status;
+
+  // ESC để đóng (không đóng khi đang lưu)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !saving) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [saving, onClose]);
 
   const handleSave = async () => {
     if (!dirty) return;
@@ -230,23 +305,26 @@ function RoomDetailModal({
         </div>
 
         <div className="p-6 space-y-5">
-          {room.imageUrls && (
-            <img src={room.imageUrls} alt={room.roomNumber} className="w-full h-44 object-cover rounded-xl border border-slate-100" />
+          {/* Ảnh phòng — chỉ render khi thực sự có URL (tránh ảnh lỗi hiện chữ alt) */}
+          {typeof room.imageUrls === 'string' && room.imageUrls.trim() !== '' && (
+            <img src={room.imageUrls} alt={`Phòng ${room.roomNumber}`}
+              onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              className="h-44 w-full rounded-xl border border-slate-100 object-cover" />
           )}
 
           {/* Thông tin phòng */}
           <div className="grid grid-cols-2 gap-3">
-            <InfoCell icon={Ruler} label="Diện tích" value={room.area != null ? `${room.area} m²` : '—'} />
+            <InfoCell icon={Ruler} label="Diện tích" value={fmtArea(room.area)} />
             <InfoCell icon={Users} label="Sức chứa" value={room.maxOccupants != null ? `${room.maxOccupants} người` : '—'} />
             <InfoCell icon={BadgeDollarSign} label="Giá thuê / tháng" value={room.price != null ? formatCurrency(room.price) : '—'} highlight />
             <InfoCell icon={Wallet} label="Tiền cọc" value={room.deposit != null ? formatCurrency(room.deposit) : (tenant?.deposit ? formatCurrency(tenant.deposit) : '—')} />
-            <InfoCell icon={Zap} label="Điện & nước" value="Tính theo giá nhà nước hằng tháng" className="col-span-2" />
+            <InfoCell icon={Zap} label="Đơn giá điện & nước" value="Theo giá nhà nước hằng tháng" className="col-span-2" />
           </div>
 
           {room.structureDescription && (
             <div className="rounded-xl bg-slate-50 px-4 py-3">
-              <p className="text-xs text-slate-400 mb-1">Mô tả / cấu trúc</p>
-              <p className="text-sm text-slate-700 whitespace-pre-line">{room.structureDescription}</p>
+              <p className="mb-1 text-xs text-slate-400">Mô tả / cấu trúc</p>
+              <p className="whitespace-pre-line text-sm text-slate-700">{room.structureDescription}</p>
             </div>
           )}
 
@@ -335,23 +413,25 @@ export const PropertyDetail = () => {
   const [managersError, setManagersError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [roomSearch, setRoomSearch] = useState('');
+  const [roomSort, setRoomSort] = useState<RoomSort>('number');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
-  const [pricing, setPricing] = useState<PricingCalculationResponse | null>(null);
-  const [inbound, setInbound] = useState<InboundContractResponse | null>(null);
+  // Chia nội dung thành tab thay vì cuộn 1 trang rất dài.
+  const [tab, setTab] = useState<DetailTab>('overview');
+  // Index ảnh đang xem phóng to trong thư viện ảnh tòa nhà (null = đóng).
+  const [lightbox, setLightbox] = useState<number | null>(null);
 
   const fetchData = async () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [prop, roomList, mgrs, hostContracts, pricingData, inboundData] = await Promise.all([
+      const [prop, roomList, mgrs, hostContracts] = await Promise.all([
         propertyService.getPropertyById(Number(id)),
         propertyService.getRooms(Number(id)),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
         // Host xem HĐ khách thuê qua /host/contracts (endpoint /properties/.../tenant-contracts chỉ cho MANAGER/ADMIN).
         hostService.listContracts({ propertyId: Number(id), size: 100 }).then(p => p.content).catch(() => null),
-        propertyService.getPricing(Number(id)).catch(() => null),          // 404 nếu chưa từng tính giá
-        propertyService.getInboundContract(Number(id)).catch(() => null),  // HĐ chủ nhà gốc
       ]);
 
       // Host dùng /host/contracts; nếu trống (vd manager/admin xem) thì fallback endpoint manager.
@@ -370,8 +450,6 @@ export const PropertyDetail = () => {
       setProperty(prop);
       setRooms(roomList);
       setContracts(contractList ?? []);
-      setPricing(pricingData);
-      setInbound(inboundData);
     } catch (e) {
       console.error(e);
     } finally {
@@ -428,6 +506,30 @@ export const PropertyDetail = () => {
     }
   };
 
+  // Lọc theo trạng thái + tìm theo số phòng / tên khách + sắp xếp.
+  const filteredRooms = useMemo(() => {
+    const kw = normalizeVi(roomSearch.trim());
+    const list = rooms.filter(r => {
+      if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+      if (kw) {
+        const tenant = contracts.find(c => c.roomId === r.id && c.status === 'ACTIVE');
+        const hay = [r.roomNumber, r.structureDescription, tenant?.tenantFullName, tenant?.tenantPhone]
+          .filter(Boolean).map(v => normalizeVi(String(v))).join(' ');
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+    return [...list].sort((a, b) => {
+      switch (roomSort) {
+        case 'number_desc': return b.roomNumber.localeCompare(a.roomNumber, 'vi', { numeric: true });
+        case 'price_desc':  return (b.price ?? 0) - (a.price ?? 0);
+        case 'price_asc':   return (a.price ?? 0) - (b.price ?? 0);
+        case 'area_desc':   return (b.area ?? 0) - (a.area ?? 0);
+        default:            return a.roomNumber.localeCompare(b.roomNumber, 'vi', { numeric: true });
+      }
+    });
+  }, [rooms, contracts, filterStatus, roomSearch, roomSort]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -449,7 +551,6 @@ export const PropertyDetail = () => {
     );
   }
 
-  const filteredRooms = filterStatus === 'all' ? rooms : rooms.filter(r => r.status === filterStatus);
   const available   = rooms.filter(r => r.status === 'AVAILABLE').length;
   const rented      = rooms.filter(r => r.status === 'RENTED').length;
   const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
@@ -462,7 +563,7 @@ export const PropertyDetail = () => {
   // Dải chỉ số trong hero — khác nhau theo loại hình
   const heroStats: { label: string; value: string | number; icon: typeof DoorOpen; color: string; bg: string }[] = isWholeHouse
     ? [
-        { label: 'Diện tích',  value: property.areaSize ? `${property.areaSize} m²` : '—', icon: Ruler,      color: 'text-indigo-500',  bg: 'bg-indigo-50' },
+        { label: 'Diện tích',  value: fmtArea(property.areaSize), icon: Ruler,      color: 'text-indigo-500',  bg: 'bg-indigo-50' },
         { label: 'Số tầng',    value: property.totalFloor ?? property.floorCount ?? '—',   icon: Layers,     color: 'text-slate-600',   bg: 'bg-slate-50' },
         { label: 'Số phòng',   value: property.totalRooms || '—',                          icon: DoorOpen,   color: 'text-violet-600',  bg: 'bg-violet-50' },
         { label: 'Cho thuê',   value: activeContract ? 'Đang thuê' : 'Còn trống',          icon: activeContract ? Users : CircleCheck, color: activeContract ? 'text-blue-600' : 'text-emerald-600', bg: activeContract ? 'bg-blue-50' : 'bg-emerald-50' },
@@ -490,90 +591,149 @@ export const PropertyDetail = () => {
         <ArrowLeft className="w-4 h-4" /> Quay lại danh sách
       </button>
 
-      {/* Hero Card */}
-      <div className="rounded-2xl overflow-hidden shadow-sm border border-slate-200">
-        {/* Top banner */}
-        <div className="bg-gradient-to-br from-indigo-400 via-indigo-500 to-violet-500 px-6 py-5">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-white/20 rounded-xl shrink-0">
-                <Building2 className="w-7 h-7 text-white" />
+      {/* ── Header hồ sơ ── */}
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+              <Building2 className="h-6 w-6" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-black leading-tight text-slate-900">{property.propertyName}</h1>
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${propStatus.cls}`}>
+                  {propStatus.label}
+                </span>
               </div>
-              <div>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <h1 className="text-xl font-extrabold text-white leading-tight">{property.propertyName}</h1>
-                  <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${propStatus.cls}`}>
-                    {propStatus.label}
-                  </span>
-                </div>
-                <p className="text-indigo-100 text-sm flex items-center gap-1 mt-1">
-                  <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  {property.fullAddress || property.shortAddress}
-                </p>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                {property.fullAddress || property.shortAddress}
+              </p>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
                 {property.zoneName && (
-                  <p className="text-indigo-200 text-xs mt-0.5">{property.zoneName}</p>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{property.zoneName}</span>
                 )}
-                <div className="mt-2.5">
-                  {property.operationManagerId ? (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/20 text-white px-2.5 py-1 rounded-full">
-                      <UserCog className="w-3.5 h-3.5" />
-                      Quản lý: {property.operationManagerName || 'Đã gán'}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium bg-white/10 text-indigo-100 px-2.5 py-1 rounded-full">
-                      <UserCog className="w-3.5 h-3.5" /> Chưa có quản lý
-                    </span>
-                  )}
-                </div>
+                <span className={`rounded-full px-2 py-0.5 font-bold ${
+                  isWholeHouse ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+                }`}>
+                  {isWholeHouse ? 'Nhà nguyên căn' : 'Nhà chia phòng'}
+                </span>
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
+                  property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
+                }`}>
+                  <UserCog className="h-3 w-3" />
+                  {property.operationManagerId
+                    ? `Quản lý: ${property.operationManagerName || 'Đã gán'}`
+                    : 'Chưa có quản lý'}
+                </span>
               </div>
             </div>
+          </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-2 shrink-0">
-              {(['ACTIVE', 'PENDING_OPERATION_MANAGER', 'PENDING_HOST_REVIEW'].includes(property.status)) ? (
-                <button onClick={openAssignModal}
-                  className="flex items-center gap-2 rounded-xl bg-white/20 hover:bg-white/30 border border-white/30 px-4 py-2 text-sm font-semibold text-white transition">
-                  <UserCog className="w-4 h-4" />
+          {/* Hành động */}
+          <div className="flex shrink-0 items-center gap-2">
+            {(['ACTIVE', 'PENDING_OPERATION_MANAGER', 'PENDING_HOST_REVIEW'].includes(property.status)) ? (
+              <button onClick={openAssignModal}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/25 transition hover:bg-indigo-700">
+                <UserCog className="h-4 w-4" />
+                {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
+              </button>
+            ) : (
+              <div className="group relative">
+                <button disabled
+                  className="flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-400">
+                  <UserCog className="h-4 w-4" />
                   {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
                 </button>
-              ) : (
-                <div className="group relative">
-                  <button disabled
-                    className="flex items-center gap-2 rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-sm font-semibold text-white/50 cursor-not-allowed">
-                    <UserCog className="w-4 h-4" />
-                    {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
-                  </button>
-                  <div className="absolute right-0 top-full mt-2 w-60 rounded-xl bg-slate-900 text-slate-200 text-xs p-3 shadow-xl opacity-0 group-hover:opacity-100 transition pointer-events-none z-10">
-                    Không thể thay đổi quản lý ở trạng thái hiện tại.
-                  </div>
+                <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-60 rounded-xl bg-slate-900 p-3 text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100">
+                  Không thể thay đổi quản lý ở trạng thái hiện tại.
                 </div>
-              )}
-              <button onClick={fetchData}
-                className="p-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/25 text-white transition">
-                <RefreshCw className="w-4 h-4" />
-              </button>
-            </div>
+              </div>
+            )}
+            <button onClick={fetchData} title="Tải lại dữ liệu"
+              className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800">
+              <RefreshCw className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        {/* Stats row */}
-        <div className={`bg-white px-6 py-4 grid grid-cols-2 gap-4 border-t border-slate-100 ${isWholeHouse ? 'sm:grid-cols-4' : 'sm:grid-cols-5'}`}>
+        {/* Thông số nhanh */}
+        <div className={`grid grid-cols-2 divide-x divide-y divide-slate-100 border-t border-slate-100 sm:divide-y-0 ${
+          isWholeHouse ? 'sm:grid-cols-4' : 'sm:grid-cols-5'
+        }`}>
           {heroStats.map(s => (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className={`p-2 rounded-lg ${s.bg} shrink-0`}>
-                <s.icon className={`w-4 h-4 ${s.color}`} />
+            <div key={s.label} className="flex items-center gap-3 px-5 py-3.5">
+              <div className={`shrink-0 rounded-lg p-2 ${s.bg}`}>
+                <s.icon className={`h-4 w-4 ${s.color}`} />
               </div>
-              <div>
-                <p className={`text-lg font-extrabold leading-tight ${s.color}`}>{s.value}</p>
-                <p className="text-xs text-slate-400">{s.label}</p>
+              <div className="min-w-0">
+                <p className="text-lg font-black leading-tight text-slate-900">{s.value}</p>
+                <p className="text-[11px] font-semibold text-slate-400">{s.label}</p>
               </div>
             </div>
           ))}
         </div>
-      </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 overflow-x-auto border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+          {DETAIL_TABS.map(t => {
+            const Icon = t.icon;
+            const activeTab = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition ${
+                  activeTab
+                    ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200'
+                    : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
+                }`}>
+                <Icon className="h-4 w-4" />
+                {t.key === 'units' ? (isWholeHouse ? 'Đơn vị cho thuê' : 'Phòng') : t.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       {/* ═══════════ Vị trí trên bản đồ (cả 2 loại hình) ═══════════ */}
-      {(property.fullAddress || property.shortAddress) && (
+      {/* ═══════════ Hình ảnh tòa nhà ═══════════ */}
+      {tab === 'overview' && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="mb-4 flex items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50">
+              <ImageIcon className="h-5 w-5 text-indigo-500" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Hình ảnh tòa nhà</h2>
+            {(property.imageUrls?.length ?? 0) > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
+                {property.imageUrls!.length}
+              </span>
+            )}
+          </div>
+
+          {(property.imageUrls?.length ?? 0) === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 py-12 text-center">
+              <ImageIcon className="mx-auto mb-2 h-8 w-8 text-slate-200" />
+              <p className="text-sm font-semibold text-slate-400">Tòa nhà này chưa có hình ảnh</p>
+              <p className="mt-1 text-xs text-slate-400">Ảnh được tải lên ở bước khởi tạo nhà.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {property.imageUrls!.map((url, i) => (
+                <button key={i} onClick={() => setLightbox(i)}
+                  className="group relative aspect-[4/3] overflow-hidden rounded-xl border border-slate-200">
+                  <img src={url} alt={`Ảnh ${i + 1}`}
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                  <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 text-xs font-bold text-white opacity-0 transition group-hover:bg-slate-900/40 group-hover:opacity-100">
+                    Xem ảnh lớn
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'overview' && (property.fullAddress || property.shortAddress) && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6">
           <div className="flex items-center gap-2.5 mb-4">
             <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center shrink-0">
@@ -609,7 +769,7 @@ export const PropertyDetail = () => {
       )}
 
       {/* ═══════════ NHÀ NGUYÊN CĂN — căn nhà là 1 đơn vị cho thuê ═══════════ */}
-      {isWholeHouse && (
+      {tab === 'units' && isWholeHouse && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Thông tin cho thuê */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
@@ -630,7 +790,7 @@ export const PropertyDetail = () => {
               </div>
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm text-slate-500"><Ruler className="w-4 h-4" /> Diện tích</span>
-                <span className="font-bold text-slate-800">{property.areaSize ? `${property.areaSize} m²` : '—'}</span>
+                <span className="font-bold text-slate-800">{fmtArea(property.areaSize)}</span>
               </div>
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm text-slate-500"><Building2 className="w-4 h-4" /> Loại hình</span>
@@ -688,100 +848,113 @@ export const PropertyDetail = () => {
       )}
 
       {/* ═══════════ NHÀ CHIA PHÒNG — grid phòng + filter ═══════════ */}
-      {!isWholeHouse && (
+      {tab === 'units' && !isWholeHouse && (
         <>
-      {/* Filter tabs + room count */}
-      <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 w-fit">
-        {FILTER_TABS.map(tab => (
-          <button key={tab.value} onClick={() => setFilterStatus(tab.value)}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition ${
-              filterStatus === tab.value
-                ? 'bg-indigo-500 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-            }`}>
-            {tab.label}
-            <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
-              filterStatus === tab.value ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
-            }`}>{tab.count}</span>
-          </button>
-        ))}
+      {/* Thanh công cụ: chip trạng thái · tìm phòng · sắp xếp */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {FILTER_TABS.map(t => (
+            <button key={t.value} onClick={() => setFilterStatus(t.value)}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-bold transition ${
+                filterStatus === t.value
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+              }`}>
+              {t.label}
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                filterStatus === t.value ? 'bg-white/25' : 'bg-white text-slate-500'
+              }`}>{t.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="relative ml-auto min-w-[150px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input value={roomSearch} onChange={e => setRoomSearch(e.target.value)}
+            placeholder="Tìm số phòng, khách thuê..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-8 text-sm outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" />
+          {roomSearch && (
+            <button onClick={() => setRoomSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition hover:bg-slate-200">
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+
+        <select value={roomSort} onChange={e => setRoomSort(e.target.value as RoomSort)}
+          className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+          <option value="number">Số phòng ↑</option>
+          <option value="number_desc">Số phòng ↓</option>
+          <option value="price_desc">Giá cao nhất</option>
+          <option value="price_asc">Giá thấp nhất</option>
+          <option value="area_desc">Diện tích lớn nhất</option>
+        </select>
       </div>
 
       {/* Room Grid */}
       {filteredRooms.length === 0 ? (
-        <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
-          <DoorOpen className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-          <p className="text-slate-400 font-medium">Không có phòng nào.</p>
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
+          <DoorOpen className="mx-auto mb-3 h-12 w-12 text-slate-200" />
+          <p className="font-medium text-slate-400">
+            {roomSearch || filterStatus !== 'all' ? 'Không có phòng nào khớp bộ lọc.' : 'Không có phòng nào.'}
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredRooms.map(room => {
             const st = roomStatusMap[room.status] ?? roomStatusMap.DRAFT;
             const tenant = contracts.find(c => c.roomId === room.id && c.status === 'ACTIVE') ?? null;
             return (
-              <div key={room.id} onClick={() => setSelectedRoom(room)}
-                className={`relative overflow-hidden bg-white rounded-2xl border ${st.border} cursor-pointer hover:shadow-md transition-all group`}>
+              <button key={room.id} onClick={() => setSelectedRoom(room)}
+                className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition-all hover:shadow-md ${st.border}`}>
                 {/* Dải màu trạng thái */}
                 <span className={`absolute inset-x-0 top-0 h-1 ${st.dot}`} />
 
-                <div className="p-4">
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0">
-                        <DoorOpen className="w-4 h-4 text-indigo-500" />
-                      </div>
-                      <span className="text-lg font-black text-slate-900">{room.roomNumber}</span>
-                    </div>
-                    <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full ${st.cls}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
+                <div className="flex flex-1 flex-col p-4">
+                  {/* Header: số phòng + trạng thái */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-lg font-black leading-none text-slate-900">{room.roomNumber}</span>
+                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                       {st.label}
                     </span>
                   </div>
 
-                  {/* Thông tin dạng chip */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {room.area != null && (
-                      <span className="inline-flex items-center gap-1 bg-slate-50 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-lg"><Ruler className="w-3 h-3 text-slate-400" /> {room.area} m²</span>
-                    )}
+                  {/* Diện tích · sức chứa */}
+                  <p className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+                    <span className="inline-flex items-center gap-1"><Ruler className="h-3 w-3 text-slate-400" />{fmtArea(room.area)}</span>
                     {room.maxOccupants != null && (
-                      <span className="inline-flex items-center gap-1 bg-slate-50 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-lg"><Users className="w-3 h-3 text-slate-400" /> {room.maxOccupants} người</span>
+                      <>
+                        <span className="text-slate-300">·</span>
+                        <span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-slate-400" />{room.maxOccupants} người</span>
+                      </>
                     )}
-                    {room.electricMeterCode && (
-                      <span className="inline-flex items-center gap-1 bg-slate-50 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-lg"><Zap className="w-3 h-3 text-amber-400" /> {room.electricMeterCode}</span>
-                    )}
-                    {room.waterMeterCode && (
-                      <span className="inline-flex items-center gap-1 bg-slate-50 text-slate-600 text-xs font-semibold px-2.5 py-1 rounded-lg"><Droplets className="w-3 h-3 text-blue-400" /> {room.waterMeterCode}</span>
-                    )}
-                  </div>
+                  </p>
 
                   {/* Khách thuê (nếu phòng đang thuê & lấy được hợp đồng) */}
-                  {tenant && (
-                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-blue-50 px-3 py-2">
-                      <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-bold shrink-0">
+                  {tenant ? (
+                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-blue-50 px-2.5 py-2">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
                         {tenant.tenantFullName.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-bold text-slate-800 truncate leading-tight">{tenant.tenantFullName}</p>
-                        <p className="text-xs text-slate-500 truncate">{tenant.tenantPhone}</p>
+                        <p className="truncate text-xs font-bold leading-tight text-slate-800">{tenant.tenantFullName}</p>
+                        <p className="truncate text-[11px] text-slate-500">{tenant.tenantPhone}</p>
                       </div>
                     </div>
-                  )}
+                  ) : room.structureDescription ? (
+                    <p className="mt-2 line-clamp-2 text-xs text-slate-400">{room.structureDescription}</p>
+                  ) : null}
 
-                  {/* Giá */}
-                  {room.price != null && (
-                    <div className="flex items-center justify-between pt-3 mt-3 border-t border-slate-100">
-                      <span className="flex items-center gap-1 text-xs text-slate-400"><BadgeDollarSign className="w-3.5 h-3.5" /> Giá thuê</span>
-                      <span className="font-black text-indigo-600">{formatCurrency(room.price)}</span>
-                    </div>
-                  )}
-
-                  <p className="mt-2 text-center text-[11px] font-semibold text-slate-300 group-hover:text-indigo-500 transition">Bấm để xem chi tiết →</p>
-                  {room.structureDescription && (
-                    <p className="mt-2 text-xs text-slate-400 line-clamp-1">{room.structureDescription}</p>
-                  )}
+                  {/* Giá — luôn nằm đáy thẻ để các thẻ thẳng hàng */}
+                  <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Giá thuê</span>
+                    <span className="font-black text-indigo-600">
+                      {room.price != null ? formatCurrency(room.price) : <span className="text-sm text-slate-300">—</span>}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -790,120 +963,27 @@ export const PropertyDetail = () => {
         </>
       )}
 
-      {/* ═══════════ Phân tích tài chính & định giá (mô hình mới) ═══════════ */}
-      {pricing && (pricing.capex != null || pricing.wholeHouseResult || (pricing.roomResults?.length ?? 0) > 0) && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
-          <div className="flex items-center gap-2.5 mb-5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
-              <TrendingUp className="w-5 h-5 text-emerald-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">Phân tích tài chính & định giá</h2>
-          </div>
-
-          {/* KPI tổng hợp — chỉ hiện field có dữ liệu */}
-          {(pricing.capex != null || pricing.monthlyRecovery != null || pricing.fixedOpex != null || pricing.revenueTarget != null) && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-              {pricing.capex != null && <FinStat label="Tổng vốn đầu tư" value={money(pricing.capex)} />}
-              {pricing.contractMonths != null && <FinStat label="Thời hạn thuê" value={`${pricing.contractMonths} tháng`} />}
-              {pricing.monthlyRecovery != null && <FinStat label="Thu hồi vốn / tháng" value={money(pricing.monthlyRecovery)} tone="indigo" />}
-              {pricing.fixedOpex != null && <FinStat label="Chi phí cần bù / tháng" value={money(pricing.fixedOpex)} />}
-              {pricing.revenueTarget != null && <FinStat label="Doanh thu mục tiêu / tháng" value={money(pricing.revenueTarget)} tone="emerald" />}
-            </div>
-          )}
-
-          {/* Nhà nguyên căn — 1 giá */}
-          {pricing.wholeHouseResult && (
-            <div className="flex flex-wrap gap-3">
-              <div className="flex-1 min-w-[200px] rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3">
-                <p className="text-xs text-indigo-500 font-semibold">Giá thuê đề xuất (đã tính lãi)</p>
-                <p className="font-black text-indigo-700 text-lg">
-                  {money(pricing.wholeHouseResult.suggestedPriceWithProfit ?? pricing.wholeHouseResult.suggestedMinPrice)}
-                  <span className="text-sm font-medium text-indigo-400">/tháng</span>
-                </p>
-              </div>
-              <div className="min-w-[150px] rounded-xl bg-slate-50 border border-slate-200 px-4 py-3">
-                <p className="text-xs text-slate-400 font-semibold">Giá tối thiểu</p>
-                <p className="font-bold text-slate-600 text-lg">{money(pricing.wholeHouseResult.roomFloor)}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Nhà chia phòng — bảng từng phòng */}
-          {pricing.roomResults && pricing.roomResults.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-left text-xs font-bold text-slate-500 uppercase">
-                    <th className="pb-2">Phòng</th>
-                    <th className="pb-2">Diện tích</th>
-                    <th className="pb-2 text-right">Tổng vốn</th>
-                    <th className="pb-2 text-right">Giá đề xuất</th>
-                    <th className="pb-2 text-right">Giá tối thiểu</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pricing.roomResults.map(r => (
-                    <tr key={r.roomId} className="border-b border-slate-50">
-                      <td className="py-2 font-semibold text-slate-900">{r.roomNumber}</td>
-                      <td className="py-2 text-slate-500">{r.area != null ? `${r.area} m²` : '—'}</td>
-                      <td className="py-2 text-right text-slate-600">{money(r.totalInvestment)}</td>
-                      <td className="py-2 text-right font-bold text-indigo-600">{money(r.suggestedPriceWithProfit ?? r.suggestedMinPrice)}</td>
-                      <td className="py-2 text-right text-slate-500">{money(r.roomFloor)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══════════ Hợp đồng với chủ nhà gốc ═══════════ */}
-      {inbound && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
-          <div className="flex items-center gap-2.5 mb-5">
-            <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
-              <FileText className="w-5 h-5 text-amber-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">Hợp đồng với chủ nhà gốc</h2>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-slate-400 text-xs">Mã hợp đồng</p>
-              <p className="font-bold text-slate-900">{inbound.contractCode}</p>
-            </div>
-            <div>
-              <p className="text-slate-400 text-xs">Chủ nhà</p>
-              <p className="font-bold text-slate-900">{inbound.ownerName}</p>
-            </div>
-            <div>
-              <p className="text-slate-400 text-xs">Tổng tiền thuê</p>
-              <p className="font-bold text-emerald-700">{money(inbound.totalRentAmount)}</p>
-            </div>
-            <div>
-              <p className="text-slate-400 text-xs">Thời hạn</p>
-              <p className="font-bold text-slate-900">{fmtDate(inbound.startDate)} → {fmtDate(inbound.endDate)}</p>
-            </div>
-          </div>
-          {inbound.contractScanUrl && (
-            <a href={inbound.contractScanUrl} target="_blank" rel="noreferrer"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-700 hover:bg-amber-100 transition">
-              <Link2 className="w-4 h-4" /> Xem bản scan hợp đồng
-            </a>
-          )}
-        </div>
-      )}
 
       {/* ═══════════ Thiết bị vận hành (nguồn, tình trạng, giá, bảo hành/hạn dùng) ═══════════ */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6">
-        <div className="flex items-center gap-2.5 mb-5">
-          <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center shrink-0">
-            <Package className="w-5 h-5 text-violet-600" />
+      {tab === 'equipment' && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="mb-5 flex items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50">
+              <Package className="h-5 w-5 text-violet-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900">Thiết bị vận hành</h2>
           </div>
-          <h2 className="text-lg font-bold text-slate-900">Thiết bị vận hành</h2>
+          <OperationalEquipmentPanel propertyId={Number(id)} />
         </div>
-        <OperationalEquipmentPanel propertyId={Number(id)} />
-      </div>
+      )}
+
+      {/* Trạng thái rỗng cho tab không có dữ liệu — tránh màn hình trắng trơn */}
+      {tab === 'overview' && !(property.fullAddress || property.shortAddress) && (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
+          <MapPin className="mx-auto mb-3 h-10 w-10 text-slate-200" />
+          <p className="font-semibold text-slate-500">Tòa nhà chưa có địa chỉ để hiển thị bản đồ</p>
+        </div>
+      )}
 
       {selectedRoom && (
         <RoomDetailModal
@@ -924,6 +1004,15 @@ export const PropertyDetail = () => {
           isChange={!!property.operationManagerId}
           onClose={() => setShowAssignModal(false)}
           onConfirm={handleAssignManager}
+        />
+      )}
+
+      {lightbox !== null && property.imageUrls?.[lightbox] && (
+        <ImageLightbox
+          urls={property.imageUrls}
+          index={lightbox}
+          onIndexChange={setLightbox}
+          onClose={() => setLightbox(null)}
         />
       )}
     </div>

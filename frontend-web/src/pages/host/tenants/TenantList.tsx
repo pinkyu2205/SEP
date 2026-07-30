@@ -5,7 +5,7 @@ import { propertyService } from '@/services/property.service';
 import { hostService, type HostContractDto } from '@/services/host.service';
 import type { PropertyResponse, RoomResponse, ContractStatus } from '@/types/api.types';
 import { TenantFormModal } from './TenantFormModal';
-import { isHostApproved } from '@/pages/host/properties/PropertyList';
+import { isHostApproved } from '@/pages/host/properties/propertyListState';
 
 const statusMap: Record<ContractStatus, { label: string; color: string; dot: string }> = {
   DRAFT:      { label: 'Nháp',          color: 'bg-slate-100 text-slate-500',   dot: 'bg-slate-400' },

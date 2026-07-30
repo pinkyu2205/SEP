@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-  ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen,
-  FileSpreadsheet, FileText, Image as ImageIcon, Layers, MapPin, Plus, Power, Search, Settings2,
+  ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen, Eye, FilePlus,
+  FileSpreadsheet, FileText, Image as ImageIcon, Layers, MapPin, Plus, Power,
   TrendingUp, Trash2, Upload, X, XCircle,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
@@ -12,21 +11,30 @@ import { uploadToCloudinary } from '@/services/upload.service';
 import { extractContractData } from '@/utils/pdfExtract';
 import type { InboundContractRequest, PropertyDraftRequest, PropertyResponse, ZoneResponse } from '@/types/api.types';
 import { StepPropertyInfo } from '@/pages/admin/properties/wizard/StepPropertyInfo';
-import { KpiCard, BuildingCard, Pagination } from '@/pages/admin/shared';
+import { StatCard, PageHero, BuildingCard, Pagination } from '@/pages/admin/shared';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { AddressAutocomplete } from '@/components/AddressAutocomplete';
 import { PropertyMap } from '@/components/PropertyMap';
 import { LeaseImportPanel } from './LeaseImportPanel';
 import { HandoverEquipmentSection } from './HandoverEquipmentSection';
+import { BuildingFilterBar, ResultBar, BuildingTable, BulkActionBar } from './BuildingFilters';
+import { useBuildingFilters, ONBOARDING_STEPS, type StatusOption } from './buildingFilterState';
 
-const statusBadge: Record<string, { label: string; cls: string }> = {
-  DRAFT:                { label: 'Nháp',                cls: 'bg-slate-100 text-slate-700' },
-  UNDER_RENOVATION:     { label: 'Chờ cấu hình',        cls: 'bg-amber-100 text-amber-800' },
-  RENOVATION_COMPLETED: { label: 'Đã hoàn tất cải tạo', cls: 'bg-teal-100 text-teal-800' },
-  PENDING_HOST_REVIEW:  { label: 'Chờ duyệt',           cls: 'bg-blue-100 text-blue-800' },
-  ACTIVE:               { label: 'Đang kinh doanh',     cls: 'bg-emerald-100 text-emerald-800' },
-  DISABLED:             { label: 'Đã vô hiệu',          cls: 'bg-rose-100 text-rose-800' },
-};
+// Module này CHỈ quan tâm bước khởi tạo hồ sơ — mọi trạng thái phía sau
+// (cải tạo / duyệt giá / kinh doanh) thuộc module "Cấu hình khai thác",
+// ở đây gộp hết thành "Đã khởi tạo".
+const DRAFT_STATE = {
+  DRAFT:       { label: 'Nháp',         cls: 'bg-slate-100 text-slate-700' },
+  INITIALIZED: { label: 'Đã khởi tạo',  cls: 'bg-indigo-100 text-indigo-800' },
+  DISABLED:    { label: 'Đã vô hiệu',   cls: 'bg-rose-100 text-rose-800' },
+} as const;
+
+const DRAFT_STATUS_OPTIONS: StatusOption[] = [
+  { value: 'all',         label: 'Tất cả',       cls: 'border-slate-900 bg-slate-900 text-white' },
+  { value: 'DRAFT',       label: 'Nháp',         cls: 'border-slate-600 bg-slate-600 text-white' },
+  { value: 'INITIALIZED', label: 'Đã khởi tạo',  cls: 'border-indigo-600 bg-indigo-600 text-white' },
+  { value: 'DISABLED',    label: 'Đã vô hiệu',   cls: 'border-rose-600 bg-rose-600 text-white' },
+];
 
 // ─── "Đã hoàn tất khởi tạo" — đánh dấu FE-side ──────────────────────────────
 // BE chưa có endpoint chuyển DRAFT → PENDING_HOST_REVIEW khi hoàn tất bước khởi
@@ -72,7 +80,6 @@ export const TaoDraftPage = () => {
   // Mặc định xem danh sách toà nhà; import Excel mở dạng popup khi bấm nút.
   const [importOpen, setImportOpen] = useState(false);
   const [view, setView] = useState<View>('list');
-  const navigate = useNavigate();
   const [newProperty, setNewProperty] = useState<PropertyResponse | null>(null);
   const [selectedBuilding, setSelectedBuilding] = useState<PropertyResponse | null>(null);
 
@@ -80,20 +87,21 @@ export const TaoDraftPage = () => {
   const [buildings, setBuildings] = useState<PropertyResponse[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState(false);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  // Sắp xếp danh sách. BE không trả createdAt nên dùng id (auto-increment):
-  // id lớn hơn = thêm sau → 'newest' = id giảm dần.
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name'>('newest');
   const [submittedDrafts, setSubmittedDrafts] = useState<number[]>(() => readSubmittedDrafts());
 
-  // Badge: DRAFT đã bấm "Xác nhận" bước cuối → "Đã khởi tạo", DRAFT đang tạo dở → "Nháp"
-  const getStatusBadge = (b: PropertyResponse): { label: string; cls: string } => {
-    if (b.status === 'DRAFT' && submittedDrafts.includes(b.id)) {
-      return { label: 'Đã khởi tạo', cls: 'bg-indigo-100 text-indigo-800' };
-    }
-    return statusBadge[b.status] ?? statusBadge.DRAFT;
+  /**
+   * Trạng thái theo góc nhìn của riêng module khởi tạo:
+   * - DRAFT chưa bấm "Xác nhận" bước cuối → Nháp
+   * - DRAFT đã xác nhận, hoặc đã sang bất kỳ bước vận hành nào → Đã khởi tạo
+   * - DISABLED → Đã vô hiệu
+   */
+  const draftState = (b: PropertyResponse): keyof typeof DRAFT_STATE => {
+    if (b.status === 'DISABLED') return 'DISABLED';
+    if (b.status === 'DRAFT' && !submittedDrafts.includes(b.id)) return 'DRAFT';
+    return 'INITIALIZED';
   };
+
+  const getStatusBadge = (b: PropertyResponse) => DRAFT_STATE[draftState(b)];
 
   // ─── create form ──────────────────────────────────────────────────
   const [zones, setZones] = useState<ZoneResponse[]>([]);
@@ -138,40 +146,26 @@ export const TaoDraftPage = () => {
   }, [importOpen]);
 
   const kpi = useMemo(() => buildings.reduce(
-    (acc, b) => ({
-      total: acc.total + 1,
-      draft: acc.draft + (b.status === 'DRAFT' && !submittedDrafts.includes(b.id) ? 1 : 0),
-      active: acc.active + (b.status === 'ACTIVE' ? 1 : 0),
-      rooms: acc.rooms + (b.totalRooms || 0),
-    }),
-    { total: 0, draft: 0, active: 0, rooms: 0 }
+    (acc, b) => {
+      const st = b.status === 'DISABLED'
+        ? 'DISABLED'
+        : b.status === 'DRAFT' && !submittedDrafts.includes(b.id) ? 'DRAFT' : 'INITIALIZED';
+      return {
+        total: acc.total + 1,
+        draft: acc.draft + (st === 'DRAFT' ? 1 : 0),
+        initialized: acc.initialized + (st === 'INITIALIZED' ? 1 : 0),
+        rooms: acc.rooms + (b.totalRooms || 0),
+      };
+    },
+    { total: 0, draft: 0, initialized: 0, rooms: 0 }
   ), [buildings, submittedDrafts]);
 
-  const filtered = useMemo(() => {
-    const kw = search.trim().toLowerCase();
-    const list = buildings.filter(b => {
-      // Draft đã bấm "Xác nhận" bước cuối → nhóm lọc riêng "Đã khởi tạo" (FE-side, không phải status BE)
-      const effectiveStatus = b.status === 'DRAFT' && submittedDrafts.includes(b.id)
-        ? 'INITIALIZED' : b.status;
-      const matchStatus = statusFilter === 'all' || effectiveStatus === statusFilter;
-      const matchSearch = !kw || [b.propertyName, b.shortAddress, b.fullAddress, b.zoneName]
-        .some(v => v?.toLowerCase().includes(kw));
-      return matchStatus && matchSearch;
-    });
-    // Sắp xếp: newest/oldest theo id (auto-increment), name theo bảng chữ cái VN.
-    return [...list].sort((a, b) => {
-      if (sortBy === 'name') return a.propertyName.localeCompare(b.propertyName, 'vi');
-      return sortBy === 'oldest' ? a.id - b.id : b.id - a.id;
-    });
-  }, [buildings, statusFilter, search, submittedDrafts, sortBy]);
+  const effectiveStatus = useCallback(
+    (b: PropertyResponse): string => draftState(b),
+    [submittedDrafts]
+  );
 
-  // ─── phân trang (9 / trang) ───────────────────────────────────────
-  const PER_PAGE = 9;
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
-  useEffect(() => { setPage(1); }, [search, statusFilter, sortBy]);
-  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
-  const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+  const f = useBuildingFilters(buildings, { storageKey: 'draft-list', effectiveStatus });
 
   // ─── form handlers ────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -289,13 +283,13 @@ export const TaoDraftPage = () => {
   // Chốt chặn: chỉ cho vô hiệu/xóa nhà ACTIVE khi không còn khách thuê.
   // - Nhà chia phòng: kiểm tra phòng có status RENTED.
   // - Nhà nguyên căn: không có phòng lẻ → dựa vào xác nhận thủ công ở hộp thoại.
-  const ensureVacant = async (b: PropertyResponse): Promise<boolean> => {
+  const ensureVacant = async (b: PropertyResponse, silent = false): Promise<boolean> => {
     if (b.wholeHouse === false) {
       try {
         const rooms = await propertyService.getRooms(b.id);
         const rented = rooms.filter(r => r.status === 'RENTED');
         if (rented.length > 0) {
-          toast.error(`Còn ${rented.length} phòng đang có khách thuê — không thể thực hiện. Chờ hết hợp đồng hoặc chuyển khách trước.`);
+          if (!silent) toast.error(`Còn ${rented.length} phòng đang có khách thuê — không thể thực hiện. Chờ hết hợp đồng hoặc chuyển khách trước.`);
           return false;
         }
       } catch {
@@ -305,57 +299,116 @@ export const TaoDraftPage = () => {
     return true;
   };
 
-  const handleDeleteBuilding = async (b: PropertyResponse, e: React.MouseEvent) => {
+  // ─── Chọn nhiều để vô hiệu hóa / xóa hàng loạt ───────────────────────
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkAction, setBulkAction] = useState<'disable' | 'delete' | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const toggleRow = (id: number) =>
+    setSelectedIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+
+  const runBulk = async () => {
+    const targets = buildings.filter(b => selectedSet.has(b.id));
+    setBulkRunning(true);
+    let ok = 0;
+    const blocked: string[] = [];   // còn khách thuê
+    const failed: string[] = [];    // BE từ chối
+    for (const b of targets) {
+      if (b.status === 'ACTIVE' && !(await ensureVacant(b, true))) { blocked.push(b.propertyName); continue; }
+      try {
+        if (bulkAction === 'delete') await propertyService.deleteProperty(b.id, { silent: true });
+        else await propertyService.disableProperty(b.id, { silent: true });
+        ok++;
+      } catch (err: any) {
+        // 404 khi xóa = đã bị xóa trước đó → coi như thành công
+        if (bulkAction === 'delete' && err?.response?.status === 404) ok++;
+        else failed.push(b.propertyName);
+      }
+    }
+    const verb = bulkAction === 'delete' ? 'xóa' : 'vô hiệu hóa';
+    if (ok > 0) toast.success(`Đã ${verb} ${ok}/${targets.length} tòa nhà`);
+    if (blocked.length) toast.error(`${blocked.length} nhà còn khách thuê nên bỏ qua: ${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? '…' : ''}`);
+    if (failed.length) toast.error(`${failed.length} nhà không ${verb} được: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
+    setBulkRunning(false);
+    setBulkAction(null);
+    setSelectedIds([]);
+    fetchBuildings();
+  };
+
+  // ─── Xác nhận hành động trên 1 tòa nhà (popup giữa màn hình) ─────────
+  type RowAction = 'delete' | 'disable' | 'enable';
+  const [rowConfirm, setRowConfirm] = useState<{ kind: RowAction; b: PropertyResponse } | null>(null);
+  const [rowRunning, setRowRunning] = useState(false);
+
+  const askRowAction = async (kind: RowAction, b: PropertyResponse, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (b.status === 'ACTIVE' && !(await ensureVacant(b))) return;
-    const extra = b.wholeHouse ? ' Hãy chắc chắn nhà hiện KHÔNG còn khách thuê.' : '';
-    if (!window.confirm(`Xác nhận xóa tòa nhà "${b.propertyName}"? Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của căn này sẽ bị xóa.${extra}`)) return;
+    // Nhà đang kinh doanh còn khách thuê → chặn ngay, khỏi mở hộp thoại
+    if (kind !== 'enable' && b.status === 'ACTIVE' && !(await ensureVacant(b))) return;
+    setRowConfirm({ kind, b });
+  };
+
+  const runRowAction = async () => {
+    if (!rowConfirm) return;
+    const { kind, b } = rowConfirm;
+    setRowRunning(true);
     try {
-      await propertyService.deleteProperty(b.id);
-      toast.success('Đã xóa căn nhà');
+      if (kind === 'delete') {
+        await propertyService.deleteProperty(b.id);
+        toast.success('Đã xóa căn nhà');
+      } else if (kind === 'disable') {
+        await propertyService.disableProperty(b.id);
+        toast.success('Đã vô hiệu hóa');
+      } else {
+        await propertyService.enableProperty(b.id);
+        toast.success('Đã kích hoạt lại tòa nhà');
+      }
       fetchBuildings();
     } catch (err: any) {
       const status = err?.response?.status;
-      if (status === 404) {
+      if (kind === 'delete' && status === 404) {
         // Đã bị xóa trước đó → coi như thành công, làm mới danh sách
         toast.success('Căn nhà đã được xóa trước đó');
         fetchBuildings();
-      } else if (status === 403) {
+      } else if (kind === 'delete' && status === 403) {
         toast.error('Bạn cần quyền ADMIN để xóa căn nhà này');
-      }
-      // 422 (ACTIVE / đã có chỉ số điện nước) & 400: api interceptor đã hiển thị message từ BE
-    }
-  };
-
-  const handleDisableBuilding = async (b: PropertyResponse, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (b.status === 'ACTIVE' && !(await ensureVacant(b))) return;
-    const extra = b.wholeHouse ? ' Hãy chắc chắn nhà hiện KHÔNG còn khách thuê.' : '';
-    if (!window.confirm(`Vô hiệu hóa tòa nhà "${b.propertyName}"?${extra}`)) return;
-    try {
-      await propertyService.disableProperty(b.id);
-      toast.success('Đã vô hiệu hóa');
-      fetchBuildings();
-    } catch {
-      // api interceptor đã toast lỗi
-    }
-  };
-
-  const handleEnableBuilding = async (id: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!window.confirm('Kích hoạt lại tòa nhà này?')) return;
-    try {
-      await propertyService.enableProperty(id);
-      toast.success('Đã kích hoạt lại tòa nhà');
-      fetchBuildings();
-    } catch (err: any) {
-      const status = err?.response?.status;
-      if (status === 404 || status === 405) {
+      } else if (kind === 'enable' && (status === 404 || status === 405)) {
         toast.error('BE chưa hỗ trợ kích hoạt lại (POST /properties/{id}/enable) — đã ghi yêu cầu cho BE');
       }
-      // các lỗi khác: api interceptor đã toast
+      // các lỗi khác: api interceptor đã toast message từ BE
+    } finally {
+      setRowRunning(false);
+      setRowConfirm(null);
     }
   };
+
+  // Nội dung hộp thoại theo từng loại hành động
+  const rowConfirmProps = (() => {
+    if (!rowConfirm) return null;
+    const { kind, b } = rowConfirm;
+    const warnWholeHouse = b.wholeHouse
+      ? <> Hãy chắc chắn nhà hiện <b className="text-slate-700">KHÔNG còn khách thuê</b>.</>
+      : null;
+    if (kind === 'delete') return {
+      tone: 'danger' as const,
+      title: 'Xóa tòa nhà này?',
+      confirmText: 'Xóa vĩnh viễn',
+      message: <>Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của <b className="text-slate-700">{b.propertyName}</b> sẽ bị
+        xóa và không thể hoàn tác.{warnWholeHouse}</>,
+    };
+    if (kind === 'disable') return {
+      tone: 'warning' as const,
+      title: 'Vô hiệu hóa tòa nhà này?',
+      confirmText: 'Vô hiệu hóa',
+      message: <>Tòa nhà <b className="text-slate-700">{b.propertyName}</b> sẽ ngừng hoạt động trên hệ thống.{warnWholeHouse}</>,
+    };
+    return {
+      tone: 'success' as const,
+      title: 'Kích hoạt lại tòa nhà này?',
+      confirmText: 'Kích hoạt lại',
+      message: <>Tòa nhà <b className="text-slate-700">{b.propertyName}</b> sẽ hoạt động trở lại.</>,
+    };
+  })();
 
   const backToList = () => {
     setView('list');
@@ -446,66 +499,126 @@ export const TaoDraftPage = () => {
   // ═══════════════════════════════════════════════════════════════════
   if (view === 'detail' && selectedBuilding) {
     const badge = getStatusBadge(selectedBuilding);
+    const isDraft = draftState(selectedBuilding) === 'DRAFT';
+    const address = selectedBuilding.fullAddress || selectedBuilding.shortAddress;
+
     return (
-      <div className="mx-auto max-w-4xl px-4 py-8">
+      <div className="mx-auto max-w-6xl space-y-5">
         <button onClick={backToList}
-          className="mb-6 flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-indigo-600 transition">
+          className="flex items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-indigo-600">
           <ArrowLeft className="h-4 w-4" /> Quay lại danh sách
         </button>
 
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900">{selectedBuilding.propertyName}</h1>
-            <div className="mt-1.5 flex items-center gap-1.5 text-sm text-slate-500">
-              <MapPin className="h-4 w-4 shrink-0" />
-              <span>{selectedBuilding.fullAddress || selectedBuilding.shortAddress}</span>
+        {/* ── Header hồ sơ ── */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                <Building2 className="h-6 w-6" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl font-black leading-tight text-slate-900">{selectedBuilding.propertyName}</h1>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${badge.cls}`}>{badge.label}</span>
+                </div>
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-500">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" /> {address}
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+                  {selectedBuilding.zoneName && (
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{selectedBuilding.zoneName}</span>
+                  )}
+                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-bold text-indigo-600">
+                    {selectedBuilding.wholeHouse === null ? 'Chưa chọn loại hình' : selectedBuilding.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
-          <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${badge.cls}`}>{badge.label}</span>
-        </div>
 
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl bg-blue-50 p-4 text-center">
-            <p className="text-xl font-black text-blue-700">{selectedBuilding.totalRooms || 0}</p>
-            <p className="mt-0.5 text-xs font-semibold text-blue-600">Tổng phòng</p>
-          </div>
-          <div className="rounded-xl bg-indigo-50 p-4 text-center">
-            <p className="text-xl font-black text-indigo-700">{selectedBuilding.totalFloor ?? selectedBuilding.floorCount ?? '—'}</p>
-            <p className="mt-0.5 text-xs font-semibold text-indigo-600">Số tầng</p>
-          </div>
-          <div className="rounded-xl bg-slate-50 p-4 text-center">
-            <p className="text-xl font-black text-slate-700">{selectedBuilding.areaSize ? `${selectedBuilding.areaSize} m²` : '—'}</p>
-            <p className="mt-0.5 text-xs font-semibold text-slate-500">Diện tích</p>
-          </div>
-        </div>
-
-        {/* Ảnh tòa nhà */}
-        {(selectedBuilding.imageUrls?.length ?? 0) > 0 && (
-          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
-            <h3 className="mb-3 text-sm font-black uppercase tracking-widest text-slate-500">Hình ảnh tòa nhà</h3>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {selectedBuilding.imageUrls!.map((url, i) => (
-                <a key={i} href={url} target="_blank" rel="noreferrer"
-                  className="group aspect-square overflow-hidden rounded-xl border border-slate-200 block">
-                  <img src={url} alt={`Ảnh ${i + 1}`} className="h-full w-full object-cover group-hover:scale-105 transition duration-200" />
-                </a>
+            {/* Thông số vật lý */}
+            <div className="grid shrink-0 grid-cols-3 divide-x divide-slate-100 overflow-hidden rounded-xl border border-slate-100 bg-slate-50/60 text-center">
+              {[
+                { v: selectedBuilding.totalRooms || 0, l: 'Phòng' },
+                { v: selectedBuilding.totalFloor ?? selectedBuilding.floorCount ?? '—', l: 'Tầng' },
+                { v: selectedBuilding.areaSize ? `${selectedBuilding.areaSize} m²` : '—', l: 'Diện tích' },
+              ].map(s => (
+                <div key={s.l} className="px-5 py-2.5">
+                  <p className="text-lg font-black leading-tight text-slate-900">{s.v}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-slate-400">{s.l}</p>
+                </div>
               ))}
             </div>
           </div>
-        )}
 
-        {/* Thiết bị chủ nhà bàn giao (import đợt 1 — chỉ hiển thị) */}
-        <HandoverEquipmentSection propertyId={selectedBuilding.id} />
+          {isDraft && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <p className="text-sm font-semibold text-amber-800">
+                Hồ sơ còn ở dạng nháp — bổ sung hợp đồng đầu vào & thiết bị bàn giao rồi bấm
+                <b> “Xác nhận &amp; Quay về danh sách”</b> ở cuối trang để hoàn tất khởi tạo.
+              </p>
+            </div>
+          )}
+        </section>
 
-        {/* Bản đồ vị trí (Goong) */}
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
-          <h3 className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-500">
-            <MapPin className="h-4 w-4 text-indigo-500" /> Vị trí trên bản đồ
-          </h3>
-          <PropertyMap address={selectedBuilding.fullAddress || selectedBuilding.shortAddress} />
+        {/* ── Nội dung: 2 cột ── */}
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="space-y-5 lg:col-span-2">
+            {/* Hợp đồng đầu vào & khai báo thiết bị */}
+            <StepPropertyInfo
+              property={selectedBuilding}
+              onNext={() => handleFinishOnboarding(selectedBuilding.id)}
+              nextLabel="Xác nhận & Quay về danh sách"
+              confirmBeforeNext
+            />
+
+            {/* Thiết bị chủ nhà bàn giao (import đợt 1 — chỉ hiển thị) */}
+            <HandoverEquipmentSection propertyId={selectedBuilding.id} />
+          </div>
+
+          <div className="space-y-5">
+            {/* Bản đồ vị trí (Goong) */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400">
+                <MapPin className="h-3.5 w-3.5" /> Vị trí trên bản đồ
+              </h3>
+              <PropertyMap address={address} />
+            </div>
+
+            {/* Ảnh tòa nhà */}
+            {(selectedBuilding.imageUrls?.length ?? 0) > 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <h3 className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400">
+                  <ImageIcon className="h-3.5 w-3.5" /> Hình ảnh tòa nhà
+                  <span className="ml-auto rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                    {selectedBuilding.imageUrls!.length}
+                  </span>
+                </h3>
+                <div className="grid grid-cols-3 gap-2">
+                  {selectedBuilding.imageUrls!.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer"
+                      className="group block aspect-square overflow-hidden rounded-xl border border-slate-200">
+                      <img src={url} alt={`Ảnh ${i + 1}`}
+                        className="h-full w-full object-cover transition duration-200 group-hover:scale-105" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Ghi chú nội bộ */}
+            {selectedBuilding.descriptions && selectedBuilding.descriptions !== 'Không có mô tả' && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <h3 className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-400">
+                  <FileText className="h-3.5 w-3.5" /> Ghi chú nội bộ
+                </h3>
+                <p className="whitespace-pre-line text-sm leading-relaxed text-slate-600">
+                  {selectedBuilding.descriptions}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-
-        <StepPropertyInfo property={selectedBuilding} onNext={() => handleFinishOnboarding(selectedBuilding.id)} nextLabel="Xác nhận & Quay về danh sách" confirmBeforeNext />
       </div>
     );
   }
@@ -860,50 +973,86 @@ export const TaoDraftPage = () => {
   // ═══════════════════════════════════════════════════════════════════
   // VIEW: Danh sách tòa nhà (màn hình chính)
   // ═══════════════════════════════════════════════════════════════════
+  // Nút hành động (vô hiệu / xóa / kích hoạt) — dùng chung cho thẻ & bảng.
+  const rowActions = (b: PropertyResponse) => (
+    <>
+      {b.status === 'DISABLED' ? (
+        <>
+          <button onClick={(e) => askRowAction('enable', b, e)} title="Kích hoạt lại"
+            className="rounded-md p-1.5 text-emerald-600 hover:bg-emerald-50">
+            <Power className="h-4 w-4" />
+          </button>
+          <button onClick={(e) => askRowAction('delete', b, e)} title="Xóa vĩnh viễn"
+            className="rounded-md p-1.5 text-rose-600 hover:bg-rose-50">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </>
+      ) : b.status === 'ACTIVE' ? (
+        <>
+          <button onClick={(e) => askRowAction('disable', b, e)} title="Vô hiệu hóa (cần phòng trống)"
+            className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50">
+            <XCircle className="h-4 w-4" />
+          </button>
+          <button onClick={(e) => askRowAction('delete', b, e)} title="Xóa (cần phòng trống)"
+            className="rounded-md p-1.5 text-rose-600 hover:bg-rose-50">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </>
+      ) : (
+        <>
+          <button onClick={(e) => askRowAction('disable', b, e)} title="Vô hiệu hóa"
+            className="rounded-md p-1.5 text-amber-600 hover:bg-amber-50">
+            <XCircle className="h-4 w-4" />
+          </button>
+          {b.status === 'DRAFT' && (
+            <button onClick={(e) => askRowAction('delete', b, e)} title="Xóa nháp"
+              className="rounded-md p-1.5 text-rose-600 hover:bg-rose-50">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </>
+      )}
+    </>
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900">Khởi tạo nhà</h1>
-          <p className="text-slate-500 mt-1 text-sm font-medium">Quản lý toàn bộ tòa nhà — nhập hàng loạt từ Excel</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
+    <div className="space-y-5">
+      {/* ── Hero + stepper quy trình ── */}
+      <PageHero
+        eyebrow="Quy trình tiếp nhận nhà"
+        title="Khởi tạo nhà"
+        subtitle="Tạo hồ sơ tòa nhà, hợp đồng đầu vào & thiết bị chủ nhà bàn giao"
+        icon={FilePlus}
+        steps={ONBOARDING_STEPS.map(s => ({ ...s, current: s.to === '/admin/buildings/draft' }))}
+      />
+
+      {/* ── Số liệu: bấm để lọc nhanh ── */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard title="Tổng tòa nhà" value={kpi.total} icon={Building2} tone="blue"
+          helper="Toàn bộ hồ sơ đã tiếp nhận"
+          onClick={() => f.setStatus('all')} active={f.status === 'all'} />
+        <StatCard title="Tổng phòng" value={kpi.rooms} icon={DoorOpen} tone="indigo"
+          helper={kpi.total ? `TB ${(kpi.rooms / kpi.total).toFixed(1)} phòng / tòa` : undefined} />
+        <StatCard title="Đang nháp" value={kpi.draft} icon={TrendingUp} tone="slate"
+          helper="chưa hoàn tất khởi tạo" progress={kpi.total ? kpi.draft / kpi.total : 0}
+          onClick={() => f.setStatus('DRAFT')} active={f.status === 'DRAFT'} />
+        <StatCard title="Đã khởi tạo" value={kpi.initialized} icon={CheckCircle2} tone="emerald"
+          helper="hồ sơ đã hoàn tất" progress={kpi.total ? kpi.initialized / kpi.total : 0}
+          onClick={() => f.setStatus('INITIALIZED')} active={f.status === 'INITIALIZED'} />
+      </div>
+
+      {/* ── Thanh tìm kiếm & bộ lọc ── */}
+      <BuildingFilterBar
+        f={f}
+        statusOptions={DRAFT_STATUS_OPTIONS}
+        hiddenFilters={['renovation', 'manager']}
+        action={
           <button onClick={() => setImportOpen(true)}
-            className="btn-primary flex items-center gap-2 rounded-xl px-5 py-2.5">
+            className="btn-primary flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5">
             <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
           </button>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard title="Tổng tòa nhà" value={String(kpi.total)} icon={Building2} color="bg-blue-50 text-blue-700" />
-        <KpiCard title="Tổng phòng" value={String(kpi.rooms)} icon={DoorOpen} color="bg-indigo-50 text-indigo-700" />
-        <KpiCard title="Đang nháp" value={String(kpi.draft)} icon={TrendingUp} color="bg-slate-50 text-slate-700" />
-        <KpiCard title="Đang kinh doanh" value={String(kpi.active)} icon={CheckCircle2} color="bg-emerald-50 text-emerald-700" />
-      </div>
-
-      <div className="flex flex-col gap-3 lg:flex-row">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            className="input-field pl-9" placeholder="Tìm theo tên, địa chỉ..." />
-        </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-field w-52">
-          <option value="all">Tất cả trạng thái</option>
-          <option value="DRAFT">Nháp</option>
-          <option value="INITIALIZED">Đã khởi tạo</option>
-          <option value="UNDER_RENOVATION">Chờ cấu hình</option>
-          <option value="RENOVATION_COMPLETED">Đã hoàn tất cải tạo</option>
-          <option value="PENDING_HOST_REVIEW">Chờ duyệt</option>
-          <option value="ACTIVE">Đang kinh doanh</option>
-          <option value="DISABLED">Đã vô hiệu</option>
-        </select>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)} className="input-field w-52">
-          <option value="newest">Mới thêm gần nhất</option>
-          <option value="oldest">Thêm sớm nhất</option>
-          <option value="name">Tên A → Z</option>
-        </select>
-      </div>
+        }
+      />
 
       {listLoading ? (
         <div className="py-16 text-center text-slate-400">Đang tải dữ liệu...</div>
@@ -916,102 +1065,147 @@ export const TaoDraftPage = () => {
             Thử lại
           </button>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="py-16 text-center text-slate-400">
-          <Building2 className="mx-auto h-10 w-10 mb-3 opacity-30" />
-          <p className="text-sm font-semibold">Chưa có tòa nhà nào. Hãy nhập từ Excel để bắt đầu.</p>
-          <button onClick={() => setImportOpen(true)}
-            className="mt-4 btn-primary flex items-center gap-2 mx-auto rounded-xl px-5 py-2.5 text-sm">
-            <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
-          </button>
+      ) : f.filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-slate-400">
+          <Building2 className="mx-auto mb-3 h-10 w-10 opacity-30" />
+          {f.activeCount > 0 ? (
+            <>
+              <p className="text-sm font-semibold text-slate-500">Không có tòa nhà nào khớp bộ lọc hiện tại.</p>
+              <button onClick={f.reset}
+                className="mx-auto mt-4 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50">
+                Xóa bộ lọc
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold">Chưa có tòa nhà nào. Hãy nhập từ Excel để bắt đầu.</p>
+              <button onClick={() => setImportOpen(true)}
+                className="btn-primary mx-auto mt-4 flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm">
+                <FileSpreadsheet className="h-4 w-4" /> Nhập từ Excel
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <>
-        <div className="grid gap-4 xl:grid-cols-3">
-          {paged.map(b => {
-            const badge = getStatusBadge(b);
-            const isSubmittedDraft = b.status === 'DRAFT' && submittedDrafts.includes(b.id);
-            const footer =
-              (b.status === 'UNDER_RENOVATION' || isSubmittedDraft) ? (
-                <button onClick={(e) => { e.stopPropagation(); navigate(`/admin/buildings/configuration/${b.id}`); }}
-                  className="w-full py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white transition rounded-xl font-bold text-sm flex justify-center items-center gap-2">
-                  <Settings2 className="w-4 h-4" /> Cấu hình khai thác
-                </button>
-              ) : b.status === 'RENOVATION_COMPLETED' ? (
-                <div className="w-full py-2 text-center text-xs font-semibold text-teal-600 bg-teal-50 rounded-xl flex items-center justify-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Đã hoàn tất cải tạo — chờ gửi Host
-                </div>
-              ) : b.status === 'PENDING_HOST_REVIEW' ? (
-                <div className="w-full py-2 text-center text-xs font-semibold text-blue-600 bg-blue-50 rounded-xl flex items-center justify-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5" /> Đang chờ Host phê duyệt
-                </div>
-              ) : b.status === 'ACTIVE' ? (
-                <div className="w-full py-2 text-center text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-xl flex items-center justify-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Đang kinh doanh
-                </div>
-              ) : null;
-            return (
-              <BuildingCard
-                key={b.id}
-                onClick={() => openDetail(b)}
-                name={b.propertyName}
-                address={b.fullAddress || b.shortAddress}
-                zoneName={b.zoneName}
-                typeLabel={b.wholeHouse === null ? 'Chưa chọn loại' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
-                areaSize={b.areaSize}
-                totalRooms={b.totalRooms}
-                floors={b.totalFloor ?? b.floorCount ?? '—'}
-                badge={badge}
-                managerName={b.operationManagerName}
-                overlay={
-                  <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-lg bg-white/80 p-1 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-                    {b.status === 'DISABLED' ? (
-                      <>
-                        <button onClick={(e) => handleEnableBuilding(b.id, e)} title="Kích hoạt lại"
-                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md">
-                          <Power className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa vĩnh viễn"
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    ) : b.status === 'ACTIVE' ? (
-                      <>
-                        <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa (cần phòng trống)"
-                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa (cần phòng trống)"
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={(e) => handleDisableBuilding(b, e)} title="Vô hiệu hóa"
-                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md">
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                        {b.status === 'DRAFT' && (
-                          <button onClick={(e) => handleDeleteBuilding(b, e)} title="Xóa nháp"
-                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                }
-              >
-                {footer}
-              </BuildingCard>
-            );
-          })}
-        </div>
-        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          <ResultBar f={f} />
+
+          {f.view === 'table' ? (
+            <BuildingTable
+              rows={f.paged}
+              getBadge={getStatusBadge}
+              onRowClick={openDetail}
+              showRenovation={false}
+              showManager={false}
+              selectedIds={selectedSet}
+              onToggleRow={toggleRow}
+              onToggleAll={(checked) => {
+                const pageIds = f.paged.map(b => b.id);
+                setSelectedIds(s => checked
+                  ? [...new Set([...s, ...pageIds])]
+                  : s.filter(id => !pageIds.includes(id)));
+              }}
+              renderActions={(b) => (
+                <>
+                  <button onClick={() => openDetail(b)} title="Xem hồ sơ"
+                    className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600">
+                    <Eye className="h-4 w-4" />
+                  </button>
+                  {rowActions(b)}
+                </>
+              )}
+            />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {f.paged.map(b => {
+                const isDraft = draftState(b) === 'DRAFT';
+                return (
+                  <BuildingCard
+                    key={b.id}
+                    onClick={() => openDetail(b)}
+                    name={b.propertyName}
+                    address={b.fullAddress || b.shortAddress}
+                    zoneName={b.zoneName}
+                    typeLabel={b.wholeHouse === null ? 'Chưa chọn loại' : b.wholeHouse ? 'Nhà nguyên căn' : 'Phòng trọ'}
+                    areaSize={b.areaSize}
+                    totalRooms={b.totalRooms}
+                    floors={b.totalFloor ?? b.floorCount ?? '—'}
+                    badge={getStatusBadge(b)}
+                    selected={selectedSet.has(b.id)}
+                    onSelectChange={() => toggleRow(b.id)}
+                    overlay={
+                      <div className="absolute right-3 top-3 z-10 flex gap-1 rounded-lg bg-white/80 p-1 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                        {rowActions(b)}
+                      </div>
+                    }
+                  >
+                    <button onClick={(e) => { e.stopPropagation(); openDetail(b); }}
+                      className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold transition ${
+                        isDraft
+                          ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white'
+                          : 'bg-slate-50 text-slate-600 hover:bg-slate-800 hover:text-white'
+                      }`}>
+                      <Eye className="h-4 w-4" /> {isDraft ? 'Tiếp tục khởi tạo' : 'Xem hồ sơ'}
+                    </button>
+                  </BuildingCard>
+                );
+              })}
+            </div>
+          )}
+
+          <Pagination page={f.page} totalPages={f.totalPages} onChange={f.setPage} />
         </>
       )}
+
+      {/* Thanh thao tác hàng loạt */}
+      <BulkActionBar count={selectedIds.length} onClear={() => setSelectedIds([])}>
+        <button onClick={() => setBulkAction('disable')}
+          className="flex items-center gap-2 rounded-xl bg-amber-500 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-amber-600">
+          <XCircle className="h-4 w-4" /> Vô hiệu hóa
+        </button>
+        <button onClick={() => setBulkAction('delete')}
+          className="flex items-center gap-2 rounded-xl bg-rose-600 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-rose-700">
+          <Trash2 className="h-4 w-4" /> Xóa
+        </button>
+      </BulkActionBar>
+
+      {/* Xác nhận hành động trên 1 tòa nhà */}
+      {rowConfirmProps && (
+        <ConfirmDialog
+          open
+          tone={rowConfirmProps.tone}
+          title={rowConfirmProps.title}
+          message={rowConfirmProps.message}
+          confirmText={rowConfirmProps.confirmText}
+          loading={rowRunning}
+          onConfirm={runRowAction}
+          onCancel={() => setRowConfirm(null)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!bulkAction}
+        tone="danger"
+        title={bulkAction === 'delete'
+          ? `Xóa ${selectedIds.length} tòa nhà đã chọn?`
+          : `Vô hiệu hóa ${selectedIds.length} tòa nhà đã chọn?`}
+        message={
+          <>
+            {bulkAction === 'delete' ? (
+              <>Toàn bộ hợp đồng, cải tạo, thiết bị và phòng của <b className="text-slate-700">{selectedIds.length} căn</b> này
+              sẽ bị xóa vĩnh viễn và <b className="text-slate-700">không thể hoàn tác</b>.</>
+            ) : (
+              <>Hệ thống sẽ vô hiệu hóa <b className="text-slate-700">{selectedIds.length} căn</b> đã chọn.</>
+            )}
+            <br />
+            Nhà đang kinh doanh mà còn khách thuê sẽ tự động được bỏ qua.
+          </>
+        }
+        confirmText={bulkAction === 'delete' ? 'Xóa tất cả' : 'Vô hiệu hóa tất cả'}
+        loading={bulkRunning}
+        onConfirm={runBulk}
+        onCancel={() => setBulkAction(null)}
+      />
 
       {importModal}
     </div>

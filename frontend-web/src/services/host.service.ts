@@ -181,11 +181,16 @@ export const hostService = {
     api.get(NOTIFICATIONS, { params }),
   markNotificationRead: (id: string): Promise<void> => api.put(`${NOTIFICATIONS}/${id}/read`),
   markAllNotificationsRead: (): Promise<void> => api.put(`${NOTIFICATIONS}/read-all`),
-  /** Số thông báo chưa đọc (cho badge sidebar/header). */
+  /**
+   * Số thông báo chưa đọc (cho badge sidebar/header).
+   * skipErrorToast: badge là thông tin phụ chạy nền — BE lỗi thì giữ số cũ,
+   * không bắn toast đỏ che màn hình (xem docs/BE-HANDOFF-host-notifications-500).
+   */
   getUnreadCount: async (): Promise<number> => {
     const page = await api.get<unknown, Page<HostNotificationDto>>(NOTIFICATIONS, {
       params: { unreadOnly: true, page: 0, size: 1 },
-    });
+      skipErrorToast: true,
+    } as never);
     return page?.totalElements ?? 0;
   },
 

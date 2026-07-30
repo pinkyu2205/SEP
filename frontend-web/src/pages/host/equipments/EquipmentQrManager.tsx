@@ -7,7 +7,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
 import type { PropertyResponse, MaintenanceEquipmentResponse } from '@/types/api.types';
-import { isHostApproved } from '@/pages/host/properties/PropertyList';
+import { isHostApproved } from '@/pages/host/properties/propertyListState';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const equipName = (e: MaintenanceEquipmentResponse): string =>

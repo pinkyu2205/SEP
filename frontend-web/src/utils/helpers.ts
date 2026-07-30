@@ -1,4 +1,11 @@
-// Các hàm tiện ích thuần (pure) cho Public Website.
+// Các hàm tiện ích thuần (pure) dùng chung toàn app.
+
+/**
+ * Bỏ dấu tiếng Việt + hạ chữ thường để tìm kiếm gõ không dấu:
+ * "thu duc" khớp "Thủ Đức", "nguyen can" khớp "Nguyên căn".
+ */
+export const normalizeVi = (s: string): string =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
 
 /** Định dạng giá tiền VND, ví dụ 5000000 -> "5.000.000 đ" */
 export const formatPrice = (value: number): string =>
