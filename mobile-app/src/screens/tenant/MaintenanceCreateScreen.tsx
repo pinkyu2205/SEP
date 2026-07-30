@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
 import { formatDate, showAlert } from '@/utils';
+import { useTenantContract } from '@/hooks';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
@@ -16,16 +17,38 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
+// Nhánh B (không gắn thiết bị) — 4 danh mục BE cho phép, KHÔNG gồm APPLIANCE/FURNITURE
+// (2 loại đó bắt buộc phải chọn thiết bị, BE tự chặn nếu gửi ở nhánh này).
+// Xem docs/FE-maintenance-non-equipment-create.md (repo BE) §3.3.
+const NON_EQUIPMENT_CATEGORIES: {
+  value: string; emoji: string; label: string; subtitle: string; placeholder: string;
+}[] = [
+  { value: 'STRUCTURAL', emoji: '🧱', label: 'Kết cấu', subtitle: 'Tường, sàn, trần, cửa, khóa', placeholder: 'vd. Sơn tường bong / thấm góc...' },
+  { value: 'ELECTRICAL', emoji: '⚡', label: 'Điện cố định', subtitle: 'Ổ cắm, đèn, cầu dao', placeholder: 'vd. Ổ cắm cháy / đèn không sáng...' },
+  { value: 'PLUMBING', emoji: '🚰', label: 'Nước / WC', subtitle: 'Vòi, ống, toilet, thoát sàn', placeholder: 'vd. Vòi rò / bồn cầu tắc...' },
+  { value: 'OTHER', emoji: '🔘', label: 'Khác', subtitle: 'Không thuộc 3 nhóm trên', placeholder: 'Mô tả ngắn sự cố' },
+];
+
 export const MaintenanceCreateScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const { selectedContractId } = useTenantContract();
   const equipment: EquipmentDto | undefined = route.params?.equipment;
+  // Không có equipment (vào từ "Sự cố khác") → bắt buộc chọn danh mục trước khi gửi.
+  const needsCategory = !equipment;
 
   const [title, setTitle] = useState(equipment ? equipName(equipment) : '');
+  const [category, setCategory] = useState<string | null>(null);
   const [description, setDescription] = useState('');
+  const [descExpanded, setDescExpanded] = useState(false);
   const [images, setImages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+
+  const selectedCategory = NON_EQUIPMENT_CATEGORIES.find(c => c.value === category);
+  const titlePlaceholder = equipment
+    ? 'Ví dụ: Vòi nước bị rỉ, Ổ cắm hỏng...'
+    : selectedCategory?.placeholder ?? 'Chọn danh mục bên trên trước';
 
   const pickImage = async () => {
     if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
@@ -45,7 +68,8 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!title.trim()) { showAlert('Lỗi', 'Vui lòng nhập tiêu đề sự cố.'); return; }
-    if (!description.trim()) { showAlert('Lỗi', 'Vui lòng mô tả chi tiết sự cố.'); return; }
+    // Không gắn thiết bị → BE bắt buộc category (STRUCTURAL/ELECTRICAL/PLUMBING/OTHER).
+    if (needsCategory && !category) { showAlert('Lỗi', 'Vui lòng chọn danh mục hư hỏng.'); return; }
     // Flow mới: BE bắt buộc ≥1 ảnh hiện trạng (BEFORE) khi tạo yêu cầu.
     if (images.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hiện trạng để tạo yêu cầu.'); return; }
 
@@ -54,13 +78,17 @@ export const MaintenanceCreateScreen: React.FC = () => {
     try {
       // roomId: ưu tiên từ QR thiết bị. Không có thì dùng dashboard — nguồn sự thật duy
       // nhất — KHÔNG suy ra từ list thiết bị (phòng trống nội thất vẫn hợp lệ).
-      // BE (26/07) hỗ trợ HĐ nguyên căn (WHOLE_HOUSE): roomId để trống, BE tự lấy
-      // property từ HĐ ACTIVE.
+      // Nguyên căn (WHOLE_HOUSE): roomId để trống nhưng BẮT BUỘC gửi propertyId thay
+      // thế — BE không tự suy được nữa (fix 27/07, trước đó thiếu propertyId gây 500).
+      // Xem docs/BE-FIX-maintenance-wholehouse-roomId-2026-07-27.md (repo BE).
       let roomIdNum: number | undefined = Number(equipment?.roomId ?? NaN);
       if (!Number.isFinite(roomIdNum) || roomIdNum <= 0) roomIdNum = undefined;
+      let propertyIdNum: number | undefined;
 
       if (roomIdNum === undefined) {
-        const dash = await realTenantSelfService.getDashboard();
+        // Nhiều HĐ ACTIVE → lấy đúng phòng/nhà của nhà đang chọn (selectedContractId),
+        // không phải cứ HĐ mới nhất — xem docs/FE-multi-contract-per-phone.md.
+        const dash = await realTenantSelfService.getDashboard(selectedContractId ?? undefined);
 
         if (!dash.contract) {
           setSubmitting(false);
@@ -76,8 +104,16 @@ export const MaintenanceCreateScreen: React.FC = () => {
             return;
           }
           roomIdNum = dashRoomId;
+        } else {
+          // WHOLE_HOUSE: không gửi roomId, thay bằng propertyId từ dashboard.
+          const dashPropertyId = Number(dash.building?.propertyId ?? dash.contract.propertyId ?? NaN);
+          if (!Number.isFinite(dashPropertyId) || dashPropertyId <= 0) {
+            setSubmitting(false);
+            showAlert('Lỗi', 'Không xác định được nhà đang thuê. Vui lòng liên hệ quản lý vận hành để được hỗ trợ.');
+            return;
+          }
+          propertyIdNum = dashPropertyId;
         }
-        // WHOLE_HOUSE: roomIdNum giữ nguyên undefined — không gửi roomId lên BE.
       }
 
       const uploaded: string[] = [];
@@ -90,13 +126,15 @@ export const MaintenanceCreateScreen: React.FC = () => {
         return;
       }
       const equipmentIdNum = Number(equipment?.id ?? NaN);
-      // Flow 17/07 chiều: tenant chỉ gửi title + description + ảnh — category/priority
-      // do manager gán khi duyệt (BE trả lỗi nếu gửi thiếu title hoặc title >200 ký tự).
+      // priority luôn do manager gán khi duyệt. category: bắt buộc khi không có thiết bị
+      // (nhánh B), optional khi có thiết bị (nhánh A — manager gán lúc duyệt như cũ).
       const body: CreateMaintenanceRequestDto = {
         roomId: roomIdNum,
+        propertyId: propertyIdNum,
         equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
         title: title.trim(),
-        description: description.trim(),
+        description: description.trim() || undefined,
+        category: category ?? undefined,
         images: uploaded,
       };
       await realMaintenanceService.createRequest(body);
@@ -114,7 +152,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
     }
   };
 
-  const isValid = title.trim() && description.trim() && images.length > 0;
+  const isValid = !!title.trim() && images.length > 0 && (!needsCategory || !!category);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -170,34 +208,67 @@ export const MaintenanceCreateScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Danh mục — chỉ hiện khi không gắn thiết bị (nhánh B); nhánh A để manager
+            gán lúc duyệt như cũ. */}
+        {needsCategory && (
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Danh mục <Text style={styles.required}>*</Text></Text>
+            <View style={styles.categoryGrid}>
+              {NON_EQUIPMENT_CATEGORIES.map(c => {
+                const active = category === c.value;
+                return (
+                  <TouchableOpacity
+                    key={c.value}
+                    style={[styles.categoryCard, active && styles.categoryCardActive]}
+                    onPress={() => setCategory(c.value)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.categoryEmoji}>{c.emoji}</Text>
+                    <Text style={[styles.categoryLabel, active && styles.categoryLabelActive]}>{c.label}</Text>
+                    <Text style={styles.categorySubtitle}>{c.subtitle}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         {/* Tiêu đề */}
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Tiêu đề sự cố <Text style={styles.required}>*</Text></Text>
           <TextInput
             style={styles.input}
-            placeholder="Ví dụ: Vòi nước bị rỉ, Ổ cắm hỏng..."
+            placeholder={titlePlaceholder}
             value={title}
             onChangeText={setTitle}
             maxLength={200}
           />
         </View>
 
-        {/* Mô tả chi tiết */}
+        {/* Mô tả — không bắt buộc, thu gọn mặc định để form gọn */}
         <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Mô tả chi tiết <Text style={styles.required}>*</Text></Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder={equipment
-              ? `Mô tả sự cố của ${equipName(equipment)}: triệu chứng, thời điểm phát sinh, mức độ ảnh hưởng...`
-              : 'Mô tả rõ tình trạng sự cố: vị trí, triệu chứng, thời điểm phát sinh...'}
-            multiline
-            numberOfLines={5}
-            textAlignVertical="top"
-            value={description}
-            onChangeText={setDescription}
-            maxLength={500}
-          />
-          <Text style={styles.charCount}>{description.length}/500</Text>
+          {descExpanded ? (
+            <>
+              <Text style={styles.fieldLabel}>Mô tả <Text style={styles.optional}>(không bắt buộc)</Text></Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder={equipment
+                  ? `Mô tả sự cố của ${equipName(equipment)}: triệu chứng, thời điểm phát sinh, mức độ ảnh hưởng...`
+                  : 'Mô tả rõ tình trạng sự cố: vị trí, triệu chứng, thời điểm phát sinh...'}
+                multiline
+                numberOfLines={5}
+                textAlignVertical="top"
+                value={description}
+                onChangeText={setDescription}
+                maxLength={500}
+              />
+              <Text style={styles.charCount}>{description.length}/500</Text>
+            </>
+          ) : (
+            <TouchableOpacity onPress={() => setDescExpanded(true)}>
+              <Text style={styles.addDescLink}>✎ Thêm mô tả (không bắt buộc)</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Ảnh đính kèm */}
@@ -308,6 +379,18 @@ const styles = StyleSheet.create({
   },
   textArea: { height: 120, textAlignVertical: 'top' },
   charCount: { fontSize: 11, color: Colors.textMuted, textAlign: 'right', marginTop: 4 },
+  addDescLink: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  categoryCard: {
+    width: '47%', backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    borderWidth: 1.5, borderColor: Colors.border, padding: Spacing.md,
+  },
+  categoryCardActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  categoryEmoji: { fontSize: 22, marginBottom: 4 },
+  categoryLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  categoryLabelActive: { color: Colors.primary },
+  categorySubtitle: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
 
   imageRow: { flexDirection: 'row', gap: Spacing.md, marginBottom: Spacing.sm },
   imageAddBtn: {

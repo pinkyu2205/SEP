@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -74,13 +75,15 @@ export const LoginScreen: React.FC = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        {/* Header / Branding */}
+        {/* Header / Branding — logo đã có sẵn tên + slogan trong ảnh, không cần Text riêng */}
         <View style={styles.brandSection}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoEmoji}>🏠</Text>
+          <View style={styles.logoCard}>
+            <Image
+              source={require('../../../assets/logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
-          <Text style={styles.appName}>RoomRent</Text>
-          <Text style={styles.appSlogan}>Quản lý phòng trọ thông minh</Text>
         </View>
 
         {/* Login Form */}
@@ -169,28 +172,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.lg,
   },
-  logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  logoCard: {
+    width: '100%',
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.xl,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.base,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.base,
+    ...Shadow.md,
   },
-  logoEmoji: {
-    fontSize: 40,
-  },
-  appName: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: Colors.white,
-    letterSpacing: -0.5,
-  },
-  appSlogan: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: Spacing.xs,
+  logoImage: {
+    width: '100%',
+    height: 120,
   },
   // Demo Box
   demoBox: {

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto } from '@/types';
+import { useTenantContract } from '@/hooks';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 import {
   formatDate, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
@@ -26,6 +27,7 @@ const getIcon = (e: EquipmentDto) => CATEGORY_ICON[guessEquipmentCategory(equipN
 
 export const RoomEquipmentScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const { selectedContractId } = useTenantContract();
   const [equipment, setEquipment] = useState<EquipmentDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -34,7 +36,7 @@ export const RoomEquipmentScreen: React.FC = () => {
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const list = await realTenantEquipmentService.getMyEquipments();
+      const list = await realTenantEquipmentService.getMyEquipments(selectedContractId ?? undefined);
       setEquipment(list);
       setLoadError(false);
     } catch {
@@ -43,7 +45,7 @@ export const RoomEquipmentScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedContractId]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const stats = {

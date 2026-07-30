@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
-  TextInput, Alert, Linking, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
+  Alert, Linking, ActivityIndicator, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -9,8 +9,14 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Contract } from '@/types';
 import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil, getContractTerminationTypeLabel } from '@/utils';
 import {
-  realTenantSelfService, ContractDetailDto, mapBeContractStatus,
+  realTenantSelfService, ContractDetailDto, TenantHandoverResponse, mapBeContractStatus,
 } from '@/services/tenant/selfService';
+
+const formatDateTime = (iso?: string): string => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('vi-VN')} ${d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+};
 
 // Map DTO chi tiết từ BE -> Contract dùng cho UI
 const mapDetail = (d: ContractDetailDto): Contract => {
@@ -28,8 +34,10 @@ const mapDetail = (d: ContractDetailDto): Contract => {
     roomCode: d.roomCode,
     startDate: d.startDate,
     endDate: d.endDate,
-    depositAmount: d.depositAmount,
-    rentAmount: d.rentAmount,
+    // BE trả field `deposit`, không phải `depositAmount` — đọc cả 2 phòng hờ (khớp
+    // cách TenantContractScreen.toCardContract đã làm cho màn list).
+    depositAmount: d.deposit ?? d.depositAmount ?? 0,
+    rentAmount: d.rentAmount ?? 0,
     status: mapBeContractStatus(d.status, daysUntilExpiry),
     equipmentList: (d.equipmentList ?? []).map(e => ({
       id: String(e.id), name: e.name, quantity: e.quantity ?? 1, condition: e.condition ?? '',
@@ -67,6 +75,8 @@ export const ContractDetailScreen: React.FC = () => {
 
   const [contract, setContract] = useState<Contract | null>(passedContract ?? null);
   const [loading, setLoading] = useState(!passedContract);
+  const [handover, setHandover] = useState<TenantHandoverResponse | null>(null);
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!contractId) return;
@@ -79,14 +89,20 @@ export const ContractDetailScreen: React.FC = () => {
     return () => { active = false; };
   }, [contractId]);
 
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [showRenewModal, setShowRenewModal] = useState(false);
-  const [showTerminateModal, setShowTerminateModal] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [renewMonths, setRenewMonths] = useState('12');
-  const [renewNote, setRenewNote] = useState('');
-  const [terminateReason, setTerminateReason] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  // Ảnh chỉ số điện/nước + hiện trạng nhà lúc đón khách — chỉ áp dụng cho HĐ đang
+  // ACTIVE (BE trả lỗi cho HĐ draft/pending/terminated), nên bỏ qua lỗi lặng lẽ
+  // (ẩn section) thay vì Alert như biên bản bàn giao đầy đủ (TenantOnboardingScreen).
+  useEffect(() => {
+    if (!contract || (contract.status !== 'active' && contract.status !== 'expiring_soon')) {
+      setHandover(null);
+      return;
+    }
+    let active = true;
+    realTenantSelfService.getHandover(Number(contract.id))
+      .then(d => { if (active) setHandover(d); })
+      .catch(() => { if (active) setHandover(null); });
+    return () => { active = false; };
+  }, [contract?.id, contract?.status]);
 
   if (loading || !contract) {
     return (
@@ -107,53 +123,10 @@ export const ContractDetailScreen: React.FC = () => {
 
   const statusColor = getContractStatusColor(contract.status);
 
-  const handleSendOtp = () => {
-    setOtpSent(true);
-    Alert.alert('OTP đã gửi', 'Mã OTP 6 số đã được gửi đến số điện thoại của bạn.');
-  };
-
-  const handleSignContract = () => {
-    if (otp.length !== 6) {
-      Alert.alert('Lỗi', 'Vui lòng nhập mã OTP 6 số hợp lệ.');
-      return;
-    }
-    setShowOtpModal(false);
-    Alert.alert(
-      'Ký hợp đồng thành công! ✅',
-      'Hợp đồng của bạn đã được ký và sẽ có hiệu lực từ ngày bắt đầu đã ghi trong hợp đồng.',
-      [{ text: 'OK', onPress: () => navigation.goBack() }]
-    );
-  };
-
-  const handleRenewalRequest = () => {
-    const months = parseInt(renewMonths, 10);
-    if (!months || months < 1 || months > 24) {
-      Alert.alert('Lỗi', 'Vui lòng nhập số tháng gia hạn hợp lệ (1-24 tháng).');
-      return;
-    }
-    setShowRenewModal(false);
-    Alert.alert(
-      'Gửi yêu cầu gia hạn thành công 📋',
-      `Yêu cầu gia hạn ${months} tháng đã được gửi. Quản lý sẽ xem xét và phản hồi sớm nhất.`,
-      [{ text: 'OK' }]
-    );
-  };
-
-  const handleTerminateRequest = () => {
-    if (!terminateReason.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập lý do chấm dứt hợp đồng.');
-      return;
-    }
-    setShowTerminateModal(false);
-    Alert.alert(
-      'Gửi yêu cầu chấm dứt thành công',
-      'Yêu cầu chấm dứt hợp đồng đã được gửi. Quản lý sẽ liên hệ để xác nhận thủ tục.',
-      [{ text: 'OK' }]
-    );
-  };
-
-  const canSign = contract.status === 'waiting_sign';
-  const canRenew = contract.status === 'active' || contract.status === 'expiring_soon';
+  // Tenant KHÔNG tự ký/gia hạn/chấm dứt hợp đồng qua app — mọi action đó chỉ
+  // MANAGER/ADMIN gọi được (verify BE 27/07/2026, TenantContractActionController).
+  // Màn này chỉ XEM; hành động thật duy nhất là "Yêu cầu trả phòng" (RequestCheckout,
+  // có API tenant thật riêng — TenantCheckoutServiceImpl).
   const canTerminate = contract.status === 'active';
 
   return (
@@ -224,6 +197,63 @@ export const ContractDetailScreen: React.FC = () => {
           </SectionCard>
         )}
 
+        {/* Ảnh điện/nước + hiện trạng nhà lúc đón khách */}
+        {!!handover && (
+          !!handover.electricMeterImageUrl || !!handover.waterMeterImageUrl ||
+          (handover.roomConditionPhotos?.length ?? 0) > 0 || (handover.roomConditionUrls?.length ?? 0) > 0
+        ) && (
+          <SectionCard title="📷 Hình ảnh hiện trạng lúc bàn giao">
+            {(!!handover.electricMeterImageUrl || !!handover.waterMeterImageUrl) && (
+              <View style={styles.meterRow}>
+                {!!handover.electricMeterImageUrl && (
+                  <View style={styles.meterCol}>
+                    <Text style={styles.meterLabel}>
+                      ⚡ Điện{handover.initialElectricReading != null ? ` — ${handover.initialElectricReading} kWh` : ''}
+                    </Text>
+                    <TouchableOpacity onPress={() => setViewerImage(handover.electricMeterImageUrl!)}>
+                      <Image source={{ uri: handover.electricMeterImageUrl }} style={styles.meterThumb} />
+                    </TouchableOpacity>
+                    <Text style={styles.capturedAtText}>🕒 {formatDateTime(handover.electricMeterCapturedAt)}</Text>
+                  </View>
+                )}
+                {!!handover.waterMeterImageUrl && (
+                  <View style={styles.meterCol}>
+                    <Text style={styles.meterLabel}>
+                      💧 Nước{handover.initialWaterReading != null ? ` — ${handover.initialWaterReading} m³` : ''}
+                    </Text>
+                    <TouchableOpacity onPress={() => setViewerImage(handover.waterMeterImageUrl!)}>
+                      <Image source={{ uri: handover.waterMeterImageUrl }} style={styles.meterThumb} />
+                    </TouchableOpacity>
+                    <Text style={styles.capturedAtText}>🕒 {formatDateTime(handover.waterMeterCapturedAt)}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {((handover.roomConditionPhotos?.length ?? handover.roomConditionUrls?.length ?? 0) > 0) && (
+              <>
+                <Text style={[styles.meterLabel, { marginTop: Spacing.md }]}>🏠 Hiện trạng phòng lúc nhận</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageRow}>
+                  {(handover.roomConditionPhotos?.length ?? 0) > 0
+                    ? handover.roomConditionPhotos!.map((p, i) => (
+                        <View key={`${p.url}-${i}`} style={styles.thumbWrap}>
+                          <TouchableOpacity onPress={() => setViewerImage(p.url)}>
+                            <Image source={{ uri: p.url }} style={styles.thumbImage} />
+                          </TouchableOpacity>
+                          <Text style={styles.capturedAtText}>🕒 {formatDateTime(p.capturedAt)}</Text>
+                        </View>
+                      ))
+                    : handover.roomConditionUrls!.map((uri, i) => (
+                        <TouchableOpacity key={`${uri}-${i}`} onPress={() => setViewerImage(uri)}>
+                          <Image source={{ uri }} style={styles.thumbImage} />
+                        </TouchableOpacity>
+                      ))}
+                </ScrollView>
+              </>
+            )}
+          </SectionCard>
+        )}
+
         {/* Ghi chú */}
         {contract.notes && (
           <SectionCard title="📝 Điều khoản & Ghi chú">
@@ -277,27 +307,7 @@ export const ContractDetailScreen: React.FC = () => {
             </TouchableOpacity>
           )}
 
-          {/* Ký hợp đồng */}
-          {canSign && (
-            <TouchableOpacity
-              style={[styles.actionBtnPrimary, { backgroundColor: Colors.success }]}
-              onPress={() => setShowOtpModal(true)}
-            >
-              <Text style={styles.actionBtnPrimaryText}>✍️ Ký hợp đồng qua OTP</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Yêu cầu gia hạn */}
-          {canRenew && (
-            <TouchableOpacity
-              style={styles.actionBtnPrimary}
-              onPress={() => setShowRenewModal(true)}
-            >
-              <Text style={styles.actionBtnPrimaryText}>🔄 Yêu cầu gia hạn hợp đồng</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Yêu cầu trả phòng — full checkout flow */}
+          {/* Yêu cầu trả phòng — full checkout flow, API tenant thật (không mock) */}
           {canTerminate && (
             <TouchableOpacity
               style={[styles.actionBtnOutline, { borderColor: '#DC2626' }]}
@@ -311,111 +321,12 @@ export const ContractDetailScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      {/* ===== Modal OTP ký hợp đồng ===== */}
-      <Modal visible={showOtpModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>✍️ Ký hợp đồng điện tử</Text>
-            <Text style={styles.modalDesc}>
-              Để xác nhận ký hợp đồng {contract.code}, chúng tôi sẽ gửi mã OTP đến số
-              {' '}<Text style={{ fontWeight: '700' }}>{contract.lesseePhone}</Text>.
-            </Text>
-
-            {!otpSent ? (
-              <TouchableOpacity style={styles.modalBtnPrimary} onPress={handleSendOtp}>
-                <Text style={styles.modalBtnPrimaryText}>📩 Gửi mã OTP</Text>
-              </TouchableOpacity>
-            ) : (
-              <>
-                <Text style={styles.otpLabel}>Nhập mã OTP 6 số:</Text>
-                <TextInput
-                  style={styles.otpInput}
-                  placeholder="______"
-                  keyboardType="numeric"
-                  maxLength={6}
-                  value={otp}
-                  onChangeText={setOtp}
-                  textAlign="center"
-                />
-                <TouchableOpacity style={styles.modalBtnPrimary} onPress={handleSignContract}>
-                  <Text style={styles.modalBtnPrimaryText}>✅ Xác nhận ký hợp đồng</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={handleSendOtp}>
-                  <Text style={styles.resendOtp}>Gửi lại OTP</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => { setShowOtpModal(false); setOtpSent(false); setOtp(''); }}>
-              <Text style={styles.modalBtnCancelText}>Hủy</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ===== Modal Gia hạn ===== */}
-      <Modal visible={showRenewModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🔄 Yêu cầu gia hạn hợp đồng</Text>
-            <Text style={styles.modalDesc}>
-              Hợp đồng hiện tại hết hạn ngày <Text style={{ fontWeight: '700' }}>{formatDate(contract.endDate)}</Text>.
-              Vui lòng cho biết bạn muốn gia hạn thêm bao nhiêu tháng.
-            </Text>
-
-            <Text style={styles.inputLabel}>Số tháng gia hạn (1-24):</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Ví dụ: 12"
-              keyboardType="numeric"
-              value={renewMonths}
-              onChangeText={setRenewMonths}
-            />
-
-            <Text style={styles.inputLabel}>Ghi chú thêm (không bắt buộc):</Text>
-            <TextInput
-              style={[styles.modalInput, { height: 80, textAlignVertical: 'top' }]}
-              placeholder="Ví dụ: Muốn giữ nguyên giá thuê..."
-              multiline
-              value={renewNote}
-              onChangeText={setRenewNote}
-            />
-
-            <TouchableOpacity style={styles.modalBtnPrimary} onPress={handleRenewalRequest}>
-              <Text style={styles.modalBtnPrimaryText}>Gửi yêu cầu gia hạn</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setShowRenewModal(false)}>
-              <Text style={styles.modalBtnCancelText}>Hủy</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ===== Modal Chấm dứt ===== */}
-      <Modal visible={showTerminateModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🚪 Yêu cầu chấm dứt hợp đồng</Text>
-            <Text style={[styles.modalDesc, { color: Colors.error }]}>
-              ⚠️ Lưu ý: Việc chấm dứt sớm hợp đồng có thể ảnh hưởng đến tiền đặt cọc. Vui lòng đọc kỹ điều khoản trước khi gửi yêu cầu.
-            </Text>
-
-            <Text style={styles.inputLabel}>Lý do chấm dứt hợp đồng:</Text>
-            <TextInput
-              style={[styles.modalInput, { height: 100, textAlignVertical: 'top' }]}
-              placeholder="Vui lòng nêu rõ lý do..."
-              multiline
-              value={terminateReason}
-              onChangeText={setTerminateReason}
-            />
-
-            <TouchableOpacity style={[styles.modalBtnPrimary, { backgroundColor: Colors.error }]} onPress={handleTerminateRequest}>
-              <Text style={styles.modalBtnPrimaryText}>Gửi yêu cầu chấm dứt</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setShowTerminateModal(false)}>
-              <Text style={styles.modalBtnCancelText}>Hủy</Text>
-            </TouchableOpacity>
-          </View>
+      <Modal visible={!!viewerImage} transparent animationType="fade">
+        <View style={styles.viewer}>
+          <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerImage(null)}>
+            <Text style={styles.viewerCloseText}>×</Text>
+          </TouchableOpacity>
+          {viewerImage && <Image source={{ uri: viewerImage }} style={styles.viewerImage} resizeMode="contain" />}
         </View>
       </Modal>
     </SafeAreaView>
@@ -473,6 +384,20 @@ const styles = StyleSheet.create({
 
   notesText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 22 },
 
+  meterRow: { flexDirection: 'row', gap: Spacing.md },
+  meterCol: { flex: 1 },
+  meterLabel: { fontSize: 12, color: Colors.textMuted, marginBottom: 2 },
+  meterThumb: { width: '100%', height: 90, borderRadius: BorderRadius.md, marginTop: Spacing.sm, backgroundColor: Colors.divider },
+  imageRow: { marginTop: Spacing.sm },
+  thumbImage: { width: 90, height: 90, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+  thumbWrap: { marginRight: Spacing.sm, width: 90 },
+  capturedAtText: { fontSize: 10, color: Colors.textMuted, marginTop: 4 },
+
+  viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '82%' },
+  viewerClose: { position: 'absolute', top: 48, right: 24, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  viewerCloseText: { color: Colors.white, fontSize: 30, lineHeight: 34 },
+
   historyItem: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, paddingVertical: Spacing.sm },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginTop: 4 },
   historyTitle: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
@@ -495,32 +420,4 @@ const styles = StyleSheet.create({
     alignItems: 'center', borderWidth: 1.5,
   },
   actionBtnOutlineText: { fontSize: 15, fontWeight: '700' },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: {
-    backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: Spacing.lg, paddingBottom: 40,
-  },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  modalDesc: { fontSize: 14, color: Colors.textSecondary, marginBottom: Spacing.lg, lineHeight: 20 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  modalInput: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    padding: Spacing.md, fontSize: 16, marginBottom: Spacing.base, color: Colors.textPrimary,
-  },
-  otpLabel: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  otpInput: {
-    borderWidth: 2, borderColor: Colors.primary, borderRadius: BorderRadius.md,
-    padding: Spacing.md, fontSize: 28, fontWeight: '700', color: Colors.primary,
-    letterSpacing: 8, marginBottom: Spacing.base,
-  },
-  resendOtp: { textAlign: 'center', color: Colors.primary, fontSize: 13, fontWeight: '600', marginTop: Spacing.sm },
-  modalBtnPrimary: {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md,
-  },
-  modalBtnPrimaryText: { fontSize: 15, fontWeight: '700', color: Colors.white },
-  modalBtnCancel: { alignItems: 'center', paddingVertical: Spacing.sm },
-  modalBtnCancelText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
 });

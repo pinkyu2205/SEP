@@ -135,6 +135,10 @@ export interface MaintenanceTicket {
   /** Chi phí thuộc luồng hóa đơn sau CLOSED — chỉ hiển thị nếu BE còn trả. */
   repairCost?: number;
   costPaidBy?: CostPaidBy;
+  cause?: 'wear' | 'misuse';
+  /** 28/07/2026 — bồi thường khách làm hư, độc lập với `status` chính. */
+  costAgreementStatus?: 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived';
+  costDisputeReason?: string;
   resolvedAt?: string;
   tenantConfirmedAt?: string;
   reopenCount?: number;

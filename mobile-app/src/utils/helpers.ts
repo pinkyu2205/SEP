@@ -100,7 +100,7 @@ export const getCurrentMonthYear = (): string => {
 export const getContractStatusLabel = (status: string): string => {
   const labels: Record<string, string> = {
     draft: 'Bản nháp',
-    waiting_sign: 'Chờ ký',
+    pending_host_approval: 'Đang xử lý',
     active: 'Đang hiệu lực',
     expiring_soon: 'Sắp hết hạn',
     expired: 'Đã hết hạn',
@@ -125,7 +125,7 @@ export const getContractTerminationTypeLabel = (type?: string): string => {
 export const getContractStatusColor = (status: string): string => {
   const colors: Record<string, string> = {
     draft: '#94A3B8',
-    waiting_sign: '#F59E0B',
+    pending_host_approval: '#F59E0B',
     active: '#10B981',
     expiring_soon: '#EF4444',
     expired: '#6B7280',

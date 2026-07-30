@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Hoàng Bình Land",
+    "name": "Onion Home",
     "slug": "sep",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },

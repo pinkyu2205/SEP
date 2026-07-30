@@ -175,6 +175,16 @@ export interface MaintenanceRequest {
   tenantConfirmedAt?: string;
   /** Ai trả phí sửa (luồng hóa đơn sau CLOSED): HOST = công ty · TENANT = khách làm hư. */
   costPaidBy?: 'HOST' | 'TENANT';
+  /** Nguyên nhân hư hỏng — chỉ có ý nghĩa khi costPaidBy=TENANT. */
+  cause?: 'wear' | 'misuse';
+  /**
+   * Trạng thái đồng ý bồi thường (28/07/2026, BE-DONE-maintenance-damage-compensation) —
+   * độc lập với `status` chính của ticket. 'pending' → tenant cần trả lời agreeToCharge
+   * khi confirm(); 'disputed' → tenant đã khiếu nại, không có charge nào được tạo.
+   */
+  costAgreementStatus?: 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived';
+  /** Lý do khiếu nại số tiền (khi costAgreementStatus=disputed). */
+  costDisputeReason?: string;
   /** Số lần tenant đã từ chối nghiệm thu. */
   reopenCount?: number;
   /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
@@ -256,22 +266,60 @@ export interface MaintenanceRequestDto {
   timeline: MaintenanceTimelineDto[];
   createdAt: string;
   updatedAt: string;
-  // Field cũ có thể còn trên response nhưng KHÔNG dùng trong flow này (billing sau CLOSED)
   repairCost?: number;
   costPaidBy?: 'HOST' | 'TENANT';
   cause?: 'WEAR' | 'MISUSE';
   scheduledDate?: string;
+  /** 28/07/2026 — bồi thường khách làm hư (BE-DONE-maintenance-damage-compensation).
+   * WAIVED (30/07): manager miễn thu qua /resolve-cost — khác NOT_APPLICABLE (chưa từng có phí). */
+  costAgreementStatus?: 'NOT_APPLICABLE' | 'PENDING' | 'AGREED' | 'DISPUTED' | 'WAIVED';
+  costDisputeReason?: string;
+  /** Chỉ có khi vừa confirm(agreeToCharge=true) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
+  issuedInvoice?: MaintenanceIssuedInvoiceDto;
 }
 
-// Flow 17/07 chiều: tenant KHÔNG gửi category/priority — manager gán khi duyệt.
-// roomId optional từ 26/07: HĐ nguyên căn (WHOLE_HOUSE) không có phòng, BE tự lấy
-// property từ HĐ ACTIVE (xác nhận qua test API thật với BE, không có doc riêng).
+/** Khớp `TenantInvoiceResponse` (BE) — subset field FE cần để hiện hoá đơn/QR ngay sau confirm(). */
+export interface MaintenanceIssuedInvoiceDto {
+  id: number;
+  code: string;
+  type: string;
+  propertyName: string;
+  roomNumber?: string | null;
+  month: number;
+  year: number;
+  billingPeriod?: string;
+  totalAmount: number;
+  lateFee?: number;
+  grandTotal: number;
+  status: string;
+  dueDate: string;
+  createdAt: string;
+  paidAt?: string;
+  payosCheckoutUrl?: string;
+  payosQrCode?: string;
+  payosOrderCode?: number;
+}
+
+// Flow 17/07: tenant không gửi priority — manager gán khi duyệt.
+// category: xem field riêng bên dưới (thêm 27/07 — bắt buộc khi báo hỏng không gắn thiết bị).
+// roomId/propertyId (fix 27/07): thuê theo phòng → gửi roomId; thuê nguyên căn → roomId
+// để trống, propertyId BẮT BUỘC thay thế (BE không tự suy được, thiếu sẽ lỗi rõ ràng
+// thay vì 500 như bản trước). Xem docs/BE-FIX-maintenance-wholehouse-roomId-2026-07-27.md.
 export interface CreateMaintenanceRequestDto {
   roomId?: number;
+  /** Bắt buộc khi KHÔNG có roomId (thuê nguyên căn). */
+  propertyId?: number;
   equipmentId?: number;
   /** Bắt buộc, ≤200 ký tự — hiển thị trên list/detail. */
   title: string;
-  description: string;
+  /** Optional từ 27/07 — BE bỏ validate bắt buộc. */
+  description?: string;
+  /**
+   * Bắt buộc khi KHÔNG có equipmentId (STRUCTURAL | ELECTRICAL | PLUMBING | OTHER —
+   * không dùng APPLIANCE/FURNITURE ở nhánh này, BE tự chặn). Optional khi có equipmentId
+   * (manager gán lúc duyệt). Xem docs/FE-maintenance-non-equipment-create.md (repo BE).
+   */
+  category?: string;
   images: string[];
 }
 
@@ -281,10 +329,37 @@ export interface ApproveMaintenanceRequestDto {
   priority?: MaintenanceReqPriority;
 }
 
-/** PUT /{id}/complete — manager báo sửa xong (cần ảnh AFTER trước hoặc gửi kèm). */
+/**
+ * PUT /{id}/complete — manager báo sửa xong (cần ảnh AFTER trước hoặc gửi kèm).
+ * costPaidBy=TENANT bắt buộc kèm cause + repairCost>0 (BE validate, xem
+ * BE-DONE-maintenance-damage-compensation-2026-07-28.md).
+ */
 export interface CompleteMaintenanceRequestDto {
   resolutionNote?: string;
   afterImages?: string[];
+  costPaidBy?: 'HOST' | 'TENANT';
+  cause?: 'WEAR' | 'MISUSE';
+  repairCost?: number;
+}
+
+/** PUT /{id}/confirm — tenant nghiệm thu; agreeToCharge bắt buộc khi costAgreementStatus=PENDING. */
+export interface ConfirmMaintenanceRequestDto {
+  accept?: boolean;
+  agreeToCharge?: boolean;
+  chargeDisputeReason?: string;
+}
+
+/**
+ * PUT /{id}/resolve-cost (BE 30/07 — BE-HANDOFF-maintenance-flow-deadends) — manager xử lý
+ * khoản bồi thường treo (costAgreementStatus PENDING/DISPUTED), dùng được cả khi ticket đã
+ * CLOSED/CANCELLED. CHARGE: chốt thu (repairCost mới ghi đè số cũ nếu gửi) + phát hoá đơn
+ * ngay (response kèm issuedInvoice). WAIVE: miễn thu → WAIVED.
+ */
+export interface ResolveCostRequestDto {
+  action: 'CHARGE' | 'WAIVE';
+  /** Chỉ dùng với CHARGE — bỏ trống = giữ số tiền cũ trên ticket. */
+  repairCost?: number;
+  note?: string;
 }
 
 export interface MaintenanceDashboardDto {
@@ -387,11 +462,12 @@ export interface PropertyMeterRecord {
 }
 
 // ======================== CONTRACT ========================
+// Tenant KHÔNG tự ký/gia hạn/chấm dứt hợp đồng qua app — toàn bộ action đó
+// (send-otp, confirm, resubmit-approval, cancel, terminate) chỉ MANAGER/ADMIN gọi
+// được (verify 27/07/2026). Vì vậy không còn trạng thái 'chờ ký' — chỉ xem.
 export type ContractStatus =
   | 'draft'
   | 'pending_host_approval'
-  | 'waiting_tenant_signature'
-  | 'waiting_sign'
   | 'active'
   | 'expiring_soon'
   | 'expired'
