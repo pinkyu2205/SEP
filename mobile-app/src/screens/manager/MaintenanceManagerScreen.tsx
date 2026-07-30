@@ -49,6 +49,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
   // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
   // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
   const [loadError, setLoadError] = useState(false);
+  // Khoản bồi thường treo (BE 30/07) — ticket MỌI status (kể cả đã đóng/hủy) còn
+  // costAgreementStatus PENDING/DISPUTED; list thường không bao phủ vì đã terminal.
+  const [pendingCost, setPendingCost] = useState<MaintenanceTicket[]>([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -66,6 +69,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
             return prev;
           });
         });
+      realMaintenanceService.getPendingCostResolution()
+        .then(list => { if (active) setPendingCost(list.map(dtoToTicket)); })
+        .catch(() => { /* best-effort — section tự ẩn khi rỗng */ });
       return () => { active = false; };
     }, []),
   );
@@ -191,6 +197,43 @@ export const MaintenanceManagerScreen: React.FC = () => {
             <Text style={s.slaBannerText}>
               {stats.slaAtRisk} ticket vượt SLA theo mức ưu tiên — cần xử lý ngay
             </Text>
+          </View>
+        )}
+
+        {/* ── Khoản bồi thường treo — khách khiếu nại / im lặng, ticket có thể đã đóng ── */}
+        {pendingCost.length > 0 && (
+          <View style={s.section}>
+            <View style={s.sectionHeaderRow}>
+              <Text style={s.sectionTitle}>💰 Bồi thường chờ xử lý</Text>
+              <Text style={s.sectionCount}>{pendingCost.length} khoản</Text>
+            </View>
+            <View style={s.activityCard}>
+              {pendingCost.map((t, i) => (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[s.activityRow, i !== pendingCost.length - 1 && s.activityRowBorder]}
+                  onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
+                    <Text style={s.activityMeta}>
+                      {t.ticketCode} · {t.propertyName}{t.roomName ? ` · ${t.roomName}` : ''}
+                      {t.repairCost != null ? ` · ${t.repairCost.toLocaleString('vi-VN')}đ` : ''}
+                    </Text>
+                  </View>
+                  <View style={[s.activityStatus, {
+                    backgroundColor: t.costAgreementStatus === 'disputed' ? Colors.errorLight : Colors.warningLight,
+                  }]}>
+                    <Text style={[s.activityStatusText, {
+                      color: t.costAgreementStatus === 'disputed' ? Colors.error : Colors.warning,
+                    }]}>
+                      {t.costAgreementStatus === 'disputed' ? 'Khiếu nại' : 'Chờ phản hồi'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
         )}
 

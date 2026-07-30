@@ -12,7 +12,7 @@ import {
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI,
+  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_CATEGORY_LABEL,
 } from '@/constants/maintenance';
 
 // ─── Filter tabs (flow mới: pending → approved → waiting_confirm → closed) ───
@@ -77,6 +77,14 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
 
       {/* ── Meta chips (priority ẩn khi manager chưa gán) ── */}
       <View style={styles.chipRow}>
+        {/* Category chỉ hiện khi KHÔNG gắn thiết bị — có thiết bị thì tên thiết bị ở trên đã đủ rõ. */}
+        {!item.equipmentName && !!item.category && (
+          <View style={styles.categoryChip}>
+            <Text style={styles.categoryChipText}>
+              {CATEGORY_EMOJI[item.category] ?? '🔧'} {MAINTENANCE_CATEGORY_LABEL[item.category] ?? item.category}
+            </Text>
+          </View>
+        )}
         {!!item.priority && (
           <View style={[styles.priorityChip, { backgroundColor: priorityColor + '18' }]}>
             <Text style={[styles.priorityText, { color: priorityColor }]}>
@@ -447,6 +455,8 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
   priorityChip: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
   priorityText: { fontSize: 11, fontWeight: '700' },
+  categoryChip: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full, backgroundColor: Colors.divider },
+  categoryChipText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
   techText:     { fontSize: 12, color: Colors.textSecondary },
   etaText:      { fontSize: 12, color: Colors.primary, fontWeight: '600' },
 

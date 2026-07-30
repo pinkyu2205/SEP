@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -57,6 +57,13 @@ export const ResumeContractScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false)
   const [selected, setSelected] = useState<TenantContractResponse | null>(null)
   const [viewingContract, setViewingContract] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const filteredList = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return list
+    return list.filter((c) => c.tenantFullName?.toLowerCase().includes(q))
+  }, [list, search])
 
   const handleViewContract = async () => {
     if (!selected) return
@@ -186,6 +193,15 @@ export const ResumeContractScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <Header onBack={() => navigation.goBack()} title="Hợp đồng chờ xử lý" />
+      <View style={styles.searchBox}>
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Tìm theo tên khách hàng..."
+          placeholderTextColor={Colors.textMuted}
+        />
+      </View>
       <ScrollView
         contentContainerStyle={styles.listBody}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -195,8 +211,13 @@ export const ResumeContractScreen: React.FC = () => {
             <Text style={styles.emptyIcon}>📭</Text>
             <Text style={styles.emptyText}>Không có hợp đồng nào chờ xử lý.</Text>
           </View>
+        ) : filteredList.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Text style={styles.emptyIcon}>🔍</Text>
+            <Text style={styles.emptyText}>Không tìm thấy khách hàng nào khớp.</Text>
+          </View>
         ) : (
-          list.map((c) => {
+          filteredList.map((c) => {
             const meta = c.priceApprovalStatus
               ? STATUS_META[c.priceApprovalStatus]
               : c.status === 'DRAFT'
@@ -213,10 +234,12 @@ export const ResumeContractScreen: React.FC = () => {
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{c.tenantFullName}</Text>
+                  {!!c.tenantPhone && <Text style={styles.cardPhone}>📞 {c.tenantPhone}</Text>}
                   <Text style={styles.cardMeta}>
                     {c.contractCode}
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
                   </Text>
+                  {!!c.propertyName && <Text style={styles.cardProperty}>🏠 {c.propertyName}</Text>}
                   <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
                   {!!c.expectedReceptionDate && (
                     <Text style={styles.cardReception}>📅 Hẹn đón khách: {formatDateVi(c.expectedReceptionDate)}</Text>
@@ -984,6 +1007,17 @@ const styles = StyleSheet.create({
   },
   viewContractBarDisabledText: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
 
+  searchBox: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
+  searchInput: {
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    fontSize: 14,
+    color: Colors.textPrimary,
+  },
   listBody: { padding: Spacing.lg, gap: Spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 80, gap: Spacing.md },
   emptyIcon: { fontSize: 44 },
@@ -1001,7 +1035,9 @@ const styles = StyleSheet.create({
     ...Shadow.sm,
   },
   cardTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  cardPhone: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardMeta: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  cardProperty: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardPrice: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
   cardReception: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },

@@ -1,4 +1,5 @@
 import { useState, useEffect, createContext, useContext } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User, UserRole } from '@/types';
 import { authService } from '@/services/auth/authService';
 import { realAuthService } from '@/services/auth/realAuthService';
@@ -180,6 +181,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await authService.logout();
     }
     await realAuthService.logout();
+    // Xoá lựa chọn "nhà đang thuê" (multi-contract) — tránh dính sang tài khoản
+    // khác đăng nhập sau trên cùng máy. Key khớp useTenantContract.tsx.
+    await AsyncStorage.removeItem('tenant_selected_contract_id');
     setUser(null);
   };
 

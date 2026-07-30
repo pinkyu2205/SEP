@@ -100,6 +100,7 @@ export interface OnboardTenantRequest {
 export interface TenantContractResponse {
   id: number;
   propertyId: number;
+  propertyName?: string;
   roomId?: number;
   roomNumber?: string;
   tenantUserId: string;
