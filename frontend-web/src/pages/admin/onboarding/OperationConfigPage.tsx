@@ -219,7 +219,6 @@ const RenovateRestartPanel = ({ property, onDone, onPropertyChanged }: {
   const [starting, setStarting] = useState(false);
   // Vừa bấm "Bắt đầu cải tạo lại" trong phiên này (danh sách session chưa kịp tải lại).
   const [justStarted, setJustStarted] = useState(false);
-
   useEffect(() => {
     setCurrent(property);
     const load = async () => {

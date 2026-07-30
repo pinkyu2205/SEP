@@ -43,7 +43,12 @@ export const PropertyList = () => {
 
   useEffect(() => { fetchProperties(); }, []);
 
-  const pending = useMemo(() => properties.filter(p => p.status === 'PENDING_HOST_REVIEW'), [properties]);
+  // Hồ sơ chờ duyệt: mới nhận được lên đầu. BE không trả createdAt nên dùng id
+  // (auto-increment) — id lớn hơn = admin gửi sang sau.
+  const pending = useMemo(
+    () => properties.filter(p => p.status === 'PENDING_HOST_REVIEW').sort((a, b) => b.id - a.id),
+    [properties],
+  );
   // Chỉ hiện nhà Host đã duyệt thành công — xem isHostApproved().
   const active = useMemo(() => properties.filter(isHostApproved), [properties]);
 
