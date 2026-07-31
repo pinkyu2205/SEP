@@ -152,4 +152,7 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   m3Used: inv.m3Used,
   waterRate: inv.waterRate,
   billingPeriod: inv.billingPeriod,
+  payosOrderCode: inv.payosOrderCode,
+  payosCheckoutUrl: inv.payosCheckoutUrl,
+  payosQrCode: inv.payosQrCode,
 });

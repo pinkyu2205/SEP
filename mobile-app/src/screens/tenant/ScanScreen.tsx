@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
+import { showAlert } from '@/utils';
 
 const parseParams = (raw: string): Record<string, string> => {
   try {
@@ -40,6 +41,11 @@ export const ScanScreen: React.FC = () => {
   const [scannedCode, setScannedCode] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const navigation = useNavigation<any>();
+  // Trên web, camera bắn onBarcodeScanned liên tục (nhiều lần/giây) — nhanh hơn cả
+  // React re-render sau setScannedCode, nên chỉ dựa vào state không chặn kịp, gây
+  // hàng chục request /by-qr chồng nhau, overlay "Đang tra cứu" nhấp nháy liên tục
+  // không dừng. Dùng ref khoá đồng bộ ngay lập tức, không đợi re-render.
+  const scanLockRef = useRef(false);
 
   if (!permission) return <View />;
 
@@ -59,7 +65,8 @@ export const ScanScreen: React.FC = () => {
   }
 
   const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
-    if (scannedCode) return;
+    if (scanLockRef.current) return;
+    scanLockRef.current = true;
     setScannedCode(data);
 
     // 1) QR tem thiết bị dạng deep-link (web sinh) → mở thẳng màn báo hỏng, điền sẵn phòng + thiết bị.
@@ -87,8 +94,8 @@ export const ScanScreen: React.FC = () => {
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.response?.data?.message
         || `Mã "${code || data}" không thuộc thiết bị nào trong phòng bạn đang thuê.`;
-      Alert.alert('Không tìm thấy thiết bị', msg, [
-        { text: 'Quét lại', onPress: () => setScannedCode(null) },
+      showAlert('Không tìm thấy thiết bị', msg, [
+        { text: 'Quét lại', onPress: () => { scanLockRef.current = false; setScannedCode(null); } },
         // QR lỗi/mờ/không đọc được — dẫn thẳng sang danh sách thiết bị của tenant để
         // chọn thay vì phải quét lại nhiều lần hoặc bí đường.
         { text: 'Chọn từ danh sách thiết bị', onPress: () => navigation.replace('RoomEquipment') },

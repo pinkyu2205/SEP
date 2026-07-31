@@ -96,16 +96,16 @@ export const MaintenanceCreateScreen: React.FC = () => {
           return;
         }
 
-        if (dash.contract.type === 'ROOM') {
-          const dashRoomId = Number(dash.room?.id ?? NaN);
-          if (!Number.isFinite(dashRoomId) || dashRoomId <= 0) {
-            setSubmitting(false);
-            showAlert('Lỗi', 'Không xác định được phòng của bạn. Vui lòng liên hệ quản lý vận hành để được hỗ trợ.');
-            return;
-          }
+        // BE không trả field `contract.type` (dù type khai báo có) — dùng đúng tín hiệu
+        // BE thực sự cung cấp: `room.id` null = HĐ nguyên căn (WHOLE_HOUSE), có giá trị =
+        // thuê theo phòng (ROOM). Trước đây check `dash.contract.type === 'ROOM'` luôn
+        // false vì field không tồn tại → mọi tenant thuê theo phòng bị tưởng nhầm là
+        // nguyên căn, gửi propertyId thay vì roomId, BE báo "không có HĐ nguyên căn".
+        const dashRoomId = Number(dash.room?.id ?? dash.contract.roomId ?? NaN);
+        if (Number.isFinite(dashRoomId) && dashRoomId > 0) {
           roomIdNum = dashRoomId;
         } else {
-          // WHOLE_HOUSE: không gửi roomId, thay bằng propertyId từ dashboard.
+          // Nguyên căn: không gửi roomId, thay bằng propertyId từ dashboard.
           const dashPropertyId = Number(dash.building?.propertyId ?? dash.contract.propertyId ?? NaN);
           if (!Number.isFinite(dashPropertyId) || dashPropertyId <= 0) {
             setSubmitting(false);

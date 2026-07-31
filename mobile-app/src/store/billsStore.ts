@@ -44,6 +44,10 @@ export interface SharedBill {
   waterRate?: number;
   // Billing period (for utility invoices)
   billingPeriod?: string;
+  // PayOS (30/07/2026) — có sau khi gọi payInvoice(), dùng để hiện QR/mở trang thanh toán thật.
+  payosOrderCode?: number;
+  payosCheckoutUrl?: string;
+  payosQrCode?: string;
 }
 
 // ===================== SEED DATA =====================

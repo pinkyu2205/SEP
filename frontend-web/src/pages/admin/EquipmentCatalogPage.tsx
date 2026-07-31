@@ -35,7 +35,14 @@ interface EquipmentUnit {
   detail: string | null;
   /** "2/3" khi cùng loại có nhiều cái; '' khi chỉ 1 */
   unitLabel: string;
-  qrData: string;
+  /**
+   * Mã QR THẬT lấy từ BE (dạng "EQ-{id}", khớp đúng thứ app tenant/manager quét được).
+   * null với "Nhà gốc" — `HandoverEquipment` chỉ là 1 dòng gộp số lượng, không phải
+   * từng `Equipment` row riêng nên không có QR thật để gắn (xem
+   * docs/BE-BUG-admin-equipments-qr-fake-2026-07-30.md) — ẩn nút QR cho các dòng này
+   * thay vì tự bịa chuỗi không quét được như trước.
+   */
+  qrData: string | null;
 }
 
 /** Mô tả 1 mã QR cần hiển thị */
@@ -65,8 +72,6 @@ const SOURCE_CFG: Record<EquipmentSource, { label: string; short: string; icon: 
   },
 };
 
-const slug = (s: string) => s.replace(/\s+/g, '_').toUpperCase();
-
 const areaLabel = (a: string | null): string | null =>
   a ? (HOUSE_AREA_LABEL[a as HouseArea] ?? a) : null;
 
@@ -78,19 +83,23 @@ const handoverLocation = (h: HandoverEquipmentResponse): string | null =>
     : h.roomNumber ? `Phòng ${h.roomNumber}` : areaLabel(h.houseArea);
 
 /**
- * Tách 1 tòa thành danh sách thiết bị riêng lẻ (mỗi cái 1 QR), gắn nguồn:
+ * Tách 1 tòa thành danh sách thiết bị riêng lẻ, gắn nguồn:
  *  - handover (getHandoverEquipments)  → "Nhà gốc"  — chủ nhà bàn giao, import lease-excel.
  *  - renovationSessions (getRenovationSessions) → "Cải tạo" — import renovation-excel, gom theo đợt.
- * QR nhúng sẵn nguồn + mã vị trí để quét ra là biết loại nào, đang ở đâu.
+ *
+ * QR: chỉ "Cải tạo" có QR thật (mỗi dòng là 1 `Equipment` row thật, BE trả sẵn `qrCode`
+ * dạng "EQ-{id}" — 30/07/2026). "Nhà gốc" KHÔNG có QR — `HandoverEquipment` chỉ là 1 dòng
+ * gộp số lượng, không phải từng đơn vị riêng trong DB nên không có gì thật để gắn QR
+ * (trước đây tự bịa chuỗi ở FE, quét không ra — xem
+ * docs/BE-BUG-admin-equipments-qr-fake-2026-07-30.md). Nếu BE sau này materialize từng
+ * unit nhà gốc thành Equipment row thật thì bỏ `qrData: null` ở nhánh 1 dưới đây.
  */
 const buildUnits = (data: PropertyData): EquipmentUnit[] => {
-  const propertyId = data.property.id;
   const units: EquipmentUnit[] = [];
 
-  // 1) Nhà gốc — thiết bị chủ nhà bàn giao
+  // 1) Nhà gốc — thiết bị chủ nhà bàn giao (không có QR thật, xem comment trên)
   for (const h of data.handover) {
     const loc = handoverLocation(h);
-    const locCode = loc ? slug(loc) : 'KHO';
     const qty = h.quantity || 1;
     for (let i = 1; i <= qty; i++) {
       units.push({
@@ -101,7 +110,7 @@ const buildUnits = (data: PropertyData): EquipmentUnit[] => {
         location: loc,
         detail: h.description?.trim() || null,
         unitLabel: qty > 1 ? `${i}/${qty}` : '',
-        qrData: `HOANGBINHLAND-EQ-P${propertyId}-NHAGOC-${locCode}-${slug(h.catalogName)}-H${h.id}U${i}`,
+        qrData: null,
       });
     }
   }
@@ -112,7 +121,6 @@ const buildUnits = (data: PropertyData): EquipmentUnit[] => {
     for (const e of s.equipments ?? []) {
       if (e.currentEffective === false || e.operationalStatus === 'DISABLED') continue;
       const loc = e.roomNumber ? `Phòng ${e.roomNumber}` : areaLabel(e.houseArea);
-      const locCode = e.roomNumber ? `R${slug(e.roomNumber)}` : e.houseArea ?? 'GAN';
       units.push({
         key: `s${s.sessionNumber ?? 0}-e${e.id}`,
         catalogName: e.catalogName,
@@ -121,7 +129,7 @@ const buildUnits = (data: PropertyData): EquipmentUnit[] => {
         location: loc,
         detail: `Đợt cải tạo ${version}`,
         unitLabel: '',
-        qrData: `HOANGBINHLAND-EQ-P${propertyId}-CAITAO-${slug(version)}-${locCode}-${slug(e.catalogName)}-E${e.id}`,
+        qrData: e.qrCode ?? null,
       });
     }
   }
@@ -306,7 +314,9 @@ const PropertyAccordion = ({
                 ))}
               </div>
               <div className="divide-y divide-slate-100">
-                {units.map(u => (
+                {units.map(u => {
+                const qrData = u.qrData;
+                return (
                   <div key={u.key} className="px-5 py-3 grid grid-cols-[1fr_96px_140px_120px_64px] gap-3 items-center hover:bg-slate-50/40 transition-colors">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 ${SOURCE_CFG[u.source].chipBg}`}>
@@ -335,20 +345,32 @@ const PropertyAccordion = ({
                       )}
                     </div>
                     <StatusBadge status={u.status} source={u.source} />
-                    <button
-                      onClick={() => onShowQr({
-                        title: u.catalogName + (u.unitLabel ? ` #${u.unitLabel}` : ''),
-                        subtitle: `${data.property.propertyName} · ${SOURCE_CFG[u.source].label} · ${u.location ?? 'Chưa rõ vị trí'}`,
-                        qrData: u.qrData,
-                        downloadName: `QR-${u.qrData}.png`,
-                      })}
-                      className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:border-slate-300 transition-colors"
-                    >
-                      <QrCode className="w-3.5 h-3.5" />
-                      QR
-                    </button>
+                    {qrData ? (
+                      <button
+                        onClick={() => onShowQr({
+                          title: u.catalogName + (u.unitLabel ? ` #${u.unitLabel}` : ''),
+                          subtitle: `${data.property.propertyName} · ${SOURCE_CFG[u.source].label} · ${u.location ?? 'Chưa rõ vị trí'}`,
+                          qrData,
+                          downloadName: `QR-${qrData}.png`,
+                        })}
+                        className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:border-slate-300 transition-colors"
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        QR
+                      </button>
+                    ) : (
+                      // Nhà gốc chưa có QR thật (xem comment buildUnits) — không hiện nút
+                      // bấm vào để tránh in ra mã không quét được như trước.
+                      <span
+                        className="text-[10px] text-slate-300 text-center"
+                        title="Thiết bị nhà gốc chưa có mã QR riêng từng cái"
+                      >
+                        —
+                      </span>
+                    )}
                   </div>
-                ))}
+                );
+                })}
               </div>
             </div>
           )}
@@ -491,7 +513,7 @@ export const EquipmentCatalogPage = () => {
               <p className="text-2xl font-bold text-slate-800 mt-2">
                 {loadingData ? <Loader2 className="w-5 h-5 animate-spin inline text-slate-400" /> : stats.total}
               </p>
-              <p className="text-xs text-slate-500 mt-1">đã tách riêng lẻ, kèm QR</p>
+              <p className="text-xs text-slate-500 mt-1">đã tách riêng lẻ (QR: chỉ nhóm cải tạo)</p>
             </div>
             <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center">
               <Package className="w-4 h-4 text-slate-500" />
@@ -598,8 +620,9 @@ export const EquipmentCatalogPage = () => {
           <p className="text-xs text-slate-500 leading-relaxed">
             Thiết bị ở đây được import từ 2 nguồn Excel: <strong>Nhập nhà hàng loạt</strong> tạo ra thiết bị{' '}
             <strong className="text-violet-600">Nhà gốc</strong> (chủ nhà bàn giao), còn <strong>Nhập cải tạo</strong> tạo ra thiết bị{' '}
-            <strong className="text-amber-600">Cải tạo</strong> (bổ sung/thay thế). Mỗi cái được <strong>tách riêng lẻ</strong>,
-            có <strong>mã QR</strong> nhúng sẵn nguồn + vị trí — quét là biết đang ở <strong>phòng/khu vực</strong> nào.
+            <strong className="text-amber-600">Cải tạo</strong> (bổ sung/thay thế). Chỉ thiết bị <strong>Cải tạo</strong> có{' '}
+            <strong>mã QR</strong> thật (quét bằng app tenant/manager ra đúng thiết bị) — thiết bị{' '}
+            <strong className="text-violet-600">Nhà gốc</strong> hiện chỉ ghi nhận theo số lượng, chưa tách được từng cái nên chưa có QR riêng.
           </p>
         </div>
       </div>

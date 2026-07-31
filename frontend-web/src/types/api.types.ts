@@ -409,6 +409,8 @@ export interface SessionEquipmentResponse {
   id: number;
   catalogId: number;
   catalogName: string;
+  /** Mã QR thật trong DB (dạng "EQ-{id}") — BE thêm 30/07/2026, dùng thay QR tự sinh ở FE. */
+  qrCode?: string;
   roomId: number | null;
   roomNumber: string | null;
   houseArea: string | null;
