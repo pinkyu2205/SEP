@@ -1,21 +1,13 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, Image, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
-import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
-
-// ── VietQR ──────────────────────────────────────────────────
-const VIETQR_BANK_BIN  = '970422';
-const VIETQR_ACCOUNT   = '0865803493';
-const VIETQR_ACCOUNT_NAME = 'ROOMRENT';
-const buildVietQRUrl = (amount: number, content: string) =>
-  `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(VIETQR_ACCOUNT_NAME)}`;
+import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 // ── Config maps ─────────────────────────────────────────────
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string; gradientTop: string }> = {
@@ -72,7 +64,6 @@ export const InvoiceDetailScreen: React.FC = () => {
   // track live status updates (e.g. after QR payment)
   const [invoice, setInvoice] = useState<SharedBill>(initialInvoice);
   const [paying, setPaying]   = useState(false);
-  const [processing, setProcessing] = useState(false);
 
   const tc  = TYPE_CFG[invoice.invoiceType];
   const sc  = STATUS_CFG[invoice.status];
@@ -80,19 +71,6 @@ export const InvoiceDetailScreen: React.FC = () => {
   const isPaid    = invoice.status === 'paid';
   const canPay    = invoice.status === 'pending' || isOverdue;
   const daysOver  = isOverdue ? Math.abs(getDaysUntil(invoice.dueDate)) : 0;
-
-  const qrContent = `HD${invoice.id} T${invoice.month} ${invoice.roomName}`;
-  const qrUrl     = buildVietQRUrl(invoice.grandTotal, qrContent);
-
-  const handleConfirmPaid = () => {
-    if (processing) return;
-    setProcessing(true);
-    // Nhờ BE đồng bộ trạng thái thanh toán hoá đơn này.
-    realTenantBillingService.checkInvoicePayment(invoice.id)
-      .then(updated => { setInvoice(toSharedBill(updated)); setPaying(false); })
-      .catch(() => Alert.alert('Đang xử lý', 'Hệ thống sẽ tự xác nhận sau khi nhận được giao dịch.'))
-      .finally(() => setProcessing(false));
-  };
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -308,75 +286,12 @@ export const InvoiceDetailScreen: React.FC = () => {
         </View>
       )}
 
-      {/* ── VietQR Modal ── */}
-      <Modal visible={paying} transparent animationType="slide">
-        <View style={s.overlay}>
-          <View style={s.modal}>
-            <TouchableOpacity style={s.modalClose} onPress={() => setPaying(false)}>
-              <Text style={{ fontSize: 15, color: Colors.textMuted }}>✕</Text>
-            </TouchableOpacity>
-
-            <Text style={s.modalTitle}>Thanh toán hóa đơn</Text>
-
-            <View style={[s.modalTypeBadge, { backgroundColor: tc.bg }]}>
-              <Text style={[s.modalTypeText, { color: tc.color }]}>
-                {tc.icon} {tc.label} · T{String(invoice.month).padStart(2, '0')}/{invoice.year}
-              </Text>
-            </View>
-
-            <View style={s.qrWrap}>
-              <Image source={{ uri: qrUrl }} style={s.qrImg} resizeMode="contain" />
-            </View>
-
-            <Text style={s.qrHint}>Mở app Ngân hàng → Quét mã QR → Thông tin tự động điền sẵn</Text>
-
-            <View style={s.bankBox}>
-              {[
-                { k: 'Ngân hàng',    v: 'MB Bank' },
-                { k: 'Số tài khoản', v: VIETQR_ACCOUNT },
-                { k: 'Số tiền',      v: formatCurrency(invoice.grandTotal), bold: true },
-                { k: 'Nội dung CK',  v: qrContent },
-              ].map(r => (
-                <View key={r.k} style={s.bankRow}>
-                  <Text style={s.bankLabel}>{r.k}</Text>
-                  <Text style={[s.bankVal, r.bold && { color: Colors.primary, fontSize: 16, fontWeight: '800' }]}>
-                    {r.v}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {(invoice.lateFee ?? 0) > 0 && (
-              <View style={s.lateFeeBox}>
-                <Text style={s.lateFeeBoxText}>
-                  Bao gồm phí trả chậm: {formatCurrency(invoice.lateFee)}
-                </Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={[s.confirmBtn, processing && { backgroundColor: Colors.textSecondary }]}
-              onPress={handleConfirmPaid}
-              disabled={processing}
-            >
-              {processing ? (
-                <>
-                  <ActivityIndicator size="small" color={Colors.white} style={{ marginRight: 8 }} />
-                  <Text style={s.confirmBtnText}>Hệ thống đang xác nhận giao dịch...</Text>
-                </>
-              ) : (
-                <Text style={s.confirmBtnText}>Tôi đã chuyển khoản xong</Text>
-              )}
-            </TouchableOpacity>
-
-            {!processing && (
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setPaying(false)}>
-                <Text style={s.cancelBtnText}>Để sau</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      </Modal>
+      <InvoicePaymentModal
+        visible={paying}
+        invoice={invoice}
+        onClose={() => setPaying(false)}
+        onUpdate={setInvoice}
+      />
     </SafeAreaView>
   );
 };
@@ -476,44 +391,4 @@ const s = StyleSheet.create({
   },
   payBtnText:   { fontSize: 15, fontWeight: '700', color: Colors.white },
   payBtnAmount: { fontSize: 15, fontWeight: '800', color: Colors.white },
-
-  // Modal
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modal: {
-    backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: Spacing.lg, paddingBottom: 40, maxHeight: '95%',
-  },
-  modalClose: {
-    position: 'absolute', top: 16, right: 16, zIndex: 10,
-    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.divider,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  modalTitle: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center', marginTop: 4, marginBottom: 12 },
-  modalTypeBadge: { borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: 6, alignSelf: 'center', marginBottom: Spacing.md },
-  modalTypeText:  { fontSize: 13, fontWeight: '700' },
-
-  qrWrap: {
-    alignSelf: 'center', backgroundColor: Colors.white,
-    padding: Spacing.md, borderRadius: BorderRadius.lg,
-    borderWidth: 2, borderColor: Colors.divider, marginBottom: Spacing.md,
-  },
-  qrImg:  { width: 220, height: 280 },
-  qrHint: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', marginBottom: Spacing.md, fontStyle: 'italic' },
-
-  bankBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.lg, padding: Spacing.base, marginBottom: Spacing.md },
-  bankRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.sm },
-  bankLabel: { fontSize: 13, color: Colors.textMuted },
-  bankVal:   { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-
-  lateFeeBox:     { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: Spacing.sm, marginBottom: Spacing.md },
-  lateFeeBoxText: { fontSize: 13, fontWeight: '600', color: Colors.error, textAlign: 'center' },
-
-  confirmBtn: {
-    backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, flexDirection: 'row',
-    justifyContent: 'center', alignItems: 'center', ...Shadow.sm, marginBottom: Spacing.md,
-  },
-  confirmBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white, flexShrink: 1, textAlign: 'center' },
-  cancelBtn:      { alignItems: 'center', paddingVertical: Spacing.sm },
-  cancelBtnText:  { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
 });

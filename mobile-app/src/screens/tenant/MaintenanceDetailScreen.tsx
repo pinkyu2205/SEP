@@ -364,7 +364,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
               <Text style={styles.confirmBtnText}>{chargeBusy ? 'Đang xử lý...' : '✅ Đồng ý thanh toán'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.reopenBtn} onPress={() => setDisputeMode(true)} disabled={chargeBusy}>
-              <Text style={styles.reopenBtnText}>↩ Khiếu nại số tiền</Text>
+              <Text style={styles.reopenBtnText}>↩ Gửi khiếu nại</Text>
             </TouchableOpacity>
           </View>
         )}
