@@ -1,7 +1,8 @@
 import React from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Linking, Alert,
+  View, Text, TouchableOpacity, StyleSheet, Linking,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, Shadow } from '@/constants';
 
@@ -18,7 +19,7 @@ export const StickyContactBar: React.FC<StickyContactBarProps> = ({ propertyName
 
   const openCall = () => {
     Linking.openURL(`tel:${HOTLINE}`).catch(() =>
-      Alert.alert('Hotline', `Vui lòng gọi: ${HOTLINE_DISPLAY}`)
+      showAlert('Hotline', `Vui lòng gọi: ${HOTLINE_DISPLAY}`)
     );
   };
 

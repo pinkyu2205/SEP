@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Contract } from '@/types';
-import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil, getContractTerminationTypeLabel } from '@/utils';
+import { formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil, getContractTerminationTypeLabel, showAlert } from '@/utils';
 import {
   realTenantSelfService, ContractDetailDto, TenantHandoverResponse, mapBeContractStatus,
 } from '@/services/tenant/selfService';
@@ -84,7 +84,7 @@ export const ContractDetailScreen: React.FC = () => {
     setLoading(true);
     realTenantSelfService.getContractDetail(contractId)
       .then(d => { if (active) setContract(mapDetail(d)); })
-      .catch(() => { if (active) Alert.alert('Lỗi', 'Không tải được chi tiết hợp đồng.'); })
+      .catch(() => { if (active) showAlert('Lỗi', 'Không tải được chi tiết hợp đồng.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [contractId]);

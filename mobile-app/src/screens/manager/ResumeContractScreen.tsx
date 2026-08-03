@@ -20,6 +20,7 @@ import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
+import { showAlert } from '@/utils';
 import {
   ContractPriceApprovalStatus,
   realTenantService,
@@ -82,10 +83,10 @@ export const ResumeContractScreen: React.FC = () => {
           dialogTitle: 'Xem hợp đồng thuê',
         })
       } else {
-        Alert.alert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ file.')
+        showAlert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ file.')
       }
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không mở được file hợp đồng.'))
+      showAlert('Lỗi', readErr(err, 'Không mở được file hợp đồng.'))
     } finally {
       setViewingContract(false)
     }
@@ -128,7 +129,7 @@ export const ResumeContractScreen: React.FC = () => {
         setSelected((prev) => (prev ? data.find((c) => c.id === prev.id) ?? prev : prev))
       }
     } catch (err: any) {
-      Alert.alert('Lỗi tải dữ liệu', readErr(err, 'Không tải được danh sách hợp đồng chờ xử lý.'))
+      showAlert('Lỗi tải dữ liệu', readErr(err, 'Không tải được danh sách hợp đồng chờ xử lý.'))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -304,24 +305,24 @@ const RejectedPanel: React.FC<{
   const resubmit = async () => {
     const rentAmount = parseNum(rent)
     const depositVal = parseNum(deposit)
-    if (rentAmount <= 0) return Alert.alert('Lỗi', 'Giá thuê phải lớn hơn 0.')
+    if (rentAmount <= 0) return showAlert('Lỗi', 'Giá thuê phải lớn hơn 0.')
     try {
       setBusy(true)
       const updated = await realTenantService.resubmitPriceApproval(contract.id, {
         rentAmount,
         deposit: depositVal,
       })
-      Alert.alert('Đã gửi lại', 'Hợp đồng đã được gửi Host duyệt lại.')
+      showAlert('Đã gửi lại', 'Hợp đồng đã được gửi Host duyệt lại.')
       onChanged(updated)
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không gửi lại được hợp đồng.'))
+      showAlert('Lỗi', readErr(err, 'Không gửi lại được hợp đồng.'))
     } finally {
       setBusy(false)
     }
   }
 
   const cancel = () => {
-    Alert.alert('Hủy hợp đồng?', 'Thao tác này sẽ hủy hợp đồng đang chờ. Bạn chắc chắn?', [
+    showAlert('Hủy hợp đồng?', 'Thao tác này sẽ hủy hợp đồng đang chờ. Bạn chắc chắn?', [
       { text: 'Không', style: 'cancel' },
       {
         text: 'Hủy hợp đồng',
@@ -330,10 +331,10 @@ const RejectedPanel: React.FC<{
           try {
             setBusy(true)
             await realTenantService.cancelContract(contract.id)
-            Alert.alert('Đã hủy', 'Hợp đồng đã được hủy.')
+            showAlert('Đã hủy', 'Hợp đồng đã được hủy.')
             onDone()
           } catch (err: any) {
-            Alert.alert('Lỗi', readErr(err, 'Không hủy được hợp đồng.'))
+            showAlert('Lỗi', readErr(err, 'Không hủy được hợp đồng.'))
           } finally {
             setBusy(false)
           }
@@ -444,7 +445,7 @@ const InspectionSection: React.FC<{
     if (useCamera) {
       const perm = await ImagePicker.requestCameraPermissionsAsync()
       if (perm.status !== 'granted') {
-        Alert.alert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
+        showAlert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
         onDenied?.()
         return null
       }
@@ -474,7 +475,7 @@ const InspectionSection: React.FC<{
         else setWaterReading(ocr.reading)
       }
     } catch (err: any) {
-      Alert.alert('OCR', readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'))
+      showAlert('OCR', readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'))
     } finally {
       setOcrLoading(null)
     }
@@ -485,7 +486,7 @@ const InspectionSection: React.FC<{
     if (useCamera) {
       const perm = await ImagePicker.requestCameraPermissionsAsync()
       if (perm.status !== 'granted') {
-        Alert.alert('Lỗi', 'Cần quyền camera.')
+        showAlert('Lỗi', 'Cần quyền camera.')
         return
       }
       const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
@@ -506,7 +507,7 @@ const InspectionSection: React.FC<{
       setPhotos((prev) => [...prev, ...urls])
       setPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
+      showAlert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
       setPhotoUploading(false)
     }
@@ -517,7 +518,7 @@ const InspectionSection: React.FC<{
       (manualEdited.elec && !manualConfirmed.elec) ||
       (manualEdited.water && !manualConfirmed.water)
     ) {
-      Alert.alert('Thiếu xác nhận', 'Vui lòng tick xác nhận chịu trách nhiệm cho số đã nhập tay trước khi lưu.')
+      showAlert('Thiếu xác nhận', 'Vui lòng tick xác nhận chịu trách nhiệm cho số đã nhập tay trước khi lưu.')
       return
     }
     try {
@@ -538,9 +539,9 @@ const InspectionSection: React.FC<{
       })
       onChanged(updated)
       setExpanded(false)
-      Alert.alert('Đã lưu', 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.')
+      showAlert('Đã lưu', 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.')
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không lưu được hiện trạng phòng.'))
+      showAlert('Lỗi', readErr(err, 'Không lưu được hiện trạng phòng.'))
     } finally {
       setSaving(false)
     }
@@ -783,9 +784,9 @@ const DepositOtpPanel: React.FC<{
     try {
       setOtpSending(true)
       await realTenantService.sendContractOtp(contract.id)
-      Alert.alert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${contract.tenantPhone}.`)
+      showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${contract.tenantPhone}.`)
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không gửi được OTP.'))
+      showAlert('Lỗi', readErr(err, 'Không gửi được OTP.'))
     } finally {
       setOtpSending(false)
     }
@@ -797,7 +798,7 @@ const DepositOtpPanel: React.FC<{
       const withPay = await realTenantService.createDepositPayment(contract.id)
       setPayInfo(withPay)
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không tạo được liên kết thanh toán.'))
+      showAlert('Lỗi', readErr(err, 'Không tạo được liên kết thanh toán.'))
     } finally {
       setBusy(false)
     }
@@ -810,15 +811,15 @@ const DepositOtpPanel: React.FC<{
         setPaid(true)
         setShowWebView(false)
       } else {
-        Alert.alert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.')
+        showAlert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.')
       }
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không kiểm tra được trạng thái.'))
+      showAlert('Lỗi', readErr(err, 'Không kiểm tra được trạng thái.'))
     }
   }
 
   const confirm = async () => {
-    if (otp.length !== 6) return Alert.alert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
+    if (otp.length !== 6) return showAlert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
     try {
       setBusy(true)
       const res = await realTenantService.confirmContract(contract.id, { otp })
@@ -833,7 +834,7 @@ const DepositOtpPanel: React.FC<{
         rolePromoted: res.tenantRolePromoted ?? false,
       })
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
+      showAlert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
     } finally {
       setBusy(false)
     }

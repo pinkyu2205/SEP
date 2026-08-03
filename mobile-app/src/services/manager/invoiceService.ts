@@ -3,8 +3,12 @@ import realApiClient from '@/services/core/realApiClient';
 /**
  * Manager tạo & gửi hoá đơn cho tenant (nối backend Spring THẬT).
  * - Điện/Nước: BE đã có `POST /properties/{id}[/rooms/{roomId}]/utility-invoices`.
- * - Tiền nhà (RENT): BE CHƯA có endpoint riêng → FE gọi sẵn theo hợp đồng kỳ vọng,
- *   xem doc/BE-TODO-rent-invoice-2026-06-29.md.
+ *   Vẫn GỬI TAY (manager ghi chỉ số rồi phát hành).
+ * - Tiền nhà (RENT): TỰ ĐỘNG. BE phát hành ngày 1 hằng tháng cho mọi HĐ ACTIVE,
+ *   hạn nộp ngày 5 (xem @/constants/rentCycle + docs/BE-HANDOFF-rent-auto-billing-2026-08-03.md).
+ *   Các endpoint create*RentInvoice bên dưới chỉ còn dùng khi manager GỬI TAY cho
+ *   HĐ bị sót, trong cửa sổ ngày 1–5 (HĐ mới ký, hoặc job BE lỗi/chưa chạy).
+ *   ⚠️ BE CHƯA có các endpoint rent-invoices → FE gọi sẵn theo hợp đồng kỳ vọng.
  */
 
 export interface CreateUtilityInvoiceBody {
@@ -22,18 +26,23 @@ export interface CreateRentInvoiceBody {
   contractId?: number;         // HĐ tenant (nếu có)
   billingMonth: string;        // "2026-06"
   amount: number;              // tiền nhà/phòng tháng này
-  dueDate: string;             // yyyy-MM-dd (theo ngày bắt đầu HĐ)
+  dueDate: string;             // yyyy-MM-dd (cố định ngày 5 — xem RENT_CYCLE.dueDay)
   note?: string;
 }
 
-// HĐ tiền nhà đã tạo (rút gọn) — để FE biết phòng nào đã gửi trong kỳ.
+// HĐ tiền nhà đã phát hành trong kỳ (rút gọn) — FE dùng để biết HĐ nào đã có hoá đơn,
+// hoá đơn nào quá hạn, và hoá đơn nào do job tự chạy vs manager gửi tay.
 export interface RentInvoiceLite {
   id?: number;
   contractId?: number;
   roomNumber?: string | null;
   billingMonth?: string;
   amount?: number;
-  status?: string;
+  status?: string;             // PENDING | PAID | OVERDUE | PARTIAL | CANCELLED
+  dueDate?: string;            // yyyy-MM-dd
+  issuedAt?: string;           // thời điểm phát hành
+  /** true = job tự động phát hành; false/undefined = manager gửi tay. */
+  autoIssued?: boolean;
 }
 
 // ===== Đọc tổng hợp cho màn "Hóa đơn & Thanh toán" của manager =====
@@ -91,7 +100,10 @@ export const realManagerInvoiceService = {
     return data;
   },
 
-  // ===== Tiền nhà / phòng (BE TODO — FE gọi sẵn) =====
+  // ===== Tiền nhà / phòng — MANAGER GỬI TAY (BE TODO — FE gọi sẵn) =====
+  // Luồng chính là job tự động ngày 1. Hai hàm dưới chỉ dùng khi manager bấm
+  // "Gửi tiền nhà" cho HĐ bị sót, trong cửa sổ ngày 1–5. BE phải IDEMPOTENT theo
+  // (contractId, billingMonth): đã có hoá đơn kỳ đó thì trả 409, không tạo trùng.
   createRoomRentInvoice: async (propertyId: number, roomId: number, body: CreateRentInvoiceBody) => {
     const { data } = await realApiClient.post(
       `/api/v1/properties/${propertyId}/rooms/${roomId}/rent-invoices`, body,

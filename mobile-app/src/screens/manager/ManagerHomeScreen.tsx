@@ -22,7 +22,8 @@ const QUICK_ACTIONS = [
   { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
   { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
   { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
-  { emoji: '🏠', label: 'Phòng',     route: 'RoomManage',         color: Colors.success },
+  // Màn này gồm cả nhà nguyên căn (không có phòng) nên không gọi là "Phòng".
+  { emoji: '🏠', label: 'Nhà & phòng', route: 'RoomManage',       color: Colors.success },
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },

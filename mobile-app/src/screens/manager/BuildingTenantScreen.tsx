@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingTenantInfo, PaymentRisk } from '@/data/managedProperties';
@@ -31,7 +32,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
   const hasOverdue = (room: string) => ops.invoices.some(i => i.room === room && i.status !== 'paid');
 
   const contact = (t: BuildingTenantInfo) => {
-    Alert.alert(t.name, `Liên hệ ${t.phone}?`, [
+    showAlert(t.name, `Liên hệ ${t.phone}?`, [
       { text: 'Huỷ', style: 'cancel' },
       { text: 'Gọi', onPress: () => {} },
     ]);

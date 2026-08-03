@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Modal, Alert, ScrollView, Dimensions, Linking, ActivityIndicator, Platform,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -788,22 +789,17 @@ export const TenantListScreen: React.FC = () => {
             await realTenantService.terminateContract(Number(tenant.id));
             setSelectedTenant(null);
             load();
-            Alert.alert('Thành công', `Đã ${isWH ? 'trả nhà' : 'trả phòng'} cho ${tenant.fullName}.`);
+            showAlert('Thành công', `Đã ${isWH ? 'trả nhà' : 'trả phòng'} cho ${tenant.fullName}.`);
           } catch (e: any) {
-            Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không kết thúc được hợp đồng — thử lại hoặc kiểm tra trạng thái HĐ.');
+            showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không kết thúc được hợp đồng — thử lại hoặc kiểm tra trạng thái HĐ.');
           }
         };
         const title = isWH ? 'Thanh lý ngay — trả nhà' : 'Thanh lý ngay — trả phòng';
         const msg = `${tenant.fullName} - ${isWH ? tenant.propertyName : tenant.roomName}\n\nThanh lý HĐ NGAY không qua yêu cầu trả phòng của khách (khách gửi yêu cầu thì duyệt ở màn "Trả phòng" ngoài trang chủ). Đảm bảo hóa đơn và tiền cọc đã xử lý xong.`;
-        // Web: Alert nhiều nút không chạy callback → dùng window.confirm.
-        if (Platform.OS === 'web') {
-          if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${msg}`)) doCheckout();
-        } else {
-          Alert.alert(title, msg, [
-            { text: 'Hủy', style: 'cancel' },
-            { text: isWH ? 'Trả nhà' : 'Trả phòng', style: 'destructive', onPress: doCheckout },
-          ]);
-        }
+        showAlert(title, msg, [
+          { text: 'Hủy', style: 'cancel' },
+          { text: isWH ? 'Trả nhà' : 'Trả phòng', style: 'destructive', onPress: doCheckout },
+        ]);
         break;
       }
       case 'activate':
@@ -811,14 +807,14 @@ export const TenantListScreen: React.FC = () => {
           t.id === tenant.id ? { ...t, status: 'active' } : t
         ));
         setSelectedTenant(null);
-        Alert.alert('Kích hoạt thành công', `${isWH ? 'Nhà nguyên căn' : `Phòng ${tenant.roomName}`} đã kích hoạt cho ${tenant.fullName}.`);
+        showAlert('Kích hoạt thành công', `${isWH ? 'Nhà nguyên căn' : `Phòng ${tenant.roomName}`} đã kích hoạt cho ${tenant.fullName}.`);
         break;
     }
   }, [navigation, load]);
 
   const handleQuickAction = useCallback((tenant: Tenant) => {
     const isWH = tenant.propertyType === 'WHOLE_HOUSE';
-    Alert.alert(
+    showAlert(
       tenant.fullName,
       `${tenant.propertyName} · ${isWH ? 'Nhà nguyên căn' : tenant.roomName}`,
       [

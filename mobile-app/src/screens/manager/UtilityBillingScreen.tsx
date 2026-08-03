@@ -3,10 +3,15 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, FlatList, ActivityIndicator, Image, Platform,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow,
+  UTILITY_CYCLE, UTILITY_WINDOW_TEXT, isUtilityWindowOpen,
+  utilityWindowDaysLeft, utilityWindowReason,
+} from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realPropertyService } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
@@ -95,6 +100,18 @@ const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
 const groupThousands = (s: string) => {
   const d = onlyDigits(s);
   return d ? Number(d).toLocaleString('vi-VN') : '';
+};
+
+/**
+ * Kỳ thanh toán trọn tháng: "01/08 – 31/08/2026". Trước đây giá trị mặc định bị
+ * hard-code "01/05 – 31/05/2026" nên mở app tháng nào cũng thấy kỳ tháng 5/2026.
+ * offset: 0 = tháng này, -1 = tháng trước.
+ */
+const monthPeriod = (offset = 0, base = new Date()) => {
+  const d = new Date(base.getFullYear(), base.getMonth() + offset, 1);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return `01/${mm} – ${lastDay}/${mm}/${d.getFullYear()}`;
 };
 
 // Dải dấu thanh/dấu phụ Unicode (U+0300–U+036F) mà NFD tách ra khỏi nguyên âm.
@@ -240,6 +257,31 @@ const mapBillingProperty = (
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState<MainTab>('electricity');
+  // Cửa sổ chốt sổ: chỉ gửi hoá đơn điện/nước được trong ngày 1–10 hằng tháng,
+  // để mọi nhà chốt cùng một kỳ (xem @/constants/utilityCycle).
+  const windowOpen = isUtilityWindowOpen();
+  const windowClosedReason = utilityWindowReason();
+  const daysLeft = utilityWindowDaysLeft();
+  /**
+   * Chặn gửi hoá đơn khi: (1) ngoài cửa sổ ngày 1–10, hoặc (2) kỳ này đã thu đủ.
+   * Trả true = bị chặn. Luôn nói rõ lý do thay vì để nút im lặng.
+   */
+  const blockedFromSending = (type: 'ELECTRICITY' | 'WATER') => {
+    if (!windowOpen) {
+      showAlert('Đã chốt sổ kỳ này', windowClosedReason ?? UTILITY_WINDOW_TEXT);
+      return true;
+    }
+    const settled = type === 'ELECTRICITY' ? elecSettled : waterSettled;
+    if (settled) {
+      showAlert(
+        'Kỳ này đã chốt xong',
+        `Khách đã thanh toán đủ hoá đơn ${type === 'ELECTRICITY' ? 'điện' : 'nước'} của kỳ này. `
+        + 'Hệ thống khoá gửi lại để tránh trùng hoá đơn — sẽ mở lại vào kỳ thanh toán tháng sau.',
+      );
+      return true;
+    }
+    return false;
+  };
   // Tăng mỗi lần gửi hóa đơn để panel trạng thái tự tải lại.
   const [utilReloadKey, setUtilReloadKey] = useState(0);
   // Lịch sử hóa đơn điện/nước đã gửi (toàn bộ nhà) — dữ liệu thật từ BE.
@@ -262,7 +304,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [waterBillData,    setWaterBillData]    = useState<WaterBillData | null>(null);
   const [waterStep,        setWaterStep]        = useState<WaterStep>('bill_entry');
   const [roomWaterReadings,setRoomWaterReadings]= useState<RoomWaterReading[]>([]);
-  const [waterBillForm,    setWaterBillForm]    = useState({ totalAmount: '', billingPeriod: '01/05 – 31/05/2026', pricePerM3: '20000' });
+  const [waterBillForm,    setWaterBillForm]    = useState({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
 
   // Lịch sử gửi hoá đơn: BE chưa có endpoint → tạm rỗng, chỉ tích trong phiên (xem doc/ gap).
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
@@ -312,11 +354,30 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const waterProperty    = properties.find(p => p.id === waterPropertyId);
   const isWholeHouse     = selectedProperty?.type === 'whole_house';
 
+  // ── Khoá theo kỳ ───────────────────────────────────────────────────────────
+  // Kỳ đã gửi hoá đơn VÀ khách đã thanh toán hết → chốt sổ, không gửi lại được.
+  // Mở lại khi sang kỳ sau (tháng mới → chưa có hoá đơn nào của kỳ đó).
+  const periodSettled = useCallback((propId: string | null, type: 'ELECTRICITY' | 'WATER') => {
+    if (!propId) return false;
+    const now = new Date();
+    const list = histInvoices.filter(i =>
+      i.type === type
+      && i.propertyId === Number(propId)
+      && i.month === now.getMonth() + 1
+      && i.year === now.getFullYear());
+    return list.length > 0 && list.every(i => (i.status || '').toUpperCase() === 'PAID');
+  }, [histInvoices]);
+
+  const elecSettled  = periodSettled(selectedPropertyId, 'ELECTRICITY');
+  const waterSettled = periodSettled(waterPropertyId, 'WATER');
+  const canSendElec  = windowOpen && !elecSettled;
+  const canSendWater = windowOpen && !waterSettled;
+
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
   const pickImage = async (useCamera: boolean): Promise<string | null> => {
     if (useCamera) {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (perm.status !== 'granted') { Alert.alert('Lỗi', 'Cần quyền camera.'); return null; }
+      if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return null; }
       const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
       return r.canceled ? null : r.assets[0].uri;
     }
@@ -328,7 +389,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   // Web: Alert nhiều nút không chạy callback → mở thẳng thư viện ảnh.
   const chooseImageSource = (onPick: (useCamera: boolean) => void) => {
     if (Platform.OS === 'web') { onPick(false); return; }
-    Alert.alert('Chọn ảnh', undefined, [
+    showAlert('Chọn ảnh', undefined, [
       { text: '📷 Chụp ảnh', onPress: () => onPick(true) },
       { text: '🖼 Chọn từ thư viện', onPress: () => onPick(false) },
       { text: 'Huỷ', style: 'cancel' },
@@ -386,7 +447,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       });
       setEditingEvn(true); // luôn mở form để manager kiểm tra/sửa
       const got = parsed.totalKwh || parsed.totalAmount || parsed.billingPeriod;
-      Alert.alert(
+      showAlert(
         got ? 'Đã quét hoá đơn' : 'Đã tải hoá đơn',
         got
           ? 'Hệ thống đã đọc sơ bộ. Vui lòng KIỂM TRA và sửa lại tổng kWh / tổng tiền / kỳ cho đúng hoá đơn.'
@@ -394,7 +455,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
             + (__DEV__ && diag ? `\n\n[DEV] ${diag}` : ''),
       );
     } catch {
-      Alert.alert('Lỗi', 'Không tải/đọc được ảnh hoá đơn. Bạn có thể nhập tay số liệu.');
+      showAlert('Lỗi', 'Không tải/đọc được ảnh hoá đơn. Bạn có thể nhập tay số liệu.');
     } finally {
       setEvnScanning(false);
     }
@@ -410,7 +471,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setEditingEvn(false);
     };
     if (Platform.OS === 'web') { doClear(); return; }
-    Alert.alert(
+    showAlert(
       'Xoá ảnh hoá đơn EVN?',
       'Ảnh và số liệu đã nhận diện (kWh, tổng tiền, kỳ) sẽ bị xoá. Bạn có thể tải/chụp lại ảnh khác.',
       [
@@ -428,7 +489,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         r.roomId === roomId ? { ...r, hasPhoto: false, meterImageUrl: undefined } : r,
       ));
     if (Platform.OS === 'web') { doClear(); return; }
-    Alert.alert(
+    showAlert(
       'Xoá ảnh đồng hồ?',
       'Ảnh sẽ không được gửi kèm hoá đơn. Chỉ số đã nhập vẫn được giữ.',
       [
@@ -442,7 +503,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const kwh = Number(onlyDigits(evnEditForm.totalKwh));
     const amt = Number(onlyDigits(evnEditForm.totalAmount));
     if (!kwh || !amt || !evnEditForm.billingPeriod.trim()) {
-      Alert.alert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn EVN.');
+      showAlert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn EVN.');
       return;
     }
     setEvnData({ totalKwh: kwh, totalAmount: amt, billingPeriod: evnEditForm.billingPeriod, imageUploaded: true });
@@ -478,9 +539,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           ? { ...r, newReading: reading || r.newReading, hasPhoto: true, meterImageUrl: url }
           : r,
       ));
-      if (!reading) Alert.alert('OCR', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
+      if (!reading) showAlert('OCR', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
     } catch {
-      Alert.alert('Lỗi', 'Không tải/đọc được ảnh đồng hồ. Vui lòng nhập tay.');
+      showAlert('Lỗi', 'Không tải/đọc được ảnh đồng hồ. Vui lòng nhập tay.');
     } finally {
       setOcrRoomId(null);
     }
@@ -492,12 +553,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   // Gửi hóa đơn ĐIỆN (riêng) cho 1 phòng cụ thể (multi-room)
   const sendSingleRoomElec = async (roomId: string) => {
+    if (blockedFromSending('ELECTRICITY')) return;
     if (!evnData || !selectedProperty) return;
     const room = roomElecReadings.find(r => r.roomId === roomId);
     if (!room) return;
     const newVal = Number(room.newReading);
     if (!newVal || newVal <= room.prevReading) {
-      Alert.alert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
+      showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
     // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
@@ -518,17 +580,18 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r,
       ));
       setUtilReloadKey(k => k + 1);
-      Alert.alert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
+      showAlert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
     } catch (e: any) {
-      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
     }
   };
 
   // Gửi hóa đơn ĐIỆN (riêng) cho tất cả phòng chưa gửi (multi-room)
   const sendAllUnsent = async () => {
+    if (blockedFromSending('ELECTRICITY')) return;
     if (!evnData || !selectedProperty) return;
     const unsent = roomElecReadings.filter(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading);
-    if (!unsent.length) { Alert.alert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
+    if (!unsent.length) { showAlert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
 
     // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
     const feePerKwh = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
@@ -567,20 +630,21 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
       setUtilReloadKey(k => k + 1);
       setElecStep('done');
-      Alert.alert('Đã gửi', `Đã gửi hóa đơn điện cho ${unsent.length} phòng.`);
+      showAlert('Đã gửi', `Đã gửi hóa đơn điện cho ${unsent.length} phòng.`);
     } catch (e: any) {
-      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
     }
   };
 
   // Gửi hóa đơn ĐIỆN (riêng) cho nhà nguyên căn (whole_house)
   const sendWholeHouseElec = async () => {
+    if (blockedFromSending('ELECTRICITY')) return;
     if (!evnData || !selectedProperty) return;
     const unit = roomElecReadings[0];
     if (!unit) return;
     const newVal = Number(unit.newReading);
     if (!newVal || newVal <= unit.prevReading) {
-      Alert.alert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
+      showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
     const consumption = newVal - unit.prevReading;
@@ -605,7 +669,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setUtilReloadKey(k => k + 1);
       setElecStep('done');
     } catch (e: any) {
-      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
     }
   };
 
@@ -624,7 +688,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const amt   = Number(waterBillForm.totalAmount);
     const price = Number(waterBillForm.pricePerM3);
     if (!amt || !price || !waterBillForm.billingPeriod.trim()) {
-      Alert.alert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn nước.');
+      showAlert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn nước.');
       return;
     }
     setWaterBillData({ totalAmount: amt, billingPeriod: waterBillForm.billingPeriod, pricePerM3: price });
@@ -634,7 +698,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const calculateWaterFees = () => {
     if (!waterBillData) return false;
     const anyMissing = roomWaterReadings.some(r => !r.newReading || Number(r.newReading) <= r.prevReading);
-    if (anyMissing) { Alert.alert('Thiếu chỉ số', 'Vui lòng nhập chỉ số mới cho tất cả phòng.'); return false; }
+    if (anyMissing) { showAlert('Thiếu chỉ số', 'Vui lòng nhập chỉ số mới cho tất cả phòng.'); return false; }
     setRoomWaterReadings(prev => prev.map(r => {
       const consumption = Math.max(Number(r.newReading) - r.prevReading, 0);
       return { ...r, consumption, fee: Math.round(consumption * waterBillData.pricePerM3) };
@@ -644,6 +708,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const sendWaterInvoices = async () => {
+    if (blockedFromSending('WATER')) return;
     if (!waterBillData || !waterProperty) return;
     const now = new Date().toISOString().split('T')[0];
     const period = waterBillData.billingPeriod;
@@ -680,7 +745,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setUtilReloadKey(k => k + 1);
       setWaterStep('done');
     } catch (e: any) {
-      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
+      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
     }
   };
 
@@ -693,7 +758,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const resetWater = () => {
     setWaterPropertyId(null); setWaterBillData(null);
     setWaterStep('bill_entry'); setRoomWaterReadings([]);
-    setWaterBillForm({ totalAmount: '', billingPeriod: '01/05 – 31/05/2026', pricePerM3: '20000' });
+    setWaterBillForm({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
   };
 
   // ───────────────────────────── RENDER ──────────────────────────────────────
@@ -964,8 +1029,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('evn_upload')}>
                     <Text style={styles.secondaryBtnText}>← Quay lại</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={sendWholeHouseElec}>
-                    <Text style={styles.sendBtnText}>⚡ Gửi hóa đơn điện</Text>
+                  <TouchableOpacity
+                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, !canSendElec && styles.btnLocked]}
+                    onPress={sendWholeHouseElec}
+                  >
+                    <Text style={styles.sendBtnText}>{canSendElec ? '⚡ Gửi hóa đơn điện' : elecSettled ? '🔒 Kỳ này đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
                   </TouchableOpacity>
                 </View>
               </>
@@ -985,8 +1053,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     Đã gửi: {roomElecReadings.filter(r => r.sent).length}/{roomElecReadings.length} phòng
                   </Text>
                   {roomElecReadings.some(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading) && (
-                    <TouchableOpacity style={styles.sendAllBtn} onPress={sendAllUnsent}>
-                      <Text style={styles.sendAllBtnText}>Gửi tất cả →</Text>
+                    <TouchableOpacity
+                      style={[styles.sendAllBtn, !canSendElec && styles.btnLocked]}
+                      onPress={sendAllUnsent}
+                    >
+                      <Text style={styles.sendAllBtnText}>{canSendElec ? 'Gửi tất cả →' : elecSettled ? '🔒 Đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1063,11 +1134,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                                 </Text>
                               </View>
                               <TouchableOpacity
-                                style={styles.sendRoomBtn}
+                                style={[styles.sendRoomBtn, !canSendElec && styles.btnLocked]}
                                 onPress={() => sendSingleRoomElec(r.roomId)}
                               >
                                 <Text style={styles.sendRoomBtnText}>
-                                  ⚡ Gửi hóa đơn phòng {r.roomCode} · {fmt(fee)}
+                                  {canSendElec
+                                    ? `⚡ Gửi hóa đơn phòng ${r.roomCode} · ${fmt(fee)}`
+                                    : elecSettled
+                                      ? '🔒 Kỳ này đã thu đủ'
+                                      : '🔒 Ngoài hạn chốt sổ (ngày 1–10)'}
                                 </Text>
                               </TouchableOpacity>
                             </>
@@ -1098,6 +1173,18 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     );
   };
 
+  // Ước lượng số m³ toàn nhà từ tổng tiền ÷ đơn giá — để manager tự soi lệch số 0.
+  const waterEstimate = useMemo(() => {
+    const total = Number(waterBillForm.totalAmount);
+    const price = Number(waterBillForm.pricePerM3);
+    if (!total || !price) return null;
+    return Math.round((total / price) * 10) / 10;
+  }, [waterBillForm.totalAmount, waterBillForm.pricePerM3]);
+
+  const waterReady =
+    !!waterBillForm.totalAmount && !!waterBillForm.pricePerM3
+    && !!waterBillForm.billingPeriod.trim() && !!waterPropertyId;
+
   const renderWaterTab = () => {
     if (waterStep === 'done') {
       return (
@@ -1125,23 +1212,83 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
         {waterStep === 'bill_entry' && (
           <View>
-            <SectionHeader title="Bước 1: Nhập thông tin hóa đơn nước" />
-            <View style={styles.card}>
-              <Text style={styles.cardDesc}>Nhập thông tin từ hóa đơn nước chính thức khi có.</Text>
-              <Text style={styles.formLabel}>Tổng tiền hóa đơn nước (đ) *</Text>
-              <TextInput style={styles.input} keyboardType="numeric" placeholder="Ví dụ: 2.500.000"
-                value={groupThousands(waterBillForm.totalAmount)}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, totalAmount: onlyDigits(t) }))} />
-              <Text style={styles.formLabel}>Đơn giá m³ (đ) *</Text>
-              <TextInput style={styles.input} keyboardType="numeric"
-                value={groupThousands(waterBillForm.pricePerM3)}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, pricePerM3: onlyDigits(t) }))} />
-              <Text style={styles.formLabel}>Kỳ thanh toán *</Text>
-              <TextInput style={styles.input}
-                value={waterBillForm.billingPeriod}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, billingPeriod: t }))} />
+            {/* ── Hoá đơn nước của cả nhà ── */}
+            <View style={styles.formCard}>
+              <View style={styles.formCardHead}>
+                <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>💧</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formCardTitle}>Hóa đơn nước của cả nhà</Text>
+                  <Text style={styles.formCardSub}>Nhập theo hóa đơn nước chính thức, hệ thống chia lại cho từng phòng.</Text>
+                </View>
+              </View>
 
-              <SectionHeader title="Chọn tòa nhà" />
+              <View style={styles.fieldRow}>
+                <View style={{ flex: 1.4 }}>
+                  <Text style={styles.formLabel}>Tổng tiền hóa đơn <Text style={styles.req}>*</Text></Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.inputFlex} keyboardType="numeric" placeholder="2.500.000"
+                      placeholderTextColor={Colors.textMuted}
+                      value={groupThousands(waterBillForm.totalAmount)}
+                      onChangeText={t => setWaterBillForm(f => ({ ...f, totalAmount: onlyDigits(t) }))}
+                    />
+                    <Text style={styles.inputSuffix}>đ</Text>
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Đơn giá <Text style={styles.req}>*</Text></Text>
+                  <View style={styles.inputWrap}>
+                    <TextInput
+                      style={styles.inputFlex} keyboardType="numeric"
+                      placeholderTextColor={Colors.textMuted}
+                      value={groupThousands(waterBillForm.pricePerM3)}
+                      onChangeText={t => setWaterBillForm(f => ({ ...f, pricePerM3: onlyDigits(t) }))}
+                    />
+                    <Text style={styles.inputSuffix}>đ/m³</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Kiểm tra chéo ngay khi nhập — sai số 0 ở đâu là thấy liền */}
+              {waterEstimate != null && (
+                <View style={styles.estimateBox}>
+                  <Text style={styles.estimateText}>
+                    ≈ <Text style={styles.estimateStrong}>{waterEstimate.toLocaleString('vi-VN')} m³</Text> toàn nhà trong kỳ này
+                  </Text>
+                </View>
+              )}
+
+              <Text style={styles.formLabel}>Kỳ thanh toán <Text style={styles.req}>*</Text></Text>
+              <View style={styles.periodChips}>
+                {(() => {
+                  const thisMonth = monthPeriod(0);
+                  const active = waterBillForm.billingPeriod === thisMonth;
+                  return (
+                    <TouchableOpacity
+                      style={[styles.periodChip, active && styles.periodChipActive]}
+                      onPress={() => setWaterBillForm(f => ({ ...f, billingPeriod: thisMonth }))}
+                    >
+                      <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>Tháng này</Text>
+                    </TouchableOpacity>
+                  );
+                })()}
+              </View>
+              <TextInput
+                style={styles.input}
+                value={waterBillForm.billingPeriod}
+                onChangeText={t => setWaterBillForm(f => ({ ...f, billingPeriod: t }))}
+              />
+            </View>
+
+            {/* ── Chọn nhà ── */}
+            <View style={styles.formCard}>
+              <View style={styles.formCardHead}>
+                <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>🏠</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formCardTitle}>Chọn nhà cần chốt</Text>
+                  <Text style={styles.formCardSub}>Chỉ số nước sẽ ghi cho các phòng của nhà này.</Text>
+                </View>
+              </View>
               <PropertyPicker
                 properties={properties}
                 loading={loadingProps}
@@ -1150,13 +1297,25 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 onSelect={setWaterPropertyId}
                 onRetry={() => { setLoadingProps(true); loadProperties(); }}
               />
-
-              {waterPropertyId && (
-                <TouchableOpacity style={[styles.primaryBtn, { marginTop: Spacing.md }]} onPress={handleWaterBillSubmit}>
-                  <Text style={styles.primaryBtnText}>Tiếp theo → Nhập chỉ số phòng</Text>
-                </TouchableOpacity>
-              )}
             </View>
+
+            <TouchableOpacity
+              style={[styles.primaryBtn, !waterReady && styles.primaryBtnDisabled]}
+              onPress={handleWaterBillSubmit}
+              disabled={!waterReady}
+            >
+              <Text style={[styles.primaryBtnText, !waterReady && styles.primaryBtnTextDisabled]}>
+                Tiếp theo → Nhập chỉ số phòng
+              </Text>
+            </TouchableOpacity>
+            {!waterReady && (
+              <Text style={styles.helperText}>
+                {!waterBillForm.totalAmount ? 'Nhập tổng tiền hóa đơn nước để tiếp tục.'
+                  : !waterBillForm.pricePerM3 ? 'Nhập đơn giá m³ để tiếp tục.'
+                  : !waterBillForm.billingPeriod.trim() ? 'Nhập kỳ thanh toán để tiếp tục.'
+                  : 'Chọn nhà cần chốt sổ để tiếp tục.'}
+              </Text>
+            )}
           </View>
         )}
 
@@ -1217,8 +1376,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => setWaterStep('room_readings')}>
                 <Text style={styles.secondaryBtnText}>← Sửa</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={sendWaterInvoices}>
-                <Text style={styles.sendBtnText}>💧 Gửi hóa đơn nước</Text>
+              <TouchableOpacity
+                style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, !canSendWater && styles.btnLocked]}
+                onPress={sendWaterInvoices}
+              >
+                <Text style={styles.sendBtnText}>{canSendWater ? '💧 Gửi hóa đơn nước' : waterSettled ? '🔒 Kỳ này đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1302,6 +1464,23 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         ))}
       </View>
 
+      {/* Cửa sổ chốt sổ — hiện ở cả 2 tab điện/nước để manager biết còn gửi được không */}
+      {activeTab !== 'history' && (() => {
+        const settled = activeTab === 'electricity' ? elecSettled : waterSettled;
+        const canSend = activeTab === 'electricity' ? canSendElec : canSendWater;
+        return (
+          <View style={[styles.windowBar, canSend ? styles.windowBarOpen : styles.windowBarClosed]}>
+            <Text style={[styles.windowBarText, { color: canSend ? Colors.success : Colors.error }]}>
+              {canSend
+                ? `● Đang mở chốt sổ — còn ${daysLeft} ngày (hết ngày ${UTILITY_CYCLE.closeDay})`
+                : settled
+                  ? '🔒 Kỳ này đã thu đủ và chốt sổ — mở lại vào kỳ thanh toán tháng sau.'
+                  : `🔒 ${windowClosedReason}`}
+            </Text>
+          </View>
+        );
+      })()}
+
       {activeTab === 'electricity' && renderElecTab()}
       {activeTab === 'water'       && renderWaterTab()}
       {activeTab === 'history'     && renderHistoryTab()}
@@ -1316,7 +1495,9 @@ const StepIndicator: React.FC<{ steps: string[]; current: number }> = ({ steps, 
       <React.Fragment key={i}>
         <View style={stepSt.item}>
           <View style={[stepSt.dot, i < current && stepSt.dotDone, i === current && stepSt.dotActive]}>
-            <Text style={stepSt.dotText}>{i < current ? '✓' : String(i + 1)}</Text>
+            <Text style={[stepSt.dotText, i > current && stepSt.dotTextIdle]}>
+              {i < current ? '✓' : String(i + 1)}
+            </Text>
           </View>
           <Text style={[stepSt.label, i === current && stepSt.labelActive]} numberOfLines={1}>{label}</Text>
         </View>
@@ -1651,16 +1832,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
     backgroundColor: Colors.white, ...Shadow.sm,
   },
-  backText: { color: Colors.primary, fontWeight: '600', fontSize: 15, width: 70 },
+  // width cố định 70 làm chữ "← Quay lại" xuống dòng trên web → dùng minWidth + 1 dòng.
+  backText: { color: Colors.primary, fontWeight: '600', fontSize: 15, minWidth: 80 },
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
 
   tabBar: { flexDirection: 'row', backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  windowBar: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  windowBarOpen: { backgroundColor: Colors.successLight },
+  windowBarClosed: { backgroundColor: Colors.errorLight },
+  windowBarText: { fontSize: 12, fontWeight: '700', lineHeight: 17 },
+  /** Nút gửi khi ngoài cửa sổ chốt sổ — vẫn bấm được để hiện lý do, nhưng nhìn là biết khoá. */
+  btnLocked: { backgroundColor: Colors.textMuted, opacity: 0.7 },
   tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabItemActive: { borderBottomWidth: 2, borderBottomColor: Colors.primary },
   tabLabel: { fontSize: 13, fontWeight: '600', color: Colors.textMuted },
   tabLabelActive: { color: Colors.primary },
 
-  tabContent: { padding: Spacing.lg },
+  // Giới hạn bề ngang: trên web (manager hay mở ở laptop) form kéo giãn hết 1900px
+  // thì label nằm tít bên trái còn ô nhập dài lê thê, rất khó đọc.
+  tabContent: { padding: Spacing.lg, width: '100%', maxWidth: 760, alignSelf: 'center' },
 
   groupLabel: {
     fontSize: 11, fontWeight: '800', color: Colors.textMuted,
@@ -1864,11 +2054,54 @@ const styles = StyleSheet.create({
   reviewTotalVal:   { fontSize: 20, fontWeight: '800', color: Colors.primary },
 
   formLabel: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4, marginTop: Spacing.sm },
+  req: { color: Colors.error },
   input: {
     backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: Colors.border,
     borderRadius: BorderRadius.md, padding: Spacing.sm,
     fontSize: 15, color: Colors.textPrimary, marginBottom: Spacing.xs,
   },
+
+  // ── Form chốt nước (bước 1) ──
+  formCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base,
+    marginBottom: Spacing.md, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  formCardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.xs },
+  formCardIcon: {
+    width: 36, height: 36, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
+  },
+  formCardTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  formCardSub: { fontSize: 12, color: Colors.textMuted, lineHeight: 17, marginTop: 2 },
+
+  fieldRow: { flexDirection: 'row', gap: Spacing.sm },
+  inputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm,
+  },
+  inputFlex: { flex: 1, paddingVertical: Spacing.sm, fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
+  inputSuffix: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+
+  estimateBox: {
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, marginTop: Spacing.sm,
+  },
+  estimateText: { fontSize: 12, color: Colors.primary },
+  estimateStrong: { fontWeight: '800' },
+
+  periodChips: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
+  periodChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background,
+  },
+  periodChipActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  periodChipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  periodChipTextActive: { color: Colors.primary },
+
+  primaryBtnDisabled: { backgroundColor: '#E2E8F0' },
+  primaryBtnTextDisabled: { color: Colors.textMuted },
+  helperText: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.sm },
   ocrBtn: { backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
   ocrBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
@@ -1908,19 +2141,25 @@ const styles = StyleSheet.create({
 });
 
 const stepSt = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.lg },
-  item: { alignItems: 'center', flex: 1 },
+  // Bó gọn lại giữa màn: trước đây trải hết bề ngang nên đường nối dài ngoằng
+  // còn nhãn thì 10px bé xíu, nhìn không ra đang ở bước nào.
+  wrap: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center',
+    width: '100%', maxWidth: 460, alignSelf: 'center', marginBottom: Spacing.lg,
+  },
+  item: { alignItems: 'center', width: 76 },
   dot: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: Colors.background, borderWidth: 2, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: Colors.white, borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 5,
   },
   dotActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   dotDone:   { backgroundColor: Colors.success, borderColor: Colors.success },
-  dotText:   { fontSize: 11, fontWeight: '800', color: Colors.white },
-  label:       { fontSize: 10, color: Colors.textMuted,  textAlign: 'center', fontWeight: '600' },
-  labelActive: { color: Colors.primary },
-  line:     { flex: 0.5, height: 2, backgroundColor: Colors.border, marginBottom: 20 },
+  dotText:   { fontSize: 12, fontWeight: '800', color: Colors.white },
+  dotTextIdle: { color: Colors.textMuted },
+  label:       { fontSize: 11, color: Colors.textMuted, textAlign: 'center', fontWeight: '600' },
+  labelActive: { color: Colors.primary, fontWeight: '800' },
+  line:     { flex: 1, height: 2, backgroundColor: Colors.border, marginTop: 14, minWidth: 12 },
   lineDone: { backgroundColor: Colors.success },
 });
 

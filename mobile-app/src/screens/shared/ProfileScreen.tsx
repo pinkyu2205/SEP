@@ -1,11 +1,15 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch,
   Modal, TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+// Alert.alert của react-native-web là no-op → dùng showAlert, không thì nút
+// Đăng xuất / Hỗ trợ bấm trên web không ra gì cả.
+import { showAlert } from '@/utils';
+import { ConfirmDialog } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 
@@ -93,18 +97,18 @@ export const ProfileScreen: React.FC = () => {
   const handleChangePassword = () => { resetPwdForm(); setShowPwdModal(true); };
 
   const submitChangePassword = async () => {
-    if (!oldPwd || !newPwd) return Alert.alert('Thiếu thông tin', 'Vui lòng nhập đủ mật khẩu cũ và mới.');
-    if (newPwd.length < 6) return Alert.alert('Mật khẩu yếu', 'Mật khẩu mới tối thiểu 6 ký tự.');
-    if (newPwd !== confirmPwd) return Alert.alert('Không khớp', 'Xác nhận mật khẩu mới không khớp.');
+    if (!oldPwd || !newPwd) return showAlert('Thiếu thông tin', 'Vui lòng nhập đủ mật khẩu cũ và mới.');
+    if (newPwd.length < 6) return showAlert('Mật khẩu yếu', 'Mật khẩu mới tối thiểu 6 ký tự.');
+    if (newPwd !== confirmPwd) return showAlert('Không khớp', 'Xác nhận mật khẩu mới không khớp.');
     try {
       setChanging(true);
       await realTenantSelfService.changePassword({ oldPassword: oldPwd, newPassword: newPwd, confirmPassword: confirmPwd });
       setShowPwdModal(false);
       resetPwdForm();
-      Alert.alert('Thành công', 'Đổi mật khẩu thành công.');
+      showAlert('Thành công', 'Đổi mật khẩu thành công.');
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.response?.data?.error || 'Đổi mật khẩu thất bại. Kiểm tra lại mật khẩu cũ.';
-      Alert.alert('Lỗi', msg);
+      showAlert('Lỗi', msg);
     } finally {
       setChanging(false);
     }
@@ -116,6 +120,10 @@ export const ProfileScreen: React.FC = () => {
   const [editEmail, setEditEmail] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // ── Xác nhận đăng xuất (dialog trong app, không dùng window.confirm của trình duyệt) ──
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
   const handleEditProfile = () => {
     setEditName(user?.fullName ?? '');
     setEditEmail(user?.email ?? '');
@@ -123,7 +131,7 @@ export const ProfileScreen: React.FC = () => {
   };
 
   const submitEditProfile = async () => {
-    if (!editName.trim()) return Alert.alert('Thiếu thông tin', 'Vui lòng nhập họ tên.');
+    if (!editName.trim()) return showAlert('Thiếu thông tin', 'Vui lòng nhập họ tên.');
     try {
       setSaving(true);
       const me = await realTenantSelfService.updateProfile({
@@ -133,23 +141,32 @@ export const ProfileScreen: React.FC = () => {
       // Đồng bộ lại user trong context để UI cập nhật ngay
       updateUser({ fullName: me.fullName, email: me.email ?? '' });
       setShowEditModal(false);
-      Alert.alert('Thành công', 'Cập nhật hồ sơ thành công.');
+      showAlert('Thành công', 'Cập nhật hồ sơ thành công.');
     } catch (err: any) {
       const msg = err?.response?.data?.message || err?.response?.data?.error || 'Cập nhật hồ sơ thất bại.';
-      Alert.alert('Lỗi', msg);
+      showAlert('Lỗi', msg);
     } finally {
       setSaving(false);
     }
   };
 
   const handleHelp = () =>
-    Alert.alert('Hỗ trợ', 'Liên hệ hỗ trợ qua email: support@hoangbinhland.vn\nHotline: 1800 1234');
+    showAlert('Hỗ trợ', 'Liên hệ hỗ trợ qua email: support@hoangbinhland.vn\nHotline: 1800 1234');
 
-  const handleLogout = () =>
-    Alert.alert('Đăng xuất', 'Bạn có chắc muốn đăng xuất?', [
-      { text: 'Hủy', style: 'cancel' },
-      { text: 'Đăng xuất', style: 'destructive', onPress: logout },
-    ]);
+  // logout() gọi mạng (gỡ push token + báo BE). Lỗi mà nuốt im thì người dùng bấm
+  // mãi không thấy gì — báo lỗi rõ ràng thay vì đứng yên.
+  const doLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      setLogoutOpen(false);
+    } catch (e: any) {
+      setLogoutOpen(false);
+      showAlert('Không đăng xuất được', e?.message || 'Vui lòng kiểm tra mạng và thử lại.');
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
@@ -265,7 +282,7 @@ export const ProfileScreen: React.FC = () => {
 
         {/* ── Đăng xuất ── */}
         <View style={styles.card}>
-          <MenuItem icon="🚪" label="Đăng xuất" onPress={handleLogout} danger />
+          <MenuItem icon="🚪" label="Đăng xuất" onPress={() => setLogoutOpen(true)} danger />
         </View>
 
         <View style={{ height: 32 }} />
@@ -355,6 +372,20 @@ export const ProfileScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Xác nhận đăng xuất */}
+      <ConfirmDialog
+        visible={logoutOpen}
+        icon="🚪"
+        title="Đăng xuất"
+        message={`Bạn sẽ cần đăng nhập lại để tiếp tục sử dụng${user?.fullName ? ` tài khoản ${user.fullName}` : ''}.`}
+        confirmText="Đăng xuất"
+        cancelText="Ở lại"
+        danger
+        loading={loggingOut}
+        onConfirm={doLogout}
+        onCancel={() => setLogoutOpen(false)}
+      />
     </SafeAreaView>
   );
 };

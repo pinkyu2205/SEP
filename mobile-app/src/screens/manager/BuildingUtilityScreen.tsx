@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingUtilityReading } from '@/data/managedProperties';
@@ -37,14 +38,14 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
   const simulateOCR = () => {
     // Placeholder for camera + OCR capture — fills plausible new values.
     setForm({ elec: String(Math.floor(1300 + Math.random() * 200)), water: String(Math.floor(90 + Math.random() * 30)) });
-    Alert.alert('Đã nhận diện (OCR)', 'Chỉ số từ ảnh đồng hồ đã được điền tự động. Vui lòng kiểm tra lại.');
+    showAlert('Đã nhận diện (OCR)', 'Chỉ số từ ảnh đồng hồ đã được điền tự động. Vui lòng kiểm tra lại.');
   };
 
   const submit = (r: BuildingUtilityReading) => {
     const elec = Number(form.elec);
     const water = Number(form.water);
-    if (!elec || !water) return Alert.alert('Thiếu dữ liệu', 'Vui lòng nhập đủ chỉ số điện và nước.');
-    if (elec < r.elecPrev || water < r.waterPrev) return Alert.alert('Lỗi', 'Chỉ số mới không được nhỏ hơn chỉ số cũ.');
+    if (!elec || !water) return showAlert('Thiếu dữ liệu', 'Vui lòng nhập đủ chỉ số điện và nước.');
+    if (elec < r.elecPrev || water < r.waterPrev) return showAlert('Lỗi', 'Chỉ số mới không được nhỏ hơn chỉ số cũ.');
     const electricityAmount = Math.max(elec - r.elecPrev, 0) * (prop?.electricityRate || 3500);
     const waterAmount = Math.max(water - r.waterPrev, 0) * (prop?.waterRate || 15000);
     if (isWholeHouse && prop?.tenantName) {
@@ -75,7 +76,7 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
         dueDate: '2026-05-15',
         createdAt: new Date().toISOString().split('T')[0],
       }]);
-      Alert.alert('Đã tạo hóa đơn', 'Chỉ số nhà nguyên căn đã được ghi nhận và hóa đơn tháng này đã được cập nhật.');
+      showAlert('Đã tạo hóa đơn', 'Chỉ số nhà nguyên căn đã được ghi nhận và hóa đơn tháng này đã được cập nhật.');
     }
     setReadings(prev => prev.map(x => x.id === r.id ? {
       ...x, status: 'done', elecPrev: elec, waterPrev: water, lastReadingDate: '2026-05-20',

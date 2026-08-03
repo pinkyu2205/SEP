@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -136,6 +136,11 @@ export const TenantHomeScreen: React.FC = () => {
       ?? unpaidBills.find(b => b.invoiceType === type))
     .filter(Boolean) as SharedBill[];
 
+  // Tránh lặp: khi tên phòng đã chứa tên toà nhà ("Phòng MTX#01" ⊃ "MTX#01") thì
+  // không hiện lại dòng tên toà nhà nữa.
+  const showBuildingName = !isWholeHouse && !!buildingInfo.name
+    && !data.room.name.toLowerCase().includes(buildingInfo.name.toLowerCase());
+
   const hasMaintenance      = data.maintenance.pending > 0 || data.maintenance.inProgress > 0;
   // Chỉ tính "sắp hết hạn" khi CÓ dữ liệu HĐ thật — tránh hiện nhầm "còn 0 ngày"
   // khi dash chưa tải được (daysLeft mặc định 0 lúc đó không phải giá trị thật).
@@ -212,65 +217,84 @@ export const TenantHomeScreen: React.FC = () => {
           )
         ) : (
         <>
-        {/* Room Banner — chỉ giữ vài số liệu quan trọng nhất để dễ nhìn lướt qua;
-            chi tiết (diện tích/tầng/cọc) chuyển xuống card "Thông tin tòa nhà" bên dưới. */}
-        <View style={styles.roomCard}>
-          <Text style={styles.roomLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
-          <Text style={styles.roomName}>{data.room.name}</Text>
-          <View style={styles.addressRow}>
-            <Text style={styles.addressIcon}>📍</Text>
-            <Text style={styles.addressText} numberOfLines={2}>{buildingInfo.address}</Text>
-          </View>
-          <View style={styles.contractBar}>
-            <Text style={styles.contractBarText}>📋 HĐ {data.contract.code}</Text>
-            <Text style={[styles.contractBarDays, contractExpiringSoon && { color: '#FCD34D' }]}>
-              {contractExpiringSoon ? '⚠️ ' : ''}{data.contract.daysLeft} ngày
-            </Text>
-          </View>
-        </View>
-
-        {/* Building info card — thông tin do host/admin cài đặt + chi tiết phòng/nhà */}
-        <View style={styles.buildingCard}>
-          <View style={styles.buildingCardHeader}>
-            <Text style={styles.buildingCardTitle} numberOfLines={1}>
-              🏢 {buildingInfo.name || 'Thông tin tòa nhà'}
-            </Text>
-            <Text style={styles.buildingCardSub}>Cài đặt bởi Host</Text>
-          </View>
-          <View style={styles.buildingAddressRow}>
-            <Text style={styles.buildingAddressIcon}>📍</Text>
-            <Text style={styles.buildingAddress}>{buildingInfo.address}</Text>
-          </View>
-          <View style={styles.buildingRatesRow}>
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateValue}>{data.room.area}m²</Text>
-              <Text style={styles.buildingRateLabel}>Diện tích</Text>
+        {/* ── Hero: gộp phòng + toà nhà làm MỘT card ──
+            Trước đây tách 2 card nên tên phòng và địa chỉ bị lặp y hệt nhau. */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <Text style={styles.heroLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
+            <View style={[styles.heroDaysPill, contractExpiringSoon && styles.heroDaysPillWarn]}>
+              <Text style={styles.heroDaysText}>
+                {contractExpiringSoon ? '⚠️ ' : ''}Còn {data.contract.daysLeft} ngày
+              </Text>
             </View>
-            <View style={styles.buildingRateDivider} />
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateValue}>
+          </View>
+
+          <Text style={styles.heroName} numberOfLines={2}>{data.room.name}</Text>
+          {showBuildingName && (
+            <Text style={styles.heroBuilding} numberOfLines={1}>{buildingInfo.name}</Text>
+          )}
+          <Text style={styles.heroAddress} numberOfLines={2}>📍 {buildingInfo.address}</Text>
+
+          {/* Số liệu phòng — nằm luôn trong hero, không tách card riêng nữa */}
+          <View style={styles.heroStats}>
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue} numberOfLines={1}>{data.room.area} m²</Text>
+              <Text style={styles.heroStatLabel}>Diện tích</Text>
+            </View>
+            <View style={styles.heroStatDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue} numberOfLines={1}>
                 {isWholeHouse ? `${buildingInfo.totalFloors} tầng` : `Tầng ${data.room.floor}`}
               </Text>
-              <Text style={styles.buildingRateLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
+              <Text style={styles.heroStatLabel}>{isWholeHouse ? 'Quy mô' : 'Vị trí'}</Text>
             </View>
-            <View style={styles.buildingRateDivider} />
-            <View style={styles.buildingRate}>
-              <Text style={styles.buildingRateValue}>{formatCurrency(data.depositAmount).replace(' đ', 'đ')}</Text>
-              <Text style={styles.buildingRateLabel}>Tiền cọc</Text>
+            <View style={styles.heroStatDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue} numberOfLines={1}>
+                {formatCurrency(data.depositAmount).replace(' đ', 'đ')}
+              </Text>
+              <Text style={styles.heroStatLabel}>Tiền cọc</Text>
             </View>
           </View>
-          {/* Điện/nước tính theo hóa đơn nhà nước (EVN) mỗi kỳ — không hiển thị đơn giá cố định. */}
-          <View style={styles.buildingNoteRow}>
-            <Text style={styles.buildingNoteIcon}>ℹ️</Text>
-            <Text style={styles.buildingNoteText}>
-              Tiền điện/nước tính theo hóa đơn nhà nước thực tế hằng tháng.
-            </Text>
+
+          <TouchableOpacity
+            style={styles.heroContract}
+            onPress={() => navigation.navigate('TenantContracts')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.heroContractText} numberOfLines={1}>Hợp đồng {data.contract.code}</Text>
+            <Text style={styles.heroContractArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Liên hệ quản lý + lưu ý điện/nước ── */}
+        <View style={styles.contactCard}>
+          <View style={styles.contactRow}>
+            <View style={styles.contactAvatar}>
+              <Text style={styles.contactAvatarText}>
+                {(buildingInfo.hostName || '?').trim().charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.contactName} numberOfLines={1}>{buildingInfo.hostName}</Text>
+              <Text style={styles.contactRole}>
+                Quản lý{buildingInfo.hostPhone ? ` · ${buildingInfo.hostPhone}` : ''}
+              </Text>
+            </View>
+            {!!buildingInfo.hostPhone && (
+              <TouchableOpacity
+                style={styles.contactCallBtn}
+                onPress={() => Linking.openURL(`tel:${buildingInfo.hostPhone}`)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.contactCallText}>Gọi</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          <View style={styles.buildingHostRow}>
-            <Text style={styles.buildingHostLabel}>Chủ nhà: </Text>
-            <Text style={styles.buildingHostName}>{buildingInfo.hostName}</Text>
-            <Text style={styles.buildingHostPhone}>  {buildingInfo.hostPhone}</Text>
-          </View>
+          {/* Điện/nước tính theo hóa đơn nhà nước (EVN) mỗi kỳ — không có đơn giá cố định. */}
+          <Text style={styles.contactNote}>
+            Điện, nước thu theo hóa đơn nhà nước thực tế hằng tháng.
+          </Text>
         </View>
         </>
         )}
@@ -492,46 +516,61 @@ const styles = StyleSheet.create({
   retryBtnText: { color: Colors.white, fontSize: 13, fontWeight: '700' },
 
   // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: Spacing.lg },
-  greeting: { fontSize: 13, color: Colors.textSecondary },
-  userName: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
-  notifBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Spacing.base, paddingBottom: Spacing.md },
+  greeting: { fontSize: 12.5, fontWeight: '500', color: Colors.textMuted },
+  // Nhỏ hơn tiêu đề hero (22) để thứ bậc rõ ràng — trước đây 22 vs 26 nhìn giằng nhau.
+  userName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  notifBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
   notifBadge: { position: 'absolute', top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   notifBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
 
-  // Room card — gọn lại chỉ còn tên phòng/nhà + địa chỉ + đếm ngày HĐ; chi tiết
-  // (diện tích/tầng/cọc) chuyển xuống "Thông tin tòa nhà" (buildingRatesRow bên dưới).
-  roomCard: { borderRadius: BorderRadius.xl, overflow: 'hidden', marginBottom: Spacing.md, backgroundColor: 'rgba(79,70,229,0.95)', padding: Spacing.lg, ...Shadow.md },
-  roomLabel: { fontSize: 10, color: 'rgba(255,255,255,0.7)', fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
-  roomName: { fontSize: 26, fontWeight: '800', color: Colors.white, marginTop: 2 },
-  addressRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 5, gap: 3, marginBottom: Spacing.md },
-  addressIcon: { fontSize: 11, marginTop: 1 },
-  addressText: { fontSize: 11, color: 'rgba(255,255,255,0.7)', flex: 1, lineHeight: 16 },
-  contractBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: BorderRadius.sm, paddingHorizontal: Spacing.sm, paddingVertical: 6 },
-  contractBarText: { fontSize: 11, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
-  contractBarDays: { fontSize: 11, fontWeight: '700', color: Colors.white },
+  // ── Hero card: phòng + toà nhà + số liệu gộp làm một ──
+  // Thang chữ cố định: nhãn 10.5 · phụ 12 · thân 13 · tiêu đề 22.
+  heroCard: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.xl,
+    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.md,
+  },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  heroLabel: { fontSize: 10.5, fontWeight: '800', color: 'rgba(255,255,255,0.65)', letterSpacing: 1.2 },
+  heroDaysPill: { backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 4 },
+  heroDaysPillWarn: { backgroundColor: 'rgba(252,211,77,0.25)' },
+  heroDaysText: { fontSize: 11, fontWeight: '700', color: Colors.white },
+  heroName: { fontSize: 22, fontWeight: '800', color: Colors.white, lineHeight: 28, marginTop: 6 },
+  heroBuilding: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  heroAddress: { fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.7)', lineHeight: 17, marginTop: 4 },
 
-  // Building info card
-  buildingCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm, borderWidth: 1, borderColor: Colors.border },
-  buildingCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
-  buildingCardTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  buildingCardSub: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic' },
-  buildingAddressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginBottom: Spacing.sm, paddingBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  buildingAddressIcon: { fontSize: 13, marginTop: 1 },
-  buildingAddress: { fontSize: 13, color: Colors.textPrimary, fontWeight: '500', flex: 1, lineHeight: 18 },
-  buildingRatesRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.sm, marginBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  buildingRate: { flex: 1, alignItems: 'center', gap: 2 },
-  buildingRateIcon: { fontSize: 16 },
-  buildingRateValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
-  buildingRateLabel: { fontSize: 10, color: Colors.textMuted },
-  buildingRateDivider: { width: 1, height: 36, backgroundColor: Colors.divider },
-  buildingNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: Spacing.sm, marginBottom: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  buildingNoteIcon: { fontSize: 13 },
-  buildingNoteText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
-  buildingHostRow: { flexDirection: 'row', alignItems: 'center' },
-  buildingHostLabel: { fontSize: 12, color: Colors.textSecondary },
-  buildingHostName: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
-  buildingHostPhone: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
+  heroStats: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)', borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, marginTop: Spacing.base,
+  },
+  heroStat: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+  heroStatValue: { fontSize: 14, fontWeight: '800', color: Colors.white },
+  heroStatLabel: { fontSize: 10.5, fontWeight: '600', color: 'rgba(255,255,255,0.65)', marginTop: 3 },
+  heroStatDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.2)' },
+
+  heroContract: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
+  heroContractText: { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
+  heroContractArrow: { fontSize: 18, fontWeight: '700', color: 'rgba(255,255,255,0.75)' },
+
+  // ── Card liên hệ quản lý + lưu ý điện/nước ──
+  contactCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
+    padding: Spacing.base, marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  contactAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center' },
+  contactAvatarText: { fontSize: 16, fontWeight: '800', color: Colors.primary },
+  contactName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  contactRole: { fontSize: 12, fontWeight: '500', color: Colors.textMuted, marginTop: 1 },
+  contactCallBtn: { backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.base, paddingVertical: 7 },
+  contactCallText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
+  contactNote: {
+    fontSize: 12, fontWeight: '500', color: Colors.textSecondary, lineHeight: 17,
+    marginTop: Spacing.sm, paddingTop: Spacing.sm,
+    borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
 
   // Alerts
   alertsCol: { gap: Spacing.xs, marginBottom: Spacing.md },

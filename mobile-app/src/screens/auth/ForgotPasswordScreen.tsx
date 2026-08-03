@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { Button, Input } from '@/components/common';
@@ -17,35 +18,35 @@ export const ForgotPasswordScreen: React.FC = () => {
 
   const handleSendOTP = () => {
     if (!phone.trim() || !/^[0-9]{10}$/.test(phone.trim())) {
-      return Alert.alert('Lỗi', 'Vui lòng nhập số điện thoại hợp lệ (10 số).');
+      return showAlert('Lỗi', 'Vui lòng nhập số điện thoại hợp lệ (10 số).');
     }
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
       setStep('otp');
-      Alert.alert('Thành công', 'Mã OTP đã được gửi đến số điện thoại của bạn (Mock: 123456)');
+      showAlert('Thành công', 'Mã OTP đã được gửi đến số điện thoại của bạn (Mock: 123456)');
     }, 1000);
   };
 
   const handleVerifyOTP = () => {
     if (otp !== '123456') {
-      return Alert.alert('Lỗi', 'Mã OTP không hợp lệ. Vui lòng thử lại (Mock: 123456).');
+      return showAlert('Lỗi', 'Mã OTP không hợp lệ. Vui lòng thử lại (Mock: 123456).');
     }
     setStep('new_password');
   };
 
   const handleResetPassword = () => {
     if (newPassword.length < 6) {
-      return Alert.alert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
+      return showAlert('Lỗi', 'Mật khẩu mới phải có ít nhất 6 ký tự.');
     }
     if (newPassword !== confirmPassword) {
-      return Alert.alert('Lỗi', 'Mật khẩu xác nhận không khớp.');
+      return showAlert('Lỗi', 'Mật khẩu xác nhận không khớp.');
     }
 
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
-      Alert.alert('Thành công 🎉', 'Mật khẩu của bạn đã được đặt lại thành công. Vui lòng đăng nhập lại.', [
+      showAlert('Thành công 🎉', 'Mật khẩu của bạn đã được đặt lại thành công. Vui lòng đăng nhập lại.', [
         { text: 'Đăng nhập ngay', onPress: () => navigation.navigate('Login') }
       ]);
     }, 1000);

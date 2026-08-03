@@ -28,6 +28,7 @@ import {
   ApiRoom,
   realPropertyService,
 } from '@/services/manager/propertyApi'
+import { showAlert } from '@/utils';
 import {
   ContractAddedEquipmentInput,
   ContractAvailableEquipmentItem,
@@ -321,7 +322,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           ),
         )
         .catch((err) =>
-          Alert.alert(
+          showAlert(
             'Lỗi tải dữ liệu',
             readErr(err, 'Không tải được danh sách bất động sản.'),
           ),
@@ -564,7 +565,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           const [key, d] = entries[0]
           const others = entries.length - 1
           await new Promise<void>((resolve) => {
-            Alert.alert(
+            showAlert(
               'Tiếp tục đón khách?',
               `Phiên đang dở: ${draftLabel(d)}.${others > 0 ? `\nCòn ${others} nháp khác đang chờ.` : ''}`,
               [
@@ -580,7 +581,8 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
                 { text: 'Để sau (đón khách mới)', onPress: () => resolve() },
                 { text: 'Tiếp tục', onPress: () => { restoreDraft(d); resolve() } },
               ],
-              { cancelable: false },
+              // Không có nút 'cancel' → AlertHost tự chặn bấm ra ngoài để đóng,
+              // thay cho { cancelable: false } của Alert.alert native.
             )
           })
         }
@@ -670,7 +672,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     const unsub = navigation.addListener('beforeRemove', (e: any) => {
       if (completedRef.current || !hasMeaningfulProgress) return
       e.preventDefault()
-      Alert.alert(
+      showAlert(
         'Thoát đón khách?',
         'Tiến trình đã nhập sẽ được lưu nháp để tiếp tục sau.',
         [
@@ -726,27 +728,27 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     switch (currentLabel) {
       case MODE_STEP:
         if (!rentalMode)
-          return Alert.alert('Lỗi', 'Vui lòng chọn loại đón khách.')
+          return showAlert('Lỗi', 'Vui lòng chọn loại đón khách.')
         break
       case 'Chọn phòng':
         if (!selectedBuildingId || !selectedRoomId)
-          return Alert.alert('Lỗi', 'Vui lòng chọn toà nhà và phòng trống.')
+          return showAlert('Lỗi', 'Vui lòng chọn toà nhà và phòng trống.')
         break
       case 'Chọn nhà nguyên căn':
         if (!selectedWholeHouseId)
-          return Alert.alert('Lỗi', 'Vui lòng chọn nhà nguyên căn.')
+          return showAlert('Lỗi', 'Vui lòng chọn nhà nguyên căn.')
         break
       case 'Khách thuê':
       case 'Khách thuê chính':
         if (!hasRequiredTenantInfo())
-          return Alert.alert('Lỗi', 'Vui lòng nhập Tên, SĐT, CCCD và giá thuê.')
+          return showAlert('Lỗi', 'Vui lòng nhập Tên, SĐT, CCCD và giá thuê.')
         if (!isValidVnPhone(tenantInfo.phone))
-          return Alert.alert(
+          return showAlert(
             'SĐT không hợp lệ',
             'Số điện thoại phải gồm 10 chữ số và bắt đầu bằng số 0.',
           )
         if (!isValidCccd(tenantInfo.cccd))
-          return Alert.alert(
+          return showAlert(
             'CCCD không hợp lệ',
             'Số căn cước công dân phải gồm đúng 12 chữ số.',
           )
@@ -757,25 +759,25 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           lookupRole !== 'ROLE_USER' &&
           lookupRole !== 'ROLE_TENANT'
         )
-          return Alert.alert(
+          return showAlert(
             'Không thể đón khách',
             `Số điện thoại này đang là tài khoản nội bộ (${lookupRole}). Vui lòng dùng số khác cho khách thuê.`,
           )
         {
           const end = parseDmy(endDate)
           if (!end)
-            return Alert.alert(
+            return showAlert(
               'Thiếu ngày kết thúc',
               'Vui lòng chọn ngày kết thúc hợp đồng.',
             )
           const endSod = startOfDay(end)
           if (endSod < minEndDate)
-            return Alert.alert(
+            return showAlert(
               'Ngày kết thúc không hợp lệ',
               'Ngày kết thúc hợp đồng phải sau ngày hợp đồng hiệu lực (hôm nay).',
             )
           if (endSod > maxEndDate)
-            return Alert.alert(
+            return showAlert(
               'Vượt thời hạn cho thuê',
               `Thời hạn thuê tối đa là ${MAX_LEASE_YEARS} năm. Vui lòng chọn ngày kết thúc trước ${maxEndDate.toLocaleDateString('en-GB')}.`,
             )
@@ -788,19 +790,19 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           if (!m.name.trim() && !m.phone.trim() && !m.cccd.trim() && !m.dateOfBirth.trim())
             continue
           if (m.phone.trim() && !isValidVnPhone(m.phone))
-            return Alert.alert(
+            return showAlert(
               'SĐT thành viên không hợp lệ',
               `Số điện thoại của "${m.name.trim() || 'thành viên'}" phải gồm 10 chữ số và bắt đầu bằng số 0.`,
             )
           if (m.cccd.trim() && !isValidCccd(m.cccd))
-            return Alert.alert(
+            return showAlert(
               'CCCD thành viên không hợp lệ',
               `Số CCCD của "${m.name.trim() || 'thành viên'}" phải gồm đúng 12 chữ số.`,
             )
           if (m.dateOfBirth.trim()) {
             const dob = parseDmy(m.dateOfBirth)
             if (!dob || startOfDay(dob) > today)
-              return Alert.alert(
+              return showAlert(
                 'Ngày sinh không hợp lệ',
                 `Ngày sinh của "${m.name.trim() || 'thành viên'}" không được vượt quá ngày hiện tại.`,
               )
@@ -810,7 +812,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       }
       case 'Điện nước':
         if (!hasRequiredMeters())
-          return Alert.alert(
+          return showAlert(
             'Lỗi',
             'Vui lòng ghi nhận chỉ số điện nước ban đầu.',
           )
@@ -818,7 +820,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       case 'Hiện trạng phòng':
       case 'Hiện trạng nhà':
         if (conditionPhotos.length === 0)
-          return Alert.alert(
+          return showAlert(
             'Lỗi',
             'Vui lòng chụp/tải ít nhất 1 ảnh hiện trạng.',
           )
@@ -827,9 +829,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         // Không bắt buộc chọn thiết bị, nhưng món lắp thêm phải có tên + số lượng > 0.
         for (const a of addedEquipments) {
           if (!a.name.trim())
-            return Alert.alert('Thiếu tên thiết bị', 'Vui lòng nhập tên cho thiết bị lắp thêm.')
+            return showAlert('Thiếu tên thiết bị', 'Vui lòng nhập tên cho thiết bị lắp thêm.')
           if (a.quantity <= 0)
-            return Alert.alert('Số lượng không hợp lệ', `Thiết bị "${a.name.trim()}" cần số lượng lớn hơn 0.`)
+            return showAlert('Số lượng không hợp lệ', `Thiết bị "${a.name.trim()}" cần số lượng lớn hơn 0.`)
         }
         break
       case 'Tạo hợp đồng':
@@ -850,7 +852,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // Huỷ toàn bộ quy trình đón khách -> xoá nháp, bỏ cảnh báo thoát, về trang chủ.
   const handleCancelAll = () => {
     const hasDraftContract = !!contract
-    Alert.alert(
+    showAlert(
       'Huỷ đón khách?',
       hasDraftContract
         ? 'Toàn bộ thông tin đang nhập sẽ bị xoá. Hợp đồng nháp đã tạo sẽ không được hoàn tất.'
@@ -875,7 +877,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const pickFromNativeCamera = async (onDenied?: () => void) => {
     const perm = await ImagePicker.requestCameraPermissionsAsync()
     if (perm.status !== 'granted') {
-      Alert.alert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
+      showAlert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
       onDenied?.()
       return null
     }
@@ -900,7 +902,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         setMeters((prev) => ({ ...prev, [kind]: ocr.reading }))
       }
     } catch (err: any) {
-      Alert.alert(
+      showAlert(
         'OCR',
         readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'),
       )
@@ -943,7 +945,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       setConditionPhotos((prev) => [...prev, ...urls])
       setConditionPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
+      showAlert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
       setPhotoUploading(false)
     }
@@ -986,7 +988,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // ===== Household =====
   const addHouseholdMember = () => {
     if (!canAddMember) {
-      Alert.alert(
+      showAlert(
         'Đã đủ số người',
         `Phòng này cho ở tối đa ${occupantLimit} người (gồm khách thuê chính).`,
       )
@@ -1116,7 +1118,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       setContract(withPay)
       setStep((prev) => prev + 1) // sang bước Thanh toán cọc
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không tạo được hợp đồng/thanh toán.'))
+      showAlert('Lỗi', readErr(err, 'Không tạo được hợp đồng/thanh toán.'))
     } finally {
       setCreating(false)
     }
@@ -1130,12 +1132,12 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         setPaid(true)
         setShowWebView(false)
       } else
-        Alert.alert(
+        showAlert(
           'Chưa nhận được thanh toán',
           'PayOS chưa ghi nhận giao dịch. Vui lòng thử lại sau vài giây.',
         )
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không kiểm tra được trạng thái.'))
+      showAlert('Lỗi', readErr(err, 'Không kiểm tra được trạng thái.'))
     }
   }
 
@@ -1148,9 +1150,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       otpSentForRef.current = contract.id
       setOtpCooldown(OTP_RESEND_COOLDOWN)
       if (manual)
-        Alert.alert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${tenantInfo.phone}.`)
+        showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${tenantInfo.phone}.`)
     } catch (err: any) {
-      Alert.alert('Lỗi gửi OTP', readErr(err, 'Không gửi được mã OTP. Vui lòng thử lại.'))
+      showAlert('Lỗi gửi OTP', readErr(err, 'Không gửi được mã OTP. Vui lòng thử lại.'))
     } finally {
       setOtpSending(false)
     }
@@ -1159,7 +1161,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const verifyOTPAndSubmit = async () => {
     // Không chặn cứng mã ở client — để BE xác thực (dev: chấp nhận mọi mã 6 số; prod: Twilio).
     if (otp.length !== 6)
-      return Alert.alert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
+      return showAlert('Lỗi', 'Vui lòng nhập mã OTP gồm 6 chữ số.')
     if (!contract) return
     try {
       setConfirming(true)
@@ -1178,7 +1180,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           res.tenantRolePromoted ?? (lookupFound && lookupRole === 'ROLE_USER'),
       })
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
+      showAlert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
     } finally {
       setConfirming(false)
     }
@@ -2361,7 +2363,7 @@ const AddEquipmentModal: React.FC<{
   const [cost, setCost] = useState('')
 
   const submit = () => {
-    if (!name.trim()) return Alert.alert('Lỗi', 'Vui lòng nhập tên thiết bị.')
+    if (!name.trim()) return showAlert('Lỗi', 'Vui lòng nhập tên thiết bị.')
     const qty = Math.max(1, parseInt(quantity, 10) || 1)
     onAdd(name.trim(), category, qty, parseNum(cost))
   }

@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, Platform, Alert,
+  View, Text, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, Platform,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { formatCurrency, formatDate } from '@/utils';
+import { formatCurrency, formatDate, showAlert } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 
@@ -53,7 +53,7 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
     setCreatingPayment(true);
     realTenantBillingService.payInvoice(invoice.id)
       .then(updated => onUpdate(toSharedBill(updated)))
-      .catch(() => { Alert.alert('Lỗi', 'Không tạo được liên kết thanh toán. Vui lòng thử lại.'); onClose(); })
+      .catch(() => { showAlert('Lỗi', 'Không tạo được liên kết thanh toán. Vui lòng thử lại.'); onClose(); })
       .finally(() => setCreatingPayment(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, invoice?.id]);
@@ -72,10 +72,10 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
           setShowWebView(false);
           onClose();
         } else {
-          Alert.alert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.');
+          showAlert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.');
         }
       })
-      .catch(() => Alert.alert('Lỗi', 'Không kiểm tra được trạng thái thanh toán. Vui lòng thử lại.'))
+      .catch(() => showAlert('Lỗi', 'Không kiểm tra được trạng thái thanh toán. Vui lòng thử lại.'))
       .finally(() => setProcessing(false));
   };
 
@@ -98,10 +98,10 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
           if (await Sharing.isAvailableAsync()) {
             await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: `QR thanh toán ${invoice.code}` });
           } else {
-            Alert.alert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ/lưu file.');
+            showAlert('Lỗi', 'Thiết bị không hỗ trợ chia sẻ/lưu file.');
           }
         } catch {
-          Alert.alert('Lỗi', 'Không tải được mã QR. Vui lòng thử lại.');
+          showAlert('Lỗi', 'Không tải được mã QR. Vui lòng thử lại.');
         } finally {
           setDownloading(false);
         }

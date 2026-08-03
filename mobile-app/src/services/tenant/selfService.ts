@@ -177,10 +177,57 @@ export interface TenantHandoverResponse {
 // ===== Yêu cầu trả phòng (checkout-request) =====
 // BE: TenantMeLifecycleController /api/v1/tenant/me/checkout-requests (tenant) +
 // CheckoutRequestController /api/v1/checkout-requests (manager duyệt).
-// Luồng: PENDING → APPROVED → COMPLETED (complete tự terminate HĐ + giải phóng
-// phòng/thiết bị); PENDING → REJECTED; tenant tự hủy khi còn PENDING.
+// Luồng đầy đủ (chốt 03/08/2026, xem docs/PLAN-checkout-flow-2026-08-03.md và
+// @/constants/checkout):
+//   PENDING → APPROVED → INSPECTING → WAITING_TENANT → SETTLING → COMPLETED
+//   nhánh phụ: REJECTED · CANCELLED (tenant tự huỷ khi PENDING) · DISPUTED (khách phản đối).
+// ⚠️ BE hiện MỚI có PENDING/APPROVED/REJECTED/COMPLETED/CANCELLED — 4 trạng thái
+// giữa (INSPECTING/WAITING_TENANT/DISPUTED/SETTLING) và mọi field inspection/settlement
+// bên dưới là BE TODO, FE gọi sẵn theo hợp đồng kỳ vọng.
 export type CheckoutRequestStatus =
-  | 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
+  | 'PENDING' | 'APPROVED' | 'INSPECTING' | 'WAITING_TENANT'
+  | 'DISPUTED' | 'SETTLING' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
+
+/** Một khoản hư hỏng ghi nhận khi kiểm tra phòng — mỗi khoản phải có bằng chứng. */
+export interface CheckoutDamageItem {
+  /** Thiết bị trong biên bản bàn giao lúc nhận nhà (nếu khoản này gắn với 1 món cụ thể). */
+  equipmentId?: number;
+  label: string;
+  amount: number;
+  note?: string;
+  photos?: string[];
+}
+
+/** Biên bản kiểm tra phòng lúc trả (check-out inspection). */
+export interface CheckoutInspectionDto {
+  photos?: string[];
+  roomConditionNote?: string;
+  electricityFinalReading?: number;
+  waterFinalReading?: number;
+  damages?: CheckoutDamageItem[];
+  inspectedAt?: string;
+  inspectedByName?: string;
+}
+
+/** Bảng quyết toán — BE TÍNH, FE chỉ hiển thị (để FE cộng trừ là mỗi màn ra một số). */
+export interface CheckoutSettlementDto {
+  /** Cọc CÒN LẠI (đã trừ các lần cấn trừ giữa kỳ), không phải số đóng ban đầu. */
+  depositAmount: number;
+  unpaidInvoices?: Array<{ id: number; code?: string; type?: string; amount: number }>;
+  unpaidTotal: number;
+  damages?: CheckoutDamageItem[];
+  damageTotal: number;
+  /** Điều chỉnh khác: tiền nhà tính lại theo ngày, phí vệ sinh... (âm = trừ khách). */
+  adjustments?: Array<{ label: string; amount: number }>;
+  /** > 0 = hoàn lại cho khách. */
+  refundAmount: number;
+  /** > 0 = khách phải đóng thêm. */
+  extraChargeAmount: number;
+  extraChargeInvoiceId?: number | null;
+  /** Đã ghi nhận hoàn cọc chưa (manager chuyển khoản tay + upload chứng từ). */
+  refundedAt?: string;
+  refundProofUrl?: string;
+}
 
 export interface CheckoutRequestDto {
   id: number;
@@ -200,6 +247,15 @@ export interface CheckoutRequestDto {
   managerNote?: string;
   rejectReason?: string;
   completedAt?: string;
+  // ── BE TODO: các khối dưới đây phục vụ luồng kiểm tra + quyết toán ──
+  inspection?: CheckoutInspectionDto;
+  settlement?: CheckoutSettlementDto;
+  /** Lý do khách phản đối bảng quyết toán (status = DISPUTED). */
+  disputeReason?: string;
+  disputePhotos?: string[];
+  disputedAt?: string;
+  /** Hạn khách phải phản hồi; quá hạn BE tự coi như đồng ý. */
+  tenantResponseDeadline?: string;
 }
 
 export interface CreateCheckoutRequestBody {
@@ -288,6 +344,27 @@ export const realTenantSelfService = {
   /** Tenant tự hủy yêu cầu đang PENDING. */
   cancelCheckoutRequest: async (id: number): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.delete<CheckoutRequestDto>(`/api/v1/tenant/me/checkout-requests/${id}`);
+    return data;
+  },
+
+  // ---- Khách xác nhận bảng quyết toán (BE TODO — FE gọi sẵn) ----
+  // Đồng ý: WAITING_TENANT → SETTLING. Quá hạn không phản hồi thì BE tự accept
+  // (xem CHECKOUT_AUTO_ACCEPT_DAYS trong @/constants/checkout).
+  acceptSettlement: async (id: number): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.post<CheckoutRequestDto>(
+      `/api/v1/tenant/me/checkout-requests/${id}/settlement/accept`,
+    );
+    return data;
+  },
+
+  /** Không đồng ý: WAITING_TENANT → DISPUTED, BE báo host + manager. */
+  disputeSettlement: async (
+    id: number,
+    body: { reason: string; photos?: string[] },
+  ): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.post<CheckoutRequestDto>(
+      `/api/v1/tenant/me/checkout-requests/${id}/settlement/dispute`, body,
+    );
     return data;
   },
 };

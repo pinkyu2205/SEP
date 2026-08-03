@@ -19,12 +19,32 @@ import { managerPropertyService } from '@/services/manager/propertyService';
 // ── Trạng thái vận hành dùng trong UI ────────────────────────────────────────
 export type OpStatus = 'available' | 'occupied' | 'maintenance' | 'disabled';
 
+/**
+ * Nhà nguyên căn KHÔNG có phòng — bản thân căn nhà là đơn vị cho thuê. Trạng thái
+ * lấy theo hợp đồng ACTIVE (giống mapToManaged của propertyService), không theo
+ * bảng rooms (BE thường trả 0 phòng cho loại này).
+ */
+export interface OpWholeHouse {
+  status: 'rented' | 'vacant' | 'maintenance';
+  tenantName?: string;
+  tenantPhone?: string;
+  contractId?: number;
+  contractCode?: string;
+  contractEndDate?: string;
+  monthlyRent?: number;
+  deposit?: number;
+}
+
 export interface OpProperty {
   id: string;            // String(propertyId) — dùng làm key + selection
   propertyId: number;    // id số để gọi API
   name: string;
   address: string;
   counts: OpRoomCounts;
+  /** true = nhà nguyên căn (không chia phòng). */
+  wholeHouse: boolean;
+  /** Chỉ có khi wholeHouse = true. */
+  whole?: OpWholeHouse;
 }
 
 export interface OpRoomCounts {
@@ -99,13 +119,40 @@ const activeTenantsByRoom = (contracts: TenantContractResponse[]) => {
   return { byId, byNumber };
 };
 
-const mapProperty = (p: ApiProperty, rooms: ApiRoom[]): OpProperty => ({
-  id: String(p.id),
-  propertyId: p.id,
-  name: p.propertyName,
-  address: p.fullAddress || p.shortAddress || '',
-  counts: countByStatus(rooms),
-});
+const mapProperty = (
+  p: ApiProperty,
+  rooms: ApiRoom[],
+  contracts: TenantContractResponse[] = [],
+): OpProperty => {
+  const wholeHouse = p.wholeHouse === true;
+  const active = contracts.find(c => (c.status || '').toUpperCase() === 'ACTIVE');
+  return {
+    id: String(p.id),
+    propertyId: p.id,
+    name: p.propertyName,
+    address: p.fullAddress || p.shortAddress || '',
+    counts: countByStatus(rooms),
+    wholeHouse,
+    whole: wholeHouse
+      ? {
+          // Ưu tiên hợp đồng; không có HĐ thì suy từ bản ghi phòng (nếu BE có tạo) rồi tới status nhà.
+          status: active
+            ? 'rented'
+            : rooms.some(r => toOpStatus(r.status) === 'maintenance')
+              || (p.status || '').toUpperCase().includes('MAINT')
+              ? 'maintenance'
+              : 'vacant',
+          tenantName: active?.tenantFullName,
+          tenantPhone: active?.tenantPhone,
+          contractId: active?.id,
+          contractCode: active?.contractCode,
+          contractEndDate: active?.endDate,
+          monthlyRent: active?.rentAmount ?? p.price,
+          deposit: active?.deposit,
+        }
+      : undefined,
+  };
+};
 
 const mapRoom = (
   r: ApiRoom,
@@ -133,12 +180,16 @@ export const roomOperationService = {
     const scoped = await managerPropertyService.getScopedProperties();
     return Promise.all(
       scoped.map(async (p) => {
-        try {
-          const rooms = await realPropertyService.getRooms(p.id);
-          return mapProperty(p, rooms);
-        } catch {
-          return mapProperty(p, []);
-        }
+        // Nhà nguyên căn cần thêm HĐ đang hiệu lực để biết đang cho thuê hay còn trống
+        // (bảng rooms thường rỗng với loại này nên không suy ra được từ phòng).
+        const isWhole = p.wholeHouse === true;
+        const [rooms, contracts] = await Promise.all([
+          realPropertyService.getRooms(p.id).catch(() => [] as ApiRoom[]),
+          isWhole
+            ? realTenantService.listByProperty(p.id).catch(() => [] as TenantContractResponse[])
+            : Promise.resolve([] as TenantContractResponse[]),
+        ]);
+        return mapProperty(p, rooms, contracts);
       }),
     );
   },

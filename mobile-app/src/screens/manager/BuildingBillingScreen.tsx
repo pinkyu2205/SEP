@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Modal, Alert, Image, TextInput, ScrollView, Dimensions, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, Image, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -120,10 +120,10 @@ export const BuildingBillingScreen: React.FC = () => {
       await realManagerInvoiceService.markInvoicePaid(selectedBill.id, { method, note });
       setShowQRModal(false); setShowCashModal(false); setShowEwalletModal(false);
       setSelectedBill(null); setCashNote('');
-      Alert.alert('✅ Thành công', 'Đã ghi nhận thanh toán.');
+      showAlert('✅ Thành công', 'Đã ghi nhận thanh toán.');
       load();
     } catch (e: any) {
-      Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không ghi nhận được (BE chưa có endpoint?).');
+      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không ghi nhận được (BE chưa có endpoint?).');
     } finally {
       setSubmitting(false);
     }

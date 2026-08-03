@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
-  Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -68,7 +68,7 @@ export const RequestCheckoutScreen: React.FC = () => {
         if (!active) return;
         if (dashboard) {
           if (!dashboard.contract) {
-            Alert.alert('Không có hợp đồng', 'Bạn chưa có hợp đồng đang hiệu lực để trả phòng.', [
+            showAlert('Không có hợp đồng', 'Bạn chưa có hợp đồng đang hiệu lực để trả phòng.', [
               { text: 'Đóng', onPress: () => navigation.goBack() },
             ]);
             return;
@@ -82,7 +82,7 @@ export const RequestCheckoutScreen: React.FC = () => {
         const open = requests.find((r) => r.status === 'PENDING' || r.status === 'APPROVED');
         if (open) setOpenRequest(open);
       } catch {
-        if (active) Alert.alert('Lỗi', 'Không tải được thông tin hợp đồng.');
+        if (active) showAlert('Lỗi', 'Không tải được thông tin hợp đồng.');
       } finally {
         if (active) setLoadingContract(false);
       }
@@ -93,15 +93,15 @@ export const RequestCheckoutScreen: React.FC = () => {
   const reasonText = selectedReason === 'Lý do khác' ? customReason.trim() : selectedReason ?? '';
 
   const handleSubmit = async () => {
-    if (!contractId) return Alert.alert('Lỗi', 'Không xác định được hợp đồng.');
+    if (!contractId) return showAlert('Lỗi', 'Không xác định được hợp đồng.');
     if (!DATE_RE.test(moveOutDate.trim())) {
-      return Alert.alert('Thiếu thông tin', 'Nhập ngày muốn trả phòng dạng YYYY-MM-DD (vd 2026-08-01).');
+      return showAlert('Thiếu thông tin', 'Nhập ngày muốn trả phòng dạng YYYY-MM-DD (vd 2026-08-01).');
     }
     if (new Date(moveOutDate.trim()) <= new Date()) {
-      return Alert.alert('Ngày không hợp lệ', 'Ngày trả phòng phải sau hôm nay.');
+      return showAlert('Ngày không hợp lệ', 'Ngày trả phòng phải sau hôm nay.');
     }
     if (!reasonText) {
-      return Alert.alert('Thiếu thông tin', 'Vui lòng chọn lý do trả phòng.');
+      return showAlert('Thiếu thông tin', 'Vui lòng chọn lý do trả phòng.');
     }
 
     // TK hoàn cọc gộp vào note (BE chưa có field riêng) — quản lý đọc được khi duyệt.
@@ -118,14 +118,14 @@ export const RequestCheckoutScreen: React.FC = () => {
         reason: reasonText,
         note: noteParts.filter(Boolean).join('\n') || undefined,
       });
-      Alert.alert(
+      showAlert(
         '✅ Đã gửi yêu cầu trả phòng',
         'Quản lý sẽ xem xét và phản hồi. Bạn có thể theo dõi tiến trình bất cứ lúc nào.',
         [{ text: 'Xem tiến trình', onPress: () => navigation.replace('CheckoutDetail', { requestId: created.id }) }],
       );
     } catch (err: any) {
       const msg = err?.response?.data?.message || 'Không gửi được yêu cầu — thử lại sau.';
-      Alert.alert('Lỗi', msg);
+      showAlert('Lỗi', msg);
     } finally {
       setSubmitting(false);
     }

@@ -1,8 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
-  Alert, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -54,7 +54,7 @@ export const TenantOnboardingScreen: React.FC = () => {
         // Account có nhiều HĐ ACTIVE nhưng chưa chọn nhà nào (hiếm — Home luôn chốt
         // sẵn primary) — hướng dẫn quay lại Trang chủ để chọn qua picker.
         const msg = readErr(err, 'Không tải được biên bản bàn giao.');
-        Alert.alert('Lỗi', msg.includes('thuê nhiều nhà')
+        showAlert('Lỗi', msg.includes('thuê nhiều nhà')
           ? `${msg} Vào Trang chủ để chọn nhà đang xem.`
           : msg);
       }
@@ -67,7 +67,7 @@ export const TenantOnboardingScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const confirmAcknowledge = () => {
-    Alert.alert(
+    showAlert(
       'Xác nhận bàn giao',
       'Bạn xác nhận đã nhận đúng phòng và thiết bị như ghi nhận dưới đây? Sau khi xác nhận sẽ KHÔNG thể chỉnh sửa lại.',
       [
@@ -82,9 +82,9 @@ export const TenantOnboardingScreen: React.FC = () => {
       setConfirming(true);
       const res = await realTenantSelfService.acknowledgeHandover(selectedContractId ?? undefined);
       setData(res);
-      Alert.alert('Đã xác nhận ✅', 'Cảm ơn bạn đã xác nhận biên bản bàn giao.');
+      showAlert('Đã xác nhận ✅', 'Cảm ơn bạn đã xác nhận biên bản bàn giao.');
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không xác nhận được — vui lòng thử lại.'));
+      showAlert('Lỗi', readErr(err, 'Không xác nhận được — vui lòng thử lại.'));
     } finally {
       setConfirming(false);
     }

@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert,
-  ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, RefreshControl,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -43,7 +43,17 @@ const VALID_TRANSITIONS: Record<OpStatus, { status: OpStatus; desc: string }[]> 
   ],
 };
 
+/** Trạng thái của NHÀ NGUYÊN CĂN — cả căn là 1 đơn vị cho thuê, không có phòng. */
+const WHOLE_META: Record<'rented' | 'vacant' | 'maintenance', {
+  label: string; color: string; bg: string; dot: string;
+}> = {
+  rented:      { label: 'Đang cho thuê', color: '#2563EB', bg: '#EFF6FF', dot: '🔵' },
+  vacant:      { label: 'Còn trống',     color: '#16A34A', bg: '#F0FDF4', dot: '🟢' },
+  maintenance: { label: 'Đang bảo trì',  color: '#D97706', bg: '#FFFBEB', dot: '🟡' },
+};
+
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmtDate = (iso?: string) => (iso ? iso.split('-').reverse().join('/') : '—');
 
 // ======================== SUMMARY BOX ========================
 const SummaryBox: React.FC<{ count: number; label: string; color: string; bg: string }> = ({ count, label, color, bg }) => (
@@ -162,6 +172,20 @@ const actSt = StyleSheet.create({
   chevron:      { fontSize: 18, color: Colors.textMuted },
 });
 
+// ======================== INFO LINE (nhà nguyên căn) ========================
+const InfoLine: React.FC<{ label: string; value: string; strong?: boolean }> = ({ label, value, strong }) => (
+  <View style={infoSt.row}>
+    <Text style={infoSt.label}>{label}</Text>
+    <Text style={[infoSt.value, strong && infoSt.valueStrong]} numberOfLines={1}>{value}</Text>
+  </View>
+);
+const infoSt = StyleSheet.create({
+  row:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.sm, paddingVertical: 6 },
+  label:       { fontSize: 13, color: Colors.textSecondary },
+  value:       { fontSize: 13, color: Colors.textPrimary, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  valueStrong: { fontSize: 14, fontWeight: '800' },
+});
+
 // ======================== MAIN SCREEN ========================
 export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   // Danh sách nhà (màn chọn nhà)
@@ -261,7 +285,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
       setRooms(prev => prev.map(r => (r.id === room.id ? { ...r, status: newStatus } : r)));
       closeAction();
     } catch (e: any) {
-      Alert.alert('Lỗi', msgOf(e, 'Không cập nhật được trạng thái phòng'));
+      showAlert('Lỗi', msgOf(e, 'Không cập nhật được trạng thái phòng'));
     } finally {
       setUpdating(false);
     }
@@ -269,7 +293,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
 
   const handleCheckOut = (room: Room) => {
     closeAction();
-    Alert.alert(
+    showAlert(
       'Trả phòng',
       `Tạo biên bản trả phòng cho ${room.tenantName ?? 'khách'} — phòng ${room.code}?`,
       [
@@ -286,7 +310,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
 
   const handleCheckIn = (room: Room) => {
     closeAction();
-    Alert.alert(
+    showAlert(
       'Đón khách mới',
       `Tạo hợp đồng và đón khách mới cho phòng ${room.code}?`,
       [
@@ -297,7 +321,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const handleFinishMaintenance = (room: Room) => {
-    Alert.alert(
+    showAlert(
       'Hoàn tất bảo trì',
       `Xác nhận phòng ${room.code} đã sửa xong và chuyển về trạng thái Trống?`,
       [
@@ -309,7 +333,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
 
   const handleReportMaintenance = (room: Room) => {
     closeAction();
-    Alert.alert(
+    showAlert(
       'Báo bảo trì',
       `Tạo yêu cầu bảo trì và chuyển phòng ${room.code} sang trạng thái Đang bảo trì?`,
       [
@@ -334,7 +358,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
             <Text style={styles.headerBackText}>← Quay lại</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Quản lý phòng</Text>
+          <Text style={styles.headerTitle}>Quản lý nhà & phòng</Text>
           <View style={styles.headerSide} />
         </View>
 
@@ -350,8 +374,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
             />
           }
         >
-          <Text style={styles.pageTitle}>Chọn tòa nhà</Text>
-          <Text style={styles.pageSubtitle}>Xem và vận hành các phòng trong tòa nhà được giao</Text>
+          <Text style={styles.pageTitle}>Chọn bất động sản</Text>
+          <Text style={styles.pageSubtitle}>Vận hành phòng (nhà nhiều phòng) hoặc cả căn (nhà nguyên căn)</Text>
 
           {loadingProps && !refreshingProps ? (
             <View style={styles.emptyState}>
@@ -381,22 +405,41 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                 activeOpacity={0.85}
               >
                 <View style={styles.propIcon}>
-                  <Text style={{ fontSize: 26 }}>🏢</Text>
+                  <Text style={{ fontSize: 26 }}>{p.wholeHouse ? '🏠' : '🏢'}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.propName}>{p.name}</Text>
-                  <Text style={styles.propAddress} numberOfLines={1}>📍 {p.address}</Text>
-                  <View style={styles.propStats}>
-                    <Text style={styles.propStat}>🚪 {pc.total} phòng</Text>
-                    <Text style={[styles.propStat, { color: '#2563EB' }]}>🔵 {pc.occupied}</Text>
-                    <Text style={[styles.propStat, { color: '#16A34A' }]}>🟢 {pc.available}</Text>
-                    {pc.maintenance > 0 && (
-                      <Text style={[styles.propStat, { color: '#D97706' }]}>🟡 {pc.maintenance}</Text>
-                    )}
-                    {pc.disabled > 0 && (
-                      <Text style={[styles.propStat, { color: '#6B7280' }]}>⚫ {pc.disabled}</Text>
-                    )}
+                  <View style={styles.propNameRow}>
+                    <Text style={styles.propName} numberOfLines={1}>{p.name}</Text>
+                    <View style={[styles.typeTag, p.wholeHouse && styles.typeTagWhole]}>
+                      <Text style={[styles.typeTagText, p.wholeHouse && styles.typeTagTextWhole]}>
+                        {p.wholeHouse ? 'Nguyên căn' : 'Nhiều phòng'}
+                      </Text>
+                    </View>
                   </View>
+                  <Text style={styles.propAddress} numberOfLines={1}>📍 {p.address}</Text>
+                  {/* Nguyên căn không có phòng → hiện trạng thái căn nhà thay vì "0 phòng 🔵0 🟢0" */}
+                  {p.wholeHouse ? (
+                    <View style={styles.propStats}>
+                      <Text style={[styles.propStat, { color: WHOLE_META[p.whole?.status ?? 'vacant'].color }]}>
+                        {WHOLE_META[p.whole?.status ?? 'vacant'].dot} {WHOLE_META[p.whole?.status ?? 'vacant'].label}
+                      </Text>
+                      {!!p.whole?.tenantName && (
+                        <Text style={styles.propStat} numberOfLines={1}>👤 {p.whole.tenantName}</Text>
+                      )}
+                    </View>
+                  ) : (
+                    <View style={styles.propStats}>
+                      <Text style={styles.propStat}>🚪 {pc.total} phòng</Text>
+                      <Text style={[styles.propStat, { color: '#2563EB' }]}>🔵 {pc.occupied}</Text>
+                      <Text style={[styles.propStat, { color: '#16A34A' }]}>🟢 {pc.available}</Text>
+                      {pc.maintenance > 0 && (
+                        <Text style={[styles.propStat, { color: '#D97706' }]}>🟡 {pc.maintenance}</Text>
+                      )}
+                      {pc.disabled > 0 && (
+                        <Text style={[styles.propStat, { color: '#6B7280' }]}>⚫ {pc.disabled}</Text>
+                      )}
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.propChevron}>›</Text>
               </TouchableOpacity>
@@ -416,7 +459,123 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   }
 
   // ──────────────────────────────────────────────────────────
-  // ROOM LIST VIEW
+  // WHOLE HOUSE VIEW — nhà nguyên căn không có phòng, cả căn là 1 đơn vị cho thuê.
+  // Không dùng lưới phòng / bộ lọc trạng thái phòng ở đây (trước đây hiện
+  // "0 phòng · Không có phòng nào", vô nghĩa với loại hình này).
+  // ──────────────────────────────────────────────────────────
+  if (property?.wholeHouse) {
+    const w = property.whole ?? { status: 'vacant' as const };
+    const meta = WHOLE_META[w.status];
+    const rented = w.status === 'rented';
+
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={backToProperties} style={styles.headerSide}>
+            <Text style={styles.headerBackText}>← Quay lại</Text>
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
+            <Text style={styles.headerSub} numberOfLines={1}>{property.address}</Text>
+          </View>
+          <View style={styles.headerSide} />
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshingProps}
+              onRefresh={() => { setRefreshingProps(true); loadProperties(); }}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
+        >
+          <View style={styles.houseCard}>
+            <View style={styles.houseTop}>
+              <Text style={styles.houseIcon}>🏠</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.houseTitle}>Toàn bộ căn nhà</Text>
+                <Text style={styles.houseSub}>Cho thuê nguyên căn — không chia phòng</Text>
+              </View>
+              <View style={[styles.houseBadge, { backgroundColor: meta.bg }]}>
+                <Text style={[styles.houseBadgeText, { color: meta.color }]}>{meta.label}</Text>
+              </View>
+            </View>
+
+            {rented ? (
+              <View style={styles.houseInfo}>
+                <InfoLine label="Khách thuê" value={w.tenantName ?? '—'} strong />
+                {!!w.tenantPhone && <InfoLine label="Điện thoại" value={w.tenantPhone} />}
+                {!!w.contractCode && <InfoLine label="Hợp đồng" value={w.contractCode} />}
+                <InfoLine label="Đến ngày" value={fmtDate(w.contractEndDate)} />
+                {!!w.monthlyRent && <InfoLine label="Tiền thuê" value={`${fmt(w.monthlyRent)}/tháng`} strong />}
+                {!!w.deposit && <InfoLine label="Tiền cọc" value={fmt(w.deposit)} />}
+              </View>
+            ) : (
+              <View style={styles.houseInfo}>
+                <Text style={styles.houseVacant}>
+                  {w.status === 'maintenance'
+                    ? '🔧 Căn nhà đang bảo trì — chưa nhận khách.'
+                    : 'Chưa có khách thuê.'}
+                </Text>
+                {!!w.monthlyRent && <InfoLine label="Giá chào thuê" value={`${fmt(w.monthlyRent)}/tháng`} strong />}
+              </View>
+            )}
+          </View>
+
+          <Text style={styles.sectionLabel}>Thao tác</Text>
+          <View style={styles.actionCard}>
+            {rented ? (
+              <>
+                <ActionItem
+                  icon="📋" label="Hợp đồng khách thuê"
+                  sublabel="Xem chi tiết, gia hạn, thanh lý"
+                  onPress={() => navigation.navigate('ManagerContracts')}
+                />
+                <ActionItem
+                  icon="🚪" label="Xử lý trả nhà"
+                  sublabel="Duyệt yêu cầu, lập biên bản, quyết toán cọc"
+                  onPress={() => navigation.navigate('CheckoutRequests')}
+                />
+              </>
+            ) : (
+              <ActionItem
+                icon="🏠" label="Đón khách mới" primary
+                sublabel="Tạo hợp đồng và bàn giao nhà"
+                onPress={() => navigation.navigate('OnboardingV2')}
+              />
+            )}
+            <ActionItem
+              icon="🔧" label="Bảo trì"
+              sublabel="Xem và xử lý yêu cầu sửa chữa của căn nhà"
+              onPress={() => navigation.navigate('BuildingMaintenance', {
+                propertyId: property.propertyId, propertyName: property.name,
+              })}
+            />
+            <ActionItem
+              icon="⚡" label="Ghi chỉ số & hóa đơn"
+              sublabel="Chốt điện/nước cho căn nhà"
+              onPress={() => navigation.navigate('UtilityBilling')}
+            />
+          </View>
+
+          <View style={styles.adminNote}>
+            <Text style={styles.adminNoteIcon}>ℹ️</Text>
+            <Text style={styles.adminNoteText}>
+              Nhà nguyên căn do Admin Web Portal cấu hình. Manager vận hành theo hợp đồng của cả căn.
+            </Text>
+          </View>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // ROOM LIST VIEW — nhà nhiều phòng
   // ──────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe}>
@@ -746,7 +905,12 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   propIcon:    { width: 52, height: 52, borderRadius: BorderRadius.lg, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center', marginRight: Spacing.md },
-  propName:    { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
+  propNameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 2 },
+  propName:    { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1 },
+  typeTag:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full, backgroundColor: '#EFF6FF' },
+  typeTagWhole:{ backgroundColor: '#FEF3C7' },
+  typeTagText: { fontSize: 10, fontWeight: '800', color: '#2563EB' },
+  typeTagTextWhole: { color: '#B45309' },
   propAddress: { fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.sm },
   propStats:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   propStat:    { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
@@ -775,6 +939,19 @@ const styles = StyleSheet.create({
   retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 
   // Admin note (footer)
+  // ── Nhà nguyên căn ──
+  houseCard:     { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm },
+  houseTop:      { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  houseIcon:     { fontSize: 30 },
+  houseTitle:    { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  houseSub:      { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  houseBadge:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BorderRadius.full },
+  houseBadgeText:{ fontSize: 11, fontWeight: '800' },
+  houseInfo:     { marginTop: Spacing.md, paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider },
+  houseVacant:   { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.xs },
+  sectionLabel:  { fontSize: 13, fontWeight: '800', color: Colors.textSecondary, marginTop: Spacing.lg, marginBottom: Spacing.sm },
+  actionCard:    { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, paddingHorizontal: Spacing.base, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm },
+
   adminNote:     { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.md, marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.primary + '25' },
   adminNoteIcon: { fontSize: 15 },
   adminNoteText: { flex: 1, fontSize: 12, color: Colors.primary, lineHeight: 18 },

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingRoom, RoomStatus } from '@/data/managedProperties';
@@ -91,7 +92,7 @@ export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
   const handleCheckOut = (r: RoomWithExt) => {
     closeAction();
     const latestInspection = getInspectionsByRoom(propertyId, r.code)[0];
-    Alert.alert('Trả phòng', `Lập biên bản check-out phòng ${r.code} (${r.tenantName})?`, [
+    showAlert('Trả phòng', `Lập biên bản check-out phòng ${r.code} (${r.tenantName})?`, [
       { text: 'Hủy', style: 'cancel' },
       {
         text: 'Chụp hiện trạng',
@@ -111,14 +112,14 @@ export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
 
   const handleCheckIn = (r: RoomWithExt) => {
     closeAction();
-    Alert.alert('Đón khách', `Tạo check-in cho phòng ${r.code}?`, [
+    showAlert('Đón khách', `Tạo check-in cho phòng ${r.code}?`, [
       { text: 'Hủy', style: 'cancel' },
       { text: 'Đón khách', onPress: () => navigation.navigate('OnboardingV2') },
     ]);
   };
 
   const handleFinishMaintenance = (r: RoomWithExt) => {
-    Alert.alert('Hoàn tất bảo trì', `Đưa phòng ${r.code} về trạng thái Trống?`, [
+    showAlert('Hoàn tất bảo trì', `Đưa phòng ${r.code} về trạng thái Trống?`, [
       { text: 'Hủy', style: 'cancel' },
       { text: 'Xác nhận', onPress: () => applyStatus(r.id, 'available') },
     ]);

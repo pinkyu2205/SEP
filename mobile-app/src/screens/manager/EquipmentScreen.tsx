@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Modal, FlatList,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, FlatList,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -480,14 +480,14 @@ export const EquipmentScreen: React.FC = () => {
     if (Number.isFinite(idNum) && idNum > 0) {
       realEquipmentService.updateStatus(idNum, toLifecycle(status)).catch(() => { /* fallback cục bộ */ });
     }
-    Alert.alert('✅ Cập nhật thành công', `Trạng thái đã được cập nhật: ${STATUS_CONFIG[status].label}`);
+    showAlert('✅ Cập nhật thành công', `Trạng thái đã được cập nhật: ${STATUS_CONFIG[status].label}`);
   };
 
   const handleAdd = () => {
     const selectedHouse = MOCK_HOUSES.find(h => h.id === selectedHouseId);
     const isWholeHouse = selectedHouse?.propertyType === 'WHOLE_HOUSE';
     if (!newName.trim() || (!isWholeHouse && !newRoom.trim())) {
-      return Alert.alert('Lỗi', 'Vui lòng nhập tên thiết bị và vị trí.');
+      return showAlert('Lỗi', 'Vui lòng nhập tên thiết bị và vị trí.');
     }
     const roomLabel = isWholeHouse ? 'Toàn bộ nhà' : newRoom;
     const assetId = `AST-${new Date().getFullYear()}-${String(equipments.length + 1).padStart(3, '0')}`;
@@ -510,7 +510,7 @@ export const EquipmentScreen: React.FC = () => {
     setEquipments(prev => [newEq, ...prev]);
     setShowAddModal(false);
     setNewName(''); setNewRoom(''); setNewBrand('');
-    Alert.alert('✅ Thêm thành công!', `Thiết bị "${newName}" đã được thêm với mã ${assetId}.`);
+    showAlert('✅ Thêm thành công!', `Thiết bị "${newName}" đã được thêm với mã ${assetId}.`);
   };
 
   return (

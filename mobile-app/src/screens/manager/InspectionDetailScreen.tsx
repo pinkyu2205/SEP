@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
-  Modal, TextInput, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal, TextInput,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -71,7 +71,7 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
   const addPhoto = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') {
-      Alert.alert('Lỗi', 'Cần quyền truy cập camera để chụp ảnh check-out.');
+      showAlert('Lỗi', 'Cần quyền truy cập camera để chụp ảnh check-out.');
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.5 });
@@ -90,10 +90,10 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
 
   const submitDraft = () => {
     if (!draft || draft.images.length === 0) {
-      Alert.alert('Lỗi', 'Vui lòng chụp ít nhất 1 ảnh check-out.');
+      showAlert('Lỗi', 'Vui lòng chụp ít nhất 1 ảnh check-out.');
       return;
     }
-    Alert.alert('Đã lưu biên bản check-out', 'Mock: biên bản check-out đã được gắn vào hợp đồng.');
+    showAlert('Đã lưu biên bản check-out', 'Mock: biên bản check-out đã được gắn vào hợp đồng.');
     navigation.goBack();
   };
 

@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Dimensions, Alert, Linking,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, Shadow } from '@/constants';
@@ -203,12 +203,12 @@ export const TenantContractDetailScreen: React.FC = () => {
   const cfg = contract ? STATUS_CFG[contract.status] : null;
 
   const handleRenew = () => {
-    Alert.alert(
+    showAlert(
       'Gia hạn hợp đồng',
       `Bạn muốn gia hạn hợp đồng cho ${tenantName}?\n\nHợp đồng mới sẽ bắt đầu ngay sau ngày ${contract?.endDate}.`,
       [
         { text: 'Hủy', style: 'cancel' },
-        { text: 'Xác nhận gia hạn', onPress: () => Alert.alert('Đã ghi nhận', 'Yêu cầu gia hạn đã được ghi nhận.') },
+        { text: 'Xác nhận gia hạn', onPress: () => showAlert('Đã ghi nhận', 'Yêu cầu gia hạn đã được ghi nhận.') },
       ],
     );
   };

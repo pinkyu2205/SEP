@@ -2,9 +2,13 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Platform,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow,
+  RENT_POLICY_SHORT, isIssueWindowOpen, toMonthKey,
+} from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
@@ -82,19 +86,14 @@ export const BillingManagementScreen: React.FC = () => {
         else await realManagerInvoiceService.rejectPayment(p.id);
         load();
       } catch (e: any) {
-        Alert.alert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch (BE chưa có endpoint?).');
+        showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch (BE chưa có endpoint?).');
       }
     };
 
     const title = approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?';
     const msg = approved ? `Xác nhận đã nhận đủ ${fmt(p.amount)} từ ${p.tenantName}?` : 'Từ chối giao dịch này?';
 
-    // Web: Alert nhiều nút không chạy callback → dùng window.confirm.
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${msg}`)) doIt();
-      return;
-    }
-    Alert.alert(title, msg, [
+    showAlert(title, msg, [
       { text: 'Hủy', style: 'cancel' },
       { text: approved ? 'Xác nhận' : 'Từ chối', style: approved ? 'default' : 'destructive', onPress: doIt },
     ]);
@@ -102,6 +101,8 @@ export const BillingManagementScreen: React.FC = () => {
 
   const now = new Date();
   const monthLabel = `Tháng ${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  // Tiền nhà chạy tự động; nút gửi tay chỉ mở ngày 1–5 (xem @/constants/rentCycle).
+  const issueWindowOpen = isIssueWindowOpen(toMonthKey(now), now);
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -116,12 +117,17 @@ export const BillingManagementScreen: React.FC = () => {
           <Text style={s.subtitle}>Tiền nhà · {monthLabel}</Text>
         </View>
 
-        {/* ── (1) Gửi hoá đơn tiền nhà — ưu tiên đầu màn ── */}
+        {/* ── (1) Chu kỳ tiền nhà tự động — ưu tiên đầu màn ── */}
         <TouchableOpacity style={s.rentCta} onPress={() => navigation.navigate('RentInvoice')} activeOpacity={0.85}>
-          <Text style={s.rentCtaIcon}>🏠</Text>
+          <Text style={s.rentCtaIcon}>🤖</Text>
           <View style={{ flex: 1 }}>
-            <Text style={s.rentCtaTitle}>Gửi hóa đơn tiền nhà</Text>
-            <Text style={s.rentCtaSub}>Tiền phòng/nhà hàng tháng — hoá đơn riêng, theo hợp đồng</Text>
+            <Text style={s.rentCtaTitle}>Tiền nhà tự động</Text>
+            <Text style={s.rentCtaSub}>{RENT_POLICY_SHORT}</Text>
+            <View style={s.rentCtaChip}>
+              <Text style={s.rentCtaChipText}>
+                {issueWindowOpen ? '● Cửa sổ gửi tay đang mở' : '○ Đang chạy tự động'}
+              </Text>
+            </View>
           </View>
           <Text style={s.rentCtaArrow}>›</Text>
         </TouchableOpacity>
@@ -290,7 +296,9 @@ export const BillingManagementScreen: React.FC = () => {
             {invoices.length === 0 && pendingVerifications.length === 0 && (
               <View style={s.emptyBox}>
                 <Text style={s.emptyEmoji}>🧾</Text>
-                <Text style={s.emptyText}>Chưa có hóa đơn tiền nhà nào trong kỳ này.</Text>
+                <Text style={s.emptyText}>
+                  Chưa có hóa đơn tiền nhà nào trong kỳ này.{'\n'}Hệ thống tự phát hành vào ngày 1 hằng tháng.
+                </Text>
               </View>
             )}
           </>
@@ -320,6 +328,8 @@ const s = StyleSheet.create({
   rentCtaIcon:  { fontSize: 28 },
   rentCtaTitle: { fontSize: 16, fontWeight: '800', color: Colors.white },
   rentCtaSub:   { fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  rentCtaChip:  { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
+  rentCtaChipText: { fontSize: 10, fontWeight: '800', color: Colors.white },
   rentCtaArrow: { fontSize: 24, color: Colors.white, fontWeight: '800' },
 
   blockLabel: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary, marginBottom: Spacing.sm },

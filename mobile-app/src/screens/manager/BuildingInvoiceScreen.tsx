@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingInvoice, InvoiceStatus } from '@/data/managedProperties';
@@ -34,7 +35,7 @@ export const BuildingInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
   const list = filter === 'all' ? invoices : invoices.filter(i => i.status === filter);
 
   const confirmPayment = (inv: BuildingInvoice) => {
-    Alert.alert(
+    showAlert(
       'Xác nhận thu tiền',
       `Xác nhận đã thu ${fmt(inv.amount)} từ ${inv.tenant} (${inv.room})?`,
       [

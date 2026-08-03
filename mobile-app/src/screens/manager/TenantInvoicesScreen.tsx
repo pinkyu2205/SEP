@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ScrollView, Modal, Dimensions, Alert,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, Dimensions,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
 
 const SH = Dimensions.get('window').height;
 const TODAY = new Date(2026, 4, 21);
@@ -34,8 +34,8 @@ interface TenantInvoice {
   paymentMethod?: string;
   propertyName: string;
   roomName: string;
-  lateFeeDays?: number;
-  lateFeeAmount?: number;
+  /** Số ngày quá hạn. Không có phí phạt — trễ lâu thì leo thang chấm dứt HĐ. */
+  overdueDays?: number;
 }
 
 // ── Mock invoice data (all tenants, filtered by tenantId at runtime) ───
@@ -48,7 +48,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 97500, waterDetail: '6,5 m³ × 15.000đ/m³',
     serviceFee: 300000, discount: 0, depositDeduction: 0,
     total: 4352500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    lateFeeDays: 6, lateFeeAmount: 43525,
+    overdueDays: 6,
   },
   {
     id: 'inv-t1-apr', tenantId: 't1', code: 'HD-NT-P101-0426',
@@ -95,7 +95,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 112500, waterDetail: '7,5 m³ × 15.000đ/m³',
     serviceFee: 300000, discount: 0, depositDeduction: 0,
     total: 4730500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    lateFeeDays: 6, lateFeeAmount: 47305,
+    overdueDays: 6,
   },
   {
     id: 'inv-t3-apr', tenantId: 't3', code: 'HD-NT-P201-0426',
@@ -104,7 +104,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 97500, waterDetail: '6,5 m³ × 15.000đ/m³',
     serviceFee: 300000, discount: 0, depositDeduction: 0,
     total: 4690500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    lateFeeDays: 36, lateFeeAmount: 140715,
+    overdueDays: 36,
   },
   {
     id: 'inv-t3-mar', tenantId: 't3', code: 'HD-NT-P201-0326',
@@ -123,7 +123,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 120000, waterDetail: '8 m³ × 15.000đ/m³',
     serviceFee: 100000, discount: 0, depositDeduction: 0,
     total: 4105000, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P301',
-    lateFeeDays: 6, lateFeeAmount: 41050,
+    overdueDays: 6,
   },
   {
     id: 'inv-t4-apr', tenantId: 't4', code: 'HD-NT-P301-0426',
@@ -142,7 +142,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 106000, waterDetail: '7 m³ × 15.000đ/m³',
     serviceFee: 200000, discount: 0, depositDeduction: 0,
     total: 4845000, propertyName: 'Nhà CMT8', roomName: 'P101',
-    lateFeeDays: 6, lateFeeAmount: 48450,
+    overdueDays: 6,
   },
   {
     id: 'inv-t8-apr', tenantId: 't8', code: 'HD-CMT8-P101-0426',
@@ -171,7 +171,7 @@ const MOCK_INVOICES: TenantInvoice[] = [
     waterFee: 242500, waterDetail: '16 m³ × 15.000đ/m³ + phí cơ bản',
     serviceFee: 150000, discount: 0, depositDeduction: 0,
     total: 13040000, propertyName: 'Nhà Nguyễn Văn Cừ', roomName: 'Nhà nguyên căn',
-    lateFeeDays: 6, lateFeeAmount: 130400,
+    overdueDays: 6,
   },
   {
     id: 'inv-wh1-apr', tenantId: 'wh-1', code: 'HD-NVC-0426',
@@ -221,7 +221,7 @@ const InvoiceDetailModal: React.FC<{
   const isUnpaid = invoice.status !== 'paid';
 
   const handlePay = () => {
-    Alert.alert(
+    showAlert(
       'Xác nhận thanh toán',
       `Hóa đơn ${invoice.code}\nTổng tiền: ${fmt(invoice.total)}\n\nThao tác này sẽ ghi nhận thanh toán cho hóa đơn tháng ${invoice.billingMonth}.`,
       [
@@ -277,10 +277,13 @@ const InvoiceDetailModal: React.FC<{
             </View>
 
             {/* Overdue warning */}
-            {invoice.status === 'overdue' && invoice.lateFeeDays && (
+            {invoice.status === 'overdue' && !!invoice.overdueDays && (
               <View style={ds.overdueBox}>
                 <Text style={ds.overdueText}>
-                  ⚠️ Quá hạn {invoice.lateFeeDays} ngày · Phạt trễ hạn: {fmt(invoice.lateFeeAmount || 0)}
+                  ⚠️ Quá hạn {invoice.overdueDays} ngày · không tính phí phạt
+                  {invoice.overdueDays >= RENT_CYCLE.terminationAlertDays
+                    ? ' — đã báo chủ nhà, đề nghị chấm dứt hợp đồng.'
+                    : ` — quá ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà.`}
                 </Text>
               </View>
             )}
@@ -454,8 +457,8 @@ const InvoiceCard: React.FC<{ invoice: TenantInvoice; onPress: () => void }> = (
       <View style={cs.footer}>
         <View>
           <Text style={cs.dueLabel}>Hạn TT: {invoice.dueDate}</Text>
-          {invoice.status === 'overdue' && invoice.lateFeeDays && (
-            <Text style={cs.lateText}>Quá hạn {invoice.lateFeeDays} ngày</Text>
+          {invoice.status === 'overdue' && !!invoice.overdueDays && (
+            <Text style={cs.lateText}>Quá hạn {invoice.overdueDays} ngày</Text>
           )}
           {invoice.status === 'paid' && (
             <Text style={cs.paidOnText}>Đã TT {invoice.paymentDate} · {invoice.paymentMethod}</Text>

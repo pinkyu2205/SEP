@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
@@ -77,7 +78,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
   };
 
   const renew = (contract: BuildingContract) => {
-    Alert.alert('Gia hạn hợp đồng', `Gia hạn ${contractCode(contract)} thêm 12 tháng?`, [
+    showAlert('Gia hạn hợp đồng', `Gia hạn ${contractCode(contract)} thêm 12 tháng?`, [
       { text: 'Hủy', style: 'cancel' },
       {
         text: 'Gia hạn',
@@ -95,7 +96,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
     if (action === 'submit') updateStatus(contract, 'pending_approval');
     if (action === 'activate') updateStatus(contract, 'active');
     if (action === 'renew') renew(contract);
-    if (action === 'edit') Alert.alert('Chỉnh sửa hợp đồng', `Mở form chỉnh sửa cho ${contractCode(contract)}.`);
+    if (action === 'edit') showAlert('Chỉnh sửa hợp đồng', `Mở form chỉnh sửa cho ${contractCode(contract)}.`);
   };
 
   const ContractActions = ({ contract }: { contract: BuildingContract }) => {

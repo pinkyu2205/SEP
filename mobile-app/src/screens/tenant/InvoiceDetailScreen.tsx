@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
@@ -108,9 +108,19 @@ export const InvoiceDetailScreen: React.FC = () => {
         {isOverdue && (
           <View style={s.overdueAlert}>
             <Text style={s.overdueIcon}>🚨</Text>
-            <Text style={s.overdueText}>
-              Đã quá hạn {daysOver} ngày (hạn: {formatDate(invoice.dueDate)})
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.overdueText}>
+                Đã quá hạn {daysOver} ngày (hạn: {formatDate(invoice.dueDate)})
+              </Text>
+              {/* Tiền phòng: không phạt tiền, nhưng trễ lâu sẽ báo chủ nhà & đề nghị chấm dứt HĐ. */}
+              {invoice.invoiceType === 'rent' && (
+                <Text style={s.overdueSub}>
+                  {daysOver >= RENT_CYCLE.terminationAlertDays
+                    ? 'Chủ nhà đã được thông báo — hợp đồng có thể bị chấm dứt. Vui lòng thanh toán ngay.'
+                    : `Không tính phí phạt, nhưng quá hạn ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà và có thể bị chấm dứt hợp đồng.`}
+                </Text>
+              )}
+            </View>
           </View>
         )}
 
@@ -332,12 +342,13 @@ const s = StyleSheet.create({
 
   // Overdue alert
   overdueAlert: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.lg,
     padding: Spacing.base, marginBottom: Spacing.md,
   },
   overdueIcon: { fontSize: 20 },
   overdueText: { fontSize: 13, fontWeight: '600', color: Colors.error, flex: 1, lineHeight: 20 },
+  overdueSub:  { fontSize: 12, fontWeight: '600', color: Colors.error, opacity: 0.85, marginTop: 4, lineHeight: 17 },
 
   // Section
   section: { marginBottom: Spacing.md },

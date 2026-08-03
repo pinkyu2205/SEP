@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -161,6 +161,15 @@ export const InvoiceListScreen: React.FC = () => {
 
         {(item.lateFee ?? 0) > 0 && (
           <Text style={styles.lateFeeText}>+ Phí trả chậm: {formatCurrency(item.lateFee)}</Text>
+        )}
+
+        {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ. */}
+        {isOverdue && item.invoiceType === 'rent' && (
+          <Text style={styles.riskText}>
+            {daysOverdue >= RENT_CYCLE.terminationAlertDays
+              ? '⚠️ Chủ nhà đã được thông báo — hợp đồng có thể bị chấm dứt.'
+              : `⚠️ Quá hạn ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà và có thể bị chấm dứt hợp đồng.`}
+          </Text>
         )}
 
         {/* Action buttons */}
@@ -428,6 +437,7 @@ const styles = StyleSheet.create({
   dueDateText: { fontSize: 12, color: Colors.textSecondary },
   paidDateText: { fontSize: 12, color: Colors.success, fontWeight: '600' },
   lateFeeText: { fontSize: 12, color: Colors.error, fontWeight: '600', marginTop: 3 },
+  riskText: { fontSize: 11, color: Colors.error, fontWeight: '700', marginTop: 4, lineHeight: 16 },
 
   payBtn: {
     backgroundColor: Colors.primary, borderRadius: BorderRadius.md,

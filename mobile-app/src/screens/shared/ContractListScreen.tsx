@@ -10,7 +10,7 @@ import { DatePickerField } from '@/components/common/DatePickerField';
 import { ManagedProperty } from '@/data/managedProperties';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { getContractTerminationTypeLabel } from '@/utils';
+import { getContractTerminationTypeLabel, showAlert } from '@/utils';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
@@ -85,22 +85,6 @@ interface Contract {
   _propertyId?: string;
 }
 
-interface ContractForm {
-  type: ContractType;
-  lesseeName: string;
-  lesseeCccd: string;
-  lesseePhone: string;
-  propertyName: string;
-  roomCode: string;
-  startDate: string;
-  endDate: string;
-  rentAmount: string;
-  depositAmount: string;
-  terms: string;
-  notes: string;
-  equipmentList: ContractEquipment[];
-}
-
 // ===================== MOCK DATA =====================
 const DEFAULT_TERMS =
   'Điều 1: Bên thuê có trách nhiệm bảo quản tài sản trong tình trạng tốt.\n' +
@@ -130,15 +114,14 @@ const APPROVAL_ACTION_CONFIG: Record<ApprovalEntry['action'], { label: string; c
   renewed:    { label: 'Gia hạn',        color: '#8B5CF6' },
 };
 
+// Màn này chỉ chứa HĐ với khách thuê nên bỏ các trạng thái của luồng soạn/duyệt HĐ
+// (nháp · chờ duyệt · đã duyệt · bị từ chối) — không bao giờ xuất hiện ở đây.
 const FILTER_TABS: Array<{ key: 'all' | ContractStatus; label: string }> = [
   { key: 'all',             label: 'Tất cả' },
-  { key: 'draft',           label: 'Nháp' },
-  { key: 'pending_approval',label: 'Chờ duyệt' },
-  { key: 'approved',        label: 'Đã duyệt' },
   { key: 'active',          label: 'Hiệu lực' },
-  { key: 'rejected',        label: 'Từ chối' },
   { key: 'expiring_soon',   label: 'Sắp hết hạn' },
   { key: 'expired',         label: 'Đã hết hạn' },
+  { key: 'terminated',      label: 'Đã thanh lý' },
 ];
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
@@ -220,22 +203,6 @@ const mapApiToContract = (c: TenantContractResponse, propertyName: string): Cont
     terminationType: c.terminationType,
     _propertyId: String(c.propertyId),
   };
-};
-
-const DEFAULT_FORM: ContractForm = {
-  type: 'room_rental',
-  lesseeName: '',
-  lesseeCccd: '',
-  lesseePhone: '',
-  propertyName: '',
-  roomCode: '',
-  startDate: '',
-  endDate: '',
-  rentAmount: '',
-  depositAmount: '',
-  terms: DEFAULT_TERMS,
-  notes: '',
-  equipmentList: [],
 };
 
 // ===================== CONTRACT CARD =====================
@@ -322,20 +289,12 @@ const ContractCard: React.FC<{
         {/* Quick action buttons */}
         <View style={styles.quickActions}>
           {contract.status === 'draft' && (
-            <>
-              <TouchableOpacity
-                style={styles.qaBtn}
-                onPress={(e) => { e.stopPropagation?.(); onAction('edit', contract); }}
-              >
-                <Text style={styles.qaBtnText}>Sửa</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.qaBtn, styles.qaBtnPrimary]}
-                onPress={(e) => { e.stopPropagation?.(); onAction('submit', contract); }}
-              >
-                <Text style={[styles.qaBtnText, styles.qaBtnPrimaryText]}>Gửi duyệt</Text>
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity
+              style={[styles.qaBtn, styles.qaBtnPrimary]}
+              onPress={(e) => { e.stopPropagation?.(); onAction('submit', contract); }}
+            >
+              <Text style={[styles.qaBtnText, styles.qaBtnPrimaryText]}>Gửi duyệt</Text>
+            </TouchableOpacity>
           )}
           {contract.status === 'pending_approval' && (
             <TouchableOpacity style={styles.qaBtn} onPress={onPress}>
@@ -343,11 +302,8 @@ const ContractCard: React.FC<{
             </TouchableOpacity>
           )}
           {contract.status === 'rejected' && (
-            <TouchableOpacity
-              style={[styles.qaBtn, styles.qaBtnPrimary]}
-              onPress={(e) => { e.stopPropagation?.(); onAction('edit', contract); }}
-            >
-              <Text style={[styles.qaBtnText, styles.qaBtnPrimaryText]}>Sửa & Gửi lại</Text>
+            <TouchableOpacity style={styles.qaBtn} onPress={onPress}>
+              <Text style={styles.qaBtnText}>Xem lý do</Text>
             </TouchableOpacity>
           )}
           {contract.status === 'approved' && (
@@ -605,21 +561,7 @@ const ContractDetailView: React.FC<{
               >
                 <Text style={detailStyles.actionBtnPrimaryText}>⬆️ Gửi duyệt cho Host</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={detailStyles.actionBtnSecondary}
-                onPress={() => onAction('edit', contract)}
-              >
-                <Text style={detailStyles.actionBtnSecondaryText}>✏️ Chỉnh sửa hợp đồng</Text>
-              </TouchableOpacity>
             </>
-          )}
-          {contract.status === 'rejected' && (
-            <TouchableOpacity
-              style={detailStyles.actionBtnPrimary}
-              onPress={() => onAction('edit', contract)}
-            >
-              <Text style={detailStyles.actionBtnPrimaryText}>✏️ Sửa & Gửi lại</Text>
-            </TouchableOpacity>
           )}
           {contract.status === 'approved' && (
             <TouchableOpacity
@@ -755,416 +697,6 @@ const AVAILABLE_PROPERTIES: {
   },
 ];
 
-// ===================== CREATE CONTRACT VIEW =====================
-const CreateContractView: React.FC<{
-  initial?: Contract | null;
-  onBack: () => void;
-  onSaveDraft: (form: ContractForm) => void;
-  onSubmit: (form: ContractForm) => void;
-}> = ({ initial, onBack, onSaveDraft, onSubmit }) => {
-  const [form, setForm] = useState<ContractForm>(() =>
-    initial
-      ? {
-          type: initial.type,
-          lesseeName: initial.lesseeName,
-          lesseeCccd: initial.lesseeCccd,
-          lesseePhone: initial.lesseePhone,
-          propertyName: initial.propertyName,
-          roomCode: initial.roomCode || '',
-          startDate: initial.startDate,
-          endDate: initial.endDate,
-          rentAmount: String(initial.rentAmount),
-          depositAmount: String(initial.depositAmount),
-          terms: initial.terms || DEFAULT_TERMS,
-          notes: initial.notes || '',
-          equipmentList: initial.equipmentList,
-        }
-      : { ...DEFAULT_FORM }
-  );
-
-  const [showPropertyPicker, setShowPropertyPicker] = useState(false);
-  const [showRoomPicker, setShowRoomPicker] = useState(false);
-
-  const selectedProperty = AVAILABLE_PROPERTIES.find(p => p.name === form.propertyName);
-  const availableRooms = selectedProperty?.rooms ?? [];
-
-  const set = (key: keyof ContractForm, value: any) =>
-    setForm(prev => ({ ...prev, [key]: value }));
-
-  const validate = (): string | null => {
-    if (!form.lesseeName.trim()) return 'Vui lòng nhập tên bên thuê';
-    if (!form.lesseeCccd.trim()) return 'Vui lòng nhập số CCCD/CMND';
-    if (!form.lesseePhone.trim()) return 'Vui lòng nhập số điện thoại';
-    if (!form.propertyName.trim()) return 'Vui lòng nhập tên nhà/tòa nhà';
-    if (form.type === 'room_rental' && !form.roomCode.trim()) return 'Vui lòng nhập mã phòng';
-    if (!form.startDate.trim()) return 'Vui lòng nhập ngày bắt đầu';
-    if (!form.endDate.trim()) return 'Vui lòng nhập ngày kết thúc';
-    if (!form.rentAmount.trim()) return 'Vui lòng nhập tiền thuê';
-    if (!form.depositAmount.trim()) return 'Vui lòng nhập tiền đặt cọc';
-    return null;
-  };
-
-  const handleSaveDraft = () => onSaveDraft(form);
-
-  const handleSubmit = () => {
-    const err = validate();
-    if (err) { Alert.alert('Thiếu thông tin', err); return; }
-    Alert.alert(
-      'Xác nhận gửi duyệt',
-      'Hợp đồng sẽ được gửi đến Host/Admin để xem xét. Bạn không thể chỉnh sửa cho đến khi có phản hồi.',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        { text: 'Gửi duyệt', onPress: () => onSubmit(form) },
-      ]
-    );
-  };
-
-  const SectionHeader = ({ icon, title }: { icon: string; title: string }) => (
-    <View style={createStyles.sectionHeader}>
-      <Text style={createStyles.sectionIcon}>{icon}</Text>
-      <Text style={createStyles.sectionTitle}>{title}</Text>
-    </View>
-  );
-
-  const FieldLabel = ({ label, required }: { label: string; required?: boolean }) => (
-    <Text style={createStyles.fieldLabel}>
-      {label}{required && <Text style={{ color: Colors.error }}> *</Text>}
-    </Text>
-  );
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      {/* Top bar */}
-      <View style={createStyles.topBar}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={createStyles.backBtn}>← Hủy</Text>
-        </TouchableOpacity>
-        <Text style={createStyles.topBarTitle}>
-          {initial ? 'Chỉnh sửa hợp đồng' : 'Tạo hợp đồng mới'}
-        </Text>
-        <TouchableOpacity onPress={handleSaveDraft}>
-          <Text style={createStyles.saveDraftBtn}>Lưu nháp</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={createStyles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Contract type info (read-only for manager) */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="📋" title="Loại hợp đồng" />
-          <View style={[createStyles.typeBtn, createStyles.typeBtnActive, { opacity: 1 }]}>
-            <Text style={createStyles.typeBtnIcon}>🚪</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={[createStyles.typeBtnLabel, createStyles.typeBtnLabelActive]}>
-                Hợp đồng thuê phòng
-              </Text>
-              <Text style={[createStyles.typeBtnSub, { color: Colors.primary }]}>
-                Manager → Khách thuê
-              </Text>
-            </View>
-            <Text style={{ fontSize: 16 }}>✓</Text>
-          </View>
-        </View>
-
-        {/* Tenant info */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="👤" title="Thông tin bên thuê" />
-          <FieldLabel label="Họ tên đầy đủ" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="Ví dụ: Nguyễn Văn An"
-            placeholderTextColor={Colors.textMuted}
-            value={form.lesseeName}
-            onChangeText={v => set('lesseeName', v)}
-          />
-          <FieldLabel label="Số CCCD/CMND" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="12 chữ số"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numeric"
-            maxLength={12}
-            value={form.lesseeCccd}
-            onChangeText={v => set('lesseeCccd', v)}
-          />
-          <FieldLabel label="Số điện thoại" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="0901234567"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="phone-pad"
-            value={form.lesseePhone}
-            onChangeText={v => set('lesseePhone', v)}
-          />
-          <TouchableOpacity style={createStyles.uploadBtn}>
-            <Text style={createStyles.uploadBtnText}>📎 Tải ảnh CCCD/CMND (tuỳ chọn)</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Property / Room */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="🏠" title="Tài sản cho thuê" />
-          <FieldLabel label="Tên nhà/tòa nhà" required />
-          <TouchableOpacity
-            style={[createStyles.input, createStyles.dropdownBtn]}
-            onPress={() => { setShowPropertyPicker(v => !v); setShowRoomPicker(false); }}
-          >
-            <Text style={form.propertyName ? createStyles.dropdownVal : createStyles.dropdownPlaceholder}>
-              {form.propertyName || 'Chọn nhà/tòa nhà...'}
-            </Text>
-            <Text style={createStyles.dropdownArrow}>{showPropertyPicker ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
-          {showPropertyPicker && (
-            <View style={createStyles.dropdownList}>
-              {AVAILABLE_PROPERTIES.map(p => (
-                <TouchableOpacity
-                  key={p.id}
-                  style={[createStyles.dropdownItem, form.propertyName === p.name && createStyles.dropdownItemActive]}
-                  onPress={() => {
-                    set('propertyName', p.name);
-                    set('roomCode', '');
-                    setShowPropertyPicker(false);
-                  }}
-                >
-                  <Text style={[createStyles.dropdownItemText, form.propertyName === p.name && { color: Colors.primary, fontWeight: '700' }]}>
-                    🏠 {p.name}
-                  </Text>
-                  <Text style={createStyles.dropdownItemSub}>{p.rooms.length} phòng trống</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          {form.type === 'room_rental' && (
-            <>
-              <FieldLabel label="Phòng trống" required />
-              <TouchableOpacity
-                style={[createStyles.input, createStyles.dropdownBtn, !selectedProperty && createStyles.dropdownDisabled]}
-                onPress={() => { if (selectedProperty) { setShowRoomPicker(v => !v); setShowPropertyPicker(false); } }}
-              >
-                <Text style={form.roomCode ? createStyles.dropdownVal : createStyles.dropdownPlaceholder}>
-                  {form.roomCode || (selectedProperty ? 'Chọn phòng...' : 'Chọn nhà trước')}
-                </Text>
-                <Text style={createStyles.dropdownArrow}>{showRoomPicker ? '▲' : '▼'}</Text>
-              </TouchableOpacity>
-              {showRoomPicker && availableRooms.length > 0 && (
-                <View style={createStyles.dropdownList}>
-                  {availableRooms.map(r => (
-                    <TouchableOpacity
-                      key={r.code}
-                      style={[createStyles.dropdownItem, form.roomCode === r.code && createStyles.dropdownItemActive]}
-                      onPress={() => {
-                        set('roomCode', r.code);
-                        if (!form.rentAmount) set('rentAmount', String(r.rentSuggested));
-                        set('equipmentList', r.equipment.map(e => ({ id: e.id, name: e.name, quantity: e.quantity, condition: e.condition })));
-                        setShowRoomPicker(false);
-                      }}
-                    >
-                      <Text style={[createStyles.dropdownItemText, form.roomCode === r.code && { color: Colors.primary, fontWeight: '700' }]}>
-                        🚪 {r.code}
-                      </Text>
-                      <Text style={createStyles.dropdownItemSub}>Gợi ý: {fmt(r.rentSuggested)}/tháng</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </View>
-
-        {/* Financial */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="💰" title="Tiền thuê & Đặt cọc" />
-          <FieldLabel label="Tiền thuê hàng tháng (VNĐ)" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="Ví dụ: 3500000"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numeric"
-            value={form.rentAmount}
-            onChangeText={v => set('rentAmount', v)}
-          />
-          {form.rentAmount !== '' && !isNaN(Number(form.rentAmount)) && (
-            <Text style={createStyles.formatHint}>{fmt(Number(form.rentAmount))}/tháng</Text>
-          )}
-          <FieldLabel label="Tiền đặt cọc (VNĐ)" required />
-          <TextInput
-            style={createStyles.input}
-            placeholder="Ví dụ: 7000000"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numeric"
-            value={form.depositAmount}
-            onChangeText={v => set('depositAmount', v)}
-          />
-          {form.depositAmount !== '' && !isNaN(Number(form.depositAmount)) && (
-            <Text style={createStyles.formatHint}>{fmt(Number(form.depositAmount))}</Text>
-          )}
-        </View>
-
-        {/* Dates */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="📅" title="Thời hạn hợp đồng" />
-
-          {/* Quick duration shortcuts */}
-          <View style={createStyles.durationRow}>
-            {[
-              { label: '1 năm',   months: 12 },
-              { label: '2 năm',   months: 24 },
-              { label: '3 năm',   months: 36 },
-            ].map(opt => {
-              const isActive = (() => {
-                if (!form.startDate || !form.endDate) return false;
-                const [ds, ms, ys] = form.startDate.split('/').map(Number);
-                const [de, me, ye] = form.endDate.split('/').map(Number);
-                if (!ds || !ms || !ys || !de || !me || !ye) return false;
-                const start = new Date(ys, ms - 1, ds);
-                const expected = new Date(ys, ms - 1 + opt.months, ds);
-                const end = new Date(ye, me - 1, de);
-                return expected.getTime() === end.getTime();
-              })();
-              return (
-                <TouchableOpacity
-                  key={opt.label}
-                  style={[createStyles.durationChip, isActive && createStyles.durationChipActive]}
-                  onPress={() => {
-                    const base = form.startDate || (() => {
-                      const t = new Date();
-                      return `${String(t.getDate()).padStart(2,'0')}/${String(t.getMonth()+1).padStart(2,'0')}/${t.getFullYear()}`;
-                    })();
-                    const [d, m, y] = base.split('/').map(Number);
-                    if (!d || !m || !y) return;
-                    if (!form.startDate) set('startDate', base);
-                    const end = new Date(y, m - 1 + opt.months, d);
-                    const ed = `${String(end.getDate()).padStart(2,'0')}/${String(end.getMonth()+1).padStart(2,'0')}/${end.getFullYear()}`;
-                    set('endDate', ed);
-                  }}
-                >
-                  <Text style={[createStyles.durationChipText, isActive && createStyles.durationChipTextActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <View style={createStyles.dateRow}>
-            <View style={{ flex: 1 }}>
-              <FieldLabel label="Ngày bắt đầu" required />
-              <DatePickerField
-                value={form.startDate}
-                onChange={v => {
-                  set('startDate', v);
-                  // Recalculate end date if a duration was active
-                  if (form.endDate) {
-                    const [ds, ms, ys] = v.split('/').map(Number);
-                    const [de, me, ye] = form.endDate.split('/').map(Number);
-                    if (ds && ms && ys && de && me && ye) {
-                      const totalMonths = (ye - ys) * 12 + (me - ms);
-                      if ([6, 12, 24, 36].includes(totalMonths)) {
-                        const end = new Date(ys, ms - 1 + totalMonths, ds);
-                        set('endDate', `${String(end.getDate()).padStart(2,'0')}/${String(end.getMonth()+1).padStart(2,'0')}/${end.getFullYear()}`);
-                      }
-                    }
-                  }
-                }}
-              />
-            </View>
-            <View style={createStyles.dateSep}>
-              <Text style={createStyles.dateSepText}>→</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <FieldLabel label="Ngày kết thúc" required />
-              <DatePickerField
-                value={form.endDate}
-                onChange={v => set('endDate', v)}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Terms */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="📜" title="Điều khoản hợp đồng" />
-          <TextInput
-            style={[createStyles.input, createStyles.textArea]}
-            placeholder="Nhập các điều khoản..."
-            placeholderTextColor={Colors.textMuted}
-            multiline
-            numberOfLines={6}
-            textAlignVertical="top"
-            value={form.terms}
-            onChangeText={v => set('terms', v)}
-          />
-        </View>
-
-        {/* Equipment */}
-        <View style={createStyles.section}>
-          <View style={createStyles.sectionHeaderRow}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={createStyles.sectionIcon}>🛠️</Text>
-              <Text style={createStyles.sectionTitle}>Tài sản bàn giao</Text>
-            </View>
-            <View style={createStyles.hostBadge}>
-              <Text style={createStyles.hostBadgeText}>📋 Từ Host</Text>
-            </View>
-          </View>
-
-          {form.equipmentList.length === 0 ? (
-            <View style={createStyles.emptyEqBox}>
-              <Text style={createStyles.emptyEqText}>
-                {form.roomCode
-                  ? 'Phòng này chưa có thiết bị được thiết lập.'
-                  : 'Chọn phòng để hiển thị tài sản bàn giao do Host thiết lập.'}
-              </Text>
-            </View>
-          ) : (
-            <>
-              {form.equipmentList.map((eq, i) => (
-                <View key={eq.id} style={[createStyles.eqItem, i === form.equipmentList.length - 1 && { borderBottomWidth: 0 }]}>
-                  <View style={createStyles.eqItemIcon}>
-                    <Text style={{ fontSize: 16 }}>⚙️</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={createStyles.eqItemName}>{eq.name}</Text>
-                    <Text style={createStyles.eqItemSub}>SL: {eq.quantity} · {eq.condition}</Text>
-                  </View>
-                  <View style={createStyles.eqConditionBadge}>
-                    <Text style={createStyles.eqConditionText}>{eq.condition}</Text>
-                  </View>
-                </View>
-              ))}
-            </>
-          )}
-        </View>
-
-        {/* Notes */}
-        <View style={createStyles.section}>
-          <SectionHeader icon="📝" title="Ghi chú (tuỳ chọn)" />
-          <TextInput
-            style={[createStyles.input, { minHeight: 80, textAlignVertical: 'top' }]}
-            placeholder="Ghi chú thêm về hợp đồng..."
-            placeholderTextColor={Colors.textMuted}
-            multiline
-            value={form.notes}
-            onChangeText={v => set('notes', v)}
-          />
-        </View>
-
-        <View style={{ height: 160 }} />
-      </ScrollView>
-
-      {/* Sticky footer actions */}
-      <View style={createStyles.footer}>
-        <TouchableOpacity style={createStyles.footerDraftBtn} onPress={handleSaveDraft}>
-          <Text style={createStyles.footerDraftBtnText}>💾 Lưu nháp</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={createStyles.footerSubmitBtn} onPress={handleSubmit}>
-          <Text style={createStyles.footerSubmitBtnText}>⬆️ Gửi duyệt Host</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
-  );
-};
-
 // ===================== PROPS =====================
 interface Props {
   navigation?: any;
@@ -1174,7 +706,9 @@ interface Props {
 // ===================== MAIN (DASHBOARD) =====================
 export const ContractListScreen: React.FC<Props> = () => {
   const navigation = useNavigation<any>();
-  type ViewMode = 'dashboard' | 'detail' | 'create';
+  // Tạo/sửa hợp đồng đã bỏ khỏi app manager (03/08/2026) — hợp đồng sinh ra từ
+  // luồng tiếp nhận nhà (OnboardingScreenV2), màn này chỉ để xem & vận hành.
+  type ViewMode = 'dashboard' | 'detail';
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
   const tab = 'tenant' as const; // Màn này chỉ quản lý HĐ giữa manager ↔ khách thuê.
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -1182,7 +716,6 @@ export const ContractListScreen: React.FC<Props> = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
-  const [editingContract, setEditingContract] = useState<Contract | null>(null);
 
   // Tải HĐ THẬT: gom hợp đồng của tất cả nhà manager phụ trách.
   const load = useCallback(async () => {
@@ -1214,11 +747,8 @@ export const ContractListScreen: React.FC<Props> = () => {
   const tenantStats = useMemo(() => ({
     total: contracts.length,
     active: contracts.filter(c => c.status === 'active').length,
-    approved: contracts.filter(c => c.status === 'approved').length,
     expiring: contracts.filter(c => c.status === 'expiring_soon').length,
-    pending: contracts.filter(c => c.status === 'pending_approval').length,
-    draft: contracts.filter(c => c.status === 'draft').length,
-    rejected: contracts.filter(c => c.status === 'rejected').length,
+    ended: contracts.filter(c => c.status === 'expired' || c.status === 'terminated').length,
   }), [contracts]);
 
   const buildingCards = useMemo(() =>
@@ -1236,13 +766,8 @@ export const ContractListScreen: React.FC<Props> = () => {
 
   const handleAction = (action: string, contract: Contract) => {
     switch (action) {
-      case 'edit':
-        setEditingContract(contract);
-        setViewMode('create');
-        break;
-
       case 'submit':
-        Alert.alert(
+        showAlert(
           'Gửi duyệt hợp đồng',
           `Gửi hợp đồng ${contract.code} đến Host/Admin để xem xét phê duyệt?`,
           [
@@ -1268,7 +793,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                Alert.alert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
+                showAlert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin. Bạn sẽ nhận thông báo khi có phản hồi.');
               },
             },
           ]
@@ -1276,7 +801,7 @@ export const ContractListScreen: React.FC<Props> = () => {
         break;
 
       case 'activate':
-        Alert.alert(
+        showAlert(
           'Kích hoạt hợp đồng',
           `Kích hoạt hợp đồng ${contract.code}?\nOTP xác nhận sẽ được gửi đến ${contract.lesseePhone}.`,
           [
@@ -1303,7 +828,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                Alert.alert('🟢 Hợp đồng đang hiệu lực!', `Hợp đồng ${contract.code} đã được kích hoạt thành công.`);
+                showAlert('🟢 Hợp đồng đang hiệu lực!', `Hợp đồng ${contract.code} đã được kích hoạt thành công.`);
               },
             },
           ]
@@ -1311,7 +836,7 @@ export const ContractListScreen: React.FC<Props> = () => {
         break;
 
       case 'renew':
-        Alert.alert(
+        showAlert(
           'Gia hạn hợp đồng',
           `Gia hạn hợp đồng ${contract.code} thêm 12 tháng?`,
           [
@@ -1337,7 +862,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                Alert.alert('✅ Đã gia hạn!', `Hợp đồng ${contract.code} được gia hạn đến 16/05/2027.`);
+                showAlert('✅ Đã gia hạn!', `Hợp đồng ${contract.code} được gia hạn đến 16/05/2027.`);
               },
             },
           ]
@@ -1345,7 +870,7 @@ export const ContractListScreen: React.FC<Props> = () => {
         break;
 
       case 'terminate':
-        Alert.alert(
+        showAlert(
           'Thanh lý hợp đồng',
           `Thanh lý hợp đồng ${contract.code}?\nThao tác này không thể hoàn tác.`,
           [
@@ -1371,7 +896,7 @@ export const ContractListScreen: React.FC<Props> = () => {
                 ));
                 setSelectedContract(null);
                 setViewMode('dashboard');
-                Alert.alert('✅ Đã thanh lý!', `Hợp đồng ${contract.code} đã được thanh lý.`);
+                showAlert('✅ Đã thanh lý!', `Hợp đồng ${contract.code} đã được thanh lý.`);
               },
             },
           ]
@@ -1379,107 +904,6 @@ export const ContractListScreen: React.FC<Props> = () => {
         break;
     }
   };
-
-  const handleSaveDraft = (form: ContractForm) => {
-    const now = new Date().toLocaleDateString('vi-VN');
-    if (editingContract) {
-      setContracts(prev => prev.map(c =>
-        c.id === editingContract.id
-          ? {
-              ...c,
-              type: form.type,
-              lesseeName: form.lesseeName,
-              lesseeCccd: form.lesseeCccd,
-              lesseePhone: form.lesseePhone,
-              propertyName: form.propertyName,
-              roomCode: form.roomCode || undefined,
-              startDate: form.startDate,
-              endDate: form.endDate,
-              rentAmount: Number(form.rentAmount) || 0,
-              depositAmount: Number(form.depositAmount) || 0,
-              terms: form.terms,
-              notes: form.notes,
-              equipmentList: form.equipmentList,
-              status: 'draft',
-              updatedAt: now,
-            }
-          : c
-      ));
-    } else {
-      const newContract: Contract = {
-        id: `c-new-${Date.now()}`,
-        code: `HD-MT-2026-${String(contracts.length + 1).padStart(3, '0')}`,
-        type: form.type,
-        lessorName: 'Nguyễn Văn Quản',
-        lesseeName: form.lesseeName,
-        lesseeCccd: form.lesseeCccd,
-        lesseePhone: form.lesseePhone,
-        propertyName: form.propertyName,
-        roomCode: form.type === 'room_rental' ? form.roomCode : undefined,
-        startDate: form.startDate,
-        endDate: form.endDate,
-        rentAmount: Number(form.rentAmount) || 0,
-        depositAmount: Number(form.depositAmount) || 0,
-        status: 'draft',
-        equipmentList: form.equipmentList,
-        terms: form.terms,
-        notes: form.notes,
-        approvalHistory: [{ action: 'created', by: 'Nguyễn Văn Quản', at: now }],
-        createdAt: now,
-        updatedAt: now,
-      };
-      setContracts(prev => [newContract, ...prev]);
-    }
-    setEditingContract(null);
-    setViewMode('dashboard');
-    Alert.alert('💾 Đã lưu nháp', 'Hợp đồng đã được lưu vào danh sách nháp.');
-  };
-
-  const handleSubmitNew = (form: ContractForm) => {
-    const now = new Date().toLocaleDateString('vi-VN');
-    const newContract: Contract = {
-      id: `c-new-${Date.now()}`,
-      code: `HD-MT-2026-${String(contracts.length + 1).padStart(3, '0')}`,
-      type: form.type,
-      lessorName: 'Nguyễn Văn Quản',
-      lesseeName: form.lesseeName,
-      lesseeCccd: form.lesseeCccd,
-      lesseePhone: form.lesseePhone,
-      propertyName: form.propertyName,
-      roomCode: form.type === 'room_rental' ? form.roomCode : undefined,
-      startDate: form.startDate,
-      endDate: form.endDate,
-      rentAmount: Number(form.rentAmount) || 0,
-      depositAmount: Number(form.depositAmount) || 0,
-      status: 'pending_approval',
-      submittedBy: 'Nguyễn Văn Quản',
-      submittedAt: now,
-      equipmentList: form.equipmentList,
-      terms: form.terms,
-      notes: form.notes,
-      approvalHistory: [
-        { action: 'created', by: 'Nguyễn Văn Quản', at: now },
-        { action: 'submitted', by: 'Nguyễn Văn Quản', at: now },
-      ],
-      createdAt: now,
-      updatedAt: now,
-    };
-    setContracts(prev => [newContract, ...prev]);
-    setEditingContract(null);
-    setViewMode('dashboard');
-    Alert.alert('✅ Đã gửi duyệt!', 'Hợp đồng đã được gửi đến Host/Admin để xem xét.');
-  };
-
-  if (viewMode === 'create') {
-    return (
-      <CreateContractView
-        initial={editingContract}
-        onBack={() => { setEditingContract(null); setViewMode('dashboard'); }}
-        onSaveDraft={handleSaveDraft}
-        onSubmit={handleSubmitNew}
-      />
-    );
-  }
 
   if (viewMode === 'detail' && selectedContract) {
     return (
@@ -1505,9 +929,6 @@ export const ContractListScreen: React.FC<Props> = () => {
           )}
           <Text style={dashStyles.headerTitle}>Hợp đồng</Text>
         </View>
-        <TouchableOpacity style={dashStyles.createBtn} onPress={() => { setEditingContract(null); setViewMode('create'); }}>
-          <Text style={dashStyles.createBtnText}>+ Tạo HĐ</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Tổng số HĐ với khách thuê */}
@@ -1524,43 +945,28 @@ export const ContractListScreen: React.FC<Props> = () => {
         contentContainerStyle={dashStyles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Stats row */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={dashStyles.statsContent}>
+        {/* Stats row — chỉ giữ trạng thái có thật với HĐ khách thuê.
+            Nháp/Chờ duyệt/Đã duyệt/Bị từ chối thuộc luồng soạn & duyệt HĐ đã bỏ. */}
+        <View style={dashStyles.statsContent}>
           <View style={[dashStyles.statCard, { borderTopColor: Colors.success }]}>
             <Text style={[dashStyles.statNum, { color: Colors.success }]}>{curStats.active}</Text>
             <Text style={dashStyles.statLabel}>Hiệu lực</Text>
-          </View>
-          <View style={[dashStyles.statCard, { borderTopColor: Colors.info }]}>
-            <Text style={[dashStyles.statNum, { color: Colors.info }]}>{curStats.pending}</Text>
-            <Text style={dashStyles.statLabel}>Chờ duyệt</Text>
-          </View>
-          <View style={[dashStyles.statCard, { borderTopColor: Colors.primary }]}>
-            <Text style={[dashStyles.statNum, { color: Colors.primary }]}>{curStats.approved}</Text>
-            <Text style={dashStyles.statLabel}>Đã duyệt</Text>
-          </View>
-          <View style={[dashStyles.statCard, { borderTopColor: Colors.textMuted }]}>
-            <Text style={[dashStyles.statNum, { color: Colors.textMuted }]}>{curStats.draft}</Text>
-            <Text style={dashStyles.statLabel}>Nháp</Text>
           </View>
           <View style={[dashStyles.statCard, { borderTopColor: Colors.warning }]}>
             <Text style={[dashStyles.statNum, { color: Colors.warning }]}>{curStats.expiring}</Text>
             <Text style={dashStyles.statLabel}>Sắp hết hạn</Text>
           </View>
-          <View style={[dashStyles.statCard, { borderTopColor: Colors.error }]}>
-            <Text style={[dashStyles.statNum, { color: Colors.error }]}>{curStats.rejected}</Text>
-            <Text style={dashStyles.statLabel}>Bị từ chối</Text>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.textMuted }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.textMuted }]}>{curStats.ended}</Text>
+            <Text style={dashStyles.statLabel}>Đã kết thúc</Text>
           </View>
-        </ScrollView>
+        </View>
 
         {/* Alert banner */}
-        {(tenantStats.expiring > 0 || tenantStats.pending > 0 || tenantStats.rejected > 0) && (
+        {tenantStats.expiring > 0 && (
           <View style={dashStyles.alertBanner}>
             <Text style={dashStyles.alertText}>
-              {[
-                tenantStats.expiring > 0 && `${tenantStats.expiring} sắp hết hạn`,
-                tenantStats.pending > 0 && `${tenantStats.pending} chờ duyệt`,
-                tenantStats.rejected > 0 && `${tenantStats.rejected} bị từ chối`,
-              ].filter(Boolean).join(' · ')}
+              {tenantStats.expiring} hợp đồng sắp hết hạn — liên hệ khách để gia hạn.
             </Text>
           </View>
         )}
@@ -1671,11 +1077,6 @@ const styles = StyleSheet.create({
   backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   listTitle: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   listSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  createBtn: {
-    backgroundColor: Colors.primary, paddingHorizontal: Spacing.md,
-    paddingVertical: 10, borderRadius: BorderRadius.lg, ...Shadow.sm,
-  },
-  createBtnText: { color: Colors.white, fontWeight: '700', fontSize: 14 },
 
 statsScroll: {
   flexGrow: 0,
@@ -1820,11 +1221,6 @@ const dashStyles = StyleSheet.create({
   },
   backBtnText: { fontSize: 24, lineHeight: 26, color: Colors.primary, fontWeight: '900' },
   headerTitle: { fontSize: 20, fontWeight: '900', color: Colors.textPrimary },
-  createBtn: {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.md, paddingVertical: 8,
-  },
-  createBtnText: { color: Colors.white, fontWeight: '800', fontSize: 12 },
 
   tabRow: {
     flexDirection: 'row', gap: Spacing.sm,
@@ -1841,12 +1237,13 @@ const dashStyles = StyleSheet.create({
   tabPillTextActive: { color: Colors.primary },
 
   scrollContent: { paddingBottom: Spacing.lg },
+  // 3 thẻ cố định, chia đều thay vì cuộn ngang như lúc còn 6 trạng thái.
   statsContent: {
-    paddingHorizontal: Spacing.base, paddingTop: Spacing.sm, paddingBottom: Spacing.md,
-    gap: Spacing.sm,
+    flexDirection: 'row', paddingHorizontal: Spacing.base,
+    paddingTop: Spacing.sm, paddingBottom: Spacing.md, gap: Spacing.sm,
   },
   statCard: {
-    width: 86, minHeight: 58, backgroundColor: Colors.white,
+    flex: 1, minHeight: 58, backgroundColor: Colors.white,
     borderRadius: BorderRadius.md, borderTopWidth: 3,
     borderWidth: 1, borderColor: Colors.border,
     paddingVertical: 7, alignItems: 'center', justifyContent: 'center',
@@ -2043,147 +1440,3 @@ const detailStyles = StyleSheet.create({
 });
 
 // ===================== CREATE STYLES =====================
-const createStyles = StyleSheet.create({
-  topBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
-    borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white,
-  },
-  backBtn: { color: Colors.error, fontWeight: '600', fontSize: 15, width: 48 },
-  topBarTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  saveDraftBtn: { color: Colors.primary, fontWeight: '700', fontSize: 14, width: 72, textAlign: 'right' },
-
-  scroll: { flex: 1 },
-
-  section: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    margin: Spacing.lg, marginBottom: 0, padding: Spacing.lg, ...Shadow.sm,
-  },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: Spacing.md },
-  sectionHeaderRow: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', marginBottom: Spacing.md,
-  },
-  sectionIcon: { fontSize: 18 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
-
-  typeRow: { flexDirection: 'row', gap: Spacing.md },
-  typeBtn: {
-    flex: 1, padding: Spacing.md, borderRadius: BorderRadius.lg,
-    borderWidth: 2, borderColor: Colors.border, alignItems: 'center',
-    backgroundColor: Colors.background,
-  },
-  typeBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  typeBtnIcon: { fontSize: 28, marginBottom: 6 },
-  typeBtnLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center' },
-  typeBtnLabelActive: { color: Colors.primary },
-  typeBtnSub: { fontSize: 11, color: Colors.textMuted, marginTop: 3, textAlign: 'center' },
-
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, marginBottom: 5, marginTop: 10 },
-
-  input: {
-    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: 12,
-    fontSize: 14, color: Colors.textPrimary,
-  },
-  dropdownBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dropdownPlaceholder: { fontSize: 14, color: Colors.textMuted, flex: 1 },
-  dropdownVal: { fontSize: 14, color: Colors.textPrimary, fontWeight: '500', flex: 1 },
-  dropdownArrow: { fontSize: 11, color: Colors.textMuted, marginLeft: Spacing.sm },
-  dropdownDisabled: { opacity: 0.5 },
-  dropdownList: {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    backgroundColor: Colors.white, marginBottom: Spacing.sm, overflow: 'hidden', ...Shadow.sm,
-  },
-  dropdownItem: {
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
-    borderBottomWidth: 1, borderBottomColor: Colors.divider,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-  },
-  dropdownItemActive: { backgroundColor: Colors.primaryBg },
-  dropdownItemText: { fontSize: 14, color: Colors.textPrimary },
-  dropdownItemSub: { fontSize: 12, color: Colors.textMuted },
-  textArea: { minHeight: 120, textAlignVertical: 'top', paddingTop: Spacing.md },
-  formatHint: { fontSize: 12, color: Colors.primary, fontWeight: '600', marginTop: 4 },
-
-  durationRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  durationChip: {
-    flex: 1, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full,
-    borderWidth: 1.5, borderColor: Colors.border, alignItems: 'center',
-    backgroundColor: Colors.white,
-  },
-  durationChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  durationChipText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  durationChipTextActive: { color: Colors.white },
-
-  dateRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 0 },
-  dateSep: { width: 28, alignItems: 'center', paddingBottom: 14 },
-  dateSepText: { color: Colors.textMuted, fontSize: 18 },
-
-  uploadBtn: {
-    marginTop: Spacing.md, borderWidth: 1.5, borderColor: Colors.border,
-    borderStyle: 'dashed', borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md, alignItems: 'center',
-  },
-  uploadBtnText: { fontSize: 14, color: Colors.textSecondary, fontWeight: '500' },
-
-  addEqBtn: {
-    backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.md,
-    paddingVertical: 6, borderRadius: BorderRadius.full,
-  },
-  addEqBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
-
-  emptyEqText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingVertical: Spacing.md },
-
-  hostBadge: { backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
-  hostBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
-  emptyEqBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.md, padding: Spacing.base, alignItems: 'center' },
-  eqItemIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center', marginRight: Spacing.sm },
-  eqConditionBadge: { backgroundColor: Colors.successLight, paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
-  eqConditionText: { fontSize: 10, fontWeight: '700', color: Colors.success },
-
-  eqItem: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
-    padding: Spacing.md, marginBottom: Spacing.sm,
-  },
-  eqItemName: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  eqItemSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  eqRemoveBtn: { fontSize: 16, color: Colors.error, paddingLeft: Spacing.sm },
-
-  eqForm: {
-    backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border,
-    marginTop: Spacing.sm,
-  },
-  eqFormTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  eqFormRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  eqFormActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
-  eqCancelBtn: {
-    flex: 1, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md,
-    borderWidth: 1, borderColor: Colors.border, alignItems: 'center',
-  },
-  eqCancelBtnText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  eqConfirmBtn: {
-    flex: 2, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primary, alignItems: 'center',
-  },
-  eqConfirmBtnText: { fontSize: 13, fontWeight: '700', color: Colors.white },
-
-  footer: {
-    flexDirection: 'row', gap: Spacing.md,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.base,
-    backgroundColor: Colors.white, borderTopWidth: 1, borderColor: Colors.divider,
-    ...Shadow.md,
-  },
-  footerDraftBtn: {
-    flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
-    borderWidth: 1.5, borderColor: Colors.primary, alignItems: 'center',
-  },
-  footerDraftBtnText: { fontSize: 15, fontWeight: '700', color: Colors.primary },
-  footerSubmitBtn: {
-    flex: 2, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.primary, alignItems: 'center', ...Shadow.sm,
-  },
-  footerSubmitBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
-});

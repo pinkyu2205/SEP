@@ -1,40 +1,38 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
-  ActivityIndicator, RefreshControl, Modal, TextInput,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { formatDate } from '@/utils';
+import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
+import { formatDate, showAlert } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 /**
- * Manager xử lý YÊU CẦU TRẢ PHÒNG của tenant — GET/approve/reject/complete
- * /api/v1/checkout-requests (trước đây tenant gửi vào store mock, manager không có
- * màn nào để duyệt → yêu cầu rơi vào hư không; xem plan cải tiến quy trình).
- * Complete = BE terminate HĐ + phòng về AVAILABLE + restore thiết bị — hành động
- * không đảo ngược nên có confirm 2 lớp.
+ * Manager xử lý YÊU CẦU TRẢ PHÒNG của tenant — /api/v1/checkout-requests.
+ *
+ * Màn này là TRẠM ĐIỀU PHỐI: mỗi hồ sơ hiện việc kế tiếp phải làm và nút dẫn thẳng
+ * tới màn tương ứng (biên bản kiểm tra / quyết toán). Việc thanh lý HĐ nằm ở màn
+ * quyết toán chứ KHÔNG đặt ở đây — complete terminate hợp đồng ngay lập tức nên chỉ
+ * được mở sau khi tiền nong đã xong (xem docs/PLAN-checkout-flow-2026-08-03.md).
  */
-
-const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
-  PENDING: { label: 'Chờ duyệt', color: '#D97706', bg: '#FFFBEB' },
-  APPROVED: { label: 'Đã duyệt — chờ trả phòng', color: '#0891B2', bg: '#ECFEFF' },
-  REJECTED: { label: 'Đã từ chối', color: '#DC2626', bg: '#FEF2F2' },
-  COMPLETED: { label: 'Đã hoàn tất', color: '#059669', bg: '#ECFDF5' },
-  CANCELLED: { label: 'Khách đã hủy', color: '#64748B', bg: '#F1F5F9' },
-};
-const FALLBACK_META = { label: 'Không rõ', color: '#64748B', bg: '#F1F5F9' };
 
 const FILTERS: { key: string | null; label: string }[] = [
   { key: null, label: 'Tất cả' },
   { key: 'PENDING', label: 'Chờ duyệt' },
-  { key: 'APPROVED', label: 'Đã duyệt' },
+  { key: 'ACTIVE', label: 'Đang xử lý' },
   { key: 'COMPLETED', label: 'Hoàn tất' },
 ];
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+/** "Đang xử lý" gom mọi trạng thái giữa chừng để manager không phải bấm từng chip. */
+const IN_PROGRESS = ['APPROVED', 'INSPECTING', 'WAITING_TENANT', 'DISPUTED', 'SETTLING'];
+
+const matchFilter = (status: string, filter: string | null) => {
+  if (!filter) return true;
+  if (filter === 'ACTIVE') return IN_PROGRESS.includes(status);
+  return status === filter;
+};
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.message || err?.message || fallback;
 
@@ -47,10 +45,10 @@ export const CheckoutRequestsScreen: React.FC = () => {
   const [filter, setFilter] = useState<string | null>('PENDING');
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  // Modal nhập liệu: approve (note tuỳ chọn) / reject (lý do bắt buộc) / complete (ngày + note)
-  const [action, setAction] = useState<{ type: 'approve' | 'reject' | 'complete'; req: CheckoutRequestDto } | null>(null);
+  // Modal nhập liệu: approve (note tuỳ chọn) / reject (lý do bắt buộc).
+  // Hoàn tất/thanh lý đã chuyển sang màn Quyết toán.
+  const [action, setAction] = useState<{ type: 'approve' | 'reject'; req: CheckoutRequestDto } | null>(null);
   const [inputNote, setInputNote] = useState('');
-  const [inputDate, setInputDate] = useState(todayIso());
 
   const load = useCallback(async () => {
     try {
@@ -68,12 +66,11 @@ export const CheckoutRequestsScreen: React.FC = () => {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const filtered = filter ? list.filter((r) => (r.status || '').toUpperCase() === filter) : list;
+  const filtered = list.filter((r) => matchFilter((r.status || '').toUpperCase(), filter));
   const pendingCount = list.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length;
 
-  const openAction = (type: 'approve' | 'reject' | 'complete', req: CheckoutRequestDto) => {
+  const openAction = (type: 'approve' | 'reject', req: CheckoutRequestDto) => {
     setInputNote('');
-    setInputDate(req.expectedMoveOutDate || todayIso());
     setAction({ type, req });
   };
 
@@ -81,30 +78,21 @@ export const CheckoutRequestsScreen: React.FC = () => {
     if (!action) return;
     const { type, req } = action;
     if (type === 'reject' && !inputNote.trim()) {
-      return Alert.alert('Thiếu lý do', 'Nhập lý do từ chối để khách hiểu và điều chỉnh.');
-    }
-    if (type === 'complete' && !/^\d{4}-\d{2}-\d{2}$/.test(inputDate.trim())) {
-      return Alert.alert('Ngày không hợp lệ', 'Nhập ngày trả phòng thực tế dạng YYYY-MM-DD.');
+      return showAlert('Thiếu lý do', 'Nhập lý do từ chối để khách hiểu và điều chỉnh.');
     }
     setBusyId(req.id);
     try {
       if (type === 'approve') {
         await checkoutService.approve(req.id, inputNote.trim() || undefined);
-        Alert.alert('Đã duyệt', 'Khách sẽ nhận thông báo — đến ngày hẹn hãy kiểm tra phòng rồi bấm "Hoàn tất trả phòng".');
-      } else if (type === 'reject') {
-        await checkoutService.reject(req.id, inputNote.trim());
-        Alert.alert('Đã từ chối', 'Khách sẽ nhận thông báo kèm lý do.');
+        showAlert('Đã duyệt', 'Khách sẽ nhận thông báo. Đến ngày hẹn, tới phòng và bấm "Lập biên bản kiểm tra".');
       } else {
-        await checkoutService.complete(req.id, {
-          actualMoveOutDate: inputDate.trim(),
-          note: inputNote.trim() || undefined,
-        });
-        Alert.alert('Hoàn tất', 'Hợp đồng đã thanh lý, phòng trở về trạng thái trống.');
+        await checkoutService.reject(req.id, inputNote.trim());
+        showAlert('Đã từ chối', 'Khách sẽ nhận thông báo kèm lý do.');
       }
       setAction(null);
       load();
     } catch (err: any) {
-      Alert.alert('Lỗi', readErr(err, 'Không xử lý được yêu cầu.'));
+      showAlert('Lỗi', readErr(err, 'Không xử lý được yêu cầu.'));
     } finally {
       setBusyId(null);
     }
@@ -113,8 +101,13 @@ export const CheckoutRequestsScreen: React.FC = () => {
   const ACTION_TITLE: Record<string, string> = {
     approve: 'Duyệt yêu cầu trả phòng',
     reject: 'Từ chối yêu cầu',
-    complete: 'Hoàn tất trả phòng (thanh lý HĐ)',
   };
+
+  const goInspection = (r: CheckoutRequestDto) =>
+    navigation.navigate('CheckoutInspection', { checkoutId: r.id });
+
+  const goSettlement = (r: CheckoutRequestDto) =>
+    navigation.navigate('CheckoutSettlement', { checkoutId: r.id });
 
   return (
     <SafeAreaView style={s.safe}>
@@ -167,7 +160,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
 
           {filtered.map((r) => {
             const status = (r.status || '').toUpperCase();
-            const meta = STATUS_META[status] ?? FALLBACK_META;
+            const meta = checkoutMeta(status);
             const busy = busyId === r.id;
             return (
               <View key={r.id} style={s.card}>
@@ -193,8 +186,16 @@ export const CheckoutRequestsScreen: React.FC = () => {
                   {!!r.note && <Text style={s.cardNote}>{r.note}</Text>}
                   {!!r.rejectReason && <Text style={[s.cardNote, { color: '#DC2626' }]}>Lý do từ chối: {r.rejectReason}</Text>}
                   {!!r.managerNote && <Text style={s.cardNote}>Ghi chú QL: {r.managerNote}</Text>}
+                  {!!r.disputeReason && (
+                    <Text style={[s.cardNote, { color: '#DC2626' }]}>
+                      Khách phản đối: {r.disputeReason}
+                    </Text>
+                  )}
                   {!!r.createdAt && <Text style={s.cardTime}>Gửi lúc {formatDate(r.createdAt)}</Text>}
                 </View>
+
+                {/* Việc kế tiếp phải làm — để manager không phải nhớ luồng */}
+                {!!meta.managerHint && <Text style={s.hint}>→ {meta.managerHint}</Text>}
 
                 {status === 'PENDING' && (
                   <View style={s.actionRow}>
@@ -214,16 +215,46 @@ export const CheckoutRequestsScreen: React.FC = () => {
                     </TouchableOpacity>
                   </View>
                 )}
+
                 {status === 'APPROVED' && (
                   <View style={s.actionRow}>
+                    <TouchableOpacity style={[s.actionBtn, s.actionApprove]} onPress={() => goInspection(r)}>
+                      <Text style={s.actionApproveText}>📋 Lập biên bản kiểm tra</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {status === 'INSPECTING' && (
+                  <View style={s.actionRow}>
+                    <TouchableOpacity style={[s.actionBtn, s.actionGhost]} onPress={() => goInspection(r)}>
+                      <Text style={s.actionGhostText}>Sửa biên bản</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.actionBtn, s.actionApprove]} onPress={() => goSettlement(r)}>
+                      <Text style={s.actionApproveText}>💰 Quyết toán</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {(status === 'WAITING_TENANT' || status === 'SETTLING') && (
+                  <View style={s.actionRow}>
                     <TouchableOpacity
-                      style={[s.actionBtn, s.actionComplete, busy && s.actionDisabled]}
-                      disabled={busy}
-                      onPress={() => openAction('complete', r)}
+                      style={[s.actionBtn, status === 'SETTLING' ? s.actionComplete : s.actionGhost]}
+                      onPress={() => goSettlement(r)}
                     >
-                      <Text style={s.actionApproveText}>
-                        {busy ? 'Đang xử lý...' : '🏁 Hoàn tất trả phòng (thanh lý HĐ)'}
+                      <Text style={status === 'SETTLING' ? s.actionApproveText : s.actionGhostText}>
+                        {status === 'SETTLING' ? '💰 Hoàn cọc & hoàn tất' : 'Xem bảng quyết toán'}
                       </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {status === 'DISPUTED' && (
+                  <View style={s.actionRow}>
+                    <TouchableOpacity style={[s.actionBtn, s.actionReject]} onPress={() => goInspection(r)}>
+                      <Text style={s.actionRejectText}>Sửa biên bản</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.actionBtn, s.actionApprove]} onPress={() => goSettlement(r)}>
+                      <Text style={s.actionApproveText}>Gửi lại bảng tiền</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -242,23 +273,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
             {action && (
               <Text style={s.modalDesc}>
                 {action.req.tenantFullName || 'Khách'} — HĐ {action.req.contractCode || `#${action.req.contractId}`}
-                {action.type === 'complete'
-                  ? '\n⚠️ Hành động này THANH LÝ hợp đồng: phòng về trạng thái trống, thiết bị được khôi phục. Không đảo ngược được.'
-                  : ''}
               </Text>
-            )}
-
-            {action?.type === 'complete' && (
-              <>
-                <Text style={s.modalLabel}>Ngày trả phòng thực tế</Text>
-                <TextInput
-                  style={s.modalInput}
-                  value={inputDate}
-                  onChangeText={setInputDate}
-                  placeholder="YYYY-MM-DD"
-                  keyboardType="numbers-and-punctuation"
-                />
-              </>
             )}
 
             <Text style={s.modalLabel}>
@@ -290,10 +305,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                 disabled={busyId != null}
               >
                 <Text style={s.modalSubmitText}>
-                  {busyId != null ? 'Đang gửi...'
-                    : action?.type === 'approve' ? 'Duyệt'
-                    : action?.type === 'reject' ? 'Từ chối'
-                    : 'Hoàn tất & thanh lý'}
+                  {busyId != null ? 'Đang gửi...' : action?.type === 'approve' ? 'Duyệt' : 'Từ chối'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -359,6 +371,7 @@ const s = StyleSheet.create({
     padding: Spacing.sm, marginTop: 4,
   },
   cardTime: { fontSize: 11, color: Colors.textMuted, marginTop: 4 },
+  hint: { fontSize: 12, fontWeight: '600', color: Colors.primary, marginTop: Spacing.sm },
 
   actionRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
   actionBtn: {
@@ -369,6 +382,8 @@ const s = StyleSheet.create({
   actionApproveText: { fontSize: 13, fontWeight: '700', color: Colors.white },
   actionReject: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
   actionRejectText: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  actionGhost: { backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
+  actionGhostText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
   actionDisabled: { opacity: 0.6 },
 
   modalOverlay: {

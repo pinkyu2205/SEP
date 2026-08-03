@@ -1,44 +1,57 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
-  ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { formatDate } from '@/utils';
+import {
+  Colors, Spacing, BorderRadius, Shadow, checkoutMeta, CHECKOUT_AUTO_ACCEPT_DAYS,
+} from '@/constants';
+import { formatDate, showAlert } from '@/utils';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 /**
- * Tenant theo dõi TIẾN TRÌNH TRẢ PHÒNG — dữ liệu thật GET /tenant/me/checkout-requests
- * (trước đây màn này chạy trên checkoutStore mock + nút "DEMO tiến bước").
- * Luồng BE: PENDING → APPROVED → COMPLETED (manager complete = terminate HĐ, trả
- * phòng/thiết bị); PENDING → REJECTED; tenant tự hủy khi còn PENDING.
+ * Tenant theo dõi TIẾN TRÌNH TRẢ PHÒNG — dữ liệu thật GET /tenant/me/checkout-requests.
+ *
+ * Luồng đầy đủ (docs/PLAN-checkout-flow-2026-08-03.md):
+ *   PENDING → APPROVED → INSPECTING → WAITING_TENANT → SETTLING → COMPLETED
+ * Ở WAITING_TENANT khách phải ĐỒNG Ý hoặc KHÔNG ĐỒNG Ý với bảng quyết toán —
+ * đây là đối trọng duy nhất của khách trước khi bị trừ tiền cọc.
  */
 
 const TIMELINE_STEPS = [
-  { label: 'Gửi yêu cầu', icon: '📤', desc: 'Yêu cầu trả phòng đã được ghi nhận' },
-  { label: 'Quản lý xem xét', icon: '⏳', desc: 'Quản lý đang xem xét và phản hồi' },
-  { label: 'Đã duyệt — hẹn trả phòng', icon: '📅', desc: 'Chờ đến ngày bàn giao, kiểm tra hiện trạng & quyết toán cọc' },
-  { label: 'Hoàn tất trả phòng', icon: '🎉', desc: 'Hợp đồng kết thúc, phòng đã bàn giao' },
+  { label: 'Gửi yêu cầu', desc: 'Yêu cầu trả phòng đã được ghi nhận' },
+  { label: 'Quản lý duyệt', desc: 'Quản lý xem xét và hẹn ngày kiểm tra phòng' },
+  { label: 'Kiểm tra phòng', desc: 'Quản lý chụp ảnh hiện trạng, đối chiếu thiết bị, chốt điện/nước' },
+  { label: 'Bạn xác nhận quyết toán', desc: 'Xem bảng tiền cọc và xác nhận hoặc phản hồi nếu chưa đúng' },
+  { label: 'Hoàn cọc & kết thúc', desc: 'Nhận lại cọc (hoặc đóng thêm), hợp đồng kết thúc' },
 ];
 
-// Map status BE -> bước hiện tại trên timeline (index của TIMELINE_STEPS).
+// Map status BE -> bước ĐANG diễn ra (index của TIMELINE_STEPS).
 const STATUS_TO_STEP: Record<string, number> = {
   PENDING: 1,
   APPROVED: 2,
-  COMPLETED: 4, // vượt quá bước cuối = tất cả done
+  INSPECTING: 2,
+  WAITING_TENANT: 3,
+  DISPUTED: 3,
+  SETTLING: 4,
+  COMPLETED: 5, // vượt quá bước cuối = tất cả done
 };
 
-const STATUS_META: Record<string, { label: string; color: string }> = {
-  PENDING: { label: 'Chờ quản lý duyệt', color: '#D97706' },
-  APPROVED: { label: 'Đã duyệt — chờ trả phòng', color: '#0891B2' },
-  REJECTED: { label: 'Bị từ chối', color: '#DC2626' },
-  COMPLETED: { label: 'Đã hoàn tất', color: '#059669' },
-  CANCELLED: { label: 'Đã hủy', color: '#64748B' },
+/** Vài trạng thái cần đổi cách xưng hô khi hiển thị cho chính khách. */
+const TENANT_LABEL: Record<string, string> = {
+  PENDING: 'Chờ quản lý duyệt',
+  REJECTED: 'Bị từ chối',
+  DISPUTED: 'Bạn đã phản hồi — chờ xử lý',
+  CANCELLED: 'Đã hủy',
 };
-const FALLBACK_META = { label: 'Không rõ', color: '#64748B' };
+const tenantMeta = (status?: string) => {
+  const m = checkoutMeta(status);
+  return { ...m, label: TENANT_LABEL[(status || '').toUpperCase()] ?? m.label };
+};
+
+const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 const SectionCard: React.FC<{ title: string; children: React.ReactNode; noPad?: boolean }> = ({ title, children, noPad }) => (
   <View style={styles.sectionCard}>
@@ -64,6 +77,10 @@ export const CheckoutDetailScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Phản hồi bảng quyết toán
+  const [busy, setBusy] = useState(false);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -73,7 +90,7 @@ export const CheckoutDetailScreen: React.FC = () => {
       setRequests(list);
       setSelectedId((prev) => prev ?? list[0]?.id ?? null);
     } catch {
-      Alert.alert('Lỗi', 'Không tải được yêu cầu trả phòng.');
+      showAlert('Lỗi', 'Không tải được yêu cầu trả phòng.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -86,7 +103,7 @@ export const CheckoutDetailScreen: React.FC = () => {
 
   const handleCancel = () => {
     if (!checkout) return;
-    Alert.alert('Hủy yêu cầu trả phòng?', 'Bạn có thể gửi lại yêu cầu mới sau nếu đổi ý.', [
+    showAlert('Hủy yêu cầu trả phòng?', 'Bạn có thể gửi lại yêu cầu mới sau nếu đổi ý.', [
       { text: 'Không' },
       {
         text: 'Hủy yêu cầu',
@@ -95,16 +112,61 @@ export const CheckoutDetailScreen: React.FC = () => {
           setCancelling(true);
           try {
             await realTenantSelfService.cancelCheckoutRequest(checkout.id);
-            Alert.alert('Đã hủy', 'Yêu cầu trả phòng đã được hủy.');
+            showAlert('Đã hủy', 'Yêu cầu trả phòng đã được hủy.');
             load();
           } catch (err: any) {
-            Alert.alert('Lỗi', err?.response?.data?.message || 'Không hủy được yêu cầu.');
+            showAlert('Lỗi', err?.response?.data?.message || 'Không hủy được yêu cầu.');
           } finally {
             setCancelling(false);
           }
         },
       },
     ]);
+  };
+
+  const handleAccept = () => {
+    if (!checkout) return;
+    showAlert(
+      'Đồng ý với bảng quyết toán?',
+      'Sau khi đồng ý, quản lý sẽ hoàn cọc (hoặc bạn đóng thêm phần còn thiếu) và hợp đồng kết thúc.',
+      [
+        { text: 'Để xem lại' },
+        {
+          text: 'Đồng ý',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await realTenantSelfService.acceptSettlement(checkout.id);
+              showAlert('Đã xác nhận', 'Cảm ơn bạn. Quản lý sẽ tiến hành hoàn cọc.');
+              load();
+            } catch (err: any) {
+              showAlert('Lỗi', err?.response?.data?.message || 'Không gửi được xác nhận.');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const submitDispute = async () => {
+    if (!checkout) return;
+    if (!disputeReason.trim()) {
+      return showAlert('Thiếu lý do', 'Ghi rõ khoản nào bạn thấy chưa đúng để quản lý xem lại.');
+    }
+    setBusy(true);
+    try {
+      await realTenantSelfService.disputeSettlement(checkout.id, { reason: disputeReason.trim() });
+      setDisputeOpen(false);
+      setDisputeReason('');
+      showAlert('Đã gửi phản hồi', 'Chủ nhà và quản lý đã được thông báo để xem lại biên bản.');
+      load();
+    } catch (err: any) {
+      showAlert('Lỗi', err?.response?.data?.message || 'Không gửi được phản hồi.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (loading) {
@@ -143,11 +205,13 @@ export const CheckoutDetailScreen: React.FC = () => {
   }
 
   const status = (checkout.status || '').toUpperCase();
-  const meta = STATUS_META[status] ?? FALLBACK_META;
+  const meta = tenantMeta(status);
   const isRejected = status === 'REJECTED';
   const isCancelled = status === 'CANCELLED';
   const isCompleted = status === 'COMPLETED';
   const currentStep = STATUS_TO_STEP[status] ?? 1;
+  const inspection = checkout.inspection;
+  const settlement = checkout.settlement;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -176,7 +240,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                   onPress={() => setSelectedId(r.id)}
                 >
                   <Text style={[styles.switchChipText, r.id === checkout.id && styles.switchChipTextActive]}>
-                    #{r.id} · {(STATUS_META[(r.status || '').toUpperCase()] ?? FALLBACK_META).label}
+                    #{r.id} · {tenantMeta(r.status).label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -294,6 +358,137 @@ export const CheckoutDetailScreen: React.FC = () => {
           </SectionCard>
         )}
 
+        {/* Biên bản kiểm tra phòng */}
+        {!!inspection && (
+          <SectionCard title="📷 Biên bản kiểm tra phòng">
+            {!!inspection.photos?.length && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: Spacing.sm }}>
+                <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
+                  {inspection.photos.map((url, i) => (
+                    <Image key={`${url}-${i}`} source={{ uri: url }} style={styles.inspPhoto} />
+                  ))}
+                </View>
+              </ScrollView>
+            )}
+            {inspection.electricityFinalReading != null && (
+              <InfoRow label="Chỉ số điện cuối" value={`${inspection.electricityFinalReading}`} />
+            )}
+            {inspection.waterFinalReading != null && (
+              <InfoRow label="Chỉ số nước cuối" value={`${inspection.waterFinalReading}`} />
+            )}
+            {!!inspection.roomConditionNote && (
+              <Text style={styles.managerNote}>{inspection.roomConditionNote}</Text>
+            )}
+            {!!inspection.damages?.length && (
+              <View style={{ marginTop: Spacing.sm }}>
+                <Text style={styles.subTitle}>Hư hỏng ghi nhận</Text>
+                {inspection.damages.map((d, i) => (
+                  <View key={i} style={styles.damageRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.damageLabel}>{d.label}</Text>
+                      {!!d.note && <Text style={styles.damageNote}>{d.note}</Text>}
+                    </View>
+                    <Text style={styles.damageAmount}>{money(d.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </SectionCard>
+        )}
+
+        {/* Bảng quyết toán cọc */}
+        {!!settlement && (
+          <SectionCard title="💰 Quyết toán tiền cọc">
+            <View style={styles.settleRow}>
+              <Text style={styles.settleLabel}>Tiền cọc</Text>
+              <Text style={styles.settleValueBold}>{money(settlement.depositAmount)}</Text>
+            </View>
+            {(settlement.unpaidInvoices ?? []).map(inv => (
+              <View key={inv.id} style={styles.settleRow}>
+                <Text style={styles.settleLabel}>− Hoá đơn {inv.code || `#${inv.id}`}</Text>
+                <Text style={styles.settleValueNeg}>−{money(inv.amount)}</Text>
+              </View>
+            ))}
+            {!settlement.unpaidInvoices?.length && settlement.unpaidTotal > 0 && (
+              <View style={styles.settleRow}>
+                <Text style={styles.settleLabel}>− Hoá đơn chưa thanh toán</Text>
+                <Text style={styles.settleValueNeg}>−{money(settlement.unpaidTotal)}</Text>
+              </View>
+            )}
+            {settlement.damageTotal > 0 && (
+              <View style={styles.settleRow}>
+                <Text style={styles.settleLabel}>− Hư hỏng</Text>
+                <Text style={styles.settleValueNeg}>−{money(settlement.damageTotal)}</Text>
+              </View>
+            )}
+            {(settlement.adjustments ?? []).map((a, i) => (
+              <View key={`adj-${i}`} style={styles.settleRow}>
+                <Text style={styles.settleLabel}>{a.amount < 0 ? '− ' : '+ '}{a.label}</Text>
+                <Text style={a.amount < 0 ? styles.settleValueNeg : styles.settleValue}>
+                  {a.amount < 0 ? '−' : '+'}{money(Math.abs(a.amount))}
+                </Text>
+              </View>
+            ))}
+
+            <View style={styles.settleDivider} />
+            <View style={styles.settleRow}>
+              <Text style={styles.settleTotalLabel}>
+                {settlement.refundAmount > 0 ? 'BẠN ĐƯỢC NHẬN LẠI'
+                  : settlement.extraChargeAmount > 0 ? 'BẠN CẦN ĐÓNG THÊM' : 'KHÔNG PHÁT SINH'}
+              </Text>
+              <Text style={[
+                styles.settleTotalValue,
+                { color: settlement.extraChargeAmount > 0 ? Colors.error : Colors.success },
+              ]}>
+                {money(settlement.refundAmount > 0 ? settlement.refundAmount : settlement.extraChargeAmount)}
+              </Text>
+            </View>
+
+            {!!settlement.refundedAt && (
+              <Text style={styles.refundedNote}>
+                ✓ Quản lý đã hoàn cọc ngày {formatDate(settlement.refundedAt)}
+              </Text>
+            )}
+          </SectionCard>
+        )}
+
+        {/* Khách xác nhận bảng quyết toán */}
+        {status === 'WAITING_TENANT' && (
+          <View style={styles.confirmBox}>
+            <Text style={styles.confirmTitle}>Bạn có đồng ý với bảng quyết toán trên?</Text>
+            <Text style={styles.confirmDesc}>
+              {checkout.tenantResponseDeadline
+                ? `Hạn phản hồi: ${formatDate(checkout.tenantResponseDeadline)}. `
+                : ''}
+              Quá {CHECKOUT_AUTO_ACCEPT_DAYS} ngày không phản hồi, hệ thống xem như bạn đồng ý.
+            </Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={[styles.disputeBtn, busy && { opacity: 0.6 }]}
+                onPress={() => setDisputeOpen(true)}
+                disabled={busy}
+              >
+                <Text style={styles.disputeBtnText}>Không đồng ý</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.acceptBtn, busy && { opacity: 0.6 }]}
+                onPress={handleAccept}
+                disabled={busy}
+              >
+                <Text style={styles.acceptBtnText}>✓ Đồng ý</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {status === 'DISPUTED' && !!checkout.disputeReason && (
+          <View style={[styles.banner, { backgroundColor: Colors.warningLight }]}>
+            <Text style={styles.bannerIcon}>⏳</Text>
+            <Text style={[styles.bannerTitle, { color: '#B45309' }]}>Đang xử lý phản hồi của bạn</Text>
+            <Text style={styles.bannerDesc}>"{checkout.disputeReason}"</Text>
+          </View>
+        )}
+
         {/* Actions */}
         {status === 'PENDING' && (
           <TouchableOpacity
@@ -317,6 +512,38 @@ export const CheckoutDetailScreen: React.FC = () => {
 
         <View style={{ height: 48 }} />
       </ScrollView>
+
+      {/* Modal: khách nêu lý do không đồng ý bảng quyết toán */}
+      <Modal visible={disputeOpen} transparent animationType="fade" onRequestClose={() => setDisputeOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Khoản nào chưa đúng?</Text>
+            <Text style={styles.modalDesc}>
+              Ghi rõ khoản bạn thấy chưa hợp lý. Chủ nhà và quản lý sẽ nhận được phản hồi này để xem lại biên bản.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              multiline
+              placeholder="VD: Vết ố trên tường đã có từ lúc tôi nhận phòng, có trong ảnh bàn giao..."
+              placeholderTextColor={Colors.textMuted}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setDisputeOpen(false)} disabled={busy}>
+                <Text style={styles.modalCancelText}>Đóng</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmit, busy && { opacity: 0.6 }]}
+                onPress={submitDispute}
+                disabled={busy}
+              >
+                <Text style={styles.modalSubmitText}>{busy ? 'Đang gửi...' : 'Gửi phản hồi'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -421,4 +648,71 @@ const styles = StyleSheet.create({
     alignItems: 'center', borderWidth: 1.5, borderColor: Colors.error,
   },
   cancelBtnText: { fontSize: 15, fontWeight: '700', color: Colors.error },
+
+  // ── Biên bản kiểm tra ──
+  inspPhoto: { width: 110, height: 110, borderRadius: BorderRadius.md, backgroundColor: Colors.divider },
+  subTitle: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, marginBottom: 4 },
+  damageRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
+    paddingVertical: 6, borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  damageLabel: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  damageNote: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  damageAmount: { fontSize: 13, fontWeight: '700', color: Colors.error },
+
+  // ── Bảng quyết toán ──
+  settleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.sm, paddingVertical: 5 },
+  settleLabel: { flex: 1, fontSize: 13, color: Colors.textSecondary },
+  settleValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  settleValueBold: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  settleValueNeg: { fontSize: 13, fontWeight: '600', color: Colors.error },
+  settleDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.sm },
+  settleTotalLabel: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.4 },
+  settleTotalValue: { fontSize: 19, fontWeight: '800' },
+  refundedNote: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: Spacing.sm },
+
+  // ── Khối xác nhận của khách ──
+  confirmBox: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base,
+    borderWidth: 1.5, borderColor: Colors.primary, marginBottom: Spacing.md, ...Shadow.sm,
+  },
+  confirmTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  confirmDesc: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18, marginTop: 4 },
+  confirmActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
+  disputeBtn: {
+    flex: 1, borderRadius: BorderRadius.lg, paddingVertical: Spacing.md, alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.error, backgroundColor: Colors.errorLight,
+  },
+  disputeBtnText: { fontSize: 14, fontWeight: '700', color: Colors.error },
+  acceptBtn: {
+    flex: 1.4, borderRadius: BorderRadius.lg, paddingVertical: Spacing.md,
+    alignItems: 'center', backgroundColor: Colors.primary,
+  },
+  acceptBtnText: { fontSize: 14, fontWeight: '800', color: Colors.white },
+
+  // ── Modal phản đối ──
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center', padding: Spacing.lg,
+  },
+  modalBox: { width: '100%', backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.lg },
+  modalTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  modalDesc: { fontSize: 13, color: Colors.textSecondary, marginTop: 6, lineHeight: 19 },
+  modalInput: {
+    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    fontSize: 14, color: Colors.textPrimary, height: 96, textAlignVertical: 'top',
+    marginTop: Spacing.md,
+  },
+  modalActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
+  modalCancel: {
+    flex: 1, borderRadius: BorderRadius.lg, paddingVertical: Spacing.md, alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  modalCancelText: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
+  modalSubmit: {
+    flex: 1.4, borderRadius: BorderRadius.lg, paddingVertical: Spacing.md,
+    alignItems: 'center', backgroundColor: Colors.error,
+  },
+  modalSubmitText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 });

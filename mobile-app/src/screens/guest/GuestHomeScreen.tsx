@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Image, Linking, Alert, Dimensions, Animated,
-  RefreshControl, TextInput, Modal, KeyboardAvoidingView, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Dimensions, Animated, RefreshControl, TextInput, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { showAlert } from '@/utils';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -844,7 +843,7 @@ export const GuestHomeScreen: React.FC = () => {
 
   const callHotline = () =>
     Linking.openURL(`tel:${HOTLINE}`).catch(() =>
-      Alert.alert('Hotline', `Vui lòng gọi: ${HOTLINE_DISPLAY}`)
+      showAlert('Hotline', `Vui lòng gọi: ${HOTLINE_DISPLAY}`)
     );
 
   const displayCards = activeTab === 'featured' ? featured : newListings;
