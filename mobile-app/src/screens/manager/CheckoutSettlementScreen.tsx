@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   Colors, Spacing, BorderRadius, Shadow, checkoutMeta, CHECKOUT_AUTO_ACCEPT_DAYS,
 } from '@/constants';
-import { formatDate, showAlert } from '@/utils';
+import { formatDate, showAlert, readApiError } from '@/utils';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenant/selfService';
@@ -23,7 +23,7 @@ import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenan
  */
 
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
-const readErr = (e: any, fb: string) => e?.response?.data?.message || e?.message || fb;
+const readErr = readApiError;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) => {
@@ -42,6 +42,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const [paidAt, setPaidAt] = useState(todayIso());
   const [uploading, setUploading] = useState(false);
   const [actualDate, setActualDate] = useState(todayIso());
+  /** Đã ghi nhận hoàn cọc thành công trong phiên này (BE chưa trả `refundedAt`). */
+  const [refundRecorded, setRefundRecorded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -68,7 +70,13 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const meta = checkoutMeta(status);
   const refundAmount = settlement?.refundAmount ?? 0;
   const extraCharge = settlement?.extraChargeAmount ?? 0;
-  const refunded = !!settlement?.refundedAt;
+  /**
+   * Đã hoàn cọc chưa. KHÔNG chỉ dựa vào `settlement.refundedAt` của BE: hiện BE nhận
+   * lệnh hoàn cọc (200 OK) nhưng chưa trả lại cờ này, nên nếu chỉ tin BE thì manager
+   * hoàn tiền xong vẫn bị khoá nút thanh lý vĩnh viễn. Ghi nhận thành công trong phiên
+   * cũng tính là đã hoàn.
+   */
+  const refunded = !!settlement?.refundedAt || refundRecorded;
   /** Không còn tiền phải chuyển qua lại → có thể đóng hồ sơ. */
   const moneyDone = refunded || (refundAmount <= 0 && extraCharge <= 0);
 
@@ -118,7 +126,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
         proofUrl: proofUrl || undefined,
         paidAt: paidAt.trim(),
       });
-      showAlert('Đã ghi nhận', 'Đã lưu chứng từ hoàn cọc. Giờ có thể hoàn tất trả phòng.');
+      setRefundRecorded(true);
+      showAlert('Đã ghi nhận', 'Đã lưu chứng từ hoàn cọc. Giờ có thể bấm "Hoàn tất trả phòng" bên dưới.');
       load();
     } catch (e: any) {
       showAlert('Lỗi', readErr(e, 'Không ghi nhận được khoản hoàn cọc.'));
@@ -269,16 +278,37 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           </>
         )}
 
-        {/* WAITING_TENANT → chờ khách */}
+        {/* WAITING_TENANT → tới lượt khách, manager không phải làm gì.
+            Vẫn liệt kê việc kế tiếp để manager biết khi nào mới đến lượt mình. */}
         {status === 'WAITING_TENANT' && (
           <View style={s.infoCard}>
-            <Text style={s.infoTitle}>Đang chờ khách xác nhận</Text>
+            <Text style={s.infoTitle}>⏳ Đã gửi — đang chờ khách xác nhận</Text>
             <Text style={s.infoText}>
-              {req?.tenantResponseDeadline
-                ? `Hạn phản hồi: ${formatDate(req.tenantResponseDeadline)}. `
-                : ''}
-              Quá {CHECKOUT_AUTO_ACCEPT_DAYS} ngày không phản hồi, hệ thống tự coi như khách đồng ý.
+              Bây giờ chưa cần làm gì thêm.
+              {req?.tenantResponseDeadline ? ` Hạn khách phản hồi: ${formatDate(req.tenantResponseDeadline)}.` : ''}
+              {' '}Quá {CHECKOUT_AUTO_ACCEPT_DAYS} ngày không phản hồi, hệ thống tự coi như khách đồng ý.
             </Text>
+
+            <Text style={s.stepsTitle}>Các bước còn lại</Text>
+            <NextStep n={1} text="Khách mở app xem biên bản và bảng tiền, bấm Đồng ý hoặc Không đồng ý." />
+            <NextStep
+              n={2}
+              text={refundAmount > 0
+                ? `Khách đồng ý → bạn chuyển khoản ${money(refundAmount)} cho khách rồi tải ảnh biên lai lên đây.`
+                : extraCharge > 0
+                  ? `Khách đồng ý → chờ khách thanh toán ${money(extraCharge)} còn thiếu.`
+                  : 'Khách đồng ý → không phát sinh tiền, sang thẳng bước cuối.'}
+            />
+            <NextStep n={3} text="Bấm Hoàn tất trả phòng — hợp đồng thanh lý, phòng về trạng thái trống." last />
+
+            <Text style={s.infoNote}>
+              Nếu khách <Text style={{ fontWeight: '800' }}>không đồng ý</Text>, hồ sơ quay lại cho bạn sửa biên bản
+              và chủ nhà cũng được báo.
+            </Text>
+
+            <TouchableOpacity style={s.refreshBtn} onPress={load} disabled={busy}>
+              <Text style={s.refreshBtnText}>🔄 Kiểm tra khách đã phản hồi chưa</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -348,8 +378,9 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             {refunded && (
               <View style={s.doneCard}>
                 <Text style={s.doneText}>
-                  ✓ Đã hoàn cọc {formatDate(settlement!.refundedAt!)}
+                  ✓ Đã hoàn cọc {money(refundAmount)} ngày {formatDate(settlement?.refundedAt ?? paidAt)}
                 </Text>
+                <Text style={s.doneSub}>Bấm "Hoàn tất trả phòng" bên dưới để thanh lý hợp đồng.</Text>
               </View>
             )}
           </>
@@ -387,6 +418,14 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
     </SafeAreaView>
   );
 };
+
+/** Một bước trong danh sách "việc còn lại" — số thứ tự tròn + mô tả. */
+const NextStep: React.FC<{ n: number; text: string; last?: boolean }> = ({ n, text, last }) => (
+  <View style={[s.stepRow, last && { marginBottom: 0 }]}>
+    <View style={s.stepNum}><Text style={s.stepNumText}>{n}</Text></View>
+    <Text style={s.stepText}>{text}</Text>
+  </View>
+);
 
 const Row: React.FC<{ label: string; value: string; negative?: boolean; bold?: boolean }> = ({
   label, value, negative, bold,
@@ -455,9 +494,26 @@ const s = StyleSheet.create({
   },
   infoTitle: { fontSize: 14, fontWeight: '800', color: Colors.primary, marginBottom: 4 },
   infoText: { fontSize: 12, color: Colors.primary, lineHeight: 17 },
+  infoNote: {
+    fontSize: 11, color: Colors.primary, lineHeight: 16, marginTop: Spacing.sm,
+    paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: 'rgba(79,70,229,0.15)',
+  },
+
+  stepsTitle: { fontSize: 11, fontWeight: '800', color: Colors.primary, letterSpacing: 0.6, marginTop: Spacing.md, marginBottom: Spacing.sm },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.sm },
+  stepNum: { width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  stepNumText: { fontSize: 11, fontWeight: '800', color: Colors.white },
+  stepText: { flex: 1, fontSize: 12, color: Colors.primary, lineHeight: 17 },
+
+  refreshBtn: {
+    marginTop: Spacing.md, backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center', borderWidth: 1, borderColor: Colors.primary + '40',
+  },
+  refreshBtnText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
 
   doneCard: { backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg, padding: Spacing.base, marginBottom: Spacing.md },
   doneText: { fontSize: 13, fontWeight: '700', color: Colors.success },
+  doneSub: { fontSize: 12, color: Colors.success, marginTop: 4, opacity: 0.85 },
 
   methodRow: { flexDirection: 'row', gap: Spacing.sm },
   methodChip: {

@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, isCheckoutClosed, checkoutMeta } from '@/constants';
 import { Contract } from '@/types';
+import { DatePickerField } from '@/components/common';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
@@ -28,7 +29,16 @@ const REASONS = [
   'Lý do khác',
 ];
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Khách phải báo trước ít nhất ngần này ngày để quản lý sắp lịch kiểm tra phòng. */
+const MIN_NOTICE_DAYS = 7;
+
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** "10/08/2026" (định dạng của DatePickerField) -> "2026-08-10" (định dạng BE). */
+const toIsoDate = (ddmmyyyy: string): string => {
+  const [d, m, y] = (ddmmyyyy || '').split('/');
+  return d && m && y ? `${y}-${m}-${d}` : '';
+};
+const WEEKDAYS = ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'];
 
 export const RequestCheckoutScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -79,7 +89,10 @@ export const RequestCheckoutScreen: React.FC = () => {
           setBuildingName(dashboard.building?.name ?? '');
           setDepositAmount(dashboard.room?.depositAmount ?? null);
         }
-        const open = requests.find((r) => r.status === 'PENDING' || r.status === 'APPROVED');
+        // "Đang mở" = mọi trạng thái chưa đóng hồ sơ. Trước đây chỉ nhận PENDING/APPROVED
+        // nên khi hồ sơ chạy tới INSPECTING/WAITING_TENANT/SETTLING thì khách lại thấy
+        // form tạo mới — tưởng yêu cầu bị mất, mà bấm gửi nữa là tạo trùng.
+        const open = requests.find((r) => !isCheckoutClosed(r.status));
         if (open) setOpenRequest(open);
       } catch {
         if (active) showAlert('Lỗi', 'Không tải được thông tin hợp đồng.');
@@ -92,13 +105,33 @@ export const RequestCheckoutScreen: React.FC = () => {
 
   const reasonText = selectedReason === 'Lý do khác' ? customReason.trim() : selectedReason ?? '';
 
+  // Ngày sớm nhất được chọn — khoá luôn trên lịch, không để khách chọn rồi mới báo lỗi.
+  const minMoveOutDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + MIN_NOTICE_DAYS);
+    return startOfDay(d);
+  }, []);
+
+  const moveOutIso = toIsoDate(moveOutDate);
+  /** Mô tả ngày đã chọn cho khách đọc lại — tránh chọn nhầm thứ/ngày. */
+  const moveOutSummary = useMemo(() => {
+    if (!moveOutIso) return null;
+    const d = startOfDay(new Date(moveOutIso));
+    if (isNaN(d.getTime())) return null;
+    const days = Math.round((d.getTime() - startOfDay(new Date()).getTime()) / 86_400_000);
+    return `${WEEKDAYS[d.getDay()]}, ${moveOutDate} · còn ${days} ngày nữa`;
+  }, [moveOutIso, moveOutDate]);
+
   const handleSubmit = async () => {
     if (!contractId) return showAlert('Lỗi', 'Không xác định được hợp đồng.');
-    if (!DATE_RE.test(moveOutDate.trim())) {
-      return showAlert('Thiếu thông tin', 'Nhập ngày muốn trả phòng dạng YYYY-MM-DD (vd 2026-08-01).');
+    if (!moveOutIso) {
+      return showAlert('Thiếu thông tin', 'Chọn ngày bạn muốn trả phòng.');
     }
-    if (new Date(moveOutDate.trim()) <= new Date()) {
-      return showAlert('Ngày không hợp lệ', 'Ngày trả phòng phải sau hôm nay.');
+    if (startOfDay(new Date(moveOutIso)) < minMoveOutDate) {
+      return showAlert(
+        'Ngày quá gần',
+        `Chọn ngày cách hôm nay ít nhất ${MIN_NOTICE_DAYS} ngày để quản lý kịp sắp lịch kiểm tra phòng.`,
+      );
     }
     if (!reasonText) {
       return showAlert('Thiếu thông tin', 'Vui lòng chọn lý do trả phòng.');
@@ -114,7 +147,7 @@ export const RequestCheckoutScreen: React.FC = () => {
     try {
       const created = await realTenantSelfService.createCheckoutRequest({
         contractId,
-        expectedMoveOutDate: moveOutDate.trim(),
+        expectedMoveOutDate: moveOutIso,
         reason: reasonText,
         note: noteParts.filter(Boolean).join('\n') || undefined,
       });
@@ -131,7 +164,7 @@ export const RequestCheckoutScreen: React.FC = () => {
     }
   };
 
-  const isValid = DATE_RE.test(moveOutDate.trim()) && !!reasonText && !!contractId;
+  const isValid = !!moveOutIso && !!reasonText && !!contractId;
 
   if (loadingContract) {
     return (
@@ -143,6 +176,8 @@ export const RequestCheckoutScreen: React.FC = () => {
 
   // Đã có yêu cầu đang mở → không cho tạo trùng
   if (openRequest) {
+    // Đang chờ CHÍNH KHÁCH xác nhận bảng quyết toán → nhấn mạnh việc phải làm.
+    const needsTenantAction = (openRequest.status || '').toUpperCase() === 'WAITING_TENANT';
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
@@ -153,19 +188,22 @@ export const RequestCheckoutScreen: React.FC = () => {
           <View style={{ width: 72 }} />
         </View>
         <View style={styles.center}>
-          <Text style={{ fontSize: 44, marginBottom: Spacing.md }}>🕒</Text>
+          <Text style={{ fontSize: 44, marginBottom: Spacing.md }}>{needsTenantAction ? '📋' : '🕒'}</Text>
           <Text style={styles.openTitle}>
-            {openRequest.status === 'PENDING' ? 'Bạn đã có yêu cầu đang chờ duyệt' : 'Yêu cầu của bạn đã được duyệt'}
+            {needsTenantAction ? 'Bạn cần xác nhận bảng quyết toán' : checkoutMeta(openRequest.status).label}
           </Text>
           <Text style={styles.openDesc}>
-            Yêu cầu trả phòng cho hợp đồng {openRequest.contractCode || `#${openRequest.contractId}`} đang được xử lý —
-            không thể tạo thêm yêu cầu mới.
+            {needsTenantAction
+              ? 'Quản lý đã kiểm tra phòng và gửi bảng tiền cọc. Xem lại và bấm Đồng ý, hoặc phản hồi nếu thấy chưa đúng.'
+              : `Yêu cầu trả phòng cho hợp đồng ${openRequest.contractCode || `#${openRequest.contractId}`} đang được xử lý — không thể tạo thêm yêu cầu mới.`}
           </Text>
           <TouchableOpacity
             style={styles.submitBtn}
             onPress={() => navigation.replace('CheckoutDetail', { requestId: openRequest.id })}
           >
-            <Text style={styles.submitBtnText}>Xem tiến trình</Text>
+            <Text style={styles.submitBtnText}>
+              {needsTenantAction ? 'Xem bảng quyết toán →' : 'Xem tiến trình'}
+            </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -213,14 +251,19 @@ export const RequestCheckoutScreen: React.FC = () => {
           <Text style={styles.fieldLabel}>
             Ngày muốn trả phòng <Text style={styles.required}>*</Text>
           </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="YYYY-MM-DD (ví dụ: 2026-08-01)"
+          <DatePickerField
             value={moveOutDate}
-            onChangeText={setMoveOutDate}
-            keyboardType="numbers-and-punctuation"
+            onChange={setMoveOutDate}
+            placeholder="Chạm để chọn ngày"
+            minDate={minMoveOutDate}
           />
-          <Text style={styles.fieldHint}>Ít nhất 7 ngày kể từ hôm nay để quản lý sắp xếp kiểm tra.</Text>
+          {moveOutSummary ? (
+            <Text style={styles.fieldPicked}>📅 {moveOutSummary}</Text>
+          ) : (
+            <Text style={styles.fieldHint}>
+              Sớm nhất là {MIN_NOTICE_DAYS} ngày kể từ hôm nay, để quản lý kịp sắp lịch kiểm tra phòng.
+            </Text>
+          )}
         </View>
 
         {/* Lý do */}
@@ -373,6 +416,7 @@ const styles = StyleSheet.create({
   field: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg },
   fieldLabel: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   fieldHint: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.xs },
+  fieldPicked: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 6, marginBottom: Spacing.xs },
   required: { color: Colors.error },
   optional: { fontWeight: '400', color: Colors.textMuted },
 

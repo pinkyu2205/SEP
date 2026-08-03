@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
-import { formatDate, showAlert } from '@/utils';
+import { formatDate, showAlert, readApiError } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
@@ -33,8 +33,7 @@ const matchFilter = (status: string, filter: string | null) => {
   if (filter === 'ACTIVE') return IN_PROGRESS.includes(status);
   return status === filter;
 };
-const readErr = (err: any, fallback: string): string =>
-  err?.response?.data?.message || err?.message || fallback;
+const readErr = readApiError;
 
 export const CheckoutRequestsScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -67,7 +66,9 @@ export const CheckoutRequestsScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const filtered = list.filter((r) => matchFilter((r.status || '').toUpperCase(), filter));
-  const pendingCount = list.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length;
+  const countOf = (key: string | null) =>
+    list.filter((r) => matchFilter((r.status || '').toUpperCase(), key)).length;
+  const pendingCount = countOf('PENDING');
 
   const openAction = (type: 'approve' | 'reject', req: CheckoutRequestDto) => {
     setInputNote('');
@@ -84,7 +85,10 @@ export const CheckoutRequestsScreen: React.FC = () => {
     try {
       if (type === 'approve') {
         await checkoutService.approve(req.id, inputNote.trim() || undefined);
-        showAlert('Đã duyệt', 'Khách sẽ nhận thông báo. Đến ngày hẹn, tới phòng và bấm "Lập biên bản kiểm tra".');
+        // Duyệt xong hồ sơ rời khỏi nhóm "Chờ duyệt" — tự nhảy sang "Đang xử lý"
+        // để manager thấy nó đi tiếp, không tưởng là mất.
+        setFilter('ACTIVE');
+        showAlert('Đã duyệt', 'Hồ sơ chuyển sang mục "Đang xử lý". Đến ngày hẹn, mở hồ sơ và bấm "Lập biên bản kiểm tra".');
       } else {
         await checkoutService.reject(req.id, inputNote.trim());
         showAlert('Đã từ chối', 'Khách sẽ nhận thông báo kèm lý do.');
@@ -120,17 +124,22 @@ export const CheckoutRequestsScreen: React.FC = () => {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Filter chips */}
+      {/* Filter chips — kèm số lượng để không hồ sơ nào "biến mất" khi đổi trạng thái */}
       <View style={s.filterRow}>
-        {FILTERS.map((f) => (
-          <TouchableOpacity
-            key={f.label}
-            style={[s.filterChip, filter === f.key && s.filterChipActive]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[s.filterChipText, filter === f.key && s.filterChipTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
+        {FILTERS.map((f) => {
+          const n = countOf(f.key);
+          return (
+            <TouchableOpacity
+              key={f.label}
+              style={[s.filterChip, filter === f.key && s.filterChipActive]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text style={[s.filterChipText, filter === f.key && s.filterChipTextActive]}>
+                {f.label}{n > 0 ? ` (${n})` : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {loading ? (
@@ -153,8 +162,22 @@ export const CheckoutRequestsScreen: React.FC = () => {
             <View style={s.emptyBox}>
               <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🚪</Text>
               <Text style={s.emptyTitle}>
-                {filter === 'PENDING' ? 'Không có yêu cầu nào chờ duyệt.' : 'Không có yêu cầu trả phòng nào.'}
+                {filter === 'PENDING' ? 'Không có yêu cầu nào chờ duyệt.'
+                  : filter === 'ACTIVE' ? 'Không có hồ sơ nào đang xử lý.'
+                  : filter === 'COMPLETED' ? 'Chưa có hồ sơ nào hoàn tất.'
+                  : 'Không có yêu cầu trả phòng nào.'}
               </Text>
+              {/* Lọc này rỗng nhưng chỗ khác có hồ sơ → chỉ đường, đừng để manager
+                  tưởng dữ liệu bị mất sau khi duyệt. */}
+              {list.length > 0 && (
+                <View style={s.emptyHints}>
+                  {FILTERS.filter(f => f.key && f.key !== filter && countOf(f.key) > 0).map(f => (
+                    <TouchableOpacity key={f.label} style={s.emptyHintBtn} onPress={() => setFilter(f.key)}>
+                      <Text style={s.emptyHintText}>{f.label} ({countOf(f.key)}) →</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -346,6 +369,12 @@ const s = StyleSheet.create({
   body: { padding: Spacing.lg, gap: Spacing.md },
 
   emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2 },
+  emptyHints: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.md, justifyContent: 'center' },
+  emptyHintBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primaryBg, borderWidth: 1, borderColor: Colors.primary + '40',
+  },
+  emptyHintText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
   emptyTitle: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center' },
   retryBtn: {
     marginTop: Spacing.md, backgroundColor: Colors.primary,

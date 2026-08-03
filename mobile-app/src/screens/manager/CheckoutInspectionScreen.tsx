@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, ActivityIndicator,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, readApiError } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -25,7 +25,7 @@ import {
  */
 
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
-const readErr = (e: any, fb: string) => e?.response?.data?.message || e?.message || fb;
+const readErr = readApiError;
 const toNum = (v: string) => Number((v || '').replace(/[^\d]/g, '')) || 0;
 
 interface DamageDraft { amount: string; note: string }
