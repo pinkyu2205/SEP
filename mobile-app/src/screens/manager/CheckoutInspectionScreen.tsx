@@ -2,15 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, ActivityIndicator,
 } from 'react-native';
-import { showAlert, readApiError } from '@/utils';
+import { showAlert, readApiError, validateMeterPhoto } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { CameraCaptureModal } from '@/components/common';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
-import {
-  realTenantSelfService,
-  type CheckoutRequestDto, type CheckoutDamageItem, type ContractEquipmentDto,
+import { realTenantService } from '@/services/tenant/tenantService';
+import type {
+  CheckoutRequestDto, CheckoutDamageItem, ContractEquipmentDto,
 } from '@/services/tenant/selfService';
 
 /**
@@ -30,6 +31,16 @@ const toNum = (v: string) => Number((v || '').replace(/[^\d]/g, '')) || 0;
 
 interface DamageDraft { amount: string; note: string }
 interface ExtraDraft { label: string; amount: string }
+/** Chỉ số + ảnh đồng hồ ghi lúc ĐÓN KHÁCH — mốc để đối chiếu số cuối kỳ. */
+interface HandoverMeters {
+  elec?: number;
+  water?: number;
+  elecPhoto?: string;
+  waterPhoto?: string;
+}
+type MeterKind = 'elec' | 'water';
+/** Trạng thái nhận diện ảnh đồng hồ hiện dưới ô nhập ('ok' xanh · 'warn' cam). */
+interface MeterStatus { tone: 'ok' | 'warn'; text: string }
 
 export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) => {
   const checkoutId: number = route?.params?.checkoutId;
@@ -40,10 +51,24 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /**
+   * Chụp bằng camera trong app (CameraCaptureModal) thay vì ImagePicker.launchCameraAsync:
+   * trên web hàm đó chỉ mở hộp thoại chọn file, còn modal này bật camera thật và bắt
+   * xác nhận lại ảnh trước khi gửi lên. Dùng chung 1 luồng cho cả web lẫn điện thoại.
+   * `null` = đóng; 'room' = ảnh hiện trạng (chụp nhiều), 'elec'/'water' = ảnh đồng hồ.
+   */
+  const [cameraTarget, setCameraTarget] = useState<'room' | MeterKind | null>(null);
+  const [meterBusy, setMeterBusy] = useState<MeterKind | null>(null);
 
   const [photos, setPhotos] = useState<string[]>([]);
   const [elecReading, setElecReading] = useState('');
   const [waterReading, setWaterReading] = useState('');
+  /** Ảnh mặt đồng hồ lúc chốt số cuối kỳ. */
+  const [elecMeterUrl, setElecMeterUrl] = useState('');
+  const [waterMeterUrl, setWaterMeterUrl] = useState('');
+  /** Kết quả nhận diện ảnh đồng hồ, hiện ngay dưới ô nhập. */
+  const [meterStatus, setMeterStatus] = useState<Partial<Record<MeterKind, MeterStatus>>>({});
+  const [handover, setHandover] = useState<HandoverMeters>({});
   const [note, setNote] = useState('');
   /** key = id thiết bị bị đánh dấu hư hỏng. Không có key = nguyên vẹn. */
   const [damages, setDamages] = useState<Record<string, DamageDraft>>({});
@@ -61,6 +86,8 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         setNote(insp.roomConditionNote ?? '');
         setElecReading(insp.electricityFinalReading != null ? String(insp.electricityFinalReading) : '');
         setWaterReading(insp.waterFinalReading != null ? String(insp.waterFinalReading) : '');
+        setElecMeterUrl(insp.electricMeterImageUrl ?? '');
+        setWaterMeterUrl(insp.waterMeterImageUrl ?? '');
         const dmg: Record<string, DamageDraft> = {};
         const ext: ExtraDraft[] = [];
         (insp.damages ?? []).forEach(d => {
@@ -71,10 +98,17 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         setExtras(ext);
       }
 
-      // Thiết bị đã bàn giao — gốc để đối chiếu
+      // Hợp đồng: thiết bị đã bàn giao (gốc để đối chiếu hư hỏng) + chỉ số/ảnh đồng hồ
+      // ghi lúc đón khách (mốc để đối chiếu số điện nước cuối kỳ).
       try {
-        const contract = await realTenantSelfService.getContractDetail(detail.contractId);
+        const contract = await realTenantService.getContract(detail.contractId);
         setEquipment(contract.equipmentList ?? []);
+        setHandover({
+          elec: contract.initialElectricReading ?? undefined,
+          water: contract.initialWaterReading ?? undefined,
+          elecPhoto: contract.electricMeterImageUrl ?? undefined,
+          waterPhoto: contract.waterMeterImageUrl ?? undefined,
+        });
       } catch {
         setEquipmentError(true);
       }
@@ -87,27 +121,123 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
 
   useEffect(() => { load(); }, [load]);
 
-  const pickPhoto = async (fromCamera: boolean) => {
-    const perm = fromCamera
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (perm.status !== 'granted') {
-      return showAlert('Thiếu quyền', fromCamera ? 'Cần quyền camera để chụp ảnh hiện trạng.' : 'Cần quyền truy cập thư viện ảnh.');
-    }
-    const result = fromCamera
-      ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (result.canceled || !result.assets?.[0]) return;
-
+  /** Tải 1 ảnh (đã chọn/đã xác nhận) lên Cloudinary rồi thêm vào biên bản. */
+  const uploadPhoto = async (uri: string) => {
     setUploading(true);
     try {
-      const url = await uploadImageToCloudinary(result.assets[0].uri);
+      const url = await uploadImageToCloudinary(uri);
       setPhotos(p => [...p, url]);
     } catch (e: any) {
       showAlert('Lỗi upload', readErr(e, 'Không tải được ảnh lên.'));
     } finally {
       setUploading(false);
     }
+  };
+
+  /** Mở thư viện ảnh, trả về uri đã chọn (null nếu huỷ/không có quyền). */
+  const pickImageUri = async (): Promise<string | null> => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== 'granted') {
+      showAlert('Thiếu quyền', 'Cần quyền truy cập thư viện ảnh.');
+      return null;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
+    if (result.canceled || !result.assets?.[0]) return null;
+    return result.assets[0].uri;
+  };
+
+  /** Chọn ảnh hiện trạng phòng có sẵn trong máy. */
+  const pickFromGallery = async () => {
+    const uri = await pickImageUri();
+    if (uri) await uploadPhoto(uri);
+  };
+
+  /**
+   * Ảnh mặt đồng hồ lúc chốt số.
+   *
+   * Chỉ số điện/nước là tiền thật nên ảnh phải là MẶT ĐỒNG HỒ THẬT: OCR đọc chữ trong
+   * ảnh, `validateMeterPhoto` soi xem có đơn vị (kWh/m³), tên hãng, serial... đúng loại
+   * đồng hồ không. Ảnh chỉ có mấy con số (ghi ra giấy, chụp màn hình) hoặc chụp nhầm
+   * loại đồng hồ đều BỊ TỪ CHỐI — không lưu ảnh, không điền số.
+   */
+  const uploadMeterPhoto = async (kind: MeterKind, uri: string) => {
+    const setUrl = kind === 'elec' ? setElecMeterUrl : setWaterMeterUrl;
+    const setReading = kind === 'elec' ? setElecReading : setWaterReading;
+    const label = kind === 'elec' ? 'điện' : 'nước';
+
+    setMeterBusy(kind);
+    try {
+      const url = await uploadImageToCloudinary(uri);
+
+      let ocr;
+      try {
+        ocr = await realTenantService.ocrMeter(url);
+      } catch {
+        // Dịch vụ đọc ảnh lỗi → không kiểm chứng được. Vẫn giữ ảnh để không chặn việc
+        // vận hành, nhưng nói thẳng là chưa kiểm được để người duyệt còn để ý.
+        setUrl(url);
+        setMeterStatus(prev => ({
+          ...prev,
+          [kind]: { tone: 'warn', text: 'Chưa kiểm chứng được ảnh (dịch vụ đọc ảnh lỗi) — tự đối chiếu mặt đồng hồ giúp.' },
+        }));
+        return;
+      }
+
+      const check = validateMeterPhoto(kind, ocr);
+      if (!check.ok) {
+        // Không giữ ảnh, không điền số — coi như chưa chụp.
+        setMeterStatus(prev => ({ ...prev, [kind]: { tone: 'warn', text: check.reason ?? '' } }));
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫');
+        return;
+      }
+
+      setUrl(url);
+      if (check.reading) setReading(check.reading);
+      setMeterStatus(prev => ({
+        ...prev,
+        [kind]: check.confidence === 'high'
+          ? {
+              tone: 'ok',
+              text: check.reading
+                ? `Đã nhận diện đồng hồ ${label} · số đọc từ ảnh, đối chiếu lại giúp.`
+                : `Đã nhận diện đồng hồ ${label} — nhập chỉ số bằng tay.`,
+            }
+          : {
+              tone: 'warn',
+              text: `Chưa chắc chắn đây là mặt đồng hồ ${label} (ảnh mờ hoặc thiếu chữ). Xem lại ảnh trước khi lưu.`,
+            },
+      }));
+    } catch (e: any) {
+      showAlert('Lỗi upload', readErr(e, 'Không tải được ảnh đồng hồ lên.'));
+    } finally {
+      setMeterBusy(null);
+    }
+  };
+
+  const pickMeterFromGallery = async (kind: MeterKind) => {
+    const uri = await pickImageUri();
+    if (uri) await uploadMeterPhoto(kind, uri);
+  };
+
+  /** Ảnh vừa chụp/chọn thuộc về ô nào. */
+  const handleCameraCapture = (uri: string) => {
+    if (cameraTarget === 'elec' || cameraTarget === 'water') {
+      const kind = cameraTarget;
+      setCameraTarget(null);              // đồng hồ chỉ cần 1 ảnh → đóng camera luôn
+      void uploadMeterPhoto(kind, uri);
+    } else {
+      void uploadPhoto(uri);
+    }
+  };
+
+  /** Số điện/nước đã dùng trong kỳ cuối = chỉ số cuối − chỉ số lúc đón khách. */
+  const meterInfo = (kind: MeterKind) => {
+    const prev = kind === 'elec' ? handover.elec : handover.water;
+    const raw = kind === 'elec' ? elecReading : waterReading;
+    const now = raw ? toNum(raw) : null;
+    const unit = kind === 'elec' ? 'kWh' : 'm³';
+    if (prev == null || now == null || !raw) return { prev, now, used: null, invalid: false, unit };
+    return { prev, now, used: now - prev, invalid: now < prev, unit };
   };
 
   const toggleDamage = (id: string) =>
@@ -148,6 +278,25 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
     if (missing) {
       return showAlert('Thiếu số tiền', `Khoản "${missing.label}" chưa có số tiền. Nhập số tiền hoặc bỏ đánh dấu hư hỏng.`);
     }
+    // Số cuối nhỏ hơn số lúc đón khách = gõ nhầm; để lọt là tính tiền điện/nước sai.
+    const badMeter = (['elec', 'water'] as MeterKind[]).find(k => meterInfo(k).invalid);
+    if (badMeter) {
+      return showAlert(
+        'Chỉ số không hợp lệ',
+        `Chỉ số ${badMeter === 'elec' ? 'điện' : 'nước'} cuối kỳ đang nhỏ hơn chỉ số lúc đón khách. Kiểm tra lại trước khi lưu.`,
+      );
+    }
+    // Có chỉ số thì phải có ảnh mặt đồng hồ đi kèm — không thì gõ số nào cũng được,
+    // khách không có gì để đối chiếu.
+    const noPhoto = (['elec', 'water'] as MeterKind[]).find(k =>
+      (k === 'elec' ? elecReading : waterReading) && !(k === 'elec' ? elecMeterUrl : waterMeterUrl));
+    if (noPhoto) {
+      return showAlert(
+        'Thiếu ảnh đồng hồ',
+        `Đã nhập chỉ số ${noPhoto === 'elec' ? 'điện' : 'nước'} thì phải có ảnh mặt đồng hồ kèm theo để khách đối chiếu. `
+        + 'Chụp ảnh đồng hồ rồi lưu lại.',
+      );
+    }
 
     setSaving(true);
     try {
@@ -156,6 +305,8 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         roomConditionNote: note.trim() || undefined,
         electricityFinalReading: elecReading ? toNum(elecReading) : undefined,
         waterFinalReading: waterReading ? toNum(waterReading) : undefined,
+        electricMeterImageUrl: elecMeterUrl || undefined,
+        waterMeterImageUrl: waterMeterUrl || undefined,
         damages: list,
       });
       if (goSettlement) navigation.replace('CheckoutSettlement', { checkoutId });
@@ -219,10 +370,10 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
             </View>
           )}
           <View style={s.photoActions}>
-            <TouchableOpacity style={s.photoBtn} onPress={() => pickPhoto(true)} disabled={uploading}>
+            <TouchableOpacity style={s.photoBtn} onPress={() => setCameraTarget('room')} disabled={uploading}>
               <Text style={s.photoBtnText}>📷 Chụp ảnh</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={s.photoBtn} onPress={() => pickPhoto(false)} disabled={uploading}>
+            <TouchableOpacity style={s.photoBtn} onPress={pickFromGallery} disabled={uploading}>
               <Text style={s.photoBtnText}>🖼️ Chọn từ máy</Text>
             </TouchableOpacity>
           </View>
@@ -239,22 +390,107 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         <View style={s.card}>
           <Text style={s.helper}>
             Không chốt thì mất tiền điện/nước những ngày cuối — khách đi rồi rất khó đòi.
+            Chụp ảnh mặt đồng hồ để khách không cãi được số cuối.
           </Text>
           <View style={s.readingRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.label}>⚡ Chỉ số điện</Text>
-              <TextInput
-                style={s.input} value={elecReading} onChangeText={setElecReading}
-                keyboardType="numeric" placeholder="VD: 1250" placeholderTextColor={Colors.textMuted}
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.label}>💧 Chỉ số nước</Text>
-              <TextInput
-                style={s.input} value={waterReading} onChangeText={setWaterReading}
-                keyboardType="numeric" placeholder="VD: 320" placeholderTextColor={Colors.textMuted}
-              />
-            </View>
+            {(['elec', 'water'] as MeterKind[]).map(kind => {
+              const isElec = kind === 'elec';
+              const info = meterInfo(kind);
+              const value = isElec ? elecReading : waterReading;
+              const setValue = isElec ? setElecReading : setWaterReading;
+              const photo = isElec ? elecMeterUrl : waterMeterUrl;
+              const status = meterStatus[kind];
+              const clearPhoto = () => {
+                if (isElec) setElecMeterUrl(''); else setWaterMeterUrl('');
+                setMeterStatus(prev => ({ ...prev, [kind]: undefined }));
+              };
+              const handoverPhoto = isElec ? handover.elecPhoto : handover.waterPhoto;
+              const busy = meterBusy === kind;
+
+              return (
+                <View key={kind} style={{ flex: 1 }}>
+                  <Text style={s.label}>{isElec ? '⚡ Chỉ số điện' : '💧 Chỉ số nước'}</Text>
+
+                  {/* Số lúc đón khách — mốc để đối chiếu, không có thì nói rõ */}
+                  <Text style={s.meterPrev}>
+                    {info.prev != null
+                      ? `Lúc đón khách: ${info.prev.toLocaleString('vi-VN')} ${info.unit}`
+                      : 'Chưa có chỉ số lúc đón khách'}
+                  </Text>
+
+                  <TextInput
+                    style={[s.input, info.invalid && s.inputError]}
+                    value={value}
+                    onChangeText={(v) => {
+                      setValue(v);
+                      // Sửa tay thì ghi chú "số đọc từ ảnh" hết đúng; cảnh báo về ẢNH thì giữ.
+                      setMeterStatus(p => (p[kind]?.tone === 'ok' ? { ...p, [kind]: undefined } : p));
+                    }}
+                    keyboardType="numeric"
+                    placeholder={isElec ? 'VD: 1250' : 'VD: 320'}
+                    placeholderTextColor={Colors.textMuted}
+                  />
+
+                  {/* Số đã dùng tính ngay tại chỗ để manager biết có hợp lý không */}
+                  {info.invalid ? (
+                    <Text style={s.meterWarn}>
+                      Số cuối nhỏ hơn lúc đón khách ({info.prev?.toLocaleString('vi-VN')}) — kiểm tra lại.
+                    </Text>
+                  ) : info.used != null ? (
+                    <Text style={s.meterUsed}>
+                      Đã dùng: {info.used.toLocaleString('vi-VN')} {info.unit}
+                    </Text>
+                  ) : null}
+                  {/* Kết quả nhận diện ảnh: nhận đúng đồng hồ / ảnh đáng ngờ / bị từ chối */}
+                  {!!status && (
+                    <Text style={status.tone === 'ok' ? s.meterOk : s.meterWarn}>
+                      {status.tone === 'ok' ? '✓ ' : '⚠️ '}{status.text}
+                    </Text>
+                  )}
+
+                  {/* Ảnh mặt đồng hồ lúc chốt */}
+                  {photo ? (
+                    <View style={s.meterPhotoWrap}>
+                      <Image source={{ uri: photo }} style={s.meterPhoto} />
+                      <TouchableOpacity style={s.photoRemove} onPress={clearPhoto}>
+                        <Text style={s.photoRemoveText}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+
+                  <View style={s.meterBtnRow}>
+                    <TouchableOpacity
+                      style={[s.meterBtn, busy && s.btnDisabled]}
+                      onPress={() => setCameraTarget(kind)}
+                      disabled={busy}
+                    >
+                      <Text style={s.meterBtnText}>📷 Chụp</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.meterBtn, busy && s.btnDisabled]}
+                      onPress={() => pickMeterFromGallery(kind)}
+                      disabled={busy}
+                    >
+                      <Text style={s.meterBtnText}>🖼️ Chọn</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {busy && (
+                    <View style={s.uploadingRow}>
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                      <Text style={s.uploadingText}>Đang tải & đọc số...</Text>
+                    </View>
+                  )}
+
+                  {/* Ảnh đồng hồ lúc đón khách để so mặt số */}
+                  {!!handoverPhoto && (
+                    <View style={s.handoverBox}>
+                      <Text style={s.handoverLabel}>Ảnh lúc đón khách</Text>
+                      <Image source={{ uri: handoverPhoto }} style={s.handoverPhoto} />
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -381,6 +617,20 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Camera trong app: chụp → xem lại → "Dùng ảnh này" mới tải lên.
+          Ảnh hiện trạng cho chụp liên tiếp nhiều góc; ảnh đồng hồ chỉ 1 tấm rồi đóng. */}
+      <CameraCaptureModal
+        visible={cameraTarget !== null}
+        multi={cameraTarget === 'room'}
+        onCapture={handleCameraCapture}
+        onClose={() => setCameraTarget(null)}
+        onUseGalleryInstead={
+          cameraTarget === 'elec' || cameraTarget === 'water'
+            ? () => pickMeterFromGallery(cameraTarget)
+            : pickFromGallery
+        }
+      />
     </SafeAreaView>
   );
 };
@@ -433,7 +683,27 @@ const s = StyleSheet.create({
   uploadingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: Spacing.sm },
   uploadingText: { fontSize: 12, color: Colors.textMuted },
 
-  readingRow: { flexDirection: 'row', gap: Spacing.sm },
+  readingRow: { flexDirection: 'row', gap: Spacing.md, alignItems: 'flex-start' },
+  // ── Chỉ số + ảnh đồng hồ ──
+  meterPrev: { fontSize: 11, color: Colors.textMuted, marginBottom: 6 },
+  inputError: { borderColor: Colors.error },
+  meterUsed: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 6 },
+  meterWarn: { fontSize: 11, fontWeight: '700', color: Colors.error, marginTop: 6, lineHeight: 16 },
+  meterOk: { fontSize: 11, fontWeight: '600', color: Colors.success, marginTop: 6, lineHeight: 16 },
+  meterPhotoWrap: { position: 'relative', marginTop: Spacing.sm, alignSelf: 'flex-start' },
+  meterPhoto: { width: 96, height: 96, borderRadius: BorderRadius.md, backgroundColor: Colors.divider },
+  meterBtnRow: { flexDirection: 'row', gap: Spacing.xs, marginTop: Spacing.sm },
+  meterBtn: {
+    flex: 1, backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center',
+  },
+  meterBtnText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  handoverBox: {
+    marginTop: Spacing.sm, backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md, padding: Spacing.sm, gap: 4,
+  },
+  handoverLabel: { fontSize: 10, fontWeight: '700', color: Colors.textMuted },
+  handoverPhoto: { width: 72, height: 72, borderRadius: BorderRadius.sm, backgroundColor: Colors.divider },
 
   eqRow: { borderBottomWidth: 1, borderBottomColor: Colors.divider, paddingVertical: Spacing.sm },
   eqTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },

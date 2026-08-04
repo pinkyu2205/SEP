@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { GuestStackNavigator } from './GuestStackNavigator';
 import { ChangePasswordScreen } from '@/screens/auth/ChangePasswordScreen';
@@ -59,11 +59,8 @@ import { Colors } from '@/constants';
 import {
   addNotificationResponseListener,
   handleInitialNotification,
-  NotificationData,
 } from '@/services/core/notifications';
-
-// Các route nằm trong tab Tenant (cần điều hướng lồng qua 'TenantTabs')
-const TENANT_TAB_ROUTES = ['Home', 'InvoiceList', 'MaintenanceList', 'TenantContracts', 'Profile'];
+import { navigationRef, navigateFromNotification } from './navigationRef';
 
 const Stack = createNativeStackNavigator();
 
@@ -76,23 +73,14 @@ const baseStackOptions = {
 
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const navRef = useNavigationContainerRef();
 
-  // Điều hướng khi người dùng bấm vào thông báo đẩy (dựa trên payload `data` từ BE)
+  // Điều hướng khi người dùng bấm vào thông báo đẩy — của BE lẫn thông báo app tự
+  // bắn cho luồng trả phòng (cùng payload `data`, xem services/core/localPush).
   useEffect(() => {
-    const routeFromData = (data: NotificationData) => {
-      if (!data?.screen || !navRef.isReady()) return;
-      const nav = navRef as any;
-      if (TENANT_TAB_ROUTES.includes(data.screen)) {
-        nav.navigate('TenantTabs', { screen: data.screen, params: data.params });
-      } else {
-        nav.navigate(data.screen, data.params);
-      }
-    };
-    const unsub = addNotificationResponseListener(routeFromData);
-    handleInitialNotification(routeFromData); // app mở từ trạng thái tắt hẳn
+    const unsub = addNotificationResponseListener(navigateFromNotification);
+    handleInitialNotification(navigateFromNotification); // app mở từ trạng thái tắt hẳn
     return unsub;
-  }, [navRef]);
+  }, []);
 
   if (isLoading) {
     return (
@@ -103,7 +91,7 @@ export const RootNavigator: React.FC = () => {
   }
 
   return (
-    <NavigationContainer ref={navRef}>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={baseStackOptions}>
         {!isAuthenticated ? (
           <Stack.Screen name="GuestStack" component={GuestStackNavigator} />

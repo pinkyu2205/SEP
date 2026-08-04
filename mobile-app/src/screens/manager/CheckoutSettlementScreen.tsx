@@ -10,6 +10,7 @@ import {
 import { formatDate, showAlert, readApiError } from '@/utils';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
+import { localAlertStore } from '@/store/localAlertStore';
 import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenant/selfService';
 
 /**
@@ -50,6 +51,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
       const detail = await checkoutService.get(checkoutId);
       setReq(detail);
       setActualDate(detail.expectedMoveOutDate || todayIso());
+      // Mở hồ sơ = đã xem thông báo của hồ sơ này.
+      localAlertStore.markReadByRef('checkout', checkoutId);
       try {
         setSettlement(detail.settlement ?? await checkoutService.getSettlement(checkoutId));
         setSettlementMissing(false);

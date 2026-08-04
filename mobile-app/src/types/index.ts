@@ -529,6 +529,8 @@ export type NotificationType =
   | 'equipment_damaged'
   | 'meter_reading_due'
   | 'tenant_onboarded'
+  // Luồng trả phòng: gửi/duyệt/kiểm tra/quyết toán/hoàn cọc — báo cho bên còn lại.
+  | 'checkout_request'
   | 'system';
 
 export interface AppNotification {

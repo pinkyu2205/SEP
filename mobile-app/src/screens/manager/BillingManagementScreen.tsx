@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  RENT_POLICY_SHORT, isIssueWindowOpen, toMonthKey,
+  RENT_POLICY_SHORT, RENT_CYCLE,
 } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
@@ -101,8 +101,9 @@ export const BillingManagementScreen: React.FC = () => {
 
   const now = new Date();
   const monthLabel = `Tháng ${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
-  // Tiền nhà chạy tự động; nút gửi tay chỉ mở ngày 1–5 (xem @/constants/rentCycle).
-  const issueWindowOpen = isIssueWindowOpen(toMonthKey(now), now);
+  // Tiền phòng chạy HOÀN TOÀN tự động (xem @/constants/rentCycle) — manager không
+  // gửi tay nữa, chỉ theo dõi. Trong kỳ 1–5 thì nhấn mạnh là đang thu.
+  const inCollectWindow = now.getDate() >= RENT_CYCLE.issueDay && now.getDate() <= RENT_CYCLE.dueDay;
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -121,11 +122,13 @@ export const BillingManagementScreen: React.FC = () => {
         <TouchableOpacity style={s.rentCta} onPress={() => navigation.navigate('RentInvoice')} activeOpacity={0.85}>
           <Text style={s.rentCtaIcon}>🤖</Text>
           <View style={{ flex: 1 }}>
-            <Text style={s.rentCtaTitle}>Tiền nhà tự động</Text>
+            <Text style={s.rentCtaTitle}>Tiền phòng tự động</Text>
             <Text style={s.rentCtaSub}>{RENT_POLICY_SHORT}</Text>
             <View style={s.rentCtaChip}>
               <Text style={s.rentCtaChipText}>
-                {issueWindowOpen ? '● Cửa sổ gửi tay đang mở' : '○ Đang chạy tự động'}
+                {inCollectWindow
+                  ? `● Đang trong kỳ thu (ngày ${RENT_CYCLE.issueDay}–${RENT_CYCLE.dueDay})`
+                  : '🤖 Hệ thống tự phát hành & nhắc khách'}
               </Text>
             </View>
           </View>

@@ -2,6 +2,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Image,
   Modal,
   StyleSheet,
   Text,
@@ -13,8 +14,11 @@ import { BorderRadius, Colors, Spacing } from '../../constants'
 /**
  * Modal chụp ảnh bằng expo-camera. Dùng thay ImagePicker.launchCameraAsync trên web,
  * vì trên web hàm đó chỉ mở file picker chứ không bật camera thật.
- * - multi=false: chụp 1 ảnh xong tự đóng.
- * - multi=true: chụp nhiều ảnh liên tiếp (mỗi ảnh gọi onCapture), bấm "Xong" để đóng.
+ * - multi=false: chụp 1 ảnh, xác nhận xong là đóng.
+ * - multi=true: chụp nhiều ảnh liên tiếp (mỗi ảnh xác nhận rồi gọi onCapture), bấm "Xong" để đóng.
+ *
+ * Chụp xong LUÔN hiện ảnh vừa chụp để người dùng xem lại: mờ/ngược sáng thì bấm
+ * "Chụp lại", ưng thì bấm "Dùng ảnh này" mới thật sự gửi lên (onCapture).
  */
 interface CameraCaptureModalProps {
   visible: boolean
@@ -37,6 +41,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   const [facing, setFacing] = useState<'back' | 'front'>('back')
   const [taking, setTaking] = useState(false)
   const [count, setCount] = useState(0)
+  /** Ảnh vừa chụp, đang chờ người dùng xác nhận. null = đang ở chế độ ngắm chụp. */
+  const [preview, setPreview] = useState<string | null>(null)
 
   useEffect(() => {
     if (visible && permission && !permission.granted && permission.canAskAgain) {
@@ -49,18 +55,25 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     try {
       setTaking(true)
       const photo = await camRef.current.takePictureAsync({ quality: 0.7 })
-      if (photo?.uri) {
-        onCapture(photo.uri)
-        if (multi) setCount((c) => c + 1)
-        else handleClose()
-      }
+      // KHÔNG gửi ngay — đưa qua bước xem lại để tránh gửi nhầm ảnh mờ/chụp hụt.
+      if (photo?.uri) setPreview(photo.uri)
     } finally {
       setTaking(false)
     }
   }
 
+  /** Người dùng bấm "Dùng ảnh này" — lúc này mới thật sự gửi ảnh đi. */
+  const confirmPhoto = () => {
+    if (!preview) return
+    onCapture(preview)
+    setPreview(null)
+    if (multi) setCount((c) => c + 1)
+    else handleClose()
+  }
+
   const handleClose = () => {
     setCount(0)
+    setPreview(null)
     onClose()
   }
 
@@ -90,6 +103,28 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
               <Text style={styles.permissionCancel}>Đóng</Text>
             </TouchableOpacity>
           </View>
+        ) : preview ? (
+          /* ── Xem lại ảnh vừa chụp: ưng thì mới gửi ── */
+          <>
+            <Image source={{ uri: preview }} style={styles.preview} resizeMode="contain" />
+            {/* Bỏ luôn ảnh vừa chụp và đóng — khỏi phải chụp lại rồi mới thoát được. */}
+            <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              <Text style={styles.closeBtnText}>✕</Text>
+            </TouchableOpacity>
+            <View style={styles.previewHint}>
+              <Text style={styles.previewHintText}>Ảnh rõ chưa? Xem lại trước khi gửi.</Text>
+            </View>
+            <View style={styles.previewBar}>
+              <TouchableOpacity style={styles.retakeBtn} onPress={() => setPreview(null)}>
+                <Text style={styles.retakeBtnText}>↺ Chụp lại</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.useBtn} onPress={confirmPhoto}>
+                <Text style={styles.useBtnText}>
+                  {multi ? '✓ Dùng ảnh & chụp tiếp' : '✓ Dùng ảnh này'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
         ) : (
           <>
             <CameraView ref={camRef} style={styles.camera} facing={facing} />
@@ -143,6 +178,61 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
+  },
+  // ── Bước xem lại ảnh vừa chụp ──
+  preview: {
+    flex: 1,
+    width: '100%',
+  },
+  previewHint: {
+    position: 'absolute',
+    top: Spacing.xl,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(15,23,42,0.6)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.base,
+    paddingVertical: 6,
+  },
+  previewHintText: {
+    color: Colors.white,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  previewBar: {
+    position: 'absolute',
+    bottom: Spacing.xl,
+    left: Spacing.base,
+    right: Spacing.base,
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  retakeBtn: {
+    flex: 1,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.white,
+    backgroundColor: 'rgba(15,23,42,0.5)',
+  },
+  retakeBtnText: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  useBtn: {
+    flex: 1.4,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+  },
+  useBtnText: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: '800',
   },
   closeBtn: {
     position: 'absolute',

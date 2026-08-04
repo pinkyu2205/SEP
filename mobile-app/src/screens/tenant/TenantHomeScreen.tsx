@@ -9,6 +9,7 @@ import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
+import { useLocalAlerts } from '@/store/localAlertStore';
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
@@ -34,7 +35,11 @@ export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
   const [actionsExpanded, setActionsExpanded] = useState(false);
-  const realUnread = useUnreadNotifications();   // badge chuông từ BE
+  const realUnread = useUnreadNotifications();   // badge chuông: BE + thông báo app tự sinh
+  // Việc mới nhất app tự báo (quản lý vừa làm gì trong luồng trả phòng, hoá đơn tiền
+  // phòng/điện/nước vừa phát hành...) — hiện ngay đầu trang, đừng bắt khách vào tận
+  // màn thông báo mới biết.
+  const { alerts: liveAlerts } = useLocalAlerts();
   // 1 account có thể có nhiều HĐ ACTIVE (nhà/phòng khác nhau) — xem
   // docs/FE-multi-contract-per-phone.md (repo BE). selectedContractId dùng chung
   // cho mọi màn (dashboard, bàn giao, thiết bị, tạo bảo trì...).
@@ -146,7 +151,18 @@ export const TenantHomeScreen: React.FC = () => {
   // khi dash chưa tải được (daysLeft mặc định 0 lúc đó không phải giá trị thật).
   const contractExpiringSoon = hasRoom && data.contract.daysLeft <= 60;
 
+  const latestAlert = liveAlerts.find(a => !a.read);
+
   const alerts = [
+    // Bỏ emoji đầu tiêu đề vì pill đã có icon riêng (regex thường, không dùng \p{L}
+    // để chạy được trên Hermes cũ).
+    latestAlert && {
+      id: 'live',
+      icon: latestAlert.kind === 'billing' ? '🧾' : '🚪',
+      text: latestAlert.title.replace(/^[^A-Za-zÀ-ỹ0-9]+/, ''),
+      route: latestAlert.screen,
+      color: '#DC2626',
+    },
     hasOverdue        && { id: 'overdue',  icon: '🚨', text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
     hasMaintenance    && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
     contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                               route: 'TenantContracts', color: Colors.info    },

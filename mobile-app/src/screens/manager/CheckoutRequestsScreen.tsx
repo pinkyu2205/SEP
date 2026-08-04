@@ -7,6 +7,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
 import { formatDate, showAlert, readApiError } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
+import { localAlertStore } from '@/store/localAlertStore';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 /**
@@ -55,6 +56,9 @@ export const CheckoutRequestsScreen: React.FC = () => {
       data.sort((a, b) => b.id - a.id);
       setList(data);
       setLoadError(false);
+      // Vào tới đây là manager đã thấy việc khách vừa làm → tắt badge chuông cho các
+      // hồ sơ này, tránh chuông đỏ mãi dù đã xem.
+      data.forEach(r => localAlertStore.markReadByRef('checkout', r.id));
     } catch {
       setLoadError(true);
     } finally {

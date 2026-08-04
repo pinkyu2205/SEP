@@ -5,7 +5,7 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
 
 const SH = Dimensions.get('window').height;
 const TODAY = new Date(2026, 4, 21);
@@ -281,9 +281,9 @@ const InvoiceDetailModal: React.FC<{
               <View style={ds.overdueBox}>
                 <Text style={ds.overdueText}>
                   ⚠️ Quá hạn {invoice.overdueDays} ngày · không tính phí phạt
-                  {invoice.overdueDays >= RENT_CYCLE.terminationAlertDays
-                    ? ' — đã báo chủ nhà, đề nghị chấm dứt hợp đồng.'
-                    : ` — quá ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà.`}
+                  {invoice.overdueDays >= RENT_TERMINATION_AFTER_DAYS
+                    ? ` — đã nhắc lần cuối ngày ${RENT_CYCLE.finalReminderDay}, bạn được quyền chấm dứt hợp đồng.`
+                    : ` — từ ngày ${RENT_CYCLE.terminationFromDay} mà chưa thanh toán thì được quyền chấm dứt hợp đồng.`}
                 </Text>
               </View>
             )}

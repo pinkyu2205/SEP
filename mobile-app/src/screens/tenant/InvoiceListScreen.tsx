@@ -5,10 +5,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
+import { localAlertStore } from '@/store/localAlertStore';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 type Invoice = SharedBill;
@@ -74,7 +75,11 @@ export const InvoiceListScreen: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, []);
-  useFocusEffect(useCallback(() => { reload(); }, [reload]));
+  useFocusEffect(useCallback(() => {
+    reload();
+    // Khách đã mở danh sách hoá đơn → các thông báo nhắc tiền/hoá đơn mới coi như đã xem.
+    localAlertStore.markReadByKind('billing');
+  }, [reload]));
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 
@@ -166,9 +171,9 @@ export const InvoiceListScreen: React.FC = () => {
         {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ. */}
         {isOverdue && item.invoiceType === 'rent' && (
           <Text style={styles.riskText}>
-            {daysOverdue >= RENT_CYCLE.terminationAlertDays
-              ? '⚠️ Chủ nhà đã được thông báo — hợp đồng có thể bị chấm dứt.'
-              : `⚠️ Quá hạn ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà và có thể bị chấm dứt hợp đồng.`}
+            {daysOverdue >= RENT_TERMINATION_AFTER_DAYS
+              ? '⚠️ Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng.'
+              : `⚠️ Tới ngày ${RENT_CYCLE.terminationFromDay} chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
           </Text>
         )}
 

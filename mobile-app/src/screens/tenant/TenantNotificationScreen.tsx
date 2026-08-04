@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView, RefreshControl,
 } from 'react-native';
@@ -10,6 +10,8 @@ import { formatRelativeTime } from '@/utils';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
+import { useLocalAlerts, localAlertStore, LocalAlert } from '@/store/localAlertStore';
+import { navigateFromNotification } from '@/navigation/navigationRef';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
 const mapApiNotif = (n: ApiNotification): AppNotification => ({
@@ -21,6 +23,29 @@ const mapApiNotif = (n: ApiNotification): AppNotification => ({
   priority: 'normal',
   createdAt: n.createdAt,
   actionRoute: n.screen,
+});
+
+/**
+ * Thông báo do app tự sinh: trả phòng (quản lý duyệt/kiểm tra/quyết toán/hoàn cọc) và
+ * hoá đơn (tiền phòng tự phát hành, điện/nước quản lý vừa gửi, nhắc tới hạn).
+ * Tiền tố id để phân biệt với thông báo BE — hai nguồn đánh số riêng, cách đánh dấu
+ * đã đọc cũng khác (BE gọi API, cái này lưu trên máy).
+ */
+const LOCAL_PREFIX = 'lc:';
+const localAlertType = (a: LocalAlert): AppNotification['type'] => {
+  if (a.kind !== 'billing') return 'checkout_request';
+  // Nhắc tới hạn / quá hạn dùng icon đỏ; hoá đơn mới thì màu thông tin.
+  return /🚨|⚠️/.test(a.title) ? 'bill_overdue' : 'new_bill';
+};
+const mapLocalAlert = (a: LocalAlert): AppNotification => ({
+  id: LOCAL_PREFIX + a.id,
+  title: a.title,
+  body: a.body,
+  type: localAlertType(a),
+  isRead: a.read,
+  priority: 'high',
+  createdAt: a.createdAt,
+  actionRoute: a.screen,
 });
 
 
@@ -39,6 +64,7 @@ const TYPE_CATEGORY: Record<string, string> = {
   equipment_damaged: 'Thiết bị',
   meter_reading_due: 'Đồng hồ',
   tenant_onboarded: 'Nhận phòng',
+  checkout_request: 'Trả phòng',
   system: 'Hệ thống',
 };
 
@@ -47,6 +73,7 @@ const FILTER_TYPES: { key: string; label: string }[] = [
   { key: 'Hóa đơn', label: 'Hóa đơn' },
   { key: 'Thanh toán', label: 'Thanh toán' },
   { key: 'Sửa chữa', label: 'Sửa chữa' },
+  { key: 'Trả phòng', label: 'Trả phòng' },
   { key: 'Hợp đồng', label: 'Hợp đồng' },
   { key: 'Hệ thống', label: 'Hệ thống' },
 ];
@@ -66,6 +93,7 @@ const TYPE_ACCENT: Record<string, { emoji: string; color: string; bg: string }> 
   equipment_damaged:      { emoji: '⚙️', color: Colors.error,     bg: Colors.errorLight },
   meter_reading_due:      { emoji: '📊', color: Colors.warning,   bg: Colors.warningLight },
   tenant_onboarded:       { emoji: '🏠', color: Colors.success,   bg: Colors.successLight },
+  checkout_request:       { emoji: '🚪', color: '#DC2626',        bg: Colors.errorLight },
   system:                 { emoji: '🔔', color: Colors.textMuted, bg: '#F1F5F9' },
 };
 
@@ -100,17 +128,19 @@ const groupByTime = (items: AppNotification[]): Section[] => {
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TenantNotificationScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [beNotifs, setBeNotifs] = useState<AppNotification[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [refreshing, setRefreshing] = useState(false);
+  // Thông báo trả phòng app tự sinh — hiện ngay khi quản lý vừa thao tác.
+  const { alerts } = useLocalAlerts();
 
   // Nạp thông báo thật từ BE mỗi khi vào màn.
   const load = useCallback(async () => {
     try {
       const rows = await realNotificationService.list();
-      setNotifications(rows.map(mapApiNotif));
+      setBeNotifs(rows.map(mapApiNotif));
     } catch {
-      setNotifications([]);
+      setBeNotifs([]);
     }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -121,6 +151,14 @@ export const TenantNotificationScreen: React.FC = () => {
   }, [load]);
 
   // ── Business logic ────────────────────────────────────────────────────────
+  // Trộn 2 nguồn (BE + app tự sinh), mới nhất lên đầu — người thuê không cần biết
+  // thông báo tới từ đâu.
+  const notifications = useMemo(
+    () => [...alerts.map(mapLocalAlert), ...beNotifs]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [alerts, beNotifs],
+  );
+
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const filtered = filter === 'all'
@@ -128,11 +166,16 @@ export const TenantNotificationScreen: React.FC = () => {
     : notifications.filter(n => TYPE_CATEGORY[n.type] === filter);
 
   const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    localAlertStore.markAllRead();
+    setBeNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
     realNotificationService.markAllRead().catch(() => { /* offline */ });
   };
   const markRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    if (id.startsWith(LOCAL_PREFIX)) {
+      localAlertStore.markRead(id.slice(LOCAL_PREFIX.length));
+      return;
+    }
+    setBeNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
     const num = Number(id);
     if (Number.isFinite(num)) realNotificationService.markRead(num).catch(() => { /* offline */ });
   };
@@ -141,6 +184,12 @@ export const TenantNotificationScreen: React.FC = () => {
 
   const handleNotifPress = async (notif: AppNotification) => {
     markRead(notif.id);
+    // Thông báo app tự sinh → mở thẳng màn tương ứng (tiến trình trả phòng / hoá đơn).
+    if (notif.id.startsWith(LOCAL_PREFIX)) {
+      const alert = alerts.find(a => LOCAL_PREFIX + a.id === notif.id);
+      if (alert) navigateFromNotification({ screen: alert.screen, params: alert.params });
+      return;
+    }
     // Thông báo bảo trì: BE không gửi payload điều hướng, nhưng body luôn có
     // "Yêu cầu #<id> ..." → parse id, nạp chi tiết rồi mở thẳng màn ticket.
     if (notif.type.startsWith('maintenance')) {

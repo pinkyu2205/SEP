@@ -6,6 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
+import { useLocalAlerts, localAlertStore, LocalAlert } from '@/store/localAlertStore';
+import { navigateFromNotification } from '@/navigation/navigationRef';
 
 // ===================== TYPES =====================
 type NotifType =
@@ -53,9 +55,33 @@ const FILTER_TABS = [
   { key: 'unread', label: 'Chưa đọc' },
   { key: 'bill_overdue', label: 'Hóa đơn' },
   { key: 'maintenance_new', label: 'Bảo trì' },
+  { key: 'checkout_request', label: 'Trả phòng' },
   { key: 'contract_expiring', label: 'Hợp đồng' },
   { key: 'payment_pending_verify', label: 'Thanh toán' },
 ];
+
+/**
+ * Thông báo do app tự sinh: trả phòng (khách gửi/huỷ/đồng ý/phản đối) và hoá đơn
+ * (tiền phòng tự phát hành, hợp đồng quá hạn được quyền chấm dứt).
+ * Id gắn tiền tố để phân biệt với thông báo BE — hai nguồn đánh số riêng và cách
+ * đánh dấu đã đọc cũng khác nhau (BE gọi API, cái này lưu máy).
+ */
+const LOCAL_PREFIX = 'lc:';
+const localNotifType = (a: LocalAlert): NotifType => {
+  if (a.kind !== 'billing') return 'checkout_request';
+  // Cảnh báo quá hạn/chấm dứt dùng icon đỏ; còn lại là hoá đơn thường.
+  return /⛔|🚨/.test(a.title) ? 'bill_overdue' : 'new_bill';
+};
+const localToAppNotif = (a: LocalAlert): AppNotification => ({
+  id: LOCAL_PREFIX + a.id,
+  title: a.title,
+  body: a.body,
+  type: localNotifType(a),
+  isRead: a.read,
+  priority: 'high',
+  createdAt: a.createdAt,
+  actionRoute: a.screen,
+});
 
 function timeAgo(dateStr: string): string {
   const now = new Date();
@@ -117,23 +143,32 @@ const NotifCard: React.FC<{
 // ===================== MAIN =====================
 export const NotificationCenterScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [beNotifs, setBeNotifs] = useState<AppNotification[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
+  // Thông báo trả phòng app tự sinh — tự cập nhật ngay khi khách vừa thao tác.
+  const { alerts } = useLocalAlerts();
 
   // Nạp thông báo thật từ BE mỗi khi vào màn.
   const load = useCallback(async () => {
     try {
       const rows = await realNotificationService.list();
-      setNotifications(rows.map((n: ApiNotification): AppNotification => ({
+      setBeNotifs(rows.map((n: ApiNotification): AppNotification => ({
         id: String(n.id), title: n.title, body: n.body,
         type: n.type as AppNotification['type'], isRead: n.isRead,
         priority: 'normal', createdAt: n.createdAt, actionRoute: n.screen,
       })));
     } catch {
-      setNotifications([]);
+      setBeNotifs([]);
     }
   }, []);
+
+  // Trộn 2 nguồn, mới nhất lên đầu — người dùng không cần biết cái nào của server.
+  const notifications = useMemo(
+    () => [...alerts.map(localToAppNotif), ...beNotifs]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [alerts, beNotifs],
+  );
   useFocusEffect(useCallback(() => { load(); }, [load]));
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -150,13 +185,18 @@ export const NotificationCenterScreen: React.FC = () => {
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const markRead = (id: string) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    if (id.startsWith(LOCAL_PREFIX)) {
+      localAlertStore.markRead(id.slice(LOCAL_PREFIX.length));
+      return;
+    }
+    setBeNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
     const num = Number(id);
     if (Number.isFinite(num)) realNotificationService.markRead(num).catch(() => { /* offline */ });
   };
 
   const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+    localAlertStore.markAllRead();
+    setBeNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
     realNotificationService.markAllRead().catch(() => { /* offline */ });
   };
 
@@ -164,6 +204,12 @@ export const NotificationCenterScreen: React.FC = () => {
 
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);
+    // Thông báo app tự sinh: mở thẳng màn kèm id (hồ sơ trả phòng / tiền phòng).
+    if (notif.id.startsWith(LOCAL_PREFIX)) {
+      const alert = alerts.find(a => LOCAL_PREFIX + a.id === notif.id);
+      if (alert) navigateFromNotification({ screen: alert.screen, params: alert.params });
+      return;
+    }
     // Thông báo bảo trì: nếu body có "#<id>" thì mở thẳng ticket, không thì về tab bảo trì.
     if (notif.type.startsWith('maintenance')) {
       const m = notif.body?.match(/#(\d+)/);

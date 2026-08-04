@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import { noteOwnCheckoutAction } from '@/services/shared/checkoutNotifier';
 import type {
   CheckoutRequestDto, CheckoutInspectionDto, CheckoutSettlementDto, CheckoutDamageItem,
 } from '@/services/tenant/selfService';
@@ -13,6 +14,10 @@ import type {
  *
  * ĐÃ CÓ trên BE: list · get · approve · reject · complete.
  * ⚠️ BE TODO (FE gọi sẵn): inspection · settlement · submitSettlement · refund · createForTenant.
+ *
+ * Mọi hàm HÀNH ĐỘNG đều gọi `noteOwnCheckoutAction` với DTO trả về: ghi nhận đây là
+ * thao tác của chính manager này để vòng theo dõi (useCheckoutWatcher) không bắn
+ * thông báo ngược lại cho người vừa bấm — khách thuê vẫn nhận bình thường.
  */
 
 export interface SaveInspectionBody {
@@ -20,6 +25,9 @@ export interface SaveInspectionBody {
   roomConditionNote?: string;
   electricityFinalReading?: number;   // chốt chỉ số cuối kỳ, tránh mất tiền điện những ngày cuối
   waterFinalReading?: number;
+  /** Ảnh mặt đồng hồ lúc chốt số — bằng chứng khi khách thắc mắc số cuối (BE TODO). */
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
   damages?: CheckoutDamageItem[];
 }
 
@@ -50,6 +58,7 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/approve`,
       { managerNote },
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -58,6 +67,7 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/reject`,
       { reason },
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -72,6 +82,7 @@ export const checkoutService = {
     reason: string;
   }): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.post<CheckoutRequestDto>('/api/v1/checkout-requests', body);
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -89,6 +100,7 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/inspection`, body,
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -107,6 +119,7 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/settlement/submit`, { note },
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -115,6 +128,7 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/refund`, body,
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -131,6 +145,7 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/complete`,
       body,
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 };

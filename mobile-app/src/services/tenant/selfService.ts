@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import { noteOwnCheckoutAction } from '@/services/shared/checkoutNotifier';
 import type { EvidencePhoto } from './tenantService';
 
 /**
@@ -204,6 +205,9 @@ export interface CheckoutInspectionDto {
   roomConditionNote?: string;
   electricityFinalReading?: number;
   waterFinalReading?: number;
+  /** Ảnh mặt đồng hồ lúc chốt số (BE TODO) — khách xem lại được khi thắc mắc. */
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
   damages?: CheckoutDamageItem[];
   inspectedAt?: string;
   inspectedByName?: string;
@@ -326,8 +330,12 @@ export const realTenantSelfService = {
   },
 
   // ---- Yêu cầu trả phòng ----
+  // Các hàm hành động dưới đây gọi `noteOwnCheckoutAction` để vòng theo dõi
+  // (useCheckoutWatcher) không báo ngược thao tác của chính khách cho khách —
+  // phía quản lý vẫn nhận thông báo bình thường.
   createCheckoutRequest: async (body: CreateCheckoutRequestBody): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.post<CheckoutRequestDto>('/api/v1/tenant/me/checkout-requests', body);
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -344,6 +352,7 @@ export const realTenantSelfService = {
   /** Tenant tự hủy yêu cầu đang PENDING. */
   cancelCheckoutRequest: async (id: number): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.delete<CheckoutRequestDto>(`/api/v1/tenant/me/checkout-requests/${id}`);
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -354,6 +363,7 @@ export const realTenantSelfService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/tenant/me/checkout-requests/${id}/settlement/accept`,
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -365,6 +375,7 @@ export const realTenantSelfService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/tenant/me/checkout-requests/${id}/settlement/dispute`, body,
     );
+    noteOwnCheckoutAction(data);
     return data;
   },
 };

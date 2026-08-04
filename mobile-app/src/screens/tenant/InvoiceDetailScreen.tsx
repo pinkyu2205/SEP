@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
@@ -115,9 +115,9 @@ export const InvoiceDetailScreen: React.FC = () => {
               {/* Tiền phòng: không phạt tiền, nhưng trễ lâu sẽ báo chủ nhà & đề nghị chấm dứt HĐ. */}
               {invoice.invoiceType === 'rent' && (
                 <Text style={s.overdueSub}>
-                  {daysOver >= RENT_CYCLE.terminationAlertDays
-                    ? 'Chủ nhà đã được thông báo — hợp đồng có thể bị chấm dứt. Vui lòng thanh toán ngay.'
-                    : `Không tính phí phạt, nhưng quá hạn ${RENT_CYCLE.terminationAlertDays} ngày sẽ báo chủ nhà và có thể bị chấm dứt hợp đồng.`}
+                  {daysOver >= RENT_TERMINATION_AFTER_DAYS
+                    ? 'Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng. Vui lòng thanh toán ngay.'
+                    : `Không tính phí phạt, nhưng nếu tới ngày ${RENT_CYCLE.terminationFromDay} vẫn chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
                 </Text>
               )}
             </View>

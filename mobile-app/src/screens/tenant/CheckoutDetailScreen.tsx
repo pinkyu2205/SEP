@@ -9,6 +9,7 @@ import {
 } from '@/constants';
 import { formatDate, showAlert } from '@/utils';
 import { realTenantSelfService } from '@/services/tenant/selfService';
+import { localAlertStore } from '@/store/localAlertStore';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 /**
@@ -89,6 +90,8 @@ export const CheckoutDetailScreen: React.FC = () => {
       list.sort((a, b) => b.id - a.id);
       setRequests(list);
       setSelectedId((prev) => prev ?? list[0]?.id ?? null);
+      // Khách đã mở xem tiến trình → thông báo của các hồ sơ này coi như đã đọc.
+      list.forEach((r) => localAlertStore.markReadByRef('checkout', r.id));
     } catch {
       showAlert('Lỗi', 'Không tải được yêu cầu trả phòng.');
     } finally {
@@ -376,6 +379,23 @@ export const CheckoutDetailScreen: React.FC = () => {
             {inspection.waterFinalReading != null && (
               <InfoRow label="Chỉ số nước cuối" value={`${inspection.waterFinalReading}`} />
             )}
+            {/* Ảnh mặt đồng hồ lúc chốt — khách tự đối chiếu, khỏi phải tin lời suông. */}
+            {(!!inspection.electricMeterImageUrl || !!inspection.waterMeterImageUrl) && (
+              <View style={styles.meterPhotoRow}>
+                {!!inspection.electricMeterImageUrl && (
+                  <View style={styles.meterPhotoItem}>
+                    <Text style={styles.meterPhotoLabel}>⚡ Đồng hồ điện</Text>
+                    <Image source={{ uri: inspection.electricMeterImageUrl }} style={styles.inspPhoto} />
+                  </View>
+                )}
+                {!!inspection.waterMeterImageUrl && (
+                  <View style={styles.meterPhotoItem}>
+                    <Text style={styles.meterPhotoLabel}>💧 Đồng hồ nước</Text>
+                    <Image source={{ uri: inspection.waterMeterImageUrl }} style={styles.inspPhoto} />
+                  </View>
+                )}
+              </View>
+            )}
             {!!inspection.roomConditionNote && (
               <Text style={styles.managerNote}>{inspection.roomConditionNote}</Text>
             )}
@@ -651,6 +671,9 @@ const styles = StyleSheet.create({
 
   // ── Biên bản kiểm tra ──
   inspPhoto: { width: 110, height: 110, borderRadius: BorderRadius.md, backgroundColor: Colors.divider },
+  meterPhotoRow: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.sm },
+  meterPhotoItem: { gap: 4 },
+  meterPhotoLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
   subTitle: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, marginBottom: 4 },
   damageRow: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,

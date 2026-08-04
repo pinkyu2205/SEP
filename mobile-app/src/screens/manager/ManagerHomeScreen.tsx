@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius } from '@/constants';
+import { Colors, Spacing, BorderRadius, canTerminateForUnpaidRent } from '@/constants';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 import {
@@ -16,6 +16,8 @@ import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { checkoutService } from '@/services/manager/checkoutService';
+import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 const QUICK_ACTIONS = [
   { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },
@@ -41,22 +43,25 @@ export const ManagerHomeScreen: React.FC = () => {
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   const [draftContracts, setDraftContracts] = useState<TenantContractResponse[]>([]);
+  const [checkouts, setCheckouts] = useState<CheckoutRequestDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const realUnread = useUnreadNotifications();   // badge chuông từ BE (null → 0)
+  const realUnread = useUnreadNotifications();   // badge chuông: BE + thông báo trả phòng
 
   const load = useCallback(async () => {
     try {
-      const [props, inv, pay, drafts] = await Promise.all([
+      const [props, inv, pay, drafts, checkoutList] = await Promise.all([
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
         realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
+        checkoutService.list().catch(() => [] as CheckoutRequestDto[]),
       ]);
       setProperties(props);
       setInvoices(inv);
       setPayments(pay);
       setDraftContracts(drafts);
+      setCheckouts(checkoutList);
     } catch {
       // Lỗi đã được xử lý/log ở service; giữ dữ liệu cũ.
     } finally {
@@ -95,6 +100,9 @@ export const ManagerHomeScreen: React.FC = () => {
 
   // Số liệu thật cho "Cần xử lý hôm nay" + badge thao tác nhanh.
   const overdueCount  = invoices.filter(i => i.status === 'OVERDUE').length;
+  // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
+  const rentTerminable = invoices.filter(i =>
+    i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
   const unpaidCount   = invoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
@@ -105,16 +113,29 @@ export const ManagerHomeScreen: React.FC = () => {
   const todayIso = new Date().toISOString().slice(0, 10);
   const receptionToday = draftContracts.filter(c => c.expectedReceptionDate === todayIso);
 
+  // Trả phòng: hồ sơ đang chờ CHÍNH MANAGER làm gì đó. Khách gửi yêu cầu / đồng ý
+  // quyết toán / phản đối đều rơi vào đây, nên việc mới hiện ngay ở màn đầu chứ không
+  // chỉ nằm trong thông báo.
+  const checkoutPending = checkouts.filter(c => (c.status || '').toUpperCase() === 'PENDING').length;
+  const checkoutTodo = checkouts.filter(c =>
+    ['PENDING', 'APPROVED', 'INSPECTING', 'DISPUTED', 'SETTLING'].includes((c.status || '').toUpperCase()),
+  ).length;
+
   const priorityItems = [
     { id: 'p0', icon: '🤝', label: 'Đón khách hôm nay',         count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
     { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
     { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
+    { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
+      count: checkoutPending > 0 ? checkoutPending : checkoutTodo,
+      urgency: checkoutPending > 0 ? 'critical' : 'warning', color: '#DC2626', route: 'CheckoutRequests' },
+    { id: 'p5', icon: '⛔', label: 'Tiền phòng quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'RentInvoice' },
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
   ];
 
   const quickBadges: Record<string, number> = {
     ManagerBilling: unpaidCount,
     ManagerMaintenance: m.maintenance,
+    CheckoutRequests: checkoutTodo,
   };
 
   const activeItems    = priorityItems.filter(p => p.count > 0);
