@@ -7,7 +7,6 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
 import { formatDate, showAlert, readApiError } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
-import { localAlertStore } from '@/store/localAlertStore';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 /**
@@ -56,9 +55,6 @@ export const CheckoutRequestsScreen: React.FC = () => {
       data.sort((a, b) => b.id - a.id);
       setList(data);
       setLoadError(false);
-      // Vào tới đây là manager đã thấy việc khách vừa làm → tắt badge chuông cho các
-      // hồ sơ này, tránh chuông đỏ mãi dù đã xem.
-      data.forEach(r => localAlertStore.markReadByRef('checkout', r.id));
     } catch {
       setLoadError(true);
     } finally {
@@ -92,7 +88,11 @@ export const CheckoutRequestsScreen: React.FC = () => {
         // Duyệt xong hồ sơ rời khỏi nhóm "Chờ duyệt" — tự nhảy sang "Đang xử lý"
         // để manager thấy nó đi tiếp, không tưởng là mất.
         setFilter('ACTIVE');
-        showAlert('Đã duyệt', 'Hồ sơ chuyển sang mục "Đang xử lý". Đến ngày hẹn, mở hồ sơ và bấm "Lập biên bản kiểm tra".');
+        showAlert(
+          'Đã duyệt',
+          'Hệ thống chốt tiền phòng tháng này theo ngày rời phòng và gửi hoá đơn kỳ cuối cho khách. '
+          + 'Hồ sơ chuyển sang mục "Đang xử lý" — đến ngày hẹn, mở hồ sơ và bấm "Lập biên bản kiểm tra".',
+        );
       } else {
         await checkoutService.reject(req.id, inputNote.trim());
         showAlert('Đã từ chối', 'Khách sẽ nhận thông báo kèm lý do.');

@@ -545,6 +545,8 @@ export interface AppNotification {
   createdAt: string;
   actionLabel?: string;
   actionRoute?: string;
+  /** Tham số route BE gửi kèm (vd { requestId: 12 }) — có từ 05/08/2026. */
+  actionParams?: Record<string, any>;
 }
 
 // ======================== ANALYTICS ========================

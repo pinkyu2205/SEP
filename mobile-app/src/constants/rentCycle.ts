@@ -1,7 +1,13 @@
 /**
  * Chu kỳ TIỀN PHÒNG TỰ ĐỘNG — nguồn sự thật duy nhất cho manager + tenant.
  *
- * Chính sách (chốt 04/08/2026):
+ * Chính sách (chốt 04/08/2026, bổ sung kỳ đầu/kỳ cuối 05/08/2026):
+ *   • KỲ ĐẦU (khách vào giữa tháng): hoá đơn tính từ NGÀY NHẬN PHÒNG đến hết tháng,
+ *                             phát hành + thu ngay lúc nhận phòng. Từ tháng sau mới
+ *                             theo chu kỳ ngày 1–5 như bình thường.
+ *   • KỲ CUỐI (trả phòng giữa tháng): hoá đơn tính từ ngày 1 đến NGÀY MANAGER DUYỆT
+ *                             rời phòng, phát hành ngay lúc duyệt; khách trả phần còn
+ *                             lại (chênh lệch vào bảng quyết toán).
  *   • Ngày 28 (tháng trước) : nhắc khách chuẩn bị — ngày 1 tới hạn đóng tiền phòng.
  *   • Ngày 1                : hệ thống TỰ phát hành hoá đơn tiền phòng cho MỌI hợp
  *                             đồng ACTIVE và báo khách. Manager KHÔNG gửi tay nữa.
@@ -13,11 +19,11 @@
  *                             trách nhiệm).
  *   • KHÔNG tính phí phạt trả chậm.
  *   • Điện/nước KHÔNG nằm trong chu kỳ này: manager vẫn ghi chỉ số & gửi tay, nhưng
- *     gửi xong khách vẫn nhận thông báo ngay (services/shared/billingNotifier).
+ *     gửi xong BE bắn thông báo cho khách ngay.
  *
- * Job phát hành + nhắc nợ đúng ra phải chạy ở BE. BE chưa có nên app tự làm tạm
- * (services/manager/rentAutoBilling + services/shared/billingNotifier) — xem
- * docs/BE-NEED-rent-auto-cycle-2026-08-04.md.
+ * TOÀN BỘ do BE chạy cron (verify 05/08/2026 — BillingCronServiceImpl):
+ * phát hành 00:05 ngày 1 (prorate theo ngày cho HĐ vào giữa tháng), quét nhắc nợ
+ * 08:00 mỗi ngày, nhắc trước 00:10 ngày 28. FE chỉ hiển thị kết quả.
  */
 
 export const RENT_CYCLE = {
@@ -54,13 +60,10 @@ export const RENT_POLICY_FULL =
   `Hệ thống tự phát hành hoá đơn tiền phòng ngày ${RENT_CYCLE.issueDay} hằng tháng, hạn nộp ngày ${RENT_CYCLE.dueDay} — quản lý không cần gửi tay. ` +
   `Khách được nhắc từ ngày ${RENT_CYCLE.preNoticeDay} tháng trước, mỗi ngày trong kỳ ${RENT_CYCLE.issueDay}–${RENT_CYCLE.dueDay}, và nhắc lần cuối ngày ${RENT_CYCLE.finalReminderDay}. ` +
   `Trả trễ KHÔNG bị phạt tiền, nhưng từ ngày ${RENT_CYCLE.terminationFromDay} mà vẫn chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`;
-
-/**
- * Nhịp app kiểm tra hoá đơn mới / mốc nhắc nợ (useBillingWatcher).
- * 3 phút: quản lý gửi hoá đơn điện–nước xong thì khách thấy thông báo gần như ngay,
- * mà vẫn nhẹ vì mỗi lần chỉ là 1 request danh sách hoá đơn.
- */
-export const BILLING_POLL_MS = 180_000;
+/** Câu giải thích 2 kỳ lẻ (vào/ra giữa tháng) — dùng ở màn tiền phòng & trả phòng. */
+export const RENT_PARTIAL_CYCLE_NOTE =
+  'Vào giữa tháng: hoá đơn kỳ đầu tính từ ngày nhận phòng đến hết tháng, thu ngay lúc nhận phòng. ' +
+  'Trả phòng giữa tháng: hoá đơn kỳ cuối tính từ ngày 1 đến ngày quản lý duyệt rời phòng, gửi khách ngay khi duyệt.';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -98,6 +101,68 @@ export const rentNoticeMonth = (now: Date = new Date()): string =>
 
 /** Kỳ mà hệ thống phải phát hành hoá đơn tính tới hôm nay (từ ngày 1 là kỳ tháng này). */
 export const rentBillingMonth = (now: Date = new Date()): string => toMonthKey(now);
+
+/** Số ngày của kỳ "YYYY-MM". */
+export const daysInMonth = (month: string): number => {
+  const [y, m] = month.split('-').map(Number);
+  return y && m ? new Date(y, m, 0).getDate() : 30;
+};
+
+/** Ngày (số) của "YYYY-MM-DD" nếu nó nằm trong tháng `month`, ngược lại null. */
+const dayWithinMonth = (month: string, iso?: string): number | null => {
+  if (!iso || !iso.startsWith(month)) return null;
+  const d = Number(iso.slice(8, 10));
+  return Number.isFinite(d) && d > 0 ? d : null;
+};
+
+export interface PartialRentCycle {
+  /** 'first' = khách vào giữa tháng · 'last' = trả phòng giữa tháng. */
+  kind: 'first' | 'last';
+  fromDay: number;
+  toDay: number;
+  days: number;
+  /** Tiền ước tính theo ngày — số CHÍNH THỨC do BE tính, đây chỉ để đối chiếu. */
+  amount: number;
+  label: string;
+}
+
+/**
+ * Kỳ tính tiền lẻ của một hợp đồng trong tháng `month` (null = trọn tháng).
+ *
+ * • Khách nhận phòng giữa tháng  → tính từ ngày nhận đến hết tháng.
+ * • Trả phòng giữa tháng         → tính từ ngày 1 đến ngày rời phòng (ngày quản lý duyệt).
+ * Công thức khớp BE: tiền tháng ÷ số ngày trong tháng × số ngày ở (làm tròn).
+ */
+export const partialRentCycle = (
+  month: string,
+  rentAmount: number,
+  startDate?: string,
+  endDate?: string,
+): PartialRentCycle | null => {
+  const total = daysInMonth(month);
+  const startDay = dayWithinMonth(month, startDate);
+  const endDay = dayWithinMonth(month, endDate);
+  const [, mm] = month.split('-');
+
+  // Trả phòng giữa tháng được ưu tiên: đó là kỳ cuối, quyết định số tiền phải thu.
+  if (endDay != null && endDay < total) {
+    const days = endDay;
+    return {
+      kind: 'last', fromDay: 1, toDay: endDay, days,
+      amount: Math.round((rentAmount * days) / total),
+      label: `Kỳ cuối · 01/${mm} → ${pad(endDay)}/${mm} (${days} ngày)`,
+    };
+  }
+  if (startDay != null && startDay > 1) {
+    const days = total - startDay + 1;
+    return {
+      kind: 'first', fromDay: startDay, toDay: total, days,
+      amount: Math.round((rentAmount * days) / total),
+      label: `Kỳ đầu · ${pad(startDay)}/${mm} → ${pad(total)}/${mm} (${days} ngày)`,
+    };
+  }
+  return null;
+};
 
 export type RentNoticeStage =
   | 'PRE_NOTICE'     // ngày 28: nhắc trước

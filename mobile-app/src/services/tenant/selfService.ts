@@ -1,5 +1,4 @@
 import realApiClient from '@/services/core/realApiClient';
-import { noteOwnCheckoutAction } from '@/services/shared/checkoutNotifier';
 import type { EvidencePhoto } from './tenantService';
 
 /**
@@ -133,6 +132,15 @@ export interface ContractDetailDto {
   // ở ContractDetailScreen.mapDetail, không dùng field này trực tiếp.
   deposit?: number;
   depositAmount?: number;
+  /** Trạng thái thu cọc: PENDING | PAID | FAILED | CANCELLED (BE: TenantContract.paymentStatus). */
+  paymentStatus?: string;
+  /** Thời điểm thu đủ cọc — PayOS `paidAt`, hoặc lúc quản lý xác nhận tiền mặt (BE 05/08/2026). */
+  depositPaidAt?: string;
+  /** PAYOS | CASH | null — cách khách đóng cọc. */
+  depositMethod?: string;
+  /** Có mã đơn PayOS = khách chuyển khoản qua cổng; không có = thu tay/tiền mặt. */
+  payosOrderCode?: number;
+  moveInDate?: string;
   equipmentList?: ContractEquipmentDto[];
   notes?: string;
   signedAt?: string;
@@ -182,9 +190,9 @@ export interface TenantHandoverResponse {
 // @/constants/checkout):
 //   PENDING → APPROVED → INSPECTING → WAITING_TENANT → SETTLING → COMPLETED
 //   nhánh phụ: REJECTED · CANCELLED (tenant tự huỷ khi PENDING) · DISPUTED (khách phản đối).
-// ⚠️ BE hiện MỚI có PENDING/APPROVED/REJECTED/COMPLETED/CANCELLED — 4 trạng thái
-// giữa (INSPECTING/WAITING_TENANT/DISPUTED/SETTLING) và mọi field inspection/settlement
-// bên dưới là BE TODO, FE gọi sẵn theo hợp đồng kỳ vọng.
+// BE đã có ĐỦ 9 trạng thái + inspection/settlement/dispute (verify 05/08/2026).
+// Duyệt yêu cầu trả phòng còn set `contract.endDate` = ngày rời dự kiến và tính lại
+// hoá đơn tiền phòng tháng đó theo số ngày ở thực tế.
 export type CheckoutRequestStatus =
   | 'PENDING' | 'APPROVED' | 'INSPECTING' | 'WAITING_TENANT'
   | 'DISPUTED' | 'SETTLING' | 'REJECTED' | 'COMPLETED' | 'CANCELLED';
@@ -205,7 +213,7 @@ export interface CheckoutInspectionDto {
   roomConditionNote?: string;
   electricityFinalReading?: number;
   waterFinalReading?: number;
-  /** Ảnh mặt đồng hồ lúc chốt số (BE TODO) — khách xem lại được khi thắc mắc. */
+  /** Ảnh mặt đồng hồ lúc chốt số — khách xem lại được khi thắc mắc (BE có 05/08/2026). */
   electricMeterImageUrl?: string;
   waterMeterImageUrl?: string;
   damages?: CheckoutDamageItem[];
@@ -330,12 +338,10 @@ export const realTenantSelfService = {
   },
 
   // ---- Yêu cầu trả phòng ----
-  // Các hàm hành động dưới đây gọi `noteOwnCheckoutAction` để vòng theo dõi
-  // (useCheckoutWatcher) không báo ngược thao tác của chính khách cho khách —
-  // phía quản lý vẫn nhận thông báo bình thường.
+  // BE tự bắn thông báo + push cho quản lý ở mỗi thao tác (CHECKOUT_REQUESTED,
+  // CHECKOUT_CANCELLED, CHECKOUT_SETTLEMENT_ACCEPTED, CHECKOUT_DISPUTED).
   createCheckoutRequest: async (body: CreateCheckoutRequestBody): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.post<CheckoutRequestDto>('/api/v1/tenant/me/checkout-requests', body);
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -352,7 +358,6 @@ export const realTenantSelfService = {
   /** Tenant tự hủy yêu cầu đang PENDING. */
   cancelCheckoutRequest: async (id: number): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.delete<CheckoutRequestDto>(`/api/v1/tenant/me/checkout-requests/${id}`);
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -363,7 +368,6 @@ export const realTenantSelfService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/tenant/me/checkout-requests/${id}/settlement/accept`,
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -375,7 +379,6 @@ export const realTenantSelfService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/tenant/me/checkout-requests/${id}/settlement/dispute`, body,
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 };

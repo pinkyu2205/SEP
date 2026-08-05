@@ -20,7 +20,8 @@ import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
-import { showAlert } from '@/utils';
+import { CameraCaptureModal } from '@/components/common'
+import { showAlert, validateMeterPhoto } from '@/utils';
 import {
   ContractPriceApprovalStatus,
   realTenantService,
@@ -435,44 +436,66 @@ const InspectionSection: React.FC<{
   // chịu trách nhiệm trước khi được lưu (feedback demo).
   const [manualEdited, setManualEdited] = useState<{ elec?: boolean; water?: boolean }>({})
   const [manualConfirmed, setManualConfirmed] = useState<{ elec?: boolean; water?: boolean }>({})
+  /**
+   * Camera trong app đang mở cho việc gì (null = đóng).
+   * Dùng CameraCaptureModal thay ImagePicker.launchCameraAsync: trên web hàm đó chỉ mở
+   * hộp thoại chọn file, và modal bắt xem lại ảnh trước khi dùng.
+   */
+  const [cameraTarget, setCameraTarget] = useState<'elec' | 'water' | 'condition' | null>(null)
   // Xem ảnh phóng to (đồng hồ điện/nước + hiện trạng phòng) — chạm bất kỳ đâu để đóng.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewCapturedAt, setPreviewCapturedAt] = useState<string | undefined>(undefined)
 
   const hasData = photos.length > 0 || !!elecReading || !!waterReading
 
-  const pickImage = async (useCamera: boolean, onDenied?: () => void): Promise<string | null> => {
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync()
-      if (perm.status !== 'granted') {
-        showAlert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
-        onDenied?.()
-        return null
-      }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      return r.canceled ? null : r.assets[0].uri
-    }
+  /** Ảnh có sẵn trong máy (1 tấm). */
+  const pickFromGallery = async (): Promise<string | null> => {
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
     return r.canceled ? null : r.assets[0].uri
   }
 
-  const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
-    if (!useCamera && !gallerySOS[kind]) return
-    const uri = await pickImage(useCamera, () => setGallerySOS((prev) => ({ ...prev, [kind]: true })))
-    if (!uri) return
+  /**
+   * Ảnh mặt đồng hồ lúc đón khách — mốc gốc để tính tiền điện/nước cả kỳ thuê, nên
+   * bắt buộc là MẶT ĐỒNG HỒ THẬT: `validateMeterPhoto` soi chữ OCR đọc được (kWh, m³,
+   * tên hãng, serial...). Ảnh chỉ có con số (ghi ra giấy, chụp màn hình) hoặc chụp
+   * nhầm loại đồng hồ đều bị từ chối — không lưu ảnh, không điền số.
+   */
+  const handleMeterPhoto = async (kind: 'elec' | 'water', uri: string) => {
     // Ảnh mới chụp — tin OCR trở lại, bỏ yêu cầu xác nhận nhập tay của lần trước.
     setManualEdited((prev) => ({ ...prev, [kind]: false }))
     setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+    const label = kind === 'elec' ? 'điện' : 'nước'
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
       const capturedAt = new Date().toISOString()
+
+      let ocr
+      try {
+        ocr = await realTenantService.ocrMeter(url)
+      } catch (err: any) {
+        // Không kiểm chứng được ảnh → vẫn giữ để không chặn việc đón khách, nhưng báo rõ.
+        if (kind === 'elec') { setElecUrl(url); setMeterCapturedAt((prev) => ({ ...prev, elec: capturedAt })) }
+        else { setWaterUrl(url); setMeterCapturedAt((prev) => ({ ...prev, water: capturedAt })) }
+        showAlert('Chưa kiểm được ảnh', readErr(err, 'Dịch vụ đọc ảnh lỗi — nhập chỉ số tay và kiểm lại ảnh giúp.'))
+        return
+      }
+
+      const check = validateMeterPhoto(kind, ocr)
+      if (!check.ok) {
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫')
+        return
+      }
+
       if (kind === 'elec') { setElecUrl(url); setMeterCapturedAt((prev) => ({ ...prev, elec: capturedAt })) }
       else { setWaterUrl(url); setMeterCapturedAt((prev) => ({ ...prev, water: capturedAt })) }
-      const ocr = await realTenantService.ocrMeter(url)
-      if (ocr.reading) {
-        if (kind === 'elec') setElecReading(ocr.reading)
-        else setWaterReading(ocr.reading)
+
+      if (check.reading) {
+        if (kind === 'elec') setElecReading(check.reading)
+        else setWaterReading(check.reading)
+      }
+      if (check.confidence === 'low') {
+        showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — xem lại ảnh và chỉ số trước khi lưu.`)
       }
     } catch (err: any) {
       showAlert('OCR', readErr(err, 'Không đọc được ảnh, vui lòng nhập số tay.'))
@@ -481,24 +504,14 @@ const InspectionSection: React.FC<{
     }
   }
 
-  const addConditionPhoto = async (useCamera: boolean) => {
-    let uris: string[] = []
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync()
-      if (perm.status !== 'granted') {
-        showAlert('Lỗi', 'Cần quyền camera.')
-        return
-      }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      if (!r.canceled) uris = [r.assets[0].uri]
-    } else {
-      const r = await ImagePicker.launchImageLibraryAsync({
-        quality: 0.6,
-        allowsMultipleSelection: true,
-        selectionLimit: 10,
-      })
-      if (!r.canceled) uris = r.assets.map((a) => a.uri)
-    }
+  /** Chọn ảnh đồng hồ từ thư viện — chỉ mở khi camera hỏng (gallerySOS). */
+  const pickMeterFromGallery = async (kind: 'elec' | 'water') => {
+    if (!gallerySOS[kind]) return
+    const uri = await pickFromGallery()
+    if (uri) await handleMeterPhoto(kind, uri)
+  }
+
+  const uploadConditionPhotos = async (uris: string[]) => {
     if (uris.length === 0) return
     try {
       setPhotoUploading(true)
@@ -511,6 +524,17 @@ const InspectionSection: React.FC<{
     } finally {
       setPhotoUploading(false)
     }
+  }
+
+  /** Chọn nhiều ảnh hiện trạng phòng từ thư viện. */
+  const pickConditionFromGallery = async () => {
+    const r = await ImagePicker.launchImageLibraryAsync({
+      quality: 0.6,
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
+    })
+    if (r.canceled) return
+    await uploadConditionPhotos(r.assets.map((a) => a.uri))
   }
 
   const save = async () => {
@@ -572,7 +596,7 @@ const InspectionSection: React.FC<{
               <View style={styles.methodRow}>
                 <TouchableOpacity
                   style={styles.secondaryBtnSm}
-                  onPress={() => captureMeter(kind, true)}
+                  onPress={() => setCameraTarget(kind)}
                   disabled={ocrLoading !== null}
                 >
                   <Text style={styles.secondaryBtnSmText}>📷 Chụp</Text>
@@ -580,7 +604,7 @@ const InspectionSection: React.FC<{
                 {gallerySOS[kind] && (
                   <TouchableOpacity
                     style={styles.secondaryBtnSm}
-                    onPress={() => captureMeter(kind, false)}
+                    onPress={() => pickMeterFromGallery(kind)}
                     disabled={ocrLoading !== null}
                   >
                     <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
@@ -654,10 +678,10 @@ const InspectionSection: React.FC<{
           <View>
             <Text style={styles.label}>Ảnh hiện trạng phòng</Text>
             <View style={styles.methodRow}>
-              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(true)} disabled={photoUploading}>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => setCameraTarget('condition')} disabled={photoUploading}>
                 <Text style={styles.secondaryBtnSmText}>📸 Chụp ảnh</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => addConditionPhoto(false)} disabled={photoUploading}>
+              <TouchableOpacity style={styles.secondaryBtnSm} onPress={pickConditionFromGallery} disabled={photoUploading}>
                 <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
               </TouchableOpacity>
               {photoUploading && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
@@ -731,6 +755,33 @@ const InspectionSection: React.FC<{
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Camera trong app: chụp → xem lại → "Dùng ảnh này" mới tải lên.
+          Ảnh hiện trạng cho chụp liên tiếp; ảnh đồng hồ chỉ 1 tấm rồi đóng. */}
+      <CameraCaptureModal
+        visible={cameraTarget !== null}
+        multi={cameraTarget === 'condition'}
+        onCapture={(uri) => {
+          if (cameraTarget === 'condition') {
+            void uploadConditionPhotos([uri])
+          } else if (cameraTarget) {
+            const kind = cameraTarget
+            setCameraTarget(null)
+            void handleMeterPhoto(kind, uri)
+          }
+        }}
+        onClose={() => setCameraTarget(null)}
+        onUseGalleryInstead={
+          cameraTarget === 'elec' || cameraTarget === 'water'
+            ? () => {
+                // Camera hỏng → mở lối chọn ảnh thư viện cho đúng đồng hồ đang chụp.
+                const kind = cameraTarget
+                setGallerySOS((prev) => ({ ...prev, [kind]: true }))
+                setCameraTarget(null)
+              }
+            : undefined
+        }
+      />
     </View>
   )
 }

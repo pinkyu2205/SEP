@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/constants/api';
+import { clearSession, notifySessionExpired } from '@/services/core/session';
 
 /**
  * Axios client trỏ tới backend Spring THẬT (REAL_BASE_URL).
@@ -27,6 +28,32 @@ realApiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+/**
+ * Token hết hạn / không hợp lệ (401) → dọn phiên và đưa app về màn đăng nhập.
+ * Không có bước này thì app vẫn tưởng đang đăng nhập trong khi mọi màn đều lỗi.
+ *
+ * Bỏ qua 2 trường hợp để không "đá" nhầm người dùng:
+ *   • Chính request đăng nhập/kích hoạt (sai mật khẩu cũng trả 401).
+ *   • Máy chưa có accessToken — tài khoản demo (mock) không gọi BE được, 401 là bình thường.
+ * Lưu ý 403 KHÔNG tính: đó là "đăng nhập rồi nhưng không đủ quyền", màn hình tự xử lý.
+ */
+realApiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const status = error?.response?.status;
+    const url: string = error?.config?.url ?? '';
+    const isAuthCall = url.includes('/auth/login') || url.includes('/auth/tenant-activate');
+    if (status === 401 && !isAuthCall) {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (token) {
+        await clearSession();
+        notifySessionExpired();
+      }
+    }
+    return Promise.reject(error);
+  },
 );
 
 export default realApiClient;

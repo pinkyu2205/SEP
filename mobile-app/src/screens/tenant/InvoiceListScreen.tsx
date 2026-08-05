@@ -9,7 +9,6 @@ import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFT
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
-import { localAlertStore } from '@/store/localAlertStore';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 type Invoice = SharedBill;
@@ -75,11 +74,7 @@ export const InvoiceListScreen: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, []);
-  useFocusEffect(useCallback(() => {
-    reload();
-    // Khách đã mở danh sách hoá đơn → các thông báo nhắc tiền/hoá đơn mới coi như đã xem.
-    localAlertStore.markReadByKind('billing');
-  }, [reload]));
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 

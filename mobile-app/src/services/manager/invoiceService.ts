@@ -66,6 +66,26 @@ export interface ManagerInvoice {
   createdAt: string;
 }
 
+/**
+ * Hoá đơn điện/nước ĐÃ phát hành (BE: GET /api/v1/manager/utility-invoices).
+ * Quan trọng: có `newReading` của từng kỳ → dùng làm CHỈ SỐ CŨ cho kỳ kế tiếp
+ * (kỳ 1 mới lấy mốc lúc đón khách, kỳ 2 lấy số cuối kỳ 1, kỳ 3 lấy số cuối kỳ 2...).
+ */
+export interface UtilityInvoiceLite {
+  id: number;
+  propertyId?: number;
+  roomId?: number | null;
+  roomNumber?: string | null;
+  type?: string;              // ELECTRICITY | WATER (BE map từ UtilityType)
+  billingPeriod?: string;
+  prevReading?: number;
+  newReading?: number;
+  consumption?: number;
+  amount?: number;
+  status?: string;
+  createdAt?: string;
+}
+
 export type ManagerPaymentStatus = 'PENDING_VERIFY' | 'VERIFIED' | 'REJECTED';
 export interface ManagerPayment {
   id: number;
@@ -117,6 +137,22 @@ export const realManagerInvoiceService = {
     return data;
   },
 
+  /**
+   * Hoá đơn điện/nước đã phát hành của 1 nhà.
+   * Bỏ trống `period` = lấy toàn bộ lịch sử — cần thế để tìm kỳ gần nhất của mỗi phòng
+   * làm chỉ số cũ cho kỳ đang chốt.
+   */
+  listUtilityInvoices: async (
+    propertyId: number,
+    params?: { period?: string; type?: 'ELECTRICITY' | 'WATER' },
+  ): Promise<UtilityInvoiceLite[]> => {
+    const { data } = await realApiClient.get<{ items?: UtilityInvoiceLite[] }>(
+      '/api/v1/manager/utility-invoices',
+      { params: { propertyId, ...params } },
+    );
+    return data?.items ?? [];
+  },
+
   // GET /api/v1/properties/{propertyId}/rent-invoices?month=2026-06
   // Trả các HĐ tiền nhà ĐÃ tạo của 1 nhà trong tháng -> để biết HĐ nào đã gửi (BE TODO).
   listRentInvoices: async (propertyId: number, month: string): Promise<RentInvoiceLite[]> => {
@@ -126,7 +162,6 @@ export const realManagerInvoiceService = {
     return unwrap(data);
   },
 
-  // ===== Tổng hợp hoá đơn của manager (BE TODO) =====
   // GET /api/v1/manager/invoices?period=&status=&type=
   listInvoices: async (params?: { period?: string; status?: string; type?: string }): Promise<ManagerInvoice[]> => {
     const { data } = await realApiClient.get<SpringPage<ManagerInvoice> | ManagerInvoice[]>(

@@ -786,7 +786,12 @@ export const TenantListScreen: React.FC = () => {
       case 'checkout': {
         const doCheckout = async () => {
           try {
-            await realTenantService.terminateContract(Number(tenant.id));
+            // Thanh lý chủ động (khách trả sớm / hai bên thống nhất) — KHÔNG phải
+            // vi phạm, nên không dùng type VIOLATION (BE rào lại type đó).
+            await realTenantService.terminateContract(Number(tenant.id), {
+              type: 'MUTUAL_AGREEMENT',
+              reason: `Quản lý thanh lý hợp đồng ${isWH ? 'trả nhà' : 'trả phòng'} theo thoả thuận`,
+            });
             setSelectedTenant(null);
             load();
             showAlert('Thành công', `Đã ${isWH ? 'trả nhà' : 'trả phòng'} cho ${tenant.fullName}.`);

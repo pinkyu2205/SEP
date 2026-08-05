@@ -14,6 +14,7 @@ import { Button, Input } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { showAlert } from '@/utils';
+import { isAccountEndedError, TENANT_ACCOUNT_ENDED_TITLE } from '@/services/tenant/accountAccess';
 
 // BE (26/07) chặn login cho tenant chưa kích hoạt (isFirstLogin=true) bằng 422 kèm
 // message này — bắt đúng chuỗi để đề nghị chuyển sang màn Kích hoạt thay vì chỉ báo lỗi.
@@ -56,7 +57,10 @@ export const LoginScreen: React.FC = () => {
       // Navigation sẽ tự chuyển sang Home thông qua RootNavigator (dựa vào cờ isFirstLogin và isAuthenticated)
     } catch (error: any) {
       const msg: string = error?.message || 'Sai số điện thoại hoặc mật khẩu. Vui lòng thử lại.';
-      if (msg.toLowerCase().includes(NOT_ACTIVATED_HINT)) {
+      if (isAccountEndedError(error)) {
+        // Khách đã trả phòng xong — không phải lỗi sai mật khẩu, nói cho tử tế.
+        showAlert(TENANT_ACCOUNT_ENDED_TITLE, msg, undefined, '👋');
+      } else if (msg.toLowerCase().includes(NOT_ACTIVATED_HINT)) {
         showAlert('Tài khoản chưa kích hoạt', msg, [
           { text: 'Để sau', style: 'cancel' },
           { text: 'Kích hoạt ngay', onPress: () => navigation.navigate('TenantActivate', { phone: phone.trim() }) },

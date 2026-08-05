@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput, Image,
 } from 'react-native';
@@ -9,8 +9,8 @@ import {
 } from '@/constants';
 import { formatDate, showAlert } from '@/utils';
 import { realTenantSelfService } from '@/services/tenant/selfService';
-import { localAlertStore } from '@/store/localAlertStore';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { useAuth } from '@/hooks';
 
 /**
  * Tenant theo dõi TIẾN TRÌNH TRẢ PHÒNG — dữ liệu thật GET /tenant/me/checkout-requests.
@@ -72,6 +72,8 @@ export const CheckoutDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const paramRequestId: number | undefined = route.params?.requestId;
+  const { logout } = useAuth();
+  const farewellShown = useRef(false);   // chỉ chào 1 lần, không hiện lại mỗi lần focus
 
   const [requests, setRequests] = useState<CheckoutRequestDto[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(paramRequestId ?? null);
@@ -90,8 +92,6 @@ export const CheckoutDetailScreen: React.FC = () => {
       list.sort((a, b) => b.id - a.id);
       setRequests(list);
       setSelectedId((prev) => prev ?? list[0]?.id ?? null);
-      // Khách đã mở xem tiến trình → thông báo của các hồ sơ này coi như đã đọc.
-      list.forEach((r) => localAlertStore.markReadByRef('checkout', r.id));
     } catch {
       showAlert('Lỗi', 'Không tải được yêu cầu trả phòng.');
     } finally {
@@ -103,6 +103,24 @@ export const CheckoutDetailScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const checkout = requests.find((r) => r.id === selectedId) ?? requests[0] ?? null;
+
+  // Trả phòng xong = hợp đồng kết thúc = tài khoản ngừng hoạt động. Chào khách một câu
+  // rồi đưa về màn đăng nhập (lần sau đăng nhập sẽ bị chặn ngay từ cổng — accountAccess).
+  useEffect(() => {
+    if (!checkout || (checkout.status || '').toUpperCase() !== 'COMPLETED') return;
+    if (farewellShown.current) return;
+    farewellShown.current = true;
+    showAlert(
+      'Đã hoàn tất trả phòng',
+      'Cảm ơn bạn đã ở cùng Hoàng Bình Land. Hợp đồng đã kết thúc nên tài khoản này sẽ ngừng '
+      + 'hoạt động. Bạn có thể xem lại bảng quyết toán trước khi đăng xuất.',
+      [
+        { text: 'Xem lại quyết toán', style: 'cancel' },
+        { text: 'Đăng xuất', onPress: () => { logout(); } },
+      ],
+      '👋',
+    );
+  }, [checkout?.id, checkout?.status]);
 
   const handleCancel = () => {
     if (!checkout) return;

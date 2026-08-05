@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, FlatList, ActivityIndicator, Image, Platform,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, validateMeterPhoto } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,6 +17,7 @@ import { realPropertyService } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
+import { CameraCaptureModal } from '@/components/common';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';
@@ -30,11 +31,22 @@ interface EVNData {
   imageUploaded: boolean;
 }
 
+/** Ảnh sắp chụp dùng cho việc gì: hoá đơn EVN hay mặt đồng hồ điện của 1 phòng. */
+type CameraTarget = { kind: 'evn' } | { kind: 'meter'; roomId: string };
+
+/** Chỉ số cũ lấy từ đâu: hoá đơn kỳ trước (kỳ 2+) hay lúc đón khách (kỳ 1). */
+type PrevReadingSource = 'last_invoice' | 'handover';
+
+/** Nói rõ số đang hiện lấy ở đâu ra — manager biết mà đối chiếu, khỏi đoán. */
+const prevSourceLabel = (source?: PrevReadingSource) =>
+  source === 'last_invoice' ? 'chốt kỳ trước' : 'lúc đón khách';
+
 interface RoomMeterReading {
   roomId: string;
   roomCode: string;
   tenantName: string;
   prevReading: number;
+  prevSource?: PrevReadingSource;
   newReading: string;
   hasPhoto: boolean;
   meterImageUrl?: string;  // ảnh đồng hồ đã chụp (Cloudinary)
@@ -54,6 +66,7 @@ interface RoomWaterReading {
   roomCode: string;
   tenantName: string;
   prevReading: number;
+  prevSource?: PrevReadingSource;
   newReading: string;
   consumption?: number;
   fee?: number;
@@ -76,9 +89,9 @@ interface BillingRoom {
   id: string;
   code: string;
   tenantName: string;
-  // Chỉ số cũ mặc định = chỉ số ghi lúc ĐÓN KHÁCH (initialElectric/WaterReading trên HĐ).
-  // Đây là mốc cho hoá đơn KỲ ĐẦU. Kỳ 2 trở đi lẽ ra lấy chỉ số kỳ trước — BE chưa có
-  // endpoint đọc lại chỉ số kỳ gần nhất, nên manager sửa tay (xem doc/ gap).
+  // Mốc DỰ PHÒNG = chỉ số ghi lúc ĐÓN KHÁCH (initialElectric/WaterReading trên HĐ),
+  // chỉ dùng cho KỲ ĐẦU. Kỳ 2 trở đi lấy chỉ số mới của kỳ liền trước qua
+  // fetchLastReadings() (GET /api/v1/manager/utility-invoices).
   prevElec: number;
   prevWater: number;
 }
@@ -298,6 +311,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [evnImageUrl,        setEvnImageUrl]        = useState('');           // ảnh hoá đơn EVN
   const [evnScanning,        setEvnScanning]        = useState(false);        // đang upload + OCR hoá đơn
   const [ocrRoomId,          setOcrRoomId]          = useState<string | null>(null); // phòng đang OCR đồng hồ
+  /** Đang mở camera trong app cho việc gì (null = đóng). */
+  const [cameraTarget,       setCameraTarget]       = useState<CameraTarget | null>(null);
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
@@ -373,34 +388,74 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const canSendElec  = windowOpen && !elecSettled;
   const canSendWater = windowOpen && !waterSettled;
 
-  // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
-  const pickImage = async (useCamera: boolean): Promise<string | null> => {
-    if (useCamera) {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return null; }
-      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-      return r.canceled ? null : r.assets[0].uri;
+  /**
+   * CHỈ SỐ CŨ CỦA KỲ ĐANG CHỐT = chỉ số MỚI của kỳ liền trước.
+   *
+   * Kỳ 1 (phòng chưa có hoá đơn điện/nước nào) mới lấy mốc ghi lúc đón khách; kỳ 2 lấy
+   * số cuối kỳ 1, kỳ 3 lấy số cuối kỳ 2... Trả map roomId(string) → chỉ số mới gần nhất;
+   * phòng không có trong map nghĩa là chưa từng chốt kỳ nào.
+   */
+  const fetchLastReadings = async (
+    propId: string,
+    type: 'ELECTRICITY' | 'WATER',
+  ): Promise<Map<string, number>> => {
+    const result = new Map<string, number>();
+    try {
+      const invoices = await realManagerInvoiceService.listUtilityInvoices(Number(propId), { type });
+      // Mới nhất trước, để phần tử đầu tiên của mỗi phòng là kỳ gần nhất.
+      const sorted = [...invoices].sort((a, b) => {
+        const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+        const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+        return tb - ta || (b.id ?? 0) - (a.id ?? 0);
+      });
+      for (const inv of sorted) {
+        if (inv.newReading == null) continue;
+        // Nhà nguyên căn không có roomId → khớp theo phần tử phòng duy nhất của nhà đó.
+        const key = inv.roomId != null ? String(inv.roomId) : `house-${propId}-unit`;
+        if (!result.has(key)) result.set(key, Number(inv.newReading));
+      }
+    } catch {
+      // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
     }
+    return result;
+  };
+
+  // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
+  /** Lấy ảnh có sẵn trong máy. */
+  const pickFromGallery = async (): Promise<string | null> => {
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
     return r.canceled ? null : r.assets[0].uri;
   };
 
-  // Hỏi nguồn ảnh (chụp / thư viện) rồi gọi tiếp.
-  // Web: Alert nhiều nút không chạy callback → mở thẳng thư viện ảnh.
-  const chooseImageSource = (onPick: (useCamera: boolean) => void) => {
-    if (Platform.OS === 'web') { onPick(false); return; }
+  /**
+   * Hỏi nguồn ảnh rồi xử lý.
+   * "Chụp" mở CameraCaptureModal (camera trong app) cho MỌI nền tảng: trên web
+   * ImagePicker.launchCameraAsync chỉ mở hộp thoại chọn file, và modal còn bắt xem
+   * lại ảnh trước khi dùng — quan trọng với ảnh đồng hồ vì đó là căn cứ tính tiền.
+   */
+  const askPhotoSource = (target: CameraTarget) => {
     showAlert('Chọn ảnh', undefined, [
-      { text: '📷 Chụp ảnh', onPress: () => onPick(true) },
-      { text: '🖼 Chọn từ thư viện', onPress: () => onPick(false) },
+      { text: '📷 Chụp ảnh', onPress: () => setCameraTarget(target) },
+      {
+        text: '🖼 Chọn từ thư viện',
+        onPress: async () => {
+          const uri = await pickFromGallery();
+          if (uri) await handlePhoto(target, uri);
+        },
+      },
       { text: 'Huỷ', style: 'cancel' },
     ]);
   };
 
+  /** Ảnh đã chọn/đã chụp xong thì đưa về đúng chỗ xử lý. */
+  const handlePhoto = async (target: CameraTarget, uri: string) => {
+    if (target.kind === 'evn') await scanEvnInvoice(uri);
+    else await captureRoomMeter(target.roomId, uri);
+  };
+
   // ── EVN helpers ────────────────────────────────────────────────────────────
   // Tải/chụp hoá đơn EVN -> OCR best-effort -> tự điền form để manager xác nhận.
-  const scanEvnInvoice = async (useCamera: boolean) => {
-    const uri = await pickImage(useCamera);
-    if (!uri) return;
+  const scanEvnInvoice = async (uri: string) => {
     try {
       setEvnScanning(true);
       const url = await uploadImageToCloudinary(uri);
@@ -510,36 +565,63 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     setEditingEvn(false);
   };
 
-  const initRoomElecReadings = (propId: string) => {
+  const initRoomElecReadings = async (propId: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
+    const lastReadings = await fetchLastReadings(propId, 'ELECTRICITY');
     setRoomElecReadings(prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
-      prevReading: r.prevElec, newReading: '', hasPhoto: false, sent: false,
+      // Kỳ 2 trở đi: chỉ số cũ = chỉ số MỚI của kỳ liền trước. Kỳ 1 (chưa có hoá đơn
+      // nào) mới rơi về mốc ghi lúc đón khách.
+      prevReading: lastReadings.get(r.id) ?? r.prevElec,
+      prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
+      newReading: '', hasPhoto: false, sent: false,
     })));
     setElecStep('room_readings');
   };
 
-  // Chụp/chọn ảnh đồng hồ điện 1 phòng -> upload + OCR -> tự điền chỉ số mới.
-  const captureRoomMeter = async (roomId: string, useCamera: boolean) => {
-    const uri = await pickImage(useCamera);
-    if (!uri) return;
+  /**
+   * Chụp/chọn ảnh đồng hồ điện 1 phòng -> upload + OCR -> tự điền chỉ số mới.
+   *
+   * Chỉ số điện là tiền thật nên ảnh phải là MẶT ĐỒNG HỒ: `validateMeterPhoto` soi chữ
+   * OCR đọc được (kWh, tên hãng, serial...). Ảnh chỉ có mấy con số (ghi ra giấy, chụp
+   * màn hình) hoặc chụp nhầm đồng hồ nước đều bị TỪ CHỐI — không lưu ảnh, không điền số.
+   */
+  const captureRoomMeter = async (roomId: string, uri: string) => {
     try {
       setOcrRoomId(roomId);
       const url = await uploadImageToCloudinary(uri);
-      let reading = '';
+
+      let ocr;
       try {
-        const ocr = await realTenantService.ocrMeter(url);
-        reading = onlyDigits(ocr.reading || '');
+        ocr = await realTenantService.ocrMeter(url);
       } catch {
-        /* OCR lỗi -> nhập tay */
+        // Không kiểm chứng được ảnh → vẫn giữ để không chặn việc chốt số, nhưng nói rõ.
+        setRoomElecReadings(prev => prev.map(r =>
+          r.roomId === roomId ? { ...r, hasPhoto: true, meterImageUrl: url } : r));
+        showAlert(
+          'Chưa kiểm được ảnh',
+          'Dịch vụ đọc ảnh đang lỗi nên chưa xác nhận được đây có phải mặt đồng hồ không. Nhập chỉ số bằng tay và kiểm lại ảnh giúp.',
+        );
+        return;
       }
+
+      const check = validateMeterPhoto('elec', ocr);
+      if (!check.ok) {
+        showAlert('Ảnh không phải đồng hồ điện', check.reason, undefined, '🚫');
+        return;
+      }
+
+      const reading = onlyDigits(check.reading || '');
       setRoomElecReadings(prev => prev.map(r =>
         r.roomId === roomId
           ? { ...r, newReading: reading || r.newReading, hasPhoto: true, meterImageUrl: url }
           : r,
       ));
-      if (!reading) showAlert('OCR', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
+      if (!reading) showAlert('Đã nhận ảnh đồng hồ', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
+      else if (check.confidence === 'low') {
+        showAlert('Ảnh hơi mờ', 'Chưa chắc chắn đây là mặt đồng hồ điện — kiểm tra lại ảnh và chỉ số trước khi gửi hoá đơn.');
+      }
     } catch {
       showAlert('Lỗi', 'Không tải/đọc được ảnh đồng hồ. Vui lòng nhập tay.');
     } finally {
@@ -674,12 +756,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   // ── Water helpers ──────────────────────────────────────────────────────────
-  const initRoomWaterReadings = (propId: string) => {
+  const initRoomWaterReadings = async (propId: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
+    const lastReadings = await fetchLastReadings(propId, 'WATER');
     setRoomWaterReadings(prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
-      prevReading: r.prevWater, newReading: '',
+      prevReading: lastReadings.get(r.id) ?? r.prevWater,
+      prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
+      newReading: '',
     })));
     setWaterStep('room_readings');
   };
@@ -863,7 +948,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               </Text>
               <TouchableOpacity
                 style={styles.uploadBtn}
-                onPress={() => chooseImageSource(scanEvnInvoice)}
+                onPress={() => askPhotoSource({ kind: 'evn' })}
                 disabled={evnScanning}
               >
                 <Text style={styles.uploadBtnIcon}>📄</Text>
@@ -891,7 +976,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   <View style={styles.thumbActions}>
                     <TouchableOpacity
                       style={styles.thumbActionBtn}
-                      onPress={() => chooseImageSource(scanEvnInvoice)}
+                      onPress={() => askPhotoSource({ kind: 'evn' })}
                       disabled={evnScanning}
                     >
                       <Text style={styles.thumbActionText}>🔄 Chụp lại</Text>
@@ -986,7 +1071,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                           </View>
                         )}
                       </View>
-                      <Text style={styles.formLabel}>Chỉ số cũ (tháng trước)</Text>
+                      <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
                       <TextInput
                         style={styles.input}
                         keyboardType="numeric"
@@ -1005,7 +1090,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         />
                         <TouchableOpacity
                           style={styles.ocrBtn}
-                          onPress={() => chooseImageSource(cam => captureRoomMeter(r.roomId, cam))}
+                          onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
                           disabled={ocrRoomId === r.roomId}
                         >
                           {ocrRoomId === r.roomId
@@ -1093,7 +1178,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     ) : (
                       /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
                       <>
-                        <Text style={styles.formLabel}>Chỉ số cũ (tháng trước)</Text>
+                        <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
                         <TextInput
                           style={styles.input}
                           keyboardType="numeric"
@@ -1112,7 +1197,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                           />
                           <TouchableOpacity
                             style={styles.ocrBtn}
-                            onPress={() => chooseImageSource(cam => captureRoomMeter(r.roomId, cam))}
+                            onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
                             disabled={ocrRoomId === r.roomId}
                           >
                             {ocrRoomId === r.roomId
@@ -1331,7 +1416,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               <View key={r.roomId} style={styles.roomCard}>
                 <Text style={styles.roomCode}>{r.roomCode}</Text>
                 <Text style={styles.roomTenant}>{r.tenantName}</Text>
-                <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} m³</Text>
+                <Text style={styles.prevReading}>Chỉ số cũ ({prevSourceLabel(r.prevSource)}): {r.prevReading} m³</Text>
                 <TextInput style={styles.input} keyboardType="numeric"
                   placeholder={`Chỉ số mới (> ${r.prevReading})`}
                   value={r.newReading}
@@ -1484,6 +1569,24 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       {activeTab === 'electricity' && renderElecTab()}
       {activeTab === 'water'       && renderWaterTab()}
       {activeTab === 'history'     && renderHistoryTab()}
+
+      {/* Camera trong app: chụp → xem lại → "Dùng ảnh này" mới tải lên & đọc số.
+          Dùng cho cả web lẫn điện thoại (web không bật được camera qua ImagePicker). */}
+      <CameraCaptureModal
+        visible={cameraTarget !== null}
+        onCapture={(uri) => {
+          const target = cameraTarget;
+          setCameraTarget(null);
+          if (target) void handlePhoto(target, uri);
+        }}
+        onClose={() => setCameraTarget(null)}
+        onUseGalleryInstead={async () => {
+          const target = cameraTarget;
+          setCameraTarget(null);
+          const uri = await pickFromGallery();
+          if (target && uri) await handlePhoto(target, uri);
+        }}
+      />
     </SafeAreaView>
   );
 };

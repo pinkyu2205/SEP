@@ -43,13 +43,19 @@ async function getExpoToken(): Promise<string | null> {
   }
 }
 
-/** Đăng ký token lên BE (gọi sau khi login). */
+/**
+ * Đăng ký token lên BE (gọi sau khi login).
+ *
+ * Body PHẢI là `{ pushToken }` — BE (PushTokenRequest) khai @NotBlank đúng tên field
+ * này; gửi tên khác là 400 "Thiếu push token" và máy sẽ không nhận được thông báo nào.
+ * `platform` BE chưa dùng, gửi kèm để sau này phân biệt iOS/Android.
+ */
 export async function registerPushToken(): Promise<void> {
   try {
     const token = await getExpoToken();
     if (!token) return;
     await realApiClient.post('/api/v1/user/me/push-token', {
-      token,
+      pushToken: token,
       platform: Platform.OS, // 'ios' | 'android'
     });
   } catch {
@@ -57,12 +63,19 @@ export async function registerPushToken(): Promise<void> {
   }
 }
 
-/** Gỡ token khỏi BE (gọi TRƯỚC khi xoá accessToken lúc logout) để không gửi nhầm cho máy đã đăng xuất. */
+/**
+ * Gỡ token khỏi BE (gọi TRƯỚC khi xoá accessToken lúc logout) để máy đã đăng xuất
+ * không còn nhận thông báo của tài khoản cũ.
+ * ⚠️ BE hiện CHƯA có endpoint xoá (chỉ có POST /me/push-token) — lệnh dưới sẽ lỗi và
+ * bị nuốt. Chừng nào BE chưa làm, token cũ còn nằm trên user cũ; đăng nhập tài khoản
+ * khác trên cùng máy thì token bị ghi đè sang tài khoản mới nên không lộ chéo,
+ * nhưng user cũ vẫn tưởng máy này còn nhận thông báo.
+ */
 export async function unregisterPushToken(): Promise<void> {
   try {
     const token = await getExpoToken();
     if (!token) return;
-    await realApiClient.delete('/api/v1/user/me/push-token', { data: { token } });
+    await realApiClient.delete('/api/v1/user/me/push-token', { data: { pushToken: token } });
   } catch {
     // best-effort
   }

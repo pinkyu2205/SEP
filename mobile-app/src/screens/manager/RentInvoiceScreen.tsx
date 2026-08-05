@@ -7,15 +7,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  RENT_CYCLE, RENT_POLICY_FULL, RENT_REMINDER_STEPS, RENT_TERMINATION_AFTER_DAYS,
+  RENT_CYCLE, RENT_POLICY_FULL, RENT_PARTIAL_CYCLE_NOTE, RENT_REMINDER_STEPS,
+  RENT_TERMINATION_AFTER_DAYS,
   toMonthKey, shiftMonthKey, monthLabel, rentIssueDate, rentDueDate,
-  daysOverdue, overdueStage, canTerminateForUnpaidRent,
+  daysOverdue, overdueStage, canTerminateForUnpaidRent, partialRentCycle,
 } from '@/constants';
-import { useAuth } from '@/hooks';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, RentInvoiceLite } from '@/services/manager/invoiceService';
-import { runRentAutoBilling, RentAutoBillingResult } from '@/services/manager/rentAutoBilling';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 const fmtDay = (iso: string) => iso.split('-').reverse().join('/');
@@ -29,6 +28,8 @@ interface RentRow {
   tenantName: string;
   rentAmount: number;
   startDate: string;
+  /** Ngày kết thúc HĐ — có giá trị giữa tháng nghĩa là kỳ cuối (trả phòng giữa tháng). */
+  endDate?: string;
   /** Hoá đơn tiền phòng của kỳ này (nếu đã phát hành). */
   invoice?: RentInvoiceLite;
 }
@@ -36,14 +37,12 @@ interface RentRow {
 /**
  * TIỀN PHÒNG TỰ ĐỘNG — màn này chỉ THEO DÕI, manager KHÔNG gửi hoá đơn tay nữa.
  *
- * Hệ thống tự phát hành ngày 1 (hiện do app chạy hộ vì BE chưa có cron — xem
- * services/manager/rentAutoBilling), nhắc khách ngày 28 · 1–5 · 7, và từ ngày 8 mở
- * quyền chấm dứt hợp đồng cho hợp đồng vẫn chưa thanh toán.
+ * BE chạy cron: phát hành 00:05 ngày 1 (có prorate cho HĐ vào giữa tháng), nhắc khách
+ * ngày 28 · 2–5 · 7, ngày 8 báo quản lý được quyền chấm dứt hợp đồng.
+ * FE chỉ đọc kết quả và cho bấm chấm dứt khi đủ điều kiện.
  * Điện/nước không thuộc chu kỳ này (vẫn ghi chỉ số & gửi tay ở màn riêng).
  */
 export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
-  const { user } = useAuth();
-
   const [props, setProps] = useState<PropItem[]>([]);
   const [loadingProps, setLoadingProps] = useState(true);
   const [errorProps, setErrorProps] = useState<string | null>(null);
@@ -52,9 +51,6 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
   const [month, setMonth] = useState(() => toMonthKey());
   const [rows, setRows] = useState<RentRow[]>([]);
   const [loadingRows, setLoadingRows] = useState(false);
-  /** Kết quả đợt phát hành tự động gần nhất — để manager biết hệ thống đã làm gì. */
-  const [auto, setAuto] = useState<RentAutoBillingResult | null>(null);
-  const [autoRunning, setAutoRunning] = useState(false);
   const [terminatingId, setTerminatingId] = useState<number | null>(null);
 
   const loadProps = useCallback(async () => {
@@ -87,6 +83,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
         tenantName: c.tenantFullName,
         rentAmount: c.rentAmount ?? 0,
         startDate: c.startDate || c.moveInDate || '',
+        endDate: c.endDate ?? undefined,
         // Ghép hoá đơn theo contractId, fallback theo số phòng.
         invoice: existing.find(inv =>
           (inv.contractId != null && inv.contractId === c.id) ||
@@ -99,33 +96,6 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
       if (!silent) setLoadingRows(false);
     }
   }, []);
-
-  /** Chạy đợt phát hành tự động rồi nạp lại bảng. `force` = bấm nút chạy lại. */
-  const runAuto = useCallback(async (force: boolean) => {
-    if (!user?.id) return;
-    setAutoRunning(true);
-    try {
-      const res = await runRentAutoBilling(user.id, { force });
-      // Lượt bị bỏ qua vì giãn cách thì giữ nguyên kết quả cũ (đừng xoá mất báo lỗi).
-      if (!res.skipped) setAuto(res);
-      if (selectedId != null) await loadRows(selectedId, month, true);
-      if (force) {
-        showAlert(
-          res.issued > 0 ? 'Đã phát hành' : 'Không có gì để phát hành',
-          res.issued > 0
-            ? `Hệ thống vừa phát hành ${res.issued} hoá đơn tiền phòng và gửi thông báo cho khách.`
-            : res.failed > 0
-              ? `Không phát hành được ${res.failed} hoá đơn. ${res.error ?? ''}`.trim()
-              : 'Mọi hợp đồng đang hiệu lực đều đã có hoá đơn của kỳ này.',
-        );
-      }
-    } finally {
-      setAutoRunning(false);
-    }
-  }, [user?.id, selectedId, month, loadRows]);
-
-  // Vào màn là chạy kiểm tra luôn (có giãn cách bên trong nên không dội API).
-  useFocusEffect(useCallback(() => { runAuto(false); }, [runAuto]));
 
   const onSelect = (id: number) => { setSelectedId(id); loadRows(id, month); };
   const shiftMonth = (delta: number) => {
@@ -174,10 +144,12 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
           onPress: async () => {
             setTerminatingId(row.contractId);
             try {
-              await realTenantService.terminateContract(
-                row.contractId,
-                `Không thanh toán tiền phòng ${monthLabel(month).toLowerCase()} — quá hạn ${od} ngày, đã nhắc đủ các mốc theo chính sách.`,
-              );
+              // type VIOLATION: BE chỉ cho khi thật sự có hoá đơn tiền phòng quá hạn
+              // > 3 ngày — đúng điều kiện nút này đang mở.
+              await realTenantService.terminateContract(row.contractId, {
+                type: 'VIOLATION',
+                reason: `Không thanh toán tiền phòng ${monthLabel(month).toLowerCase()} — quá hạn ${od} ngày, đã nhắc đủ các mốc theo chính sách.`,
+              });
               showAlert('Đã chấm dứt', 'Hợp đồng đã được thanh lý. Khách thuê không còn quyền truy cập phòng này trong app.');
               if (selectedId != null) await loadRows(selectedId, month, true);
             } catch (e: any) {
@@ -216,8 +188,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
     const od = inv && !paid && status !== 'CANCELLED' ? daysOverdue(due) : 0;
     const stage = overdueStage(od);
     const canTerminate = !!inv && canTerminateForUnpaidRent(due, status);
-    // HĐ ký sau ngày phát hành của kỳ này → đợt tự động kế tiếp sẽ phát hành.
-    const newThisMonth = !inv && row.startDate.startsWith(month);
+    // Kỳ lẻ: khách vào giữa tháng (kỳ đầu) hoặc trả phòng giữa tháng (kỳ cuối).
+    const partial = partialRentCycle(month, row.rentAmount, row.startDate, row.endDate);
 
     return (
       <View key={row.key} style={[s.card, paid && s.cardPaid, canTerminate && s.cardRisk]}>
@@ -255,14 +227,22 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
             </Text>
           </View>
         )}
-        {newThisMonth && (
-          <Text style={s.hint}>
-            HĐ bắt đầu {fmtDay(row.startDate)} — hệ thống sẽ phát hành ở đợt kiểm tra kế tiếp.
-          </Text>
+        {/* Kỳ lẻ: nói rõ tính từ ngày nào tới ngày nào + số tiền theo ngày, để manager
+            đối chiếu ngay với hoá đơn BE phát hành thay vì phải bấm máy tính. */}
+        {!!partial && (
+          <View style={s.partialBox}>
+            <Text style={s.partialTitle}>{partial.label}</Text>
+            <Text style={s.partialText}>
+              {partial.kind === 'first'
+                ? `Khách nhận phòng ${fmtDay(row.startDate)} — thu ngay lúc nhận phòng.`
+                : `Rời phòng ${fmtDay(row.endDate || '')} — hoá đơn kỳ cuối gửi khách khi duyệt trả phòng.`}
+              {' '}Tiền theo ngày ≈ {fmt(partial.amount)} (trọn tháng {fmt(row.rentAmount)}).
+            </Text>
+          </View>
         )}
 
         <View style={s.amountRow}>
-          <Text style={s.amount}>{fmt(row.rentAmount)}</Text>
+          <Text style={s.amount}>{fmt(inv?.amount ?? partial?.amount ?? row.rentAmount)}</Text>
           {canTerminate && (
             <TouchableOpacity
               style={[s.terminateBtn, terminatingId === row.contractId && s.btnDisabled]}
@@ -294,6 +274,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
         <View style={s.policyBox}>
           <Text style={s.policyTitle}>🤖 Chạy hoàn toàn tự động</Text>
           <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
+          <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
           <View style={s.reminderRow}>
             {RENT_REMINDER_STEPS.map(r => (
               <View key={r.day} style={s.reminderChip}>
@@ -345,9 +326,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
                   <View style={s.cycleTop}>
                     <Text style={s.cycleTitle}>Đã phát hành {cycle.issued}/{cycle.total} hợp đồng</Text>
                     <View style={s.autoChip}>
-                      <Text style={s.autoChipText}>
-                        {autoRunning ? '● Đang kiểm tra...' : '🤖 Tự động'}
-                      </Text>
+                      <Text style={s.autoChipText}>🤖 Tự động</Text>
                     </View>
                   </View>
                   <Text style={s.cycleMeta}>
@@ -382,28 +361,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
                     <Text style={s.cycleWarn}>
                       {cycle.missing} hợp đồng chưa có hoá đơn kỳ này
                       {isCurrentMonth
-                        ? ' — hệ thống sẽ tự phát hành ở đợt kiểm tra kế tiếp.'
+                        ? ` — hệ thống phát hành lúc 00:05 ngày ${RENT_CYCLE.issueDay}; HĐ ký sau đó sẽ có hoá đơn ở kỳ kế tiếp.`
                         : ' (kỳ cũ — chu kỳ tự động chỉ chạy cho kỳ hiện tại).'}
-                    </Text>
-                  )}
-
-                  {/* Không phải nhập tay: đây chỉ là chạy lại đúng đợt tự động, dùng khi
-                      mạng lỗi hoặc hợp đồng vừa ký xong muốn có hoá đơn ngay. */}
-                  {isCurrentMonth && cycle.missing > 0 && (
-                    <TouchableOpacity
-                      style={[s.autoBtn, autoRunning && s.btnDisabled]}
-                      onPress={() => runAuto(true)}
-                      disabled={autoRunning}
-                    >
-                      {autoRunning
-                        ? <ActivityIndicator color={Colors.white} />
-                        : <Text style={s.autoBtnText}>🤖 Chạy phát hành tự động ngay</Text>}
-                    </TouchableOpacity>
-                  )}
-
-                  {!!auto?.error && auto.failed > 0 && (
-                    <Text style={s.autoError}>
-                      ⚠️ Đợt tự động gần nhất lỗi {auto.failed} hoá đơn: {auto.error}
                     </Text>
                   )}
                 </View>
@@ -483,9 +442,6 @@ const s = StyleSheet.create({
   cycleSep: { width: 1, height: 28, backgroundColor: Colors.divider },
   cycleWarn: { fontSize: 12, color: Colors.warning, fontWeight: '600', marginTop: Spacing.sm, lineHeight: 17 },
   cycleDone: { fontSize: 12, color: Colors.success, fontWeight: '700', marginTop: Spacing.sm, lineHeight: 17 },
-  autoBtn: { backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingVertical: Spacing.sm, alignItems: 'center', marginTop: Spacing.sm },
-  autoBtnText: { fontSize: 13, fontWeight: '800', color: Colors.white },
-  autoError: { fontSize: 11, color: Colors.error, marginTop: Spacing.sm, lineHeight: 16 },
   btnDisabled: { opacity: 0.6 },
 
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.sm, ...Shadow.sm },
@@ -502,6 +458,12 @@ const s = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '700' },
   due: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.xs },
   hint: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', marginBottom: Spacing.xs },
+  partialBox: {
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.sm,
+    padding: Spacing.sm, marginBottom: Spacing.xs, gap: 2,
+  },
+  partialTitle: { fontSize: 11, fontWeight: '800', color: Colors.primary },
+  partialText: { fontSize: 11, color: Colors.primary, lineHeight: 16 },
   warnBox: { backgroundColor: Colors.warningLight, borderRadius: BorderRadius.sm, padding: Spacing.sm, marginBottom: Spacing.xs },
   warnBoxText: { fontSize: 11, fontWeight: '700', color: '#B45309' },
   riskBox: { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.sm, padding: Spacing.sm, marginBottom: Spacing.xs },

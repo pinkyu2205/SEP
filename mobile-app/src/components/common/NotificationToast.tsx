@@ -2,30 +2,39 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { localAlertStore, LocalAlert } from '@/store/localAlertStore';
+import { toastBus, ToastNotice } from '@/store/toastBus';
 import { navigateFromNotification } from '@/navigation/navigationRef';
 
 /**
- * Băng thông báo trượt từ trên xuống khi đối phương vừa thao tác (mount 1 lần ở App.tsx).
+ * Băng thông báo trượt từ trên xuống khi có thông báo mới (mount 1 lần ở App.tsx).
  *
- * Vì sao cần thêm cái này dù đã bắn thông báo lên thanh thông báo của máy:
- *   • Người dùng ĐANG mở app thì banner hệ thống dễ bị bỏ qua/không hiện.
- *   • Expo Go (SDK 53+) và bản chạy thử trên web KHÔNG có push — banner này là kênh
- *     duy nhất thấy được ngay, nên demo vẫn chạy đúng.
- * Bấm vào là mở thẳng hồ sơ tương ứng, giống hệt bấm push.
+ * Nguồn là thông báo THẬT của BE (xem hooks/useNotificationToasts) và chỉ chạy ở nơi
+ * không có push hệ thống — Expo Go và bản chạy web. Trên máy thật, banner của hệ điều
+ * hành lo phần này nên băng thông báo không xuất hiện, tránh hiện 2 lần.
+ * Bấm vào là mở thẳng màn tương ứng, giống hệt bấm push.
  */
 
 const SHOW_MS = 6000;
 
+/** Icon theo loại thông báo để nhìn phát biết việc gì. */
+const iconOf = (type: string): string => {
+  const t = (type || '').toUpperCase();
+  if (t.includes('CHECKOUT')) return '🚪';
+  if (t.includes('MAINTENANCE')) return '🔧';
+  if (t.includes('OVERDUE')) return '🚨';
+  if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT'].some(k => t.includes(k))) return '🧾';
+  if (t.includes('CONTRACT') || t.includes('ASSIGN') || t.includes('ONBOARD')) return '🤝';
+  return '🔔';
+};
+
 export const NotificationToast: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const [queue, setQueue] = useState<LocalAlert[]>([]);
+  const [queue, setQueue] = useState<ToastNotice[]>([]);
   const current = queue[0];
   const slide = useRef(new Animated.Value(-160)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Nhận thông báo mới từ kho (chỉ cái vừa tới, không phải mỗi lần đánh dấu đã đọc).
-  useEffect(() => localAlertStore.subscribeIncoming(a => setQueue(q => [...q, a])), []);
+  useEffect(() => toastBus.subscribe(n => setQueue(q => [...q, n])), []);
 
   const hide = useCallback((then?: () => void) => {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
@@ -46,10 +55,7 @@ export const NotificationToast: React.FC = () => {
   if (!current) return null;
 
   const open = () => {
-    localAlertStore.markRead(current.id);
-    hide(() => navigateFromNotification({
-      screen: current.screen, params: current.params, type: 'checkout_request',
-    }));
+    hide(() => navigateFromNotification({ type: current.type }));
   };
 
   return (
@@ -61,7 +67,7 @@ export const NotificationToast: React.FC = () => {
       pointerEvents="box-none"
     >
       <TouchableOpacity style={s.card} activeOpacity={0.9} onPress={open}>
-        <View style={s.iconWrap}><Text style={s.icon}>🚪</Text></View>
+        <View style={s.iconWrap}><Text style={s.icon}>{iconOf(current.type)}</Text></View>
         <View style={s.body}>
           <Text style={s.title} numberOfLines={1}>{current.title}</Text>
           <Text style={s.text} numberOfLines={2}>{current.body}</Text>

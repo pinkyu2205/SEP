@@ -6,6 +6,7 @@ import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { CameraCaptureModal } from '@/components/common';
 import {
   getInspectionById,
   getInspectionStatusLabel,
@@ -46,6 +47,11 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
   const inspection = draft || existing;
   const sibling = useMemo(() => inspection ? getSiblingInspection(inspection) : undefined, [inspection]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  /**
+   * Camera trong app (CameraCaptureModal) thay ImagePicker.launchCameraAsync: trên web
+   * hàm đó chỉ mở hộp thoại chọn file, và modal bắt xem lại ảnh trước khi dùng.
+   */
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   if (!inspection) {
     return (
@@ -68,16 +74,14 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
   const editable = !!draft;
   const typeLabel = getInspectionTypeLabel(inspection.inspectionType);
 
-  const addPhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (perm.status !== 'granted') {
-      showAlert('Lỗi', 'Cần quyền truy cập camera để chụp ảnh check-out.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.5 });
-    if (!result.canceled && result.assets[0]) {
-      setDraft(prev => prev ? { ...prev, images: [...prev.images, result.assets[0].uri] } : prev);
-    }
+  const addPhotoUri = (uri: string) => {
+    setDraft(prev => prev ? { ...prev, images: [...prev.images, uri] } : prev);
+  };
+
+  /** Chọn ảnh có sẵn — lối thoát khi camera không dùng được. */
+  const pickFromGallery = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.5 });
+    if (!result.canceled && result.assets[0]) addPhotoUri(result.assets[0].uri);
   };
 
   const removePhoto = (uri: string) => {
@@ -149,7 +153,7 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
             </View>
           )}
           {editable && (
-            <TouchableOpacity style={styles.cameraBtn} onPress={addPhoto}>
+            <TouchableOpacity style={styles.cameraBtn} onPress={() => setCameraOpen(true)}>
               <Text style={styles.cameraBtnText}>📸 Chụp thêm ảnh</Text>
             </TouchableOpacity>
           )}
@@ -257,6 +261,15 @@ export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => 
           {selectedImage && <Image source={{ uri: selectedImage }} style={styles.viewerImage} resizeMode="contain" />}
         </View>
       </Modal>
+
+      {/* Camera trong app: chụp → xem lại → "Dùng ảnh này". Chụp liên tiếp nhiều góc. */}
+      <CameraCaptureModal
+        visible={cameraOpen}
+        multi
+        onCapture={addPhotoUri}
+        onClose={() => setCameraOpen(false)}
+        onUseGalleryInstead={pickFromGallery}
+      />
     </SafeAreaView>
   );
 };

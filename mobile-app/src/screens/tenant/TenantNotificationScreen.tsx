@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView, RefreshControl,
 } from 'react-native';
@@ -10,7 +10,6 @@ import { formatRelativeTime } from '@/utils';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
-import { useLocalAlerts, localAlertStore, LocalAlert } from '@/store/localAlertStore';
 import { navigateFromNotification } from '@/navigation/navigationRef';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
@@ -23,29 +22,7 @@ const mapApiNotif = (n: ApiNotification): AppNotification => ({
   priority: 'normal',
   createdAt: n.createdAt,
   actionRoute: n.screen,
-});
-
-/**
- * Thông báo do app tự sinh: trả phòng (quản lý duyệt/kiểm tra/quyết toán/hoàn cọc) và
- * hoá đơn (tiền phòng tự phát hành, điện/nước quản lý vừa gửi, nhắc tới hạn).
- * Tiền tố id để phân biệt với thông báo BE — hai nguồn đánh số riêng, cách đánh dấu
- * đã đọc cũng khác (BE gọi API, cái này lưu trên máy).
- */
-const LOCAL_PREFIX = 'lc:';
-const localAlertType = (a: LocalAlert): AppNotification['type'] => {
-  if (a.kind !== 'billing') return 'checkout_request';
-  // Nhắc tới hạn / quá hạn dùng icon đỏ; hoá đơn mới thì màu thông tin.
-  return /🚨|⚠️/.test(a.title) ? 'bill_overdue' : 'new_bill';
-};
-const mapLocalAlert = (a: LocalAlert): AppNotification => ({
-  id: LOCAL_PREFIX + a.id,
-  title: a.title,
-  body: a.body,
-  type: localAlertType(a),
-  isRead: a.read,
-  priority: 'high',
-  createdAt: a.createdAt,
-  actionRoute: a.screen,
+  actionParams: n.params,
 });
 
 
@@ -128,19 +105,17 @@ const groupByTime = (items: AppNotification[]): Section[] => {
 // ─── Component ────────────────────────────────────────────────────────────────
 export const TenantNotificationScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [beNotifs, setBeNotifs] = useState<AppNotification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [filter, setFilter] = useState<string>('all');
   const [refreshing, setRefreshing] = useState(false);
-  // Thông báo trả phòng app tự sinh — hiện ngay khi quản lý vừa thao tác.
-  const { alerts } = useLocalAlerts();
 
   // Nạp thông báo thật từ BE mỗi khi vào màn.
   const load = useCallback(async () => {
     try {
       const rows = await realNotificationService.list();
-      setBeNotifs(rows.map(mapApiNotif));
+      setNotifications(rows.map(mapApiNotif));
     } catch {
-      setBeNotifs([]);
+      setNotifications([]);
     }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -151,14 +126,6 @@ export const TenantNotificationScreen: React.FC = () => {
   }, [load]);
 
   // ── Business logic ────────────────────────────────────────────────────────
-  // Trộn 2 nguồn (BE + app tự sinh), mới nhất lên đầu — người thuê không cần biết
-  // thông báo tới từ đâu.
-  const notifications = useMemo(
-    () => [...alerts.map(mapLocalAlert), ...beNotifs]
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [alerts, beNotifs],
-  );
-
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const filtered = filter === 'all'
@@ -166,16 +133,11 @@ export const TenantNotificationScreen: React.FC = () => {
     : notifications.filter(n => TYPE_CATEGORY[n.type] === filter);
 
   const markAllRead = () => {
-    localAlertStore.markAllRead();
-    setBeNotifs(prev => prev.map(n => ({ ...n, isRead: true })));
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     realNotificationService.markAllRead().catch(() => { /* offline */ });
   };
   const markRead = (id: string) => {
-    if (id.startsWith(LOCAL_PREFIX)) {
-      localAlertStore.markRead(id.slice(LOCAL_PREFIX.length));
-      return;
-    }
-    setBeNotifs(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
     const num = Number(id);
     if (Number.isFinite(num)) realNotificationService.markRead(num).catch(() => { /* offline */ });
   };
@@ -184,10 +146,16 @@ export const TenantNotificationScreen: React.FC = () => {
 
   const handleNotifPress = async (notif: AppNotification) => {
     markRead(notif.id);
-    // Thông báo app tự sinh → mở thẳng màn tương ứng (tiến trình trả phòng / hoá đơn).
-    if (notif.id.startsWith(LOCAL_PREFIX)) {
-      const alert = alerts.find(a => LOCAL_PREFIX + a.id === notif.id);
-      if (alert) navigateFromNotification({ screen: alert.screen, params: alert.params });
+    // BE trả sẵn màn + tham số (từ 05/08/2026) → mở đúng hồ sơ/hoá đơn.
+    if (notif.actionRoute) {
+      navigateFromNotification({
+        screen: notif.actionRoute, params: notif.actionParams, type: notif.type,
+      });
+      return;
+    }
+    // ── Thông báo cũ (chưa có screen) → suy theo loại như trước ──
+    if (notif.type === 'checkout_request') {
+      navigation.navigate('CheckoutDetail');
       return;
     }
     // Thông báo bảo trì: BE không gửi payload điều hướng, nhưng body luôn có

@@ -6,6 +6,7 @@ import { Colors, Spacing, BorderRadius } from '@/constants';
 import { Button, Input } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { realAuthService } from '@/services/auth/realAuthService';
+import { isAccountEndedError, TENANT_ACCOUNT_ENDED_TITLE } from '@/services/tenant/accountAccess';
 import { showAlert } from '@/utils';
 
 const readErr = (err: any, fallback: string): string =>
@@ -113,6 +114,10 @@ export const TenantActivateScreen: React.FC = () => {
       await activateTenant(phone.trim(), otp.trim(), newPassword, confirmPassword);
       // Thành công: token đã lưu + user đã set trong context, RootNavigator tự chuyển vào app.
     } catch (err: any) {
+      if (isAccountEndedError(err)) {
+        showAlert(TENANT_ACCOUNT_ENDED_TITLE, err.message, undefined, '👋');
+        return;
+      }
       showAlert('Kích hoạt thất bại', err?.message || 'Vui lòng thử lại.');
     } finally {
       setLoading(false);

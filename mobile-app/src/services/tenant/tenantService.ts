@@ -388,10 +388,30 @@ export const realTenantService = {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/cancel`);
   },
 
-  // Thanh lý HĐ ACTIVE/EXPIRED (manager chủ động, không qua checkout-request).
-  // BE tự trả phòng về AVAILABLE + restore thiết bị (verify PASS 10/07/2026).
-  // Luồng khách tự xin trả phòng dùng checkout-request (checkoutService/selfService).
-  terminateContract: async (contractId: number, reason?: string): Promise<void> => {
-    await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/terminate`, { reason });
+  /**
+   * Thanh lý HĐ ACTIVE/EXPIRED (manager chủ động, không qua checkout-request).
+   * BE tự trả phòng về AVAILABLE + restore thiết bị (verify PASS 10/07/2026).
+   * Luồng khách tự xin trả phòng dùng checkout-request (checkoutService/selfService).
+   *
+   * `type` và `reason` là BẮT BUỘC ở BE (TerminateContractRequest) — thiếu là 400.
+   * Riêng VIOLATION bị BE rào: phải có hoá đơn tiền phòng quá hạn > 3 ngày
+   * (từ ngày 8, xem @/constants/rentCycle) thì mới chấm dứt được.
+   */
+  terminateContract: async (
+    contractId: number,
+    options: {
+      type?: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'NO_SHOW' | 'OTHER';
+      reason?: string;
+      /** Ngày chấm dứt thực tế (yyyy-MM-dd) — bỏ trống thì BE lấy hôm nay. */
+      effectiveDate?: string;
+      note?: string;
+    } = {},
+  ): Promise<void> => {
+    await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/terminate`, {
+      type: options.type ?? 'MUTUAL_AGREEMENT',
+      reason: options.reason ?? 'Quản lý thanh lý hợp đồng',
+      effectiveDate: options.effectiveDate,
+      note: options.note,
+    });
   },
 };

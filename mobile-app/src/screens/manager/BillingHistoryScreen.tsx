@@ -1,314 +1,389 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { useBills, InvoiceType } from '@/store/billsStore';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import {
+  realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
+} from '@/services/manager/invoiceService';
 
-// ===================== CONFIG =====================
-const TYPE_CONFIG: Record<InvoiceType, { icon: string; label: string; color: string; bg: string }> = {
-  rent:        { icon: '🏠', label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },
-  electricity: { icon: '⚡', label: 'Điện',       color: '#D97706', bg: '#FEF9C3' },
-  water:       { icon: '💧', label: 'Nước',        color: '#2563EB', bg: '#DBEAFE' },
-  maintenance: { icon: '🔧', label: 'Phí bảo trì',  color: '#DC2626', bg: '#FEE2E2' },
+/**
+ * LỊCH SỬ HOÁ ĐƠN THEO TỪNG NHÀ.
+ *
+ * Màn "Hoá đơn & Thanh toán" chỉ cho thấy kỳ hiện tại; chỗ này để tra ngược mọi kỳ đã
+ * qua của MỘT nhà: nhà nhiều phòng gom theo từng phòng, nhà nguyên căn gom thành một
+ * mục. Vào từ nút "Lịch sử" ở màn Hoá đơn & Thanh toán, hoặc mở thẳng kèm
+ * `route.params.propertyId`.
+ *
+ * Dữ liệu thật: GET /api/v1/manager/invoices — KHÔNG truyền `period` để lấy mọi kỳ.
+ */
+
+const fmt = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
+const monthKey = (i: ManagerInvoice) => `${i.year}-${String(i.month).padStart(2, '0')}`;
+const monthText = (i: ManagerInvoice) => `T${String(i.month).padStart(2, '0')}/${i.year}`;
+
+const TYPE_CFG: Record<string, { icon: string; label: string; color: string; bg: string }> = {
+  RENT:        { icon: '🏠', label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },
+  ELECTRICITY: { icon: '⚡', label: 'Điện',        color: '#D97706', bg: '#FEF9C3' },
+  WATER:       { icon: '💧', label: 'Nước',        color: '#2563EB', bg: '#DBEAFE' },
+  SERVICE:     { icon: '🧹', label: 'Dịch vụ',     color: '#0891B2', bg: '#ECFEFF' },
+  OTHER:       { icon: '🧾', label: 'Khác',        color: '#64748B', bg: '#F1F5F9' },
 };
+const typeCfg = (t?: string) => TYPE_CFG[(t || 'OTHER').toUpperCase()] ?? TYPE_CFG.OTHER;
 
-const METHOD_LABEL: Record<string, string> = {
-  qr:            '📱 QR',
-  bank_transfer: '🏦 Chuyển khoản',
-  cash:          '💵 Tiền mặt',
-  ewallet:       '👛 Ví điện tử',
+const STATUS_CFG: Record<string, { label: string; color: string; bg: string }> = {
+  PAID:      { label: 'Đã thu',       color: Colors.success,   bg: Colors.successLight },
+  PENDING:   { label: 'Chưa thu',     color: Colors.warning,   bg: Colors.warningLight },
+  OVERDUE:   { label: 'Quá hạn',      color: Colors.error,     bg: Colors.errorLight },
+  PARTIAL:   { label: 'Thu một phần', color: Colors.info,      bg: Colors.infoLight },
+  CANCELLED: { label: 'Đã huỷ',       color: Colors.textMuted, bg: Colors.background },
 };
+const statusCfg = (s?: string) => STATUS_CFG[(s || '').toUpperCase()] ?? STATUS_CFG.PENDING;
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const TYPE_FILTERS: { key: 'all' | ManagerInvoiceType; label: string }[] = [
+  { key: 'all', label: 'Tất cả' },
+  { key: 'RENT', label: '🏠 Tiền phòng' },
+  { key: 'ELECTRICITY', label: '⚡ Điện' },
+  { key: 'WATER', label: '💧 Nước' },
+];
+const STATUS_FILTERS: { key: 'all' | ManagerInvoiceStatus; label: string }[] = [
+  { key: 'all', label: 'Tất cả' },
+  { key: 'PAID', label: 'Đã thu' },
+  { key: 'PENDING', label: 'Chưa thu' },
+  { key: 'OVERDUE', label: 'Quá hạn' },
+];
 
-type TypeFilter   = 'all' | InvoiceType;
-type StatusFilter = 'all' | 'paid' | 'overdue' | 'cancelled';
+interface PropItem { id: number; name: string; wholeHouse: boolean }
+/** Một đơn vị thu tiền: 1 phòng, hoặc cả căn với nhà nguyên căn. */
+interface UnitGroup { key: string; title: string; invoices: ManagerInvoice[] }
 
-// ===================== SCREEN =====================
 export const BillingHistoryScreen: React.FC = () => {
-  const navigation  = useNavigation<any>();
-  const allBills    = useBills();
-  const [typeFilter,   setTypeFilter]   = useState<TypeFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const paramPropertyId: number | undefined = route.params?.propertyId != null
+    ? Number(route.params.propertyId) : undefined;
 
-  // Only manager bills (HD- prefix), excluding currently pending ones
-  const historyBills = useMemo(() => {
-    return allBills
-      .filter(b => b.code.startsWith('HD-'))
-      .filter(b => {
-        if (statusFilter === 'all')       return b.status === 'paid' || b.status === 'overdue' || b.status === 'cancelled';
-        return b.status === statusFilter;
-      })
-      .filter(b => typeFilter === 'all' || b.invoiceType === typeFilter)
-      .sort((a, b) => (b.paidAt ?? b.createdAt).localeCompare(a.paidAt ?? a.createdAt));
-  }, [allBills, typeFilter, statusFilter]);
+  const [props, setProps] = useState<PropItem[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(paramPropertyId ?? null);
+  const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'all' | ManagerInvoiceType>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | ManagerInvoiceStatus>('all');
+  /** Phòng đang mở rộng — mặc định đóng để nhìn được toàn cảnh trước. */
+  const [openUnit, setOpenUnit] = useState<string | null>(null);
 
-  const totalPaid = useMemo(
-    () => historyBills.filter(b => b.status === 'paid').reduce((s, b) => s + b.grandTotal, 0),
-    [historyBills],
-  );
+  const load = useCallback(async () => {
+    try {
+      const [scoped, list] = await Promise.all([
+        managerPropertyService.getScopedProperties(),
+        realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
+      ]);
+      const items = scoped.map(p => ({
+        id: p.id, name: p.propertyName, wholeHouse: p.wholeHouse === true,
+      }));
+      setProps(items);
+      setInvoices(list);
+      setSelectedId(prev => prev ?? paramPropertyId ?? items[0]?.id ?? null);
+    } catch {
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [paramPropertyId]);
 
-  const counts = useMemo(() => ({
-    paid:      allBills.filter(b => b.code.startsWith('HD-') && b.status === 'paid').length,
-    overdue:   allBills.filter(b => b.code.startsWith('HD-') && b.status === 'overdue').length,
-    cancelled: allBills.filter(b => b.code.startsWith('HD-') && b.status === 'cancelled').length,
-  }), [allBills]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const renderItem = ({ item }: { item: (typeof historyBills)[0] }) => {
-    const typeCfg = TYPE_CONFIG[item.invoiceType];
-    const isPaid      = item.status === 'paid';
-    const isOverdue   = item.status === 'overdue';
-    const isCancelled = item.status === 'cancelled';
+  const selectedProp = props.find(p => p.id === selectedId) ?? null;
 
+  const filtered = useMemo(() => invoices.filter(i =>
+    i.propertyId === selectedId
+    && (typeFilter === 'all' || i.type === typeFilter)
+    && (statusFilter === 'all' || i.status === statusFilter),
+  ), [invoices, selectedId, typeFilter, statusFilter]);
+
+  /** Gom theo phòng (nhà nhiều phòng) hoặc gộp 1 mục (nhà nguyên căn). */
+  const groups: UnitGroup[] = useMemo(() => {
+    if (!selectedProp) return [];
+    if (selectedProp.wholeHouse) {
+      return filtered.length ? [{ key: 'whole', title: 'Nhà nguyên căn', invoices: filtered }] : [];
+    }
+    const byRoom = new Map<string, ManagerInvoice[]>();
+    for (const inv of filtered) {
+      const key = inv.roomNumber || '—';
+      byRoom.set(key, [...(byRoom.get(key) ?? []), inv]);
+    }
+    return [...byRoom.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], 'vi', { numeric: true }))
+      .map(([room, list]) => ({ key: room, title: `Phòng ${room}`, invoices: list }));
+  }, [filtered, selectedProp]);
+
+  const totals = useMemo(() => {
+    const paid = filtered.filter(i => i.status === 'PAID');
+    const unpaid = filtered.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE');
+    return {
+      count: filtered.length,
+      collected: paid.reduce((s, i) => s + (i.amount || 0), 0),
+      uncollected: unpaid.reduce((s, i) => s + (i.amount || 0), 0),
+      overdueCount: filtered.filter(i => i.status === 'OVERDUE').length,
+      /** Số kỳ đã phát hành — cho biết lịch sử dài tới đâu. */
+      periods: new Set(filtered.map(monthKey)).size,
+    };
+  }, [filtered]);
+
+  const renderInvoice = (inv: ManagerInvoice) => {
+    const tc = typeCfg(inv.type);
+    const sc = statusCfg(inv.status);
     return (
-      <View style={[
-        st.card,
-        isPaid      && st.cardPaid,
-        isOverdue   && st.cardOverdue,
-        isCancelled && st.cardCancelled,
-      ]}>
-        {/* Top row: type badge + status badge */}
-        <View style={st.cardTop}>
-          <View style={[st.typeBadge, { backgroundColor: typeCfg.bg }]}>
-            <Text style={[st.typeBadgeText, { color: typeCfg.color }]}>
-              {typeCfg.icon} {typeCfg.label}
-            </Text>
-          </View>
-          <View style={[
-            st.statusBadge,
-            isPaid      ? st.statusPaid :
-            isOverdue   ? st.statusOverdue :
-            st.statusCancelled,
-          ]}>
-            <Text style={[
-              st.statusBadgeText,
-              { color: isPaid ? Colors.success : isOverdue ? Colors.error : Colors.textMuted },
-            ]}>
-              {isPaid ? '✓ Đã thu' : isOverdue ? 'Quá hạn' : 'Đã huỷ'}
-            </Text>
-          </View>
+      <View key={inv.id} style={s.invRow}>
+        <View style={[s.typeChip, { backgroundColor: tc.bg }]}>
+          <Text style={s.typeChipText}>{tc.icon}</Text>
         </View>
-
-        {/* Middle: info + amount */}
-        <View style={st.cardMid}>
-          <View style={{ flex: 1 }}>
-            <Text style={st.code}>{item.code}</Text>
-            <Text style={st.meta}>{item.tenantName} · {item.roomName}</Text>
-            <Text style={st.prop}>{item.propertyName}</Text>
-          </View>
-          <Text style={[st.amount, { color: isPaid ? Colors.success : isOverdue ? Colors.error : Colors.textMuted }]}>
-            {fmt(item.grandTotal)}
+        <View style={{ flex: 1 }}>
+          <Text style={s.invTitle}>{tc.label} · {monthText(inv)}</Text>
+          <Text style={s.invMeta}>
+            {inv.code}{inv.tenantName ? ` · ${inv.tenantName}` : ''}
           </Text>
         </View>
-
-        {/* Utility detail */}
-        {item.invoiceType === 'electricity' && item.kwhUsed !== undefined && (
-          <Text style={st.detail}>⚡ {item.kwhUsed} kWh · {item.billingPeriod ?? ''}</Text>
-        )}
-        {item.invoiceType === 'water' && item.m3Used !== undefined && (
-          <Text style={st.detail}>💧 {item.m3Used} m³ · {item.billingPeriod ?? ''}</Text>
-        )}
-
-        {/* Footer: date + method */}
-        <View style={st.cardFoot}>
-          <Text style={st.date}>
-            {isPaid && item.paidAt ? `Đã thu: ${item.paidAt}` : `Tạo: ${item.createdAt}`}
-          </Text>
-          {item.paymentMethod && (
-            <Text style={st.method}>{METHOD_LABEL[item.paymentMethod] ?? item.paymentMethod}</Text>
-          )}
+        <View style={{ alignItems: 'flex-end', gap: 4 }}>
+          <Text style={s.invAmount}>{fmt(inv.amount)}</Text>
+          <View style={[s.statusChip, { backgroundColor: sc.bg }]}>
+            <Text style={[s.statusChipText, { color: sc.color }]}>{sc.label}</Text>
+          </View>
         </View>
       </View>
     );
   };
 
-  return (
-    <SafeAreaView style={st.safe}>
-      {/* Header */}
-      <View style={st.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={st.backText}>← Quay lại</Text>
+  /** Trong một phòng: chia tiếp theo kỳ, mới nhất trước. */
+  const renderGroup = (g: UnitGroup) => {
+    const open = openUnit === g.key;
+    const collected = g.invoices.filter(i => i.status === 'PAID').reduce((sum, i) => sum + (i.amount || 0), 0);
+    const unpaidCount = g.invoices.filter(i => i.status !== 'PAID' && i.status !== 'CANCELLED').length;
+    const byMonth = new Map<string, ManagerInvoice[]>();
+    for (const inv of g.invoices) byMonth.set(monthKey(inv), [...(byMonth.get(monthKey(inv)) ?? []), inv]);
+    const months = [...byMonth.keys()].sort((a, b) => b.localeCompare(a));
+
+    return (
+      <View key={g.key} style={s.groupCard}>
+        <TouchableOpacity
+          style={s.groupHeader}
+          onPress={() => setOpenUnit(open ? null : g.key)}
+          activeOpacity={0.75}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={s.groupTitle}>{g.title}</Text>
+            <Text style={s.groupMeta}>
+              {g.invoices.length} hoá đơn · {months.length} kỳ · đã thu {fmt(collected)}
+              {unpaidCount > 0 ? ` · còn ${unpaidCount} chưa thu` : ''}
+            </Text>
+          </View>
+          <Text style={s.groupChevron}>{open ? '⌄' : '›'}</Text>
         </TouchableOpacity>
-        <Text style={st.headerTitle}>Lịch sử hóa đơn</Text>
-        <View style={{ width: 70 }} />
+
+        {open && months.map(m => {
+          const list = byMonth.get(m)!;
+          const [y, mm] = m.split('-');
+          return (
+            <View key={m} style={s.monthBlock}>
+              <Text style={s.monthTitle}>Kỳ {mm}/{y}</Text>
+              {list
+                .slice()
+                .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+                .map(renderInvoice)}
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
+          <Text style={s.backArrow}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerTitle}>Lịch sử hoá đơn</Text>
+          <Text style={s.headerSub}>{selectedProp ? selectedProp.name : 'Chọn nhà để xem'}</Text>
+        </View>
       </View>
 
-      {/* Summary bar */}
-      <View style={st.summaryRow}>
-        <View style={st.summaryItem}>
-          <Text style={[st.summaryNum, { color: Colors.success }]}>{counts.paid}</Text>
-          <Text style={st.summaryLbl}>Đã thu</Text>
-        </View>
-        <View style={st.summaryDivider} />
-        <View style={st.summaryItem}>
-          <Text style={[st.summaryNum, { color: Colors.error }]}>{counts.overdue}</Text>
-          <Text style={st.summaryLbl}>Quá hạn</Text>
-        </View>
-        <View style={st.summaryDivider} />
-        <View style={[st.summaryItem, { flex: 2 }]}>
-          <Text style={[st.summaryAmt, { color: Colors.success }]}>{fmt(totalPaid)}</Text>
-          <Text style={st.summaryLbl}>Tổng đã thu</Text>
-        </View>
-      </View>
+      {loading ? (
+        <View style={s.center}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={s.body}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
+          }
+        >
+          {/* Chọn nhà */}
+          {props.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
+              <View style={s.chipRow}>
+                {props.map(p => (
+                  <TouchableOpacity
+                    key={p.id}
+                    style={[s.propChip, selectedId === p.id && s.propChipActive]}
+                    onPress={() => { setSelectedId(p.id); setOpenUnit(null); }}
+                  >
+                    <Text style={[s.propChipText, selectedId === p.id && s.propChipTextActive]}>
+                      {p.wholeHouse ? '🏠' : '🏢'} {p.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
-      {/* Filters */}
-      <View style={st.filterBlock}>
-        {/* Row 1 – Loại hóa đơn */}
-        <View style={st.filterRow}>
-          <Text style={st.filterLabel}>Loại</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chipRow}>
-            {([
-              { key: 'all',         label: 'Tất cả' },
-              { key: 'rent',        label: '🏠 Tiền phòng' },
-              { key: 'electricity', label: '⚡ Điện' },
-              { key: 'water',       label: '💧 Nước' },
-            ] as { key: TypeFilter; label: string }[]).map(f => (
-              <TouchableOpacity
-                key={f.key}
-                style={[st.chip, typeFilter === f.key && st.chipActive]}
-                onPress={() => setTypeFilter(f.key)}
-              >
-                <Text style={[st.chipText, typeFilter === f.key && st.chipTextActive]}>{f.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+          {/* Tổng quan nhà đang chọn */}
+          <View style={s.summaryCard}>
+            <View style={s.summaryRow}>
+              <View style={s.summaryItem}>
+                <Text style={[s.summaryNum, { color: Colors.success }]}>{fmt(totals.collected)}</Text>
+                <Text style={s.summaryLbl}>Đã thu</Text>
+              </View>
+              <View style={s.summarySep} />
+              <View style={s.summaryItem}>
+                <Text style={[s.summaryNum, { color: Colors.warning }]}>{fmt(totals.uncollected)}</Text>
+                <Text style={s.summaryLbl}>Chưa thu</Text>
+              </View>
+              <View style={s.summarySep} />
+              <View style={s.summaryItem}>
+                <Text style={[s.summaryNum, { color: totals.overdueCount > 0 ? Colors.error : Colors.textMuted }]}>
+                  {totals.overdueCount}
+                </Text>
+                <Text style={s.summaryLbl}>Quá hạn</Text>
+              </View>
+            </View>
+            <Text style={s.summaryFoot}>
+              {totals.count} hoá đơn · {totals.periods} kỳ đã phát hành
+            </Text>
+          </View>
 
-        {/* Row 2 – Trạng thái */}
-        <View style={st.filterRow}>
-          <Text style={st.filterLabel}>TT</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chipRow}>
-            {([
-              { key: 'all',     label: 'Tất cả',   activeColor: Colors.primary,  activeBg: Colors.primaryBg },
-              { key: 'paid',    label: '✓ Đã thu', activeColor: Colors.success,  activeBg: Colors.successLight },
-              { key: 'overdue', label: 'Quá hạn',  activeColor: Colors.error,    activeBg: Colors.errorLight },
-            ] as { key: StatusFilter; label: string; activeColor: string; activeBg: string }[]).map(f => {
-              const isActive = statusFilter === f.key;
-              return (
+          {/* Bộ lọc */}
+          <View style={s.filterBlock}>
+            <View style={s.filterRow}>
+              {TYPE_FILTERS.map(f => (
                 <TouchableOpacity
                   key={f.key}
-                  style={[st.chip, isActive && { backgroundColor: f.activeBg, borderColor: f.activeColor }]}
+                  style={[s.filterChip, typeFilter === f.key && s.filterChipActive]}
+                  onPress={() => setTypeFilter(f.key)}
+                >
+                  <Text style={[s.filterText, typeFilter === f.key && s.filterTextActive]}>{f.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.filterRow}>
+              {STATUS_FILTERS.map(f => (
+                <TouchableOpacity
+                  key={f.key}
+                  style={[s.filterChip, statusFilter === f.key && s.filterChipActive]}
                   onPress={() => setStatusFilter(f.key)}
                 >
-                  <Text style={[st.chipText, isActive && { color: f.activeColor, fontWeight: '700' }]}>
-                    {f.label}
-                  </Text>
+                  <Text style={[s.filterText, statusFilter === f.key && s.filterTextActive]}>{f.label}</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      </View>
-
-      {/* List */}
-      <FlatList
-        data={historyBills}
-        keyExtractor={b => b.id}
-        renderItem={renderItem}
-        contentContainerStyle={st.list}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListEmptyComponent={
-          <View style={st.empty}>
-            <Text style={st.emptyEmoji}>📭</Text>
-            <Text style={st.emptyTitle}>Chưa có lịch sử</Text>
-            <Text style={st.emptyDesc}>Chưa có hóa đơn nào phù hợp với bộ lọc này.</Text>
+              ))}
+            </View>
           </View>
-        }
-        ListFooterComponent={<View style={{ height: 60 }} />}
-      />
+
+          {groups.length === 0 ? (
+            <View style={s.emptyBox}>
+              <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🧾</Text>
+              <Text style={s.emptyText}>
+                {invoices.length === 0
+                  ? 'Chưa có hoá đơn nào được phát hành.'
+                  : 'Không có hoá đơn nào khớp bộ lọc của nhà này.'}
+              </Text>
+            </View>
+          ) : (
+            groups.map(renderGroup)
+          )}
+
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
 
-// ===================== STYLES =====================
-const st = StyleSheet.create({
+const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
-    backgroundColor: Colors.white, ...Shadow.sm,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
+    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  backText:    { color: Colors.primary, fontWeight: '600', fontSize: 15, width: 70 },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
+  backBtn: { padding: Spacing.sm },
+  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
 
-  summaryRow: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.white, marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, ...Shadow.sm,
-  },
-  summaryItem:    { flex: 1, alignItems: 'center' },
-  summaryNum:     { fontSize: 20, fontWeight: '800' },
-  summaryAmt:     { fontSize: 15, fontWeight: '800' },
-  summaryLbl:     { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  summaryDivider: { width: 1, height: 32, backgroundColor: Colors.divider, marginHorizontal: Spacing.sm },
+  body: { padding: Spacing.lg, gap: Spacing.md },
 
-  filterBlock: {
-    backgroundColor: Colors.white, marginHorizontal: Spacing.lg,
-    marginTop: Spacing.md, borderRadius: BorderRadius.xl,
-    paddingVertical: Spacing.sm, ...Shadow.sm,
-    borderWidth: 1, borderColor: Colors.border,
+  chipRow: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.xs },
+  propChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
-  filterRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: Spacing.xs, paddingHorizontal: Spacing.md,
-  },
-  filterLabel: {
-    fontSize: 11, fontWeight: '800', color: Colors.textMuted,
-    textTransform: 'uppercase', width: 30, marginRight: Spacing.xs,
-  },
-  chipRow: { gap: Spacing.xs, paddingRight: Spacing.sm, alignItems: 'center' },
-  chip: {
-    paddingHorizontal: Spacing.md, paddingVertical: 6,
-    borderRadius: BorderRadius.full, backgroundColor: Colors.background,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  chipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  chipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
-  chipTextActive: { color: Colors.white },
+  propChipActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
+  propChipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  propChipTextActive: { color: Colors.primary },
 
-  list: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xs },
+  summaryCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  summaryRow: { flexDirection: 'row', alignItems: 'center' },
+  summaryItem: { flex: 1, alignItems: 'center' },
+  summaryNum: { fontSize: 15, fontWeight: '800' },
+  summaryLbl: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  summarySep: { width: 1, height: 28, backgroundColor: Colors.divider },
+  summaryFoot: { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.sm },
 
-  card: {
+  filterBlock: { gap: Spacing.sm },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  filterChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  filterChipActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
+  filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  filterTextActive: { color: Colors.primary },
+
+  groupCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, ...Shadow.sm,
-    borderWidth: 1, borderColor: Colors.border,
-    borderLeftWidth: 3, borderLeftColor: Colors.divider,
+    borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
   },
-  cardPaid:      { borderLeftColor: Colors.success },
-  cardOverdue:   { borderLeftColor: Colors.error },
-  cardCancelled: { borderLeftColor: Colors.textMuted, opacity: 0.7 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', padding: Spacing.base, gap: Spacing.sm },
+  groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  groupMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  groupChevron: { fontSize: 18, color: Colors.textMuted, fontWeight: '700' },
 
-  cardTop: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: Spacing.sm,
+  monthBlock: {
+    borderTopWidth: 1, borderTopColor: Colors.divider,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, gap: Spacing.sm,
   },
-  typeBadge:     { paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.full },
-  typeBadgeText: { fontSize: 11, fontWeight: '700' },
-  statusBadge:   { paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.full },
-  statusPaid:      { backgroundColor: Colors.successLight },
-  statusOverdue:   { backgroundColor: Colors.errorLight },
-  statusCancelled: { backgroundColor: Colors.background },
-  statusBadgeText: { fontSize: 11, fontWeight: '700' },
+  monthTitle: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase' },
 
-  cardMid:  { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.xs },
-  code:     { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
-  meta:     { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  prop:     { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-  amount:   { fontSize: 16, fontWeight: '800', marginLeft: Spacing.sm },
-  detail:   { fontSize: 11, color: Colors.textSecondary, marginBottom: Spacing.xs },
+  invRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  typeChip: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  typeChipText: { fontSize: 14 },
+  invTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  invMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  invAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
+  statusChip: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full },
+  statusChipText: { fontSize: 10, fontWeight: '700' },
 
-  cardFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.xs },
-  date:     { fontSize: 11, color: Colors.textMuted },
-  method:   { fontSize: 11, color: Colors.textMuted },
-
-  empty:      { alignItems: 'center', paddingTop: 60 },
-  emptyEmoji: { fontSize: 40, marginBottom: Spacing.sm },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: 4 },
-  emptyDesc:  { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2 },
+  emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

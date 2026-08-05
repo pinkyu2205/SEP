@@ -106,9 +106,3 @@ export const isCheckoutClosed = (status?: string) =>
  */
 export const CHECKOUT_AUTO_ACCEPT_DAYS = 7;
 
-/**
- * Nhịp app tự hỏi BE xem đối phương đã thao tác gì chưa (useCheckoutWatcher).
- * 30 giây: đủ nhanh để hai bên cảm giác "gửi là bên kia nhận ngay", vẫn nhẹ cho BE
- * vì mỗi lần chỉ là 1 request danh sách.
- */
-export const CHECKOUT_POLL_MS = 30_000;

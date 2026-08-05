@@ -12,7 +12,7 @@ export default function App() {
         <TenantContractProvider>
           <StatusBar style="auto" />
           <RootNavigator />
-          {/* Chạy ngầm: theo dõi trả phòng + chu kỳ tiền phòng tự động & hoá đơn mới. */}
+          {/* Chạy ngầm: bắt thông báo mới của BE để hiện trong app (web/Expo Go). */}
           <BackgroundWatcher />
           {/* Băng thông báo trượt xuống khi có việc mới — nằm dưới AlertHost. */}
           <NotificationToast />

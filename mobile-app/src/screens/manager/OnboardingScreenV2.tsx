@@ -8,7 +8,6 @@ import {
   Image,
   Linking,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +27,7 @@ import {
   ApiRoom,
   realPropertyService,
 } from '@/services/manager/propertyApi'
-import { showAlert } from '@/utils';
+import { showAlert, validateMeterPhoto } from '@/utils';
 import {
   ContractAddedEquipmentInput,
   ContractAvailableEquipmentItem,
@@ -873,33 +872,51 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   }
 
   // ===== Ảnh + OCR =====
-  // Trên web, launchCameraAsync chỉ mở file picker -> dùng CameraCaptureModal (expo-camera).
-  const pickFromNativeCamera = async (onDenied?: () => void) => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync()
-    if (perm.status !== 'granted') {
-      showAlert('Lỗi', 'Cần quyền camera. Bạn có thể chọn ảnh từ thư viện thay thế.')
-      onDenied?.()
-      return null
-    }
-    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 })
-    return r.canceled ? null : r.assets[0].uri
-  }
+  // Chụp ảnh luôn đi qua CameraCaptureModal (expo-camera) — xem captureMeter /
+  // addConditionPhoto. ImagePicker chỉ còn dùng để chọn ảnh có sẵn trong máy.
 
-  // Upload ảnh đồng hồ + OCR tự điền chỉ số
+  /**
+   * Upload ảnh đồng hồ + OCR tự điền chỉ số.
+   *
+   * Chỉ số lúc đón khách là MỐC GỐC tính tiền điện/nước cả kỳ thuê, nên ảnh bắt buộc
+   * là mặt đồng hồ thật: `validateMeterPhoto` soi chữ OCR đọc được (kWh, m³, tên hãng,
+   * serial...). Ảnh chỉ có con số (ghi ra giấy, chụp màn hình) hay chụp nhầm loại đồng
+   * hồ đều bị từ chối — không lưu ảnh, không điền số.
+   */
   const processMeterImage = async (kind: 'elec' | 'water', uri: string) => {
     // Ảnh mới chụp — tin OCR trở lại, bỏ yêu cầu xác nhận nhập tay của lần trước.
     setManualEdited((prev) => ({ ...prev, [kind]: false }))
     setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
-    try {
-      setOcrLoading(kind)
-      const url = await uploadImageToCloudinary(uri)
+    const label = kind === 'elec' ? 'điện' : 'nước'
+    const keepPhoto = (url: string) => {
       if (kind === 'elec') setElecMeterUrl(url)
       else setWaterMeterUrl(url)
       setMeterCapturedAt((prev) => ({ ...prev, [kind]: new Date().toISOString() }))
-      // OCR đọc số
-      const ocr = await realTenantService.ocrMeter(url)
-      if (ocr.reading) {
-        setMeters((prev) => ({ ...prev, [kind]: ocr.reading }))
+    }
+    try {
+      setOcrLoading(kind)
+      const url = await uploadImageToCloudinary(uri)
+
+      let ocr
+      try {
+        ocr = await realTenantService.ocrMeter(url)
+      } catch (err: any) {
+        // Không kiểm chứng được → vẫn giữ ảnh để không chặn việc đón khách, nhưng báo rõ.
+        keepPhoto(url)
+        showAlert('Chưa kiểm được ảnh', readErr(err, 'Dịch vụ đọc ảnh lỗi — nhập chỉ số tay và kiểm lại ảnh giúp.'))
+        return
+      }
+
+      const check = validateMeterPhoto(kind, ocr)
+      if (!check.ok) {
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫')
+        return
+      }
+
+      keepPhoto(url)
+      if (check.reading) setMeters((prev) => ({ ...prev, [kind]: check.reading as string }))
+      if (check.confidence === 'low') {
+        showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — xem lại ảnh và chỉ số trước khi lưu.`)
       }
     } catch (err: any) {
       showAlert(
@@ -912,21 +929,17 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   }
 
   const captureMeter = async (kind: 'elec' | 'water', useCamera: boolean) => {
-    if (useCamera && Platform.OS === 'web') {
+    // Camera trong app cho MỌI nền tảng: web không bật được camera qua ImagePicker,
+    // và modal còn bắt xem lại ảnh trước khi dùng (ảnh này là căn cứ tính tiền).
+    if (useCamera) {
       setCameraTarget(kind)
       return
     }
-    let uri: string | null
-    if (useCamera) {
-      uri = await pickFromNativeCamera(() => reportCameraBroken(kind))
-    } else {
-      // Chỉ cho chọn ảnh từ thư viện sau khi đã xác nhận camera lỗi (gallerySOS).
-      if (!gallerySOS[kind]) return
-      const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
-      uri = r.canceled ? null : r.assets[0].uri
-    }
-    if (!uri) return
-    await processMeterImage(kind, uri)
+    // Chỉ cho chọn ảnh từ thư viện sau khi đã xác nhận camera lỗi (gallerySOS).
+    if (!gallerySOS[kind]) return
+    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 })
+    if (r.canceled) return
+    await processMeterImage(kind, r.assets[0].uri)
   }
 
   // Camera không dùng được (mất quyền, lỗi thiết bị...) — manager tự báo để mở khoá
@@ -952,15 +965,13 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   }
 
   const addConditionPhoto = async (useCamera: boolean) => {
-    if (useCamera && Platform.OS === 'web') {
+    // Chụp → camera trong app (có bước xem lại ảnh), dùng chung cho web lẫn điện thoại.
+    if (useCamera) {
       setCameraTarget('condition')
       return
     }
     let uris: string[] = []
-    if (useCamera) {
-      const uri = await pickFromNativeCamera()
-      if (uri) uris = [uri]
-    } else {
+    {
       // Cho chọn nhiều ảnh cùng lúc từ thư viện
       const r = await ImagePicker.launchImageLibraryAsync({
         quality: 0.6,

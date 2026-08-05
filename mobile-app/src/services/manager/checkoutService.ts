@@ -1,5 +1,4 @@
 import realApiClient from '@/services/core/realApiClient';
-import { noteOwnCheckoutAction } from '@/services/shared/checkoutNotifier';
 import type {
   CheckoutRequestDto, CheckoutInspectionDto, CheckoutSettlementDto, CheckoutDamageItem,
 } from '@/services/tenant/selfService';
@@ -12,12 +11,11 @@ import type {
  *   PENDING →approve→ APPROVED →saveInspection→ INSPECTING →submitSettlement→
  *   WAITING_TENANT →(khách đồng ý)→ SETTLING →refund→ complete→ COMPLETED
  *
- * ĐÃ CÓ trên BE: list · get · approve · reject · complete.
- * ⚠️ BE TODO (FE gọi sẵn): inspection · settlement · submitSettlement · refund · createForTenant.
+ * ĐÃ CÓ ĐỦ trên BE (verify 05/08/2026): list · get · approve · reject · complete ·
+ * inspection · settlement · settlement/submit · refund · createForTenant.
  *
- * Mọi hàm HÀNH ĐỘNG đều gọi `noteOwnCheckoutAction` với DTO trả về: ghi nhận đây là
- * thao tác của chính manager này để vòng theo dõi (useCheckoutWatcher) không bắn
- * thông báo ngược lại cho người vừa bấm — khách thuê vẫn nhận bình thường.
+ * BE tự bắn thông báo + push cho phía còn lại ở mọi bước (CHECKOUT_* ) — FE KHÔNG
+ * tự sinh thông báo nữa, tránh khách/quản lý nhận 2 lần.
  */
 
 export interface SaveInspectionBody {
@@ -25,7 +23,7 @@ export interface SaveInspectionBody {
   roomConditionNote?: string;
   electricityFinalReading?: number;   // chốt chỉ số cuối kỳ, tránh mất tiền điện những ngày cuối
   waterFinalReading?: number;
-  /** Ảnh mặt đồng hồ lúc chốt số — bằng chứng khi khách thắc mắc số cuối (BE TODO). */
+  /** Ảnh mặt đồng hồ lúc chốt số — bằng chứng khi khách thắc mắc (BE có 05/08/2026). */
   electricMeterImageUrl?: string;
   waterMeterImageUrl?: string;
   damages?: CheckoutDamageItem[];
@@ -58,7 +56,6 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/approve`,
       { managerNote },
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -67,14 +64,13 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/reject`,
       { reason },
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
   /**
    * Manager mở hồ sơ trả phòng THAY khách — dùng khi khách bỏ đi không báo hoặc HĐ
-   * hết hạn không gia hạn. Không có API này thì phòng treo mãi vì chỉ tenant tạo được.
-   * (BE TODO)
+   * hết hạn không gia hạn. BE đã có từ 05/08/2026 (POST /api/v1/checkout-requests,
+   * chỉ MANAGER/ADMIN gọi được).
    */
   createForTenant: async (body: {
     contractId: number;
@@ -82,11 +78,10 @@ export const checkoutService = {
     reason: string;
   }): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.post<CheckoutRequestDto>('/api/v1/checkout-requests', body);
-    noteOwnCheckoutAction(data);
     return data;
   },
 
-  // ===== Biên bản kiểm tra phòng (BE TODO) =====
+  // ===== Biên bản kiểm tra phòng =====
 
   getInspection: async (id: number): Promise<CheckoutInspectionDto> => {
     const { data } = await realApiClient.get<CheckoutInspectionDto>(
@@ -100,11 +95,10 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/inspection`, body,
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
-  // ===== Quyết toán (BE TODO) =====
+  // ===== Quyết toán =====
 
   /** BE tự tính từ cọc + hoá đơn chưa trả + hư hỏng. FE KHÔNG tự cộng trừ. */
   getSettlement: async (id: number): Promise<CheckoutSettlementDto> => {
@@ -119,7 +113,6 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/settlement/submit`, { note },
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -128,7 +121,6 @@ export const checkoutService = {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/checkout-requests/${id}/refund`, body,
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 
@@ -145,7 +137,6 @@ export const checkoutService = {
       `/api/v1/checkout-requests/${id}/complete`,
       body,
     );
-    noteOwnCheckoutAction(data);
     return data;
   },
 };

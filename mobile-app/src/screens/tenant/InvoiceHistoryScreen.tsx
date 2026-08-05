@@ -6,6 +6,37 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatCurrency, formatDate } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
+import { realTenantSelfService } from '@/services/tenant/selfService';
+
+/**
+ * Tiền cọc đã đóng lúc mới vào ở — KHÔNG phải hoá đơn (BE lưu trên hợp đồng), nhưng
+ * với khách nó vẫn là một khoản đã trả nên phải nằm chung lịch sử, không thì khách
+ * tưởng hệ thống "quên" mất khoản lớn nhất mình từng đóng.
+ */
+interface DepositRow {
+  contractId: number;
+  contractCode: string;
+  place: string;
+  amount: number;
+  /** Ngày thu đủ cọc (BE trả từ 05/08/2026); chưa có thì lùi về ngày ký HĐ. */
+  paidAt?: string;
+  /** true = ngày trên là ngày ký HĐ, không phải ngày thu tiền → phải ghi đúng nhãn. */
+  dateIsSignedAt: boolean;
+  /** PAYOS | CASH | undefined */
+  method?: string;
+}
+
+/** Nhãn cách đóng cọc — khớp `depositMethod` của BE. */
+const DEPOSIT_METHOD_LABEL: Record<string, string> = {
+  PAYOS: 'Chuyển khoản',
+  CASH: 'Tiền mặt',
+  BANK_TRANSFER: 'Chuyển khoản',
+};
+
+/** Một dòng trong lịch sử: hoá đơn đã thanh toán hoặc khoản cọc. */
+type HistoryRow =
+  | { kind: 'invoice'; key: string; date: string; bill: SharedBill }
+  | { kind: 'deposit'; key: string; date: string; deposit: DepositRow };
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
@@ -17,15 +48,105 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
 export const InvoiceHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [invoices, setInvoices] = useState<SharedBill[]>([]);
+  const [deposits, setDeposits] = useState<DepositRow[]>([]);
   const [loading, setLoading] = useState(true);
+
   useFocusEffect(useCallback(() => {
+    let active = true;
     setLoading(true);
-    realTenantBillingService.listInvoices({ status: 'PAID' })
-      .then(r => setInvoices(r.map(toSharedBill)))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false));
+
+    /** Cọc đã đóng của từng hợp đồng (kể cả HĐ đã kết thúc — vẫn là lịch sử của khách). */
+    const loadDeposits = async (): Promise<DepositRow[]> => {
+      const contracts = await realTenantSelfService.getMyContracts().catch(() => []);
+      const details = await Promise.all(contracts.map(c =>
+        realTenantSelfService.getContractDetail(c.id).catch(() => null)));
+      return details.flatMap((d, i) => {
+        if (!d) return [];
+        const amount = d.deposit ?? d.depositAmount ?? contracts[i].deposit ?? contracts[i].depositAmount ?? 0;
+        // Chỉ đưa vào lịch sử khi thật sự ĐÃ THU — chưa thu thì không phải "đã trả".
+        if (amount <= 0 || (d.paymentStatus || '').toUpperCase() !== 'PAID') return [];
+        const paidAt = d.depositPaidAt || d.signedAt || d.moveInDate;
+        return [{
+          contractId: d.id,
+          contractCode: d.code || contracts[i].code,
+          place: [d.roomCode || contracts[i].roomNumber, d.propertyName || contracts[i].propertyName]
+            .filter(Boolean).join(' · '),
+          amount,
+          paidAt,
+          dateIsSignedAt: !d.depositPaidAt,
+          method: d.depositMethod ?? (d.payosOrderCode != null ? 'PAYOS' : undefined),
+        }];
+      });
+    };
+
+    Promise.all([
+      realTenantBillingService.listInvoices({ status: 'PAID' })
+        .then(r => r.map(toSharedBill)).catch(() => [] as SharedBill[]),
+      loadDeposits().catch(() => [] as DepositRow[]),
+    ])
+      .then(([bills, deps]) => {
+        if (!active) return;
+        setInvoices(bills);
+        setDeposits(deps);
+      })
+      .finally(() => { if (active) setLoading(false); });
+
+    return () => { active = false; };
   }, []));
+
   const paidInvoices = invoices.filter(i => i.status === 'paid');
+
+  // Trộn hoá đơn + cọc, mới nhất lên đầu.
+  const rows: HistoryRow[] = [
+    ...paidInvoices.map((bill): HistoryRow => ({
+      kind: 'invoice', key: `inv-${bill.id}`, date: bill.paidAt || bill.createdAt, bill,
+    })),
+    ...deposits.map((deposit): HistoryRow => ({
+      kind: 'deposit', key: `dep-${deposit.contractId}`, date: deposit.paidAt || '', deposit,
+    })),
+  ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  /** Thẻ tiền cọc — không mở được chi tiết vì cọc nằm trên hợp đồng, không phải hoá đơn. */
+  const renderDeposit = (d: DepositRow) => (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[styles.typeBadge, { backgroundColor: '#ECFDF5' }]}>
+            <Text style={[styles.typeBadgeText, { color: '#059669' }]}>🔐 Tiền cọc</Text>
+          </View>
+          <Text style={styles.invoiceMonth}>HĐ {d.contractCode}</Text>
+        </View>
+        <View style={styles.statusBadge}>
+          <Text style={styles.statusText}>Đã thanh toán</Text>
+        </View>
+      </View>
+      <Text style={styles.invoiceRoom}>{d.place}</Text>
+
+      <View style={styles.divider} />
+      <View style={styles.lineRow}>
+        <Text style={styles.lineLabel}>Tiền cọc giữ chỗ (đóng khi nhận nhà)</Text>
+        <Text style={styles.lineVal}>{formatCurrency(d.amount)}</Text>
+      </View>
+
+      <View style={styles.divider} />
+      <View style={styles.totalRow}>
+        <Text style={styles.totalLabel}>Tổng cộng</Text>
+        <Text style={styles.totalVal}>{formatCurrency(d.amount)}</Text>
+      </View>
+
+      <View style={styles.paidInfo}>
+        <Text style={styles.paidText}>
+          {d.paidAt
+            ? `✅ ${d.dateIsSignedAt ? 'Đã đóng · ký hợp đồng ngày' : 'Đã đóng ngày'} ${formatDate(d.paidAt)}`
+            : '✅ Đã đóng'}
+        </Text>
+        <Text style={styles.paidMethod}>{DEPOSIT_METHOD_LABEL[d.method ?? ''] ?? 'Thu tại chỗ'}</Text>
+      </View>
+      <Text style={styles.depositNote}>
+        Cọc được hoàn lại khi trả phòng, sau khi trừ hoá đơn còn nợ và hư hỏng (nếu có).
+      </Text>
+    </View>
+  );
 
   const renderItem = ({ item }: { item: SharedBill }) => {
     const tc = TYPE_CFG[item.invoiceType];
@@ -89,14 +210,19 @@ export const InvoiceHistoryScreen: React.FC = () => {
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>Lịch sử hóa đơn</Text>
-          <Text style={styles.subtitle}>{paidInvoices.length} hóa đơn đã thanh toán</Text>
+          <Text style={styles.subtitle}>
+            {paidInvoices.length} hóa đơn đã thanh toán
+            {deposits.length > 0 ? ` · ${deposits.length} khoản cọc` : ''}
+          </Text>
         </View>
       </View>
 
       <FlatList
-        data={paidInvoices}
-        renderItem={renderItem}
-        keyExtractor={i => i.id}
+        data={rows}
+        renderItem={({ item }) => (
+          item.kind === 'deposit' ? renderDeposit(item.deposit) : renderItem({ item: item.bill })
+        )}
+        keyExtractor={i => i.key}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
@@ -169,6 +295,7 @@ const styles = StyleSheet.create({
   },
   paidText: { fontSize: 13, color: Colors.success, fontWeight: '600' },
   paidMethod: { fontSize: 12, color: Colors.textMuted },
+  depositNote: { fontSize: 11, color: Colors.textMuted, lineHeight: 16, marginTop: Spacing.sm },
   detailFooter: { marginTop: Spacing.sm, alignItems: 'flex-end' },
   detailLink: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 

@@ -60,7 +60,7 @@ import {
   addNotificationResponseListener,
   handleInitialNotification,
 } from '@/services/core/notifications';
-import { navigationRef, navigateFromNotification } from './navigationRef';
+import { navigationRef, navigateFromNotification, setNotificationRole } from './navigationRef';
 
 const Stack = createNativeStackNavigator();
 
@@ -74,8 +74,10 @@ const baseStackOptions = {
 export const RootNavigator: React.FC = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
 
-  // Điều hướng khi người dùng bấm vào thông báo đẩy — của BE lẫn thông báo app tự
-  // bắn cho luồng trả phòng (cùng payload `data`, xem services/core/localPush).
+  // Vai hiện tại quyết định thông báo mở màn nào (manager và khách xem màn khác nhau).
+  useEffect(() => { setNotificationRole(user?.role); }, [user?.role]);
+
+  // Điều hướng khi người dùng bấm vào thông báo đẩy của BE (payload `data`).
   useEffect(() => {
     const unsub = addNotificationResponseListener(navigateFromNotification);
     handleInitialNotification(navigateFromNotification); // app mở từ trạng thái tắt hẳn

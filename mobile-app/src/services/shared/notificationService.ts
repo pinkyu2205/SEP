@@ -17,13 +17,16 @@ export interface ApiNotification {
   createdAt: string;       // ISO
 }
 
-// Shape thật BE trả về: GET /api/v1/notifications là Page<NotificationResponse>
-// với mỗi phần tử {id, title, content, type, read, createdAt}.
+// Shape thật BE trả về: GET /api/v1/notifications là Page<NotificationResponse>.
+// Từ 05/08/2026 BE trả kèm `screen` + `params` (đúng payload của push) và đã sort
+// id DESC sẵn — bấm vào thông báo là mở đúng hồ sơ/hoá đơn, không phải đoán theo type.
 interface BeNotificationRow {
   id: number;
   title: string;
   content: string;
   type: string;            // BE hiện ghi "MAINTENANCE" cho mọi thông báo bảo trì
+  screen?: string;
+  params?: Record<string, any>;
   read: boolean;
   createdAt: string;
 }
@@ -31,9 +34,18 @@ interface BeNotificationRow {
 /** Đổi type thô của BE về type UI (TYPE_CATEGORY/TYPE_ACCENT của các màn). */
 const normalizeType = (row: BeNotificationRow): string => {
   const raw = (row.type || '').toUpperCase();
-  // Cron nhắc nợ (API-CRON-NhacNo-LateFee-BE-TODO.md): BE ghi type BILLING_*.
-  if (raw === 'BILLING_REMINDER') return 'new_bill';
-  if (raw === 'BILLING_OVERDUE') return 'bill_overdue';
+  /**
+   * Hoá đơn & chu kỳ tiền phòng tự động (BE 05/08/2026):
+   *   BILLING_REMINDER · BILLING_OVERDUE  — cron nhắc nợ
+   *   RENT_ISSUED · RENT_REMINDER_PRE     — phát hành ngày 1 · nhắc trước ngày 28
+   *   RENT_OVERDUE_MANAGER                — ngày 8, báo quản lý được chấm dứt HĐ
+   *   UTILITY_INVOICE_CREATED             — manager vừa chốt số điện/nước
+   * Gom hết về 2 nhóm UI để lọc theo tab "Hoá đơn" là thấy đủ.
+   */
+  if (raw.startsWith('BILLING_') || raw.startsWith('RENT_')
+    || raw.includes('UTILITY') || raw.includes('INVOICE')) {
+    return raw.includes('OVERDUE') ? 'bill_overdue' : 'new_bill';
+  }
   if (raw === 'MAINTENANCE') {
     // BE dùng chung 1 type — phân biệt qua nội dung: ticket mới / đã xong / cập nhật.
     if (/mới/i.test(row.title)) return 'maintenance_new';
@@ -57,6 +69,8 @@ const mapRow = (row: BeNotificationRow): ApiNotification => ({
   body: row.content,
   type: normalizeType(row),
   isRead: row.read,
+  screen: row.screen,
+  params: row.params,
   createdAt: row.createdAt,
 });
 
@@ -68,9 +82,8 @@ export const realNotificationService = {
       { params: { size: 50 } },
     );
     const rows = Array.isArray(data) ? data : data?.content ?? [];
-    // BE trả Page KHÔNG sort (id ASC — cũ nhất trước) và bỏ qua param `sort`,
-    // nên phải tự đảo về mới-nhất-trước. Lưu ý: khi user vượt 50 notif, page 0
-    // chỉ còn 50 cái CŨ nhất → cần BE sort DESC (đã gửi API-NOTIF-Sort-BE-TODO.md).
+    // BE đã sort id DESC từ 05/08/2026 (page 0 = 50 thông báo MỚI nhất). Vẫn sort lại
+    // ở FE cho chắc — rẻ, và không phụ thuộc vào việc BE có đổi lại thứ tự hay không.
     return rows.map(mapRow).sort((a, b) => b.id - a.id);
   },
 
