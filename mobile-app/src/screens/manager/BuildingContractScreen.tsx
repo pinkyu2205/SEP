@@ -1,477 +1,552 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
+  ActivityIndicator, RefreshControl, Linking, Image,
 } from 'react-native';
-import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
-  getPropertyById, getBuildingOps, BuildingContract, ContractStatus,
-} from '@/data/managedProperties';
-import {
-  getInspectionsByContractId,
-  getInspectionStatusLabel,
-  getInspectionTypeLabel,
-  RoomInspection,
-} from '@/data/roomInspections';
+  showAlert, readApiError, formatDate,
+  CONTRACT_STATUS_META, mapContractStatus, daysUntil, isLivingStatus, isEndedStatus,
+  isClosedContract, type ContractUiStatus,
+} from '@/utils';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { managerPropertyService } from '@/services/manager/propertyService';
 
-type FilterId = 'all' | 'draft' | 'pending' | 'approved' | 'active' | 'expiring_soon' | 'rejected';
-type NormalStatus = Exclude<FilterId, 'all'>;
+/**
+ * Hợp đồng khách thuê của MỘT bất động sản (quản lý bấm vào từ màn Hợp đồng).
+ *
+ * Dữ liệu THẬT: GET /api/v1/properties/{id}/tenant-contracts (realTenantService.
+ * listByProperty) + thông tin nhà từ danh sách bất động sản manager phụ trách.
+ * Trước đây màn này đọc mock `@/data/managedProperties` nên propertyId thật không
+ * khớp gì cả → luôn hiện 0/0 "Không có hợp đồng phù hợp".
+ *
+ * Chỉ XEM, không sửa: hợp đồng sinh ra từ luồng tiếp nhận khách (OnboardingScreenV2),
+ * kết thúc bằng luồng trả phòng — nên ở đây không có nút tạo/duyệt/gia hạn giả.
+ */
+
+type FilterId = 'all' | 'living' | 'expiring_soon' | 'waiting';
 
 const FILTERS: { id: FilterId; label: string }[] = [
   { id: 'all', label: 'Tất cả' },
-  { id: 'draft', label: 'Nháp' },
-  { id: 'pending', label: 'Chờ duyệt' },
-  { id: 'approved', label: 'Đã duyệt' },
-  { id: 'active', label: 'Hiệu lực' },
+  { id: 'living', label: 'Đang thuê' },
   { id: 'expiring_soon', label: 'Sắp hết hạn' },
-  { id: 'rejected', label: 'Từ chối' },
+  { id: 'waiting', label: 'Chờ nhận phòng' },
 ];
 
-const STATUS_META: Record<NormalStatus, { label: string; color: string; bg: string }> = {
-  draft: { label: 'Nháp', color: Colors.textSecondary, bg: Colors.divider },
-  pending: { label: 'Chờ duyệt', color: '#7C3AED', bg: '#F5F3FF' },
-  approved: { label: 'Đã duyệt', color: Colors.info, bg: Colors.infoLight },
-  active: { label: 'Hiệu lực', color: Colors.success, bg: Colors.successLight },
-  expiring_soon: { label: 'Sắp hết hạn', color: Colors.warning, bg: Colors.warningLight },
-  rejected: { label: 'Từ chối', color: Colors.error, bg: Colors.errorLight },
+const matchFilter = (status: ContractUiStatus, filter: FilterId): boolean => {
+  if (filter === 'all') return true;
+  if (filter === 'living') return isLivingStatus(status);
+  if (filter === 'waiting') return status === 'waiting_deposit' || status === 'pending_approval' || status === 'rejected';
+  return status === filter;
 };
 
-const fmt = (n: number) => `${n.toLocaleString('vi-VN')}đ`;
-
-const normalizeStatus = (status: ContractStatus): NormalStatus => {
-  if (status === 'pending_approval') return 'pending';
-  if (status === 'expiring') return 'expiring_soon';
-  return status as NormalStatus;
+/** Thứ tự ưu tiên: việc cần làm trước, hết hạn chưa xử lý xuống cuối. */
+const SORT_WEIGHT: Record<ContractUiStatus, number> = {
+  rejected: 0, expiring_soon: 1, pending_approval: 2, waiting_deposit: 3,
+  active: 4, expired: 5, terminated: 6,
 };
 
-const contractCode = (contract: BuildingContract) =>
-  contract.code || `HD-${contract.room}-${contract.startDate.slice(0, 4)}`;
+const money = (n?: number) => `${(n || 0).toLocaleString('vi-VN')}đ`;
+const roomLabel = (c: TenantContractResponse) => (c.roomNumber ? `Phòng ${c.roomNumber}` : 'Nhà nguyên căn');
+
+/** "còn 12 ngày" / "quá hạn 3 ngày" — nói bằng lời cho dễ hiểu. */
+const remainText = (endDate?: string): string | null => {
+  const d = daysUntil(endDate);
+  if (d == null) return null;
+  if (d < 0) return `Quá hạn ${Math.abs(d)} ngày`;
+  if (d === 0) return 'Hết hạn hôm nay';
+  return `Còn ${d} ngày`;
+};
 
 export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => {
-  const propertyId: string = route?.params?.propertyId;
-  const prop = getPropertyById(propertyId);
-  const [contracts, setContracts] = useState<BuildingContract[]>(() => getBuildingOps(propertyId).contracts);
+  const propertyId: string = String(route?.params?.propertyId ?? '');
+  const paramName: string | undefined = route?.params?.propertyName;
+
+  const [propName, setPropName] = useState(paramName ?? '');
+  const [propAddress, setPropAddress] = useState('');
+  const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterId>('all');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<BuildingContract | null>(null);
+  const [selected, setSelected] = useState<TenantContractResponse | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
-  const summary = useMemo(() => ({
-    total: contracts.length,
-    active: contracts.filter(c => normalizeStatus(c.status) === 'active').length,
-    pending: contracts.filter(c => normalizeStatus(c.status) === 'pending').length,
-    expiring: contracts.filter(c => normalizeStatus(c.status) === 'expiring_soon').length,
-  }), [contracts]);
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const list = await realTenantService.listByProperty(Number(propertyId));
+      // Khách đã trả phòng xong (HĐ đã thanh lý) thì bỏ hẳn khỏi màn vận hành —
+      // ở đây chỉ quan tâm ai đang thuê. Lịch sử tra ở màn Hoá đơn & Thanh toán.
+      setContracts(list.filter(c => !isClosedContract(c.status)));
+      // Tên/địa chỉ nhà: ưu tiên tham số truyền sang, thiếu thì tra trong danh sách nhà.
+      const fromContract = list.find(c => c.propertyName)?.propertyName;
+      if (fromContract) setPropName(prev => prev || fromContract);
+      managerPropertyService.getScopedProperties()
+        .then(props => {
+          const p = props.find(item => String(item.id) === propertyId);
+          if (p) {
+            setPropName(p.propertyName);
+            setPropAddress(p.fullAddress || p.shortAddress || '');
+          }
+        })
+        .catch(() => { /* chỉ là thông tin phụ, thiếu cũng không sao */ });
+    } catch (err: any) {
+      // Trước đây lỗi bị nuốt im lặng → nhìn y hệt "nhà này không có hợp đồng".
+      setError(readApiError(err, 'Không tải được danh sách hợp đồng của nhà này.'));
+      setContracts([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [propertyId]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const rows = useMemo(
+    () => contracts.map(c => ({ contract: c, status: mapContractStatus(c) })),
+    [contracts],
+  );
+
+  const stats = useMemo(() => ({
+    total: rows.length,
+    living: rows.filter(r => isLivingStatus(r.status)).length,
+    expiring: rows.filter(r => r.status === 'expiring_soon').length,
+    waiting: rows.filter(r => matchFilter(r.status, 'waiting')).length,
+    overdue: rows.filter(r => r.status === 'expired').length,
+  }), [rows]);
+
+  const counts: Record<FilterId, number> = {
+    all: stats.total, living: stats.living,
+    expiring_soon: stats.expiring, waiting: stats.waiting,
+  };
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return contracts.filter(c => {
-      const status = normalizeStatus(c.status);
-      return (filter === 'all' || status === filter)
-        && (!q || c.tenant.toLowerCase().includes(q) || c.room.toLowerCase().includes(q) || contractCode(c).toLowerCase().includes(q));
-    });
-  }, [contracts, filter, search]);
+    return rows
+      .filter(({ contract: c, status }) =>
+        matchFilter(status, filter)
+        && (!q
+          || c.tenantFullName?.toLowerCase().includes(q)
+          || c.tenantPhone?.includes(q)
+          || c.roomNumber?.toLowerCase().includes(q)
+          || c.contractCode?.toLowerCase().includes(q)))
+      .sort((a, b) => SORT_WEIGHT[a.status] - SORT_WEIGHT[b.status]
+        || (a.contract.roomNumber ?? '').localeCompare(b.contract.roomNumber ?? ''));
+  }, [rows, filter, search]);
 
-  const updateStatus = (contract: BuildingContract, status: ContractStatus) => {
-    setContracts(prev => prev.map(item => item.id === contract.id ? { ...item, status } : item));
-    setSelected(prev => prev?.id === contract.id ? { ...prev, status } : prev);
+  const callTenant = (phone?: string) => {
+    if (!phone) return showAlert('Thiếu số điện thoại', 'Hợp đồng này chưa có số điện thoại khách thuê.');
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      showAlert('Không gọi được', `Số điện thoại khách: ${phone}`));
   };
 
-  const renew = (contract: BuildingContract) => {
-    showAlert('Gia hạn hợp đồng', `Gia hạn ${contractCode(contract)} thêm 12 tháng?`, [
-      { text: 'Hủy', style: 'cancel' },
-      {
-        text: 'Gia hạn',
-        onPress: () => setContracts(prev => prev.map(item => {
-          if (item.id !== contract.id) return item;
-          const end = new Date(item.endDate);
-          end.setFullYear(end.getFullYear() + 1);
-          return { ...item, status: 'active', endDate: end.toISOString().slice(0, 10) };
-        })),
-      },
-    ]);
+  const viewDocument = async (c: TenantContractResponse) => {
+    setDownloading(true);
+    try {
+      const { uri, mimeType } = await realTenantService.downloadContractDocument(c.id, c.contractCode);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType,
+          UTI: mimeType === 'application/pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
+          dialogTitle: 'Xem hợp đồng thuê',
+        });
+      } else {
+        showAlert('Không mở được', 'Thiết bị không hỗ trợ mở file hợp đồng.');
+      }
+    } catch (err: any) {
+      showAlert('Lỗi', readApiError(err, 'Không mở được file hợp đồng.'));
+    } finally {
+      setDownloading(false);
+    }
   };
 
-  const handleAction = (action: string, contract: BuildingContract) => {
-    if (action === 'submit') updateStatus(contract, 'pending_approval');
-    if (action === 'activate') updateStatus(contract, 'active');
-    if (action === 'renew') renew(contract);
-    if (action === 'edit') showAlert('Chỉnh sửa hợp đồng', `Mở form chỉnh sửa cho ${contractCode(contract)}.`);
-  };
-
-  const ContractActions = ({ contract }: { contract: BuildingContract }) => {
-    const status = normalizeStatus(contract.status);
-    if (status === 'draft') {
-      return (
-        <>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => handleAction('edit', contract)}>
-            <Text style={styles.actionText}>Sửa</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionBtn, styles.actionPrimary]} onPress={() => handleAction('submit', contract)}>
-            <Text style={styles.actionPrimaryText}>Gửi duyệt</Text>
-          </TouchableOpacity>
-        </>
-      );
-    }
-    if (status === 'approved') {
-      return (
-        <TouchableOpacity style={[styles.actionBtn, styles.actionSuccess]} onPress={() => handleAction('activate', contract)}>
-          <Text style={styles.actionSuccessText}>Kích hoạt</Text>
-        </TouchableOpacity>
-      );
-    }
-    if (status === 'active' || status === 'expiring_soon') {
-      return (
-        <TouchableOpacity style={[styles.actionBtn, styles.actionPrimary]} onPress={() => handleAction('renew', contract)}>
-          <Text style={styles.actionPrimaryText}>Gia hạn</Text>
-        </TouchableOpacity>
-      );
-    }
-    if (status === 'rejected') {
-      return (
-        <TouchableOpacity style={[styles.actionBtn, styles.actionPrimary]} onPress={() => handleAction('edit', contract)}>
-          <Text style={styles.actionPrimaryText}>Sửa & gửi lại</Text>
-        </TouchableOpacity>
-      );
-    }
-    return (
-      <TouchableOpacity style={styles.actionBtn} onPress={() => setSelected(contract)}>
-        <Text style={styles.actionText}>Xem chi tiết</Text>
-      </TouchableOpacity>
-    );
-  };
-
+  // ===================== CHI TIẾT 1 HỢP ĐỒNG =====================
   if (selected) {
-    const status = normalizeStatus(selected.status);
-    const meta = STATUS_META[status];
-    const ops = getBuildingOps(propertyId);
-    const room = ops.rooms.find(item => item.code === selected.room);
-    const tenant = ops.tenants.find(item => item.room === selected.room);
-    const utility = ops.utility.find(item => item.room === selected.room);
-    const latestInvoice = ops.invoices.find(item => item.room === selected.room);
-    const inspections = getInspectionsByContractId(selected.id);
-    const submittedDate = ['pending', 'approved', 'active', 'expiring_soon'].includes(status) ? selected.startDate : 'Chưa gửi';
-    const approvedDate = ['approved', 'active', 'expiring_soon'].includes(status) ? selected.startDate : 'Chưa duyệt';
+    const status = mapContractStatus(selected);
+    const meta = CONTRACT_STATUS_META[status];
+    const remain = remainText(selected.endDate);
+    const photos = selected.roomConditionPhotos?.map(p => p.url) ?? selected.roomConditionUrls ?? [];
+    const equipment = selected.equipmentList ?? [];
 
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => setSelected(null)}>
-            <Text style={styles.backText}>← Quay lại</Text>
+          <TouchableOpacity style={styles.backBtn} onPress={() => setSelected(null)}>
+            <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.title}>{contractCode(selected)}</Text>
-            <Text style={styles.subtitle}>{prop?.name || 'Tòa nhà'}</Text>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{roomLabel(selected)}</Text>
+            <Text style={styles.headerSub} numberOfLines={1}>{selected.contractCode}</Text>
           </View>
-          <View style={{ width: 72 }} />
+          <View style={{ width: 36 }} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.detailScroll} showsVerticalScrollIndicator={false}>
-          <View style={styles.detailHero}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.detailHeroLabel}>Mã hợp đồng</Text>
-              <Text style={styles.detailHeroCode}>{contractCode(selected)}</Text>
-              <Text style={styles.detailHeroSub}>{selected.tenant} · Phòng {selected.room}</Text>
+        <ScrollView contentContainerStyle={styles.detailBody} showsVerticalScrollIndicator={false}>
+          {/* Trạng thái + khách thuê */}
+          <View style={[styles.heroCard, { borderLeftColor: meta.color }]}>
+            <View style={styles.heroTop}>
+              <View style={[styles.badge, { backgroundColor: meta.bg }]}>
+                <Text style={[styles.badgeText, { color: meta.color }]}>{meta.icon} {meta.label}</Text>
+              </View>
+              {!!remain && !isEndedStatus(status) && (
+                <Text style={[styles.heroRemain, { color: meta.color }]}>{remain}</Text>
+              )}
             </View>
-            <View style={[styles.detailStatus, { backgroundColor: meta.bg }]}>
-              <Text style={[styles.detailStatusText, { color: meta.color }]}>{meta.label}</Text>
-            </View>
+            <Text style={styles.heroName}>{selected.tenantFullName}</Text>
+            <Text style={styles.heroHint}>{meta.hint}</Text>
           </View>
 
-          <DetailSection title="Tổng quan hợp đồng">
-            <InfoRow label="Mã hợp đồng" value={contractCode(selected)} />
-            <InfoRow label="Loại hợp đồng" value={selected.type === 'building_rental' ? 'Thuê nhà' : 'Thuê phòng'} />
-            <InfoRow label="Trạng thái" value={meta.label} highlight />
-            <InfoRow label="Ngày tạo" value={selected.startDate} />
-            <InfoRow label="Ngày gửi duyệt" value={submittedDate} />
-            <InfoRow label="Ngày duyệt" value={approvedDate} />
-            <InfoRow label="Thời hạn" value={`${selected.startDate} → ${selected.endDate}`} />
-          </DetailSection>
-
-          <DetailSection title="Bên thuê">
-            <InfoRow label="Họ tên" value={selected.tenant} />
-            <InfoRow label="Số điện thoại" value={tenant?.phone || 'Chưa cập nhật'} />
-            <InfoRow label="Ngày vào ở" value={tenant?.moveInDate || selected.startDate} />
-            <InfoRow
-              label="Rủi ro thanh toán"
-              value={tenant?.paymentRisk === 'high' ? 'Cao' : tenant?.paymentRisk === 'medium' ? 'Trung bình' : 'Thấp'}
-            />
-          </DetailSection>
-
-          <DetailSection title="Tài sản thuê">
-            <InfoRow label="Tòa nhà" value={prop?.name || 'Chưa xác định'} />
-            <InfoRow label="Địa chỉ" value={prop?.address || 'Chưa cập nhật'} />
-            <InfoRow label="Phòng" value={selected.room} />
-            <InfoRow label="Tầng" value={room ? `Tầng ${room.floor}` : 'Chưa cập nhật'} />
-            <InfoRow label="Diện tích" value={room ? `${room.area} m²` : 'Chưa cập nhật'} />
-            <InfoRow label="Trạng thái phòng" value={room?.status === 'occupied' ? 'Đang thuê' : room?.status === 'maintenance' ? 'Bảo trì' : 'Trống'} />
-          </DetailSection>
-
-          <Text style={styles.detailSectionTitle}>Tài chính</Text>
-          <View style={styles.priceGrid}>
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Tiền thuê/tháng</Text>
-              <Text style={styles.priceValue}>{fmt(selected.monthlyRent)}</Text>
-            </View>
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>Tiền cọc</Text>
-              <Text style={[styles.priceValue, { color: Colors.warning }]}>{fmt(selected.depositAmount ?? selected.monthlyRent * 2)}</Text>
-            </View>
+          <View style={styles.quickRow}>
+            <TouchableOpacity style={styles.quickBtn} onPress={() => callTenant(selected.tenantPhone)}>
+              <Text style={styles.quickBtnText}>📞 Gọi khách</Text>
+            </TouchableOpacity>
+            {selected.contractFileAvailable && (
+              <TouchableOpacity
+                style={[styles.quickBtn, styles.quickBtnPrimary]}
+                onPress={() => viewDocument(selected)}
+                disabled={downloading}
+              >
+                {downloading
+                  ? <ActivityIndicator size="small" color={Colors.white} />
+                  : <Text style={[styles.quickBtnText, styles.quickBtnPrimaryText]}>📄 Xem hợp đồng</Text>}
+              </TouchableOpacity>
+            )}
           </View>
-          <DetailSection>
-            <InfoRow label="Hóa đơn gần nhất" value={latestInvoice ? `${latestInvoice.period} · ${fmt(latestInvoice.amount)}` : 'Chưa có'} />
-            <InfoRow
-              label="Trạng thái hóa đơn"
-              value={latestInvoice?.status === 'paid' ? 'Đã thanh toán' : latestInvoice?.status === 'overdue' ? 'Quá hạn' : latestInvoice ? 'Chưa thanh toán' : 'Chưa có'}
-            />
-            <InfoRow label="Phí dịch vụ" value={prop ? `${fmt(prop.serviceCharge)}/tháng` : 'Chưa cập nhật'} />
-          </DetailSection>
 
-          <DetailSection title="Chỉ số & bàn giao">
-            <InfoRow label="Điện đầu kỳ" value={utility ? `${utility.elecPrev} kWh` : 'Chưa cập nhật'} />
-            <InfoRow label="Nước đầu kỳ" value={utility ? `${utility.waterPrev} m³` : 'Chưa cập nhật'} />
-            <InfoRow label="Ngày chốt gần nhất" value={utility?.lastReadingDate || 'Chưa cập nhật'} />
-            <InfoRow label="Ảnh hiện trạng" value={status === 'draft' || status === 'rejected' ? 'Cần bổ sung' : 'Đã lưu'} />
-            <InfoRow label="Biên bản bàn giao" value={status === 'active' ? 'Đã xác nhận' : 'Chờ xác nhận'} />
-          </DetailSection>
+          <Section title="Khách thuê">
+            <Row label="Họ tên" value={selected.tenantFullName} />
+            <Row label="Số điện thoại" value={selected.tenantPhone} />
+            <Row label="CCCD/CMND" value={selected.tenantCccd || 'Chưa có'} />
+          </Section>
 
-          <Text style={styles.detailSectionTitle}>Biên bản hiện trạng</Text>
-          {inspections.length === 0 ? (
-            <View style={styles.emptyInspectionBox}>
-              <Text style={styles.emptyInspectionTitle}>Chưa có biên bản hiện trạng.</Text>
-              <Text style={styles.emptyInspectionText}>Ảnh hiện trạng được quản lý theo hợp đồng, không lưu trực tiếp trong phòng.</Text>
+          <Section title="Tiền thuê">
+            <View style={styles.priceRow}>
+              <View style={styles.priceBox}>
+                <Text style={styles.priceLabel}>Thuê hằng tháng</Text>
+                <Text style={styles.priceValue}>{money(selected.rentAmount)}</Text>
+              </View>
+              <View style={styles.priceBox}>
+                <Text style={styles.priceLabel}>Tiền cọc</Text>
+                <Text style={[styles.priceValue, { color: Colors.warning }]}>{money(selected.deposit)}</Text>
+              </View>
             </View>
-          ) : (
-            <View style={styles.inspectionList}>
-              {inspections.map(inspection => (
-                <InspectionCard
-                  key={inspection.id}
-                  inspection={inspection}
-                  onPress={() => navigation.navigate('InspectionDetail', { inspectionId: inspection.id })}
+            <Row
+              label="Trạng thái cọc"
+              value={selected.paymentStatus === 'PAID' ? 'Đã thu' : selected.paymentStatus === 'PENDING' ? 'Chưa thu' : (selected.paymentStatus || 'Chưa có')}
+              last
+            />
+          </Section>
+
+          <Section title="Thời hạn thuê">
+            <Row label="Ngày vào ở" value={formatDate(selected.moveInDate || selected.startDate)} />
+            <Row label="Bắt đầu" value={formatDate(selected.startDate)} />
+            <Row label="Kết thúc" value={selected.endDate ? formatDate(selected.endDate) : 'Không thời hạn'} last={!remain} />
+            {!!remain && <Row label="Còn lại" value={remain} last />}
+          </Section>
+
+          {(selected.initialElectricReading != null || selected.initialWaterReading != null
+            || selected.electricMeterImageUrl || selected.waterMeterImageUrl) && (
+            <Section title="Bàn giao lúc đón khách">
+              <Row label="Chỉ số điện đầu" value={selected.initialElectricReading != null ? `${selected.initialElectricReading} kWh` : 'Chưa ghi'} />
+              <Row label="Chỉ số nước đầu" value={selected.initialWaterReading != null ? `${selected.initialWaterReading} m³` : 'Chưa ghi'} last={!selected.electricMeterImageUrl && !selected.waterMeterImageUrl} />
+              {(selected.electricMeterImageUrl || selected.waterMeterImageUrl) && (
+                <View style={styles.photoStrip}>
+                  {!!selected.electricMeterImageUrl && (
+                    <MeterThumb label="Đồng hồ điện" uri={selected.electricMeterImageUrl} />
+                  )}
+                  {!!selected.waterMeterImageUrl && (
+                    <MeterThumb label="Đồng hồ nước" uri={selected.waterMeterImageUrl} />
+                  )}
+                </View>
+              )}
+            </Section>
+          )}
+
+          {(photos.length > 0 || !!selected.roomConditionNote) && (
+            <Section title="Hiện trạng phòng lúc bàn giao">
+              {!!selected.roomConditionNote && (
+                <Text style={styles.noteText}>{selected.roomConditionNote}</Text>
+              )}
+              {photos.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+                  {photos.map((uri, i) => (
+                    <Image key={`${uri}-${i}`} source={{ uri }} style={styles.photo} />
+                  ))}
+                </ScrollView>
+              )}
+            </Section>
+          )}
+
+          {equipment.length > 0 ? (
+            <Section title={`Nội thất bàn giao (${equipment.length} món)`}>
+              {equipment.map((eq, i) => (
+                <Row
+                  key={eq.id ?? i}
+                  label={eq.roomNumber ? `${eq.name} · P${eq.roomNumber}` : eq.name}
+                  value={`SL ${eq.quantity ?? 1}`}
+                  last={i === equipment.length - 1}
                 />
               ))}
-            </View>
+            </Section>
+          ) : !!selected.equipmentSnapshot && (
+            // API danh sách không trả equipmentList — dùng tạm dòng tóm tắt BE sinh cho PDF.
+            <Section title="Nội thất bàn giao">
+              <Text style={styles.noteText}>{selected.equipmentSnapshot}</Text>
+            </Section>
           )}
 
-          <Text style={styles.detailSectionTitle}>Điều khoản chính</Text>
-          <View style={styles.termsCard}>
-            <Text style={styles.termText}>• Thanh toán tiền thuê trước ngày 05 hằng tháng.</Text>
-            <Text style={styles.termText}>• Tiền cọc được hoàn trả khi kết thúc hợp đồng nếu không phát sinh hư hỏng hoặc công nợ.</Text>
-            <Text style={styles.termText}>• Khách thuê cần báo trước 30 ngày khi chấm dứt hợp đồng.</Text>
-            <Text style={styles.termText}>• Không tự ý chuyển nhượng hoặc cho thuê lại phòng khi chưa được quản lý xác nhận.</Text>
-          </View>
-
-          {status === 'rejected' && selected.rejectionReason && (
-            <>
-              <Text style={styles.detailSectionTitle}>Lý do từ chối</Text>
-              <View style={styles.rejectBox}>
-                <Text style={styles.rejectTitle}>Cần chỉnh sửa trước khi gửi lại</Text>
-                <Text style={styles.rejectText}>{selected.rejectionReason}</Text>
-              </View>
-            </>
+          {isEndedStatus(status) && !!selected.terminatedAt && (
+            <Section title="Thanh lý hợp đồng">
+              <Row label="Ngày thanh lý" value={formatDate(selected.terminatedAt)} />
+              <Row label="Lý do" value={selected.terminationReason || 'Không ghi'} last />
+            </Section>
           )}
 
-          <Text style={styles.detailSectionTitle}>Lịch sử xử lý</Text>
-          <View style={styles.timelineCard}>
-            <TimelineRow title="Tạo hợp đồng" meta={`Quản lý · ${selected.startDate}`} done />
-            {['pending', 'approved', 'active', 'expiring_soon'].includes(status) && (
-              <TimelineRow title="Gửi duyệt" meta={`Quản lý · ${submittedDate}`} done />
-            )}
-            {['approved', 'active', 'expiring_soon'].includes(status) && (
-              <TimelineRow title="Đã duyệt" meta={`Host/Admin · ${approvedDate}`} done />
-            )}
-            {['active', 'expiring_soon'].includes(status) && (
-              <TimelineRow title="Kích hoạt hợp đồng" meta={`OTP xác nhận · ${selected.startDate}`} done />
-            )}
-          </View>
-
-          <View style={styles.detailActions}>
-            <ContractActions contract={selected} />
-          </View>
+          <View style={{ height: Spacing.xl }} />
         </ScrollView>
       </SafeAreaView>
     );
   }
 
+  // ===================== DANH SÁCH =====================
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Quay lại</Text>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.title}>Hợp đồng</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>{prop?.name || ''}</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Hợp đồng khách thuê</Text>
+          <Text style={styles.headerSub} numberOfLines={1}>{propName || 'Đang tải…'}</Text>
         </View>
-        <View style={{ width: 72 }} />
+        <View style={{ width: 36 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.summaryRow}>
-          <MiniStat label="Tổng" value={summary.total} color={Colors.primary} />
-          <MiniStat label="Hiệu lực" value={summary.active} color={Colors.success} />
-          <MiniStat label="Chờ duyệt" value={summary.pending} color={Colors.info} />
-          <MiniStat label="Sắp hết hạn" value={summary.expiring} color={Colors.warning} />
-        </View>
-
-        <View style={styles.searchBar}>
-          <Text style={styles.searchIcon}>⌕</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Tìm khách thuê, phòng, mã hợp đồng"
-            placeholderTextColor={Colors.textMuted}
-            value={search}
-            onChangeText={setSearch}
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')}>
-              <Text style={styles.clearText}>×</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-          {FILTERS.map(item => (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.chip, filter === item.id && styles.chipActive]}
-              onPress={() => setFilter(item.id)}
-            >
-              <Text style={[styles.chipText, filter === item.id && styles.chipTextActive]} numberOfLines={1}>
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        <View style={styles.resultHeader}>
-          <Text style={styles.sectionTitle}>Danh sách hợp đồng</Text>
-          <Text style={styles.resultCount}>{list.length}/{contracts.length}</Text>
-        </View>
-
-        {list.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <Text style={styles.emptyText}>Không có hợp đồng phù hợp</Text>
-          </View>
-        ) : list.map(contract => {
-          const status = normalizeStatus(contract.status);
-          const meta = STATUS_META[status];
-          return (
-            <TouchableOpacity key={contract.id} style={styles.card} activeOpacity={0.75} onPress={() => setSelected(contract)}>
-              <View style={styles.cardTop}>
-                <View style={styles.cardTitleArea}>
-                  <View style={styles.codeRow}>
-                    <Text style={styles.cardCode} numberOfLines={1}>{contractCode(contract)}</Text>
-                    <Text style={styles.typeText}>Thuê phòng</Text>
-                  </View>
-                  <Text style={styles.cardSub} numberOfLines={1}>{contract.tenant} · Phòng {contract.room}</Text>
+      {loading ? (
+        <View style={styles.center}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.listBody}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+        >
+          {error ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Không tải được dữ liệu</Text>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
+                <Text style={styles.retryText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* Tóm tắt: đang thuê là con số quản lý cần nhất */}
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryMain}>
+                  <Text style={styles.summaryBig}>{stats.living}</Text>
+                  <Text style={styles.summaryBigLabel}>khách đang thuê</Text>
                 </View>
-                <View style={[styles.badge, { backgroundColor: meta.bg }]}>
-                  <Text style={[styles.badgeText, { color: meta.color }]} numberOfLines={1}>{meta.label}</Text>
+                <View style={styles.summarySide}>
+                  <SummaryLine color={Colors.warning} label="Sắp hết hạn" value={stats.expiring} />
+                  <SummaryLine color={Colors.info} label="Chờ nhận phòng" value={stats.waiting} />
+                  <SummaryLine color={Colors.error} label="Hết hạn chưa xử lý" value={stats.overdue} />
                 </View>
               </View>
 
-              <View style={styles.moneyRow}>
-                <InfoPill label="Thuê" value={`${fmt(contract.monthlyRent)}/tháng`} />
-                <InfoPill label="Cọc" value={fmt(contract.depositAmount ?? contract.monthlyRent * 2)} />
-                <InfoPill label="Thời hạn" value={`${contract.startDate} → ${contract.endDate}`} wide />
-              </View>
-
-              {status === 'rejected' && contract.rejectionReason && (
-                <Text style={styles.inlineWarning} numberOfLines={1}>{contract.rejectionReason}</Text>
+              {stats.expiring > 0 && (
+                <View style={styles.alertBanner}>
+                  <Text style={styles.alertText}>
+                    ⏰ {stats.expiring} hợp đồng sắp hết hạn — liên hệ khách để gia hạn hoặc hẹn ngày trả phòng.
+                  </Text>
+                </View>
               )}
 
-              <View style={styles.actionRow}>
-                <ContractActions contract={contract} />
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+              {stats.total > 0 && (
+                <>
+                  <View style={styles.searchBar}>
+                    <Text style={styles.searchIcon}>⌕</Text>
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Tìm tên khách, số phòng, mã hợp đồng"
+                      placeholderTextColor={Colors.textMuted}
+                      value={search}
+                      onChangeText={setSearch}
+                    />
+                    {search.length > 0 && (
+                      <TouchableOpacity onPress={() => setSearch('')}>
+                        <Text style={styles.clearText}>×</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.filterRow}
+                    contentContainerStyle={styles.filterContent}
+                  >
+                    {FILTERS.map(f => (
+                      <TouchableOpacity
+                        key={f.id}
+                        style={[styles.chip, filter === f.id && styles.chipActive]}
+                        onPress={() => setFilter(f.id)}
+                      >
+                        <Text style={[styles.chipText, filter === f.id && styles.chipTextActive]}>
+                          {f.label} ({counts[f.id]})
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {list.length === 0 ? (
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyIcon}>{stats.total === 0 ? '📄' : '🔍'}</Text>
+                  <Text style={styles.emptyTitle}>
+                    {stats.total === 0 ? 'Chưa có khách nào đang thuê' : 'Không có hợp đồng khớp'}
+                  </Text>
+                  <Text style={styles.emptyText}>
+                    {stats.total === 0
+                      ? 'Hợp đồng sẽ xuất hiện ở đây sau khi bạn đón khách vào ở. Hợp đồng đã thanh lý không hiện ở màn này.'
+                      : 'Thử bỏ bớt bộ lọc hoặc xoá từ khoá tìm kiếm.'}
+                  </Text>
+                  {stats.total > 0 && (
+                    <TouchableOpacity
+                      style={styles.retryBtn}
+                      onPress={() => { setFilter('all'); setSearch(''); }}
+                    >
+                      <Text style={styles.retryText}>Xoá bộ lọc</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ) : list.map(({ contract: c, status }) => {
+                const meta = CONTRACT_STATUS_META[status];
+                const remain = remainText(c.endDate);
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.card, { borderLeftColor: meta.color }]}
+                    activeOpacity={0.75}
+                    onPress={() => setSelected(c)}
+                  >
+                    <View style={styles.cardTop}>
+                      <Text style={styles.cardRoom} numberOfLines={1}>{roomLabel(c)}</Text>
+                      <View style={[styles.badge, { backgroundColor: meta.bg }]}>
+                        <Text style={[styles.badgeText, { color: meta.color }]} numberOfLines={1}>{meta.label}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.cardTenant} numberOfLines={1}>
+                      {c.tenantFullName}{c.tenantPhone ? ` · ${c.tenantPhone}` : ''}
+                    </Text>
+
+                    <View style={styles.cardMoneyRow}>
+                      <Text style={styles.cardRent}>{money(c.rentAmount)}<Text style={styles.cardRentUnit}>/tháng</Text></Text>
+                      <Text style={styles.cardDeposit}>Cọc {money(c.deposit)}</Text>
+                    </View>
+
+                    <View style={styles.cardFooter}>
+                      <Text style={styles.cardDate} numberOfLines={1}>
+                        {formatDate(c.moveInDate || c.startDate)} → {c.endDate ? formatDate(c.endDate) : '—'}
+                      </Text>
+                      {!!remain && !isEndedStatus(status) && (
+                        <Text style={[styles.cardRemain, { color: meta.color }]}>{remain}</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+
+              {!!propAddress && (
+                <Text style={styles.addressNote} numberOfLines={2}>📍 {propAddress}</Text>
+              )}
+            </>
+          )}
+
+          <View style={{ height: Spacing.xl }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
 
-const DetailSection = ({ title, children }: { title?: string; children: React.ReactNode }) => (
+// ===================== SUB COMPONENTS =====================
+const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <>
-    {title && <Text style={styles.detailSectionTitle}>{title}</Text>}
-    <View style={styles.detailCard}>{children}</View>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={styles.sectionCard}>{children}</View>
   </>
 );
 
-const MiniStat = ({ label, value, color }: { label: string; value: number; color: string }) => (
-  <View style={styles.miniStat}>
-    <Text style={[styles.miniStatValue, { color }]}>{value}</Text>
-    <Text style={styles.miniStatLabel}>{label}</Text>
-  </View>
-);
-
-const InfoPill = ({ label, value, wide }: { label: string; value: string; wide?: boolean }) => (
-  <View style={[styles.infoPill, wide && styles.infoPillWide]}>
-    <Text style={styles.infoPillLabel}>{label}</Text>
-    <Text style={styles.infoPillValue} numberOfLines={1}>{value}</Text>
-  </View>
-);
-
-const InfoRow = ({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) => (
-  <View style={styles.infoRow}>
+const Row: React.FC<{ label: string; value: string; last?: boolean }> = ({ label, value, last }) => (
+  <View style={[styles.infoRow, last && { borderBottomWidth: 0 }]}>
     <Text style={styles.infoLabel}>{label}</Text>
-    <Text style={[styles.infoValue, highlight && { color: Colors.primary }]}>{value}</Text>
+    <Text style={styles.infoValue}>{value}</Text>
   </View>
 );
 
-const TimelineRow = ({ title, meta, done }: { title: string; meta: string; done?: boolean }) => (
-  <View style={styles.timelineRow}>
-    <View style={[styles.timelineDot, done && styles.timelineDotDone]} />
-    <View style={{ flex: 1 }}>
-      <Text style={styles.timelineTitle}>{title}</Text>
-      <Text style={styles.timelineMeta}>{meta}</Text>
-    </View>
+const SummaryLine: React.FC<{ color: string; label: string; value: number }> = ({ color, label, value }) => (
+  <View style={styles.summaryLine}>
+    <View style={[styles.summaryDot, { backgroundColor: color }]} />
+    <Text style={styles.summaryLineLabel}>{label}</Text>
+    <Text style={[styles.summaryLineValue, { color }]}>{value}</Text>
   </View>
 );
 
-const InspectionCard = ({ inspection, onPress }: { inspection: RoomInspection; onPress: () => void }) => (
-  <TouchableOpacity style={styles.inspectionCard} onPress={onPress} activeOpacity={0.8}>
-    <View style={styles.inspectionIcon}>
-      <Text style={styles.inspectionIconText}>📸</Text>
-    </View>
-    <View style={styles.inspectionBody}>
-      <View style={styles.inspectionTop}>
-        <Text style={styles.inspectionTitle}>{getInspectionTypeLabel(inspection.inspectionType)} Inspection</Text>
-        <Text style={styles.inspectionStatus}>{getInspectionStatusLabel(inspection.status)}</Text>
-      </View>
-      <Text style={styles.inspectionMeta}>
-        {inspection.images.length} photos · {inspection.createdAt} · Created by {inspection.createdBy}
-      </Text>
-      <Text style={styles.inspectionNote} numberOfLines={2}>
-        {inspection.depositDeductionAmount
-          ? `Deposit deduction: ${inspection.depositDeductionAmount.toLocaleString('vi-VN')}đ`
-          : inspection.notes || 'Chưa có ghi chú hiện trạng.'}
-      </Text>
-    </View>
-  </TouchableOpacity>
+const MeterThumb: React.FC<{ label: string; uri: string }> = ({ label, uri }) => (
+  <View style={styles.meterThumb}>
+    <Image source={{ uri }} style={styles.photo} />
+    <Text style={styles.meterThumbLabel}>{label}</Text>
+  </View>
 );
 
+// ===================== STYLES =====================
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  backText: { color: Colors.primary, fontWeight: '700', fontSize: 13, width: 72 },
-  headerTitleWrap: { flex: 1, alignItems: 'center' },
-  title: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
+  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
+  backArrow: { fontSize: 26, color: Colors.textPrimary, lineHeight: 30 },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  headerSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
 
-  scroll: { paddingHorizontal: Spacing.base, paddingTop: Spacing.md, paddingBottom: Spacing.lg },
-  summaryRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
-  miniStat: {
-    flex: 1, backgroundColor: Colors.white, borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.sm, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
+  listBody: { padding: Spacing.base, paddingBottom: Spacing.xl },
+
+  // Tóm tắt
+  summaryCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  miniStatValue: { fontSize: 18, fontWeight: '900' },
-  miniStatLabel: { fontSize: 10, color: Colors.textSecondary, marginTop: 1, fontWeight: '600' },
+  summaryMain: { alignItems: 'center', paddingRight: Spacing.md, borderRightWidth: 1, borderRightColor: Colors.divider, minWidth: 96 },
+  summaryBig: { fontSize: 34, fontWeight: '900', color: Colors.success, lineHeight: 38 },
+  summaryBigLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: '700', textAlign: 'center' },
+  summarySide: { flex: 1, gap: 6 },
+  summaryLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  summaryDot: { width: 8, height: 8, borderRadius: 4 },
+  summaryLineLabel: { flex: 1, fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  summaryLineValue: { fontSize: 14, fontWeight: '900' },
+
+  alertBanner: {
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.md,
+    padding: Spacing.sm, marginBottom: Spacing.sm,
+  },
+  alertText: { fontSize: 12, color: '#92400E', fontWeight: '700', lineHeight: 17 },
+
   searchBar: {
     height: 42, flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.white, borderRadius: BorderRadius.md,
@@ -480,136 +555,105 @@ const styles = StyleSheet.create({
   },
   searchIcon: { fontSize: 17, color: Colors.textMuted },
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary, paddingVertical: 0 },
-  clearText: { fontSize: 18, color: Colors.textMuted, paddingHorizontal: 2 },
+  clearText: { fontSize: 20, color: Colors.textMuted, paddingHorizontal: 2 },
+
   filterRow: { flexGrow: 0, marginBottom: Spacing.md },
   filterContent: { gap: Spacing.sm, paddingRight: Spacing.base },
   chip: {
     height: 32, justifyContent: 'center', paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border, minWidth: 58,
+    borderWidth: 1, borderColor: Colors.border,
   },
   chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   chipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   chipTextActive: { color: Colors.white },
-  resultHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
-  resultCount: { fontSize: 12, color: Colors.textMuted, fontWeight: '700' },
-  emptyBox: { backgroundColor: Colors.white, borderRadius: BorderRadius.md, padding: Spacing.lg, alignItems: 'center' },
-  emptyText: { fontSize: 13, color: Colors.textMuted },
+
+  // Thẻ hợp đồng
   card: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     padding: Spacing.md, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+    borderWidth: 1, borderColor: Colors.border, borderLeftWidth: 4, ...Shadow.sm,
   },
-  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  cardTitleArea: { flex: 1 },
-  codeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  cardCode: { fontSize: 13, fontWeight: '900', color: Colors.primary, flexShrink: 1 },
-  typeText: {
-    fontSize: 10, fontWeight: '800', color: Colors.textSecondary,
-    backgroundColor: Colors.divider, paddingHorizontal: 7, paddingVertical: 2,
-    borderRadius: BorderRadius.full,
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  cardRoom: { flex: 1, fontSize: 15, fontWeight: '900', color: Colors.textPrimary },
+  badge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: BorderRadius.full },
+  badgeText: { fontSize: 11, fontWeight: '900' },
+  cardTenant: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600', marginTop: 4 },
+  cardMoneyRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.md, marginTop: Spacing.sm },
+  cardRent: { fontSize: 16, fontWeight: '900', color: Colors.primary },
+  cardRentUnit: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
+  cardDeposit: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700' },
+  cardFooter: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm,
+    marginTop: Spacing.sm, paddingTop: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider,
   },
-  cardSub: { fontSize: 12, color: Colors.textPrimary, marginTop: 4, fontWeight: '700' },
-  badge: { maxWidth: 94, paddingHorizontal: 8, paddingVertical: 4, borderRadius: BorderRadius.full, alignItems: 'center' },
-  badgeText: { fontSize: 10, fontWeight: '900' },
-  moneyRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
-  infoPill: { flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: 7 },
-  infoPillWide: { flex: 1.5 },
-  infoPillLabel: { fontSize: 10, color: Colors.textMuted, fontWeight: '700' },
-  infoPillValue: { fontSize: 11, color: Colors.textPrimary, fontWeight: '800', marginTop: 2 },
-  inlineWarning: {
-    marginTop: Spacing.sm, fontSize: 11, color: Colors.error, fontWeight: '700',
-    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.sm, paddingVertical: 5,
-  },
-  actionRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm, justifyContent: 'flex-end', flexWrap: 'wrap' },
-  actionBtn: {
-    height: 30, justifyContent: 'center', paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.white,
-  },
-  actionPrimary: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  actionSuccess: { backgroundColor: Colors.success, borderColor: Colors.success },
-  actionText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary },
-  actionPrimaryText: { fontSize: 11, fontWeight: '800', color: Colors.white },
-  actionSuccessText: { fontSize: 11, fontWeight: '800', color: Colors.white },
+  cardDate: { flex: 1, fontSize: 11, color: Colors.textMuted, fontWeight: '700' },
+  cardRemain: { fontSize: 11, fontWeight: '900' },
 
-  detailScroll: { padding: Spacing.base, paddingBottom: Spacing['3xl'] },
-  detailHero: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+  addressNote: { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.sm, lineHeight: 16 },
+
+  // Rỗng / lỗi
+  emptyBox: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, marginBottom: Spacing.md,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+    padding: Spacing.lg, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
   },
-  detailHeroLabel: { fontSize: 10, color: Colors.textMuted, fontWeight: '800', textTransform: 'uppercase' },
-  detailHeroCode: { fontSize: 17, color: Colors.textPrimary, fontWeight: '900', marginTop: 2 },
-  detailHeroSub: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700', marginTop: 2 },
-  detailSectionTitle: { fontSize: 13, color: Colors.textPrimary, fontWeight: '900', marginTop: Spacing.md, marginBottom: Spacing.sm },
-  detailStatus: { alignSelf: 'flex-start', borderRadius: BorderRadius.full, paddingHorizontal: Spacing.md, paddingVertical: 6 },
-  detailStatusText: { fontSize: 12, fontWeight: '900' },
-  detailCard: {
+  emptyIcon: { fontSize: 34, marginBottom: Spacing.sm },
+  emptyTitle: { fontSize: 14, fontWeight: '900', color: Colors.textPrimary, textAlign: 'center' },
+  emptyText: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: 6, lineHeight: 18 },
+  errorBox: {
+    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, alignItems: 'center',
+  },
+  errorTitle: { fontSize: 14, fontWeight: '900', color: Colors.error },
+  errorText: { fontSize: 12, color: Colors.error, textAlign: 'center', marginTop: 6, lineHeight: 18 },
+  retryBtn: {
+    marginTop: Spacing.md, height: 36, justifyContent: 'center', paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.full, backgroundColor: Colors.primary,
+  },
+  retryText: { color: Colors.white, fontSize: 13, fontWeight: '800' },
+
+  // Chi tiết
+  detailBody: { padding: Spacing.base, paddingBottom: Spacing.xl },
+  heroCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, borderLeftWidth: 4, ...Shadow.sm,
+  },
+  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  heroRemain: { fontSize: 12, fontWeight: '900' },
+  heroName: { fontSize: 19, fontWeight: '900', color: Colors.textPrimary, marginTop: Spacing.sm },
+  heroHint: { fontSize: 12, color: Colors.textSecondary, marginTop: 3, lineHeight: 17 },
+
+  quickRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
+  quickBtn: {
+    flex: 1, height: 42, alignItems: 'center', justifyContent: 'center',
+    borderRadius: BorderRadius.md, backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  quickBtnPrimary: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  quickBtnText: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
+  quickBtnPrimaryText: { color: Colors.white },
+
+  sectionTitle: { fontSize: 13, fontWeight: '900', color: Colors.textPrimary, marginTop: Spacing.lg, marginBottom: Spacing.sm },
+  sectionCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
   },
   infoRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.md,
     paddingHorizontal: Spacing.md, paddingVertical: 11,
     borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  infoLabel: { fontSize: 12, color: Colors.textSecondary, flex: 0.8 },
-  infoValue: { fontSize: 13, color: Colors.textPrimary, fontWeight: '800', flex: 1.2, textAlign: 'right' },
-  priceGrid: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm },
-  priceBox: {
-    flex: 1, backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
-  },
+  infoLabel: { fontSize: 12, color: Colors.textSecondary, flexShrink: 1 },
+  infoValue: { fontSize: 13, color: Colors.textPrimary, fontWeight: '800', flexShrink: 1, textAlign: 'right' },
+
+  priceRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  priceBox: { flex: 1, padding: Spacing.md },
   priceLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: '700' },
-  priceValue: { fontSize: 17, color: Colors.primary, fontWeight: '900', marginTop: 4 },
-  termsCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
-    gap: 7,
-  },
-  termText: { fontSize: 12, color: Colors.textPrimary, lineHeight: 18, fontWeight: '600' },
-  inspectionList: { gap: Spacing.sm },
-  inspectionCard: {
-    flexDirection: 'row', gap: Spacing.md, backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg, padding: Spacing.md,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
-  },
-  inspectionIcon: {
-    width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primaryBg,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  inspectionIconText: { fontSize: 20 },
-  inspectionBody: { flex: 1 },
-  inspectionTop: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.sm },
-  inspectionTitle: { flex: 1, fontSize: 13, color: Colors.textPrimary, fontWeight: '900' },
-  inspectionStatus: { fontSize: 10, color: Colors.primary, fontWeight: '900' },
-  inspectionMeta: { fontSize: 11, color: Colors.textMuted, fontWeight: '700', marginTop: 4 },
-  inspectionNote: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17, marginTop: 5 },
-  emptyInspectionBox: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.md, borderWidth: 1, borderColor: Colors.border,
-  },
-  emptyInspectionTitle: { fontSize: 13, color: Colors.textPrimary, fontWeight: '900' },
-  emptyInspectionText: { fontSize: 12, color: Colors.textMuted, marginTop: 4, lineHeight: 18 },
-  rejectBox: { padding: Spacing.md, borderRadius: BorderRadius.md, backgroundColor: Colors.errorLight },
-  rejectTitle: { fontSize: 12, color: Colors.error, fontWeight: '900', marginBottom: 3 },
-  rejectText: { fontSize: 12, color: Colors.error, lineHeight: 18 },
-  timelineCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
-  },
-  timelineRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
-    paddingVertical: Spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.divider,
-  },
-  timelineDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.border, marginTop: 4 },
-  timelineDotDone: { backgroundColor: Colors.success },
-  timelineTitle: { fontSize: 12, color: Colors.textPrimary, fontWeight: '900' },
-  timelineMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2, fontWeight: '600' },
-  detailActions: { flexDirection: 'row', gap: Spacing.sm, justifyContent: 'flex-end', marginTop: Spacing.md, flexWrap: 'wrap' },
+  priceValue: { fontSize: 17, fontWeight: '900', color: Colors.primary, marginTop: 3 },
+
+  noteText: { fontSize: 12, color: Colors.textPrimary, lineHeight: 18, padding: Spacing.md },
+  photoStrip: { flexDirection: 'row', gap: Spacing.sm, padding: Spacing.md },
+  photo: { width: 96, height: 96, borderRadius: BorderRadius.md, backgroundColor: Colors.divider },
+  meterThumb: { alignItems: 'center', gap: 4 },
+  meterThumbLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: '700' },
 });

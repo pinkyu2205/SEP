@@ -2,7 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, ActivityIndicator,
 } from 'react-native';
-import { showAlert, readApiError, validateMeterPhoto } from '@/utils';
+import {
+  showAlert, readApiError, validateMeterPhoto,
+  validateEquipmentPhoto, classifyEquipment, requireLiveCapture,
+} from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -10,6 +13,8 @@ import { CameraCaptureModal } from '@/components/common';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
 import { realTenantService } from '@/services/tenant/tenantService';
+import { visionService } from '@/services/shared/visionService';
+import { realManagerInvoiceService, type UtilityInvoiceLite } from '@/services/manager/invoiceService';
 import type {
   CheckoutRequestDto, CheckoutDamageItem, ContractEquipmentDto,
 } from '@/services/tenant/selfService';
@@ -28,15 +33,35 @@ import type {
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const readErr = readApiError;
 const toNum = (v: string) => Number((v || '').replace(/[^\d]/g, '')) || 0;
+const onlyDigits = (v: string) => (v || '').replace(/[^\d]/g, '');
+/** Hiện số có dấu chấm ngăn nghìn khi gõ: "3412" -> "3.412" (giá trị lưu vẫn là số trần). */
+const groupThousands = (v: string) => {
+  const d = onlyDigits(v);
+  return d ? Number(d).toLocaleString('vi-VN') : '';
+};
 
 interface DamageDraft { amount: string; note: string }
 interface ExtraDraft { label: string; amount: string }
-/** Chỉ số + ảnh đồng hồ ghi lúc ĐÓN KHÁCH — mốc để đối chiếu số cuối kỳ. */
+/**
+ * MỐC ĐỐI CHIẾU cho chỉ số cuối kỳ.
+ *
+ * Phải là chỉ số CHỐT KỲ GẦN NHẤT, không phải lúc đón khách: khách ở tháng thứ 8 mà
+ * lấy mốc lúc vào ở thì "đã dùng" gộp cả 8 tháng — thu lại lần nữa số tiền khách đã
+ * đóng suốt 7 tháng trước. Chỉ khách ở tháng đầu (chưa có hoá đơn nào) mới lấy mốc
+ * lúc đón khách. Cùng luật với màn Hoá đơn điện nước.
+ */
 interface HandoverMeters {
   elec?: number;
   water?: number;
+  /** Ảnh đồng hồ lúc đón khách — vẫn hiện để đối chiếu hiện trạng đồng hồ. */
   elecPhoto?: string;
   waterPhoto?: string;
+  /** Mốc đang dùng đến từ đâu, để nói rõ trên màn hình. */
+  elecSource?: 'last_invoice' | 'handover';
+  waterSource?: 'last_invoice' | 'handover';
+  /** Kỳ của hoá đơn đã lấy làm mốc, vd "2026-07". */
+  elecPeriod?: string;
+  waterPeriod?: string;
 }
 type MeterKind = 'elec' | 'water';
 /** Trạng thái nhận diện ảnh đồng hồ hiện dưới ô nhập ('ok' xanh · 'warn' cam). */
@@ -57,8 +82,10 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
    * xác nhận lại ảnh trước khi gửi lên. Dùng chung 1 luồng cho cả web lẫn điện thoại.
    * `null` = đóng; 'room' = ảnh hiện trạng (chụp nhiều), 'elec'/'water' = ảnh đồng hồ.
    */
-  const [cameraTarget, setCameraTarget] = useState<'room' | MeterKind | null>(null);
+  const [cameraTarget, setCameraTarget] = useState<'room' | MeterKind | { equipmentId: string } | null>(null);
   const [meterBusy, setMeterBusy] = useState<MeterKind | null>(null);
+  /** Đang xử lý ảnh của thiết bị nào (id) — khoá nút trong lúc upload + đọc tem. */
+  const [equipBusy, setEquipBusy] = useState<string | null>(null);
 
   const [photos, setPhotos] = useState<string[]>([]);
   const [elecReading, setElecReading] = useState('');
@@ -72,6 +99,23 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
   const [note, setNote] = useState('');
   /** key = id thiết bị bị đánh dấu hư hỏng. Không có key = nguyên vẹn. */
   const [damages, setDamages] = useState<Record<string, DamageDraft>>({});
+  /**
+   * ĐƠN GIÁ điện/nước để tính tiền kỳ cuối ngay tại biên bản.
+   *
+   * Vì sao phải tạm tính: giá điện là giá BÌNH QUÂN từ hoá đơn EVN của cả nhà
+   * (tổng tiền ÷ tổng kWh), mà hoá đơn tháng 8 thì đầu tháng 9 mới có. Khách đi ngày
+   * 20/8 không thể chờ. Nên lấy đơn giá của kỳ gần nhất làm giá tạm, chốt tiền ngay,
+   * trừ vào cọc — chênh lệch giữa 2 tháng liền kề chỉ vài phần trăm.
+   * Manager sửa tay được nếu biết giá chính xác hơn.
+   */
+  const [unitPrice, setUnitPrice] = useState<Record<MeterKind, string>>({ elec: '', water: '' });
+  /** Đơn giá đang dùng lấy từ hoá đơn kỳ nào, để ghi rõ "tạm tính theo kỳ ...". */
+  const [pricePeriod, setPricePeriod] = useState<Partial<Record<MeterKind, string>>>({});
+
+  /** Ảnh bằng chứng hư hỏng theo từng thiết bị (key = id thiết bị). */
+  const [damagePhotos, setDamagePhotos] = useState<Record<string, string[]>>({});
+  /** Kết quả nhận diện ảnh thiết bị, hiện ngay dưới ô nhập của món đó. */
+  const [equipStatus, setEquipStatus] = useState<Record<string, MeterStatus>>({});
   const [extras, setExtras] = useState<ExtraDraft[]>([]);
 
   const load = useCallback(async () => {
@@ -89,26 +133,78 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         setElecMeterUrl(insp.electricMeterImageUrl ?? '');
         setWaterMeterUrl(insp.waterMeterImageUrl ?? '');
         const dmg: Record<string, DamageDraft> = {};
+        const dmgPhotos: Record<string, string[]> = {};
         const ext: ExtraDraft[] = [];
         (insp.damages ?? []).forEach(d => {
-          if (d.equipmentId != null) dmg[String(d.equipmentId)] = { amount: String(d.amount ?? ''), note: d.note ?? '' };
-          else ext.push({ label: d.label, amount: String(d.amount ?? '') });
+          if (d.equipmentId != null) {
+            dmg[String(d.equipmentId)] = { amount: String(d.amount ?? ''), note: d.note ?? '' };
+            if (d.photos?.length) dmgPhotos[String(d.equipmentId)] = d.photos;
+          } else ext.push({ label: d.label, amount: String(d.amount ?? '') });
         });
         setDamages(dmg);
+        setDamagePhotos(dmgPhotos);
         setExtras(ext);
       }
 
       // Hợp đồng: thiết bị đã bàn giao (gốc để đối chiếu hư hỏng) + chỉ số/ảnh đồng hồ
-      // ghi lúc đón khách (mốc để đối chiếu số điện nước cuối kỳ).
+      // lúc đón khách. Mốc tính điện nước thì ưu tiên hoá đơn chốt gần nhất (xem dưới).
       try {
         const contract = await realTenantService.getContract(detail.contractId);
         setEquipment(contract.equipmentList ?? []);
-        setHandover({
+
+        const base: HandoverMeters = {
           elec: contract.initialElectricReading ?? undefined,
           water: contract.initialWaterReading ?? undefined,
           elecPhoto: contract.electricMeterImageUrl ?? undefined,
           waterPhoto: contract.waterMeterImageUrl ?? undefined,
-        });
+          elecSource: 'handover',
+          waterSource: 'handover',
+        };
+
+        // Đã có hoá đơn điện/nước kỳ nào rồi thì lấy chỉ số MỚI của kỳ gần nhất làm mốc.
+        // Không làm bước này thì khách ở tháng thứ 8 bị tính lại điện của cả 7 tháng trước.
+        try {
+          const [elecInv, waterInv] = await Promise.all([
+            realManagerInvoiceService.listUtilityInvoices(contract.propertyId, { type: 'ELECTRICITY' }).catch(() => []),
+            realManagerInvoiceService.listUtilityInvoices(contract.propertyId, { type: 'WATER' }).catch(() => []),
+          ]);
+          const latestOf = (list: UtilityInvoiceLite[]) => list
+            .filter(i => (contract.roomId ? i.roomId === contract.roomId : true) && i.newReading != null)
+            .sort((a, b) => (b.billingPeriod ?? '').localeCompare(a.billingPeriod ?? ''))[0];
+
+          // Đơn giá bình quân của kỳ đó = tổng tiền ÷ số đã dùng. Đây chính là giá EVN
+          // sau khi chia bậc thang, nên dùng làm giá tạm cho kỳ cuối là sát nhất.
+          const priceOf = (inv?: UtilityInvoiceLite) =>
+            inv && inv.amount && inv.consumption ? Math.round(inv.amount / inv.consumption) : 0;
+
+          const lastElec = latestOf(elecInv);
+          if (lastElec?.newReading != null) {
+            base.elec = lastElec.newReading;
+            base.elecSource = 'last_invoice';
+            base.elecPeriod = lastElec.billingPeriod;
+          }
+          const elecPrice = priceOf(lastElec);
+          if (elecPrice > 0) {
+            setUnitPrice(p => ({ ...p, elec: String(elecPrice) }));
+            setPricePeriod(p => ({ ...p, elec: lastElec?.billingPeriod }));
+          }
+
+          const lastWater = latestOf(waterInv);
+          if (lastWater?.newReading != null) {
+            base.water = lastWater.newReading;
+            base.waterSource = 'last_invoice';
+            base.waterPeriod = lastWater.billingPeriod;
+          }
+          const waterPrice = priceOf(lastWater);
+          if (waterPrice > 0) {
+            setUnitPrice(p => ({ ...p, water: String(waterPrice) }));
+            setPricePeriod(p => ({ ...p, water: lastWater?.billingPeriod }));
+          }
+        } catch {
+          // Không lấy được lịch sử hoá đơn → giữ mốc lúc đón khách, UI sẽ nói rõ mốc nào.
+        }
+
+        setHandover(base);
       } catch {
         setEquipmentError(true);
       }
@@ -219,43 +315,167 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
     if (uri) await uploadMeterPhoto(kind, uri);
   };
 
+  /**
+   * Ảnh bằng chứng HƯ HỎNG của 1 thiết bị — mỗi ảnh là căn cứ trừ tiền cọc nên phải
+   * đúng thiết bị đó, cùng tinh thần với ảnh đồng hồ:
+   *   • Đồ điện máy (có tem nhãn): OCR đọc chữ trong ảnh, đòi thấy hãng/model/thông số
+   *     đúng loại. Ảnh chụp giấy, chụp màn hình, hoặc chụp nhầm thiết bị khác → TỪ CHỐI.
+   *   • Đồ không có chữ (giường, tủ, bàn ghế...): OCR vô nghĩa nên chỉ nhận ảnh CHỤP
+   *     TRỰC TIẾP trong app — nút "Chọn từ máy" bị ẩn với nhóm này.
+   */
+  const uploadDamagePhoto = async (equipmentId: string, uri: string) => {
+    const name = equipment.find(e => String(e.id) === equipmentId)?.name;
+    const cls = classifyEquipment(name);
+
+    setEquipBusy(equipmentId);
+    try {
+      const url = await uploadImageToCloudinary(uri);
+      const keep = (status: MeterStatus) => {
+        setDamagePhotos(prev => ({ ...prev, [equipmentId]: [...(prev[equipmentId] ?? []), url] }));
+        setEquipStatus(prev => ({ ...prev, [equipmentId]: status }));
+      };
+
+      let labels;
+      try {
+        labels = await visionService.detectLabels(url);
+        console.log('[vision]', labels.map(l => `${l.name}:${l.score.toFixed(2)}`).join(', '));
+      } catch (e: any) {
+        // Không nhìn được ảnh → không kiểm chứng được, vẫn giữ ảnh nhưng nói rõ.
+        return keep({ tone: 'warn', text: readErr(e, 'Chưa kiểm chứng được ảnh — tự đối chiếu thiết bị giúp.') });
+      }
+
+      const result = validateEquipmentPhoto(name, labels);
+      if (result.status === 'mismatch') {
+        // Chỉ từ chối khi ĐỌC RA thiết bị khác — đó mới là bằng chứng chụp nhầm.
+        setEquipStatus(prev => ({ ...prev, [equipmentId]: { tone: 'warn', text: result.reason ?? '' } }));
+        showAlert('Ảnh có vẻ không phải thiết bị này', result.reason, undefined, '🚫');
+        return;   // không lưu ảnh — coi như chưa chụp
+      }
+
+      keep(result.status === 'match'
+        ? { tone: 'ok', text: `Đã nhận diện ${cls.label} trong ảnh.` }
+        // Nhãn chung chung (ảnh chụp cận vết hỏng chẳng hạn) — giữ ảnh, nói rõ chưa đối chiếu được.
+        : { tone: 'warn', text: 'Đã lưu ảnh. Máy chưa khẳng định được đây có phải thiết bị đó không — tự xem lại giúp.' });
+    } catch (e: any) {
+      showAlert('Lỗi upload', readErr(e, 'Không tải được ảnh thiết bị lên.'));
+    } finally {
+      setEquipBusy(null);
+    }
+  };
+
+  const pickDamagePhotoFromGallery = async (equipmentId: string) => {
+    const uri = await pickImageUri();
+    if (uri) await uploadDamagePhoto(equipmentId, uri);
+  };
+
   /** Ảnh vừa chụp/chọn thuộc về ô nào. */
   const handleCameraCapture = (uri: string) => {
     if (cameraTarget === 'elec' || cameraTarget === 'water') {
       const kind = cameraTarget;
       setCameraTarget(null);              // đồng hồ chỉ cần 1 ảnh → đóng camera luôn
       void uploadMeterPhoto(kind, uri);
+    } else if (cameraTarget && typeof cameraTarget === 'object') {
+      void uploadDamagePhoto(cameraTarget.equipmentId, uri);   // để mở, chụp nhiều góc
     } else {
       void uploadPhoto(uri);
     }
   };
 
+  /**
+   * Nút "Chọn ảnh có sẵn" trong camera — trả undefined để ẨN nút đó khi ảnh bắt buộc
+   * phải chụp trực tiếp (thiết bị không có tem nhãn để máy kiểm nội dung ảnh).
+   */
+  const galleryFallback = (): (() => void) | undefined => {
+    if (cameraTarget === 'elec' || cameraTarget === 'water') {
+      const kind = cameraTarget;
+      return () => pickMeterFromGallery(kind);
+    }
+    if (cameraTarget && typeof cameraTarget === 'object') {
+      const id = cameraTarget.equipmentId;
+      const name = equipment.find(e => String(e.id) === id)?.name;
+      return requireLiveCapture(name) ? undefined : () => pickDamagePhotoFromGallery(id);
+    }
+    if (cameraTarget === 'room') return pickFromGallery;
+    return undefined;
+  };
+
   /** Số điện/nước đã dùng trong kỳ cuối = chỉ số cuối − chỉ số lúc đón khách. */
   const meterInfo = (kind: MeterKind) => {
     const prev = kind === 'elec' ? handover.elec : handover.water;
+    const source = kind === 'elec' ? handover.elecSource : handover.waterSource;
+    const period = kind === 'elec' ? handover.elecPeriod : handover.waterPeriod;
     const raw = kind === 'elec' ? elecReading : waterReading;
     const now = raw ? toNum(raw) : null;
     const unit = kind === 'elec' ? 'kWh' : 'm³';
-    if (prev == null || now == null || !raw) return { prev, now, used: null, invalid: false, unit };
-    return { prev, now, used: now - prev, invalid: now < prev, unit };
+    // Nói rõ mốc lấy từ đâu: chốt kỳ trước (khách ở lâu) hay lúc đón khách (tháng đầu).
+    const sourceLabel = source === 'last_invoice'
+      ? `Chốt kỳ ${period ?? 'trước'}`
+      : 'Lúc đón khách';
+    const base = { prev, now, unit, sourceLabel, source };
+    if (prev == null || now == null || !raw) return { ...base, used: null, invalid: false };
+    return { ...base, used: now - prev, invalid: now < prev };
   };
 
-  const toggleDamage = (id: string) =>
+  /**
+   * Tiền điện/nước kỳ cuối = số đã dùng × đơn giá tạm tính.
+   * Trả null khi chưa đủ dữ liệu (chưa nhập số cuối, hoặc chưa có đơn giá).
+   */
+  const utilityCharge = (kind: MeterKind) => {
+    const info = meterInfo(kind);
+    const price = toNum(unitPrice[kind]);
+    if (info.used == null || info.used <= 0 || info.invalid || price <= 0) return null;
+    return {
+      used: info.used,
+      price,
+      unit: info.unit,
+      amount: Math.round(info.used * price),
+      period: pricePeriod[kind],
+    };
+  };
+
+  const toggleDamage = (id: string) => {
     setDamages(prev => {
       const next = { ...prev };
       if (next[id]) delete next[id];
       else next[id] = { amount: '', note: '' };
       return next;
     });
+    // Bỏ đánh dấu hư hỏng thì dọn luôn ảnh + kết quả nhận diện của món đó.
+    if (damages[id]) {
+      setDamagePhotos(prev => { const next = { ...prev }; delete next[id]; return next; });
+      setEquipStatus(prev => { const next = { ...prev }; delete next[id]; return next; });
+    }
+  };
 
   const setDamageField = (id: string, key: keyof DamageDraft, value: string) =>
     setDamages(prev => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
 
+  /**
+   * Tiền điện + nước kỳ cuối, dạng khoản trừ để đẩy vào quyết toán.
+   *
+   * Đi kèm hoá đơn: KHÔNG phát hành hoá đơn điện/nước riêng cho kỳ cuối rồi bắt khách
+   * chuyển khoản — khách đang chuẩn bị đi, đòi rất khó. Trừ thẳng vào cọc gọn hơn;
+   * cọc không đủ thì BE tự sinh khoản thu thêm ở bước quyết toán.
+   */
+  const utilityDamages = (): CheckoutDamageItem[] =>
+    (['elec', 'water'] as MeterKind[]).flatMap(kind => {
+      const c = utilityCharge(kind);
+      if (!c) return [];
+      const name = kind === 'elec' ? 'điện' : 'nước';
+      return [{
+        label: `Tiền ${name} kỳ cuối (${c.used.toLocaleString('vi-VN')} ${c.unit} × ${money(c.price)})`,
+        amount: c.amount,
+        note: c.period ? `Tạm tính theo đơn giá kỳ ${c.period}` : 'Đơn giá do quản lý nhập',
+      }];
+    });
+
   const damageTotal = useMemo(() => {
     const fromEquipment = Object.values(damages).reduce((s, d) => s + toNum(d.amount), 0);
     const fromExtras = extras.reduce((s, x) => s + toNum(x.amount), 0);
-    return fromEquipment + fromExtras;
-  }, [damages, extras]);
+    const fromUtility = utilityDamages().reduce((s, d) => s + d.amount, 0);
+    return fromEquipment + fromExtras + fromUtility;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [damages, extras, elecReading, waterReading, unitPrice, handover]);
 
   const buildDamages = (): CheckoutDamageItem[] => [
     ...Object.entries(damages).map(([id, d]) => ({
@@ -263,7 +483,9 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       label: equipment.find(e => String(e.id) === id)?.name ?? `Thiết bị #${id}`,
       amount: toNum(d.amount),
       note: d.note.trim() || undefined,
+      photos: damagePhotos[id]?.length ? damagePhotos[id] : undefined,
     })),
+    ...utilityDamages(),
     ...extras
       .filter(x => x.label.trim())
       .map(x => ({ label: x.label.trim(), amount: toNum(x.amount) })),
@@ -297,6 +519,38 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         + 'Chụp ảnh đồng hồ rồi lưu lại.',
       );
     }
+    // Chốt sang quyết toán = bắt đầu tính tiền, nên phải có ĐỦ chỉ số VÀ ảnh của cả hai
+    // đồng hồ. Bỏ trống là mất tiền điện/nước những ngày cuối, khách đi rồi không đòi được.
+    // ("Chỉ lưu biên bản" thì vẫn cho lưu dở, để quản lý ra chỗ đồng hồ chụp tiếp.)
+    if (goSettlement) {
+      const notClosed = (['elec', 'water'] as MeterKind[]).find(k => {
+        const reading = k === 'elec' ? elecReading : waterReading;
+        const url = k === 'elec' ? elecMeterUrl : waterMeterUrl;
+        return !reading || !url;
+      });
+      if (notClosed) {
+        const name = notClosed === 'elec' ? 'điện' : 'nước';
+        const reading = notClosed === 'elec' ? elecReading : waterReading;
+        return showAlert(
+          `Chưa chốt đồng hồ ${name}`,
+          reading
+            ? `Đã có chỉ số ${name} nhưng thiếu ảnh mặt đồng hồ. Chụp ảnh rồi mới chốt được quyết toán.`
+            : `Phải nhập chỉ số ${name} cuối kỳ và chụp ảnh mặt đồng hồ thì mới chốt được quyết toán.`,
+          undefined, '📷',
+        );
+      }
+    }
+    // Cùng lý lẽ với đồng hồ: đã trừ tiền một món thì phải có ảnh món đó, không thì
+    // khách chỉ nhận được con số suông và không có gì để cãi.
+    const noDamagePhoto = Object.keys(damages).find(id => !(damagePhotos[id]?.length));
+    if (noDamagePhoto) {
+      const name = equipment.find(e => String(e.id) === noDamagePhoto)?.name ?? 'thiết bị';
+      return showAlert(
+        'Thiếu ảnh hư hỏng',
+        `Khoản trừ cho "${name}" chưa có ảnh. Chụp ảnh chỗ hư hỏng để khách đối chiếu, `
+        + 'hoặc bỏ đánh dấu hư hỏng nếu không trừ tiền món này.',
+      );
+    }
 
     setSaving(true);
     try {
@@ -315,6 +569,17 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         navigation.goBack();
       }
     } catch (e: any) {
+      // 404 = máy chủ chưa có API lưu biên bản. "Not Found" trơ trọi thì không ai đoán
+      // ra chuyện gì, nói thẳng cho đỡ mất công dò.
+      if (e?.response?.status === 404) {
+        showAlert(
+          'Máy chủ chưa hỗ trợ',
+          'Chức năng lưu biên bản kiểm phòng chưa có trên máy chủ đang chạy. '
+          + 'Báo đội backend triển khai bản có luồng trả phòng rồi thử lại.',
+          undefined, '🛠️',
+        );
+        return;
+      }
       showAlert('Lỗi', readErr(e, 'Không lưu được biên bản kiểm tra.'));
     } finally {
       setSaving(false);
@@ -406,30 +671,36 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
               };
               const handoverPhoto = isElec ? handover.elecPhoto : handover.waterPhoto;
               const busy = meterBusy === kind;
+              const charge = utilityCharge(kind);
 
               return (
-                <View key={kind} style={{ flex: 1 }}>
+                <View key={kind} style={[s.meterCol, !isElec && s.meterColLast]}>
                   <Text style={s.label}>{isElec ? '⚡ Chỉ số điện' : '💧 Chỉ số nước'}</Text>
 
-                  {/* Số lúc đón khách — mốc để đối chiếu, không có thì nói rõ */}
+                  {/* Mốc đối chiếu — phải nói rõ lấy từ đâu, vì tiền tính theo hiệu số này */}
                   <Text style={s.meterPrev}>
                     {info.prev != null
-                      ? `Lúc đón khách: ${info.prev.toLocaleString('vi-VN')} ${info.unit}`
-                      : 'Chưa có chỉ số lúc đón khách'}
+                      ? `${info.sourceLabel}: ${info.prev.toLocaleString('vi-VN')} ${info.unit}`
+                      : 'Chưa có chỉ số làm mốc'}
                   </Text>
 
-                  <TextInput
-                    style={[s.input, info.invalid && s.inputError]}
-                    value={value}
-                    onChangeText={(v) => {
-                      setValue(v);
-                      // Sửa tay thì ghi chú "số đọc từ ảnh" hết đúng; cảnh báo về ẢNH thì giữ.
-                      setMeterStatus(p => (p[kind]?.tone === 'ok' ? { ...p, [kind]: undefined } : p));
-                    }}
-                    keyboardType="numeric"
-                    placeholder={isElec ? 'VD: 1250' : 'VD: 320'}
-                    placeholderTextColor={Colors.textMuted}
-                  />
+                  {/* Chỉ số căn phải + chấm ngăn nghìn: số công tơ toàn 4–6 chữ số,
+                      đọc "3.191" dễ soi hơn "3191", và thẳng hàng với đơn giá bên dưới. */}
+                  <View style={[s.readingWrap, info.invalid && s.inputError]}>
+                    <TextInput
+                      style={s.readingInput}
+                      value={groupThousands(value)}
+                      onChangeText={(v) => {
+                        setValue(onlyDigits(v));
+                        // Sửa tay thì ghi chú "số đọc từ ảnh" hết đúng; cảnh báo về ẢNH thì giữ.
+                        setMeterStatus(p => (p[kind]?.tone === 'ok' ? { ...p, [kind]: undefined } : p));
+                      }}
+                      keyboardType="numeric"
+                      placeholder={isElec ? '1.250' : '320'}
+                      placeholderTextColor={Colors.textMuted}
+                    />
+                    <Text style={s.readingUnit}>{info.unit}</Text>
+                  </View>
 
                   {/* Số đã dùng tính ngay tại chỗ để manager biết có hợp lý không */}
                   {info.invalid ? (
@@ -441,6 +712,43 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                       Đã dùng: {info.used.toLocaleString('vi-VN')} {info.unit}
                     </Text>
                   ) : null}
+
+                  {/* Tạm tính tiền ngay tại đây: khách đi giữa tháng, hoá đơn EVN tháng
+                      này phải sang tháng sau mới có nên không thể chờ. */}
+                  {info.used != null && !info.invalid && (
+                    <View style={s.priceBox}>
+                      <View style={s.priceRow}>
+                        <Text style={s.priceLabel}>Đơn giá</Text>
+                        <View style={s.priceInputWrap}>
+                          <TextInput
+                            style={s.priceInput}
+                            value={groupThousands(unitPrice[kind])}
+                            onChangeText={v => setUnitPrice(p => ({ ...p, [kind]: onlyDigits(v) }))}
+                            keyboardType="numeric"
+                            placeholder="0"
+                            placeholderTextColor={Colors.textMuted}
+                          />
+                          <Text style={s.priceUnit}>đ/{info.unit}</Text>
+                        </View>
+                      </View>
+                      {charge ? (
+                        <>
+                          <View style={s.priceResultRow}>
+                            <Text style={s.priceResultLabel}>Thành tiền</Text>
+                            <Text style={s.priceResult}>{money(charge.amount)}</Text>
+                          </View>
+                          <Text style={s.priceNote}>
+                            {charge.used.toLocaleString('vi-VN')} {charge.unit} × {money(charge.price)}
+                            {charge.period ? ` · tạm tính theo đơn giá kỳ ${charge.period}` : ' · đơn giá bạn nhập'}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={s.priceNote}>
+                          Chưa có hoá đơn kỳ trước để lấy đơn giá — nhập tay để tính tiền kỳ cuối.
+                        </Text>
+                      )}
+                    </View>
+                  )}
                   {/* Kết quả nhận diện ảnh: nhận đúng đồng hồ / ảnh đáng ngờ / bị từ chối */}
                   {!!status && (
                     <Text style={status.tone === 'ok' ? s.meterOk : s.meterWarn}>
@@ -542,6 +850,59 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                         placeholder="Mô tả hư hỏng"
                         placeholderTextColor={Colors.textMuted}
                       />
+
+                      {/* Ảnh bằng chứng — app kiểm ảnh có đúng thiết bị này không */}
+                      {(damagePhotos[id]?.length ?? 0) > 0 && (
+                        <View style={s.eqPhotoGrid}>
+                          {damagePhotos[id].map((url, i) => (
+                            <View key={`${url}-${i}`} style={s.eqPhotoWrap}>
+                              <Image source={{ uri: url }} style={s.eqPhoto} />
+                              <TouchableOpacity
+                                style={s.photoRemove}
+                                onPress={() => setDamagePhotos(prev => ({
+                                  ...prev, [id]: prev[id].filter((_, idx) => idx !== i),
+                                }))}
+                              >
+                                <Text style={s.photoRemoveText}>×</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      <View style={s.eqPhotoActions}>
+                        <TouchableOpacity
+                          style={s.eqPhotoBtn}
+                          onPress={() => setCameraTarget({ equipmentId: id })}
+                          disabled={equipBusy === id}
+                        >
+                          <Text style={s.eqPhotoBtnText}>
+                            {equipBusy === id ? 'Đang kiểm ảnh…' : '📷 Chụp thiết bị'}
+                          </Text>
+                        </TouchableOpacity>
+                        {/* Đồ có tem nhãn thì cho lấy ảnh sẵn (vẫn phải qua kiểm tem).
+                            Đồ không chữ không kiểm được nội dung → chỉ nhận chụp trực tiếp. */}
+                        {!requireLiveCapture(item.name) && (
+                          <TouchableOpacity
+                            style={s.eqPhotoBtn}
+                            onPress={() => pickDamagePhotoFromGallery(id)}
+                            disabled={equipBusy === id}
+                          >
+                            <Text style={s.eqPhotoBtnText}>🖼️ Chọn từ máy</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      <Text style={[
+                        s.eqPhotoHint,
+                        equipStatus[id]?.tone === 'ok' && { color: '#059669' },
+                        equipStatus[id]?.tone === 'warn' && { color: '#B45309' },
+                      ]}>
+                        {equipStatus[id]?.text
+                          ?? (requireLiveCapture(item.name)
+                            ? `${classifyEquipment(item.name).label} không có tem nhãn — chỉ nhận ảnh chụp trực tiếp tại phòng.`
+                            : 'Chụp rõ phần tem nhãn (hãng, model) để app đối chiếu đúng thiết bị.')}
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -597,7 +958,8 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           <Text style={s.totalValue}>{money(damageTotal)}</Text>
         </View>
         <Text style={s.totalNote}>
-          Số cuối cùng do hệ thống tính ở bước quyết toán (cộng thêm hoá đơn khách còn nợ).
+          Đã gồm tiền điện/nước kỳ cuối. Số cuối cùng do hệ thống tính ở bước quyết toán
+          (cộng thêm hoá đơn khách còn nợ, trừ tiền phòng những ngày không ở).
         </Text>
 
         <TouchableOpacity
@@ -622,14 +984,10 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           Ảnh hiện trạng cho chụp liên tiếp nhiều góc; ảnh đồng hồ chỉ 1 tấm rồi đóng. */}
       <CameraCaptureModal
         visible={cameraTarget !== null}
-        multi={cameraTarget === 'room'}
+        multi={cameraTarget === 'room' || typeof cameraTarget === 'object'}
         onCapture={handleCameraCapture}
         onClose={() => setCameraTarget(null)}
-        onUseGalleryInstead={
-          cameraTarget === 'elec' || cameraTarget === 'water'
-            ? () => pickMeterFromGallery(cameraTarget)
-            : pickFromGallery
-        }
+        onUseGalleryInstead={galleryFallback()}
       />
     </SafeAreaView>
   );
@@ -683,10 +1041,27 @@ const s = StyleSheet.create({
   uploadingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: Spacing.sm },
   uploadingText: { fontSize: 12, color: Colors.textMuted },
 
-  readingRow: { flexDirection: 'row', gap: Spacing.md, alignItems: 'flex-start' },
+  // Mỗi đồng hồ một khối RIÊNG, xếp dọc. Trước đây ép 2 cột cạnh nhau nên trên điện
+  // thoại mỗi cột chỉ còn ~140px — ô đơn giá, nút chụp và ảnh chen nhau vỡ hết.
+  readingRow: { gap: Spacing.lg },
+  meterCol: {
+    paddingBottom: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  meterColLast: { borderBottomWidth: 0, paddingBottom: 0 },
   // ── Chỉ số + ảnh đồng hồ ──
   meterPrev: { fontSize: 11, color: Colors.textMuted, marginBottom: 6 },
   inputError: { borderColor: Colors.error },
+  readingWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, height: 44,
+  },
+  readingInput: {
+    flex: 1, paddingVertical: 0,
+    fontSize: 18, fontWeight: '800', color: Colors.textPrimary, textAlign: 'right',
+  },
+  readingUnit: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700' },
   meterUsed: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 6 },
   meterWarn: { fontSize: 11, fontWeight: '700', color: Colors.error, marginTop: 6, lineHeight: 16 },
   meterOk: { fontSize: 11, fontWeight: '600', color: Colors.success, marginTop: 6, lineHeight: 16 },
@@ -713,7 +1088,44 @@ const s = StyleSheet.create({
   eqToggleOk: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
   eqToggleBad: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
   eqToggleText: { fontSize: 12, fontWeight: '700' },
+  priceBox: {
+    marginTop: Spacing.sm, padding: Spacing.sm,
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+  },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  priceLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700' },
+  // Ô nhập + đơn vị nằm chung một khung, số căn phải sát ngay chữ "đ/kWh" cho dễ đọc.
+  priceInputWrap: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4,
+    height: 34, paddingHorizontal: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  priceInput: {
+    flex: 1, paddingVertical: 0,
+    fontSize: 14, fontWeight: '800', color: Colors.textPrimary, textAlign: 'right',
+  },
+  priceUnit: { fontSize: 11, color: Colors.textSecondary, fontWeight: '700' },
+  priceResultRow: {
+    flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+    marginTop: Spacing.sm, paddingTop: 6, borderTopWidth: 1, borderTopColor: Colors.primary + '25',
+  },
+  priceResultLabel: { fontSize: 12, color: Colors.textSecondary, fontWeight: '700' },
+  priceResult: { fontSize: 16, color: Colors.primary, fontWeight: '900' },
+  priceNote: { fontSize: 11, color: Colors.textSecondary, marginTop: 3, lineHeight: 15 },
+
   eqDamage: { marginTop: Spacing.sm },
+  eqPhotoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
+  eqPhotoWrap: { position: 'relative' },
+  eqPhoto: { width: 72, height: 72, borderRadius: BorderRadius.md, backgroundColor: Colors.divider },
+  eqPhotoActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
+  eqPhotoBtn: {
+    flex: 1, height: 34, alignItems: 'center', justifyContent: 'center',
+    borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.primary + '50',
+    backgroundColor: Colors.white,
+  },
+  eqPhotoBtnText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  eqPhotoHint: { fontSize: 11, color: Colors.textSecondary, marginTop: 6, lineHeight: 16 },
 
   extraRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
   extraRemove: { fontSize: 22, color: Colors.error, fontWeight: '800', paddingHorizontal: 4 },
