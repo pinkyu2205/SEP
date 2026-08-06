@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Modal, Alert, ScrollView, Dimensions, Linking, ActivityIndicator, Platform,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, isClosedContract } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -46,11 +46,12 @@ interface Tenant {
 
 // ===================== MAP API → UI =====================
 // Trạng thái HĐ từ BE (uppercase) → trạng thái khách thuê dùng trong UI.
+// Khách đã trả phòng xong không vào tới đây nữa (lọc bỏ ngay lúc tải — isClosedContract),
+// nên chỉ còn: đang ở · chờ kích hoạt · tạm ngưng. HĐ hết hạn mà chưa làm thủ tục trả
+// phòng vẫn là khách đang ở — bộ lọc "Sắp hết HĐ" sẽ nhặt ra để quản lý xử lý.
 const mapTenantStatus = (s?: string): TenantStatus => {
   const u = (s || '').toUpperCase();
-  if (u === 'ACTIVE') return 'active';
   if (u.startsWith('PENDING')) return 'pending_activation';
-  if (['ENDED', 'TERMINATED', 'MOVED_OUT', 'EXPIRED', 'CANCELLED'].includes(u)) return 'moved_out';
   if (u === 'SUSPENDED') return 'suspended';
   return 'active';
 };
@@ -141,7 +142,6 @@ const FILTER_DEFS: { key: FilterKey; label: string }[] = [
   { key: 'overdue', label: 'Quá hạn TT' },
   { key: 'whole_house', label: 'Nguyên căn' },
   { key: 'expiring', label: 'Sắp hết HĐ' },
-  { key: 'moved_out', label: 'Đã rời' },
 ];
 
 const matchesFilter = (t: Tenant, filter: FilterKey): boolean => {
@@ -701,7 +701,11 @@ export const TenantListScreen: React.FC = () => {
             .listByProperty(p.id)
             .catch(() => [] as TenantContractResponse[]);
           const isWhole = p.wholeHouse === true;
-          return contracts.map(c => mapContractToTenant(c, p.propertyName, isWhole));
+          // Chỉ giữ khách ĐANG THUÊ: khách đã trả phòng xong (HĐ thanh lý) không hiện
+          // ở đây nữa, tránh danh sách phình ra toàn người đã đi.
+          return contracts
+            .filter(c => !isClosedContract(c.status))
+            .map(c => mapContractToTenant(c, p.propertyName, isWhole));
         }),
       );
       setTenants(lists.flat());

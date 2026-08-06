@@ -10,7 +10,7 @@ import { DatePickerField } from '@/components/common/DatePickerField';
 import { ManagedProperty } from '@/data/managedProperties';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { getContractTerminationTypeLabel, showAlert } from '@/utils';
+import { getContractTerminationTypeLabel, showAlert, isClosedContract } from '@/utils';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
@@ -727,7 +727,11 @@ export const ContractListScreen: React.FC<Props> = () => {
           const apiContracts = await realTenantService
             .listByProperty(Number(p.id))
             .catch(() => [] as TenantContractResponse[]);
-          return apiContracts.map(c => mapApiToContract(c, p.name));
+          // HĐ đã thanh lý (khách trả phòng xong) không hiện ở màn vận hành nữa —
+          // giữ đúng 1 luật với màn Hợp đồng theo nhà và màn Khách thuê.
+          return apiContracts
+            .filter(c => !isClosedContract(c.status))
+            .map(c => mapApiToContract(c, p.name));
         }),
       );
       setContracts(lists.flat());
@@ -744,11 +748,12 @@ export const ContractListScreen: React.FC<Props> = () => {
 
   const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
+  // HĐ đã thanh lý đã bị lọc từ lúc tải — `ended` giờ chỉ còn HĐ hết hạn chưa xử lý.
   const tenantStats = useMemo(() => ({
     total: contracts.length,
-    active: contracts.filter(c => c.status === 'active').length,
+    active: contracts.filter(c => c.status === 'active' || c.status === 'expiring_soon').length,
     expiring: contracts.filter(c => c.status === 'expiring_soon').length,
-    ended: contracts.filter(c => c.status === 'expired' || c.status === 'terminated').length,
+    ended: contracts.filter(c => c.status === 'expired').length,
   }), [contracts]);
 
   const buildingCards = useMemo(() =>
@@ -950,15 +955,15 @@ export const ContractListScreen: React.FC<Props> = () => {
         <View style={dashStyles.statsContent}>
           <View style={[dashStyles.statCard, { borderTopColor: Colors.success }]}>
             <Text style={[dashStyles.statNum, { color: Colors.success }]}>{curStats.active}</Text>
-            <Text style={dashStyles.statLabel}>Hiệu lực</Text>
+            <Text style={dashStyles.statLabel}>Đang thuê</Text>
           </View>
           <View style={[dashStyles.statCard, { borderTopColor: Colors.warning }]}>
             <Text style={[dashStyles.statNum, { color: Colors.warning }]}>{curStats.expiring}</Text>
             <Text style={dashStyles.statLabel}>Sắp hết hạn</Text>
           </View>
-          <View style={[dashStyles.statCard, { borderTopColor: Colors.textMuted }]}>
-            <Text style={[dashStyles.statNum, { color: Colors.textMuted }]}>{curStats.ended}</Text>
-            <Text style={dashStyles.statLabel}>Đã kết thúc</Text>
+          <View style={[dashStyles.statCard, { borderTopColor: Colors.error }]}>
+            <Text style={[dashStyles.statNum, { color: Colors.error }]}>{curStats.ended}</Text>
+            <Text style={dashStyles.statLabel}>Hết hạn</Text>
           </View>
         </View>
 
@@ -986,16 +991,21 @@ export const ContractListScreen: React.FC<Props> = () => {
             )}
             {buildingCards.map(({ prop, bContracts }) => {
               const isWholeHouse = prop.propertyType === 'WHOLE_HOUSE';
-              const activeCount = bContracts.filter(c => c.status === 'active').length;
+              const activeCount = bContracts.filter(c => c.status === 'active' || c.status === 'expiring_soon').length;
               const expiringCount = bContracts.filter(c => c.status === 'expiring_soon').length;
-              const pendingCount = bContracts.filter(c => c.status === 'pending_approval').length;
+              // HĐ hết hạn mà chưa làm thủ tục trả phòng — việc cần xử lý, khác "đã thanh lý"
+              // (nhóm đó đã bị lọc bỏ từ lúc tải).
+              const endedCount = bContracts.filter(c => c.status === 'expired').length;
               const occ = prop.totalRooms > 0 ? Math.round((prop.occupied / prop.totalRooms) * 100) : 0;
-              const needsAction = isWholeHouse ? prop.expiringContractCount : expiringCount + pendingCount;
+              const needsAction = isWholeHouse ? prop.expiringContractCount : expiringCount + endedCount;
               return (
                 <TouchableOpacity
                   key={prop.id}
                   style={dashStyles.buildingCard}
-                  onPress={() => navigation.navigate(isWholeHouse ? 'WholeHouseDetail' : 'BuildingContract', { propertyId: prop.id })}
+                  onPress={() => navigation.navigate(
+                    isWholeHouse ? 'WholeHouseDetail' : 'BuildingContract',
+                    { propertyId: prop.id, propertyName: prop.name },
+                  )}
                   activeOpacity={0.7}
                 >
                   <View style={dashStyles.buildingCardTop}>
@@ -1020,15 +1030,15 @@ export const ContractListScreen: React.FC<Props> = () => {
                     </View>
                     <View style={dashStyles.buildingMetric}>
                       <Text style={[dashStyles.buildingMetricValue, { color: Colors.success }]}>{activeCount}</Text>
-                      <Text style={dashStyles.buildingMetricLabel}>Hiệu lực</Text>
-                    </View>
-                    <View style={dashStyles.buildingMetric}>
-                      <Text style={[dashStyles.buildingMetricValue, { color: Colors.info }]}>{pendingCount}</Text>
-                      <Text style={dashStyles.buildingMetricLabel}>Chờ duyệt</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Đang thuê</Text>
                     </View>
                     <View style={dashStyles.buildingMetric}>
                       <Text style={[dashStyles.buildingMetricValue, { color: Colors.warning }]}>{expiringCount}</Text>
                       <Text style={dashStyles.buildingMetricLabel}>Sắp hết hạn</Text>
+                    </View>
+                    <View style={dashStyles.buildingMetric}>
+                      <Text style={[dashStyles.buildingMetricValue, { color: Colors.error }]}>{endedCount}</Text>
+                      <Text style={dashStyles.buildingMetricLabel}>Hết hạn</Text>
                     </View>
                   </View>
                 </TouchableOpacity>
