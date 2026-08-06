@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import realApiClient from '@/services/core/realApiClient';
 import { API_CONFIG } from '@/constants/api';
@@ -362,6 +363,28 @@ export const realTenantService = {
   ): Promise<{ uri: string; mimeType: string }> => {
     const token = await AsyncStorage.getItem('accessToken');
     const url = `${API_CONFIG.REAL_BASE_URL}/api/v1/tenant-contracts/${contractId}/document/download`;
+
+    // WEB: expo-file-system là module native, downloadAsync/moveAsync KHÔNG tồn tại
+    // trên react-native-web — gọi vào là ném "The method or property
+    // expo-file-system.downloadAsync is not available on web". Dùng fetch + Blob rồi
+    // trả về object URL; caller mở bằng window.open thay cho Sharing (cũng native-only).
+    if (Platform.OS === 'web') {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) throw new Error('Không tải được hợp đồng.');
+      const contentType = res.headers.get('content-type') ?? '';
+      const isDocxWeb =
+        contentType.includes('wordprocessingml') || contentType.includes('msword');
+      const blob = await res.blob();
+      return {
+        uri: (globalThis as any).URL.createObjectURL(blob),
+        mimeType: isDocxWeb
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/pdf',
+      };
+    }
+
     // Tải về tên tạm — chưa biết PDF hay DOCX trước khi đọc header response.
     const tmpUri = `${FileSystem.cacheDirectory}${contractCode}.tmp`;
     const result = await FileSystem.downloadAsync(url, tmpUri, {

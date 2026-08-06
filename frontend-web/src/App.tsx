@@ -11,7 +11,6 @@ import { Dashboard } from '@/pages/host/HostDashboard';
 import { EquipmentCatalogPage } from '@/pages/admin/EquipmentCatalogPage';
 import { FinancialManagement } from '@/pages/host/finance/FinancialManagement';
 import { MaintenanceList } from '@/pages/host/maintenance/MaintenanceList';
-import { EquipmentQrManager } from '@/pages/host/equipments/EquipmentQrManager';
 import { ManagerList } from '@/pages/host/managers/ManagerList';
 import { NotificationCenter } from '@/pages/host/notifications/NotificationCenter';
 import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
@@ -133,7 +132,6 @@ function App() {
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />
-            <Route path="/host/equipments" element={<EquipmentQrManager />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
             <Route element={<ProtectedRoute allowedRoles={['host']} />}>

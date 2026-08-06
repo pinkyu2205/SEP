@@ -27,15 +27,15 @@ import {
   ApiRoom,
   realPropertyService,
 } from '@/services/manager/propertyApi'
-import { showAlert, validateMeterPhoto } from '@/utils';
+import { showAlert, validateMeterPhoto, validateRoomPhoto } from '@/utils';
+import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractAddedEquipmentInput,
   ContractAvailableEquipmentItem,
   defaultTenantUsername,
   OnboardTenantRequest,
   realTenantService,
-  TenantContractResponse,
-} from '@/services/tenant/tenantService'
+  TenantContractResponse,} from '@/services/tenant/tenantService'
 
 type RentalMode = 'room' | 'whole_house'
 
@@ -715,8 +715,10 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     rentValue > 0
   // Nhập tay (gõ đè lên số OCR đọc, hoặc OCR fail phải tự gõ) bắt buộc tick xác nhận
   // chịu trách nhiệm — feedback demo: không được lưu số nhập tay mà không cam kết.
+  // Ảnh đồng hồ là bằng chứng cho chỉ số — chỉ kiểm số thì xoá ảnh đi vẫn qua được bước.
   const hasRequiredMeters = () =>
     !!meters.elec.trim() && !!meters.water.trim() &&
+    !!elecMeterUrl && !!waterMeterUrl &&
     (!manualEdited.elec || manualConfirmed.elec) &&
     (!manualEdited.water || manualConfirmed.water)
 
@@ -807,6 +809,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         break
       }
       case 'Điện nước':
+        if (!elecMeterUrl || !waterMeterUrl)
+          return showAlert(
+            'Thiếu ảnh đồng hồ',
+            'Cần có ảnh đồng hồ của cả điện và nước làm bằng chứng cho chỉ số ghi nhận.',
+          )
         if (!hasRequiredMeters())
           return showAlert(
             'Lỗi',
@@ -910,8 +917,21 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         return
       }
 
+      // Không tách được dãy số → ảnh mờ/xa/loá. Từ chối để bắt chụp lại, vì ảnh không
+      // đọc nổi số thì không còn giá trị làm bằng chứng đối soát.
+      if (!check.reading) {
+        showAlert(
+          'Ảnh chưa đọc được chỉ số',
+          `Không tách được dãy số trên đồng hồ ${label} — thường do ảnh mờ, chụp xa hoặc bị loá. `
+            + 'Chụp lại gần hơn, lấy rõ phần ô số và tránh ánh sáng phản chiếu.',
+          undefined,
+          '🚫',
+        )
+        return
+      }
+
       keepPhoto(url)
-      if (check.reading) setMeters((prev) => ({ ...prev, [kind]: check.reading as string }))
+      setMeters((prev) => ({ ...prev, [kind]: check.reading as string }))
       if (check.confidence === 'low') {
         showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — xem lại ảnh và chỉ số trước khi lưu.`)
       }
@@ -951,9 +971,35 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       const urls = await Promise.all(
         uris.map((u) => uploadImageToCloudinary(u)),
       )
-      const now = new Date().toISOString()
-      setConditionPhotos((prev) => [...prev, ...urls])
-      setConditionPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
+      // Kiểm nội dung từng ảnh (xem validateRoomPhoto): chặn ảnh chế/poster/đồng hồ
+      // lọt vào bộ bằng chứng hiện trạng.
+      const accepted: string[] = []
+      const rejected: string[] = []
+      for (const url of urls) {
+        let labels: VisionLabel[] = []
+        try {
+          labels = await visionService.detectLabels(url)
+        } catch {
+          // Vision lỗi → validateRoomPhoto tự cho qua, không chặn luồng đón khách.
+        }
+        const check = validateRoomPhoto(labels)
+        if (check.ok) accepted.push(url)
+        else rejected.push(check.reason || 'Ảnh không hợp lệ.')
+      }
+
+      if (accepted.length > 0) {
+        const now = new Date().toISOString()
+        setConditionPhotos((prev) => [...prev, ...accepted])
+        setConditionPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
+      }
+      if (rejected.length > 0) {
+        showAlert(
+          rejected.length === urls.length ? 'Ảnh không hợp lệ' : `Đã bỏ ${rejected.length} ảnh không hợp lệ`,
+          rejected[0],
+          undefined,
+          '🚫',
+        )
+      }
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
@@ -1749,8 +1795,21 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
           </Text>
         )}
+        {/* Quy ước đọc số — phải giống nhau giữa lúc đón khách và các kỳ hoá đơn sau,
+            nếu không hiệu số giữa 2 kỳ sẽ sai. */}
+        <View style={styles.meterHintBox}>
+          <Text style={styles.meterHintText}>
+            • Chỉ nhập phần số <Text style={styles.meterHintStrong}>ĐEN</Text>
+            {kind === 'elec' ? ' (kWh)' : ' (m³)'} — ô{' '}
+            <Text style={styles.meterHintRed}>ĐỎ</Text> là phần thập phân, bỏ qua.
+          </Text>
+          <Text style={styles.meterHintText}>
+            • Chữ số đang nhảy giữa 2 số → lấy số{' '}
+            <Text style={styles.meterHintStrong}>NHỎ HƠN</Text>.
+          </Text>
+        </View>
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.meterReadingInput]}
           value={meters[kind]}
           onChangeText={(v) => {
             setMeters((prev) => ({ ...prev, [kind]: v }))
@@ -2828,6 +2887,19 @@ const styles = StyleSheet.create({
   },
   meterRoomBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
   meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: 6 },
+  // Chỉ số điện/nước căn PHẢI cho dễ đối chiếu theo hàng đơn vị với mặt đồng hồ.
+  meterReadingInput: { textAlign: 'right' as const },
+  meterHintBox: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    gap: 2,
+  },
+  meterHintText: { fontSize: 11, color: '#92400E', lineHeight: 16 },
+  meterHintStrong: { fontWeight: '800' as const },
+  meterHintRed: { fontWeight: '800' as const, color: '#DC2626' },
   galleryFallbackLink: { fontSize: 11, color: Colors.textMuted, textDecorationLine: 'underline', marginTop: 4 },
   meterCard: {
     backgroundColor: Colors.white,

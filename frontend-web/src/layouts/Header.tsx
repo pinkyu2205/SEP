@@ -13,7 +13,6 @@ const ROUTE_LABELS: Record<string, string> = {
   '/host/contracts': 'Phê duyệt hợp đồng',
   '/host/maintenance': 'Giám sát bảo trì',
   '/host/financial': 'Quản lý tài chính',
-  '/host/equipments': 'Danh mục tài sản',
   '/host/reports': 'Báo cáo & Phân tích',
   '/host/notifications': 'Thông báo',
   '/host/settings': 'Cài đặt',

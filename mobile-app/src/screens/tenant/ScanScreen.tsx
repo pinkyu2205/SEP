@@ -69,28 +69,24 @@ export const ScanScreen: React.FC = () => {
     scanLockRef.current = true;
     setScannedCode(data);
 
-    // 1) QR tem thiết bị dạng deep-link (web sinh) → mở thẳng màn báo hỏng, điền sẵn phòng + thiết bị.
+    // Cả 2 dạng QR đều PHẢI tra cứu qua BE trước khi mở màn tiếp theo.
+    //
+    // Trước đây tem deep-link được tin tưởng hoàn toàn: quét xong nhảy thẳng vào form
+    // báo hỏng với dữ liệu bóc từ chính chuỗi QR, không gọi API. Hệ quả là khách quét
+    // nhầm tem của nhà/phòng khác vẫn vào được form, chụp ảnh và mô tả xong xuôi mới
+    // bị BE từ chối lúc bấm gửi. Gọi /by-qr ngay tại đây để BE chặn sớm (nó tự kiểm
+    // HĐ ACTIVE + đúng nhà/phòng, trả 422 nếu không phải của mình), đồng thời lấy được
+    // hiện trạng thật của thiết bị thay vì tin tem có thể đã in từ lâu.
     const mqr = parseMaintenanceQr(data);
-    if (mqr) {
-      const idNum = Number(mqr.equipmentId);
-      const roomIdNum = Number(mqr.roomId);
-      navigation.replace('MaintenanceCreate', {
-        equipment: {
-          id: Number.isFinite(idNum) ? idNum : undefined,
-          roomId: Number.isFinite(roomIdNum) ? roomIdNum : undefined,
-          equipmentName: mqr.name || 'Thiết bị',
-          catalogName: mqr.name,
-        },
-      });
-      return;
-    }
+    // Mã tra cứu: deep-link mang sẵn `qr=`; tem cũ thiếu tham số đó thì dựng lại từ
+    // equipmentId — BE chấp nhận dạng "EQ-<id>" kể cả khi cột qr_code còn trống.
+    const code = resolveEquipmentCode(data) || (mqr ? `EQ-${mqr.equipmentId}` : data);
 
-    // 2) QR dán trên thiết bị thật (dạng "EQ-<id>") → tra cứu qua API, mở chi tiết thiết bị.
-    const code = resolveEquipmentCode(data);
     setVerifying(true);
     try {
-      const equipment = await realTenantEquipmentService.getByQrCode(code || data);
-      navigation.replace('EquipmentDetail', { equipment });
+      const equipment = await realTenantEquipmentService.getByQrCode(code);
+      // Tem bảo trì → vào thẳng form báo hỏng. QR thiết bị thường → xem chi tiết.
+      navigation.replace(mqr ? 'MaintenanceCreate' : 'EquipmentDetail', { equipment });
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.response?.data?.message
         || `Mã "${code || data}" không thuộc thiết bị nào trong phòng bạn đang thuê.`;

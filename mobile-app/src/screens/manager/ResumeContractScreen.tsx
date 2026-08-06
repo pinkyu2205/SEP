@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -21,12 +22,12 @@ import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import { CameraCaptureModal } from '@/components/common'
-import { showAlert, validateMeterPhoto } from '@/utils';
+import { showAlert, validateMeterPhoto, validateRoomPhoto } from '@/utils';
+import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractPriceApprovalStatus,
   realTenantService,
-  TenantContractResponse,
-} from '@/services/tenant/tenantService'
+  TenantContractResponse,} from '@/services/tenant/tenantService'
 
 // Khớp với OnboardingScreen — PayOS redirect URLs.
 
@@ -75,7 +76,19 @@ export const ResumeContractScreen: React.FC = () => {
         selected.id,
         selected.contractCode,
       )
-      if (await Sharing.isAvailableAsync()) {
+      if (Platform.OS === 'web') {
+        // Trên web `uri` là blob object URL (xem downloadContractDocument). Sharing là
+        // module native nên isAvailableAsync() luôn false ở đây — mở tab mới để trình
+        // duyệt tự xem PDF, hoặc tải xuống nếu là DOCX.
+        const win = (globalThis as any).window
+        const opened = win?.open(uri, '_blank')
+        if (!opened) {
+          showAlert(
+            'Trình duyệt chặn cửa sổ mới',
+            'Hãy cho phép pop-up cho trang này để xem file hợp đồng.',
+          )
+        }
+      } else if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType,
           UTI: mimeType === 'application/pdf' ? 'com.adobe.pdf' : 'org.openxmlformats.wordprocessingml.document',
@@ -425,6 +438,9 @@ const InspectionSection: React.FC<{
   )
   const [note, setNote] = useState(contract.roomConditionNote ?? '')
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
+  // Các số khác OCR đọc được trên cùng ảnh — hiện thành nút bấm để đổi nhanh khi máy
+  // chọn nhầm (hay gặp: bắt trúng serial "Số SX" thay vì ô chỉ số).
+  const [ocrCandidates, setOcrCandidates] = useState<{ elec?: string[]; water?: string[] }>({})
   const [photoUploading, setPhotoUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   // Nút "Chọn ảnh" từ thư viện CHỈ hiện sau khi chụp bằng camera bị lỗi — tránh
@@ -485,13 +501,27 @@ const InspectionSection: React.FC<{
         return
       }
 
+      // Đọc được mặt đồng hồ nhưng KHÔNG tách được dãy số → gần như luôn do ảnh mờ,
+      // chụp xa, loá hoặc nghiêng. TỪ CHỐI luôn thay vì giữ ảnh rồi cho gõ tay: giữ
+      // lại thì bằng chứng vô dụng (nhìn ảnh không đọc nổi số) mà vẫn lưu được số bất kỳ.
+      if (!check.reading) {
+        showAlert(
+          'Ảnh chưa đọc được chỉ số',
+          `Không tách được dãy số trên đồng hồ ${label} — thường do ảnh mờ, chụp xa hoặc bị loá. `
+            + 'Chụp lại gần hơn, lấy rõ phần ô số và tránh ánh sáng phản chiếu.',
+          undefined,
+          '🚫',
+        )
+        return
+      }
+
       if (kind === 'elec') { setElecUrl(url); setMeterCapturedAt((prev) => ({ ...prev, elec: capturedAt })) }
       else { setWaterUrl(url); setMeterCapturedAt((prev) => ({ ...prev, water: capturedAt })) }
 
-      if (check.reading) {
-        if (kind === 'elec') setElecReading(check.reading)
-        else setWaterReading(check.reading)
-      }
+      if (kind === 'elec') setElecReading(check.reading)
+      else setWaterReading(check.reading)
+      setOcrCandidates((prev) => ({ ...prev, [kind]: check.candidates ?? [] }))
+
       if (check.confidence === 'low') {
         showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — xem lại ảnh và chỉ số trước khi lưu.`)
       }
@@ -514,9 +544,38 @@ const InspectionSection: React.FC<{
     try {
       setPhotoUploading(true)
       const urls = await Promise.all(uris.map((u) => uploadImageToCloudinary(u)))
-      const now = new Date().toISOString()
-      setPhotos((prev) => [...prev, ...urls])
-      setPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
+
+      // Kiểm nội dung TỪNG ảnh: ảnh hiện trạng là căn cứ trừ cọc lúc trả phòng, để
+      // lọt ảnh chế / poster / ảnh đồng hồ là mất luôn bằng chứng. Vision chỉ nhận
+      // URL Cloudinary nên phải upload trước rồi mới kiểm được; ảnh bị từ chối thì
+      // không đưa vào danh sách (file rác trên Cloudinary chấp nhận được).
+      const accepted: string[] = []
+      const rejected: string[] = []
+      for (const url of urls) {
+        let labels: VisionLabel[] = []
+        try {
+          labels = await visionService.detectLabels(url)
+        } catch {
+          // Vision lỗi/hết quota → không chặn, xem validateRoomPhoto.
+        }
+        const check = validateRoomPhoto(labels)
+        if (check.ok) accepted.push(url)
+        else rejected.push(check.reason || 'Ảnh không hợp lệ.')
+      }
+
+      if (accepted.length > 0) {
+        const now = new Date().toISOString()
+        setPhotos((prev) => [...prev, ...accepted])
+        setPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
+      }
+      if (rejected.length > 0) {
+        showAlert(
+          rejected.length === urls.length ? 'Ảnh không hợp lệ' : `Đã bỏ ${rejected.length} ảnh không hợp lệ`,
+          rejected[0],
+          undefined,
+          '🚫',
+        )
+      }
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
@@ -543,6 +602,30 @@ const InspectionSection: React.FC<{
       showAlert('Thiếu xác nhận', 'Vui lòng tick xác nhận chịu trách nhiệm cho số đã nhập tay trước khi lưu.')
       return
     }
+    // Chỉ số điện nước là căn cứ tính tiền, ảnh đồng hồ là bằng chứng đi kèm — thiếu
+    // một trong hai thì số ghi nhận không đối soát được. Trước đây chỉ cần có số là
+    // lưu được, nên xoá ảnh đi rồi lưu vẫn lọt, để lại chỉ số không có gì chứng minh.
+    const meterPairs: { url: string; reading: string; label: string }[] = [
+      { url: elecUrl, reading: elecReading.trim(), label: 'điện' },
+      { url: waterUrl, reading: waterReading.trim(), label: 'nước' },
+    ]
+    for (const m of meterPairs) {
+      if (m.reading && !m.url)
+        return showAlert(
+          `Thiếu ảnh đồng hồ ${m.label}`,
+          `Đã nhập chỉ số ${m.label} thì phải kèm ảnh đồng hồ làm bằng chứng. Chụp lại ảnh hoặc xoá chỉ số trước khi lưu.`,
+        )
+      if (m.url && !m.reading)
+        return showAlert(
+          `Thiếu chỉ số ${m.label}`,
+          `Đã có ảnh đồng hồ ${m.label} nhưng chưa có chỉ số. Nhập chỉ số hoặc xoá ảnh trước khi lưu.`,
+        )
+    }
+    if (photos.length === 0)
+      return showAlert(
+        'Thiếu ảnh hiện trạng phòng',
+        'Cần ít nhất 1 ảnh hiện trạng phòng để đối chiếu khi khách trả phòng.',
+      )
     try {
       setSaving(true)
       const updated = await realTenantService.updateDraftContract(contract.id, {
@@ -643,8 +726,21 @@ const InspectionSection: React.FC<{
                   🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
                 </Text>
               )}
+              {/* Quy ước đọc số — phải giống nhau giữa lúc đón khách và các kỳ hoá đơn
+                  sau, nếu không hiệu số giữa 2 kỳ sẽ sai. */}
+              <View style={styles.meterRuleBox}>
+                <Text style={styles.meterRuleText}>
+                  • Chỉ nhập phần số <Text style={styles.meterRuleStrong}>ĐEN</Text>
+                  {kind === 'elec' ? ' (kWh)' : ' (m³)'} — ô{' '}
+                  <Text style={styles.meterRuleRed}>ĐỎ</Text> là phần thập phân, bỏ qua.
+                </Text>
+                <Text style={styles.meterRuleText}>
+                  • Chữ số đang nhảy giữa 2 số → lấy số{' '}
+                  <Text style={styles.meterRuleStrong}>NHỎ HƠN</Text>.
+                </Text>
+              </View>
               <TextInput
-                style={styles.input}
+                style={[styles.input, styles.meterReadingInput]}
                 value={kind === 'elec' ? elecReading : waterReading}
                 onChangeText={(v) => {
                   if (kind === 'elec') setElecReading(v)
@@ -656,6 +752,29 @@ const InspectionSection: React.FC<{
                 placeholder="OCR tự điền, có thể chỉnh"
                 placeholderTextColor={Colors.textMuted}
               />
+              {!!(ocrCandidates[kind]?.length) && (
+                <View style={styles.ocrAltBox}>
+                  <Text style={styles.ocrAltLabel}>Máy đọc nhầm? Chọn số khác trên ảnh:</Text>
+                  <View style={styles.ocrAltRow}>
+                    {ocrCandidates[kind]!.slice(0, 6).map((n) => (
+                      <TouchableOpacity
+                        key={n}
+                        style={styles.ocrAltChip}
+                        onPress={() => {
+                          if (kind === 'elec') setElecReading(n)
+                          else setWaterReading(n)
+                          // Số vẫn đến từ ảnh (OCR đọc được), không phải gõ tay
+                          // → không bắt tick cam kết như nhánh nhập tay.
+                          setManualEdited((prev) => ({ ...prev, [kind]: false }))
+                          setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+                        }}
+                      >
+                        <Text style={styles.ocrAltChipText}>{n}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
               {manualEdited[kind] && (
                 <TouchableOpacity
                   style={styles.confirmRow}
@@ -1210,6 +1329,32 @@ const styles = StyleSheet.create({
   checkboxTick: { color: Colors.white, fontSize: 13, fontWeight: '800' },
   confirmRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   confirmText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  // Chỉ số điện/nước căn PHẢI: đọc số theo hàng đơn vị dễ đối chiếu với mặt đồng hồ
+  // hơn, và khớp thói quen hiển thị số liệu tiền/lượng.
+  meterReadingInput: { textAlign: 'right' },
+  meterRuleBox: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    gap: 2,
+  },
+  meterRuleText: { fontSize: 11, color: '#92400E', lineHeight: 16 },
+  meterRuleStrong: { fontWeight: '800' },
+  meterRuleRed: { fontWeight: '800', color: '#DC2626' },
+  ocrAltBox: { marginTop: Spacing.sm },
+  ocrAltLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 6 },
+  ocrAltRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  ocrAltChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+    backgroundColor: Colors.white,
+  },
+  ocrAltChipText: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.sm },
   photoWrap: {
     width: '31%',

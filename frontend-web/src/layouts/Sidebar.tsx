@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   Wrench, DollarSign, BarChart3, Bell, Settings,
-  ChevronRight, QrCode, Coins, PiggyBank,
+  ChevronRight, Coins, PiggyBank,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
@@ -53,7 +53,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'Giám sát & Tài sản',
     items: [
       { name: 'Giám sát bảo trì', path: '/host/maintenance', icon: Wrench },
-      { name: 'Thiết bị & Mã QR', path: '/host/equipments', icon: QrCode },
     ],
   },
   {
