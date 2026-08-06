@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute, PublicOnlyRoute } from '@/auth/WebAuthContext';
 import { AuthLayout } from '@/layouts/AuthLayout';
@@ -41,6 +41,20 @@ const HomePage = lazy(() => import('@/pages/public/HomePage'));
 const PropertyListPage = lazy(() => import('@/pages/public/PropertyListPage'));
 const PropertyDetailPage = lazy(() => import('@/pages/public/PropertyDetailPage'));
 const ContactPage = lazy(() => import('@/pages/public/ContactPage'));
+const PaymentSuccessPage = lazy(() =>
+  import('@/pages/public/PaymentResultPage').then((m) => ({ default: m.PaymentSuccessPage }))
+);
+const PaymentCancelPage = lazy(() =>
+  import('@/pages/public/PaymentResultPage').then((m) => ({ default: m.PaymentCancelPage }))
+);
+
+/** Fallback cho 2 trang PayOS — chúng đứng ngoài PublicLayout nên không dùng chung
+ *  Suspense boundary của layout đó. */
+const PaymentFallback = () => (
+  <div className="flex min-h-screen items-center justify-center bg-slate-50">
+    <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900" />
+  </div>
+);
 
 function App() {
   return (
@@ -53,6 +67,26 @@ function App() {
           <Route path="/properties/:id" element={<PropertyDetailPage />} />
           <Route path="/contact" element={<ContactPage />} />
         </Route>
+
+        {/* ─── PayOS redirect (không dùng layout: user tới từ cổng thanh toán) ───
+            Path phải khớp returnUrl/cancelUrl của BE và PAY_SUCCESS_URL/PAY_CANCEL_URL
+            trong mobile-app/src/constants/api.ts — đổi ở đây là đứt luồng thanh toán. */}
+        <Route
+          path="/payment-success"
+          element={
+            <Suspense fallback={<PaymentFallback />}>
+              <PaymentSuccessPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/payment-cancel"
+          element={
+            <Suspense fallback={<PaymentFallback />}>
+              <PaymentCancelPage />
+            </Suspense>
+          }
+        />
 
         {/* ─── Đăng nhập quản trị ─── */}
         <Route element={<PublicOnlyRoute />}>

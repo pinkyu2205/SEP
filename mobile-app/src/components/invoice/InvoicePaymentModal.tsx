@@ -6,7 +6,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants';
 import { formatCurrency, formatDate } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -27,8 +27,6 @@ const TYPE_LABEL: Record<InvoiceType, { label: string; icon: string; color: stri
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
 };
 
-const PAY_SUCCESS_URL = 'https://slms.app/payment-success';
-const PAY_CANCEL_URL = 'https://slms.app/payment-cancel';
 
 interface Props {
   visible: boolean;

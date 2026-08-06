@@ -18,7 +18,7 @@ import QRCode from 'react-native-qrcode-svg'
 import { WebView } from 'react-native-webview'
 import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
-import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
+import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
   ContractPriceApprovalStatus,
@@ -27,8 +27,6 @@ import {
 } from '@/services/tenant/tenantService'
 
 // Khớp với OnboardingScreen — PayOS redirect URLs.
-const PAY_SUCCESS_URL = 'https://slms.app/payment-success'
-const PAY_CANCEL_URL = 'https://slms.app/payment-cancel'
 
 const onlyDigits = (s: string) => String(s).replace(/[^\d]/g, '')
 const parseNum = (s: string) => Number(onlyDigits(s)) || 0

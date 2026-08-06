@@ -104,3 +104,18 @@ export const API_CONFIG = {
     NOTIFICATION_REGISTER_TOKEN: '/notifications/register-token',
   },
 } as const;
+
+/**
+ * URL PayOS redirect về sau khi thanh toán xong / huỷ.
+ *
+ * Đây KHÔNG phải trang của app — mobile mở checkout PayOS trong WebView rồi bắt
+ * sự kiện điều hướng: URL bắt đầu bằng PAY_SUCCESS_URL thì đóng WebView và xác
+ * nhận đã trả, PAY_CANCEL_URL thì chỉ đóng.
+ *
+ * ⚠️ PHẢI KHỚP CHÍNH XÁC returnUrl/cancelUrl mà BE cấu hình cho PayOS. Lệch một
+ * ký tự là WebView không bắt được điều hướng → thanh toán xong màn hình vẫn treo
+ * ở trang PayOS, hoá đơn không tự đánh dấu đã trả.
+ * Giá trị hiện tại theo BE-HANDOFF-https-payos-ready-2026-08-06.md (06/08/2026).
+ */
+export const PAY_SUCCESS_URL = 'https://sep-frontend-prod.vercel.app/payment-success';
+export const PAY_CANCEL_URL = 'https://sep-frontend-prod.vercel.app/payment-cancel';
