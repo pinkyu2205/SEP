@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal'
 import { DatePickerField } from '../../components/common/DatePickerField'
-import { BorderRadius, Colors, Shadow, Spacing } from '../../constants'
+import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '../../constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import {
   ApiProperty,
@@ -48,9 +48,6 @@ interface HouseholdMemberForm {
   cccd: string
 }
 
-// URL mốc PayOS redirect về (phải khớp PAYOS_RETURN_URL / PAYOS_CANCEL_URL ở backend)
-const PAY_SUCCESS_URL = 'https://slms.app/payment-success'
-const PAY_CANCEL_URL = 'https://slms.app/payment-cancel'
 
 const MODE_STEP = 'Chọn loại'
 const HANDOVER_STEP = 'Bàn giao thiết bị'
