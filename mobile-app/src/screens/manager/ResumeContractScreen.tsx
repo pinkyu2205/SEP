@@ -1009,6 +1009,11 @@ const DepositOtpPanel: React.FC<{
   }
 
   const depositValue = contract.deposit
+  // TỔNG khách phải chuyển = tiền nhà tháng đầu + cọc, đúng bằng số PayOS trừ.
+  // Ưu tiên số BE trả kèm link thanh toán; chưa gọi tạo link thì tự cộng để hiển thị
+  // trước cho manager biết mà báo khách.
+  const rentValue = contract.rentAmount ?? 0
+  const totalDue = payInfo.initialPaymentAmount ?? rentValue + (depositValue ?? 0)
 
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
@@ -1018,8 +1023,8 @@ const DepositOtpPanel: React.FC<{
           {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu cọc'}
         </Text>
         <Text style={styles.bannerDesc}>
-          {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Tiến hành thu cọc{' '}
-          {formatVnd(depositValue)} đ rồi xác thực OTP để kích hoạt hợp đồng.
+          {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Thu{' '}
+          {formatVnd(totalDue)} đ (tiền nhà tháng đầu + cọc) rồi xác thực OTP để kích hoạt hợp đồng.
         </Text>
         {!!contract.expectedReceptionDate && (
           <Text style={styles.bannerReception}>
@@ -1057,7 +1062,22 @@ const DepositOtpPanel: React.FC<{
           )}
           {!!payInfo.payosQrCode && !showWebView && (
             <View style={styles.qrBox}>
-              <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
+              <Text style={styles.qrAmountLabel}>Tổng thu</Text>
+              <Text style={styles.qrAmount}>{formatVnd(totalDue)} đ</Text>
+              {/* Tách rõ cấu phần để manager giải thích được với khách vì sao không
+                  phải chỉ mỗi tiền cọc. */}
+              <View style={styles.payBreakdown}>
+                <View style={styles.payBreakdownRow}>
+                  <Text style={styles.payBreakdownLabel}>• Tiền nhà tháng đầu</Text>
+                  <Text style={styles.payBreakdownValue}>{formatVnd(rentValue)} đ</Text>
+                </View>
+                <View style={styles.payBreakdownRow}>
+                  <Text style={styles.payBreakdownLabel}>
+                    • Tiền cọc{contract.depositMonths ? ` (${contract.depositMonths} tháng)` : ''}
+                  </Text>
+                  <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
+                </View>
+              </View>
               <View style={styles.qrWrap}>
                 <QRCode value={payInfo.payosQrCode} size={200} />
               </View>
@@ -1280,7 +1300,19 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.5 },
 
   qrBox: { alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.md },
+  qrAmountLabel: { fontSize: 12, color: Colors.textSecondary, marginBottom: -2 },
   qrAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
+  payBreakdown: {
+    alignSelf: 'stretch',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    gap: 4,
+  },
+  payBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  payBreakdownLabel: { fontSize: 12, color: Colors.textSecondary },
+  payBreakdownValue: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
   qrWrap: { padding: Spacing.md, backgroundColor: Colors.white, borderRadius: BorderRadius.lg, ...Shadow.sm },
   qrCaption: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center' },
   webviewBox: { height: 460, borderRadius: BorderRadius.lg, overflow: 'hidden', marginTop: Spacing.md },

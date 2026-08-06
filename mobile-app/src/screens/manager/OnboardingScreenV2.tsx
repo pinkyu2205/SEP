@@ -413,6 +413,10 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   const rentValue = parseNum(tenantInfo.monthlyRent)
   const depositValue = rentValue * depositMonths
+  // TỔNG khách phải chuyển = tiền nhà tháng đầu + cọc — đúng bằng số PayOS trừ
+  // (BE: TenantContractPaymentAmounts.resolveInitialPaymentAmount). Hiển thị mỗi
+  // `depositValue` là ghi thiếu nguyên một tháng tiền nhà so với app ngân hàng.
+  const totalDueValue = rentValue + depositValue
 
   // Ngày hợp đồng hiệu lực = hôm nay (khoá cứng). Ngày kết thúc: sau hôm nay, tối đa MAX_LEASE_YEARS năm.
   const todayStr = new Date().toLocaleDateString('en-GB') // dd/MM/yyyy
@@ -2147,8 +2151,8 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       >
         <Text style={styles.sectionTitle}>Thanh toán tiền cọc</Text>
         <Text style={styles.hint}>
-          Khách chuyển khoản tiền cọc {formatVnd(depositValue)} đ qua PayOS. Sau
-          khi hệ thống ghi nhận, mới sang bước xác thực OTP.
+          Khách chuyển khoản {formatVnd(totalDueValue)} đ qua PayOS (tiền nhà tháng
+          đầu + tiền cọc). Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.
         </Text>
 
         {paid ? (
@@ -2160,13 +2164,26 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <>
             {!!contract?.payosQrCode && !showWebView && (
               <View style={styles.qrBox}>
-                <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
+                <Text style={styles.qrAmountLabel}>Tổng thu</Text>
+                <Text style={styles.qrAmount}>
+                  {formatVnd(contract.initialPaymentAmount ?? totalDueValue)} đ
+                </Text>
+                {/* Tách cấu phần để manager giải thích được với khách. */}
+                <View style={styles.payBreakdown}>
+                  <View style={styles.payBreakdownRow}>
+                    <Text style={styles.payBreakdownLabel}>• Tiền nhà tháng đầu</Text>
+                    <Text style={styles.payBreakdownValue}>{formatVnd(rentValue)} đ</Text>
+                  </View>
+                  <View style={styles.payBreakdownRow}>
+                    <Text style={styles.payBreakdownLabel}>• Tiền cọc ({depositMonths} tháng)</Text>
+                    <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
+                  </View>
+                </View>
                 <View style={styles.qrWrap}>
                   <QRCode value={contract.payosQrCode} size={220} />
                 </View>
                 <Text style={styles.qrCaption}>
-                  Khách quét mã VietQR bằng app ngân hàng để thanh toán tiền
-                  cọc.
+                  Khách quét mã VietQR bằng app ngân hàng để thanh toán.
                 </Text>
               </View>
             )}
@@ -3079,12 +3096,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
+  qrAmountLabel: { fontSize: 12, color: Colors.textSecondary },
   qrAmount: {
     fontSize: 22,
     fontWeight: '800',
     color: Colors.primary,
+    marginBottom: Spacing.sm,
+  },
+  payBreakdown: {
+    alignSelf: 'stretch',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    gap: 4,
     marginBottom: Spacing.md,
   },
+  payBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  payBreakdownLabel: { fontSize: 12, color: Colors.textSecondary },
+  payBreakdownValue: { fontSize: 12, fontWeight: '700' as const, color: Colors.textPrimary },
   qrWrap: {
     padding: Spacing.md,
     backgroundColor: Colors.white,

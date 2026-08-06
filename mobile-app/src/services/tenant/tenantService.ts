@@ -111,6 +111,8 @@ export interface TenantContractResponse {
   contractCode: string;
   rentAmount: number;
   deposit: number;
+  /** Số tháng tiền nhà dùng làm cọc — BE trả ở toResponse, dùng để ghi rõ "cọc (N tháng)". */
+  depositMonths?: number;
   moveInDate: string;
   startDate: string;
   endDate?: string;
@@ -125,6 +127,15 @@ export interface TenantContractResponse {
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+  /**
+   * TỔNG tiền khách phải chuyển khi đón khách = tiền nhà tháng đầu + tiền cọc.
+   * BE tính ở TenantContractPaymentAmounts.resolveInitialPaymentAmount và cũng dùng
+   * đúng số này để tạo link/QR PayOS. PHẢI hiển thị field này, không được lấy
+   * `deposit` — lấy `deposit` thì màn hình ghi thiếu nguyên một tháng tiền nhà so
+   * với số mà app ngân hàng trừ của khách.
+   * Chỉ có trong response của deposit-payment; các API khác không trả.
+   */
+  initialPaymentAmount?: number;
 
   // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
   initialElectricReading?: number;
