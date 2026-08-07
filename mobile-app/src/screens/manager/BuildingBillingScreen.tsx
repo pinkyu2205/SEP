@@ -5,7 +5,7 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
@@ -98,15 +98,16 @@ export const BuildingBillingScreen: React.FC = () => {
     return [...list].sort((a, b) => STATUS_ORDER[toLocalStatus(a.status)] - STATUS_ORDER[toLocalStatus(b.status)]);
   }, [invoices, filter, search]);
 
+  // Đếm theo SỐ HOÁ ĐƠN, không cộng tiền — manager không được thấy số tiền thuê
+  // (xem @/constants/managerVisibility).
   const stats = useMemo(() => {
     const paid    = invoices.filter(b => b.status === 'PAID');
     const overdue = invoices.filter(b => b.status === 'OVERDUE');
     return {
       total:        invoices.length,
       paidCount:    paid.length,
-      paidAmt:      paid.reduce((s, b) => s + b.amount, 0),
       overdueCount: overdue.length,
-      uncollected:  invoices.filter(b => b.status !== 'PAID' && b.status !== 'CANCELLED').reduce((s, b) => s + b.amount, 0),
+      unpaidCount:  invoices.filter(b => b.status !== 'PAID' && b.status !== 'CANCELLED').length,
     };
   }, [invoices]);
 
@@ -159,10 +160,10 @@ export const BuildingBillingScreen: React.FC = () => {
           </View>
           <View style={s.summarySep} />
           <View style={[s.summaryStat, { flex: 1.6 }]}>
-            <Text style={[s.summaryAmtNum, { color: stats.uncollected > 0 ? Colors.warning : Colors.success }]}>
-              {stats.uncollected > 0 ? fmt(stats.uncollected) : fmt(stats.paidAmt)}
+            <Text style={[s.summaryAmtNum, { color: stats.unpaidCount > 0 ? Colors.warning : Colors.success }]}>
+              {stats.unpaidCount > 0 ? stats.unpaidCount : '✓'}
             </Text>
-            <Text style={s.summaryLbl}>{stats.uncollected > 0 ? 'Cần thu' : 'Đã thu'}</Text>
+            <Text style={s.summaryLbl}>{stats.unpaidCount > 0 ? 'Chưa thanh toán' : 'Đã thu đủ'}</Text>
           </View>
         </View>
         <View style={s.progRow}>
@@ -236,8 +237,9 @@ export const BuildingBillingScreen: React.FC = () => {
                 </View>
                 <View style={s.billAmountRow}>
                   <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
+                  {/* Không hiện số tiền thuê — xem @/constants/managerVisibility. */}
                   <Text style={[s.billTotal, st === 'overdue' && { color: Colors.error }]}>
-                    {fmt(item.amount)}
+                    {st === 'paid' ? '✓ Đã thanh toán' : st === 'overdue' ? 'Quá hạn' : 'Chưa thanh toán'}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -291,10 +293,15 @@ export const BuildingBillingScreen: React.FC = () => {
                     ))}
                   </View>
 
+                  {/* Số tiền thuê do hệ thống thu thẳng của khách — manager chỉ theo dõi
+                      đã/chưa thanh toán (xem @/constants/managerVisibility). */}
                   <View style={s.totalRowCompact}>
                     <Text style={s.totalLabel}>TIỀN NHÀ</Text>
-                    <Text style={s.totalAmount}>{fmt(selectedBill.amount)}</Text>
+                    <Text style={[s.totalAmount, { fontSize: 16, color: st === 'paid' ? Colors.success : Colors.warning }]}>
+                      {st === 'paid' ? '✓ Khách đã thanh toán' : 'Khách chưa thanh toán'}
+                    </Text>
                   </View>
+                  <Text style={s.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
 
                   {st !== 'paid' && st !== 'cancelled' && (
                     <View style={s.paymentActions}>
@@ -344,7 +351,9 @@ export const BuildingBillingScreen: React.FC = () => {
                     <Text style={s.modalClose}>✕</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {fmt(selectedBill.amount)}</Text>
+                {/* Không ghi số tiền ra chữ — mã QR vẫn mang đúng số, khách quét là ra.
+                    Manager chỉ cần đưa QR cho khách (xem @/constants/managerVisibility). */}
+                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {selectedBill.code}</Text>
                 <View style={s.qrImageContainer}>
                   <Image
                     source={{ uri: buildQRUrl(selectedBill.amount, `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim()) }}
@@ -356,7 +365,7 @@ export const BuildingBillingScreen: React.FC = () => {
                   {[
                     { label: 'Ngân hàng', val: 'MB Bank' },
                     { label: 'Số TK',     val: VIETQR_ACCOUNT },
-                    { label: 'Số tiền',   val: fmt(selectedBill.amount), primary: true },
+                    { label: 'Số tiền',   val: 'Đã gắn sẵn trong mã QR', primary: true },
                     { label: 'Nội dung',  val: `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim() },
                   ].map((row, i) => (
                     <View key={i} style={s.bankRow}>
@@ -382,11 +391,15 @@ export const BuildingBillingScreen: React.FC = () => {
           <View style={s.modalOverlay}>
             <View style={s.modalContent}>
               <Text style={s.modalTitle}>💵 Ghi nhận tiền mặt</Text>
+              {/* ⚠️ Không hiện số tiền cần thu (@/constants/managerVisibility) — manager
+                  phải đối chiếu số trên app của khách trước khi bấm xác nhận. */}
               <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Số tiền cần thu</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
+                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
+                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
               </View>
-              <Text style={s.cashHint}>Xác nhận sau khi đã đếm đủ tiền mặt từ khách thuê.</Text>
+              <Text style={s.cashHint}>
+                Số tiền hiển thị trên app của khách thuê. Đối chiếu đúng số đó rồi mới xác nhận.
+              </Text>
               <TextInput
                 style={s.cashNoteInput}
                 placeholder="Ghi chú (tùy chọn)..."
@@ -412,8 +425,8 @@ export const BuildingBillingScreen: React.FC = () => {
             <View style={s.modalContent}>
               <Text style={s.modalTitle}>👛 Ví điện tử</Text>
               <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Số tiền</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
+                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
+                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
               </View>
               <Text style={s.cashHint}>Chọn ví điện tử khách đã thanh toán:</Text>
               {['MoMo', 'ZaloPay', 'VNPay', 'Ví khác'].map(wallet => (
@@ -543,6 +556,10 @@ const s = StyleSheet.create({
   },
   totalLabel:  { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   totalAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
+  hiddenAmountNote: {
+    fontSize: 11.5, color: Colors.textMuted, lineHeight: 16,
+    marginTop: Spacing.sm, marginBottom: Spacing.sm,
+  },
 
   paymentActions:      { marginBottom: Spacing.md },
   paymentActionsTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },

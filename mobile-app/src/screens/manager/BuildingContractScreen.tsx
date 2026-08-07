@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE } from '@/constants';
 import {
   showAlert, readApiError, formatDate,
   CONTRACT_STATUS_META, mapContractStatus, daysUntil, isLivingStatus, isEndedStatus,
@@ -224,17 +224,27 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
             <Row label="CCCD/CMND" value={selected.tenantCccd || 'Chưa có'} />
           </Section>
 
+          {/* Không hiện số tiền thuê/cọc — hệ thống thu thẳng của khách
+              (xem @/constants/managerVisibility). Chỉ hiện ĐÃ/CHƯA thu. */}
           <Section title="Tiền thuê">
             <View style={styles.priceRow}>
               <View style={styles.priceBox}>
                 <Text style={styles.priceLabel}>Thuê hằng tháng</Text>
-                <Text style={styles.priceValue}>{money(selected.rentAmount)}</Text>
+                <Text style={[styles.priceValue, { fontSize: 14, color: Colors.textSecondary }]}>
+                  Hệ thống thu
+                </Text>
               </View>
               <View style={styles.priceBox}>
                 <Text style={styles.priceLabel}>Tiền cọc</Text>
-                <Text style={[styles.priceValue, { color: Colors.warning }]}>{money(selected.deposit)}</Text>
+                <Text style={[styles.priceValue, {
+                  fontSize: 14,
+                  color: selected.paymentStatus === 'PAID' ? Colors.success : Colors.warning,
+                }]}>
+                  {selected.paymentStatus === 'PAID' ? '✓ Đã thu' : 'Chưa thu'}
+                </Text>
               </View>
             </View>
+            <Text style={styles.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
             <Row
               label="Trạng thái cọc"
               value={selected.paymentStatus === 'PAID' ? 'Đã thu' : selected.paymentStatus === 'PENDING' ? 'Chưa thu' : (selected.paymentStatus || 'Chưa có')}
@@ -447,9 +457,14 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
                       {c.tenantFullName}{c.tenantPhone ? ` · ${c.tenantPhone}` : ''}
                     </Text>
 
+                    {/* Thay số tiền bằng trạng thái thu cọc — @/constants/managerVisibility. */}
                     <View style={styles.cardMoneyRow}>
-                      <Text style={styles.cardRent}>{money(c.rentAmount)}<Text style={styles.cardRentUnit}>/tháng</Text></Text>
-                      <Text style={styles.cardDeposit}>Cọc {money(c.deposit)}</Text>
+                      <Text style={[styles.cardRent, {
+                        fontSize: 13,
+                        color: c.paymentStatus === 'PAID' ? Colors.success : Colors.warning,
+                      }]}>
+                        {c.paymentStatus === 'PAID' ? '✓ Đã thu cọc' : 'Chưa thu cọc'}
+                      </Text>
                     </View>
 
                     <View style={styles.cardFooter}>
@@ -650,6 +665,7 @@ const styles = StyleSheet.create({
   priceBox: { flex: 1, padding: Spacing.md },
   priceLabel: { fontSize: 11, color: Colors.textSecondary, fontWeight: '700' },
   priceValue: { fontSize: 17, fontWeight: '900', color: Colors.primary, marginTop: 3 },
+  hiddenAmountNote: { fontSize: 11.5, color: Colors.textMuted, lineHeight: 16, marginTop: Spacing.sm },
 
   noteText: { fontSize: 12, color: Colors.textPrimary, lineHeight: 18, padding: Spacing.md },
   photoStrip: { flexDirection: 'row', gap: Spacing.sm, padding: Spacing.md },

@@ -25,6 +25,7 @@ import { EquipmentScreen } from '@/screens/manager/EquipmentScreen';
 import { ContractListScreen } from '@/screens/shared/ContractListScreen';
 import { BuildingBillingScreen } from '@/screens/manager/BuildingBillingScreen';
 import { BillingHistoryScreen } from '@/screens/manager/BillingHistoryScreen';
+import { ManagerPaymentHistoryScreen } from '@/screens/manager/PaymentHistoryScreen';
 import { TicketDetailScreen } from '@/screens/manager/TicketDetailScreen';
 import { WholeHouseDetailScreen } from '@/screens/manager/WholeHouseDetailScreen';
 import { TenantInvoicesScreen } from '@/screens/manager/TenantInvoicesScreen';
@@ -127,6 +128,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="ManagerContracts" component={ContractListScreen} />
             <Stack.Screen name="BuildingBilling" component={BuildingBillingScreen} />
             <Stack.Screen name="BillingHistory" component={BillingHistoryScreen} />
+            <Stack.Screen name="ManagerPaymentHistory" component={ManagerPaymentHistoryScreen} />
             <Stack.Screen name="MaintenanceTicketDetail" component={TicketDetailScreen} />
             {/* Tenant-scoped screens — opened from Tenant Detail modal */}
             <Stack.Screen name="TenantInvoices" component={TenantInvoicesScreen} />

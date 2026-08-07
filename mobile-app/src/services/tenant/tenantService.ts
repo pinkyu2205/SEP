@@ -115,7 +115,11 @@ export interface TenantContractResponse {
   endDate?: string;
   expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
-  paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
+  paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED — trạng thái thu CỌC
+  /** Thời điểm thu đủ cọc: PayOS `paidAt`, hoặc lúc quản lý xác nhận tiền mặt. */
+  depositPaidAt?: string;
+  /** BE suy ra: có payosOrderCode → 'PAYOS'; có xác nhận tiền mặt → 'CASH'; chưa thu → null. */
+  depositMethod?: string;
   // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
   // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
   terminatedAt?: string;

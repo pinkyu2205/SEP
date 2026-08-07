@@ -8,9 +8,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
   RENT_CYCLE, RENT_POLICY_FULL, RENT_PARTIAL_CYCLE_NOTE, RENT_REMINDER_STEPS,
-  RENT_TERMINATION_AFTER_DAYS,
+  RENT_TERMINATION_AFTER_DAYS, FIRST_RENT_CYCLE, FIRST_RENT_CYCLE_NOTE,
   toMonthKey, shiftMonthKey, monthLabel, rentIssueDate, rentDueDate,
   daysOverdue, overdueStage, canTerminateForUnpaidRent, partialRentCycle,
+  addDays, daysSince,
 } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
@@ -184,12 +185,22 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
     const inv = row.invoice;
     const status = (inv?.status || '').toUpperCase();
     const paid = status === 'PAID';
-    const due = inv?.dueDate || rentDueDate(month);
-    const od = inv && !paid && status !== 'CANCELLED' ? daysOverdue(due) : 0;
-    const stage = overdueStage(od);
-    const canTerminate = !!inv && canTerminateForUnpaidRent(due, status);
     // Kỳ lẻ: khách vào giữa tháng (kỳ đầu) hoặc trả phòng giữa tháng (kỳ cuối).
     const partial = partialRentCycle(month, row.rentAmount, row.startDate, row.endDate);
+    // KỲ ĐẦU chạy mốc riêng: nhắc mỗi ngày trong 3 ngày kể từ ngày nhận phòng, hết 3
+    // ngày là quản lý được quyền chấm dứt — KHÔNG dùng lịch 1/5/7/8 của tháng thường.
+    const isFirstCycle = partial?.kind === 'first';
+    const due = isFirstCycle
+      ? addDays(row.startDate, FIRST_RENT_CYCLE.graceDays)
+      : (inv?.dueDate || rentDueDate(month));
+    const unpaid = !!inv && !paid && status !== 'CANCELLED';
+    const od = unpaid ? daysOverdue(due) : 0;
+    const stage = overdueStage(od);
+    const canTerminate = unpaid && (isFirstCycle ? od > 0 : canTerminateForUnpaidRent(due, status));
+    /** Kỳ đầu còn trong hạn: còn mấy ngày nữa hết 3 ngày. */
+    const firstCycleDaysLeft = isFirstCycle
+      ? Math.max(0, FIRST_RENT_CYCLE.graceDays - daysSince(row.startDate))
+      : 0;
 
     return (
       <View key={row.key} style={[s.card, paid && s.cardPaid, canTerminate && s.cardRisk]}>
@@ -210,10 +221,20 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
 
         <Text style={s.due}>
           Hạn nộp: {fmtDay(due)}
+          {isFirstCycle ? ` · kỳ đầu (${FIRST_RENT_CYCLE.graceDays} ngày kể từ ngày nhận phòng)` : ''}
           {inv ? (inv.autoIssued === false ? ' · phát hành thủ công (kỳ cũ)' : ' · tự động') : ''}
         </Text>
 
-        {stage === 'final' && !canTerminate && (
+        {/* Kỳ đầu: mốc riêng, nói theo "còn mấy ngày" chứ không theo ngày 5/7/8. */}
+        {isFirstCycle && unpaid && !canTerminate && (
+          <View style={s.warnBox}>
+            <Text style={s.warnBoxText}>
+              ⏰ Kỳ đầu — còn {firstCycleDaysLeft} ngày. Khách được nhắc mỗi ngày; hết hạn mà chưa
+              thu được thì bạn được quyền chấm dứt hợp đồng.
+            </Text>
+          </View>
+        )}
+        {!isFirstCycle && stage === 'final' && !canTerminate && (
           <View style={s.warnBox}>
             <Text style={s.warnBoxText}>
               ⏰ Quá hạn {od} ngày — khách đã được nhắc. Ngày {RENT_CYCLE.finalReminderDay} nhắc lần cuối.
@@ -223,7 +244,9 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
         {canTerminate && (
           <View style={s.riskBox}>
             <Text style={s.riskText}>
-              ⛔ Quá hạn {od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.
+              {isFirstCycle
+                ? `⛔ Kỳ đầu quá ${FIRST_RENT_CYCLE.graceDays} ngày chưa thanh toán (trễ ${od} ngày) — bạn được quyền chấm dứt hợp đồng.`
+                : `⛔ Quá hạn ${od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.`}
             </Text>
           </View>
         )}
@@ -234,15 +257,18 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
             <Text style={s.partialTitle}>{partial.label}</Text>
             <Text style={s.partialText}>
               {partial.kind === 'first'
-                ? `Khách nhận phòng ${fmtDay(row.startDate)} — thu ngay lúc nhận phòng.`
+                ? `Khách nhận phòng ${fmtDay(row.startDate)} — phát hành ngay, khách có ${FIRST_RENT_CYCLE.graceDays} ngày để thanh toán.`
                 : `Rời phòng ${fmtDay(row.endDate || '')} — hoá đơn kỳ cuối gửi khách khi duyệt trả phòng.`}
-              {' '}Tiền theo ngày ≈ {fmt(partial.amount)} (trọn tháng {fmt(row.rentAmount)}).
+              {' '}Hệ thống tính tiền theo số ngày ở rồi thu trực tiếp của khách.
             </Text>
           </View>
         )}
 
         <View style={s.amountRow}>
-          <Text style={s.amount}>{fmt(inv?.amount ?? partial?.amount ?? row.rentAmount)}</Text>
+          {/* Không hiện số tiền thuê — xem @/constants/managerVisibility. */}
+          <Text style={[s.amount, { fontSize: 14, color: paid ? Colors.success : Colors.textSecondary }]}>
+            {paid ? '✓ Khách đã thanh toán' : inv ? 'Khách chưa thanh toán' : 'Chờ phát hành'}
+          </Text>
           {canTerminate && (
             <TouchableOpacity
               style={[s.terminateBtn, terminatingId === row.contractId && s.btnDisabled]}
@@ -275,6 +301,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
           <Text style={s.policyTitle}>🤖 Chạy hoàn toàn tự động</Text>
           <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
           <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
+          <Text style={[s.policyText, { marginTop: 6 }]}>🆕 {FIRST_RENT_CYCLE_NOTE}</Text>
           <View style={s.reminderRow}>
             {RENT_REMINDER_STEPS.map(r => (
               <View key={r.day} style={s.reminderChip}>

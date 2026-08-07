@@ -21,8 +21,13 @@ import { KpiCard, formatShortVnd, formatVnd } from './shared';
 // Khi BE chưa trả dữ liệu → hiển thị '—' / trạng thái trống trung thực.
 // =============================================================================
 
-const STATUS_COLOR: Record<string, string> = { paid: '#10b981', unpaid: '#f59e0b', overdue: '#f43f5e', pending: '#94a3b8' };
-const STATUS_LABEL: Record<string, string> = { paid: 'Đã thu', unpaid: 'Chưa thu', overdue: 'Quá hạn', pending: 'Chờ' };
+// Khớp enum TenantInvoiceStatus của BE (nguồn: GET /api/v1/manager/invoices).
+const STATUS_COLOR: Record<string, string> = {
+  PAID: '#10b981', PENDING: '#f59e0b', OVERDUE: '#f43f5e', PARTIAL: '#3b82f6', CANCELLED: '#94a3b8',
+};
+const STATUS_LABEL: Record<string, string> = {
+  PAID: 'Đã thu', PENDING: 'Chưa thu', OVERDUE: 'Quá hạn', PARTIAL: 'Thu 1 phần', CANCELLED: 'Đã huỷ',
+};
 
 // Tooltip gọn (chữ ink token, chấm màu theo series)
 const MiniTooltip = ({ active, payload, label }: any) => {
@@ -65,8 +70,11 @@ export const SuperAdminOverview = () => {
   }, []);
 
   // ── Suy số liệu từ hóa đơn thật ──
-  const revenuePaid = useMemo(() => invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0), [invoices]);
-  const unpaid = useMemo(() => invoices.filter(i => i.status === 'unpaid' || i.status === 'overdue'), [invoices]);
+  const revenuePaid = useMemo(() => invoices.filter(i => i.status === 'PAID').reduce((s, i) => s + i.amount, 0), [invoices]);
+  const unpaid = useMemo(
+    () => invoices.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE' || i.status === 'PARTIAL'),
+    [invoices],
+  );
   const unpaidAmount = useMemo(() => unpaid.reduce((s, i) => s + i.amount, 0), [unpaid]);
 
   const byStatus = useMemo(() => {
@@ -75,9 +83,11 @@ export const SuperAdminOverview = () => {
     return [...m.entries()].map(([status, value]) => ({ name: STATUS_LABEL[status] ?? status, value, color: STATUS_COLOR[status] ?? '#94a3b8' })).filter(x => x.value > 0);
   }, [invoices]);
 
-  const byHost = useMemo(() => {
+  // Hoá đơn thật không mang thông tin host (ManagerInvoiceResponse chỉ có property),
+  // nên gom theo TOÀ NHÀ — xem docs/BE-NEED-admin-billing-fields-2026-08-07.md.
+  const byProperty = useMemo(() => {
     const m = new Map<string, number>();
-    for (const i of invoices) m.set(i.hostName, (m.get(i.hostName) ?? 0) + i.amount);
+    for (const i of invoices) m.set(i.propertyName, (m.get(i.propertyName) ?? 0) + i.amount);
     return [...m.entries()].map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 6);
   }, [invoices]);
 
@@ -142,13 +152,13 @@ export const SuperAdminOverview = () => {
       <div className="grid gap-5 xl:grid-cols-2">
         {/* Doanh thu theo Host */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="font-extrabold text-slate-950">Doanh thu theo Host</h2>
-          <p className="mb-4 text-sm text-slate-500">Tổng hóa đơn của từng chủ nhà — toàn hệ thống</p>
-          {byHost.length === 0 ? (
+          <h2 className="font-extrabold text-slate-950">Doanh thu theo toà nhà</h2>
+          <p className="mb-4 text-sm text-slate-500">Tổng hóa đơn của từng toà nhà — toàn hệ thống</p>
+          {byProperty.length === 0 ? (
             <EmptyChart note="Chưa có hóa đơn nào trong hệ thống" />
           ) : (
             <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={byHost} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+              <BarChart data={byProperty} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
                 <defs><linearGradient id="gHost" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#0891b2" /><stop offset="100%" stopColor="#22d3ee" /></linearGradient></defs>
                 <CartesianGrid horizontal={false} strokeDasharray="4 4" stroke="#eef2f7" />
                 <XAxis type="number" tickFormatter={formatShortVnd} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
@@ -254,7 +264,7 @@ export const SuperAdminOverview = () => {
           <table className="w-full text-sm text-left text-slate-600">
             <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-medium border-b border-slate-100">
               <tr>
-                <th className="px-5 py-3">Host</th>
+                <th className="px-5 py-3">Mã hoá đơn</th>
                 <th className="px-5 py-3">Toà nhà / Khách</th>
                 <th className="px-5 py-3 text-right">Số tiền</th>
                 <th className="px-5 py-3">Hạn TT</th>
@@ -264,10 +274,10 @@ export const SuperAdminOverview = () => {
             <tbody className="divide-y divide-slate-100">
               {unpaid.slice(0, 8).map(inv => (
                 <tr key={inv.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-slate-900">{inv.hostName}</td>
-                  <td className="px-5 py-3"><p className="text-slate-900">{inv.buildingName}</p><p className="text-xs text-slate-400">{inv.tenantName}</p></td>
+                  <td className="px-5 py-3 font-mono text-xs font-medium text-slate-900">{inv.code}</td>
+                  <td className="px-5 py-3"><p className="text-slate-900">{inv.propertyName}</p><p className="text-xs text-slate-400">{inv.tenantName}</p></td>
                   <td className="px-5 py-3 text-right font-semibold text-slate-900 tabular-nums">{formatVnd(inv.amount)}</td>
-                  <td className="px-5 py-3 text-xs text-slate-500">{inv.dueDate}</td>
+                  <td className="px-5 py-3 text-xs text-slate-500">{inv.dueDate ? inv.dueDate.split('-').reverse().join('/') : '—'}</td>
                   <td className="px-5 py-3"><span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full" style={{ background: `${STATUS_COLOR[inv.status]}1a`, color: STATUS_COLOR[inv.status] }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: STATUS_COLOR[inv.status] }} />{STATUS_LABEL[inv.status]}</span></td>
                 </tr>
               ))}

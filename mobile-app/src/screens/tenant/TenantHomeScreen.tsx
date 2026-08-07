@@ -2,7 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Modal, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow,
+  isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline, firstCycleTenantWarning,
+} from '@/constants';
 import { useAuth, useTenantContract } from '@/hooks';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
@@ -332,8 +335,15 @@ export const TenantHomeScreen: React.FC = () => {
         ) : (
           displayBills.map(bill => {
             const tc = TYPE_CFG[bill.invoiceType];
-            const isOver = bill.status === 'overdue';
-            const isPending = bill.status === 'pending';
+            // Kỳ đầu: hạn thật là ngày nhận phòng + 3 ngày, chưa hết 3 ngày thì chưa
+            // gọi là quá hạn dù BE đã gắn OVERDUE (xem constants/rentCycle.ts).
+            const isFirstCycle = isFirstRentCycleInvoice(bill);
+            const isPaid = bill.status === 'paid';
+            const isOver = isFirstCycle
+              ? firstCycleStage(bill) === 'expired' && !isPaid
+              : bill.status === 'overdue';
+            const isPending = !isOver && !isPaid;
+            const dueDate = isFirstCycle ? firstCycleDeadline(bill) : bill.dueDate;
             return (
               <TouchableOpacity
                 key={bill.id}
@@ -374,9 +384,14 @@ export const TenantHomeScreen: React.FC = () => {
                     {formatCurrency(bill.grandTotal)}
                   </Text>
                   <Text style={[styles.invDue, isOver && { color: Colors.error }]}>
-                    {isOver ? `Quá hạn ${Math.abs(getDaysUntil(bill.dueDate))} ngày` : `Hạn: ${formatDate(bill.dueDate)}`}
+                    {isOver ? `Quá hạn ${Math.abs(getDaysUntil(dueDate))} ngày` : `Hạn: ${formatDate(dueDate)}`}
                   </Text>
                 </View>
+
+                {/* Kỳ đầu có mốc riêng (3 ngày kể từ ngày nhận phòng) — nhắc ngay tại Home. */}
+                {isFirstCycle && (
+                  <Text style={styles.invFirstCycleNote}>⚠️ {firstCycleTenantWarning(bill)}</Text>
+                )}
 
                 {(isOver || isPending) && (
                   <TouchableOpacity
@@ -606,6 +621,7 @@ const styles = StyleSheet.create({
   invAmountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   invAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
   invDue: { fontSize: 11, color: Colors.textSecondary },
+  invFirstCycleNote: { fontSize: 11, color: Colors.error, marginTop: 6, lineHeight: 16 },
   invPayBtn: {
     marginTop: Spacing.sm, borderRadius: BorderRadius.md,
     paddingVertical: Spacing.sm + 2, alignItems: 'center',

@@ -5,7 +5,10 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  RENT_AMOUNT_HIDDEN_NOTE,
+} from '@/constants';
 
 const SH = Dimensions.get('window').height;
 const TODAY = new Date(2026, 4, 21);
@@ -223,7 +226,7 @@ const InvoiceDetailModal: React.FC<{
   const handlePay = () => {
     showAlert(
       'Xác nhận thanh toán',
-      `Hóa đơn ${invoice.code}\nTổng tiền: ${fmt(invoice.total)}\n\nThao tác này sẽ ghi nhận thanh toán cho hóa đơn tháng ${invoice.billingMonth}.`,
+      `Hóa đơn ${invoice.code}\n\nThao tác này sẽ ghi nhận thanh toán cho hóa đơn tháng ${invoice.billingMonth}.`,
       [
         { text: 'Hủy', style: 'cancel' },
         { text: 'Xác nhận đã thu', style: 'default', onPress: onClose },
@@ -291,33 +294,28 @@ const InvoiceDetailModal: React.FC<{
             {/* Line items */}
             <View style={ds.section}>
               <Text style={ds.sectionTitle}>Chi tiết hóa đơn</Text>
-              <LineItem label="Tiền thuê phòng" amount={invoice.rentFee} />
+              {/* Tiền thuê + mọi con số CÓ CHỨA tiền thuê (tạm tính, tổng) đều bị ẩn —
+                  xem @/constants/managerVisibility. Điện/nước/dịch vụ vẫn hiện vì
+                  manager tự chốt số và phát hành. */}
+              <View style={ds.subtotalRow}>
+                <Text style={ds.subtotalLabel}>Tiền thuê phòng</Text>
+                <Text style={ds.subtotalVal}>Hệ thống thu</Text>
+              </View>
               <LineItem label="Tiền điện" amount={invoice.electricFee} detail={invoice.electricDetail} />
               <LineItem label="Tiền nước" amount={invoice.waterFee} detail={invoice.waterDetail} />
               {invoice.serviceFee > 0 && (
                 <LineItem label="Phí dịch vụ" amount={invoice.serviceFee} />
               )}
-              {subtotal !== invoice.total - invoice.discount + invoice.depositDeduction ? null : (
-                <View style={ds.subtotalRow}>
-                  <Text style={ds.subtotalLabel}>Tạm tính</Text>
-                  <Text style={ds.subtotalVal}>{fmt(subtotal)}</Text>
-                </View>
-              )}
-              {invoice.discount > 0 && (
-                <LineItem label="Giảm giá" amount={-invoice.discount} isDiscount />
-              )}
-              {invoice.depositDeduction > 0 && (
-                <LineItem label="Trừ tiền cọc" amount={-invoice.depositDeduction} isDiscount />
-              )}
             </View>
 
-            {/* Total */}
+            {/* Tổng: chỉ nói đã/chưa thanh toán, không cộng ra tiền */}
             <View style={ds.totalBox}>
-              <Text style={ds.totalLabel}>Tổng thanh toán</Text>
-              <Text style={[ds.totalAmount, { color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
-                {fmt(invoice.total)}
+              <Text style={ds.totalLabel}>Tình trạng</Text>
+              <Text style={[ds.totalAmount, { fontSize: 16, color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
+                {isUnpaid ? 'Khách chưa thanh toán' : '✓ Khách đã thanh toán'}
               </Text>
             </View>
+            <Text style={ds.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
 
             {/* Payment info */}
             {invoice.status === 'paid' && (
@@ -405,6 +403,10 @@ const ds = StyleSheet.create({
   totalBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginBottom: Spacing.md },
   totalLabel: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
   totalAmount: { fontSize: 20, fontWeight: '800' },
+  hiddenAmountNote: {
+    fontSize: 11.5, color: '#94A3B8', lineHeight: 16,
+    paddingHorizontal: Spacing.base, marginTop: Spacing.sm,
+  },
 
   paidBox: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14, marginBottom: Spacing.md },
   paidIcon: { fontSize: 22 },
@@ -445,7 +447,7 @@ const InvoiceCard: React.FC<{ invoice: TenantInvoice; onPress: () => void }> = (
 
       {/* Amounts row */}
       <View style={cs.amountsRow}>
-        <AmountItem label="Tiền thuê" amount={invoice.rentFee} />
+        {/* Bỏ ô "Tiền thuê" — @/constants/managerVisibility. */}
         <AmountItem label="Điện" amount={invoice.electricFee} />
         <AmountItem label="Nước" amount={invoice.waterFee} />
         <AmountItem label="Dịch vụ" amount={invoice.serviceFee} />
@@ -465,9 +467,8 @@ const InvoiceCard: React.FC<{ invoice: TenantInvoice; onPress: () => void }> = (
           )}
         </View>
         <View style={cs.totalBlock}>
-          <Text style={cs.totalLabel}>Tổng</Text>
-          <Text style={[cs.totalAmt, { color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
-            {fmt(invoice.total)}
+          <Text style={[cs.totalAmt, { fontSize: 12, color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
+            {isUnpaid ? 'Chưa thanh toán' : '✓ Đã thanh toán'}
           </Text>
         </View>
       </View>
@@ -622,8 +623,8 @@ export const TenantInvoicesScreen: React.FC = () => {
               <View style={ss.unpaidBanner}>
                 <Text style={ss.unpaidBannerIcon}>⚠️</Text>
                 <View style={ss.unpaidBannerBody}>
-                  <Text style={ss.unpaidBannerTitle}>Công nợ chưa thanh toán</Text>
-                  <Text style={ss.unpaidBannerAmount}>{fmt(totalUnpaid)}</Text>
+                  <Text style={ss.unpaidBannerTitle}>Hoá đơn chưa thanh toán</Text>
+                  <Text style={ss.unpaidBannerAmount}>Khách chưa đóng đủ</Text>
                 </View>
                 <Text style={ss.unpaidBannerCount}>{counts.overdue + counts.pending} HĐ</Text>
               </View>

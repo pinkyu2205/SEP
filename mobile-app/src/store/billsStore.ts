@@ -31,6 +31,8 @@ export interface SharedBill {
   status: BillStatus;
   dueDate: string;
   createdAt: string;
+  /** FIRST | REGULAR | LAST — hoá đơn tiền phòng kỳ đầu chạy mốc nhắc riêng (3 ngày). */
+  cycleType?: string;
   paidAt?: string;
   paidAmount?: number;
   paymentMethod?: BillPaymentMethod;
