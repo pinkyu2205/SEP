@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, ChevronRight, Home, LogOut, Search } from 'lucide-react';
+import { Bell, ChevronRight, Home, Search } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
+import { UserMenu } from './UserMenu';
+
+const initialsOf = (name?: string) =>
+  (name || 'HB').split(' ').filter(Boolean).slice(-2).map(w => w[0]).join('').toUpperCase() || 'HB';
 
 const ROUTE_LABELS: Record<string, string> = {
   '/host': 'Bảng điều hành',
@@ -13,6 +17,9 @@ const ROUTE_LABELS: Record<string, string> = {
   '/host/contracts': 'Phê duyệt hợp đồng',
   '/host/maintenance': 'Giám sát bảo trì',
   '/host/financial': 'Quản lý tài chính',
+  '/host/billing': 'Hoá đơn & Thanh toán',
+  '/host/receivables': 'Công nợ phải thu',
+  '/host/deposits': 'Sổ cọc',
   '/host/equipments': 'Danh mục tài sản',
   '/host/reports': 'Báo cáo & Phân tích',
   '/host/notifications': 'Thông báo',
@@ -111,23 +118,16 @@ export const Header = () => {
 
         <div className="h-5 w-px bg-slate-200" />
 
-        <div className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-            {user?.role === 'admin' ? 'A' : 'HB'}
-          </div>
-          <div className="hidden sm:block">
-            <p className="text-xs font-bold text-slate-800 leading-tight group-hover:text-primary-600 transition-colors">{user?.fullName ?? 'Hoàng Bình Land'}</p>
-            <p className="text-[10px] text-slate-400 leading-tight">{user?.role === 'admin' ? 'Admin' : 'Cổng quản lý Host'}</p>
-          </div>
-        </div>
-
-        <button
-          onClick={logout}
-          className="p-2 text-slate-400 hover:text-rose-600 transition-colors rounded-lg hover:bg-rose-50"
-          title="Đăng xuất"
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
+        {/* Nút đăng xuất trần trước đây nằm ở đây đã gộp vào menu tài khoản —
+            AppSidebar cũng có sẵn một nút đăng xuất, để hai nút trần cạnh nhau
+            vừa thừa vừa dễ bấm nhầm. */}
+        <UserMenu
+          name={user?.fullName ?? 'Hoàng Bình Land'}
+          subtitle={user?.username ? `@${user.username}` : 'Cổng quản lý Host'}
+          initials={initialsOf(user?.fullName)}
+          settingsTo="/host/settings"
+          onLogout={logout}
+        />
       </div>
     </header>
   );

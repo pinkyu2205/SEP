@@ -1,5 +1,11 @@
+/**
+ * Tiền VND — luôn làm tròn về đồng nguyên.
+ * BE trả BigDecimal có phần thập phân ở các số chia tỷ lệ (vd chi phí thuê nhà
+ * phân bổ theo tháng → 107.391.304,3478…). VND không có đơn vị nhỏ hơn đồng nên
+ * hiển thị phần lẻ chỉ gây nhiễu. Ép Number để chịu được cả chuỗi số BE trả về.
+ */
 export const formatCurrency = (amount: number): string => {
-  return amount.toLocaleString('vi-VN') + ' ₫';
+  return Math.round(Number(amount) || 0).toLocaleString('vi-VN') + ' ₫';
 };
 
 export const roomStatusMap = {
