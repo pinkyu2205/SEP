@@ -18,10 +18,10 @@ import { toastBus } from '@/store/toastBus';
  * constants/rentCycle.ts → FIRST_RENT_CYCLE): nhắc mỗi ngày trong 3 ngày, quá 3
  * ngày thì báo quản lý.
  *
- * Push điện thoại là việc của BE (chưa làm — xem docs/BE-HANDOFF-first-cycle-
- * reminder-2026-08-07.md). Hook này lo phần "thông báo trong app mỗi khi tenant
- * đăng nhập": bắn 1 lần cho mỗi phiên đăng nhập, và bắn lại nếu app nằm nền qua
- * ngày mới rồi mở lại — đúng nhịp mỗi ngày 1 tin.
+ * Push điện thoại do BE lo (cron RENT_FIRST_CYCLE_REMINDER, 08:00 mỗi ngày — BE
+ * commit a52c370). Hook này lo phần "thông báo trong app mỗi khi tenant đăng nhập":
+ * bắn 1 lần cho mỗi phiên, và bắn lại nếu app nằm nền qua ngày mới rồi mở lại.
+ * Hai kênh không đụng nhau: push là của hệ điều hành, cái này là băng toast trong app.
  */
 
 /** id âm để không đụng id thông báo thật của BE (luôn dương). */

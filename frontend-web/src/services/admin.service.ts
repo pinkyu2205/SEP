@@ -1,22 +1,22 @@
 import api from './api';
+import type { Page } from '@/types/api.types';
 
 // =============================================================================
 // Admin (System Admin) service — giám sát tài chính toàn hệ thống.
 //
-// ⚠️ ĐÃ BỎ `GET /api/v1/admin/invoices` (07/08/2026). Endpoint đó KHÔNG đọc bảng
-// hoá đơn thật: `AdminBillingServiceImpl.buildInvoices()` tự dựng "hoá đơn ảo" từ
-// các hợp đồng ACTIVE — mỗi hợp đồng 1 dòng/tháng, với:
-//   • id       = "{contractId}-{yyyy-MM}"      (không phải mã hoá đơn thật)
-//   • amount   = contract.rentAmount            (trọn tháng, không prorate)
-//   • dueDate  = cuối tháng + 5 ngày            (hạn bịa, hoá đơn thật hạn ngày 5)
-//   • status   = suy từ contract.paymentStatus  (vốn là trạng thái thu CỌC)
-// Không có mã hoá đơn, không có hoá đơn điện/nước, không có kỳ thanh toán.
+// Nguồn dữ liệu (BE commit a52c370, verify 08/08/2026):
+//   • Hoá đơn   `GET /api/v1/manager/invoices`  — ManagerBillingController cho phép
+//     cả ROLE_ADMIN; admin gọi thì managerFilter = null nên nhận hoá đơn TOÀN hệ
+//     thống, đã `ORDER BY i.createdAt DESC` sẵn (mới nhất lên đầu, FE không sort lại).
+//     Admin nhận đủ số tiền; manager bị BE null `amount`/`totalAmount`/`lateFee`
+//     với hoá đơn RENT — xem mobile-app/src/constants/managerVisibility.ts.
+//   • Giao dịch `GET /api/v1/manager/payments`  — ghép với hoá đơn theo `invoiceCode`.
+//   • Tiền cọc  `GET /api/v1/admin/deposits`    — cọc nằm trên hợp đồng, không có
+//     trong bảng hoá đơn.
+//   • Host      `GET /api/v1/admin/hosts`       — chỉ để đếm ở Bảng điều hành.
 //
-// NGUỒN THẬT: `GET /api/v1/manager/invoices` — `ManagerBillingController` cho phép
-// cả `ROLE_ADMIN`; khi người gọi là admin thì `managerFilter = null`, nên
-// `TenantInvoiceRepository.findForManager` trả hoá đơn của TOÀN hệ thống và đã
-// `ORDER BY i.createdAt DESC` sẵn (mới nhất lên đầu — không cần FE sort lại).
-// Kèm `GET /api/v1/manager/payments` để tra giao dịch đã ghi nhận của từng hoá đơn.
+// `GET /api/v1/admin/invoices` đã bị BE XOÁ HẲN (a52c370) vì nó dựng "hoá đơn ảo"
+// từ hợp đồng chứ không đọc bảng hoá đơn thật. Đừng gọi lại.
 // =============================================================================
 
 const MANAGER = '/api/v1/manager';
@@ -170,34 +170,32 @@ const paymentToRow = (d: ManagerPaymentDto): AdminPaymentRow => {
  * (`TenantContract.deposit` + `paymentStatus` + `depositPaidAt` + `depositMethod`),
  * thu 1 lần lúc đón khách. Vì vậy không thể lấy qua /manager/invoices.
  *
- * Nguồn: `GET /api/v1/tenant-contracts` — `TenantContractActionController.listAll`,
- * cho phép MANAGER + ADMIN, và `getContractsByStatus(null)` gọi thẳng `findAll()`
- * nên admin nhận toàn bộ hợp đồng, không bị lọc theo người quản lý. Verify 07/08/2026.
+ * Nguồn: `GET /api/v1/admin/deposits` — `AdminBillingController`, chỉ ADMIN. BE đã
+ * phân trang và sort sẵn `COALESCE(paidAt, depositCashManagerConfirmedAt) DESC` nên
+ * FE không sắp lại. Khác bản `/manager/deposits`, DTO của admin CÓ `deposit` và
+ * `rentAmount` — admin được xem tiền, manager thì không.
  */
 
 /** Khớp `PaymentStatus` của BE — trạng thái thu CỌC của hợp đồng. */
 export type AdminDepositStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED';
 
-/** Chỉ những field của `TenantContractResponse` mà màn tài chính cần. */
-interface TenantContractDto {
-  id: number;
+/** Khớp `AdminDepositDto` của BE. */
+interface AdminDepositDto {
+  contractId: number;
   contractCode?: string | null;
   propertyName?: string | null;
   roomNumber?: string | null;
-  tenantFullName?: string | null;
+  tenantName?: string | null;
   tenantPhone?: string | null;
   deposit?: number | string | null;
   depositMonths?: number | null;
   rentAmount?: number | string | null;
   paymentStatus?: string | null;
-  depositPaidAt?: string | null;
   /** BE suy ra: có payosOrderCode → "PAYOS", có xác nhận tiền mặt → "CASH", còn lại null. */
   depositMethod?: string | null;
-  payosOrderCode?: number | null;
-  status?: string | null;          // ContractStatus: DRAFT|PENDING|ACTIVE|EXPIRED|TERMINATED
+  depositPaidAt?: string | null;
+  contractStatus?: string | null;   // DRAFT | PENDING | ACTIVE | EXPIRED | TERMINATED
   moveInDate?: string | null;
-  startDate?: string | null;
-  signedAt?: string | null;
 }
 
 export interface AdminDepositRow {
@@ -216,33 +214,27 @@ export interface AdminDepositRow {
   contractStatus: string;
   /** Ngày nhận phòng — cọc phải thu xong trước mốc này. */
   moveInDate?: string;
-  signedAt?: string;
-  /** Mốc dùng để xếp "mới nhất trên đầu": ngày thu cọc, không có thì ngày ký/nhận phòng. */
-  sortAt: string;
 }
 
 const DEPOSIT_STATUSES: AdminDepositStatus[] = ['PENDING', 'PAID', 'FAILED', 'CANCELLED'];
 
-const contractToDepositRow = (d: TenantContractDto): AdminDepositRow => {
+const depositToRow = (d: AdminDepositDto): AdminDepositRow => {
   const status = (d.paymentStatus || '').toUpperCase() as AdminDepositStatus;
-  const paidAt = d.depositPaidAt ?? undefined;
   return {
-    contractId: d.id,
-    contractCode: d.contractCode ?? `HĐ #${d.id}`,
+    contractId: d.contractId,
+    contractCode: d.contractCode ?? `HĐ #${d.contractId}`,
     propertyName: d.propertyName ?? '—',
     roomNumber: d.roomNumber ?? undefined,
-    tenantName: d.tenantFullName ?? '—',
+    tenantName: d.tenantName ?? '—',
     tenantPhone: d.tenantPhone ?? undefined,
     amount: Number(d.deposit) || 0,
     depositMonths: d.depositMonths ?? undefined,
     rentAmount: Number(d.rentAmount) || 0,
     status: DEPOSIT_STATUSES.includes(status) ? status : 'PENDING',
     method: d.depositMethod ?? undefined,
-    paidAt,
-    contractStatus: (d.status || '').toUpperCase(),
-    moveInDate: d.moveInDate ?? d.startDate ?? undefined,
-    signedAt: d.signedAt ?? undefined,
-    sortAt: paidAt ?? d.signedAt ?? d.moveInDate ?? d.startDate ?? '',
+    paidAt: d.depositPaidAt ?? undefined,
+    contractStatus: (d.contractStatus || '').toUpperCase(),
+    moveInDate: d.moveInDate ?? undefined,
   };
 };
 
@@ -282,20 +274,16 @@ export const adminService = {
   },
 
   /**
-   * Tiền cọc của mọi hợp đồng, mới thu trước.
-   *
-   * ⚠️ BE trả `findAll()` KHÔNG sort, nên FE phải tự xếp — khác /manager/invoices
-   * (BE đã sort sẵn). Bỏ hợp đồng nháp (DRAFT) vì chưa phát sinh nghĩa vụ thu cọc.
+   * Tiền cọc của mọi hợp đồng, mới thu trước (BE sort sẵn).
+   * Bỏ hợp đồng nháp (DRAFT) vì chưa phát sinh nghĩa vụ thu cọc.
    */
-  listDeposits: async (): Promise<AdminDepositRow[]> => {
-    const res = await api.get<unknown, TenantContractDto[]>(
-      '/api/v1/tenant-contracts', { skipErrorToast: true } as object,
+  listDeposits: async (status?: AdminDepositStatus): Promise<AdminDepositRow[]> => {
+    const res = await api.get<unknown, Page<AdminDepositDto> | AdminDepositDto[]>(
+      `${ADMIN}/deposits`,
+      { params: { status, size: 500 }, skipErrorToast: true } as object,
     );
-    if (!Array.isArray(res)) return [];
-    return res
-      .map(contractToDepositRow)
-      .filter(r => r.contractStatus !== 'DRAFT' && r.amount > 0)
-      .sort((a, b) => b.sortAt.localeCompare(a.sortAt));
+    const list = Array.isArray(res) ? res : res?.content ?? [];
+    return list.map(depositToRow).filter(r => r.contractStatus !== 'DRAFT');
   },
 
   /** Danh sách host (user role OWNER) — chỉ để đếm ở Bảng điều hành. */

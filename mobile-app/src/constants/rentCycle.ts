@@ -21,20 +21,18 @@
  *   • Điện/nước KHÔNG nằm trong chu kỳ này: manager vẫn ghi chỉ số & gửi tay, nhưng
  *     gửi xong BE bắn thông báo cho khách ngay.
  *
- * ⚠️ BE CHƯA khớp chính sách này (đọc lại code 07/08/2026 — BillingCronServiceImpl):
- *   - generateMonthlyRentInvoices: 00:05 ngày 1, dueDate = ngày 5  → ĐÚNG.
- *   - remindUpcomingRentOn28th   : 00:10 ngày 28                   → ĐÚNG.
- *   - runDailySweep (08:00 mỗi ngày) thì KHÔNG nhắc mỗi ngày: chỉ bắn khi còn
- *     đúng 2 ngày tới hạn, đúng ngày tới hạn, và ngày quá hạn đầu tiên (đánh dấu
- *     OVERDUE). Sau đó im lặng tới ĐÚNG ngày quá hạn thứ 10 mới báo quản lý +
- *     host và set contract.terminationProposed = true.
+ * ✅ BE ĐÃ KHỚP chính sách này (verify 08/08/2026 — BE commit a52c370):
+ *   - generateMonthlyRentInvoices : 00:05 ngày 1, dueDate = ngày 5
+ *   - remindUpcomingRentOn28th    : 00:10 ngày 28
+ *   - runDailySweep (08:00 mỗi ngày): nhắc mỗi ngày 2–4, hạn ngày 5, nhắc lần cuối
+ *     ngày 7, và từ ngày 8 (`overdueDays >= termination-after-days`) thì báo quản lý
+ *     + host rồi set contract.terminationProposed = true.
+ *   - Các mốc nằm ở application.yaml: billing.rent.{due-day, final-reminder-day,
+ *     termination-after-days} — đúng bằng các số trong RENT_CYCLE bên dưới.
  *
- * ĐÃ CHỐT 07/08/2026 — phương án A: BE sửa cron cho khớp mốc 1–5–7–8 bên dưới,
- * FE GIỮ NGUYÊN các con số này. Tức file này là NGUỒN SỰ THẬT, phần lệch là bug
- * của BE chứ không phải của FE — KHÔNG sửa RENT_CYCLE cho vừa BE.
- * Spec bàn giao: docs/BE-HANDOFF-rent-reminder-schedule-2026-08-07.md.
- * Kỳ đầu (nhận phòng giữa tháng) chạy mốc riêng — xem FIRST_RENT_CYCLE cuối file
- * và docs/BE-HANDOFF-first-cycle-reminder-2026-08-07.md.
+ * File này là NGUỒN SỰ THẬT phía FE. Đổi số ở đây thì phải đổi cả application.yaml
+ * của BE, nếu không hai bên nói hai kiểu với cùng một người dùng.
+ * Kỳ đầu (nhận phòng giữa tháng) chạy mốc riêng — xem FIRST_RENT_CYCLE cuối file.
  */
 
 export const RENT_CYCLE = {
@@ -243,9 +241,11 @@ export const canTerminateForUnpaidRent = (
  *                     dứt hợp đồng (app không tự cắt).
  *   • Vẫn KHÔNG tính phí phạt trả chậm.
  *
- * ⚠️ Phần push + báo quản lý là việc của BE — hiện BE chưa làm (vẫn dùng mốc 10
- * ngày dùng chung). FE tự lo phần hiển thị + nhắc trong app. Chi tiết bàn giao:
- * docs/BE-HANDOFF-first-cycle-reminder-2026-08-07.md.
+ * ✅ BE đã làm (commit a52c370): hoá đơn kỳ đầu mang `cycleType = FIRST`, hạn đặt
+ * `now + billing.first-cycle-grace-days` (mặc định 3), và runDailySweep có nhánh
+ * riêng bắn RENT_FIRST_CYCLE_REMINDER mỗi ngày D+1→D+3, quá hạn thì
+ * RENT_FIRST_CYCLE_OVERDUE + RENT_FIRST_CYCLE_MANAGER và gắn terminationProposed.
+ * FE lo phần hiển thị + nhắc trong app (hooks/useFirstCycleReminder).
  */
 export const FIRST_RENT_CYCLE = {
   /** Số ngày nhắc liên tục sau ngày nhận phòng (D+1 → D+3), mỗi ngày 1 tin. */
@@ -295,12 +295,13 @@ export interface RentCycleInvoiceLike {
  * Hoá đơn này có phải hoá đơn TIỀN PHÒNG KỲ ĐẦU (ngay sau khi nhận phòng) không.
  *
  * Thứ tự tin cậy:
- *   1. `cycleType` của BE — chuẩn nhất, dùng ngay khi BE trả về.
+ *   1. `cycleType` của BE — đường chính từ 08/08/2026, BE đã trả field này.
  *   2. `contractStartDate` — kỳ hoá đơn trùng tháng nhận phòng VÀ nhận phòng sau ngày 1.
- *   3. Suy ra từ khoảng cách phát hành → hạn. Kỳ đầu phát hành lúc nhận phòng nên hạn
- *      cách ngày tạo tối đa `graceDays` (BE hiện đặt bằng 0, sau khi sửa sẽ là 3), còn
- *      hoá đơn tháng thường luôn phát hành ngày 1 / hạn ngày 5 → cách 4 ngày. Nhờ vậy
- *      nhận diện đúng cả trước lẫn sau khi BE sửa `dueDate`.
+ *   3. Suy ra từ khoảng cách phát hành → hạn: kỳ đầu cách tối đa `graceDays`, hoá đơn
+ *      tháng thường phát hành ngày 1 / hạn ngày 5 nên cách 4 ngày.
+ *
+ * Giữ lại 2 & 3 làm lưới đỡ cho hoá đơn TẠO TRƯỚC khi BE thêm cột `cycle_type` —
+ * những bản ghi đó có `cycleType = NULL` vĩnh viễn trừ khi chạy migration vá lại.
  */
 export const isFirstRentCycleInvoice = (
   inv: RentCycleInvoiceLike | null | undefined,

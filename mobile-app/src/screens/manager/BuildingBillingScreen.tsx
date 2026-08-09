@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, Image, TextInput, ScrollView, Dimensions, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,12 +17,6 @@ type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 type FilterType = 'all' | BillStatus;
 
 // ===================== CONSTANTS =====================
-const VIETQR_BANK_BIN = '970422';
-const VIETQR_ACCOUNT  = '0865803493';
-
-const buildQRUrl = (amount: number, content: string) =>
-  `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=ROOMRENT`;
-
 const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 
 const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: string }> = {
@@ -76,7 +70,6 @@ export const BuildingBillingScreen: React.FC = () => {
   const [search,           setSearch]           = useState('');
   const [filter,           setFilter]           = useState<FilterType>('all');
   const [selectedBill,     setSelectedBill]     = useState<ManagerInvoice | null>(null);
-  const [showQRModal,      setShowQRModal]      = useState(false);
   const [showCashModal,    setShowCashModal]    = useState(false);
   const [showEwalletModal, setShowEwalletModal] = useState(false);
   const [cashNote,         setCashNote]         = useState('');
@@ -119,7 +112,7 @@ export const BuildingBillingScreen: React.FC = () => {
     setSubmitting(true);
     try {
       await realManagerInvoiceService.markInvoicePaid(selectedBill.id, { method, note });
-      setShowQRModal(false); setShowCashModal(false); setShowEwalletModal(false);
+      setShowCashModal(false); setShowEwalletModal(false);
       setSelectedBill(null); setCashNote('');
       showAlert('✅ Thành công', 'Đã ghi nhận thanh toán.');
       load();
@@ -258,7 +251,7 @@ export const BuildingBillingScreen: React.FC = () => {
       )}
 
       {/* ── Bill Detail Modal ─────────────────────────────────────── */}
-      {selectedBill && !showQRModal && !showCashModal && !showEwalletModal && (() => {
+      {selectedBill && !showCashModal && !showEwalletModal && (() => {
         const st  = toLocalStatus(selectedBill.status);
         const cfg = STATUS_CONFIG[st];
         return (
@@ -306,9 +299,17 @@ export const BuildingBillingScreen: React.FC = () => {
                   {st !== 'paid' && st !== 'cancelled' && (
                     <View style={s.paymentActions}>
                       <Text style={s.paymentActionsTitle}>Ghi nhận thanh toán</Text>
-                      <TouchableOpacity style={s.qrPayBtn} onPress={() => setShowQRModal(true)}>
-                        <Text style={s.qrPayBtnText}>📱 Hiện QR cho khách quét</Text>
-                      </TouchableOpacity>
+                      {/* Đã bỏ nút "Hiện QR cho khách quét": QR do FE tự ghép URL
+                          img.vietqr.io từ `invoice.amount`, mà từ BE commit a52c370
+                          `amount` là NULL với tài khoản quản lý → mã QR sinh ra sai số
+                          tiền. Khách tự thanh toán trong app của mình (PayOS); ở đây
+                          quản lý chỉ GHI NHẬN khoản đã nhận ngoài luồng app.
+                          Muốn có lại QR thì BE phải trả `payosQrCode` trong
+                          ManagerInvoiceResponse — xem docs/BE-NEED-*-2026-08-08.md. */}
+                      <Text style={s.paymentActionsHint}>
+                        Khách thuê thanh toán trong app của mình. Chỉ dùng các nút dưới khi
+                        khách trả trực tiếp cho bạn.
+                      </Text>
                       <View style={s.payAltRow}>
                         <TouchableOpacity style={s.payAltBtn} onPress={() => setShowCashModal(true)}>
                           <Text style={s.payAltIcon}>💵</Text>
@@ -338,52 +339,6 @@ export const BuildingBillingScreen: React.FC = () => {
         );
       })()}
 
-      {/* ── QR Payment Modal ──────────────────────────────────────── */}
-      {showQRModal && selectedBill && (
-        <Modal transparent animationType="slide">
-          <View style={s.modalOverlay}>
-            <View style={s.billDetailSheet}>
-              <ScrollView bounces={false} showsVerticalScrollIndicator={false}
-                contentContainerStyle={s.billDetailContent}>
-                <View style={s.modalHeader}>
-                  <Text style={s.modalTitle}>QR Thanh toán</Text>
-                  <TouchableOpacity onPress={() => setShowQRModal(false)}>
-                    <Text style={s.modalClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                {/* Không ghi số tiền ra chữ — mã QR vẫn mang đúng số, khách quét là ra.
-                    Manager chỉ cần đưa QR cho khách (xem @/constants/managerVisibility). */}
-                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {selectedBill.code}</Text>
-                <View style={s.qrImageContainer}>
-                  <Image
-                    source={{ uri: buildQRUrl(selectedBill.amount, `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim()) }}
-                    style={s.qrImage}
-                    resizeMode="contain"
-                  />
-                </View>
-                <View style={s.bankInfoBox}>
-                  {[
-                    { label: 'Ngân hàng', val: 'MB Bank' },
-                    { label: 'Số TK',     val: VIETQR_ACCOUNT },
-                    { label: 'Số tiền',   val: 'Đã gắn sẵn trong mã QR', primary: true },
-                    { label: 'Nội dung',  val: `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim() },
-                  ].map((row, i) => (
-                    <View key={i} style={s.bankRow}>
-                      <Text style={s.bankLabel}>{row.label}</Text>
-                      <Text style={[s.bankVal, row.primary && { color: Colors.primary, fontWeight: '800' }]}>
-                        {row.val}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <TouchableOpacity style={s.confirmPayBtn} disabled={submitting} onPress={() => recordPaid('QR')}>
-                  <Text style={s.confirmPayBtnText}>✅ Xác nhận đã thanh toán</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      )}
 
       {/* ── Cash Modal ───────────────────────────────────────────── */}
       {showCashModal && selectedBill && (
@@ -563,11 +518,9 @@ const s = StyleSheet.create({
 
   paymentActions:      { marginBottom: Spacing.md },
   paymentActionsTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },
-  qrPayBtn:    {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md,
+  paymentActionsHint: {
+    fontSize: 12, color: Colors.textMuted, lineHeight: 17, marginBottom: Spacing.md,
   },
-  qrPayBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
   payAltRow:    { flexDirection: 'row', gap: Spacing.sm },
   payAltBtn:    {
     flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
@@ -578,18 +531,6 @@ const s = StyleSheet.create({
 
   paidInfo:     { backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg, padding: Spacing.md },
   paidInfoText: { fontSize: 14, color: Colors.success, lineHeight: 22, fontWeight: '500' },
-
-  qrSubtitle:       { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', marginBottom: Spacing.md },
-  qrImageContainer: {
-    alignItems: 'center', backgroundColor: Colors.white, padding: Spacing.md,
-    borderRadius: BorderRadius.lg, borderWidth: 2, borderColor: Colors.divider,
-    alignSelf: 'center', marginBottom: Spacing.md,
-  },
-  qrImage:     { width: 220, height: 280 },
-  bankInfoBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.lg, padding: Spacing.base, marginBottom: Spacing.lg },
-  bankRow:     { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: Spacing.sm },
-  bankLabel:   { fontSize: 13, color: Colors.textMuted },
-  bankVal:     { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
 
   confirmPayBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
