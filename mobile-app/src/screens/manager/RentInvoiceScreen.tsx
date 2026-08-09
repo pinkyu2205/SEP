@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  RENT_CYCLE, RENT_POLICY_FULL, RENT_PARTIAL_CYCLE_NOTE, RENT_REMINDER_STEPS,
+  RENT_CYCLE, RENT_POLICY_SHORT, RENT_POLICY_FULL, RENT_PARTIAL_CYCLE_NOTE, RENT_REMINDER_STEPS,
   RENT_TERMINATION_AFTER_DAYS, FIRST_RENT_CYCLE, FIRST_RENT_CYCLE_NOTE,
   toMonthKey, shiftMonthKey, monthLabel, rentIssueDate, rentDueDate,
   daysOverdue, overdueStage, canTerminateForUnpaidRent, partialRentCycle,
@@ -53,6 +53,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
   const [rows, setRows] = useState<RentRow[]>([]);
   const [loadingRows, setLoadingRows] = useState(false);
   const [terminatingId, setTerminatingId] = useState<number | null>(null);
+  /** Banner chính sách mặc định thu gọn — xem chú thích chỗ render. */
+  const [policyOpen, setPolicyOpen] = useState(false);
 
   const loadProps = useCallback(async () => {
     try {
@@ -296,19 +298,45 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-        {/* ── Chính sách chu kỳ ── */}
+        {/* ── Chính sách chu kỳ ──
+            Mặc định THU GỌN: 3 đoạn text dài + 6 chip xuống dòng chiếm gần nửa màn,
+            đẩy phần chọn toà nhà (việc chính) xuống dưới. Giữ lại đúng 1 dòng tóm tắt
+            + dải mốc cuộn ngang; ai cần đọc kỹ thì bấm "Chi tiết". */}
         <View style={s.policyBox}>
-          <Text style={s.policyTitle}>🤖 Chạy hoàn toàn tự động</Text>
-          <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
-          <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
-          <Text style={[s.policyText, { marginTop: 6 }]}>🆕 {FIRST_RENT_CYCLE_NOTE}</Text>
-          <View style={s.reminderRow}>
+          <TouchableOpacity
+            style={s.policyHead}
+            onPress={() => setPolicyOpen(o => !o)}
+            activeOpacity={0.7}
+          >
+            <View style={s.policyHeadText}>
+              <Text style={s.policyTitle}>🤖 Chạy hoàn toàn tự động</Text>
+              <Text style={s.policySummary} numberOfLines={1}>
+                {RENT_POLICY_SHORT} · nhắc khách tự động · trễ không phạt tiền
+              </Text>
+            </View>
+            <Text style={s.policyToggle}>{policyOpen ? 'Thu gọn ▴' : 'Chi tiết ▾'}</Text>
+          </TouchableOpacity>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.reminderRow}
+          >
             {RENT_REMINDER_STEPS.map(r => (
               <View key={r.day} style={s.reminderChip}>
-                <Text style={s.reminderChipText}>Ngày {r.day} · {r.label}</Text>
+                <Text style={s.reminderChipDay}>{r.day}</Text>
+                <Text style={s.reminderChipText} numberOfLines={1}>{r.label}</Text>
               </View>
             ))}
-          </View>
+          </ScrollView>
+
+          {policyOpen && (
+            <View style={s.policyDetail}>
+              <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
+              <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
+              <Text style={[s.policyText, { marginTop: 6 }]}>🆕 {FIRST_RENT_CYCLE_NOTE}</Text>
+            </View>
+          )}
         </View>
 
         <Text style={s.sectionTitle}>Chọn tòa nhà / căn hộ</Text>
@@ -426,13 +454,28 @@ const s = StyleSheet.create({
   groupLabel: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: Spacing.xs },
 
   policyBox: {
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md, padding: Spacing.md,
-    marginBottom: Spacing.lg, borderLeftWidth: 3, borderLeftColor: Colors.primary,
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, paddingLeft: Spacing.md,
+    marginBottom: Spacing.md, borderLeftWidth: 3, borderLeftColor: Colors.primary,
   },
-  policyTitle: { fontSize: 13, fontWeight: '800', color: Colors.primary, marginBottom: 4 },
+  policyHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingRight: Spacing.md },
+  policyHeadText: { flex: 1 },
+  policyTitle: { fontSize: 13, fontWeight: '800', color: Colors.primary },
+  policySummary: { fontSize: 11, color: Colors.primary, opacity: 0.75, marginTop: 1 },
+  policyToggle: { fontSize: 11, fontWeight: '800', color: Colors.primary },
+  policyDetail: { paddingRight: Spacing.md, marginTop: Spacing.sm },
   policyText: { fontSize: 12, color: Colors.primary, lineHeight: 18 },
-  reminderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: Spacing.sm },
-  reminderChip: { backgroundColor: Colors.white, borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 3 },
+  // Dải mốc cuộn ngang: 6 mốc mà xuống dòng thì ăn 2–3 hàng, cuộn ngang giữ đúng 1 hàng.
+  reminderRow: { gap: 6, paddingRight: Spacing.md, marginTop: Spacing.sm },
+  reminderChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.full,
+    paddingLeft: 4, paddingRight: 9, paddingVertical: 3,
+  },
+  reminderChipDay: {
+    fontSize: 10, fontWeight: '800', color: Colors.white, backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.full, minWidth: 20, textAlign: 'center', paddingHorizontal: 5, paddingVertical: 2,
+  },
   reminderChipText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
 
   propRow: {

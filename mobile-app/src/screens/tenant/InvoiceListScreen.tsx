@@ -221,39 +221,64 @@ export const InvoiceListScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* ── Summary chips ── */}
+      {/* ── Tổng phải trả ──
+          Trước đây đây là một ScrollView ngang đặt thẳng trong SafeAreaView (cột flex):
+          ScrollView không có chiều cao nội dung cố định nên bị kéo giãn, chừa một
+          mảng trắng to giữa tiêu đề và bộ lọc. Giờ bọc trong View và cho ScrollView
+          `flexGrow: 0` nên khối chỉ cao đúng bằng nội dung.
+
+          Nội dung cũng gộp lại: mỗi loại một thẻ to xếp dọc (icon/nhãn/tiền) vừa cao
+          vừa lặp lại đúng con số của thẻ hoá đơn ngay bên dưới. Giờ là một dòng
+          "Cần thanh toán + tổng tiền", loại phí thu nhỏ thành chip lọc nhanh. */}
       {(overdueCount > 0 || pendingTotal > 0) && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.summaryRow}>
-          {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
-            const bills = unpaidByType(type);
-            if (!bills.length) return null;
-            const cfg = TYPE_CONFIG[type];
-            const total = bills.reduce((s, b) => s + b.grandTotal, 0);
-            const isActive = typeFilter === type && statusFilter === 'unpaid';
-            return (
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryTop}>
+            <View style={styles.summaryTotalBox}>
+              <Text style={styles.summaryTotalLabel}>Cần thanh toán</Text>
+              <Text style={styles.summaryTotalValue}>{formatCurrency(pendingTotal)}</Text>
+            </View>
+            {overdueCount > 0 && (
               <TouchableOpacity
-                key={type}
-                style={[styles.summaryChip, { backgroundColor: cfg.bg }, isActive && styles.summaryChipActive]}
-                onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
+                style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
+                onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
               >
-                <Text style={styles.summaryChipIcon}>{cfg.icon}</Text>
-                <Text style={[styles.summaryChipLabel, { color: cfg.color }]}>{cfg.label}</Text>
-                <Text style={[styles.summaryChipAmount, { color: cfg.color }]}>{formatCurrency(total)}</Text>
+                <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
+                  ⚠️ {overdueCount} quá hạn
+                </Text>
               </TouchableOpacity>
-            );
-          })}
-          {overdueCount > 0 && (
-            <TouchableOpacity
-              style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
-              onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
-            >
-              <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
-                ⚠️ {overdueCount} quá hạn
-              </Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
+            )}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.summaryTypesScroll}
+            contentContainerStyle={styles.summaryTypes}
+          >
+            {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
+              const bills = unpaidByType(type);
+              if (!bills.length) return null;
+              const cfg = TYPE_CONFIG[type];
+              const total = bills.reduce((s, b) => s + b.grandTotal, 0);
+              const isActive = typeFilter === type && statusFilter === 'unpaid';
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.typeChip, { backgroundColor: cfg.bg }, isActive && styles.typeChipActive]}
+                  onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
+                >
+                  <Text style={styles.typeChipIcon}>{cfg.icon}</Text>
+                  <Text style={[styles.typeChipLabel, { color: cfg.color }]} numberOfLines={1}>
+                    {cfg.label}
+                  </Text>
+                  <Text style={[styles.typeChipAmount, { color: cfg.color }]} numberOfLines={1}>
+                    {formatCurrency(total)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
 
       {/* ── Filter row 1: Loại ── */}
@@ -377,25 +402,38 @@ const styles = StyleSheet.create({
   historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
   // Summary chips
-  summaryRow: {
-    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm,
-    gap: Spacing.sm, flexDirection: 'row', alignItems: 'center',
+  summaryCard: {
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingTop: Spacing.sm, paddingBottom: Spacing.sm, paddingLeft: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border,
   },
-  summaryChip: {
-    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    alignItems: 'center', minWidth: 90, borderWidth: 1.5, borderColor: 'transparent',
+  summaryTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingRight: Spacing.md,
   },
-  summaryChipActive: { borderColor: Colors.primary + '80' },
-  summaryChipIcon:   { fontSize: 18, marginBottom: 2 },
-  summaryChipLabel:  { fontSize: 11, fontWeight: '700' },
-  summaryChipAmount: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+  summaryTotalBox: { flex: 1 },
+  summaryTotalLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
+  summaryTotalValue: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 1 },
+  // flexGrow: 0 — không có nó thì ScrollView ngang bị kéo giãn theo chiều dọc.
+  summaryTypesScroll: { flexGrow: 0, marginTop: Spacing.sm },
+  summaryTypes: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: Spacing.md },
+  typeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
+  typeChipActive: { borderColor: Colors.primary + '80' },
+  typeChipIcon: { fontSize: 12 },
+  typeChipLabel: { fontSize: 11, fontWeight: '700' },
+  typeChipAmount: { fontSize: 11, fontWeight: '800' },
   overduePill: {
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs + 1,
+    paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs,
     borderWidth: 1, borderColor: Colors.error + '40',
   },
   overduePillActive: { backgroundColor: Colors.error },
-  overduePillText: { fontSize: 12, fontWeight: '700', color: Colors.error },
+  overduePillText: { fontSize: 11, fontWeight: '700', color: Colors.error },
 
   // Filter rows
   filterBlock: {

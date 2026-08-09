@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, ActivityIndicator,
 } from 'react-native';
@@ -80,11 +80,34 @@ export const TenantContractScreen: React.FC = () => {
     }, []),
   );
 
-  const filtered = filter === 'all'
-    ? contracts
-    : contracts.filter(c => c.status === filter);
+  /**
+   * Thứ tự ưu tiên khi xếp hợp đồng: hợp đồng còn hiệu lực phải nằm trên cùng.
+   * BE trả theo id/ngày tạo nên hợp đồng đã chấm dứt hay lọt lên đầu, khách phải
+   * cuộn qua mấy cái cũ mới thấy hợp đồng đang ở.
+   */
+  const STATUS_RANK: Record<ContractStatus, number> = {
+    active: 0,
+    expiring_soon: 1,
+    pending_host_approval: 2,
+    draft: 3,
+    expired: 4,
+    terminated: 5,
+  };
 
-  const activeContract = contracts.find(c => c.status === 'active' || c.status === 'expiring_soon');
+  const sorted = useMemo(
+    () => [...contracts].sort((a, b) => {
+      const rank = (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9);
+      // Cùng nhóm trạng thái thì hợp đồng mới ký nằm trên.
+      return rank !== 0 ? rank : (b.startDate ?? '').localeCompare(a.startDate ?? '');
+    }),
+    [contracts],
+  );
+
+  const filtered = filter === 'all'
+    ? sorted
+    : sorted.filter(c => c.status === filter);
+
+  const activeContract = sorted.find(c => c.status === 'active' || c.status === 'expiring_soon');
 
   const renderContract = ({ item }: { item: CardContract }) => {
     const isActive = item.status === 'active';
