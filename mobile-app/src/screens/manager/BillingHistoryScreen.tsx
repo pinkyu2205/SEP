@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -22,6 +23,15 @@ import {
  */
 
 const fmt = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
+
+/** Bỏ dấu + thường hoá — gõ "trang" ra "Đỗ Minh Trang". */
+const norm = (s: string) =>
+  (s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').replace(/[đĐ]/g, 'd').toLowerCase();
+
+const periodText = (key: string) => {
+  const [y, m] = key.split('-');
+  return m ? `T${m}/${y}` : key;
+};
 const monthKey = (i: ManagerInvoice) => `${i.year}-${String(i.month).padStart(2, '0')}`;
 const monthText = (i: ManagerInvoice) => `T${String(i.month).padStart(2, '0')}/${i.year}`;
 
@@ -87,7 +97,10 @@ export const BillingHistoryScreen: React.FC = () => {
       }));
       setProps(items);
       setInvoices(list);
-      setSelectedId(prev => prev ?? paramPropertyId ?? items[0]?.id ?? null);
+      // Chỉ khoá vào 1 nhà khi được mở kèm propertyId (bấm từ thẻ nhà cụ thể).
+      // Vào từ "Lịch sử các kỳ" thì KHÔNG tự chọn nhà đầu tiên — trước đây
+      // `?? items[0]?.id` làm màn luôn chỉ hiện đúng một nhà và không có cách xem hết.
+      setSelectedId(prev => prev ?? paramPropertyId ?? null);
     } catch {
       setInvoices([]);
     } finally {
@@ -100,14 +113,52 @@ export const BillingHistoryScreen: React.FC = () => {
 
   const selectedProp = props.find(p => p.id === selectedId) ?? null;
 
+  /**
+   * Các kỳ CÓ THẬT trong dữ liệu của nhà đang chọn, mới nhất trước.
+   * Nhà thuê 1–2 năm là ra 12–24 kỳ; đổ hết ra một trang thì không đọc nổi, nên
+   * mặc định chỉ xem kỳ mới nhất và cho chuyển kỳ bằng hàng chip bên dưới.
+   */
+  const periods = useMemo(() => {
+    const scoped = invoices.filter(i => selectedId === null || i.propertyId === selectedId);
+    return [...new Set(scoped.map(monthKey))].sort((a, b) => b.localeCompare(a));
+  }, [invoices, selectedId]);
+
+  /** '' = kỳ mới nhất (mặc định), 'all' = mọi kỳ, còn lại là 'YYYY-MM'. */
+  const [periodFilter, setPeriodFilter] = useState<string>('');
+  const activePeriod = periodFilter || periods[0] || '';
+
+  /** Tìm không dấu theo khách / phòng / nhà / mã hoá đơn. */
+  const [search, setSearch] = useState('');
+  const kw = norm(search.trim());
+
+  /** selectedId = null → xem TẤT CẢ nhà mình phụ trách. */
   const filtered = useMemo(() => invoices.filter(i =>
-    i.propertyId === selectedId
+    (selectedId === null || i.propertyId === selectedId)
+    && (periodFilter === 'all' || monthKey(i) === activePeriod)
     && (typeFilter === 'all' || i.type === typeFilter)
-    && (statusFilter === 'all' || i.status === statusFilter),
-  ), [invoices, selectedId, typeFilter, statusFilter]);
+    && (statusFilter === 'all' || i.status === statusFilter)
+    && (!kw || [i.tenantName, i.roomNumber, i.propertyName, i.code]
+      .some(v => norm(v || '').includes(kw))),
+  ), [invoices, selectedId, periodFilter, activePeriod, typeFilter, statusFilter, kw]);
 
   /** Gom theo phòng (nhà nhiều phòng) hoặc gộp 1 mục (nhà nguyên căn). */
   const groups: UnitGroup[] = useMemo(() => {
+    // Xem tất cả nhà → gom theo NHÀ (gom theo phòng sẽ trộn phòng 101 của nhiều nhà
+    // vào chung một mục). Chọn 1 nhà → gom theo phòng như trước.
+    if (selectedId === null) {
+      const byProp = new Map<number, { name: string; list: ManagerInvoice[] }>();
+      for (const inv of filtered) {
+        const cur = byProp.get(inv.propertyId) ?? { name: inv.propertyName, list: [] };
+        cur.list.push(inv);
+        byProp.set(inv.propertyId, cur);
+      }
+      return [...byProp.entries()]
+        // Nhà còn nợ nhiều nhất lên đầu — đó là nhà cần nhìn trước.
+        .sort((a, b) =>
+          b[1].list.filter(x => x.status === 'OVERDUE').length
+          - a[1].list.filter(x => x.status === 'OVERDUE').length)
+        .map(([id, v]) => ({ key: `p-${id}`, title: v.name, invoices: v.list }));
+    }
     if (!selectedProp) return [];
     if (selectedProp.wholeHouse) {
       return filtered.length ? [{ key: 'whole', title: 'Nhà nguyên căn', invoices: filtered }] : [];
@@ -120,7 +171,7 @@ export const BillingHistoryScreen: React.FC = () => {
     return [...byRoom.entries()]
       .sort((a, b) => a[0].localeCompare(b[0], 'vi', { numeric: true }))
       .map(([room, list]) => ({ key: room, title: `Phòng ${room}`, invoices: list }));
-  }, [filtered, selectedProp]);
+  }, [filtered, selectedProp, selectedId]);
 
   // Đếm theo SỐ HOÁ ĐƠN, không cộng tiền: danh sách trộn cả tiền phòng lẫn điện/nước,
   // mà tiền phòng thì manager không được thấy (@/constants/managerVisibility) — cộng
@@ -191,12 +242,54 @@ export const BillingHistoryScreen: React.FC = () => {
           <Text style={s.groupChevron}>{open ? '⌄' : '›'}</Text>
         </TouchableOpacity>
 
+        {/* Màn lịch sử chỉ để TRA CỨU — muốn ghi nhận thanh toán / thao tác thì sang
+            màn thu tiền của nhà đó (BuildingBilling), giống hệt khi bấm thẻ nhà ở
+            màn Hoá đơn tiền nhà. Trước đây vào đây là cụt đường, không làm gì được. */}
+        {open && unpaidCount > 0 && (
+          <TouchableOpacity
+            style={s.groupAction}
+            activeOpacity={0.75}
+            onPress={() => {
+              const inv = g.invoices[0];
+              navigation.navigate('BuildingBilling', {
+                propertyId: String(inv.propertyId), propertyName: inv.propertyName,
+              });
+            }}
+          >
+            <Text style={s.groupActionText}>💵  Ghi nhận thanh toán · còn {unpaidCount} hoá đơn  →</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Mỗi KỲ là một khối riêng có thanh tiêu đề + tình trạng thu của chính kỳ đó.
+            Trước đây chỉ có một dòng chữ nhỏ "KỲ 08/2026" rồi đổ thẳng hoá đơn ra,
+            xem nhiều kỳ liền nhau là không biết hoá đơn nào thuộc kỳ nào. */}
         {open && months.map(m => {
           const list = byMonth.get(m)!;
           const [y, mm] = m.split('-');
+          const mPaid = list.filter(i => i.status === 'PAID').length;
+          const mOverdue = list.filter(i => i.status === 'OVERDUE').length;
+          const allPaid = mPaid === list.length;
           return (
             <View key={m} style={s.monthBlock}>
-              <Text style={s.monthTitle}>Kỳ {mm}/{y}</Text>
+              <View style={s.monthBar}>
+                <Text style={s.monthTitle}>Kỳ {mm}/{y}</Text>
+                <View style={s.monthBadges}>
+                  {mOverdue > 0 && (
+                    <View style={[s.monthPill, { backgroundColor: Colors.errorLight }]}>
+                      <Text style={[s.monthPillText, { color: Colors.error }]}>{mOverdue} quá hạn</Text>
+                    </View>
+                  )}
+                  <View style={[s.monthPill, {
+                    backgroundColor: allPaid ? Colors.successLight : Colors.background,
+                  }]}>
+                    <Text style={[s.monthPillText, {
+                      color: allPaid ? Colors.success : Colors.textSecondary,
+                    }]}>
+                      {allPaid ? `✓ đã thu đủ ${list.length}` : `đã thu ${mPaid}/${list.length}`}
+                    </Text>
+                  </View>
+                </View>
+              </View>
               {list
                 .slice()
                 .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
@@ -216,7 +309,7 @@ export const BillingHistoryScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>Lịch sử hoá đơn</Text>
-          <Text style={s.headerSub}>{selectedProp ? selectedProp.name : 'Chọn nhà để xem'}</Text>
+          <Text style={s.headerSub}>{selectedProp ? selectedProp.name : `Tất cả ${props.length} nhà`}</Text>
         </View>
       </View>
 
@@ -230,10 +323,19 @@ export const BillingHistoryScreen: React.FC = () => {
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
           }
         >
-          {/* Chọn nhà */}
+          {/* Chọn nhà — mặc định "Tất cả nhà" để lịch sử mở ra là thấy hết,
+              rồi mới thu hẹp dần. Chỉ 1 nhà thì không cần hàng chọn này. */}
           {props.length > 1 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
               <View style={s.chipRow}>
+                <TouchableOpacity
+                  style={[s.propChip, selectedId === null && s.propChipActive]}
+                  onPress={() => { setSelectedId(null); setOpenUnit(null); }}
+                >
+                  <Text style={[s.propChipText, selectedId === null && s.propChipTextActive]}>
+                    🗂 Tất cả nhà ({props.length})
+                  </Text>
+                </TouchableOpacity>
                 {props.map(p => (
                   <TouchableOpacity
                     key={p.id}
@@ -269,10 +371,61 @@ export const BillingHistoryScreen: React.FC = () => {
                 <Text style={s.summaryLbl}>Quá hạn</Text>
               </View>
             </View>
+            {/* Nói rõ đang xem kỳ nào, và tổng cộng có bao nhiêu kỳ để tra tiếp —
+                không thì lọc về 1 kỳ xong lại tưởng cả lịch sử chỉ có bấy nhiêu. */}
             <Text style={s.summaryFoot}>
-              {totals.count} hoá đơn · {totals.periods} kỳ đã phát hành
+              {totals.count} hoá đơn ·{' '}
+              {periodFilter === 'all'
+                ? `tất cả ${periods.length} kỳ`
+                : `kỳ ${periodText(activePeriod)} · còn ${Math.max(0, periods.length - 1)} kỳ khác`}
             </Text>
           </View>
+
+          {/* Tìm kiếm */}
+          <View style={s.searchBox}>
+            <Text style={s.searchIcon}>🔍</Text>
+            <TextInput
+              style={s.searchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Tìm khách thuê, phòng, nhà, mã hoá đơn..."
+              placeholderTextColor={Colors.textMuted}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={s.searchClear}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Chọn kỳ — nhà thuê 1–2 năm là 12–24 kỳ, mặc định chỉ xem kỳ mới nhất. */}
+          {periods.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
+              <View style={s.chipRow}>
+                <TouchableOpacity
+                  style={[s.filterChip, periodFilter === 'all' && s.filterChipActive]}
+                  onPress={() => { setPeriodFilter('all'); setOpenUnit(null); }}
+                >
+                  <Text style={[s.filterText, periodFilter === 'all' && s.filterTextActive]}>
+                    Tất cả {periods.length} kỳ
+                  </Text>
+                </TouchableOpacity>
+                {periods.map(p => (
+                  <TouchableOpacity
+                    key={p}
+                    style={[s.filterChip, periodFilter !== 'all' && activePeriod === p && s.filterChipActive]}
+                    onPress={() => { setPeriodFilter(p); setOpenUnit(null); }}
+                  >
+                    <Text style={[s.filterText, periodFilter !== 'all' && activePeriod === p && s.filterTextActive]}>
+                      {periodText(p)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+          )}
 
           {/* Bộ lọc */}
           <View style={s.filterBlock}>
@@ -337,6 +490,15 @@ const s = StyleSheet.create({
   body: { padding: Spacing.lg, gap: Spacing.md },
 
   chipRow: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.xs },
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.base, ...Shadow.sm,
+  },
+  searchIcon: { fontSize: 14 },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 4 },
+  searchClear: { fontSize: 15, fontWeight: '800', color: Colors.textMuted, paddingHorizontal: 4 },
   propChip: {
     paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
@@ -377,9 +539,19 @@ const s = StyleSheet.create({
 
   monthBlock: {
     borderTopWidth: 1, borderTopColor: Colors.divider,
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm, gap: Spacing.sm,
+    paddingHorizontal: Spacing.base, paddingBottom: Spacing.md, gap: Spacing.sm,
   },
-  monthTitle: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase' },
+  // Thanh tiêu đề kỳ: nền xám nhạt kéo hết bề ngang để tách hẳn các kỳ với nhau.
+  monthBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginHorizontal: -Spacing.base, paddingHorizontal: Spacing.base,
+    paddingVertical: Spacing.sm, backgroundColor: Colors.background,
+    marginBottom: Spacing.xs,
+  },
+  monthTitle: { fontSize: 11.5, fontWeight: '900', color: Colors.textSecondary, textTransform: 'uppercase' },
+  monthBadges: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  monthPill: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 2 },
+  monthPillText: { fontSize: 10, fontWeight: '800' },
 
   invRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   typeChip: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
@@ -392,4 +564,10 @@ const s = StyleSheet.create({
 
   emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2 },
   emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  groupAction: {
+    marginHorizontal: Spacing.base, marginBottom: Spacing.md,
+    paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.primaryBg, alignItems: 'center',
+  },
+  groupActionText: { fontSize: 12.5, fontWeight: '800', color: Colors.primary },
 });

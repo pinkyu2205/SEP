@@ -21,7 +21,10 @@ import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 const QUICK_ACTIONS = [
   { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },
+  // "Hóa đơn" chỉ còn lo tiền nhà/phòng; mọi khoản thu khác (cọc, bảo trì, điện
+  // nước) xem ở "Thu & Đối soát" để hai việc không lẫn vào nhau.
   { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
+  { emoji: '💳', label: 'Thu & Đối soát', route: 'ManagerPaymentHistory', color: Colors.info },
   { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
   { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
   // Màn này gồm cả nhà nguyên căn (không có phòng) nên không gọi là "Phòng".
@@ -103,6 +106,13 @@ export const ManagerHomeScreen: React.FC = () => {
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
   const rentTerminable = invoices.filter(i =>
     i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
+  /**
+   * Nhà đang có hoá đơn tới mức được chấm dứt HĐ — bấm thẻ ở My Task là mở thẳng
+   * nhà đó. Không truyền thì màn Tiền phòng tự động rơi về danh sách chọn nhà trống,
+   * người dùng phải tự mò lại đúng nhà vừa được báo.
+   */
+  const terminablePropertyId = invoices.find(i =>
+    i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status))?.propertyId ?? null;
   const unpaidCount   = invoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
@@ -128,7 +138,7 @@ export const ManagerHomeScreen: React.FC = () => {
     { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
       count: checkoutPending > 0 ? checkoutPending : checkoutTodo,
       urgency: checkoutPending > 0 ? 'critical' : 'warning', color: '#DC2626', route: 'CheckoutRequests' },
-    { id: 'p5', icon: '⛔', label: 'Tiền phòng quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'RentInvoice' },
+    { id: 'p5', icon: '⛔', label: 'Tiền phòng quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'RentInvoice', params: terminablePropertyId != null ? { propertyId: terminablePropertyId } : undefined },
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
   ];
 
@@ -209,7 +219,7 @@ export const ManagerHomeScreen: React.FC = () => {
                       backgroundColor : item.color + '0C',
                       borderColor     : item.color + '2E',
                     }]}
-                    onPress={() => navigation.navigate(item.route)}
+                    onPress={() => navigation.navigate(item.route, (item as any).params)}
                     activeOpacity={0.72}
                   >
                     {/* Icon + count badge */}
@@ -242,7 +252,7 @@ export const ManagerHomeScreen: React.FC = () => {
                       s.secondaryRow,
                       i < secondaryItems.length - 1 && s.secondaryRowBorder,
                     ]}
-                    onPress={() => navigation.navigate(item.route)}
+                    onPress={() => navigation.navigate(item.route, (item as any).params)}
                     activeOpacity={0.75}
                   >
                     <View style={[s.secondaryIconWrap, { backgroundColor: item.color + '14' }]}>

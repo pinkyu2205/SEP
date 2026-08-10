@@ -203,8 +203,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           <Text style={s.backBtnText}>‹</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.title}>Lịch sử thanh toán</Text>
-          <Text style={s.subtitle}>Toàn bộ giao dịch của khách thuê · {RENT_AMOUNT_HIDDEN_SHORT}</Text>
+          <Text style={s.title}>Thu & Đối soát</Text>
+          <Text style={s.subtitle}>
+            Tiền cọc · bảo trì · tiền nhà · điện nước · {RENT_AMOUNT_HIDDEN_SHORT}
+          </Text>
         </View>
       </View>
 
