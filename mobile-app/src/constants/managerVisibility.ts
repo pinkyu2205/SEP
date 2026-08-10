@@ -10,6 +10,9 @@
  *   • Tiền điện/nước — manager tự ghi chỉ số rồi phát hành hoá đơn, không thấy thành
  *     tiền thì không làm được việc.
  *   • Chi phí bảo trì, giá thiết bị, quyết toán trả phòng — đó là khoản manager duyệt chi.
+ *   • TIỀN CỌC (mở lại 10/08/2026) — manager là người đối soát khách đã chuyển đủ cọc
+ *     hay chưa, nên phải thấy số tiền cọc. Số này lấy từ `TenantContractResponse.deposit`
+ *     vì `/api/v1/manager/deposits` không trả field số tiền.
  *
  * Đây là quy tắc HIỂN THỊ ở FE. BE vẫn trả `amount` trong ManagerInvoiceResponse và
  * `rentAmount`/`deposit` trong TenantContractResponse — muốn chặn tận gốc thì BE phải
