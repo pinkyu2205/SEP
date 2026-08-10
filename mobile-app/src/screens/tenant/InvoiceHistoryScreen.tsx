@@ -43,6 +43,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
 export const InvoiceHistoryScreen: React.FC = () => {
@@ -87,7 +88,19 @@ export const InvoiceHistoryScreen: React.FC = () => {
       .then(([bills, deps]) => {
         if (!active) return;
         setInvoices(bills);
-        setDeposits(deps);
+        // Hợp đồng nào đã có hoá đơn `HD-ONBOARD-{id}` thì BỎ thẻ cọc dựng riêng:
+        // hoá đơn đó CHÍNH LÀ khoản cọc (BE 10/08/2026 bỏ gộp tiền nhà vào nó), giữ
+        // cả hai là cùng một khoản tiền hiện hai lần và khách cộng ra gấp đôi.
+        //
+        // Vẫn giữ thẻ cọc cho hợp đồng KHÔNG có hoá đơn onboard — thu tiền mặt kiểu
+        // cũ và dữ liệu seed không sinh hoá đơn, với chúng thẻ này là nguồn duy nhất.
+        const invoicedContractIds = new Set(
+          bills
+            .map(b => /^HD-ONBOARD-(\d+)/.exec(b.code ?? '')?.[1])
+            .filter(Boolean)
+            .map(Number),
+        );
+        setDeposits(deps.filter(d => !invoicedContractIds.has(d.contractId)));
       })
       .finally(() => { if (active) setLoading(false); });
 

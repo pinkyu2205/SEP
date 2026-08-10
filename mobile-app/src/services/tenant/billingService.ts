@@ -1,5 +1,6 @@
 import realApiClient from '@/services/core/realApiClient';
 import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/store/billsStore';
+import type { PaymentBreakdown } from '@/services/tenant/tenantService';
 
 /**
  * Hoá đơn & thanh toán của CHÍNH tenant đang đăng nhập (nối backend Spring THẬT).
@@ -40,6 +41,12 @@ export interface TenantInvoice {
    * ra bằng isFirstRentCycleInvoice() ở @/constants/rentCycle.
    */
   cycleType?: string;
+  /**
+   * Cách tính khoản này, BE dựng sẵn từ 10/08/2026 (`PaymentBreakdownResponse`).
+   * Quan trọng nhất với hoá đơn tiền nhà chu kỳ đầu: nó mang công thức chia theo ngày
+   * để khách tự đối chiếu, thay vì thấy một con số lẻ không hiểu ở đâu ra.
+   */
+  paymentBreakdown?: PaymentBreakdown;
   paidAt?: string;
   paymentMethod?: string;
   transactionId?: string;
@@ -124,6 +131,16 @@ const TYPE_MAP: Record<TenantInvoiceType, InvoiceType> = {
   RENT: 'rent', SERVICE: 'rent', OTHER: 'rent', ELECTRICITY: 'electricity', WATER: 'water',
   MAINTENANCE: 'maintenance',
 };
+
+/**
+ * Hoá đơn thu lúc nhận phòng nhận diện theo MÃ, không theo `type`.
+ *
+ * BE đổi `type` của nó từ `RENT` sang `OTHER` ngày 10/08/2026, nên đi theo `type` thì
+ * hoá đơn cũ và mới rơi vào hai nhãn khác nhau. `OTHER` cũng còn dùng cho khoản khác
+ * nên không thể quy hết `OTHER` thành tiền cọc. Mã `HD-ONBOARD-{contractId}` thì cả
+ * hai đời đều giống nhau.
+ */
+const isOnboardCode = (code?: string) => !!code && code.startsWith('HD-ONBOARD-');
 const STATUS_MAP: Record<TenantInvoiceStatus, BillStatus> = {
   PENDING: 'pending', PAID: 'paid', OVERDUE: 'overdue', PARTIAL: 'partial', CANCELLED: 'cancelled',
 };
@@ -134,7 +151,7 @@ const METHOD_MAP: Record<string, BillPaymentMethod> = {
 export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   id: String(inv.id),
   code: inv.code,
-  invoiceType: TYPE_MAP[inv.type] ?? 'rent',
+  invoiceType: isOnboardCode(inv.code) ? 'deposit' : (TYPE_MAP[inv.type] ?? 'rent'),
   roomId: '',
   roomName: inv.roomNumber ? `Phòng ${inv.roomNumber}` : 'Nhà nguyên căn',
   propertyId: '',
@@ -152,6 +169,7 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   dueDate: inv.dueDate,
   createdAt: inv.createdAt,
   cycleType: inv.cycleType,
+  paymentBreakdown: inv.paymentBreakdown,
   paidAt: inv.paidAt,
   paymentMethod: inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined,
   transactionId: inv.transactionId,
