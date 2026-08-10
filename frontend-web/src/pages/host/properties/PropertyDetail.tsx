@@ -45,7 +45,8 @@ const hostContractToTenant = (hc: HostContractDto, rooms: RoomResponse[]): Tenan
     roomId: room?.id,
     roomNumber: hc.roomCode,
     tenantUserId: '',
-    tenantFullName: hc.lesseeName,
+    // HĐ đã chấm dứt bị BE gỡ liên kết khách nên lesseeName về null.
+    tenantFullName: hc.lesseeName ?? '',
     tenantPhone: hc.tenantPhone ?? '',
     tenantCccd: hc.tenantCccd,
     contractCode: hc.code,

@@ -83,13 +83,13 @@ export const TenantList = () => {
     ? contracts.filter((c) => matchProperty(c, selectedProperty))
     : contracts;
 
-  const filtered = propContracts.filter(
-    (c) =>
-      c.lesseeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.roomCode ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.tenantPhone ?? '').includes(searchTerm) ||
-      c.code.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+  // Mọi field text đều phải phòng null: HĐ đã chấm dứt bị BE gỡ liên kết khách nên
+  // `lesseeName` về null, gọi thẳng .toLowerCase() là trắng cả trang.
+  const filtered = propContracts.filter((c) => {
+    const kw = searchTerm.toLowerCase();
+    return [c.lesseeName, c.roomCode, c.code].some((v) => (v ?? '').toLowerCase().includes(kw))
+      || (c.tenantPhone ?? '').includes(searchTerm);
+  });
 
   const activeCount = propContracts.filter((c) => c.status === 'ACTIVE').length;
 
@@ -214,12 +214,17 @@ export const TenantList = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filtered.map((c) => {
-                      const st = statusMap[c.status];
+                      const st = statusMap[c.status] ?? statusMap.DRAFT;
                       return (
                         <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.code}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.code || '—'}</td>
                           <td className="px-4 py-3">
-                            <p className="font-semibold text-slate-900">{c.lesseeName}</p>
+                            {c.lesseeName ? (
+                              <p className="font-semibold text-slate-900">{c.lesseeName}</p>
+                            ) : (
+                              // HĐ chấm dứt xong thì BE không còn trả tên khách nữa.
+                              <p className="font-medium text-slate-400 italic">Không còn liên kết khách</p>
+                            )}
                             {c.tenantPhone && <p className="text-xs text-slate-400 mt-0.5">{c.tenantPhone}</p>}
                           </td>
                           <td className="px-4 py-3">

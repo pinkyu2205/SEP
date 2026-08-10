@@ -92,7 +92,9 @@ export interface PropertyPerformanceRow {
 // ── Contracts ────────────────────────────────────────────────────────────────
 export interface HostContractDto {
   id: string; propertyId?: number; code: string;
-  lesseeName: string; tenantPhone?: string; tenantCccd?: string;
+  // BE (HostPortalServiceImpl.toContractDto) chỉ lấy tên từ tenant.user, KHÔNG fallback
+  // sang draftTenantName — HĐ đã chấm dứt bị gỡ tenant_user_id nên trả về null.
+  lesseeName: string | null; tenantPhone?: string; tenantCccd?: string;
   propertyName: string;
   roomCode?: string; lessorName?: string;
   rentAmount: number; deposit?: number;

@@ -20,8 +20,9 @@ import type { PropertyResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import {
   STATUS_BADGE, HOST_STATUS_CHIPS, SORT_LABEL, TYPE_LABEL, MANAGER_LABEL,
-  GRID_SIZES, TABLE_SIZES, typeLabel, formatVnd,
+  GRID_SIZES, TABLE_SIZES, typeLabel, formatVnd, formatRoomPriceRange,
   type PropertyListFilters, type SortKey, type TypeFilter, type ManagerFilter,
+  type RoomPriceRange,
 } from './propertyListState';
 
 // ─── Thẻ số liệu ────────────────────────────────────────────────────────────
@@ -435,7 +436,12 @@ const MiniStat = ({ icon: Icon, value, label }: { icon: LucideIcon; value: React
   </div>
 );
 
-export const PropertyCard = ({ p, onClick }: { p: PropertyResponse; onClick: () => void }) => {
+export const PropertyCard = ({ p, roomPrice, onClick }: {
+  p: PropertyResponse;
+  /** Khoảng giá suy từ phòng — chỉ có với nhà chia phòng chưa đặt giá ở cấp toà nhà. */
+  roomPrice?: RoomPriceRange | null;
+  onClick: () => void;
+}) => {
   const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.DRAFT;
   const noManager = !p.operationManagerId;
 
@@ -496,8 +502,19 @@ export const PropertyCard = ({ p, onClick }: { p: PropertyResponse; onClick: () 
           <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-500">
             <Wallet className="h-3.5 w-3.5" /> Giá thuê
           </span>
-          <span className="text-sm font-black text-indigo-700">
-            {p.price ? `${formatVnd(p.price)}/tháng` : <span className="text-slate-400">Chưa định giá</span>}
+          <span className="text-right text-sm font-black text-indigo-700">
+            {p.price ? (
+              `${formatVnd(p.price)}/tháng`
+            ) : roomPrice ? (
+              <>
+                {formatRoomPriceRange(roomPrice)}/tháng
+                <span className="block text-[10px] font-semibold text-indigo-400">
+                  theo giá {roomPrice.rooms} phòng
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-400">Chưa định giá</span>
+            )}
           </span>
         </div>
 
@@ -528,8 +545,10 @@ export const PropertyCard = ({ p, onClick }: { p: PropertyResponse; onClick: () 
 };
 
 // ─── Chế độ xem bảng ────────────────────────────────────────────────────────
-export const PropertyTable = ({ rows, onRowClick }: {
+export const PropertyTable = ({ rows, roomPrices = {}, onRowClick }: {
   rows: PropertyResponse[];
+  /** id nhà → khoảng giá suy từ phòng (nhà chia phòng chưa đặt giá ở cấp toà nhà). */
+  roomPrices?: Record<number, RoomPriceRange | null>;
   onRowClick: (p: PropertyResponse) => void;
 }) => (
   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
@@ -587,9 +606,18 @@ export const PropertyTable = ({ rows, onRowClick }: {
               <td className="px-4 py-3 text-center font-bold text-slate-700">{p.totalRooms || 0}</td>
               <td className="px-4 py-3 text-center font-bold text-slate-700">{p.totalFloor ?? p.floorCount ?? '—'}</td>
               <td className="px-4 py-3 text-right">
-                {p.price
-                  ? <span className="font-black text-indigo-700">{formatVnd(p.price)}</span>
-                  : <span className="text-xs text-slate-300">Chưa định giá</span>}
+                {p.price ? (
+                  <span className="font-black text-indigo-700">{formatVnd(p.price)}</span>
+                ) : roomPrices[p.id] ? (
+                  <>
+                    <span className="font-black text-indigo-700">{formatRoomPriceRange(roomPrices[p.id]!)}</span>
+                    <span className="block text-[10px] font-semibold text-indigo-400">
+                      theo giá {roomPrices[p.id]!.rooms} phòng
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-xs text-slate-300">Chưa định giá</span>
+                )}
               </td>
               <td className="px-4 py-3">
                 {p.operationManagerName ? (

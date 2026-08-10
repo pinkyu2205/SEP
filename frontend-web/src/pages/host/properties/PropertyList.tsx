@@ -6,7 +6,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import {
-  usePropertyListFilters, isHostApproved, formatVnd,
+  usePropertyListFilters, isHostApproved, formatVnd, type RoomPriceRange,
 } from './propertyListState';
 import {
   StatTile, PendingApprovalPanel, FilterToolbar, ResultBar,
@@ -18,6 +18,8 @@ export const PropertyList = () => {
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  /** id nhà → khoảng giá suy từ phòng; xem effect bên dưới. */
+  const [roomPrices, setRoomPrices] = useState<Record<number, RoomPriceRange | null>>({});
 
   const fetchProperties = async () => {
     setLoading(true);
@@ -62,10 +64,12 @@ export const PropertyList = () => {
       room: acc.room + (p.wholeHouse === false ? 1 : 0),
       noMgr: acc.noMgr + (p.operationManagerId ? 0 : 1),
       rooms: acc.rooms + (p.totalRooms || 0),
-      revenue: acc.revenue + (p.price ?? 0),
+      // Nhà chia phòng không đặt giá ở cấp toà nhà thì lấy giá phòng đã suy ra, để tổng
+      // ở tiêu đề khớp với con số từng card đang hiện.
+      revenue: acc.revenue + (p.price ?? roomPrices[p.id]?.min ?? 0),
     }),
     { total: 0, whole: 0, room: 0, noMgr: 0, rooms: 0, revenue: 0 }
-  ), [active]);
+  ), [active, roomPrices]);
 
   // BE list không trả imageUrls → lấy thêm ảnh cho các căn đang hiển thị.
   const fetchedImagesRef = useRef<Set<number>>(new Set());
@@ -84,6 +88,33 @@ export const PropertyList = () => {
       )
     );
   }, [f.paged, pending]);
+
+  /**
+   * Nhà CHIA PHÒNG không có giá ở cấp toà nhà — giá nằm trên từng phòng (`rooms[].price`),
+   * `Property.price` để null. Card cũ đọc thẳng `p.price` nên ghi "Chưa định giá" trong
+   * khi mở chi tiết ra thì phòng nào cũng có giá. Lấy thêm phòng của đúng những căn
+   * thiếu giá để hiện khoảng giá thật (rất ít căn rơi vào trường hợp này).
+   */
+  const fetchedRoomsRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const need = properties.filter(p =>
+      p.wholeHouse === false && p.price == null && !fetchedRoomsRef.current.has(p.id));
+    if (!need.length) return;
+    need.forEach(p => fetchedRoomsRef.current.add(p.id));
+    need.forEach(p => {
+      propertyService.getRooms(p.id)
+        .then(rooms => {
+          const prices = rooms.map(r => r.price).filter((v): v is number => v != null && v > 0);
+          setRoomPrices(prev => ({
+            ...prev,
+            [p.id]: prices.length
+              ? { min: Math.min(...prices), max: Math.max(...prices), rooms: prices.length }
+              : null,
+          }));
+        })
+        .catch(() => setRoomPrices(prev => ({ ...prev, [p.id]: null })));
+    });
+  }, [properties]);
 
   return (
     <div className="space-y-5 pb-6">
@@ -169,11 +200,12 @@ export const PropertyList = () => {
           <ResultBar f={f} />
 
           {f.view === 'table' ? (
-            <PropertyTable rows={f.paged} onRowClick={p => navigate(`/host/properties/${p.id}`)} />
+            <PropertyTable rows={f.paged} roomPrices={roomPrices} onRowClick={p => navigate(`/host/properties/${p.id}`)} />
           ) : (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
               {f.paged.map(p => (
-                <PropertyCard key={p.id} p={p} onClick={() => navigate(`/host/properties/${p.id}`)} />
+                <PropertyCard key={p.id} p={p} roomPrice={roomPrices[p.id]}
+                  onClick={() => navigate(`/host/properties/${p.id}`)} />
               ))}
             </div>
           )}
