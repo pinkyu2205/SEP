@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
+import type { PaymentBreakdown } from '@/services/tenant/tenantService';
 
 // ===================== TYPES =====================
 export type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 export type BillPaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet' | 'other';
-export type InvoiceType = 'rent' | 'electricity' | 'water' | 'maintenance';
+/**
+ * `deposit` = khoản thu lúc nhận phòng (`HD-ONBOARD-*`). Tách khỏi `rent` từ 10/08/2026:
+ * BE bỏ gộp tiền nhà tháng đầu vào QR đón khách, nên hoá đơn này giờ chỉ còn tiền cọc —
+ * để chung nhãn "Tiền phòng" thì khách tưởng đã trả tiền nhà rồi.
+ */
+export type InvoiceType = 'rent' | 'electricity' | 'water' | 'maintenance' | 'deposit';
 
 export interface BillItem {
   label: string;
@@ -33,6 +39,11 @@ export interface SharedBill {
   createdAt: string;
   /** FIRST | REGULAR | LAST — hoá đơn tiền phòng kỳ đầu chạy mốc nhắc riêng (3 ngày). */
   cycleType?: string;
+  /**
+   * Cách tính do BE dựng sẵn (công thức + các dòng đã format). Chỉ hoá đơn mới có;
+   * hoá đơn cũ và dữ liệu seed để trống — nơi hiển thị phải chịu được `undefined`.
+   */
+  paymentBreakdown?: PaymentBreakdown;
   paidAt?: string;
   paidAmount?: number;
   paymentMethod?: BillPaymentMethod;

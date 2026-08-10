@@ -32,6 +32,7 @@ const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: str
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
 const TYPE_FILTER_TABS: { key: TypeFilter; label: string }[] = [
