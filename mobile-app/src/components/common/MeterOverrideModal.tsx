@@ -41,7 +41,7 @@ export const MeterOverrideModal: React.FC<{
   };
 
   const submit = async () => {
-    if (!passcode.trim()) return setError('Nhập mã admin cấp.');
+    if (passcode.trim().length !== 6) return setError('Mã gồm 6 chữ số admin vừa đọc cho bạn.');
     if (reason.trim().length < 10) {
       return setError('Ghi rõ lý do không chụp được ảnh (ít nhất 10 ký tự) — lý do này được lưu lại.');
     }
@@ -50,14 +50,16 @@ export const MeterOverrideModal: React.FC<{
     try {
       const res = await meterOverrideService.verify(passcode.trim(), contractId, meterKind);
       if (!res.valid || !res.overrideToken) {
-        setError(res.message || 'Mã không đúng. Liên hệ admin để lấy mã.');
+        setError(res.message || 'Mã không đúng hoặc đã hết hạn. Nhờ admin tạo mã mới.');
         return;
       }
       onGranted(res.overrideToken, reason.trim());
       reset();
     } catch (err: any) {
-      // 403 sai mã · 429 khoá 5 phút sau 5 lần sai · 500 chưa cấu hình passcode ở server.
-      setError(readApiError(err, 'Không xác thực được mã. Thử lại hoặc liên hệ admin.'));
+      // 403 mã sai/hết hạn/đã dùng · 429 khoá 5 phút sau 5 lần sai.
+      // Mã chỉ sống ~10 phút và chết ngay khi dùng, nên lỗi ở đây thường là "xin mã mới",
+      // chứ không phải "gõ lại cho đúng" — câu chữ phải nói thẳng điều đó.
+      setError(readApiError(err, 'Không xác thực được mã. Nhờ admin tạo mã mới rồi thử lại.'));
     } finally {
       setBusy(false);
     }
@@ -69,19 +71,26 @@ export const MeterOverrideModal: React.FC<{
         <View style={s.sheet}>
           <Text style={s.title}>🔑 Xin mã nhập chỉ số {label}</Text>
           <Text style={s.desc}>
-            Chỉ dùng khi thật sự không chụp được ảnh đồng hồ. Liên hệ admin để lấy mã —
-            mỗi lần dùng đều được ghi lại kèm lý do.
+            Chỉ dùng khi thật sự không chụp được ảnh đồng hồ. Gọi admin để xin mã 6 số —
+            mã sống khoảng 10 phút, dùng một lần là hết, và lần dùng nào cũng được ghi
+            lại kèm lý do.
           </Text>
 
-          <Text style={s.label}>Mã admin cấp</Text>
+          <Text style={s.label}>Mã 6 số admin vừa cấp</Text>
+          {/*
+            Mã do admin bấm tạo rồi ĐỌC QUA ĐIỆN THOẠI (BE 10/08/2026, commit b3be95c).
+            Vì vậy ô này cố tình KHÔNG che ký tự: nghe qua điện thoại vốn đã dễ nhầm
+            0/không, 5/năm — che thêm thì gõ sai không biết sai ở đâu. Bàn phím số và
+            giới hạn 6 ký tự để không gõ thừa.
+          */}
           <TextInput
-            style={s.input}
+            style={[s.input, s.codeInput]}
             value={passcode}
-            onChangeText={(v) => { setPasscode(v); setError(''); }}
-            placeholder="Nhập mã"
+            onChangeText={(v) => { setPasscode(v.replace(/[^\d]/g, '')); setError(''); }}
+            placeholder="000000"
             placeholderTextColor={Colors.textMuted}
-            autoCapitalize="characters"
-            secureTextEntry
+            keyboardType="number-pad"
+            maxLength={6}
             editable={!busy}
           />
 
@@ -147,6 +156,13 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: Colors.textPrimary,
     backgroundColor: Colors.white,
+  },
+  /** Mã đọc qua điện thoại — chữ to, giãn ký tự để soát lại từng số cho nhanh. */
+  codeInput: {
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 6,
+    textAlign: 'center',
   },
   reasonInput: { minHeight: 72, textAlignVertical: 'top' },
   error: { fontSize: 12, color: '#DC2626', fontWeight: '600', marginTop: 4 },
