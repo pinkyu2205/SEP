@@ -76,6 +76,45 @@ const BLOCKED_LABELS: { key: string; label: string }[] = [
 const MIN_SCORE = 0.6;
 
 /**
+ * NHÃN CHỈ NGƯỜI — mentor 07/08/2026 (ý 8): chụp mặt người mà hệ thống vẫn nhận.
+ *
+ * ⚠️ Khớp theo RANH GIỚI TỪ, KHÔNG dùng `includes` như `BLOCKED_LABELS`. Đây không
+ * phải chuyện cầu kỳ: đồ trong phòng chứa nguyên mấy từ này bên trong.
+ *
+ *   'face' ⊂ "surface"          'hair' ⊂ "chair", "armchair"
+ *   'chin' ⊂ "washing machine"  'head' ⊂ "shower head"
+ *   'arm'  ⊂ "armchair"         'eye'  ⊂ "eyewear"
+ *
+ * Nhét thẳng vào `BLOCKED_LABELS` là mọi ảnh phòng có cái ghế đều bị chặn.
+ *
+ * Cũng vì vậy mà danh sách này CỐ Ý bỏ các bộ phận cơ thể trùng tên đồ đạc
+ * (`arm`, `leg`, `foot`, `head`, `nail`, `iris` — "iris" còn là tên một loài hoa).
+ * Mất vài tín hiệu yếu còn hơn đuổi oan ảnh phòng thật.
+ */
+const PERSON_WORDS = [
+  'face', 'facial expression', 'selfie', 'portrait', 'person', 'people', 'human',
+  'skin', 'forehead', 'cheek', 'chin', 'nose', 'nostril', 'eyebrow', 'eyelash',
+  'lip', 'mouth', 'tooth', 'teeth', 'smile', 'jaw', 'hair', 'hairstyle',
+  'beard', 'moustache', 'neck', 'shoulder', 'hand', 'finger', 'thumb', 'wrist',
+];
+const PERSON_RE = new RegExp(`\\b(${PERSON_WORDS.join('|')})\\b`, 'i');
+
+/**
+ * Ảnh có người không? Dùng chung cho ảnh hiện trạng phòng VÀ ảnh đồng hồ.
+ * @returns nhãn đã khớp (để nói cho người dùng biết vì sao bị từ chối), hoặc null.
+ */
+export function findPersonLabel(
+  labels: VisionLabelLike[] | null | undefined,
+  minScore = MIN_SCORE,
+): string | null {
+  if (!labels?.length) return null;
+  const hit = labels.find(
+    l => (l.score ?? 0) >= minScore && PERSON_RE.test((l.name || '').toLowerCase()),
+  );
+  return hit ? hit.name : null;
+}
+
+/**
  * @param labels nhãn từ POST /api/v1/vision/labels
  */
 export function validateRoomPhoto(labels: VisionLabelLike[] | null | undefined): RoomPhotoCheck {
@@ -85,6 +124,18 @@ export function validateRoomPhoto(labels: VisionLabelLike[] | null | undefined):
 
   const strong = labels.filter(l => (l.score ?? 0) >= MIN_SCORE);
   const names = strong.map(l => (l.name || '').toLowerCase());
+
+  // Người xuất hiện trong khung → chặn TRƯỚC mọi luật khác. Ảnh selfie giơ lên trong
+  // phòng vẫn thấy tường/trần nên `hasRoom` bên dưới sẽ cho qua — đúng lỗi mentor nêu.
+  const person = findPersonLabel(strong);
+  if (person) {
+    return {
+      ok: false,
+      matchedBlocked: 'ảnh có người',
+      reason: `Ảnh này có người trong khung (máy nhận ra: ${person}). Ảnh hiện trạng chỉ `
+        + 'chụp phòng — tường, sàn, trần, nội thất — để làm bằng chứng khi khách trả phòng.',
+    };
+  }
 
   const blocked = BLOCKED_LABELS.find(b => names.some(n => n === b.key || n.includes(b.key)));
   if (blocked) {

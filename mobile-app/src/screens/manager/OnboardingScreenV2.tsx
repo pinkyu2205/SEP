@@ -31,6 +31,7 @@ import {
 } from '@/services/manager/propertyApi'
 import {
   DEFAULT_DIGIT_CONFIG,
+  findPersonLabel,
   splitMeterReading,
   showAlert,
   validateMeterPhoto,
@@ -991,6 +992,34 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       if (!check.ok) {
         showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫')
         return
+      }
+
+      // Chặn ảnh có người (mentor ý 8). `validateMeterPhoto` chỉ soi CHỮ do OCR đọc,
+      // nên ảnh chụp mặt mà trong khung có bất kỳ dãy 4–8 chữ số nào (tờ lịch, số nhà,
+      // màn hình điện thoại) vẫn lọt qua luật cuối của nó.
+      //
+      // Chỉ hỏi Vision khi OCR KHÔNG thấy đơn vị kWh/m³ (`confidence !== 'high'`):
+      // đọc được đơn vị nghĩa là trong khung có mặt đồng hồ thật, không cần hỏi thêm.
+      // Nhờ vậy ca dùng bình thường không tốn thêm lượt Vision nào — quan trọng vì
+      // trần đang là 20 ảnh/giờ/tài khoản, mà đón một khách đã hết 2 ảnh đồng hồ.
+      if (check.confidence !== 'high') {
+        try {
+          const labels = await visionService.detectLabels(url)
+          const person = findPersonLabel(labels)
+          if (person) {
+            showAlert(
+              'Ảnh có người trong khung',
+              `Máy nhận ra "${person}" trong ảnh. Chỉ số đồng hồ là căn cứ tính tiền cả kỳ `
+                + `thuê nên ảnh phải chụp thẳng vào MẶT SỐ của đồng hồ ${label}, không có người che.`,
+              undefined,
+              '🚫',
+            )
+            return
+          }
+        } catch {
+          // Vision lỗi/hết quota → không chặn. Ảnh vẫn qua nhánh OCR như cũ; thà lọt
+          // một ảnh sai còn hơn khoá cứng luồng đón khách vì dịch vụ ngoài trục trặc.
+        }
       }
 
       // Không tách được dãy số → ảnh mờ/xa/loá. Từ chối để bắt chụp lại, vì ảnh không
