@@ -1052,11 +1052,11 @@ const DepositOtpPanel: React.FC<{
   }
 
   const depositValue = contract.deposit
-  // TỔNG khách phải chuyển = tiền nhà tháng đầu + cọc, đúng bằng số PayOS trừ.
-  // Ưu tiên số BE trả kèm link thanh toán; chưa gọi tạo link thì tự cộng để hiển thị
-  // trước cho manager biết mà báo khách.
-  const rentValue = contract.rentAmount ?? 0
-  const totalDue = payInfo.initialPaymentAmount ?? rentValue + (depositValue ?? 0)
+  // Khách chuyển lúc đón = CHỈ TIỀN CỌC (BE commit 92c87d8, 10/08/2026). Tiền nhà
+  // tháng vào ở tách thành hoá đơn RENT riêng, tính theo ngày ở, phát sau khi HĐ ACTIVE.
+  // Ưu tiên số BE trả kèm link thanh toán; chưa gọi tạo link thì lấy tiền cọc của HĐ.
+  // Cộng thêm `rentAmount` vào đây là báo khách chuyển thừa nguyên một tháng tiền nhà.
+  const totalDue = payInfo.initialPaymentAmount ?? depositValue ?? 0
 
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
@@ -1067,7 +1067,8 @@ const DepositOtpPanel: React.FC<{
         </Text>
         <Text style={styles.bannerDesc}>
           {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Thu{' '}
-          {formatVnd(totalDue)} đ (tiền nhà tháng đầu + cọc) rồi xác thực OTP để kích hoạt hợp đồng.
+          {formatVnd(totalDue)} đ tiền cọc rồi xác thực OTP để kích hoạt hợp đồng.
+          Tiền nhà tính theo ngày ở sẽ phát hoá đơn riêng cho khách trả trên app.
         </Text>
         {!!contract.expectedReceptionDate && (
           <Text style={styles.bannerReception}>
@@ -1105,15 +1106,12 @@ const DepositOtpPanel: React.FC<{
           )}
           {!!payInfo.payosQrCode && !showWebView && (
             <View style={styles.qrBox}>
-              <Text style={styles.qrAmountLabel}>Tổng thu</Text>
+              <Text style={styles.qrAmountLabel}>Tiền cọc thu qua QR</Text>
               <Text style={styles.qrAmount}>{formatVnd(totalDue)} đ</Text>
-              {/* Tách rõ cấu phần để manager giải thích được với khách vì sao không
-                  phải chỉ mỗi tiền cọc. */}
+              {/* QR chỉ thu cọc (BE 10/08/2026). Giữ lại dòng tách cấu phần để manager
+                  nói được số tháng cọc, và thêm dòng nhắc tiền nhà đi đường riêng —
+                  không có nó thì khách tưởng đã trả xong mọi thứ. */}
               <View style={styles.payBreakdown}>
-                <View style={styles.payBreakdownRow}>
-                  <Text style={styles.payBreakdownLabel}>• Tiền nhà tháng đầu</Text>
-                  <Text style={styles.payBreakdownValue}>{formatVnd(rentValue)} đ</Text>
-                </View>
                 <View style={styles.payBreakdownRow}>
                   <Text style={styles.payBreakdownLabel}>
                     • Tiền cọc{contract.depositMonths ? ` (${contract.depositMonths} tháng)` : ''}
@@ -1121,6 +1119,10 @@ const DepositOtpPanel: React.FC<{
                   <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
                 </View>
               </View>
+              <Text style={styles.qrNextDueNote}>
+                Tiền nhà tính theo số ngày ở sẽ phát hoá đơn riêng sau khi kích hoạt hợp
+                đồng — khách thanh toán trên app, không thu ở đây.
+              </Text>
               <View style={styles.qrWrap}>
                 <QRCode value={payInfo.payosQrCode} size={200} />
               </View>
@@ -1356,6 +1358,16 @@ const styles = StyleSheet.create({
   payBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   payBreakdownLabel: { fontSize: 12, color: Colors.textSecondary },
   payBreakdownValue: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
+  qrNextDueNote: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#9A3412',
+    backgroundColor: '#FFF7ED',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
   qrWrap: { padding: Spacing.md, backgroundColor: Colors.white, borderRadius: BorderRadius.lg, ...Shadow.sm },
   qrCaption: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center' },
   webviewBox: { height: 460, borderRadius: BorderRadius.lg, overflow: 'hidden', marginTop: Spacing.md },

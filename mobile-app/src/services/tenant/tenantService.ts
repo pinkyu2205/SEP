@@ -108,6 +108,49 @@ export interface OnboardTenantRequest {
   addedEquipments?: ContractAddedEquipmentInput[];
 }
 
+/**
+ * CÁCH TÍNH một khoản tiền, do BE dựng sẵn (`PaymentBreakdownResponse`, 10/08/2026).
+ *
+ * Mọi thứ trong đây đã được format sẵn để render thẳng. Cố ý KHÔNG tự tính lại ở FE:
+ * BE làm tròn theo phép nhân chia cả tháng (HALF_UP), còn `dailyRate` trả về đã làm
+ * tròn rồi — lấy nó nhân lại với số ngày là ra số lệch vài đồng so với hoá đơn thật.
+ */
+export interface PaymentBreakdownLine {
+  key: string;            // rentAmount | depositMonths | dailyRate | billedDays | period | total…
+  label: string;
+  displayValue: string;   // đã format, render trực tiếp được
+  amount?: number;
+  unit?: string;          // VND | ngày | tháng
+}
+
+export interface PaymentBreakdown {
+  kind:
+    | 'DEPOSIT_ONBOARD'
+    | 'RENT_FIRST_PRO_RATA'
+    | 'RENT_FIRST_FULL'
+    /** Vào ở ≤3 ngày cuối tháng → không phát hoá đơn, gộp sang tháng sau. */
+    | 'RENT_FIRST_DEFERRED'
+    | 'RENT_REGULAR'
+    | 'OTHER';
+  title: string;
+  /** VD "(5.000.000 ÷ 30) × 6 = 1.000.000". Có thể null. */
+  formula?: string | null;
+  explanation: string;
+  totalAmount: number;
+  rentAmountMonthly?: number;
+  depositMonths?: number;
+  depositAmount?: number;
+  dailyRate?: number;
+  daysInMonth?: number;
+  billedDays?: number;
+  periodStart?: string;
+  periodEnd?: string;
+  includesMoveInDay?: boolean;
+  proRated?: boolean;
+  deferredToNextMonth?: boolean;
+  lines: PaymentBreakdownLine[];
+}
+
 export interface TenantContractResponse {
   id: number;
   propertyId: number;
@@ -147,14 +190,26 @@ export interface TenantContractResponse {
   payosCheckoutUrl?: string;
   payosQrCode?: string;
   /**
-   * TỔNG tiền khách phải chuyển khi đón khách = tiền nhà tháng đầu + tiền cọc.
-   * BE tính ở TenantContractPaymentAmounts.resolveInitialPaymentAmount và cũng dùng
-   * đúng số này để tạo link/QR PayOS. PHẢI hiển thị field này, không được lấy
-   * `deposit` — lấy `deposit` thì màn hình ghi thiếu nguyên một tháng tiền nhà so
-   * với số mà app ngân hàng trừ của khách.
+   * Số tiền khách phải chuyển khi đón khách — từ BE commit `92c87d8` (10/08/2026)
+   * là **CHỈ TIỀN CỌC**, không còn gộp tiền nhà tháng đầu như trước.
+   *
+   * Tiền nhà tháng vào ở giờ là một hoá đơn RENT riêng (`cycleType = FIRST`), tính
+   * theo số ngày ở thật, phát hành sau khi hợp đồng ACTIVE và khách tự trả trên app.
+   *
+   * Vẫn PHẢI hiển thị field này chứ đừng tự cộng lại từ `rentAmount`/`deposit`: BE
+   * dùng đúng số này để tạo link/QR PayOS, tự tính lại là có ngày lệch với số mà app
+   * ngân hàng trừ của khách.
    * Chỉ có trong response của deposit-payment; các API khác không trả.
    */
   initialPaymentAmount?: number;
+
+  /** Cách tính tiền cọc trên QR (BE 10/08/2026). Manager gọi thì BE trả null (ý 15). */
+  depositPaymentBreakdown?: PaymentBreakdown;
+  /**
+   * XEM TRƯỚC tiền nhà chu kỳ đầu — chưa phải hoá đơn, chỉ để manager nói trước với
+   * khách sẽ phải trả thêm bao nhiêu sau khi nhận nhà.
+   */
+  firstRentPaymentBreakdown?: PaymentBreakdown;
 
   // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
   initialElectricReading?: number;

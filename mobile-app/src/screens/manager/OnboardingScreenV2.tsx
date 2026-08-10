@@ -456,10 +456,12 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   const rentValue = parseNum(tenantInfo.monthlyRent)
   const depositValue = rentValue * depositMonths
-  // TỔNG khách phải chuyển = tiền nhà tháng đầu + cọc — đúng bằng số PayOS trừ
-  // (BE: TenantContractPaymentAmounts.resolveInitialPaymentAmount). Hiển thị mỗi
-  // `depositValue` là ghi thiếu nguyên một tháng tiền nhà so với app ngân hàng.
-  const totalDueValue = rentValue + depositValue
+  // Số khách phải chuyển lúc đón khách = CHỈ TIỀN CỌC, từ BE commit 92c87d8 (10/08/2026).
+  // Trước đó QR gộp cả tiền nhà tháng đầu; giờ tiền nhà tách thành hoá đơn RENT riêng
+  // (cycleType FIRST, tính theo ngày ở) phát sau khi HĐ ACTIVE, khách trả trên app.
+  // Đây chỉ là số DỰ PHÒNG khi BE chưa trả `initialPaymentAmount` — cộng thêm
+  // `rentValue` vào đây là đọc thừa nguyên một tháng tiền nhà cho khách.
+  const totalDueValue = depositValue
 
   // Ngày hợp đồng hiệu lực = hôm nay (khoá cứng). Ngày kết thúc: sau hôm nay, tối đa MAX_LEASE_YEARS năm.
   const todayStr = new Date().toLocaleDateString('en-GB') // dd/MM/yyyy
@@ -2274,6 +2276,41 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     )
   }
 
+  /**
+   * "Sau khi nhận nhà sẽ thu thêm" — xem trước tiền nhà chu kỳ đầu.
+   *
+   * Từ 10/08/2026 QR chỉ thu cọc, tiền nhà tháng vào ở phát thành hoá đơn riêng tính
+   * theo số ngày ở thật. Khách vừa chuyển một khoản lớn xong mà hôm sau lại thấy hoá
+   * đơn thì rất dễ nghĩ bị thu hai lần — nói trước ngay tại màn thu tiền là cách rẻ
+   * nhất để tránh chuyện đó.
+   *
+   * Trả null khi BE không gửi (bản BE cũ, hoặc ẩn tiền khỏi manager theo ý 15) — thà
+   * không hiện gì còn hơn tự tính một con số có thể lệch với hoá đơn BE phát ra.
+   */
+  const renderFirstRentPreview = () => {
+    const b = contract?.firstRentPaymentBreakdown
+    if (!b) return null
+
+    // Vào ở ≤3 ngày cuối tháng: BE không phát hoá đơn riêng mà gộp sang tháng sau.
+    const deferred = b.kind === 'RENT_FIRST_DEFERRED' || b.deferredToNextMonth
+    return (
+      <View style={styles.nextDueBox}>
+        <View style={styles.nextDueHead}>
+          <Text style={styles.nextDueTitle}>{b.title}</Text>
+          {deferred ? (
+            <Text style={styles.nextDueBadge}>Gộp tháng sau</Text>
+          ) : (
+            <Text style={styles.nextDueAmount}>{formatVnd(b.totalAmount)} đ</Text>
+          )}
+        </View>
+        {!!b.formula && !deferred && (
+          <Text style={styles.nextDueFormula}>{b.formula}</Text>
+        )}
+        <Text style={styles.nextDueNote}>{b.explanation}</Text>
+      </View>
+    )
+  }
+
   const renderPaymentStep = () => {
     return (
       <ScrollView
@@ -2282,8 +2319,9 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       >
         <Text style={styles.sectionTitle}>Thanh toán tiền cọc</Text>
         <Text style={styles.hint}>
-          Khách chuyển khoản {formatVnd(totalDueValue)} đ qua PayOS (tiền nhà tháng
-          đầu + tiền cọc). Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.
+          Khách chuyển khoản {formatVnd(contract?.initialPaymentAmount ?? totalDueValue)} đ
+          qua PayOS — đây là <Text style={styles.hintStrong}>tiền cọc</Text>, chưa gồm tiền
+          nhà. Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.
         </Text>
 
         {paid ? (
@@ -2295,21 +2333,34 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <>
             {!!contract?.payosQrCode && !showWebView && (
               <View style={styles.qrBox}>
-                <Text style={styles.qrAmountLabel}>Tổng thu</Text>
+                <Text style={styles.qrAmountLabel}>Tiền cọc thu qua QR</Text>
                 <Text style={styles.qrAmount}>
                   {formatVnd(contract.initialPaymentAmount ?? totalDueValue)} đ
                 </Text>
-                {/* Tách cấu phần để manager giải thích được với khách. */}
+                {/* Tách cấu phần để manager giải thích được với khách. Dùng các dòng BE
+                    dựng sẵn nếu có (`depositPaymentBreakdown.lines`) — khi ẩn tiền khỏi
+                    manager thì BE trả null, lúc đó rơi về cách tính tại chỗ. */}
                 <View style={styles.payBreakdown}>
-                  <View style={styles.payBreakdownRow}>
-                    <Text style={styles.payBreakdownLabel}>• Tiền nhà tháng đầu</Text>
-                    <Text style={styles.payBreakdownValue}>{formatVnd(rentValue)} đ</Text>
-                  </View>
-                  <View style={styles.payBreakdownRow}>
-                    <Text style={styles.payBreakdownLabel}>• Tiền cọc ({depositMonths} tháng)</Text>
-                    <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
-                  </View>
+                  {contract.depositPaymentBreakdown?.lines?.length ? (
+                    contract.depositPaymentBreakdown.lines.map((l, i) => (
+                      <View key={`${l.key}-${i}`} style={styles.payBreakdownRow}>
+                        <Text style={styles.payBreakdownLabel}>• {l.label}</Text>
+                        <Text style={styles.payBreakdownValue}>
+                          {l.amount != null ? `${formatVnd(l.amount)} đ` : l.displayValue}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.payBreakdownRow}>
+                      <Text style={styles.payBreakdownLabel}>• Tiền cọc ({depositMonths} tháng)</Text>
+                      <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
+                    </View>
+                  )}
                 </View>
+
+                {/* Khoản khách sẽ phải trả TIẾP sau khi nhận nhà. Nói trước ở đây để
+                    manager không bị khách chất vấn "sao vừa đóng xong lại có hoá đơn". */}
+                {renderFirstRentPreview()}
                 <View style={styles.qrWrap}>
                   <QRCode value={contract.payosQrCode} size={220} />
                 </View>
@@ -2735,6 +2786,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   hintSmall: { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
+  hintStrong: { fontWeight: '700' as const, color: Colors.textPrimary },
 
   readonlyField: {
     flexDirection: 'row',
@@ -3292,6 +3344,32 @@ const styles = StyleSheet.create({
   payBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   payBreakdownLabel: { fontSize: 12, color: Colors.textSecondary },
   payBreakdownValue: { fontSize: 12, fontWeight: '700' as const, color: Colors.textPrimary },
+
+  // Khối "sẽ thu tiếp sau khi nhận nhà" — nền khác hẳn khối QR để không bị đọc nhầm
+  // thành một phần của số tiền đang phải chuyển.
+  nextDueBox: {
+    marginTop: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  nextDueHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  nextDueTitle: { flex: 1, fontSize: 12, fontWeight: '700' as const, color: '#9A3412' },
+  nextDueAmount: { fontSize: 14, fontWeight: '800' as const, color: '#9A3412' },
+  nextDueBadge: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#9A3412',
+    backgroundColor: '#FED7AA',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
+    overflow: 'hidden' as const,
+  },
+  nextDueFormula: { marginTop: 6, fontSize: 12, color: '#9A3412', fontVariant: ['tabular-nums'] as const },
+  nextDueNote: { marginTop: 6, fontSize: 11, color: Colors.textSecondary, lineHeight: 16 },
   qrWrap: {
     padding: Spacing.md,
     backgroundColor: Colors.white,
