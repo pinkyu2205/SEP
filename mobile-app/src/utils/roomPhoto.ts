@@ -37,8 +37,9 @@ const ROOM_LABELS = [
   'table', 'desk', 'cabinetry', 'cupboard', 'shelf', 'wardrobe', 'closet', 'drawer',
   'bathroom', 'toilet', 'sink', 'plumbing fixture', 'bathtub', 'shower', 'tap',
   'kitchen', 'countertop', 'kitchen appliance', 'refrigerator', 'stove', 'oven',
-  'tile', 'tiles', 'wood', 'plaster', 'paint', 'light fixture', 'lighting',
-  'curtain', 'window covering', 'balcony', 'stairs', 'handrail', 'fan', 'air conditioning',
+  'tile', 'tiles', 'wood', 'plaster', 'paint', 'light fixture', 'lighting', 'light',
+  'curtain', 'window covering', 'balcony', 'stairs', 'handrail', 'fan',
+  'air conditioning', 'air conditioner',
   'living room', 'hall', 'daylighting', 'roof', 'brick', 'concrete', 'glass',
 ];
 
