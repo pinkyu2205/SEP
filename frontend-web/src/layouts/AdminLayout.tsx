@@ -9,6 +9,7 @@ import {
   FilePlus,
   MapPin,
   Menu,
+  KeyRound,
   Package,
   PackageCheck,
   Search,
@@ -64,6 +65,8 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     items: [
       // Mục mới từ nhánh dev (trang HandoverMonitoring + route /admin/handover).
       { label: 'Tiến độ bàn giao', path: '/admin/handover', icon: PackageCheck },
+      // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
+      { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
       { label: 'Quản lý khu vực', path: '/admin/zones', icon: MapPin },
       { label: 'Khu vực Manager', path: '/admin/zones/managers', icon: UserRound },
       { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
