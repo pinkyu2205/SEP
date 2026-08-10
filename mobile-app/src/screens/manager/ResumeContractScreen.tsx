@@ -16,15 +16,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
 import QRCode from 'react-native-qrcode-svg'
-import { WebView } from 'react-native-webview'
 import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
-import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants'
+import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import { CameraCaptureModal } from '@/components/common'
 import {
   findPersonLabel, showAlert, splitMeterReading, validateMeterPhoto, validateRoomPhoto,
 } from '@/utils';
+import { MeterOverrideModal } from '@/components/common';
+import type { MeterOverrideKind } from '@/services/manager/meterOverrideService';
 import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractPriceApprovalStatus,
@@ -74,14 +75,47 @@ export const ResumeContractScreen: React.FC = () => {
   const [viewingContract, setViewingContract] = useState(false)
   const [search, setSearch] = useState('')
 
+  /**
+   * Hợp đồng còn quá xa ngày vào ở thì KHÔNG hiện — tránh manager đón khách sớm.
+   *
+   * BE chặn ở tận bước xác thực OTP (`TenantOnboardingServiceImpl`, luật
+   * `contract.max-early-move-in-days`): quá 3 ngày là ném "Chỉ được nhận nhà sớm tối đa
+   * 3 ngày". Nhưng lúc đó manager đã chụp ảnh đồng hồ, chụp hiện trạng, thu cọc xong
+   * xuôi — hỏng nguyên một lượt làm việc, và tiền cọc thì đã vào thật.
+   *
+   * Lọc theo `moveInDate` chứ không phải `expectedReceptionDate`: BE ràng buộc trên
+   * ngày vào ở, còn ngày hẹn đón chỉ là lịch làm việc của manager. Thiếu `moveInDate`
+   * thì lùi về ngày hẹn đón, thiếu cả hai thì vẫn hiện (không đoán bừa mà giấu mất
+   * hợp đồng của người ta).
+   */
+  const MAX_EARLY_ONBOARD_DAYS = 3
+
+  const daysUntilOnboard = (c: TenantContractResponse): number | null => {
+    const raw = c.moveInDate || c.expectedReceptionDate
+    if (!raw) return null
+    const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return null
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return Math.round((d.getTime() - today.getTime()) / 86_400_000)
+  }
+
+  const tooEarly = (c: TenantContractResponse) => {
+    const d = daysUntilOnboard(c)
+    return d != null && d > MAX_EARLY_ONBOARD_DAYS
+  }
+
+  const hiddenEarlyCount = useMemo(() => list.filter(tooEarly).length, [list])
+
   const filteredList = useMemo(() => {
+    const inWindow = list.filter((c) => !tooEarly(c))
     const q = search.trim().toLowerCase()
-    if (!q) return list
+    if (!q) return inWindow
     // Trước 08/08/2026 chỉ lọc theo tên khách — mentor phản ánh "search không ra".
     // Lúc đón dở, manager thường chỉ nhớ SỐ PHÒNG hoặc SĐT chứ hiếm khi nhớ đúng
     // họ tên đầy đủ; hợp đồng nháp thì tên còn có thể để trống.
     const digits = q.replace(/[^\d]/g, '')
-    return list.filter((c) => {
+    return inWindow.filter((c) => {
       const haystack = [
         c.tenantFullName,
         c.tenantPhone,
@@ -254,6 +288,14 @@ export const ResumeContractScreen: React.FC = () => {
           placeholderTextColor={Colors.textMuted}
         />
       </View>
+      {/* Nói rõ có bao nhiêu hợp đồng đang bị giấu. Giấu im lặng thì manager tìm không
+          thấy khách của mình rồi tưởng hỏng dữ liệu — tốn một cuộc gọi cho admin. */}
+      {hiddenEarlyCount > 0 && (
+        <Text style={styles.earlyHiddenNote}>
+          🗓 {hiddenEarlyCount} hợp đồng chưa tới hạn đón (còn hơn {MAX_EARLY_ONBOARD_DAYS} ngày
+          nữa mới tới ngày vào ở) nên tạm ẩn. Chỉ đón được sớm tối đa {MAX_EARLY_ONBOARD_DAYS} ngày.
+        </Text>
+      )}
       <ScrollView
         contentContainerStyle={styles.listBody}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -297,7 +339,13 @@ export const ResumeContractScreen: React.FC = () => {
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
                   </Text>
                   {!!c.propertyName && <Text style={styles.cardProperty}>🏠 {c.propertyName}</Text>}
-                  <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
+                  {/* Hiện giá thuê. BE hiện đang trả `null` cho tài khoản MANAGER
+                      (`isManager ? null : c.getRentAmount()`) — chừng nào BE còn mask thì
+                      dòng này ẩn, KHÔNG hiện "0 đ/tháng" như trước vì `formatVnd(null)`
+                      ra "0", đọc lên thành hợp đồng miễn phí. */}
+                  {c.rentAmount != null && (
+                    <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
+                  )}
                   {!!c.expectedReceptionDate && (
                     <Text style={styles.cardReception}>📅 Hẹn đón khách: {formatDateVi(c.expectedReceptionDate)}</Text>
                   )}
@@ -331,7 +379,8 @@ const ContractActionPanel: React.FC<{
           <Text style={styles.bannerIcon}>⏳</Text>
           <Text style={styles.bannerTitle}>Đang chờ Host duyệt giá</Text>
           <Text style={styles.bannerDesc}>
-            Hợp đồng {contract.contractCode} ({formatVnd(contract.rentAmount)} đ/tháng) đang chờ Host
+            Hợp đồng {contract.contractCode}
+            {contract.rentAmount != null ? ` (${formatVnd(contract.rentAmount)} đ/tháng)` : ''} đang chờ Host
             phê duyệt. Bạn sẽ được thông báo khi có phản hồi.
           </Text>
         </View>
@@ -494,6 +543,27 @@ const InspectionSection: React.FC<{
   // chịu trách nhiệm trước khi được lưu (feedback demo).
   const [manualEdited, setManualEdited] = useState<{ elec?: boolean; water?: boolean }>({})
   const [manualConfirmed, setManualConfirmed] = useState<{ elec?: boolean; water?: boolean }>({})
+  /**
+   * Mã admin cấp cho phép NHẬP TAY chỉ số khi không chụp được ảnh (mentor ý 5).
+   *
+   * Từ 10/08/2026 BE bắt buộc: có ghi chỉ số thì phải kèm ảnh HOẶC token
+   * (`requireMeterEvidence`). Trước đó màn này KHÔNG có đường xin mã, nên manager
+   * không chụp được ảnh là tắc hẳn — gõ số vào cũng bị BE chặn.
+   */
+  const [meterOverride, setMeterOverride] = useState<{
+    elec?: { token: string; reason: string }
+    water?: { token: string; reason: string }
+  }>({})
+  const [overrideTarget, setOverrideTarget] = useState<MeterOverrideKind | null>(null)
+
+  /**
+   * Ô chỉ số bị NIÊM PHONG cho tới khi có bằng chứng: ảnh đồng hồ, hoặc mã admin.
+   *
+   * Khoá ô nhập thay vì chỉ chặn lúc bấm Lưu là có chủ ý — người dùng biết ngay từ
+   * đầu là phải có bằng chứng, thay vì gõ xong hết rồi mới bị đuổi về.
+   */
+  const meterUnlocked = (kind: 'elec' | 'water') =>
+    !!(kind === 'elec' ? elecUrl : waterUrl) || !!meterOverride[kind]
   /**
    * Camera trong app đang mở cho việc gì (null = đóng).
    * Dùng CameraCaptureModal thay ImagePicker.launchCameraAsync: trên web hàm đó chỉ mở
@@ -668,15 +738,19 @@ const InspectionSection: React.FC<{
     // Chỉ số điện nước là căn cứ tính tiền, ảnh đồng hồ là bằng chứng đi kèm — thiếu
     // một trong hai thì số ghi nhận không đối soát được. Trước đây chỉ cần có số là
     // lưu được, nên xoá ảnh đi rồi lưu vẫn lọt, để lại chỉ số không có gì chứng minh.
-    const meterPairs: { url: string; reading: string; label: string }[] = [
-      { url: elecUrl, reading: elecReading.trim(), label: 'điện' },
-      { url: waterUrl, reading: waterReading.trim(), label: 'nước' },
+    const meterPairs: { url: string; reading: string; label: string; hasCode: boolean }[] = [
+      { url: elecUrl, reading: elecReading.trim(), label: 'điện', hasCode: !!meterOverride.elec },
+      { url: waterUrl, reading: waterReading.trim(), label: 'nước', hasCode: !!meterOverride.water },
     ]
     for (const m of meterPairs) {
-      if (m.reading && !m.url)
+      // Bằng chứng = ảnh HOẶC mã quản trị. Chốt này viết từ hồi chỉ có đường ảnh, chỉ
+      // xét `!m.url` — thiếu `hasCode` thì xin mã xong vẫn bị đuổi ngay tại đây, không
+      // bao giờ gửi được request lên BE.
+      if (m.reading && !m.url && !m.hasCode)
         return showAlert(
-          `Thiếu ảnh đồng hồ ${m.label}`,
-          `Đã nhập chỉ số ${m.label} thì phải kèm ảnh đồng hồ làm bằng chứng. Chụp lại ảnh hoặc xoá chỉ số trước khi lưu.`,
+          `Thiếu bằng chứng chỉ số ${m.label}`,
+          `Đã nhập chỉ số ${m.label} thì phải có ảnh đồng hồ, hoặc mã quản trị cấp kèm lý do. `
+            + 'Chụp ảnh, bấm "Xin mã từ quản trị", hoặc xoá chỉ số trước khi lưu.',
         )
       if (m.url && !m.reading)
         return showAlert(
@@ -698,6 +772,12 @@ const InspectionSection: React.FC<{
         electricMeterCapturedAt: meterCapturedAt.elec,
         waterMeterImageUrl: waterUrl || undefined,
         waterMeterCapturedAt: meterCapturedAt.water,
+        // Mã cho phép nhập tay khi không có ảnh. BE chỉ tiêu thụ token khi ảnh tương
+        // ứng TRỐNG — có ảnh thì bỏ qua, nên gửi kèm luôn cũng không đốt mã oan.
+        electricMeterOverrideToken: meterOverride.elec?.token,
+        electricMeterOverrideReason: meterOverride.elec?.reason,
+        waterMeterOverrideToken: meterOverride.water?.token,
+        waterMeterOverrideReason: meterOverride.water?.reason,
         roomConditionUrls: photos,
         roomConditionPhotos: photos.map((url, i) => ({
           url,
@@ -803,8 +883,13 @@ const InspectionSection: React.FC<{
                   <Text style={styles.meterRuleStrong}>NHỎ HƠN</Text>.
                 </Text>
               </View>
+              {/* Ô nhập bị KHOÁ khi chưa có ảnh và chưa xin mã — xem meterUnlocked. */}
               <TextInput
-                style={[styles.input, styles.meterReadingInput]}
+                style={[
+                  styles.input,
+                  styles.meterReadingInput,
+                  !meterUnlocked(kind) && styles.meterReadingLocked,
+                ]}
                 value={kind === 'elec' ? elecReading : waterReading}
                 onChangeText={(v) => {
                   if (kind === 'elec') setElecReading(v)
@@ -812,10 +897,42 @@ const InspectionSection: React.FC<{
                   setManualEdited((prev) => ({ ...prev, [kind]: true }))
                   setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
                 }}
+                editable={meterUnlocked(kind)}
                 keyboardType="numeric"
-                placeholder="OCR tự điền, có thể chỉnh"
+                placeholder={
+                  meterUnlocked(kind)
+                    ? 'OCR tự điền, có thể chỉnh'
+                    : '🔒 Chụp ảnh đồng hồ, hoặc xin mã để nhập tay'
+                }
                 placeholderTextColor={Colors.textMuted}
               />
+
+              {/* Đường xin mã — hiện khi chưa có ảnh và chưa xin. Không giấu sau bước
+                  "báo camera hỏng" như màn đón khách mới: từ 10/08/2026 BE bắt buộc
+                  ảnh hoặc mã, nên đây là lối duy nhất khi không chụp được. Giấu kỹ
+                  quá thì manager mò không ra và tắc hẳn. */}
+              {!meterUnlocked(kind) && (
+                <TouchableOpacity
+                  onPress={() => setOverrideTarget(kind === 'elec' ? 'ELEC' : 'WATER')}
+                >
+                  <Text style={styles.overrideLink}>
+                    🔑 Không chụp được ảnh? Xin mã từ quản trị để nhập tay
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {!!meterOverride[kind] && (
+                <View style={styles.overrideBadge}>
+                  <Text style={styles.overrideBadgeText} numberOfLines={2}>
+                    🔑 Nhập tay có mã · {meterOverride[kind]!.reason}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setMeterOverride((prev) => ({ ...prev, [kind]: undefined }))}
+                  >
+                    <Text style={styles.overrideBadgeClear}>Bỏ</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               {!!(ocrCandidates[kind]?.length) && (
                 <View style={styles.ocrAltBox}>
                   <Text style={styles.ocrAltLabel}>Máy đọc nhầm? Chọn số khác trên ảnh:</Text>
@@ -963,6 +1080,24 @@ const InspectionSection: React.FC<{
             : undefined
         }
       />
+
+      {/* Xin mã quản trị để mở khoá ô chỉ số khi không chụp được ảnh.
+          `contractId` có thật ở màn này (hợp đồng nháp đã tồn tại), khác màn đón khách
+          mới nơi hợp đồng chưa được tạo nên phải gửi null. */}
+      <MeterOverrideModal
+        visible={overrideTarget !== null}
+        meterKind={overrideTarget ?? 'ELEC'}
+        contractId={contract.id}
+        onCancel={() => setOverrideTarget(null)}
+        onGranted={(token, reason) => {
+          const kind = overrideTarget === 'WATER' ? 'water' : 'elec'
+          setMeterOverride((prev) => ({ ...prev, [kind]: { token, reason } }))
+          // Số gõ tay sau khi xin mã vẫn là số gõ tay → giữ nguyên yêu cầu tick cam kết.
+          setManualEdited((prev) => ({ ...prev, [kind]: true }))
+          setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+          setOverrideTarget(null)
+        }}
+      />
     </View>
   )
 }
@@ -976,7 +1111,6 @@ const DepositOtpPanel: React.FC<{
   const navigation = useNavigation<any>()
   const [payInfo, setPayInfo] = useState<TenantContractResponse>(contract)
   const [paid, setPaid] = useState(contract.paymentStatus === 'PAID')
-  const [showWebView, setShowWebView] = useState(false)
   const [busy, setBusy] = useState(false)
   const [otp, setOtp] = useState('')
   const [otpSending, setOtpSending] = useState(false)
@@ -990,7 +1124,6 @@ const DepositOtpPanel: React.FC<{
         const c = await realTenantService.checkPayment(contract.id)
         if (c.paymentStatus === 'PAID') {
           setPaid(true)
-          setShowWebView(false)
         }
       } catch {
         /* ignore */
@@ -1041,7 +1174,6 @@ const DepositOtpPanel: React.FC<{
       const c = await realTenantService.checkPayment(contract.id)
       if (c.paymentStatus === 'PAID') {
         setPaid(true)
-        setShowWebView(false)
       } else {
         showAlert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.')
       }
@@ -1087,8 +1219,12 @@ const DepositOtpPanel: React.FC<{
           {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu cọc'}
         </Text>
         <Text style={styles.bannerDesc}>
-          {contract.tenantFullName} · {formatVnd(contract.rentAmount)} đ/tháng. Thu{' '}
-          {formatVnd(totalDue)} đ tiền cọc rồi xác thực OTP để kích hoạt hợp đồng.
+          {contract.tenantFullName}
+          {contract.rentAmount != null ? ` · ${formatVnd(contract.rentAmount)} đ/tháng` : ''}.{' '}
+          {/* `totalDue` = 0 khi BE chưa trả số (ẩn tiền khỏi manager, hoặc chưa tạo link
+              thanh toán). Ghi "Thu 0 đ tiền cọc" thì manager đọc thành không phải thu gì. */}
+          {totalDue > 0 ? `Thu ${formatVnd(totalDue)} đ tiền cọc` : 'Tạo mã thanh toán để thu cọc'}
+          {' '}rồi xác thực OTP để kích hoạt hợp đồng.
           Tiền nhà tính theo ngày ở sẽ phát hoá đơn riêng cho khách trả trên app.
         </Text>
         {!!contract.expectedReceptionDate && (
@@ -1102,16 +1238,9 @@ const DepositOtpPanel: React.FC<{
 
       {!paid ? (
         <>
-          <Text style={styles.label}>Hình thức thu cọc</Text>
-          {/* Hệ thống thu cọc 100% chuyển khoản qua PayOS — không còn tiền mặt */}
-          <View style={styles.methodRow}>
-            <View style={[styles.methodChip, styles.methodChipActive]}>
-              <Text style={[styles.methodText, styles.methodTextActive]}>
-                💳 Chuyển khoản (PayOS)
-              </Text>
-            </View>
-          </View>
-
+          {/* Bỏ khối "Hình thức thu cọc": hệ thống thu 100% chuyển khoản qua PayOS,
+              không còn tiền mặt, nên đó là một ô chọn chỉ có đúng một lựa chọn —
+              chiếm chỗ mà không cho người dùng quyết định gì. */}
           {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
             <TouchableOpacity
               style={[styles.primaryBtn, busy && styles.btnDisabled]}
@@ -1125,7 +1254,7 @@ const DepositOtpPanel: React.FC<{
               )}
             </TouchableOpacity>
           )}
-          {!!payInfo.payosQrCode && !showWebView && (
+          {!!payInfo.payosQrCode && (
             <View style={styles.qrBox}>
               <Text style={styles.qrAmountLabel}>Tiền cọc thu qua QR</Text>
               <Text style={styles.qrAmount}>{formatVnd(totalDue)} đ</Text>
@@ -1137,7 +1266,11 @@ const DepositOtpPanel: React.FC<{
                   <Text style={styles.payBreakdownLabel}>
                     • Tiền cọc{contract.depositMonths ? ` (${contract.depositMonths} tháng)` : ''}
                   </Text>
-                  <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
+                  {/* `contract.deposit` bị BE ẩn khỏi manager (null) nên trước đây dòng
+                      này hiện "0 đ" ngay dưới tổng 2.500.000 — tự mâu thuẫn. Từ
+                      10/08/2026 QR CHỈ thu cọc, nên tổng chính là tiền cọc: lấy
+                      `totalDue` khi không có `deposit`. */}
+                  <Text style={styles.payBreakdownValue}>{formatVnd(depositValue ?? totalDue)} đ</Text>
                 </View>
               </View>
               <Text style={styles.qrNextDueNote}>
@@ -1150,26 +1283,10 @@ const DepositOtpPanel: React.FC<{
               <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
             </View>
           )}
-          {!!payInfo.payosCheckoutUrl && !showWebView && (
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => setShowWebView(true)}>
-              <Text style={styles.primaryBtnText}>💳 Mở trang thanh toán PayOS</Text>
-            </TouchableOpacity>
-          )}
-          {showWebView && !!payInfo.payosCheckoutUrl && (
-            <View style={styles.webviewBox}>
-              <WebView
-                source={{ uri: payInfo.payosCheckoutUrl }}
-                onNavigationStateChange={(nav) => {
-                  if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
-                    setShowWebView(false)
-                    checkPaidNow()
-                  } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
-                    setShowWebView(false)
-                  }
-                }}
-              />
-            </View>
-          )}
+          {/* Đã bỏ nút "Mở trang thanh toán PayOS" và khối WebView đi kèm: khách quét mã
+              QR bằng app ngân hàng CỦA KHÁCH, không ai đưa điện thoại của manager cho
+              khách gõ thông tin thẻ. Mở WebView ngay trong màn đón khách chỉ khiến
+              manager bấm nhầm rồi lạc khỏi luồng. Xác nhận đã chuyển bằng nút bên dưới. */}
           {(!!payInfo.payosQrCode || !!payInfo.payosCheckoutUrl) && (
             <TouchableOpacity style={styles.secondaryBtn} onPress={checkPaidNow}>
               <Text style={styles.secondaryBtnText}>Tôi đã chuyển khoản — Kiểm tra</Text>
@@ -1295,6 +1412,19 @@ const styles = StyleSheet.create({
   cardProperty: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardPrice: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
   cardReception: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  earlyHiddenNote: {
+    marginHorizontal: Spacing.base,
+    marginBottom: Spacing.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#9A3412',
+  },
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   statusText: { fontSize: 11, fontWeight: '700' },
 
@@ -1440,6 +1570,34 @@ const styles = StyleSheet.create({
   // Chỉ số điện/nước căn PHẢI: đọc số theo hàng đơn vị dễ đối chiếu với mặt đồng hồ
   // hơn, và khớp thói quen hiển thị số liệu tiền/lượng.
   meterReadingInput: { textAlign: 'right' },
+  /** Ô chỉ số đang bị niêm phong — nền xám để nhìn là biết chưa gõ được. */
+  meterReadingLocked: {
+    backgroundColor: Colors.background,
+    borderStyle: 'dashed',
+    color: Colors.textMuted,
+  },
+  overrideLink: {
+    fontSize: 12,
+    color: Colors.primary,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+    marginTop: 8,
+  },
+  overrideBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+  },
+  overrideBadgeText: { flex: 1, fontSize: 11, color: '#9A3412' },
+  overrideBadgeClear: { fontSize: 11, fontWeight: '700', color: '#9A3412' },
   meterRuleBox: {
     backgroundColor: '#FFFBEB',
     borderRadius: BorderRadius.md,
