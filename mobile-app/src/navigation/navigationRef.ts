@@ -30,7 +30,13 @@ const fallbackScreen = (type?: string): string | undefined => {
   const t = (type || '').toUpperCase();
   const isManager = currentRole === 'manager';
   if (t.includes('CHECKOUT')) return isManager ? 'CheckoutRequests' : 'CheckoutDetail';
-  if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT'].some(k => t.includes(k))) {
+  // Thu tiền onboard (BE 08/08/2026). Cùng sự kiện nhưng manager phải quay lại luồng
+  // đón khách để bấm tiếp OTP, chứ không phải mở màn hoá đơn — nên xét trước.
+  if (t.startsWith('DEPOSIT_PAID')) return isManager ? 'ResumeContract' : 'InvoiceList';
+  if (t.startsWith('PRICE_APPROVAL')) return isManager ? 'ResumeContract' : 'TenantContracts';
+  // 'DEPOSIT' phòng các type thu tiền khác BE thêm sau — chuỗi đó KHÔNG chứa 'PAYMENT'
+  // nên không lọt vào các từ khoá còn lại.
+  if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT', 'DEPOSIT'].some(k => t.includes(k))) {
     return isManager ? 'RentInvoice' : 'InvoiceList';
   }
   if (t.includes('MAINTENANCE')) return isManager ? 'ManagerMaintenance' : 'MaintenanceList';
