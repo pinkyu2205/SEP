@@ -147,8 +147,13 @@ export function roundByMentorRule(integerPart: string, decimalPart: string): num
  * tiện (12,567 → nhìn số 5 → xuống, trong khi phần lẻ rõ ràng quá nửa). Dùng ngưỡng
  * nửa đơn vị thì đúng cho mọi số chữ số mà vẫn khớp tuyệt đối với luật mentor chốt.
  *
- * `EPS` chống rác dấu phẩy động của phép trừ số thực: 3090,4 − 3081,9 ra
- * 8.500000000000455, đúng ranh giới, không có epsilon là bị đẩy lên nhầm.
+ * `HALF_EPS` là biên phòng thủ, KHÔNG phải vá một ca đã gặp: ở đây phần lẻ dựng lại
+ * từ chuỗi (`Number('0.' + '5')`) nên ra đúng 0.5, không có sai số. Thử ngẫu nhiên
+ * 200k phép trừ chỉ số điện (1 số lẻ) và 300k phép trừ chỉ số nước (3 số lẻ) đều
+ * không ra ca nào lệch 0,5 dưới 1e-9. Giữ epsilon vì nó vô hại và chặn được trường
+ * hợp sau này có ai truyền vào số đã qua tính toán thay vì chuỗi gốc.
+ *
+ * Rác dấu phẩy động CÓ THẬT nằm ở chỗ khác — xem `roundConsumptionByMentorRule`.
  */
 const HALF_EPS = 1e-9;
 const isAboveHalf = (decimalPart: string): boolean => {
