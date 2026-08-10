@@ -66,17 +66,30 @@ export async function registerPushToken(): Promise<void> {
 /**
  * Gỡ token khỏi BE (gọi TRƯỚC khi xoá accessToken lúc logout) để máy đã đăng xuất
  * không còn nhận thông báo của tài khoản cũ.
- * ⚠️ BE hiện CHƯA có endpoint xoá (chỉ có POST /me/push-token) — lệnh dưới sẽ lỗi và
- * bị nuốt. Chừng nào BE chưa làm, token cũ còn nằm trên user cũ; đăng nhập tài khoản
- * khác trên cùng máy thì token bị ghi đè sang tài khoản mới nên không lộ chéo,
- * nhưng user cũ vẫn tưởng máy này còn nhận thông báo.
+ *
+ * BE đã có `DELETE /api/v1/user/me/push-token` từ 08/08/2026 (bảng `user_push_tokens`,
+ * 1 tài khoản nhiều máy):
+ *   • CÓ body `{ pushToken }` → gỡ đúng máy đó
+ *   • KHÔNG body            → gỡ mọi máy của tài khoản
+ *
+ * Gửi kèm token khi lấy được để không đá văng các máy khác của cùng người dùng.
+ * ⚠️ Lấy token KHÔNG được là điều kiện chặn: trước đây hàm này gọi `getExpoToken()`
+ * rồi `return` sớm khi null, nên trên máy chưa cấp quyền / chưa cấu hình push thì
+ * lệnh DELETE KHÔNG BAO GIỜ chạy và token cũ ở lại BE vĩnh viễn. Giờ vẫn gọi DELETE
+ * không body — coi như đăng xuất khỏi mọi máy, đúng ý người dùng hơn là im lặng bỏ qua.
  */
 export async function unregisterPushToken(): Promise<void> {
+  let token: string | null = null;
   try {
-    const token = await getExpoToken();
-    if (!token) return;
-    await realApiClient.delete('/api/v1/user/me/push-token', { data: { pushToken: token } });
+    token = await getExpoToken();
   } catch {
-    // best-effort
+    // bỏ qua — vẫn phải gọi DELETE bên dưới
+  }
+  try {
+    await realApiClient.delete('/api/v1/user/me/push-token', {
+      data: token ? { pushToken: token } : undefined,
+    });
+  } catch {
+    // best-effort: lỗi mạng lúc logout không được chặn việc đăng xuất
   }
 }
