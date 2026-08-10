@@ -22,7 +22,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import { CameraCaptureModal } from '@/components/common'
-import { showAlert, validateMeterPhoto, validateRoomPhoto } from '@/utils';
+import { showAlert, splitMeterReading, validateMeterPhoto, validateRoomPhoto } from '@/utils';
 import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractPriceApprovalStatus,
@@ -33,6 +33,18 @@ import {
 
 const onlyDigits = (s: string) => String(s).replace(/[^\d]/g, '')
 const parseNum = (s: string) => Number(onlyDigits(s)) || 0
+/**
+ * Dãy chữ số OCR đọc được ("030815") → chuỗi chỉ số thật ("3081.5").
+ *
+ * Không tách thì chỉ số bị ghi to gấp 10 lần và sai luôn tiền điện cả kỳ thuê.
+ * Màn này dùng số chữ số MẶC ĐỊNH (điện 5+1, nước 5+3) vì `TenantContractResponse`
+ * chưa mang cấu hình của phòng — trùng đúng mặc định BE, và người nhập vẫn sửa
+ * được trực tiếp trong ô. Màn đón khách (OnboardingScreenV2) thì đọc cấu hình thật.
+ */
+const toReadingValue = (raw: string, kind: 'elec' | 'water'): string => {
+  const s = splitMeterReading(raw, kind)
+  return s.decimalPart ? `${Number(s.integerPart)}.${s.decimalPart}` : String(Number(s.integerPart || 0))
+}
 const formatVnd = (v: number) => (v ? v.toLocaleString('vi-VN') : '0')
 const formatDateVi = (iso?: string): string => {
   if (!iso) return ''
@@ -63,7 +75,25 @@ export const ResumeContractScreen: React.FC = () => {
   const filteredList = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return list
-    return list.filter((c) => c.tenantFullName?.toLowerCase().includes(q))
+    // Trước 08/08/2026 chỉ lọc theo tên khách — mentor phản ánh "search không ra".
+    // Lúc đón dở, manager thường chỉ nhớ SỐ PHÒNG hoặc SĐT chứ hiếm khi nhớ đúng
+    // họ tên đầy đủ; hợp đồng nháp thì tên còn có thể để trống.
+    const digits = q.replace(/[^\d]/g, '')
+    return list.filter((c) => {
+      const haystack = [
+        c.tenantFullName,
+        c.tenantPhone,
+        c.roomNumber,
+        c.contractCode,
+        c.propertyName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      if (haystack.includes(q)) return true
+      // Gõ SĐT có/không dấu cách, dấu chấm đều phải ra.
+      return digits.length >= 3 && haystack.replace(/[^\d]/g, '').includes(digits)
+    })
   }, [list, search])
 
   const handleViewContract = async () => {
@@ -106,14 +136,21 @@ export const ResumeContractScreen: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      // Gọi KHÔNG status chỉ trả về HĐ đang chờ/đã duyệt giá — HĐ nháp (DRAFT) mới gán
-      // bị BE loại ra mặc định, phải gọi thêm status=DRAFT riêng rồi gộp (dedupe theo id,
-      // ưu tiên nháp lên trước vì cần xử lý sớm nhất).
-      const [pending, drafts] = await Promise.all([
+      // BE chia 3 rổ và nhánh mặc định KHÔNG bao gồm DRAFT/PENDING, nên phải gọi đủ
+      // cả ba rồi gộp (dedupe theo id):
+      //   • không status → 3 trạng thái duyệt giá
+      //   • DRAFT        → hợp đồng nháp mới gán
+      //   • PENDING      → ĐÃ tạo mã thanh toán, đang chờ khách chuyển tiền / xác thực OTP
+      //
+      // Thiếu nhánh PENDING chính là lỗi mentor nêu 07/08/2026: manager thoát app giữa
+      // chừng rồi vào lại là mất dấu khách đang đón dở, tìm kiểu gì cũng không ra.
+      const [approval, drafts, pendings] = await Promise.all([
         realTenantService.listManagedContracts(),
         realTenantService.listManagedContracts('DRAFT'),
+        realTenantService.listManagedContracts('PENDING'),
       ])
-      const data = [...drafts, ...pending].filter(
+      // Thứ tự gộp = thứ tự ưu tiên xử lý: đang chờ tiền/OTP gấp nhất, rồi tới nháp.
+      const data = [...pendings, ...drafts, ...approval].filter(
         (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
       )
       setList(data)
@@ -211,7 +248,7 @@ export const ResumeContractScreen: React.FC = () => {
           style={styles.searchInput}
           value={search}
           onChangeText={setSearch}
-          placeholder="Tìm theo tên khách hàng..."
+          placeholder="Tìm theo tên, SĐT, số phòng, mã HĐ..."
           placeholderTextColor={Colors.textMuted}
         />
       </View>
@@ -231,13 +268,18 @@ export const ResumeContractScreen: React.FC = () => {
           </View>
         ) : (
           filteredList.map((c) => {
-            const meta = c.priceApprovalStatus
-              ? STATUS_META[c.priceApprovalStatus]
-              : c.status === 'DRAFT'
-                ? { label: 'Nháp — chờ đón khách', color: '#D97706', bg: '#FFFBEB' }
-                : c.status === 'PENDING'
-                  ? { label: 'Chờ thu cọc', color: '#0891B2', bg: '#ECFEFF' }
-                  : null
+            // Khách ĐÃ chuyển tiền nhưng chưa xong OTP là việc gấp nhất — manager chỉ
+            // cần bấm tiếp là xong. Trạng thái này phải thắng mọi nhãn khác.
+            const paid = c.paymentStatus === 'PAID' || !!c.depositPaidAt
+            const meta = c.status === 'PENDING' && paid
+              ? { label: '✅ Đã thu — chờ OTP', color: '#047857', bg: '#ECFDF5' }
+              : c.priceApprovalStatus
+                ? STATUS_META[c.priceApprovalStatus]
+                : c.status === 'DRAFT'
+                  ? { label: 'Nháp — chờ đón khách', color: '#D97706', bg: '#FFFBEB' }
+                  : c.status === 'PENDING'
+                    ? { label: 'Chờ khách chuyển tiền', color: '#0891B2', bg: '#ECFEFF' }
+                    : null
             return (
               <TouchableOpacity
                 key={c.id}
@@ -518,8 +560,8 @@ const InspectionSection: React.FC<{
       if (kind === 'elec') { setElecUrl(url); setMeterCapturedAt((prev) => ({ ...prev, elec: capturedAt })) }
       else { setWaterUrl(url); setMeterCapturedAt((prev) => ({ ...prev, water: capturedAt })) }
 
-      if (kind === 'elec') setElecReading(check.reading)
-      else setWaterReading(check.reading)
+      if (kind === 'elec') setElecReading(toReadingValue(check.reading, kind))
+      else setWaterReading(toReadingValue(check.reading, kind))
       setOcrCandidates((prev) => ({ ...prev, [kind]: check.candidates ?? [] }))
 
       if (check.confidence === 'low') {
@@ -730,9 +772,10 @@ const InspectionSection: React.FC<{
                   sau, nếu không hiệu số giữa 2 kỳ sẽ sai. */}
               <View style={styles.meterRuleBox}>
                 <Text style={styles.meterRuleText}>
-                  • Chỉ nhập phần số <Text style={styles.meterRuleStrong}>ĐEN</Text>
-                  {kind === 'elec' ? ' (kWh)' : ' (m³)'} — ô{' '}
-                  <Text style={styles.meterRuleRed}>ĐỎ</Text> là phần thập phân, bỏ qua.
+                  • Nhập cả phần <Text style={styles.meterRuleStrong}>ĐEN</Text>
+                  {kind === 'elec' ? ' (kWh)' : ' (m³)'} lẫn phần{' '}
+                  <Text style={styles.meterRuleRed}>ĐỎ</Text>, ngăn nhau bằng dấu chấm —
+                  vd <Text style={styles.meterRuleStrong}>3081.5</Text>.
                 </Text>
                 <Text style={styles.meterRuleText}>
                   • Chữ số đang nhảy giữa 2 số → lấy số{' '}
@@ -761,8 +804,8 @@ const InspectionSection: React.FC<{
                         key={n}
                         style={styles.ocrAltChip}
                         onPress={() => {
-                          if (kind === 'elec') setElecReading(n)
-                          else setWaterReading(n)
+                          if (kind === 'elec') setElecReading(toReadingValue(n, kind))
+                          else setWaterReading(toReadingValue(n, kind))
                           // Số vẫn đến từ ảnh (OCR đọc được), không phải gõ tay
                           // → không bắt tick cam kết như nhánh nhập tay.
                           setManualEdited((prev) => ({ ...prev, [kind]: false }))
