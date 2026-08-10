@@ -55,8 +55,23 @@ export const TenantHomeScreen: React.FC = () => {
     let active = true;
     setLoading(true);
     setDashError(false);
+
+    // Hỏi dashboard theo HĐ đang chọn; nếu HĐ đó không còn thuộc về tài khoản này
+    // (403/404 — máy từng đăng nhập tài khoản tenant khác) thì bỏ contractId gọi lại
+    // để BE tự chọn HĐ mới nhất, thay vì báo "Không tải được dữ liệu".
+    const fetchDashboard = async () => {
+      try {
+        return await realTenantSelfService.getDashboard(selectedContractId ?? undefined);
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (selectedContractId == null || (status !== 403 && status !== 404)) throw err;
+        setSelectedContractId(null);
+        return await realTenantSelfService.getDashboard();
+      }
+    };
+
     Promise.all([
-      realTenantSelfService.getDashboard(selectedContractId ?? undefined)
+      fetchDashboard()
         .then(d => ({ ok: true as const, d }))
         .catch(() => ({ ok: false as const, d: null })),
       realTenantBillingService.listInvoices().then(r => r.map(toSharedBill)).catch(() => [] as SharedBill[]),
@@ -124,6 +139,22 @@ export const TenantHomeScreen: React.FC = () => {
     },
     unreadNotifications: dash?.summary?.unreadNotifications ?? 0,
   };
+
+  /**
+   * Khoản thu lúc NHẬN PHÒNG (tiền nhà tháng đầu + tiền cọc, khách trả 1 lần qua PayOS).
+   *
+   * Mentor 07/08/2026: "tenant chưa xem được đã chuyển và đặt cọc hay chưa" và "tổng
+   * 10tr mà hoá đơn hiện 5tr, chưa có tiền tháng". Nguyên nhân là BE không sinh hoá
+   * đơn cho khoản này nên trong app không có gì để nhìn; BE đã sửa 08/08/2026 — sinh
+   * hoá đơn `HD-ONBOARD-{contractId}` trạng thái PAID kèm 2 dòng item.
+   *
+   * Nhận diện theo mã trước (chắc chắn nhất), rồi tới `billingPeriod` để còn chạy được
+   * với hoá đơn seed/cũ mà BE đặt mã khác.
+   */
+  const onboardingBill = allBills.find(
+    b => b.code?.startsWith('HD-ONBOARD-')
+      || /thu lúc nhận phòng/i.test(b.billingPeriod ?? ''),
+  );
 
   const unpaidBills = allBills.filter(b => b.status === 'pending' || b.status === 'overdue');
   const overdueInvoices = allBills.filter(b => b.status === 'overdue');
@@ -266,6 +297,43 @@ export const TenantHomeScreen: React.FC = () => {
             <Text style={styles.heroContractArrow}>›</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Khoản thu lúc nhận phòng — tách rõ tiền nhà tháng đầu / tiền cọc để khách
+            đối chiếu được với số tiền app ngân hàng đã trừ (mentor 07/08/2026, ý 10+11). */}
+        {!!onboardingBill && (
+          <TouchableOpacity
+            style={styles.onboardPaidCard}
+            activeOpacity={0.8}
+            // Route nhận cả object hoá đơn (xem InvoiceListScreen), KHÔNG phải id.
+            onPress={() => navigation.navigate('InvoiceDetail', { invoice: onboardingBill })}
+          >
+            <View style={styles.onboardPaidHead}>
+              <Text style={styles.onboardPaidTitle}>✅ Đã thanh toán khi nhận phòng</Text>
+              <Text style={styles.onboardPaidTotal}>
+                {formatCurrency(onboardingBill.grandTotal)}
+              </Text>
+            </View>
+            {onboardingBill.items && onboardingBill.items.length > 0 ? (
+              onboardingBill.items.map((it, i) => (
+                <View key={`${it.label}-${i}`} style={styles.onboardPaidRow}>
+                  <Text style={styles.onboardPaidLabel}>• {it.label}</Text>
+                  <Text style={styles.onboardPaidValue}>{formatCurrency(it.amount)}</Text>
+                </View>
+              ))
+            ) : (
+              // BE cũ chưa kèm items -> vẫn phải nói được đây là khoản gì, đừng để
+              // khách nhìn một con số trống không.
+              <Text style={styles.onboardPaidLabel}>
+                Gồm tiền nhà tháng đầu và tiền cọc. Xem chi tiết trong hoá đơn.
+              </Text>
+            )}
+            {!!onboardingBill.paidAt && (
+              <Text style={styles.onboardPaidAt}>
+                🕒 Ghi nhận {new Date(onboardingBill.paidAt).toLocaleString('vi-VN')}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
 
         {/* ── Liên hệ quản lý + lưu ý điện/nước ── */}
         <View style={styles.contactCard}>
@@ -552,6 +620,24 @@ const styles = StyleSheet.create({
   heroContract: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
   heroContractText: { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
   heroContractArrow: { fontSize: 18, fontWeight: '700', color: 'rgba(255,255,255,0.75)' },
+
+  // ── Khoản thu lúc nhận phòng (tiền nhà tháng đầu + cọc) ──
+  onboardPaidCard: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    padding: Spacing.base,
+    marginTop: Spacing.base,
+    gap: 6,
+  },
+  onboardPaidHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  onboardPaidTitle: { flex: 1, fontSize: 13, fontWeight: '800', color: '#047857' },
+  onboardPaidTotal: { fontSize: 15, fontWeight: '800', color: '#047857' },
+  onboardPaidRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  onboardPaidLabel: { flex: 1, fontSize: 12, color: Colors.textSecondary },
+  onboardPaidValue: { fontSize: 12, fontWeight: '700', color: Colors.textPrimary },
+  onboardPaidAt: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
 
   // ── Card liên hệ quản lý + lưu ý điện/nước ──
   contactCard: {

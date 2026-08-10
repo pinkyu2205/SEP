@@ -12,6 +12,7 @@ export { StickyContactBar } from './StickyContactBar';
 export { SkeletonCard } from './SkeletonCard';
 export { ConfirmDialog } from './ConfirmDialog';
 export { CameraCaptureModal } from './CameraCaptureModal';
+export { MeterOverrideModal } from './MeterOverrideModal';
 export { AlertHost } from './AlertHost';
 export { NotificationToast } from './NotificationToast';
 export { BackgroundWatcher } from './BackgroundWatcher';

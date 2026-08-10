@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, ActivityIndicator,
 } from 'react-native';
 import {
-  showAlert, readApiError, validateMeterPhoto,
+  showAlert, readApiError, validateMeterPhoto, splitMeterReading,
   validateEquipmentPhoto, classifyEquipment, requireLiveCapture,
 } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -288,7 +288,14 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       }
 
       setUrl(url);
-      if (check.reading) setReading(check.reading);
+      // Tách phần lẻ (chữ số đỏ) trước khi điền — chỉ số chốt lúc trả phòng phải cùng
+      // quy ước với chỉ số chốt lúc đón khách, lệch một bên là hiệu số ra sai 10 lần.
+      if (check.reading) {
+        const s = splitMeterReading(check.reading, kind);
+        setReading(s.decimalPart
+          ? `${Number(s.integerPart)}.${s.decimalPart}`
+          : String(Number(s.integerPart || 0)));
+      }
       setMeterStatus(prev => ({
         ...prev,
         [kind]: check.confidence === 'high'
