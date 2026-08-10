@@ -122,13 +122,16 @@ export const BillingHistoryScreen: React.FC = () => {
       .map(([room, list]) => ({ key: room, title: `Phòng ${room}`, invoices: list }));
   }, [filtered, selectedProp]);
 
+  // Đếm theo SỐ HOÁ ĐƠN, không cộng tiền: danh sách trộn cả tiền phòng lẫn điện/nước,
+  // mà tiền phòng thì manager không được thấy (@/constants/managerVisibility) — cộng
+  // gộp lại là lộ gián tiếp.
   const totals = useMemo(() => {
     const paid = filtered.filter(i => i.status === 'PAID');
     const unpaid = filtered.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE');
     return {
       count: filtered.length,
-      collected: paid.reduce((s, i) => s + (i.amount || 0), 0),
-      uncollected: unpaid.reduce((s, i) => s + (i.amount || 0), 0),
+      paidCount: paid.length,
+      unpaidCount: unpaid.length,
       overdueCount: filtered.filter(i => i.status === 'OVERDUE').length,
       /** Số kỳ đã phát hành — cho biết lịch sử dài tới đâu. */
       periods: new Set(filtered.map(monthKey)).size,
@@ -150,7 +153,10 @@ export const BillingHistoryScreen: React.FC = () => {
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end', gap: 4 }}>
-          <Text style={s.invAmount}>{fmt(inv.amount)}</Text>
+          {/* Tiền phòng: ẩn số tiền. Điện/nước: vẫn hiện vì manager tự chốt số. */}
+          <Text style={s.invAmount}>
+            {(inv.type || '').toUpperCase() === 'RENT' ? '' : fmt(inv.amount)}
+          </Text>
           <View style={[s.statusChip, { backgroundColor: sc.bg }]}>
             <Text style={[s.statusChipText, { color: sc.color }]}>{sc.label}</Text>
           </View>
@@ -162,7 +168,7 @@ export const BillingHistoryScreen: React.FC = () => {
   /** Trong một phòng: chia tiếp theo kỳ, mới nhất trước. */
   const renderGroup = (g: UnitGroup) => {
     const open = openUnit === g.key;
-    const collected = g.invoices.filter(i => i.status === 'PAID').reduce((sum, i) => sum + (i.amount || 0), 0);
+    const paidCount = g.invoices.filter(i => i.status === 'PAID').length;
     const unpaidCount = g.invoices.filter(i => i.status !== 'PAID' && i.status !== 'CANCELLED').length;
     const byMonth = new Map<string, ManagerInvoice[]>();
     for (const inv of g.invoices) byMonth.set(monthKey(inv), [...(byMonth.get(monthKey(inv)) ?? []), inv]);
@@ -178,7 +184,7 @@ export const BillingHistoryScreen: React.FC = () => {
           <View style={{ flex: 1 }}>
             <Text style={s.groupTitle}>{g.title}</Text>
             <Text style={s.groupMeta}>
-              {g.invoices.length} hoá đơn · {months.length} kỳ · đã thu {fmt(collected)}
+              {g.invoices.length} hoá đơn · {months.length} kỳ · đã thu {paidCount}
               {unpaidCount > 0 ? ` · còn ${unpaidCount} chưa thu` : ''}
             </Text>
           </View>
@@ -247,12 +253,12 @@ export const BillingHistoryScreen: React.FC = () => {
           <View style={s.summaryCard}>
             <View style={s.summaryRow}>
               <View style={s.summaryItem}>
-                <Text style={[s.summaryNum, { color: Colors.success }]}>{fmt(totals.collected)}</Text>
+                <Text style={[s.summaryNum, { color: Colors.success }]}>{totals.paidCount}</Text>
                 <Text style={s.summaryLbl}>Đã thu</Text>
               </View>
               <View style={s.summarySep} />
               <View style={s.summaryItem}>
-                <Text style={[s.summaryNum, { color: Colors.warning }]}>{fmt(totals.uncollected)}</Text>
+                <Text style={[s.summaryNum, { color: Colors.warning }]}>{totals.unpaidCount}</Text>
                 <Text style={s.summaryLbl}>Chưa thu</Text>
               </View>
               <View style={s.summarySep} />

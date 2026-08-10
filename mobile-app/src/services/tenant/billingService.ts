@@ -33,6 +33,13 @@ export interface TenantInvoice {
   status: TenantInvoiceStatus;
   dueDate: string;
   createdAt: string;
+  /**
+   * FIRST | REGULAR | LAST — phân biệt hoá đơn tiền phòng kỳ đầu (thu ngay lúc nhận
+   * phòng, hạn 3 ngày) với các tháng thường. BE CHƯA trả field này (07/08/2026) —
+   * xem docs/BE-HANDOFF-first-cycle-reminder-2026-08-07.md; trong lúc chờ, FE tự suy
+   * ra bằng isFirstRentCycleInvoice() ở @/constants/rentCycle.
+   */
+  cycleType?: string;
   paidAt?: string;
   paymentMethod?: string;
   transactionId?: string;
@@ -144,6 +151,7 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   status: STATUS_MAP[inv.status] ?? 'pending',
   dueDate: inv.dueDate,
   createdAt: inv.createdAt,
+  cycleType: inv.cycleType,
   paidAt: inv.paidAt,
   paymentMethod: inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined,
   transactionId: inv.transactionId,

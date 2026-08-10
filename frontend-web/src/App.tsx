@@ -35,6 +35,7 @@ import { CauHinhKhaiThacPage } from '@/pages/admin/onboarding/OperationConfigPag
 import { TenantList } from '@/pages/host/tenants/TenantList';
 import { ReceivablesAging } from '@/pages/host/finance/ReceivablesAging';
 import { DepositLedger } from '@/pages/host/finance/DepositLedger';
+import { BillingPayments } from '@/pages/host/finance/BillingPayments';
 import { HostPropertyReview } from '@/pages/host/PropertyReview';
 
 // Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
@@ -139,6 +140,7 @@ function App() {
             <Route path="/host/financial" element={<FinancialManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
             <Route element={<ProtectedRoute allowedRoles={['host']} />}>
+              <Route path="/host/billing" element={<BillingPayments />} />
               <Route path="/host/receivables" element={<ReceivablesAging />} />
               <Route path="/host/deposits" element={<DepositLedger />} />
             </Route>

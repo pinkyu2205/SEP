@@ -149,6 +149,20 @@ export const hostService = {
     const list = Array.isArray(res) ? res : res.content;
     return list.map(dtoToExpense);
   },
+  /**
+   * Như listExpenses nhưng giữ nguyên thông tin phân trang (totalElements) —
+   * cần cho sổ chi phí ở trang Quản lý tài chính. BE đã ORDER BY createdAt DESC
+   * nên trang 0 luôn là các khoản mới nhất.
+   */
+  listExpensesPage: async (params: { propertyId?: string; category?: ExpenseCategory; month?: string; page?: number; size?: number } = {}): Promise<Page<Expense>> => {
+    const query = { ...params, category: params.category ? CATEGORY_TO_API[params.category] : undefined };
+    const res = await api.get<unknown, Page<ExpenseDto> | ExpenseDto[]>(EXPENSES, { params: query });
+    if (Array.isArray(res)) {
+      const content = res.map(dtoToExpense);
+      return { content, totalElements: content.length, totalPages: 1, number: 0, size: content.length } as Page<Expense>;
+    }
+    return { ...res, content: (res.content ?? []).map(dtoToExpense) };
+  },
   createExpense: async (input: Omit<Expense, 'id' | 'createdAt' | 'propertyName'> & { propertyName?: string }): Promise<Expense> => {
     const body = { ...input, category: CATEGORY_TO_API[input.category] };
     const res = await api.post<unknown, ExpenseDto>(EXPENSES, body);

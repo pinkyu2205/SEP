@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SESSION_KEYS } from '@/services/core/session';
 import { realPropertyService, ApiProperty, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { ManagedProperty, WholeHouseRentalStatus } from '@/data/managedProperties';
@@ -123,18 +124,31 @@ export const managerPropertyService = {
    * (Quản lý toà nhà, Quản lý phòng...) để không lặp lại logic scope.
    */
   getScopedProperties: async (): Promise<ApiProperty[]> => {
-    const token = await AsyncStorage.getItem('accessToken');
-    const claims = token ? decodeJwtClaims(token) : null;
-
+    // BE chưa có endpoint "nhà của tôi" nên phải lấy hết rồi lọc ở client
+    // (xem docs/BE-NEED-manager-money-visibility-2026-08-07.md).
     const all = await realPropertyService.getProperties();
-    const managerId = resolveManagerId(claims, all);
 
-    // Lọc đúng nhà của manager. Nếu không xác định được id (vd JWT không chứa) thì
-    // tạm hiện tất cả để không khoá người dùng — xem doc/ cho hướng xử lý triệt để (BE).
-    if (!managerId) {
-      console.warn('[managerProperties] Chưa xác định được managerId từ JWT — đang hiển thị tất cả. Claims:', claims);
-      return all;
+    // Ưu tiên id thật của user (lấy từ /auth/me lúc đăng nhập, lưu ở SESSION_KEYS.user)
+    // — chắc chắn hơn nhiều so với đoán tên claim trong JWT.
+    let managerId: string | null = null;
+    try {
+      const raw = await AsyncStorage.getItem(SESSION_KEYS.user);
+      const uid = raw ? (JSON.parse(raw) as { id?: string }).id : undefined;
+      if (uid && all.some((p) => p.operationManagerId === uid)) managerId = uid;
+    } catch {
+      // JSON hỏng: rơi xuống cách suy từ JWT bên dưới.
     }
+
+    if (!managerId) {
+      const token = await AsyncStorage.getItem(SESSION_KEYS.accessToken);
+      managerId = resolveManagerId(token ? decodeJwtClaims(token) : null, all);
+    }
+
+    // KHOÁ LẠI khi không xác định được (fail closed).
+    // Trước đây chỗ này `return all` — nghĩa là manager CHƯA được giao nhà nào sẽ thấy
+    // TOÀN BỘ nhà của hệ thống, đúng ngược với ý đồ phân quyền. Thà hiện rỗng còn hơn
+    // để lộ nhà + hợp đồng của người khác.
+    if (!managerId) return [];
     return all.filter((p) => p.operationManagerId === managerId);
   },
 

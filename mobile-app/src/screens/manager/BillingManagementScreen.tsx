@@ -1,22 +1,28 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
+  TextInput,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
-  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE,
+  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_AMOUNT_HIDDEN_NOTE,
 } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
+import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
 
 /**
  * HOÁ ĐƠN & THANH TOÁN (tiền nhà) — màn theo dõi kỳ thu HIỆN TẠI.
  *
+ * ⚠️ Màn này KHÔNG hiện số tiền (chốt 07/08/2026 — xem @/constants/managerVisibility).
+ * Manager chỉ cần biết khách đã thanh toán hoá đơn tiền phòng của kỳ hay chưa, nên
+ * mọi thống kê ở đây đếm theo SỐ HOÁ ĐƠN chứ không cộng tiền.
+ *
  * Thứ tự trên màn đi theo việc manager cần làm, không theo thứ tự dữ liệu:
- *   1. Kỳ này thu tới đâu (tiền, không phải số đếm) — trả lời câu hỏi đầu tiên luôn.
+ *   1. Kỳ này thu tới đâu (bao nhiêu hoá đơn đã thanh toán / tổng).
  *   2. Việc cần xử lý: giao dịch chờ xác nhận, hoá đơn quá hạn.
  *   3. Từng nhà: nhà nào chưa thu xong, bấm vào xem chi tiết.
  *   4. Giao dịch gần đây.
@@ -32,15 +38,12 @@ const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
 };
 const methodOf = (m: string) => METHOD_CONFIG[(m || '').toUpperCase()] ?? METHOD_CONFIG.OTHER;
 
-const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
-/** Rút gọn cho các ô số liệu chật: 5.800.000 → "5,8tr". */
-const fmtShort = (n: number) => {
-  const v = n ?? 0;
-  if (v >= 1e9) return `${(v / 1e9).toFixed(1).replace('.', ',')}tỷ`;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace('.', ',')}tr`;
-  if (v >= 1e3) return `${Math.round(v / 1e3)}k`;
-  return String(v);
-};
+/**
+ * Bỏ dấu + thường hoá để tìm "trang" ra "Đỗ Minh Trang", gõ không dấu vẫn thấy.
+ * Manager gõ nhanh trên điện thoại, bắt gõ đúng dấu là không dùng được.
+ */
+const norm = (s: string) =>
+  (s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').replace(/[đĐ]/g, 'd').toLowerCase();
 
 /** "Hôm nay 13:58" / "Hôm qua 09:12" / "05/08 13:58" — dễ đọc hơn ISO thô. */
 const fmtWhen = (iso: string) => {
@@ -57,6 +60,14 @@ const fmtWhen = (iso: string) => {
 
 const TX_PREVIEW = 5;
 
+const DEPOSIT_STATUS: Record<string, { label: string; color: string; bg: string }> = {
+  PAID:      { label: '✓ Đã thu cọc',  color: Colors.success, bg: Colors.successLight },
+  PENDING:   { label: 'Chưa thu cọc',  color: Colors.warning, bg: Colors.warningLight },
+  FAILED:    { label: 'Thu thất bại',  color: Colors.error,   bg: Colors.errorLight },
+  CANCELLED: { label: 'Đã huỷ',        color: Colors.textMuted, bg: Colors.background },
+};
+const depositStatusOf = (s: string) => DEPOSIT_STATUS[(s || '').toUpperCase()] ?? DEPOSIT_STATUS.PENDING;
+
 export const BillingManagementScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
@@ -64,15 +75,17 @@ export const BillingManagementScreen: React.FC = () => {
   const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showVerifications, setShowVerifications] = useState(true);
-  const [showAllTx, setShowAllTx] = useState(false);
+  const [search, setSearch] = useState('');
+  const [deposits, setDeposits] = useState<ManagerDeposit[]>([]);
 
   const load = useCallback(() => {
     Promise.all([
       // Màn này CHỈ về tiền nhà (RENT). Điện/nước có thống kê riêng ở màn Ghi chỉ số & Hóa đơn.
       realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
+      managerDepositService.list().catch(() => [] as ManagerDeposit[]),
     ])
-      .then(([inv, pay]) => { setInvoices(inv); setPayments(pay); })
+      .then(([inv, pay, dep]) => { setInvoices(inv); setPayments(pay); setDeposits(dep); })
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -82,40 +95,66 @@ export const BillingManagementScreen: React.FC = () => {
     else navigation.navigate('ManagerHome');
   };
 
-  const stats = useMemo(() => {
-    const paid    = invoices.filter(i => i.status === 'PAID');
-    const pending = invoices.filter(i => i.status === 'PENDING');
-    const overdue = invoices.filter(i => i.status === 'OVERDUE');
-    const sum = (list: ManagerInvoice[]) => list.reduce((s, i) => s + (i.amount || 0), 0);
-    const paidAmt = sum(paid);
-    const dueAmt = sum(pending) + sum(overdue);
-    const total = paidAmt + dueAmt;
-    return {
-      paidCount: paid.length, paidAmt,
-      pendingCount: pending.length, pendingAmt: sum(pending),
-      overdueCount: overdue.length, overdueAmt: sum(overdue),
-      total, dueAmt,
-      rate: total > 0 ? Math.round((paidAmt / total) * 100) : 0,
-    };
-  }, [invoices]);
+  // Tìm theo khách / phòng / nhà / mã hoá đơn — áp cho cả hoá đơn lẫn giao dịch để
+  // gõ 1 lần là cả màn cùng thu hẹp, không phải nhớ ô nào lọc phần nào.
+  const kw = norm(search.trim());
+  const matchInvoice = useCallback((i: ManagerInvoice) =>
+    !kw || [i.tenantName, i.roomNumber, i.propertyName, i.code].some(v => norm(v || '').includes(kw)),
+    [kw]);
+  const matchPayment = useCallback((p: ManagerPayment) =>
+    !kw || [p.tenantName, p.roomNumber, p.propertyName, p.invoiceCode].some(v => norm(v || '').includes(kw)),
+    [kw]);
 
-  const pendingVerifications = useMemo(() => payments.filter(p => p.status === 'PENDING_VERIFY'), [payments]);
+  const shownInvoices = useMemo(() => invoices.filter(matchInvoice), [invoices, matchInvoice]);
+
+  const shownDeposits = useMemo(
+    () => deposits.filter(d =>
+      !kw || [d.tenantName, d.roomNumber, d.propertyName, d.contractCode].some(v => norm(v || '').includes(kw))),
+    [deposits, kw],
+  );
+  const unpaidDeposits = useMemo(
+    () => shownDeposits.filter(d => (d.status || '').toUpperCase() !== 'PAID'),
+    [shownDeposits],
+  );
+
+  /**
+   * Đếm theo SỐ HOÁ ĐƠN, không cộng tiền — manager không được thấy số tiền thuê
+   * (xem @/constants/managerVisibility). Tỉ lệ hoàn thành cũng tính theo số hoá đơn.
+   */
+  const stats = useMemo(() => {
+    const paid    = shownInvoices.filter(i => i.status === 'PAID');
+    const pending = shownInvoices.filter(i => i.status === 'PENDING');
+    const overdue = shownInvoices.filter(i => i.status === 'OVERDUE');
+    const total = shownInvoices.length;
+    return {
+      paidCount: paid.length,
+      pendingCount: pending.length,
+      overdueCount: overdue.length,
+      total,
+      rate: total > 0 ? Math.round((paid.length / total) * 100) : 0,
+    };
+  }, [shownInvoices]);
+
+  const pendingVerifications = useMemo(
+    () => payments.filter(p => p.status === 'PENDING_VERIFY' && matchPayment(p)),
+    [payments, matchPayment],
+  );
   const verifiedTx = useMemo(
-    () => payments.filter(p => p.status === 'VERIFIED')
+    () => payments.filter(p => p.status === 'VERIFIED' && matchPayment(p))
       .sort((a, b) => (b.verifiedAt || b.createdAt).localeCompare(a.verifiedAt || a.createdAt)),
-    [payments],
+    [payments, matchPayment],
   );
 
   const buildingGroups = useMemo(() => {
     const map = new Map<number, { propertyId: number; propertyName: string; invoices: ManagerInvoice[] }>();
-    invoices.forEach(i => {
+    shownInvoices.forEach(i => {
       if (!map.has(i.propertyId)) map.set(i.propertyId, { propertyId: i.propertyId, propertyName: i.propertyName, invoices: [] });
       map.get(i.propertyId)!.invoices.push(i);
     });
     // Nhà nào còn nợ nhiều nhất lên đầu — đó là nhà cần đụng tới trước.
     return Array.from(map.values()).sort((a, b) =>
       b.invoices.filter(x => x.status === 'OVERDUE').length - a.invoices.filter(x => x.status === 'OVERDUE').length);
-  }, [invoices]);
+  }, [shownInvoices]);
 
   const handleVerify = (p: ManagerPayment, approved: boolean) => {
     const doIt = async () => {
@@ -130,7 +169,9 @@ export const BillingManagementScreen: React.FC = () => {
 
     showAlert(
       approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?',
-      approved ? `Xác nhận đã nhận đủ ${fmt(p.amount)} từ ${p.tenantName}?` : 'Từ chối giao dịch này?',
+      approved
+        ? `Xác nhận đã nhận đủ tiền hoá đơn ${p.invoiceCode} từ ${p.tenantName}?`
+        : 'Từ chối giao dịch này?',
       [
         { text: 'Hủy', style: 'cancel' },
         { text: approved ? 'Xác nhận' : 'Từ chối', style: approved ? 'default' : 'destructive', onPress: doIt },
@@ -143,7 +184,8 @@ export const BillingManagementScreen: React.FC = () => {
   const inCollectWindow = now.getDate() >= RENT_CYCLE.issueDay && now.getDate() <= RENT_CYCLE.dueDay;
   const rateColor = stats.rate >= 80 ? Colors.success : stats.rate >= 50 ? Colors.warning : Colors.error;
   const hasTodo = pendingVerifications.length > 0 || stats.overdueCount > 0;
-  const shownTx = showAllTx ? verifiedTx : verifiedTx.slice(0, TX_PREVIEW);
+  // Chỉ xem nhanh vài giao dịch mới nhất — đủ thì sang màn Lịch sử thanh toán.
+  const shownTx = verifiedTx.slice(0, TX_PREVIEW);
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -169,10 +211,29 @@ export const BillingManagementScreen: React.FC = () => {
           <View style={s.loading}><ActivityIndicator size="large" color={Colors.primary} /></View>
         ) : (
           <>
-            {/* ── (1) Kỳ này thu tới đâu ── */}
+            {/* ── Tìm kiếm: lọc cùng lúc hoá đơn + giao dịch bên dưới ── */}
+            <View style={s.searchBox}>
+              <Text style={s.searchIcon}>🔍</Text>
+              <TextInput
+                style={s.searchInput}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Tìm khách thuê, phòng, nhà, mã hoá đơn..."
+                placeholderTextColor={Colors.textMuted}
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={s.searchClear}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* ── (1) Kỳ này thu tới đâu — đếm theo SỐ HOÁ ĐƠN, không hiện tiền ── */}
             <View style={s.heroCard}>
               <View style={s.heroTop}>
-                <Text style={s.heroLabel}>Đã thu kỳ này</Text>
+                <Text style={s.heroLabel}>{search ? 'Kết quả tìm kiếm' : 'Kỳ này đã thu tới đâu'}</Text>
                 <TouchableOpacity style={s.autoChip} onPress={() => navigation.navigate('RentInvoice')}>
                   <Text style={s.autoChipText}>
                     {inCollectWindow ? `● Đang thu (ngày ${RENT_CYCLE.issueDay}–${RENT_CYCLE.dueDay})` : '🤖 Tự động'} ›
@@ -180,9 +241,12 @@ export const BillingManagementScreen: React.FC = () => {
                 </TouchableOpacity>
               </View>
 
-              <Text style={s.heroAmount}>{fmt(stats.paidAmt)}</Text>
+              <Text style={s.heroAmount}>
+                {stats.paidCount}/{stats.total}
+                <Text style={s.heroUnit}> hoá đơn đã thanh toán</Text>
+              </Text>
               <Text style={s.heroTotal}>
-                {stats.total > 0 ? `trên tổng ${fmt(stats.total)} phải thu` : 'Chưa có hoá đơn nào trong kỳ'}
+                {stats.total > 0 ? RENT_AMOUNT_HIDDEN_NOTE : 'Chưa có hoá đơn nào trong kỳ'}
               </Text>
 
               <View style={s.progRow}>
@@ -195,19 +259,19 @@ export const BillingManagementScreen: React.FC = () => {
               <View style={s.heroStats}>
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatNum, { color: Colors.success }]}>{stats.paidCount}</Text>
-                  <Text style={s.heroStatLbl}>Đã thu</Text>
+                  <Text style={s.heroStatLbl}>Đã thanh toán</Text>
                 </View>
                 <View style={s.heroSep} />
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatNum, { color: Colors.warning }]}>{stats.pendingCount}</Text>
-                  <Text style={s.heroStatLbl}>Chưa thu · {fmtShort(stats.pendingAmt)}</Text>
+                  <Text style={s.heroStatLbl}>Chưa thanh toán</Text>
                 </View>
                 <View style={s.heroSep} />
                 <View style={s.heroStat}>
                   <Text style={[s.heroStatNum, { color: stats.overdueCount > 0 ? Colors.error : Colors.textMuted }]}>
                     {stats.overdueCount}
                   </Text>
-                  <Text style={s.heroStatLbl}>Quá hạn · {fmtShort(stats.overdueAmt)}</Text>
+                  <Text style={s.heroStatLbl}>Quá hạn</Text>
                 </View>
               </View>
             </View>
@@ -225,7 +289,7 @@ export const BillingManagementScreen: React.FC = () => {
                     <View style={{ flex: 1 }}>
                       <Text style={s.todoTitle}>{stats.overdueCount} hoá đơn quá hạn</Text>
                       <Text style={s.todoSub}>
-                        Còn {fmt(stats.overdueAmt)} chưa thu — quá {RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay} ngày
+                        Khách chưa thanh toán — quá {RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay} ngày
                         thì được quyền chấm dứt hợp đồng
                       </Text>
                     </View>
@@ -266,7 +330,6 @@ export const BillingManagementScreen: React.FC = () => {
                                 {mc.icon} {mc.label} · {fmtWhen(item.createdAt)}
                               </Text>
                             </View>
-                            <Text style={s.verifyAmt}>{fmt(item.amount)}</Text>
                           </View>
                           {!!item.transferContent && (
                             <Text style={s.verifyContent} numberOfLines={1}>📝 {item.transferContent}</Text>
@@ -285,7 +348,7 @@ export const BillingManagementScreen: React.FC = () => {
                   </>
                 )}
               </View>
-            ) : invoices.length > 0 && (
+            ) : shownInvoices.length > 0 && (
               <View style={s.clearCard}>
                 <Text style={s.clearText}>✅  Không còn việc tồn — kỳ này đang chạy ổn</Text>
               </View>
@@ -304,9 +367,8 @@ export const BillingManagementScreen: React.FC = () => {
                 {buildingGroups.map(group => {
                   const paid    = group.invoices.filter(b => b.status === 'PAID');
                   const overdue = group.invoices.filter(b => b.status === 'OVERDUE');
-                  const uncollected = group.invoices
-                    .filter(b => b.status === 'PENDING' || b.status === 'OVERDUE')
-                    .reduce((sum, b) => sum + (b.amount || 0), 0);
+                  const unpaidCount = group.invoices
+                    .filter(b => b.status === 'PENDING' || b.status === 'OVERDUE').length;
                   const rate = group.invoices.length > 0
                     ? Math.round((paid.length / group.invoices.length) * 100) : 0;
                   const barColor = rate >= 80 ? Colors.success : rate >= 50 ? Colors.warning : Colors.error;
@@ -331,9 +393,9 @@ export const BillingManagementScreen: React.FC = () => {
                       </View>
 
                       <Text style={s.buildingMoney}>
-                        {uncollected > 0
-                          ? <>Còn thu <Text style={{ color: Colors.error }}>{fmt(uncollected)}</Text></>
-                          : <>Đã thu đủ <Text style={{ color: Colors.success }}>{fmt(paid.reduce((s2, b) => s2 + (b.amount || 0), 0))}</Text></>}
+                        {unpaidCount > 0
+                          ? <>Còn <Text style={{ color: Colors.error }}>{unpaidCount} khách</Text> chưa thanh toán</>
+                          : <><Text style={{ color: Colors.success }}>Tất cả đã thanh toán</Text></>}
                         <Text style={s.buildingCount}>  ·  {paid.length}/{group.invoices.length} hoá đơn</Text>
                       </Text>
 
@@ -349,11 +411,64 @@ export const BillingManagementScreen: React.FC = () => {
               </View>
             )}
 
+            {/* ── Tiền cọc — thu 1 lần lúc đón khách, KHÔNG nằm trong danh sách hoá đơn.
+                Ở đây chỉ liệt kê khoản CHƯA thu (việc cần làm); toàn bộ lịch sử cọc đã
+                thu nằm ở màn Lịch sử thanh toán để màn này gọn đúng phần tiền nhà. ── */}
+            {shownDeposits.length > 0 && (
+              <View style={s.section}>
+                <View style={s.sectionHeaderRow}>
+                  <Text style={s.sectionTitle}>Tiền cọc chưa thu</Text>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('ManagerPaymentHistory', { filter: 'DEPOSIT' })}
+                  >
+                    <Text style={s.sectionLink}>🔐 Tất cả tiền cọc →</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {unpaidDeposits.length === 0 ? (
+                  <View style={s.clearCard}>
+                    <Text style={s.clearText}>
+                      ✅  {shownDeposits.length} hợp đồng đã thu đủ cọc
+                    </Text>
+                  </View>
+                ) : (
+                <View style={s.txCard}>
+                  {unpaidDeposits.map((d, i) => {
+                    const st = depositStatusOf(d.status);
+                    return (
+                      <View key={d.contractId} style={[s.txRow, i > 0 && s.txRowBorder]}>
+                        <View style={s.txIcon}><Text style={{ fontSize: 16 }}>🔐</Text></View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.txName}>
+                            {d.tenantName}{d.roomNumber ? ` · ${d.roomNumber}` : ''}
+                          </Text>
+                          <Text style={s.txMeta} numberOfLines={1}>
+                            {d.propertyName} · {d.contractCode}
+                          </Text>
+                          <Text style={s.txMeta}>
+                            {d.paidAt
+                              ? `${d.method === 'CASH' ? '💵 Tiền mặt' : d.method === 'PAYOS' ? '📱 PayOS' : '💳 Đã thu'} · ${fmtWhen(d.paidAt)}`
+                              : 'Chưa ghi nhận khoản cọc nào'}
+                          </Text>
+                        </View>
+                        <View style={[s.depositBadge, { backgroundColor: st.bg }]}>
+                          <Text style={[s.depositBadgeText, { color: st.color }]}>{st.label}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+                )}
+              </View>
+            )}
+
             {/* ── (4) Giao dịch gần đây ── */}
             <View style={s.section}>
               <View style={s.sectionHeaderRow}>
                 <Text style={s.sectionTitle}>Giao dịch gần đây</Text>
-                <Text style={s.sectionCount}>{verifiedTx.length} đã xác nhận</Text>
+                <TouchableOpacity onPress={() => navigation.navigate('ManagerPaymentHistory')}>
+                  <Text style={s.sectionLink}>💳 Toàn bộ lịch sử →</Text>
+                </TouchableOpacity>
               </View>
 
               {verifiedTx.length === 0 ? (
@@ -375,14 +490,19 @@ export const BillingManagementScreen: React.FC = () => {
                             {mc.label} · {fmtWhen(tx.verifiedAt || tx.createdAt)}
                           </Text>
                         </View>
-                        <Text style={s.txAmt}>+{fmt(tx.amount)}</Text>
+                        <Text style={s.txAmt}>✓ Đã thu</Text>
                       </View>
                     );
                   })}
+                  {/* Chỉ xem nhanh vài giao dịch mới nhất ở đây; xem đủ thì sang màn
+                      Lịch sử thanh toán (có lọc theo trạng thái + gộp cả tiền cọc). */}
                   {verifiedTx.length > TX_PREVIEW && (
-                    <TouchableOpacity style={s.txMore} onPress={() => setShowAllTx(v => !v)}>
+                    <TouchableOpacity
+                      style={s.txMore}
+                      onPress={() => navigation.navigate('ManagerPaymentHistory')}
+                    >
                       <Text style={s.txMoreText}>
-                        {showAllTx ? 'Thu gọn' : `Xem thêm ${verifiedTx.length - TX_PREVIEW} giao dịch`}
+                        Xem toàn bộ {verifiedTx.length} giao dịch →
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -390,12 +510,14 @@ export const BillingManagementScreen: React.FC = () => {
               )}
             </View>
 
-            {invoices.length === 0 && pendingVerifications.length === 0 && (
+            {shownInvoices.length === 0 && shownDeposits.length === 0
+              && pendingVerifications.length === 0 && verifiedTx.length === 0 && (
               <View style={s.emptyBox}>
-                <Text style={s.emptyEmoji}>🧾</Text>
+                <Text style={s.emptyEmoji}>{search ? '🔍' : '🧾'}</Text>
                 <Text style={s.emptyText}>
-                  Chưa có hoá đơn tiền nhà nào trong kỳ này.{'\n'}
-                  Hệ thống tự phát hành vào ngày {RENT_CYCLE.issueDay} hằng tháng.
+                  {search
+                    ? `Không tìm thấy khách thuê, phòng hay hoá đơn nào khớp "${search.trim()}".`
+                    : `Chưa có hoá đơn tiền nhà nào trong kỳ này.\nHệ thống tự phát hành vào ngày ${RENT_CYCLE.issueDay} hằng tháng.`}
                 </Text>
               </View>
             )}
@@ -440,7 +562,22 @@ const s = StyleSheet.create({
   },
   autoChipText: { fontSize: 10.5, fontWeight: '800', color: Colors.primary },
   heroAmount: { fontSize: 30, fontWeight: '900', color: Colors.textPrimary, marginTop: Spacing.sm },
-  heroTotal: { fontSize: 12.5, color: Colors.textSecondary, marginTop: 2 },
+  heroUnit: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary },
+  heroTotal: { fontSize: 12, color: Colors.textMuted, marginTop: 4, lineHeight: 17 },
+
+  // ── Thanh tìm kiếm ──
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border,
+    marginBottom: Spacing.base, ...Shadow.sm,
+  },
+  searchIcon: { fontSize: 14 },
+  searchInput: {
+    flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 4,
+  },
+  searchClear: { fontSize: 15, fontWeight: '800', color: Colors.textMuted, paddingHorizontal: 4 },
 
   heroStats: {
     flexDirection: 'row', alignItems: 'center',
@@ -494,7 +631,6 @@ const s = StyleSheet.create({
   verifyTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   verifyName: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   verifyMeta: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2 },
-  verifyAmt:  { fontSize: 16, fontWeight: '900', color: Colors.primary },
   verifyContent: {
     fontSize: 11.5, color: Colors.textSecondary, backgroundColor: Colors.background,
     borderRadius: BorderRadius.sm, padding: Spacing.sm, marginTop: Spacing.sm,
@@ -541,7 +677,9 @@ const s = StyleSheet.create({
   },
   txName: { fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
   txMeta: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2 },
-  txAmt:  { fontSize: 14, fontWeight: '800', color: Colors.success },
+  txAmt:  { fontSize: 13, fontWeight: '800', color: Colors.success },
+  depositBadge: { borderRadius: BorderRadius.full, paddingHorizontal: 9, paddingVertical: 4 },
+  depositBadgeText: { fontSize: 10.5, fontWeight: '800' },
   txMore: {
     paddingVertical: Spacing.md, alignItems: 'center',
     borderTopWidth: 1, borderTopColor: Colors.divider,

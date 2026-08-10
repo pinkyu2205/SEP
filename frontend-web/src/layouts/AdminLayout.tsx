@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, Outlet } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
@@ -7,7 +7,6 @@ import {
   CreditCard,
   FileText,
   FilePlus,
-  LogOut,
   MapPin,
   Menu,
   KeyRound,
@@ -23,121 +22,102 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
-import clsx from 'clsx';
 import { useWebAuth } from '@/auth/WebAuthContext';
-import { AUDIT_LOGS, PLATFORM_MAINTENANCE_REQUESTS } from '@/utils/adminMockData';
+import { maintenanceService } from '@/services/maintenance.service';
+import { AppSidebar, type SidebarSection } from './AppSidebar';
+import { UserMenu } from './UserMenu';
 
-type SidebarSection = { type: 'section'; label: string };
-type SidebarLink = { type?: 'link'; path: string; label: string; icon: React.ElementType; end?: boolean; badge?: number };
-type SidebarItem = SidebarSection | SidebarLink;
-
-const navItems: SidebarItem[] = [
-  // ── TỔNG QUAN ────────────────────────────────────────────────────
-  { type: 'section', label: 'Tổng quan' },
-  { path: '/admin', label: 'Bảng điều hành', icon: BarChart3, end: true },
-
-  // ── QUẢN TRỊ ─────────────────────────────────────────────────────
-  { type: 'section', label: 'Quản trị' },
-  { path: '/admin/users', label: 'Người dùng & RBAC', icon: Users },
-
-  // ── QUY TRÌNH TIẾP NHẬN NHÀ ──────────────────────────────────────
-  { type: 'section', label: 'Quy trình tiếp nhận nhà' },
-  { path: '/admin/buildings/draft', label: 'Khởi tạo nhà', icon: FilePlus },
-  { path: '/admin/buildings/configuration', label: 'Cấu hình khai thác', icon: Settings2 },
-
-  // ── ĐÓN KHÁCH ────────────────────────────────────────────────────
-  { type: 'section', label: 'Đón khách' },
-  { path: '/admin/onboarding', label: 'Hợp đồng nháp', icon: UserPlus },
-
-  // ── TÀI CHÍNH & HỢP ĐỒNG ─────────────────────────────────────────
-  { type: 'section', label: 'Tài chính & Hợp đồng' },
-  { path: '/admin/billing', label: 'Thanh toán', icon: CreditCard },
-  { path: '/admin/contracts', label: 'Hợp đồng', icon: FileText },
-
-  // ── VẬN HÀNH ─────────────────────────────────────────────────────
-  { type: 'section', label: 'Vận hành' },
-  { path: '/admin/handover', label: 'Tiến độ bàn giao', icon: PackageCheck },
-  { path: '/admin/meter-override', label: 'Cấp mã đồng hồ', icon: KeyRound },
-  { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
-  { path: '/admin/zones/managers', label: 'Khu vực Manager', icon: UserRound },
-  { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
-  { path: '/admin/equipments', label: 'Danh mục thiết bị', icon: Package },
-
-  // ── HỆ THỐNG ─────────────────────────────────────────────────────
-  { type: 'section', label: 'Hệ thống' },
-  { path: '/admin/settings', label: 'Cấu hình hệ thống', icon: Settings },
-  { path: '/admin/security', label: 'Nhật ký & bảo mật', icon: Activity, badge: AUDIT_LOGS.filter(l => l.severity === 'critical').length },
+/**
+ * Menu Admin Portal. Badge phải là số THẬT — trước đây đếm từ mock
+ * (`PLATFORM_MAINTENANCE_REQUESTS`, `AUDIT_LOGS`) nên hiện "9" trong khi hệ thống
+ * thật không có yêu cầu bảo trì nào, đá nhau với Bảng điều hành. Giờ nhận từ API;
+ * chưa có API nhật ký bảo mật thì không gắn badge còn hơn gắn số bịa.
+ */
+const buildSections = (openMaintenance: number): SidebarSection[] => [
+  {
+    label: 'Tổng quan',
+    items: [{ label: 'Bảng điều hành', path: '/admin', icon: BarChart3, end: true }],
+  },
+  {
+    label: 'Quản trị',
+    items: [{ label: 'Người dùng & RBAC', path: '/admin/users', icon: Users }],
+  },
+  {
+    label: 'Quy trình tiếp nhận nhà',
+    items: [
+      { label: 'Khởi tạo nhà', path: '/admin/buildings/draft', icon: FilePlus },
+      { label: 'Cấu hình khai thác', path: '/admin/buildings/configuration', icon: Settings2 },
+    ],
+  },
+  {
+    label: 'Đón khách',
+    items: [{ label: 'Hợp đồng nháp', path: '/admin/onboarding', icon: UserPlus }],
+  },
+  {
+    label: 'Tài chính & Hợp đồng',
+    items: [
+      { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
+    ],
+  },
+  {
+    label: 'Vận hành',
+    items: [
+      // Mục mới từ nhánh dev (trang HandoverMonitoring + route /admin/handover).
+      { label: 'Tiến độ bàn giao', path: '/admin/handover', icon: PackageCheck },
+      // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
+      { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
+      { label: 'Quản lý khu vực', path: '/admin/zones', icon: MapPin },
+      { label: 'Khu vực Manager', path: '/admin/zones/managers', icon: UserRound },
+      { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
+      { label: 'Danh mục thiết bị', path: '/admin/equipments', icon: Package },
+    ],
+  },
+  {
+    label: 'Hệ thống',
+    items: [
+      { label: 'Cấu hình hệ thống', path: '/admin/settings', icon: Settings },
+      { label: 'Nhật ký & bảo mật', path: '/admin/security', icon: Activity },
+    ],
+  },
 ];
 
-const SidebarContent = ({ onNavigate }: { onNavigate?: () => void }) => (
-  <>
-    <div className="flex h-16 items-center border-b border-slate-800/80 px-5">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500 shadow-lg shadow-cyan-950/30">
-          <ShieldCheck className="h-5 w-5 text-white" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-extrabold leading-tight text-white">Hoàng Bình Land</p>
-          <p className="text-[10px] font-semibold leading-tight text-cyan-200/80">Admin Portal</p>
-        </div>
-      </div>
-    </div>
-
-    <nav className="flex-1 overflow-y-auto px-3 py-4">
-      {navItems.map((item, idx) => {
-        if (item.type === 'section') {
-          return (
-            <p key={idx} className="mt-5 mb-1 px-3 text-[10px] font-black uppercase tracking-widest text-slate-500 first:mt-0">
-              {item.label}
-            </p>
-          );
-        }
-        const link = item as SidebarLink;
-        return (
-          <NavLink
-            key={link.path}
-            to={link.path}
-            end={link.end}
-            onClick={onNavigate}
-            className={({ isActive }) => clsx(
-              'group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors',
-              isActive
-                ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-950/20'
-                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            )}
-          >
-            {({ isActive }) => (
-              <>
-                <link.icon className={clsx(
-                  'h-4 w-4',
-                  isActive ? 'text-white' : 'text-slate-500 group-hover:text-cyan-300'
-                )} />
-                <span className="flex-1 truncate">{link.label}</span>
-                {!!link.badge && (
-                  <span className={clsx(
-                    'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold',
-                    isActive ? 'bg-white text-cyan-700' : 'bg-cyan-500 text-white'
-                  )}>
-                    {link.badge > 9 ? '9+' : link.badge}
-                  </span>
-                )}
-              </>
-            )}
-          </NavLink>
-        );
-      })}
-    </nav>
-  </>
-);
+const initialsOf = (name?: string) =>
+  (name || 'Admin').split(' ').filter(Boolean).slice(-2).map(w => w[0]).join('').toUpperCase() || 'SA';
 
 export const AdminLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openMaintenance, setOpenMaintenance] = useState(0);
   const { user, logout } = useWebAuth();
+
+  // Badge bảo trì = yêu cầu chờ + đang xử lý (số thật, cùng nguồn với Bảng điều hành).
+  useEffect(() => {
+    let active = true;
+    maintenanceService.getDashboard()
+      .then(d => { if (active && d) setOpenMaintenance((d.pending ?? 0) + (d.inProgress ?? 0)); })
+      .catch(() => { /* lỗi mạng: không gắn badge còn hơn gắn số sai */ });
+    return () => { active = false; };
+  }, []);
+
+  const sections = buildSections(openMaintenance);
+  const sidebarUser = {
+    name: user?.fullName ?? 'Admin',
+    subtitle: user?.username ? `@${user.username}` : 'Toàn quyền hệ thống',
+    initials: initialsOf(user?.fullName),
+  };
+  const brand = { title: 'Hoàng Bình Land', subtitle: 'Admin Portal', icon: ShieldCheck };
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
-      <aside className="sticky top-0 hidden h-screen w-72 flex-col bg-slate-950 text-slate-300 lg:flex">
-        <SidebarContent />
+      <aside className="sticky top-0 hidden h-screen flex-shrink-0 select-none lg:block">
+        <AppSidebar
+          accent="cyan"
+          storageKey="hbl_sidebar_admin"
+          brand={brand}
+          sections={sections}
+          user={sidebarUser}
+          onLogout={logout}
+        />
       </aside>
 
       {mobileOpen && (
@@ -147,17 +127,24 @@ export const AdminLayout = () => {
             className="absolute inset-0 bg-slate-950/60"
             onClick={() => setMobileOpen(false)}
           />
-          <aside className="relative flex h-full w-80 max-w-[86vw] flex-col bg-slate-950 text-slate-300 shadow-2xl">
-            <div className="absolute right-3 top-3">
-              <button
-                aria-label="Đóng menu"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+          <aside className="relative h-full max-w-[86vw] shadow-2xl">
+            <button
+              aria-label="Đóng menu"
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-3 top-3 z-10 rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            {/* Drawer mobile: luôn mở rộng, không cho thu gọn. */}
+            <AppSidebar
+              accent="cyan"
+              brand={brand}
+              sections={sections}
+              user={sidebarUser}
+              onLogout={logout}
+              onNavigate={() => setMobileOpen(false)}
+              collapsible={false}
+            />
           </aside>
         </div>
       )}
@@ -188,35 +175,24 @@ export const AdminLayout = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              className={clsx(
-                'relative rounded-xl border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-800',
-                AUDIT_LOGS.some(log => log.severity === 'critical') && 'text-rose-600'
-              )}
-              title="Cảnh báo bảo mật"
+          <div className="flex items-center gap-2">
+            {/* Chấm đỏ trước đây bật theo AUDIT_LOGS mock nên luôn sáng dù hệ thống
+                không có cảnh báo nào. Chưa có API nhật ký bảo mật → để chuông trung tính. */}
+            <Link
+              to="/admin/security"
+              className="relative rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+              title="Nhật ký & bảo mật"
             >
               <Bell className="h-4 w-4" />
-              {AUDIT_LOGS.some(log => log.severity === 'critical') && (
-                <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-rose-500 ring-2 ring-white" />
-              )}
-            </button>
-            <div className="hidden items-center gap-2 border-l border-slate-200 pl-3 sm:flex">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-xs font-black text-white">
-                SA
-              </div>
-              <div>
-                <p className="text-xs font-bold leading-tight text-slate-900">{user?.fullName ?? 'Admin'}</p>
-                <p className="text-[10px] leading-tight text-slate-500">Toàn quyền hệ thống</p>
-              </div>
-            </div>
-            <button
-              onClick={logout}
-              className="rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
-              title="Đăng xuất"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            </Link>
+            <UserMenu
+              accent="cyan"
+              name={sidebarUser.name}
+              subtitle={sidebarUser.subtitle}
+              initials={sidebarUser.initials}
+              settingsTo="/admin/settings"
+              onLogout={logout}
+            />
           </div>
         </header>
 

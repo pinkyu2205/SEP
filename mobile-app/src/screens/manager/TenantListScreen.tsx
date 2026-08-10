@@ -35,7 +35,8 @@ interface Tenant {
   status: TenantStatus;
   moveInDate: string;
   moveOutDate?: string;
-  depositAmount: number;
+  /** Đã thu đủ cọc chưa (không lưu số tiền — @/constants/managerVisibility). */
+  depositPaid: boolean;
   contractId?: string;
   unpaidAmount?: number;
   unpaidBills?: number;
@@ -79,7 +80,7 @@ const mapContractToTenant = (
   propertyType: isWholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
   status: mapTenantStatus(c.status),
   moveInDate: fmtIsoDate(c.moveInDate || c.startDate),
-  depositAmount: c.deposit ?? 0,
+  depositPaid: (c.paymentStatus || '').toUpperCase() === 'PAID',
   contractId: c.contractCode,
   contractEndDate: c.endDate,   // ISO (yyyy-MM-dd)
   // BE chưa trả công nợ/ticket theo từng khách ở endpoint này → để 0 (không bịa số).
@@ -370,7 +371,12 @@ const TenantDetailModal: React.FC<{
                   highlight={!!tenant.contractEndDate && getDaysRemaining(tenant.contractEndDate) <= 30}
                 />
               )}
-              <InfoRow label="💰 Tiền cọc" value={fmt(tenant.depositAmount)} accent />
+              {/* Không hiện số tiền cọc — @/constants/managerVisibility. */}
+              <InfoRow
+                label="💰 Tiền cọc"
+                value={tenant.depositPaid ? 'Đã thu' : 'Chưa thu'}
+                accent
+              />
             </View>
 
             {/* Household members */}

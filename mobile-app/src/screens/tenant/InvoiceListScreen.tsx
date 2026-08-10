@@ -5,7 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline, firstCycleTenantWarning,
+} from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -105,9 +108,17 @@ export const InvoiceListScreen: React.FC = () => {
   const renderInvoice = ({ item }: { item: Invoice }) => {
     const cfg     = STATUS_CONFIG[item.status];
     const typeCfg = TYPE_CONFIG[item.invoiceType];
-    const isOverdue = item.status === 'overdue';
     const isPaid    = item.status === 'paid';
-    const daysOverdue = isOverdue ? Math.abs(getDaysUntil(item.dueDate)) : 0;
+    // Kỳ đầu chạy chính sách riêng: hạn thật là ngày nhận phòng + 3 ngày, KHÔNG phải
+    // dueDate của BE (BE đang đặt dueDate = đúng ngày nhận phòng nên hôm sau đã gắn
+    // OVERDUE). Trong 3 ngày đó vẫn coi là "chờ thanh toán" để khỏi doạ khách oan.
+    const isFirstCycle = isFirstRentCycleInvoice(item);
+    const firstCycleExpired = isFirstCycle && firstCycleStage(item) === 'expired';
+    const isOverdue = isFirstCycle
+      ? firstCycleExpired && !isPaid
+      : item.status === 'overdue';
+    const dueDate = isFirstCycle ? firstCycleDeadline(item) : item.dueDate;
+    const daysOverdue = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
 
     return (
       <TouchableOpacity
@@ -127,8 +138,10 @@ export const InvoiceListScreen: React.FC = () => {
             </View>
             <Text style={styles.invoiceMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-            <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: isFirstCycle && !isPaid && !isOverdue ? Colors.warningLight : cfg.bg }]}>
+            <Text style={[styles.statusText, { color: isFirstCycle && !isPaid && !isOverdue ? Colors.warning : cfg.color }]}>
+              {isFirstCycle && !isPaid && !isOverdue ? 'Chờ thanh toán' : cfg.label}
+            </Text>
           </View>
         </View>
 
@@ -154,7 +167,7 @@ export const InvoiceListScreen: React.FC = () => {
             <Text style={[styles.dueDateText, isOverdue && { color: Colors.error }]}>
               {isOverdue
                 ? `Quá hạn ${daysOverdue} ngày`
-                : `Hạn: ${formatDate(item.dueDate)}`}
+                : `Hạn: ${formatDate(dueDate)}`}
             </Text>
           )}
         </View>
@@ -163,17 +176,22 @@ export const InvoiceListScreen: React.FC = () => {
           <Text style={styles.lateFeeText}>+ Phí trả chậm: {formatCurrency(item.lateFee)}</Text>
         )}
 
-        {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ. */}
-        {isOverdue && item.invoiceType === 'rent' && (
+        {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ.
+            Kỳ đầu có mốc riêng (3 ngày) nên cảnh báo ngay cả khi CHƯA quá hạn. */}
+        {isFirstCycle && !isPaid ? (
+          <Text style={styles.riskText}>⚠️ {firstCycleTenantWarning(item)}</Text>
+        ) : isOverdue && item.invoiceType === 'rent' ? (
           <Text style={styles.riskText}>
             {daysOverdue >= RENT_TERMINATION_AFTER_DAYS
               ? '⚠️ Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng.'
               : `⚠️ Tới ngày ${RENT_CYCLE.terminationFromDay} chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
           </Text>
-        )}
+        ) : null}
 
-        {/* Action buttons */}
-        {item.status === 'pending' && (
+        {/* Action buttons.
+            Kỳ đầu còn trong 3 ngày: BE đã gắn OVERDUE nhưng ta vẫn coi là chờ thanh
+            toán, nên phải mở nút thường ở đây — không thì hoá đơn không có nút nào. */}
+        {(item.status === 'pending' || (isFirstCycle && !isPaid && !isOverdue)) && (
           <TouchableOpacity style={styles.payBtn} onPress={() => handlePay(item)}>
             <Text style={styles.payBtnText}>💳 Thanh toán ngay</Text>
           </TouchableOpacity>
@@ -203,39 +221,64 @@ export const InvoiceListScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* ── Summary chips ── */}
+      {/* ── Tổng phải trả ──
+          Trước đây đây là một ScrollView ngang đặt thẳng trong SafeAreaView (cột flex):
+          ScrollView không có chiều cao nội dung cố định nên bị kéo giãn, chừa một
+          mảng trắng to giữa tiêu đề và bộ lọc. Giờ bọc trong View và cho ScrollView
+          `flexGrow: 0` nên khối chỉ cao đúng bằng nội dung.
+
+          Nội dung cũng gộp lại: mỗi loại một thẻ to xếp dọc (icon/nhãn/tiền) vừa cao
+          vừa lặp lại đúng con số của thẻ hoá đơn ngay bên dưới. Giờ là một dòng
+          "Cần thanh toán + tổng tiền", loại phí thu nhỏ thành chip lọc nhanh. */}
       {(overdueCount > 0 || pendingTotal > 0) && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.summaryRow}>
-          {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
-            const bills = unpaidByType(type);
-            if (!bills.length) return null;
-            const cfg = TYPE_CONFIG[type];
-            const total = bills.reduce((s, b) => s + b.grandTotal, 0);
-            const isActive = typeFilter === type && statusFilter === 'unpaid';
-            return (
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryTop}>
+            <View style={styles.summaryTotalBox}>
+              <Text style={styles.summaryTotalLabel}>Cần thanh toán</Text>
+              <Text style={styles.summaryTotalValue}>{formatCurrency(pendingTotal)}</Text>
+            </View>
+            {overdueCount > 0 && (
               <TouchableOpacity
-                key={type}
-                style={[styles.summaryChip, { backgroundColor: cfg.bg }, isActive && styles.summaryChipActive]}
-                onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
+                style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
+                onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
               >
-                <Text style={styles.summaryChipIcon}>{cfg.icon}</Text>
-                <Text style={[styles.summaryChipLabel, { color: cfg.color }]}>{cfg.label}</Text>
-                <Text style={[styles.summaryChipAmount, { color: cfg.color }]}>{formatCurrency(total)}</Text>
+                <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
+                  ⚠️ {overdueCount} quá hạn
+                </Text>
               </TouchableOpacity>
-            );
-          })}
-          {overdueCount > 0 && (
-            <TouchableOpacity
-              style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
-              onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
-            >
-              <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
-                ⚠️ {overdueCount} quá hạn
-              </Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
+            )}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.summaryTypesScroll}
+            contentContainerStyle={styles.summaryTypes}
+          >
+            {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
+              const bills = unpaidByType(type);
+              if (!bills.length) return null;
+              const cfg = TYPE_CONFIG[type];
+              const total = bills.reduce((s, b) => s + b.grandTotal, 0);
+              const isActive = typeFilter === type && statusFilter === 'unpaid';
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.typeChip, { backgroundColor: cfg.bg }, isActive && styles.typeChipActive]}
+                  onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
+                >
+                  <Text style={styles.typeChipIcon}>{cfg.icon}</Text>
+                  <Text style={[styles.typeChipLabel, { color: cfg.color }]} numberOfLines={1}>
+                    {cfg.label}
+                  </Text>
+                  <Text style={[styles.typeChipAmount, { color: cfg.color }]} numberOfLines={1}>
+                    {formatCurrency(total)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
 
       {/* ── Filter row 1: Loại ── */}
@@ -359,25 +402,38 @@ const styles = StyleSheet.create({
   historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
   // Summary chips
-  summaryRow: {
-    paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm,
-    gap: Spacing.sm, flexDirection: 'row', alignItems: 'center',
+  summaryCard: {
+    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingTop: Spacing.sm, paddingBottom: Spacing.sm, paddingLeft: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border,
   },
-  summaryChip: {
-    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    alignItems: 'center', minWidth: 90, borderWidth: 1.5, borderColor: 'transparent',
+  summaryTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingRight: Spacing.md,
   },
-  summaryChipActive: { borderColor: Colors.primary + '80' },
-  summaryChipIcon:   { fontSize: 18, marginBottom: 2 },
-  summaryChipLabel:  { fontSize: 11, fontWeight: '700' },
-  summaryChipAmount: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+  summaryTotalBox: { flex: 1 },
+  summaryTotalLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
+  summaryTotalValue: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 1 },
+  // flexGrow: 0 — không có nó thì ScrollView ngang bị kéo giãn theo chiều dọc.
+  summaryTypesScroll: { flexGrow: 0, marginTop: Spacing.sm },
+  summaryTypes: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: Spacing.md },
+  typeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 5,
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
+  typeChipActive: { borderColor: Colors.primary + '80' },
+  typeChipIcon: { fontSize: 12 },
+  typeChipLabel: { fontSize: 11, fontWeight: '700' },
+  typeChipAmount: { fontSize: 11, fontWeight: '800' },
   overduePill: {
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs + 1,
+    paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs,
     borderWidth: 1, borderColor: Colors.error + '40',
   },
   overduePillActive: { backgroundColor: Colors.error },
-  overduePillText: { fontSize: 12, fontWeight: '700', color: Colors.error },
+  overduePillText: { fontSize: 11, fontWeight: '700', color: Colors.error },
 
   // Filter rows
   filterBlock: {

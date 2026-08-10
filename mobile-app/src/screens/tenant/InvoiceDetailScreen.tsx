@@ -4,7 +4,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  FIRST_RENT_CYCLE, isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline,
+  firstCycleDaysLeft, firstCycleTenantWarning,
+} from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
@@ -66,11 +70,18 @@ export const InvoiceDetailScreen: React.FC = () => {
   const [paying, setPaying]   = useState(false);
 
   const tc  = TYPE_CFG[invoice.invoiceType];
-  const sc  = STATUS_CFG[invoice.status];
-  const isOverdue = invoice.status === 'overdue';
   const isPaid    = invoice.status === 'paid';
-  const canPay    = invoice.status === 'pending' || isOverdue;
-  const daysOver  = isOverdue ? Math.abs(getDaysUntil(invoice.dueDate)) : 0;
+  // Hoá đơn tiền phòng KỲ ĐẦU: hạn thật = ngày nhận phòng + FIRST_RENT_CYCLE.graceDays,
+  // không phải dueDate của BE (BE đặt dueDate = đúng ngày nhận phòng rồi hôm sau gắn
+  // OVERDUE). Trong 3 ngày đó vẫn hiển thị "chờ thanh toán".
+  const isFirstCycle      = isFirstRentCycleInvoice(invoice);
+  const firstCycleExpired = isFirstCycle && firstCycleStage(invoice) === 'expired';
+  const isOverdue = isFirstCycle ? firstCycleExpired && !isPaid : invoice.status === 'overdue';
+  const sc  = STATUS_CFG[isFirstCycle && !isPaid && !isOverdue ? 'pending' : invoice.status];
+  const canPay    = invoice.status === 'pending' || isOverdue
+    || (isFirstCycle && !isPaid && invoice.status !== 'cancelled');
+  const dueDate   = isFirstCycle ? firstCycleDeadline(invoice) : invoice.dueDate;
+  const daysOver  = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -104,8 +115,23 @@ export const InvoiceDetailScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ── Overdue alert ── */}
-        {isOverdue && (
+        {/* ── Cảnh báo kỳ đầu: có mốc riêng nên hiện cả khi chưa quá hạn ── */}
+        {isFirstCycle && !isPaid && (
+          <View style={s.overdueAlert}>
+            <Text style={s.overdueIcon}>{firstCycleExpired ? '🚨' : '🧾'}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.overdueText}>
+                {firstCycleExpired
+                  ? `Hoá đơn đầu tiên đã quá hạn ${daysOver} ngày`
+                  : `Hoá đơn đầu tiên — còn ${firstCycleDaysLeft(invoice)} ngày để thanh toán`}
+              </Text>
+              <Text style={s.overdueSub}>{firstCycleTenantWarning(invoice)}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Overdue alert (các kỳ thường) ── */}
+        {isOverdue && !isFirstCycle && (
           <View style={s.overdueAlert}>
             <Text style={s.overdueIcon}>🚨</Text>
             <View style={{ flex: 1 }}>
@@ -132,8 +158,8 @@ export const InvoiceDetailScreen: React.FC = () => {
             <InfoRow label="Tòa nhà"      value={invoice.propertyName} />
             <InfoRow label="Kỳ hóa đơn"  value={`Tháng ${String(invoice.month).padStart(2, '0')}/${invoice.year}`} />
             <InfoRow
-              label="Hạn thanh toán"
-              value={formatDate(invoice.dueDate)}
+              label={isFirstCycle ? `Hạn thanh toán (kỳ đầu · ${FIRST_RENT_CYCLE.graceDays} ngày)` : 'Hạn thanh toán'}
+              value={formatDate(dueDate)}
               valueStyle={isOverdue ? { color: Colors.error, fontWeight: '700' } : {}}
               last
             />

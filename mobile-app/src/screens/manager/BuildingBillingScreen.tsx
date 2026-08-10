@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, Image, TextInput, ScrollView, Dimensions, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
@@ -17,12 +17,6 @@ type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 type FilterType = 'all' | BillStatus;
 
 // ===================== CONSTANTS =====================
-const VIETQR_BANK_BIN = '970422';
-const VIETQR_ACCOUNT  = '0865803493';
-
-const buildQRUrl = (amount: number, content: string) =>
-  `https://img.vietqr.io/image/${VIETQR_BANK_BIN}-${VIETQR_ACCOUNT}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(content)}&accountName=ROOMRENT`;
-
 const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 
 const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: string }> = {
@@ -76,7 +70,6 @@ export const BuildingBillingScreen: React.FC = () => {
   const [search,           setSearch]           = useState('');
   const [filter,           setFilter]           = useState<FilterType>('all');
   const [selectedBill,     setSelectedBill]     = useState<ManagerInvoice | null>(null);
-  const [showQRModal,      setShowQRModal]      = useState(false);
   const [showCashModal,    setShowCashModal]    = useState(false);
   const [showEwalletModal, setShowEwalletModal] = useState(false);
   const [cashNote,         setCashNote]         = useState('');
@@ -98,15 +91,16 @@ export const BuildingBillingScreen: React.FC = () => {
     return [...list].sort((a, b) => STATUS_ORDER[toLocalStatus(a.status)] - STATUS_ORDER[toLocalStatus(b.status)]);
   }, [invoices, filter, search]);
 
+  // Đếm theo SỐ HOÁ ĐƠN, không cộng tiền — manager không được thấy số tiền thuê
+  // (xem @/constants/managerVisibility).
   const stats = useMemo(() => {
     const paid    = invoices.filter(b => b.status === 'PAID');
     const overdue = invoices.filter(b => b.status === 'OVERDUE');
     return {
       total:        invoices.length,
       paidCount:    paid.length,
-      paidAmt:      paid.reduce((s, b) => s + b.amount, 0),
       overdueCount: overdue.length,
-      uncollected:  invoices.filter(b => b.status !== 'PAID' && b.status !== 'CANCELLED').reduce((s, b) => s + b.amount, 0),
+      unpaidCount:  invoices.filter(b => b.status !== 'PAID' && b.status !== 'CANCELLED').length,
     };
   }, [invoices]);
 
@@ -118,7 +112,7 @@ export const BuildingBillingScreen: React.FC = () => {
     setSubmitting(true);
     try {
       await realManagerInvoiceService.markInvoicePaid(selectedBill.id, { method, note });
-      setShowQRModal(false); setShowCashModal(false); setShowEwalletModal(false);
+      setShowCashModal(false); setShowEwalletModal(false);
       setSelectedBill(null); setCashNote('');
       showAlert('✅ Thành công', 'Đã ghi nhận thanh toán.');
       load();
@@ -159,10 +153,10 @@ export const BuildingBillingScreen: React.FC = () => {
           </View>
           <View style={s.summarySep} />
           <View style={[s.summaryStat, { flex: 1.6 }]}>
-            <Text style={[s.summaryAmtNum, { color: stats.uncollected > 0 ? Colors.warning : Colors.success }]}>
-              {stats.uncollected > 0 ? fmt(stats.uncollected) : fmt(stats.paidAmt)}
+            <Text style={[s.summaryAmtNum, { color: stats.unpaidCount > 0 ? Colors.warning : Colors.success }]}>
+              {stats.unpaidCount > 0 ? stats.unpaidCount : '✓'}
             </Text>
-            <Text style={s.summaryLbl}>{stats.uncollected > 0 ? 'Cần thu' : 'Đã thu'}</Text>
+            <Text style={s.summaryLbl}>{stats.unpaidCount > 0 ? 'Chưa thanh toán' : 'Đã thu đủ'}</Text>
           </View>
         </View>
         <View style={s.progRow}>
@@ -236,8 +230,9 @@ export const BuildingBillingScreen: React.FC = () => {
                 </View>
                 <View style={s.billAmountRow}>
                   <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
+                  {/* Không hiện số tiền thuê — xem @/constants/managerVisibility. */}
                   <Text style={[s.billTotal, st === 'overdue' && { color: Colors.error }]}>
-                    {fmt(item.amount)}
+                    {st === 'paid' ? '✓ Đã thanh toán' : st === 'overdue' ? 'Quá hạn' : 'Chưa thanh toán'}
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -256,7 +251,7 @@ export const BuildingBillingScreen: React.FC = () => {
       )}
 
       {/* ── Bill Detail Modal ─────────────────────────────────────── */}
-      {selectedBill && !showQRModal && !showCashModal && !showEwalletModal && (() => {
+      {selectedBill && !showCashModal && !showEwalletModal && (() => {
         const st  = toLocalStatus(selectedBill.status);
         const cfg = STATUS_CONFIG[st];
         return (
@@ -291,17 +286,30 @@ export const BuildingBillingScreen: React.FC = () => {
                     ))}
                   </View>
 
+                  {/* Số tiền thuê do hệ thống thu thẳng của khách — manager chỉ theo dõi
+                      đã/chưa thanh toán (xem @/constants/managerVisibility). */}
                   <View style={s.totalRowCompact}>
                     <Text style={s.totalLabel}>TIỀN NHÀ</Text>
-                    <Text style={s.totalAmount}>{fmt(selectedBill.amount)}</Text>
+                    <Text style={[s.totalAmount, { fontSize: 16, color: st === 'paid' ? Colors.success : Colors.warning }]}>
+                      {st === 'paid' ? '✓ Khách đã thanh toán' : 'Khách chưa thanh toán'}
+                    </Text>
                   </View>
+                  <Text style={s.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
 
                   {st !== 'paid' && st !== 'cancelled' && (
                     <View style={s.paymentActions}>
                       <Text style={s.paymentActionsTitle}>Ghi nhận thanh toán</Text>
-                      <TouchableOpacity style={s.qrPayBtn} onPress={() => setShowQRModal(true)}>
-                        <Text style={s.qrPayBtnText}>📱 Hiện QR cho khách quét</Text>
-                      </TouchableOpacity>
+                      {/* Đã bỏ nút "Hiện QR cho khách quét": QR do FE tự ghép URL
+                          img.vietqr.io từ `invoice.amount`, mà từ BE commit a52c370
+                          `amount` là NULL với tài khoản quản lý → mã QR sinh ra sai số
+                          tiền. Khách tự thanh toán trong app của mình (PayOS); ở đây
+                          quản lý chỉ GHI NHẬN khoản đã nhận ngoài luồng app.
+                          Muốn có lại QR thì BE phải trả `payosQrCode` trong
+                          ManagerInvoiceResponse — xem docs/BE-NEED-*-2026-08-08.md. */}
+                      <Text style={s.paymentActionsHint}>
+                        Khách thuê thanh toán trong app của mình. Chỉ dùng các nút dưới khi
+                        khách trả trực tiếp cho bạn.
+                      </Text>
                       <View style={s.payAltRow}>
                         <TouchableOpacity style={s.payAltBtn} onPress={() => setShowCashModal(true)}>
                           <Text style={s.payAltIcon}>💵</Text>
@@ -331,50 +339,6 @@ export const BuildingBillingScreen: React.FC = () => {
         );
       })()}
 
-      {/* ── QR Payment Modal ──────────────────────────────────────── */}
-      {showQRModal && selectedBill && (
-        <Modal transparent animationType="slide">
-          <View style={s.modalOverlay}>
-            <View style={s.billDetailSheet}>
-              <ScrollView bounces={false} showsVerticalScrollIndicator={false}
-                contentContainerStyle={s.billDetailContent}>
-                <View style={s.modalHeader}>
-                  <Text style={s.modalTitle}>QR Thanh toán</Text>
-                  <TouchableOpacity onPress={() => setShowQRModal(false)}>
-                    <Text style={s.modalClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={s.qrSubtitle}>{selectedBill.tenantName} — {fmt(selectedBill.amount)}</Text>
-                <View style={s.qrImageContainer}>
-                  <Image
-                    source={{ uri: buildQRUrl(selectedBill.amount, `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim()) }}
-                    style={s.qrImage}
-                    resizeMode="contain"
-                  />
-                </View>
-                <View style={s.bankInfoBox}>
-                  {[
-                    { label: 'Ngân hàng', val: 'MB Bank' },
-                    { label: 'Số TK',     val: VIETQR_ACCOUNT },
-                    { label: 'Số tiền',   val: fmt(selectedBill.amount), primary: true },
-                    { label: 'Nội dung',  val: `${selectedBill.code} ${selectedBill.tenantName || ''}`.trim() },
-                  ].map((row, i) => (
-                    <View key={i} style={s.bankRow}>
-                      <Text style={s.bankLabel}>{row.label}</Text>
-                      <Text style={[s.bankVal, row.primary && { color: Colors.primary, fontWeight: '800' }]}>
-                        {row.val}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <TouchableOpacity style={s.confirmPayBtn} disabled={submitting} onPress={() => recordPaid('QR')}>
-                  <Text style={s.confirmPayBtnText}>✅ Xác nhận đã thanh toán</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      )}
 
       {/* ── Cash Modal ───────────────────────────────────────────── */}
       {showCashModal && selectedBill && (
@@ -382,11 +346,15 @@ export const BuildingBillingScreen: React.FC = () => {
           <View style={s.modalOverlay}>
             <View style={s.modalContent}>
               <Text style={s.modalTitle}>💵 Ghi nhận tiền mặt</Text>
+              {/* ⚠️ Không hiện số tiền cần thu (@/constants/managerVisibility) — manager
+                  phải đối chiếu số trên app của khách trước khi bấm xác nhận. */}
               <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Số tiền cần thu</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
+                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
+                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
               </View>
-              <Text style={s.cashHint}>Xác nhận sau khi đã đếm đủ tiền mặt từ khách thuê.</Text>
+              <Text style={s.cashHint}>
+                Số tiền hiển thị trên app của khách thuê. Đối chiếu đúng số đó rồi mới xác nhận.
+              </Text>
               <TextInput
                 style={s.cashNoteInput}
                 placeholder="Ghi chú (tùy chọn)..."
@@ -412,8 +380,8 @@ export const BuildingBillingScreen: React.FC = () => {
             <View style={s.modalContent}>
               <Text style={s.modalTitle}>👛 Ví điện tử</Text>
               <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Số tiền</Text>
-                <Text style={s.cashAmount}>{fmt(selectedBill.amount)}</Text>
+                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
+                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
               </View>
               <Text style={s.cashHint}>Chọn ví điện tử khách đã thanh toán:</Text>
               {['MoMo', 'ZaloPay', 'VNPay', 'Ví khác'].map(wallet => (
@@ -543,14 +511,16 @@ const s = StyleSheet.create({
   },
   totalLabel:  { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   totalAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
+  hiddenAmountNote: {
+    fontSize: 11.5, color: Colors.textMuted, lineHeight: 16,
+    marginTop: Spacing.sm, marginBottom: Spacing.sm,
+  },
 
   paymentActions:      { marginBottom: Spacing.md },
   paymentActionsTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.md },
-  qrPayBtn:    {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md,
+  paymentActionsHint: {
+    fontSize: 12, color: Colors.textMuted, lineHeight: 17, marginBottom: Spacing.md,
   },
-  qrPayBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
   payAltRow:    { flexDirection: 'row', gap: Spacing.sm },
   payAltBtn:    {
     flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
@@ -561,18 +531,6 @@ const s = StyleSheet.create({
 
   paidInfo:     { backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg, padding: Spacing.md },
   paidInfoText: { fontSize: 14, color: Colors.success, lineHeight: 22, fontWeight: '500' },
-
-  qrSubtitle:       { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', marginBottom: Spacing.md },
-  qrImageContainer: {
-    alignItems: 'center', backgroundColor: Colors.white, padding: Spacing.md,
-    borderRadius: BorderRadius.lg, borderWidth: 2, borderColor: Colors.divider,
-    alignSelf: 'center', marginBottom: Spacing.md,
-  },
-  qrImage:     { width: 220, height: 280 },
-  bankInfoBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.lg, padding: Spacing.base, marginBottom: Spacing.lg },
-  bankRow:     { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: Spacing.sm },
-  bankLabel:   { fontSize: 13, color: Colors.textMuted },
-  bankVal:     { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
 
   confirmPayBtn: {
     backgroundColor: Colors.success, borderRadius: BorderRadius.lg,

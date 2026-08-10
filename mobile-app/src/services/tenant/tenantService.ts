@@ -128,14 +128,15 @@ export interface TenantContractResponse {
   endDate?: string;
   expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
-  paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
+  paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED — trạng thái thu CỌC
   /**
-   * Mốc PayOS ghi nhận khoản thu lúc đón khách (tiền nhà tháng đầu + cọc).
-   * BE set trong `completeDepositPayment` từ 08/08/2026 — trước đó chỉ có `paidAt`.
-   * Dùng để hiện "đã thu" mà không phải suy từ `paymentStatus`.
+   * Mốc PayOS ghi nhận khoản thu lúc đón khách (tiền nhà tháng đầu + cọc), hoặc lúc
+   * quản lý xác nhận tiền mặt. BE set trong `completeDepositPayment` từ 08/08/2026 —
+   * trước đó chỉ có `paidAt`. Dùng để hiện "đã thu" mà không phải suy từ `paymentStatus`.
    */
   depositPaidAt?: string;
-  depositMethod?: string; // PAYOS | CASH
+  /** BE suy ra: có payosOrderCode → 'PAYOS'; có xác nhận tiền mặt → 'CASH'; chưa thu → null. */
+  depositMethod?: string;
   paidAt?: string;
   // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
   // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
