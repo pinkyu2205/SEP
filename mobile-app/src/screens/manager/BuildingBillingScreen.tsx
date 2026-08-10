@@ -1,14 +1,19 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
+  View, Text, StyleSheet, SectionList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE,
+  FIRST_RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+} from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { checkoutService } from '@/services/manager/checkoutService';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -29,13 +34,46 @@ const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: stri
 
 const FILTERS: { id: FilterType; label: string }[] = [
   { id: 'all',     label: 'Tất cả' },
-  { id: 'pending', label: '⏳ Chưa thu' },
-  { id: 'overdue', label: '🚨 Quá hạn' },
-  { id: 'paid',    label: '✅ Đã thu' },
-  { id: 'partial', label: '💛 Một phần' },
+  // Thứ tự + nhãn khớp với 3 ô số ở thẻ tổng quan và với màn Lịch sử hoá đơn.
+  { id: 'paid',    label: 'Đã thu' },
+  { id: 'pending', label: 'Chưa thu' },
+  { id: 'overdue', label: 'Quá hạn' },
+  { id: 'partial', label: 'Một phần' },
 ];
 
 const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3, cancelled: 4 };
+
+/**
+ * Số ngày trễ THẬT. Kỳ đầu (hoá đơn phát hành cùng ngày với hạn nộp — BE đặt
+ * dueDate = ngày nhận phòng) có {FIRST_RENT_CYCLE.graceDays} ngày ân hạn, phải cộng
+ * vào rồi mới tính trễ. Cùng công thức với màn Hoá đơn tiền nhà.
+ */
+const isFirstCycle = (inv: ManagerInvoice) =>
+  !!inv.createdAt && !!inv.dueDate && inv.createdAt.slice(0, 10) === inv.dueDate.slice(0, 10);
+
+const lateDays = (inv: ManagerInvoice): number => {
+  if (!inv.dueDate) return 0;
+  const d = new Date(`${inv.dueDate.slice(0, 10)}T00:00:00`);
+  if (isNaN(d.getTime())) return 0;
+  if (isFirstCycle(inv)) d.setDate(d.getDate() + FIRST_RENT_CYCLE.graceDays);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - d.getTime()) / 86_400_000);
+};
+
+/**
+ * Được quyền chấm dứt hợp đồng vì không trả tiền phòng chưa?
+ *
+ * Hai kỳ có mốc khác nhau:
+ *  • Kỳ đầu: nhận phòng 07/08 → khách có 3 ngày là 07, 08, 09 → hết ngày 09 là hết
+ *    hạn, sang 10/08 được chấm dứt. `lateDays` đã cộng 3 ngày ân hạn nên mốc 10/08
+ *    ứng với late = 0 → ngưỡng là `>= 0`.
+ *  • Kỳ thường: hạn ngày 5 → ngày 8 mới được chấm dứt, tức trễ 3 ngày.
+ */
+const canTerminateInvoice = (inv: ManagerInvoice): boolean => {
+  const st = (inv.status || '').toUpperCase();
+  if (st === 'PAID' || st === 'CANCELLED') return false;
+  return lateDays(inv) >= (isFirstCycle(inv) ? 0 : RENT_TERMINATION_AFTER_DAYS);
+};
 
 const toLocalStatus = (s: ManagerInvoiceStatus): BillStatus => {
   switch (s) {
@@ -57,12 +95,25 @@ export const BuildingBillingScreen: React.FC = () => {
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [loading,  setLoading]  = useState(true);
 
+  /**
+   * Hợp đồng đang hiệu lực của nhà này — cần `contractId` để chấm dứt ngay tại màn
+   * này. `ManagerInvoiceResponse` của BE không trả contractId, chỉ có roomNumber, nên
+   * phải nạp thêm danh sách hợp đồng rồi ghép theo phòng.
+   */
+  const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
+  const [terminating, setTerminating] = useState(false);
+
   // Chỉ lấy hoá đơn TIỀN NHÀ (RENT) của BĐS này — điện/nước có thống kê riêng ở màn Ghi chỉ số.
   const load = useCallback(() => {
     setLoading(true);
-    realManagerInvoiceService.listInvoices({ type: 'RENT' })
-      .then(list => setInvoices(list.filter(i => i.propertyId === pid)))
-      .catch(() => setInvoices([]))
+    Promise.all([
+      realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
+      realTenantService.listByProperty(pid).catch(() => [] as TenantContractResponse[]),
+    ])
+      .then(([list, cts]) => {
+        setInvoices(list.filter(i => i.propertyId === pid));
+        setContracts(cts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE'));
+      })
       .finally(() => setLoading(false));
   }, [pid]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -104,8 +155,104 @@ export const BuildingBillingScreen: React.FC = () => {
     };
   }, [invoices]);
 
+  /**
+   * Gom hoá đơn theo KỲ, mới nhất trước — nhà thuê lâu là hàng chục kỳ, đổ ra một
+   * danh sách phẳng thì không biết hoá đơn nào của tháng nào. Mỗi kỳ có tiêu đề
+   * riêng kèm tình trạng thu của chính kỳ đó.
+   */
+  const sections = useMemo(() => {
+    const byMonth = new Map<string, ManagerInvoice[]>();
+    for (const b of filteredBills) {
+      const key = `${b.year}-${String(b.month).padStart(2, '0')}`;
+      byMonth.set(key, [...(byMonth.get(key) ?? []), b]);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, list]) => {
+        const [y, m] = key.split('-');
+        return {
+          key,
+          title: `${m}/${y}`,
+          paid: list.filter(i => i.status === 'PAID').length,
+          overdue: list.filter(i => i.status === 'OVERDUE').length,
+          data: list,
+        };
+      });
+  }, [filteredBills]);
+
   const payRate  = stats.total > 0 ? Math.round((stats.paidCount / stats.total) * 100) : 0;
   const barColor = payRate >= 80 ? Colors.success : payRate >= 50 ? Colors.warning : Colors.error;
+
+  /** Ghép hoá đơn → hợp đồng: theo số phòng; nhà nguyên căn thì chỉ có 1 HĐ. */
+  const contractOf = (inv: ManagerInvoice) =>
+    (inv.roomNumber
+      ? contracts.find(c => c.roomNumber === inv.roomNumber)
+      : contracts[0]) ?? null;
+
+  /**
+   * Chấm dứt hợp đồng NGAY tại đây rồi mở luôn yêu cầu trả phòng.
+   * Trước đây nút này chỉ điều hướng sang màn "Tiền phòng tự động" để bấm tiếp —
+   * thừa một bước và người dùng không hiểu vì sao bị đá sang màn khác.
+   */
+  const confirmTerminate = (inv: ManagerInvoice) => {
+    const contract = contractOf(inv);
+    if (!contract) {
+      showAlert('Không tìm được hợp đồng', 'Không xác định được hợp đồng của hoá đơn này. Thử tải lại màn hình.');
+      return;
+    }
+    const late = lateDays(inv);
+    showAlert(
+      'Chấm dứt hợp đồng?',
+      `${inv.tenantName || 'Khách thuê'} — ${inv.roomNumber ? `phòng ${inv.roomNumber}` : 'nhà nguyên căn'} `
+      + `đã quá hạn tiền phòng ${late} ngày và đã được nhắc đủ các mốc.\n\n`
+      + 'Chấm dứt sẽ THANH LÝ hợp đồng: khách mất quyền truy cập phòng trong app, phòng về trạng thái trống. '
+      + 'Hành động này không đảo ngược được.',
+      [
+        { text: 'Huỷ', style: 'cancel' },
+        {
+          text: 'Chấm dứt hợp đồng',
+          style: 'destructive',
+          onPress: async () => {
+            setTerminating(true);
+            try {
+              await realTenantService.terminateContract(contract.id, {
+                type: 'VIOLATION',
+                reason: `Không thanh toán tiền phòng T${String(inv.month).padStart(2, '0')}/${inv.year} — quá hạn ${late} ngày, đã nhắc đủ các mốc theo chính sách.`,
+              });
+
+              // Mở luôn thủ tục trả phòng để còn kiểm kê thiết bị và tất toán cọc.
+              let ok = false;
+              try {
+                await checkoutService.createForTenant({
+                  contractId: contract.id,
+                  expectedMoveOutDate: new Date().toISOString().slice(0, 10),
+                  reason: `Chấm dứt hợp đồng do không thanh toán tiền phòng T${String(inv.month).padStart(2, '0')}/${inv.year}.`,
+                });
+                ok = true;
+              } catch { /* báo rõ ở dưới, không nuốt */ }
+
+              setSelectedBill(null);
+              load();
+              showAlert(
+                'Đã chấm dứt hợp đồng',
+                ok
+                  ? 'Đã mở yêu cầu trả phòng. Sang đó để kiểm kê thiết bị, chốt số điện nước và tất toán tiền cọc.'
+                  : 'Hợp đồng đã thanh lý, nhưng CHƯA mở được yêu cầu trả phòng. Vào mục Trả phòng tạo thủ công để còn tất toán cọc.',
+                [
+                  { text: 'Để sau', style: 'cancel' },
+                  { text: 'Xử lý trả phòng', onPress: () => navigation.navigate('CheckoutRequests') },
+                ],
+              );
+            } catch (e: any) {
+              showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không chấm dứt được hợp đồng.');
+            } finally {
+              setTerminating(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const recordPaid = async (method: string, note?: string) => {
     if (!selectedBill) return;
@@ -137,33 +284,62 @@ export const BuildingBillingScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* ── Summary card ─────────────────────────────────────────── */}
+      {/* ── Thẻ tổng quan ──
+          Dùng CHUNG bố cục với màn "Hóa đơn tiền nhà" và "Lịch sử hoá đơn":
+          số lớn dạng đã-thu/tổng, thanh 3 đoạn, rồi 3 ô Đã thu · Chưa thu · Quá hạn
+          theo đúng thứ tự đó. Trước đây màn này tự bày một kiểu riêng (2/4 · Quá hạn ·
+          Chưa thanh toán + thanh 1 màu) nên nhìn như của app khác. ── */}
       <View style={s.summaryCard}>
-        <View style={s.summaryRow}>
-          <View style={s.summaryStat}>
-            <Text style={[s.summaryNum, { color: Colors.success }]}>{stats.paidCount}/{stats.total}</Text>
-            <Text style={s.summaryLbl}>Đã thu</Text>
-          </View>
-          <View style={s.summarySep} />
-          <View style={s.summaryStat}>
-            <Text style={[s.summaryNum, { color: stats.overdueCount > 0 ? Colors.error : Colors.textMuted }]}>
-              {stats.overdueCount}
-            </Text>
-            <Text style={s.summaryLbl}>Quá hạn</Text>
-          </View>
-          <View style={s.summarySep} />
-          <View style={[s.summaryStat, { flex: 1.6 }]}>
-            <Text style={[s.summaryAmtNum, { color: stats.unpaidCount > 0 ? Colors.warning : Colors.success }]}>
-              {stats.unpaidCount > 0 ? stats.unpaidCount : '✓'}
-            </Text>
-            <Text style={s.summaryLbl}>{stats.unpaidCount > 0 ? 'Chưa thanh toán' : 'Đã thu đủ'}</Text>
+        <View style={s.heroFigure}>
+          <Text style={s.heroAmount}>{stats.paidCount}</Text>
+          <Text style={s.heroSlash}>/{stats.total}</Text>
+          <View style={s.heroFigureText}>
+            <Text style={s.heroUnit}>hoá đơn đã thu</Text>
+            <Text style={[s.heroRate, { color: barColor }]}>{payRate}% hoàn thành</Text>
           </View>
         </View>
-        <View style={s.progRow}>
-          <View style={s.progBg}>
-            <View style={[s.progFill, { width: `${payRate}%` as any, backgroundColor: barColor }]} />
-          </View>
-          <Text style={[s.progPct, { color: barColor }]}>{payRate}% đã thu</Text>
+
+        <View style={s.segBg}>
+          {stats.paidCount > 0 && (
+            <View style={[s.segPart, {
+              width: `${(stats.paidCount / Math.max(1, stats.total)) * 100}%` as any,
+              backgroundColor: Colors.success,
+            }]} />
+          )}
+          {stats.unpaidCount - stats.overdueCount > 0 && (
+            <View style={[s.segPart, {
+              width: `${((stats.unpaidCount - stats.overdueCount) / Math.max(1, stats.total)) * 100}%` as any,
+              backgroundColor: Colors.warning,
+            }]} />
+          )}
+          {stats.overdueCount > 0 && (
+            <View style={[s.segPart, {
+              width: `${(stats.overdueCount / Math.max(1, stats.total)) * 100}%` as any,
+              backgroundColor: Colors.error,
+            }]} />
+          )}
+        </View>
+
+        <View style={s.heroStats}>
+          {([
+            { key: 'paid' as const, num: stats.paidCount, label: 'Đã thu', color: Colors.success },
+            { key: 'pending' as const, num: stats.unpaidCount - stats.overdueCount, label: 'Chưa thu', color: Colors.warning },
+            { key: 'overdue' as const, num: stats.overdueCount, label: 'Quá hạn', color: Colors.error },
+          ]).map(st => {
+            const on = filter === st.key;
+            return (
+              <TouchableOpacity
+                key={st.key}
+                style={[s.heroStat, on && { backgroundColor: st.color + '14', borderColor: st.color + '55' }]}
+                onPress={() => setFilter(on ? 'all' : st.key)}
+                activeOpacity={0.7}
+              >
+                <View style={[s.heroDot, { backgroundColor: st.num > 0 ? st.color : Colors.textMuted }]} />
+                <Text style={[s.heroStatNum, { color: st.num > 0 ? st.color : Colors.textMuted }]}>{st.num}</Text>
+                <Text style={s.heroStatLbl}>{st.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
@@ -202,9 +378,27 @@ export const BuildingBillingScreen: React.FC = () => {
       {loading ? (
         <View style={s.emptyState}><ActivityIndicator size="large" color={Colors.primary} /></View>
       ) : (
-        <FlatList
-          data={filteredBills}
+        <SectionList
+          sections={sections}
           keyExtractor={i => String(i.id)}
+          stickySectionHeadersEnabled={false}
+          renderSectionHeader={({ section }) => (
+            <View style={s.monthBar}>
+              <Text style={s.monthTitle}>Kỳ {section.title}</Text>
+              <View style={s.monthBadges}>
+                {section.overdue > 0 && (
+                  <View style={[s.monthPill, { backgroundColor: Colors.errorLight }]}>
+                    <Text style={[s.monthPillText, { color: Colors.error }]}>{section.overdue} quá hạn</Text>
+                  </View>
+                )}
+                <View style={[s.monthPill, { backgroundColor: section.paid === section.data.length ? Colors.successLight : Colors.white }]}>
+                  <Text style={[s.monthPillText, { color: section.paid === section.data.length ? Colors.success : Colors.textSecondary }]}>
+                    {section.paid === section.data.length ? `✓ đã thu đủ ${section.data.length}` : `đã thu ${section.paid}/${section.data.length}`}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
           renderItem={({ item }) => {
             const st  = toLocalStatus(item.status);
             const cfg = STATUS_CONFIG[st];
@@ -327,6 +521,62 @@ export const BuildingBillingScreen: React.FC = () => {
                     </View>
                   )}
 
+                  {/* Hoá đơn quá hạn → mở đường sang chỗ chấm dứt hợp đồng.
+                      KHÔNG gọi terminateContract ngay tại đây: ManagerInvoice không
+                      mang `contractId`, mà quyết định chấm dứt còn phải xem mốc leo
+                      thang của kỳ (kỳ đầu có 3 ngày ân hạn riêng) — màn "Tiền phòng
+                      tự động" mới có đủ dữ liệu hợp đồng để chốt đúng. */}
+                  {st === 'overdue' && (() => {
+                    const late = lateDays(selectedBill);
+                    // Chỉ MỜI chấm dứt khi thật sự đã đủ điều kiện — dùng cùng luật với
+                    // màn "Tiền phòng tự động" (kỳ đầu có 3 ngày ân hạn kể từ ngày nhận
+                    // phòng, BE lại gắn OVERDUE ngay hôm sau). Trước đây chỉ xét nhãn
+                    // OVERDUE nên bấm sang bên kia thì không có nút nào để bấm tiếp.
+                    // Hợp đồng đã thanh lý rồi thì không còn gì để chấm dứt nữa — BE
+                    // vẫn giữ hoá đơn ở trạng thái OVERDUE nên phải tự kiểm tra, không
+                    // thì nút vẫn hiện và bấm vào chỉ báo "không tìm được hợp đồng".
+                    const contract = contractOf(selectedBill);
+                    const canTerminate = !!contract && canTerminateInvoice(selectedBill);
+                    const graceLeft = (isFirstCycle(selectedBill) ? 0 : RENT_TERMINATION_AFTER_DAYS) - late;
+                    return (
+                      <View style={[s.terminateBox, !canTerminate && s.terminateBoxSoft]}>
+                        <Text style={[s.terminateTitle, !canTerminate && s.terminateTitleSoft]}>
+                          {!contract
+                            ? 'Hợp đồng đã chấm dứt'
+                            : canTerminate ? 'Khách không thanh toán?' : 'Đang quá hạn — chưa được chấm dứt'}
+                        </Text>
+                        <Text style={[s.terminateHint, !canTerminate && s.terminateTitleSoft]}>
+                          {!contract
+                            ? 'Hợp đồng của khách này đã được thanh lý. Hoá đơn còn nợ vẫn giữ lại để đối soát; phần tiền cọc và bàn giao xử lý ở mục Trả phòng.'
+                            : canTerminate
+                              ? `Đã quá hạn ${late} ngày và đã nhắc đủ các mốc. Bạn được quyền chấm dứt hợp đồng thuê.`
+                              : graceLeft <= 1
+                                ? 'Hôm nay là ngày cuối trong hạn. Hết hôm nay mà khách chưa trả thì từ ngày mai bạn được quyền chấm dứt hợp đồng.'
+                                : `Hệ thống vẫn đang nhắc khách mỗi ngày. Còn ${graceLeft} ngày nữa, nếu vẫn chưa thu được thì bạn được quyền chấm dứt hợp đồng.`}
+                        </Text>
+                        {!contract && (
+                          <TouchableOpacity
+                            style={s.terminateBtn}
+                            activeOpacity={0.8}
+                            onPress={() => { setSelectedBill(null); navigation.navigate('CheckoutRequests'); }}
+                          >
+                            <Text style={s.terminateBtnText}>🚪  Sang mục Trả phòng  →</Text>
+                          </TouchableOpacity>
+                        )}
+                        {canTerminate && (
+                          <TouchableOpacity
+                            style={s.terminateBtn}
+                            activeOpacity={0.8}
+                            disabled={terminating}
+                            onPress={() => confirmTerminate(selectedBill)}
+                          >
+                            <Text style={s.terminateBtnText}>{terminating ? "Đang xử lý…" : "⛔  Chấm dứt hợp đồng"}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })()}
+
                   {st === 'paid' && (
                     <View style={s.paidInfo}>
                       <Text style={s.paidInfoText}>✅ Hóa đơn đã được thanh toán.</Text>
@@ -421,17 +671,7 @@ const s = StyleSheet.create({
     borderRadius: BorderRadius.xl, padding: Spacing.base,
     ...Shadow.sm, borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.md,
   },
-  summaryRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md },
-  summaryStat:  { flex: 1, alignItems: 'center' },
-  summaryNum:   { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
-  summaryAmtNum:{ fontSize: 13, fontWeight: '800' },
-  summaryLbl:   { fontSize: 10, color: Colors.textMuted, marginTop: 2, textAlign: 'center' },
-  summarySep:   { width: 1, height: 32, backgroundColor: Colors.divider },
 
-  progRow:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  progBg:   { flex: 1, height: 6, backgroundColor: Colors.divider, borderRadius: 3 },
-  progFill: { height: 6, borderRadius: 3 },
-  progPct:  { fontSize: 11, fontWeight: '700', minWidth: 62 },
 
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
@@ -560,4 +800,47 @@ const s = StyleSheet.create({
   },
   ewalletOptionText:  { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
   ewalletOptionArrow: { fontSize: 16, color: Colors.textMuted },
+  heroFigure: { flexDirection: 'row', alignItems: 'baseline', gap: 2 },
+  heroAmount: { fontSize: 38, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -1 },
+  heroSlash: { fontSize: 20, fontWeight: '800', color: Colors.textMuted },
+  heroFigureText: { marginLeft: Spacing.sm, flex: 1 },
+  heroUnit: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  heroRate: { fontSize: 11.5, fontWeight: '800', marginTop: 1 },
+  segBg: {
+    flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden',
+    backgroundColor: Colors.divider, marginTop: Spacing.md, gap: 2,
+  },
+  segPart: { height: '100%' },
+  heroStats: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
+  heroStat: {
+    flex: 1, alignItems: 'center', paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: 'transparent',
+    backgroundColor: Colors.background,
+  },
+  heroDot: { width: 6, height: 6, borderRadius: 3, marginBottom: 4 },
+  heroStatNum: { fontSize: 18, fontWeight: '900' },
+  heroStatLbl: { fontSize: 10.5, color: Colors.textMuted, marginTop: 1, textAlign: 'center' },
+  monthBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm, marginBottom: Spacing.xs,
+  },
+  monthTitle: { fontSize: 11.5, fontWeight: '900', color: Colors.textSecondary, textTransform: 'uppercase' },
+  monthBadges: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  monthPill: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 2 },
+  monthPillText: { fontSize: 10, fontWeight: '800' },
+  terminateBox: {
+    marginTop: Spacing.base, padding: Spacing.base,
+    borderRadius: BorderRadius.lg, backgroundColor: '#FEF2F2',
+    borderWidth: 1, borderColor: '#FECACA',
+  },
+  terminateTitle: { fontSize: 13.5, fontWeight: '800', color: '#B91C1C' },
+  terminateHint: { fontSize: 11.5, color: '#B91C1C', marginTop: 3, lineHeight: 17, opacity: 0.85 },
+  terminateBtn: {
+    marginTop: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.error, alignItems: 'center',
+  },
+  terminateBtnText: { fontSize: 13, fontWeight: '800', color: Colors.white },
+  terminateBoxSoft: { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' },
+  terminateTitleSoft: { color: '#B45309' },
 });

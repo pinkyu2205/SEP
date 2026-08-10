@@ -16,6 +16,7 @@ import {
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, RentInvoiceLite } from '@/services/manager/invoiceService';
+import { checkoutService } from '@/services/manager/checkoutService';
 
 const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
 const fmtDay = (iso: string) => iso.split('-').reverse().join('/');
@@ -43,12 +44,19 @@ interface RentRow {
  * FE chỉ đọc kết quả và cho bấm chấm dứt khi đủ điều kiện.
  * Điện/nước không thuộc chu kỳ này (vẫn ghi chỉ số & gửi tay ở màn riêng).
  */
-export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
+export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
   const [props, setProps] = useState<PropItem[]>([]);
   const [loadingProps, setLoadingProps] = useState(true);
   const [errorProps, setErrorProps] = useState<string | null>(null);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  /**
+   * Mở kèm `propertyId` (vd bấm "Xử lý chấm dứt hợp đồng" từ ô chi tiết hoá đơn) thì
+   * chọn sẵn đúng nhà đó — trước đây màn này bỏ qua route.params nên rơi về danh sách
+   * chọn nhà trống, người dùng phải tự mò lại từ đầu.
+   */
+  const paramPropertyId: number | null = route?.params?.propertyId != null
+    ? Number(route.params.propertyId) : null;
+  const [selectedId, setSelectedId] = useState<number | null>(paramPropertyId);
   const [month, setMonth] = useState(() => toMonthKey());
   const [rows, setRows] = useState<RentRow[]>([]);
   const [loadingRows, setLoadingRows] = useState(false);
@@ -67,7 +75,12 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
       setLoadingProps(false);
     }
   }, []);
-  useFocusEffect(useCallback(() => { loadProps(); }, [loadProps]));
+  useFocusEffect(useCallback(() => {
+    loadProps();
+    // Vào kèm propertyId thì nạp luôn danh sách khách của nhà đó, khỏi bắt bấm thêm.
+    if (paramPropertyId != null) loadRows(paramPropertyId, month);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadProps, paramPropertyId]));
 
   const loadRows = useCallback(async (propId: number, m: string, silent = false) => {
     if (!silent) setLoadingRows(true);
@@ -153,8 +166,37 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation }) => {
                 type: 'VIOLATION',
                 reason: `Không thanh toán tiền phòng ${monthLabel(month).toLowerCase()} — quá hạn ${od} ngày, đã nhắc đủ các mốc theo chính sách.`,
               });
-              showAlert('Đã chấm dứt', 'Hợp đồng đã được thanh lý. Khách thuê không còn quyền truy cập phòng này trong app.');
+              /**
+                * Chấm dứt xong PHẢI mở luôn thủ tục trả phòng: kiểm kê thiết bị, chốt
+                * số điện nước, tất toán cọc. Bỏ bước này là mất tiền thật (cọc không
+                * được trừ nợ, điện nước những ngày cuối không thu).
+                * BE đã có POST /checkout-requests cho MANAGER nên tạo được ngay.
+                */
+              let checkoutId: number | null = null;
+              try {
+                const req = await checkoutService.createForTenant({
+                  contractId: row.contractId,
+                  expectedMoveOutDate: new Date().toISOString().slice(0, 10),
+                  reason: `Chấm dứt hợp đồng do không thanh toán tiền phòng ${monthLabel(month).toLowerCase()} (quá hạn ${od} ngày).`,
+                });
+                checkoutId = req?.id ?? null;
+              } catch { /* tạo hụt thì vẫn báo thành công phần chấm dứt, xem ghi chú dưới */ }
+
               if (selectedId != null) await loadRows(selectedId, month, true);
+
+              showAlert(
+                'Đã chấm dứt hợp đồng',
+                checkoutId
+                  ? 'Đã mở yêu cầu trả phòng cho khách này. Sang đó để kiểm kê thiết bị, chốt số điện nước và tất toán tiền cọc.'
+                  : 'Hợp đồng đã thanh lý, nhưng CHƯA mở được yêu cầu trả phòng. Bạn vào mục Trả phòng tạo thủ công để còn tất toán cọc.',
+                [
+                  { text: 'Để sau', style: 'cancel' },
+                  {
+                    text: checkoutId ? 'Xử lý trả phòng' : 'Mở mục Trả phòng',
+                    onPress: () => navigation.navigate('CheckoutRequests'),
+                  },
+                ],
+              );
             } catch (e: any) {
               showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không chấm dứt được hợp đồng.');
             } finally {
