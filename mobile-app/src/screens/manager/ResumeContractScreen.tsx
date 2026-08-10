@@ -22,7 +22,9 @@ import * as ImagePicker from 'expo-image-picker'
 import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import { CameraCaptureModal } from '@/components/common'
-import { showAlert, splitMeterReading, validateMeterPhoto, validateRoomPhoto } from '@/utils';
+import {
+  findPersonLabel, showAlert, splitMeterReading, validateMeterPhoto, validateRoomPhoto,
+} from '@/utils';
 import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractPriceApprovalStatus,
@@ -541,6 +543,25 @@ const InspectionSection: React.FC<{
       if (!check.ok) {
         showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫')
         return
+      }
+
+      // Chặn ảnh có người (mentor ý 8) — xem ghi chú dài ở OnboardingScreenV2.
+      // Chỉ hỏi Vision khi OCR không thấy đơn vị kWh/m³, để không đốt quota vô ích.
+      if (check.confidence !== 'high') {
+        try {
+          const person = findPersonLabel(await visionService.detectLabels(url))
+          if (person) {
+            showAlert(
+              'Ảnh có người trong khung',
+              `Máy nhận ra "${person}" trong ảnh. Chụp thẳng vào MẶT SỐ của đồng hồ ${label}, không có người che.`,
+              undefined,
+              '🚫',
+            )
+            return
+          }
+        } catch {
+          // Vision lỗi → không chặn, giữ nguyên hành vi cũ.
+        }
       }
 
       // Đọc được mặt đồng hồ nhưng KHÔNG tách được dãy số → gần như luôn do ảnh mờ,
