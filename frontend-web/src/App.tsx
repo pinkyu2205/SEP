@@ -20,6 +20,7 @@ import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
+import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
@@ -111,6 +112,7 @@ function App() {
             <Route path="/admin/onboarding" element={<DraftOnboardingList />} />
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
