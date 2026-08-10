@@ -9,6 +9,17 @@ import { normalizeVi } from '@/utils/helpers';
 
 export const formatVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + ' đ';
 
+/**
+ * Khoảng giá phòng của một nhà CHIA PHÒNG.
+ * Nhà loại này để `Property.price` null vì giá nằm trên từng phòng — không suy ra
+ * khoảng giá từ `rooms[]` thì card ghi "Chưa định giá" dù phòng nào cũng có giá.
+ */
+export interface RoomPriceRange { min: number; max: number; rooms: number }
+
+/** "8.200.000 đ" nếu mọi phòng cùng giá, "7.000.000 – 9.000.000 đ" nếu khác nhau. */
+export const formatRoomPriceRange = (r: RoomPriceRange) =>
+  r.min === r.max ? formatVnd(r.min) : `${formatVnd(r.min)} – ${formatVnd(r.max)}`;
+
 export const typeLabel = (p: PropertyResponse) =>
   p.wholeHouse === null ? 'Chưa xác định' : p.wholeHouse ? 'Nguyên căn' : 'Chia phòng';
 
