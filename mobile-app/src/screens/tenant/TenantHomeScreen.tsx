@@ -18,6 +18,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
 const QUICK_ACTIONS = [
@@ -144,19 +145,22 @@ export const TenantHomeScreen: React.FC = () => {
   };
 
   /**
-   * Khoản thu lúc NHẬN PHÒNG (tiền nhà tháng đầu + tiền cọc, khách trả 1 lần qua PayOS).
+   * Khoản thu lúc NHẬN PHÒNG — từ BE commit `92c87d8` (10/08/2026) là **CHỈ TIỀN CỌC**.
+   * Tiền nhà tháng vào ở tách thành hoá đơn RENT riêng (`cycleType = FIRST`, tính theo
+   * số ngày ở), khách trả sau trên app như mọi hoá đơn khác.
    *
    * Mentor 07/08/2026: "tenant chưa xem được đã chuyển và đặt cọc hay chưa" và "tổng
    * 10tr mà hoá đơn hiện 5tr, chưa có tiền tháng". Nguyên nhân là BE không sinh hoá
    * đơn cho khoản này nên trong app không có gì để nhìn; BE đã sửa 08/08/2026 — sinh
-   * hoá đơn `HD-ONBOARD-{contractId}` trạng thái PAID kèm 2 dòng item.
+   * hoá đơn `HD-ONBOARD-{contractId}` trạng thái PAID.
    *
    * Nhận diện theo mã trước (chắc chắn nhất), rồi tới `billingPeriod` để còn chạy được
-   * với hoá đơn seed/cũ mà BE đặt mã khác.
+   * với hoá đơn seed/cũ mà BE đặt mã khác. Chuỗi dò phải khớp CẢ HAI đời nhãn: cũ là
+   * "Thu lúc nhận phòng", mới là "Tiền cọc lúc nhận phòng" — nên chỉ dò phần đuôi.
    */
   const onboardingBill = allBills.find(
     b => b.code?.startsWith('HD-ONBOARD-')
-      || /thu lúc nhận phòng/i.test(b.billingPeriod ?? ''),
+      || /lúc nhận phòng/i.test(b.billingPeriod ?? ''),
   );
 
   const unpaidBills = allBills.filter(b => b.status === 'pending' || b.status === 'overdue');

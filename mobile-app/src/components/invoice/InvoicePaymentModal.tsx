@@ -25,6 +25,7 @@ const TYPE_LABEL: Record<InvoiceType, { label: string; icon: string; color: stri
   electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
 

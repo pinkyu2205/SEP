@@ -19,6 +19,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
   water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
+  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
 };
 
 const STATUS_CFG: Record<BillStatus, { label: string; color: string; bg: string; emoji: string }> = {
@@ -70,6 +71,8 @@ export const InvoiceDetailScreen: React.FC = () => {
   const [paying, setPaying]   = useState(false);
 
   const tc  = TYPE_CFG[invoice.invoiceType];
+  // Cách tính do BE dựng sẵn (10/08/2026). Hoá đơn cũ/seed không có → khối "Cách tính" ẩn.
+  const breakdown = invoice.paymentBreakdown;
   const isPaid    = invoice.status === 'paid';
   // Hoá đơn tiền phòng KỲ ĐẦU: hạn thật = ngày nhận phòng + FIRST_RENT_CYCLE.graceDays,
   // không phải dueDate của BE (BE đặt dueDate = đúng ngày nhận phòng rồi hôm sau gắn
@@ -197,6 +200,41 @@ export const InvoiceDetailScreen: React.FC = () => {
                 value={`${(invoice.waterRate ?? 0).toLocaleString('vi-VN')}đ / m³`}
                 last
               />
+            </View>
+          </View>
+        )}
+
+        {/* ── Cách tính (BE dựng sẵn) ──
+            Đặt TRƯỚC "Chi tiết khoản thu": với hoá đơn tiền nhà chu kỳ đầu, số tiền là
+            một con số lẻ chia theo ngày ở — khách nhìn thấy nó trước tiên sẽ hỏi "sao
+            không phải nguyên tháng", nên công thức phải nằm ngay trên đầu.
+            Hoá đơn cũ không có `paymentBreakdown` thì khối này tự ẩn. */}
+        {!!breakdown && (
+          <View style={s.section}>
+            <Text style={s.sectionTitle}>🧮 Cách tính</Text>
+            <View style={s.card}>
+              <View style={s.breakdownHead}>
+                <Text style={s.breakdownTitle}>{breakdown.title}</Text>
+                {isFirstCycle && <Text style={s.cycleBadge}>Chu kỳ đầu</Text>}
+              </View>
+
+              {!!breakdown.formula && (
+                <Text style={s.breakdownFormula}>{breakdown.formula}</Text>
+              )}
+
+              {breakdown.lines.map((l, i) => (
+                <InfoRow
+                  key={`${l.key}-${i}`}
+                  label={l.label}
+                  // BE đã format sẵn `displayValue`; chỉ khi là tiền mới format lại theo
+                  // đúng kiểu tiền tệ của app cho khớp các dòng khác.
+                  value={l.amount != null ? formatCurrency(l.amount) : l.displayValue}
+                />
+              ))}
+
+              {!!breakdown.explanation && (
+                <Text style={s.breakdownNote}>{breakdown.explanation}</Text>
+              )}
             </View>
           </View>
         )}
@@ -428,4 +466,24 @@ const s = StyleSheet.create({
   },
   payBtnText:   { fontSize: 15, fontWeight: '700', color: Colors.white },
   payBtnAmount: { fontSize: 15, fontWeight: '800', color: Colors.white },
+
+  // ── Khối "Cách tính" ──
+  breakdownHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+    marginBottom: 6,
+  },
+  breakdownTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  cycleBadge: {
+    fontSize: 11, fontWeight: '700', color: '#9A3412', backgroundColor: '#FFEDD5',
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.sm, overflow: 'hidden',
+  },
+  // Công thức để khách tự kiểm lại — chữ đều bề ngang cho các chữ số thẳng cột.
+  breakdownFormula: {
+    fontSize: 13, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
+    backgroundColor: Colors.background, borderRadius: BorderRadius.sm,
+    paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8,
+  },
+  breakdownNote: {
+    marginTop: 8, fontSize: 12, lineHeight: 18, color: Colors.textSecondary,
+  },
 });
