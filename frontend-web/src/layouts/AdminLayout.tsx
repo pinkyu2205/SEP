@@ -10,6 +10,7 @@ import {
   MapPin,
   Menu,
   Package,
+  PackageCheck,
   Search,
   Settings,
   Settings2,
@@ -61,6 +62,8 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
   {
     label: 'Vận hành',
     items: [
+      // Mục mới từ nhánh dev (trang HandoverMonitoring + route /admin/handover).
+      { label: 'Tiến độ bàn giao', path: '/admin/handover', icon: PackageCheck },
       { label: 'Quản lý khu vực', path: '/admin/zones', icon: MapPin },
       { label: 'Khu vực Manager', path: '/admin/zones/managers', icon: UserRound },
       { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },

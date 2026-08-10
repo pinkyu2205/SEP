@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import realApiClient from '@/services/core/realApiClient';
 import { API_CONFIG } from '@/constants/api';
@@ -82,6 +83,16 @@ export interface OnboardTenantRequest {
   electricMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ điện
   waterMeterImageUrl?: string;
   waterMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ nước
+  /**
+   * Mã cho phép NHẬP TAY chỉ số khi không chụp được ảnh (BE 08/08/2026).
+   * Lấy từ `POST /api/v1/manager/meter-override/verify`, dùng một lần, TTL 15 phút.
+   * BE chỉ tiêu thụ token khi ảnh đồng hồ tương ứng TRỐNG; `reason` là bắt buộc và
+   * được ghi vào bảng audit cho admin soi (`GET /api/v1/admin/meter-overrides`).
+   */
+  electricMeterOverrideToken?: string;
+  electricMeterOverrideReason?: string;
+  waterMeterOverrideToken?: string;
+  waterMeterOverrideReason?: string;
   roomConditionUrls?: string[]; // legacy — vẫn gửi được, BE tự set capturedAt = lúc lưu
   roomConditionPhotos?: EvidencePhoto[]; // ưu tiên field này — có capturedAt từng ảnh
   roomConditionNote?: string;
@@ -110,16 +121,23 @@ export interface TenantContractResponse {
   contractCode: string;
   rentAmount: number;
   deposit: number;
+  /** Số tháng tiền nhà dùng làm cọc — BE trả ở toResponse, dùng để ghi rõ "cọc (N tháng)". */
+  depositMonths?: number;
   moveInDate: string;
   startDate: string;
   endDate?: string;
   expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
   paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED — trạng thái thu CỌC
-  /** Thời điểm thu đủ cọc: PayOS `paidAt`, hoặc lúc quản lý xác nhận tiền mặt. */
+  /**
+   * Mốc PayOS ghi nhận khoản thu lúc đón khách (tiền nhà tháng đầu + cọc), hoặc lúc
+   * quản lý xác nhận tiền mặt. BE set trong `completeDepositPayment` từ 08/08/2026 —
+   * trước đó chỉ có `paidAt`. Dùng để hiện "đã thu" mà không phải suy từ `paymentStatus`.
+   */
   depositPaidAt?: string;
   /** BE suy ra: có payosOrderCode → 'PAYOS'; có xác nhận tiền mặt → 'CASH'; chưa thu → null. */
   depositMethod?: string;
+  paidAt?: string;
   // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
   // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
   terminatedAt?: string;
@@ -128,6 +146,15 @@ export interface TenantContractResponse {
   payosOrderCode?: number;
   payosCheckoutUrl?: string;
   payosQrCode?: string;
+  /**
+   * TỔNG tiền khách phải chuyển khi đón khách = tiền nhà tháng đầu + tiền cọc.
+   * BE tính ở TenantContractPaymentAmounts.resolveInitialPaymentAmount và cũng dùng
+   * đúng số này để tạo link/QR PayOS. PHẢI hiển thị field này, không được lấy
+   * `deposit` — lấy `deposit` thì màn hình ghi thiếu nguyên một tháng tiền nhà so
+   * với số mà app ngân hàng trừ của khách.
+   * Chỉ có trong response của deposit-payment; các API khác không trả.
+   */
+  initialPaymentAmount?: number;
 
   // Hiện trạng phòng lúc đón khách (ảnh + ghi chú) + chỉ số đồng hồ điện/nước ban đầu.
   initialElectricReading?: number;
@@ -366,6 +393,28 @@ export const realTenantService = {
   ): Promise<{ uri: string; mimeType: string }> => {
     const token = await AsyncStorage.getItem('accessToken');
     const url = `${API_CONFIG.REAL_BASE_URL}/api/v1/tenant-contracts/${contractId}/document/download`;
+
+    // WEB: expo-file-system là module native, downloadAsync/moveAsync KHÔNG tồn tại
+    // trên react-native-web — gọi vào là ném "The method or property
+    // expo-file-system.downloadAsync is not available on web". Dùng fetch + Blob rồi
+    // trả về object URL; caller mở bằng window.open thay cho Sharing (cũng native-only).
+    if (Platform.OS === 'web') {
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) throw new Error('Không tải được hợp đồng.');
+      const contentType = res.headers.get('content-type') ?? '';
+      const isDocxWeb =
+        contentType.includes('wordprocessingml') || contentType.includes('msword');
+      const blob = await res.blob();
+      return {
+        uri: (globalThis as any).URL.createObjectURL(blob),
+        mimeType: isDocxWeb
+          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          : 'application/pdf',
+      };
+    }
+
     // Tải về tên tạm — chưa biết PDF hay DOCX trước khi đọc header response.
     const tmpUri = `${FileSystem.cacheDirectory}${contractCode}.tmp`;
     const result = await FileSystem.downloadAsync(url, tmpUri, {

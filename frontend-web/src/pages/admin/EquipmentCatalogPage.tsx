@@ -1,634 +1,523 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import {
-  AlertCircle, Building2, ChevronRight, Download,
-  Info, Loader2, MapPin, Package, Printer, QrCode, Search, Wrench, X,
+  Package, Printer, QrCode, Search, Loader2, MapPin, ShieldCheck, Wrench,
+  X, Download, CheckSquare, Square, AlertTriangle,
 } from 'lucide-react';
-import type {
-  EquipmentSource, HandoverEquipmentResponse, HouseArea, PropertyResponse, RenovationSession,
-} from '@/types/api.types';
 import { propertyService } from '@/services/property.service';
+import { equipmentService } from '@/services/equipment.service';
+import type { PropertyResponse, MaintenanceEquipmentResponse } from '@/types/api.types';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+/**
+ * Danh mục thiết bị & in tem QR (trang admin).
+ *
+ * Nguồn dữ liệu: `GET /api/v1/properties/{id}/equipments` — bảng `equipment` thật,
+ * mỗi dòng là 1 đơn vị thiết bị riêng. Bản trước của trang này đọc 2 endpoint import
+ * (`handover-equipments` + `renovation/sessions`) nên chỉ thấy nhà nhập bằng Excel,
+ * bỏ sót toàn bộ thiết bị tạo bằng đường khác.
+ *
+ * Mã QR: `equipCode()` ưu tiên `qrCode` BE cấp, thiếu thì tự dựng `EQ-{id}`. Fallback
+ * này an toàn vì BE khi tra không thấy trong cột `qr_code` sẽ bóc số sau "EQ-" rồi tìm
+ * theo id (EquipmentServiceImpl.resolveEquipmentByQrFallback) — đã test sống với thiết
+ * bị có qr_code NULL, quét vẫn ra đúng. Nhờ vậy in được tem ngay, không phải chờ BE vá
+ * chuyện thiết bị import không được cấp mã (xem docs/BE-BUG-equipment-qrcode-null-import-2026-08-06.md).
+ */
 
-/** Bộ lọc nguồn thiết bị: tất cả / nhà gốc / cải tạo */
-type SourceFilter = 'all' | 'INITIAL_HANDOVER' | 'PURCHASED';
+// ── Helpers ─────────────────────────────────────────────────────────────────
+const equipName = (e: MaintenanceEquipmentResponse): string =>
+  e.equipmentName || e.catalogName || 'Thiết bị';
 
-interface PropertyData {
-  property: PropertyResponse;
-  /** Thiết bị chủ nhà bàn giao — import lease-excel (nhà gốc) */
-  handover: HandoverEquipmentResponse[];
-  /** Các đợt cải tạo — import renovation-excel (cải tạo), kèm version v1/v2 */
-  renovationSessions: RenovationSession[];
-  expanded: boolean;
-}
-
-/** 1 đơn vị thiết bị riêng lẻ (tách từ số lượng) — mỗi cái 1 mã QR + vị trí + nguồn riêng */
-interface EquipmentUnit {
-  key: string;
-  catalogName: string;
-  status: string;
-  /** Nguồn: INITIAL_HANDOVER = nhà gốc · PURCHASED = cải tạo */
-  source: EquipmentSource;
-  /** null = chưa gán, còn trong kho */
-  location: string | null;
-  /** Dòng phụ dưới tên: mô tả (nhà gốc) hoặc "Đợt v2" (cải tạo) */
-  detail: string | null;
-  /** "2/3" khi cùng loại có nhiều cái; '' khi chỉ 1 */
-  unitLabel: string;
-  /**
-   * Mã QR THẬT lấy từ BE (dạng "EQ-{id}", khớp đúng thứ app tenant/manager quét được).
-   * null với "Nhà gốc" — `HandoverEquipment` chỉ là 1 dòng gộp số lượng, không phải
-   * từng `Equipment` row riêng nên không có QR thật để gắn (xem
-   * docs/BE-BUG-admin-equipments-qr-fake-2026-07-30.md) — ẩn nút QR cho các dòng này
-   * thay vì tự bịa chuỗi không quét được như trước.
-   */
-  qrData: string | null;
-}
-
-/** Mô tả 1 mã QR cần hiển thị */
-interface QrTarget {
-  title: string;
-  subtitle: string;
-  qrData: string;
-  downloadName: string;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-const HOUSE_AREA_LABEL: Record<HouseArea, string> = {
+// Nhãn vị trí trong nhà nguyên căn (BE trả houseArea dạng enum).
+const HOUSE_AREA_LABEL: Record<string, string> = {
   LIVING_ROOM: 'Phòng khách', BEDROOM: 'Phòng ngủ', KITCHEN: 'Bếp',
   BATHROOM: 'Nhà tắm', BALCONY: 'Ban công', GARAGE: 'Gara', OTHER: 'Khác',
 };
-
-/** Cấu hình hiển thị theo nguồn thiết bị (nhà gốc vs cải tạo) */
-const SOURCE_CFG: Record<EquipmentSource, { label: string; short: string; icon: typeof Building2; cls: string; iconCls: string; chipBg: string }> = {
-  INITIAL_HANDOVER: {
-    label: 'Nhà gốc', short: 'NHAGOC', icon: Building2,
-    cls: 'bg-violet-50 text-violet-700 border-violet-200', iconCls: 'text-violet-500', chipBg: 'bg-violet-50',
-  },
-  PURCHASED: {
-    label: 'Cải tạo', short: 'CAITAO', icon: Wrench,
-    cls: 'bg-amber-50 text-amber-700 border-amber-200', iconCls: 'text-amber-500', chipBg: 'bg-amber-50',
-  },
-};
-
-const areaLabel = (a: string | null): string | null =>
-  a ? (HOUSE_AREA_LABEL[a as HouseArea] ?? a) : null;
-
-// Vị trí TB bàn giao: BE để roomNumber/houseArea = null, ghi vị trí trong `note`.
-// Ưu tiên note; fallback roomNumber/houseArea cho dữ liệu cũ.
-const handoverLocation = (h: HandoverEquipmentResponse): string | null =>
-  h.note?.trim()
-    ? h.note.trim()
-    : h.roomNumber ? `Phòng ${h.roomNumber}` : areaLabel(h.houseArea);
+const areaLabel = (a?: string): string => (a ? HOUSE_AREA_LABEL[a] ?? a : '');
 
 /**
- * Tách 1 tòa thành danh sách thiết bị riêng lẻ, gắn nguồn:
- *  - handover (getHandoverEquipments)  → "Nhà gốc"  — chủ nhà bàn giao, import lease-excel.
- *  - renovationSessions (getRenovationSessions) → "Cải tạo" — import renovation-excel, gom theo đợt.
- *
- * QR: chỉ "Cải tạo" có QR thật (mỗi dòng là 1 `Equipment` row thật, BE trả sẵn `qrCode`
- * dạng "EQ-{id}" — 30/07/2026). "Nhà gốc" KHÔNG có QR — `HandoverEquipment` chỉ là 1 dòng
- * gộp số lượng, không phải từng đơn vị riêng trong DB nên không có gì thật để gắn QR
- * (trước đây tự bịa chuỗi ở FE, quét không ra — xem
- * docs/BE-BUG-admin-equipments-qr-fake-2026-07-30.md). Nếu BE sau này materialize từng
- * unit nhà gốc thành Equipment row thật thì bỏ `qrData: null` ở nhánh 1 dưới đây.
+ * Mã thiết bị CHUẨN: ưu tiên `qrCode` BE cấp (vd "EQ-88"); fallback "EQ-{id}".
+ * `id` là primary key nên mã luôn DUY NHẤT — cùng loại thiết bị lắp nhiều phòng
+ * (kể cả nhà chia phòng) cũng không bao giờ trùng.
  */
-const buildUnits = (data: PropertyData): EquipmentUnit[] => {
-  const units: EquipmentUnit[] = [];
+const equipCode = (e: MaintenanceEquipmentResponse): string => e.qrCode || `EQ-${e.id}`;
 
-  // 1) Nhà gốc — thiết bị chủ nhà bàn giao (không có QR thật, xem comment trên)
-  for (const h of data.handover) {
-    const loc = handoverLocation(h);
-    const qty = h.quantity || 1;
-    for (let i = 1; i <= qty; i++) {
-      units.push({
-        key: `h${h.id}-u${i}`,
-        catalogName: h.catalogName,
-        status: h.status,
-        source: 'INITIAL_HANDOVER',
-        location: loc,
-        detail: h.description?.trim() || null,
-        unitLabel: qty > 1 ? `${i}/${qty}` : '',
-        qrData: null,
-      });
-    }
-  }
+/** Payload QR: deep link mở thẳng màn tạo yêu cầu trên mobile; định danh theo id + mã BE. */
+const qrPayload = (e: MaintenanceEquipmentResponse): string =>
+  `slms://maintenance/new?equipmentId=${e.id}`
+  + `&qr=${encodeURIComponent(equipCode(e))}`
+  + `&roomId=${e.roomId ?? ''}`
+  + `&name=${encodeURIComponent(equipName(e))}`
+  + `&cat=${encodeURIComponent(e.catalogName ?? '')}`;
 
-  // 2) Cải tạo — thiết bị bổ sung/thay thế, gom theo đợt cải tạo (chỉ cái đang hiệu lực)
-  for (const s of data.renovationSessions) {
-    const version = s.versionLabel || `v${s.sessionNumber ?? 1}`;
-    for (const e of s.equipments ?? []) {
-      if (e.currentEffective === false || e.operationalStatus === 'DISABLED') continue;
-      const loc = e.roomNumber ? `Phòng ${e.roomNumber}` : areaLabel(e.houseArea);
-      units.push({
-        key: `s${s.sessionNumber ?? 0}-e${e.id}`,
-        catalogName: e.catalogName,
-        status: e.status,
-        source: 'PURCHASED',
-        location: loc,
-        detail: `Đợt cải tạo ${version}`,
-        unitLabel: '',
-        qrData: e.qrCode ?? null,
-      });
-    }
-  }
+const STATUS_MAP: Record<string, { label: string; color: string }> = {
+  NEW:         { label: 'Mới',          color: 'bg-sky-100 text-sky-700' },
+  GOOD:        { label: 'Hoạt động tốt', color: 'bg-emerald-100 text-emerald-700' },
+  MAINTENANCE: { label: 'Đang bảo trì',  color: 'bg-amber-100 text-amber-700' },
+  BROKEN:      { label: 'Đang hỏng',     color: 'bg-rose-100 text-rose-700' },
+  DISPOSED:    { label: 'Đã thanh lý',   color: 'bg-slate-100 text-slate-500' },
+};
+const STATUS_ORDER = ['NEW', 'GOOD', 'MAINTENANCE', 'BROKEN', 'DISPOSED'];
+// Khoá lọc riêng cho trục vận hành "đã gỡ" (operationalStatus=DISABLED).
+const FILTER_DISABLED = 'OP_DISABLED';
 
-  return units.sort((x, y) =>
-    x.source.localeCompare(y.source) ||
-    x.catalogName.localeCompare(y.catalogName) ||
-    (x.location ?? 'zzz').localeCompare(y.location ?? 'zzz')
-  );
+// Thiết bị đã bị gỡ khỏi phòng (theo yêu cầu khách). Độc lập với status vật lý.
+const isDisabled = (e: MaintenanceEquipmentResponse): boolean => e.operationalStatus === 'DISABLED';
+
+// Tình trạng bảo hành tính từ ngày hết hạn.
+const warrantyInfo = (d?: string): { label: string; cls: string } | null => {
+  if (!d) return null;
+  const exp = new Date(d).getTime();
+  if (isNaN(exp)) return null;
+  const days = Math.ceil((exp - Date.now()) / 86_400_000);
+  if (days < 0) return { label: 'Hết bảo hành', cls: 'bg-slate-100 text-slate-500' };
+  if (days <= 30) return { label: `BH còn ${days} ngày`, cls: 'bg-amber-100 text-amber-700' };
+  return { label: 'Còn bảo hành', cls: 'bg-emerald-100 text-emerald-700' };
 };
 
-const getQrUrl = (data: string, size = 180) =>
-  `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(data)}`;
-
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-
-const STATUS_CFG: Record<string, { label: string; dot: string; cls: string }> = {
-  NEW:     { label: 'Mới',      dot: 'bg-emerald-500', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  GOOD:    { label: 'Tốt',      dot: 'bg-lime-500',    cls: 'bg-lime-50 text-lime-700 border-lime-200' },
-  DAMAGED: { label: 'Hư hỏng',  dot: 'bg-orange-500',  cls: 'bg-orange-50 text-orange-700 border-orange-200' },
-  BROKEN:  { label: 'Báo hỏng', dot: 'bg-rose-500',    cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+/**
+ * Nhãn vị trí thiết bị để nhóm hiển thị:
+ *  - Nhà CHIA PHÒNG: BE trả `roomNumber` (vd "P101") -> "Phòng P101".
+ *  - Nhà NGUYÊN CĂN: `roomNumber` = "Toàn nhà" -> nhóm theo `houseArea` (Phòng khách, Bếp…).
+ *  - Fallback: roomName hoặc "Khu vực chung / Toàn nhà".
+ */
+const roomLabel = (e: MaintenanceEquipmentResponse): string => {
+  const rn = e.roomNumber?.trim();
+  if (rn && rn !== 'Toàn nhà') return `Phòng ${rn}`;
+  if (e.roomName?.trim()) return e.roomName;
+  if (e.houseArea) return areaLabel(e.houseArea);
+  return rn || 'Khu vực chung / Toàn nhà';
 };
-
-// Nhà gốc: NEW/GOOD = tình trạng lúc bàn giao (không phải "mới mua")
-const HANDOVER_STATUS_CFG: Record<string, { label: string; dot: string; cls: string }> = {
-  NEW:  { label: 'Bàn giao - Mới', dot: 'bg-violet-500', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
-  GOOD: { label: 'Bàn giao - Cũ',  dot: 'bg-slate-400',  cls: 'bg-slate-50 text-slate-600 border-slate-200' },
-};
-
-const StatusBadge = ({ status, source }: { status: string; source: EquipmentSource }) => {
-  const cfg = source === 'INITIAL_HANDOVER'
-    ? (HANDOVER_STATUS_CFG[status] ?? STATUS_CFG[status])
-    : STATUS_CFG[status];
-  if (!cfg) return <span className="text-xs text-slate-400">{status}</span>;
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.cls}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-      {cfg.label}
-    </span>
-  );
-};
-
-/** Badge nguồn: Nhà gốc / Cải tạo */
-const SourceBadge = ({ source }: { source: EquipmentSource }) => {
-  const cfg = SOURCE_CFG[source];
-  const Icon = cfg.icon;
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.cls}`}>
-      <Icon className="w-3 h-3" />
-      {cfg.label}
-    </span>
-  );
-};
-
-// ─── QR Modal ────────────────────────────────────────────────────────────────
-
-const QrModal = ({ title, subtitle, qrData, downloadName, onClose }: QrTarget & { onClose: () => void }) => {
-  const qrUrl = getQrUrl(qrData, 220);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl mx-4 overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-1.5 mb-1">
-              <QrCode className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Mã QR thiết bị</span>
-            </div>
-            <h3 className="font-bold text-slate-900 text-sm">{title}</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-6 flex flex-col items-center gap-4">
-          <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 shadow-inner">
-            <img src={qrUrl} alt="QR code" className="w-[220px] h-[220px]" />
-          </div>
-          <p className="font-mono text-[10px] text-slate-400 text-center break-all leading-relaxed px-2">
-            {qrData}
-          </p>
-          <div className="grid grid-cols-2 gap-2 w-full">
-            <a
-              href={qrUrl}
-              download={downloadName}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Tải QR
-            </a>
-            <button
-              onClick={() => window.print()}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              In tem
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── Property Accordion — quản lý thiết bị theo toà nhà ───────────────────────
-
-const PropertyAccordion = ({
-  data,
-  search,
-  sourceFilter,
-  onToggle,
-  onShowQr,
-}: {
-  data: PropertyData;
-  search: string;
-  sourceFilter: SourceFilter;
-  onToggle: () => void;
-  onShowQr: (target: QrTarget) => void;
-}) => {
-  const q = search.toLowerCase();
-  const allUnits = useMemo(() => buildUnits(data), [data]);
-
-  const handoverCount = allUnits.filter(u => u.source === 'INITIAL_HANDOVER').length;
-  const renoCount = allUnits.filter(u => u.source === 'PURCHASED').length;
-
-  const units = allUnits.filter(u =>
-    (sourceFilter === 'all' || u.source === sourceFilter) &&
-    (!q || u.catalogName.toLowerCase().includes(q))
-  );
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full px-5 py-4 flex items-center gap-3 hover:bg-slate-50/50 transition-colors"
-      >
-        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center flex-shrink-0">
-          <Building2 className="w-4 h-4 text-slate-500" />
-        </div>
-        <div className="flex-1 text-left min-w-0">
-          <p className="font-semibold text-slate-900 text-sm truncate">{data.property.propertyName}</p>
-          <p className="text-xs text-slate-400 mt-0.5 truncate">{data.property.shortAddress}</p>
-        </div>
-        <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
-            <Building2 className="w-3 h-3" />{handoverCount} nhà gốc
-          </span>
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">
-            <Wrench className="w-3 h-3" />{renoCount} cải tạo
-          </span>
-        </div>
-        <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${data.expanded ? 'rotate-90' : ''}`} />
-      </button>
-
-      {data.expanded && (
-        <div className="border-t border-slate-100">
-          {units.length === 0 ? (
-            <div className="px-5 py-8 text-center">
-              <p className="text-xs text-slate-400">
-                {allUnits.length === 0
-                  ? 'Chưa có thiết bị nào được import cho toà nhà này.'
-                  : 'Không có thiết bị khớp bộ lọc hiện tại.'}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <div className="px-5 py-2 bg-slate-50/60 border-b border-slate-100 flex items-center justify-between">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  {units.length} thiết bị riêng lẻ
-                </p>
-                <p className="text-[10px] font-bold text-slate-400">
-                  <span className="text-violet-600">{handoverCount} nhà gốc</span>
-                  {' · '}
-                  <span className="text-amber-600">{renoCount} cải tạo</span>
-                </p>
-              </div>
-              <div className="px-5 py-2 bg-slate-50/30 border-b border-slate-100 grid grid-cols-[1fr_96px_140px_120px_64px] gap-3">
-                {['Thiết bị', 'Nguồn', 'Vị trí', 'Trạng thái', 'Mã QR'].map(h => (
-                  <p key={h} className="text-[10px] font-black uppercase tracking-widest text-slate-400">{h}</p>
-                ))}
-              </div>
-              <div className="divide-y divide-slate-100">
-                {units.map(u => {
-                const qrData = u.qrData;
-                return (
-                  <div key={u.key} className="px-5 py-3 grid grid-cols-[1fr_96px_140px_120px_64px] gap-3 items-center hover:bg-slate-50/40 transition-colors">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-6 h-6 rounded flex items-center justify-center flex-shrink-0 ${SOURCE_CFG[u.source].chipBg}`}>
-                        <Package className={`w-3 h-3 ${SOURCE_CFG[u.source].iconCls}`} />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 truncate">
-                          {u.catalogName}
-                          {u.unitLabel && <span className="ml-1.5 text-[10px] font-mono text-slate-400">#{u.unitLabel}</span>}
-                        </p>
-                        {u.detail && <p className="text-[11px] text-slate-400 truncate">{u.detail}</p>}
-                      </div>
-                    </div>
-                    <SourceBadge source={u.source} />
-                    <div className="min-w-0">
-                      {u.location ? (
-                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 max-w-full truncate">
-                          <MapPin className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate">{u.location}</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-50 text-slate-500 border-slate-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                          Chưa rõ vị trí
-                        </span>
-                      )}
-                    </div>
-                    <StatusBadge status={u.status} source={u.source} />
-                    {qrData ? (
-                      <button
-                        onClick={() => onShowQr({
-                          title: u.catalogName + (u.unitLabel ? ` #${u.unitLabel}` : ''),
-                          subtitle: `${data.property.propertyName} · ${SOURCE_CFG[u.source].label} · ${u.location ?? 'Chưa rõ vị trí'}`,
-                          qrData,
-                          downloadName: `QR-${qrData}.png`,
-                        })}
-                        className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:border-slate-300 transition-colors"
-                      >
-                        <QrCode className="w-3.5 h-3.5" />
-                        QR
-                      </button>
-                    ) : (
-                      // Nhà gốc chưa có QR thật (xem comment buildUnits) — không hiện nút
-                      // bấm vào để tránh in ra mã không quét được như trước.
-                      <span
-                        className="text-[10px] text-slate-300 text-center"
-                        title="Thiết bị nhà gốc chưa có mã QR riêng từng cái"
-                      >
-                        —
-                      </span>
-                    )}
-                  </div>
-                );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export const EquipmentCatalogPage = () => {
-  const [propertyData,  setPropertyData]  = useState<PropertyData[]>([]);
-  const [loading,       setLoading]       = useState(true);
-  const [loadingData,   setLoadingData]   = useState(false);
-  const [fetchError,    setFetchError]    = useState<string | null>(null);
-  const [search,        setSearch]        = useState('');
-  const [sourceFilter,  setSourceFilter]  = useState<SourceFilter>('all');
-  const [qrModal,       setQrModal]       = useState<QrTarget | null>(null);
+  const [properties, setProperties] = useState<PropertyResponse[]>([]);
+  const [propertyId, setPropertyId] = useState<number | null>(null);
+  const [equipments, setEquipments] = useState<MaintenanceEquipmentResponse[]>([]);
+  const [loadingProps, setLoadingProps] = useState(true);
+  const [loadingEq, setLoadingEq] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [qrModal, setQrModal] = useState<MaintenanceEquipmentResponse | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const propPage = await propertyService.getProperties(0, 100);
-      const props = propPage.content;
-      setPropertyData(props.map(p => ({ property: p, handover: [], renovationSessions: [], expanded: false })));
-
-      if (props.length > 0) {
-        setLoadingData(true);
-        const results = await Promise.allSettled(
-          props.map(async p => {
-            const [handover, renovationSessions] = await Promise.all([
-              propertyService.getHandoverEquipments(p.id).catch(() => [] as HandoverEquipmentResponse[]),
-              propertyService.getRenovationSessions(p.id).catch(() => [] as RenovationSession[]),
-            ]);
-            return { id: p.id, handover, renovationSessions };
-          })
-        );
-        setPropertyData(prev =>
-          prev.map(d => {
-            const hit = results.find(r => r.status === 'fulfilled' && r.value.id === d.property.id);
-            if (!hit || hit.status !== 'fulfilled') return d;
-            return { ...d, handover: hit.value.handover, renovationSessions: hit.value.renovationSessions };
-          })
-        );
-        setLoadingData(false);
-      }
-    } catch {
-      setFetchError('Không thể tải dữ liệu. Vui lòng thử lại.');
-    } finally {
-      setLoading(false);
-    }
+  // Tải danh sách bất động sản
+  useEffect(() => {
+    let active = true;
+    propertyService.getProperties(0, 200)
+      .then(page => {
+        if (!active) return;
+        // Admin quản trị toàn hệ thống nên KHÔNG lọc theo trạng thái duyệt của Host.
+        // Bản dùng cho Host trước đây lọc `isHostApproved`, áp vào đây sẽ giấu mất các
+        // căn đang PENDING_HOST_REVIEW / nháp — đúng thứ admin cần thao tác nhất.
+        const list = page.content ?? [];
+        setProperties(list);
+        if (list.length > 0) setPropertyId(list[0].id);
+      })
+      .catch(() => setProperties([]))
+      .finally(() => active && setLoadingProps(false));
+    return () => { active = false; };
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Tải thiết bị theo nhà
+  useEffect(() => {
+    if (propertyId == null) return;
+    let active = true;
+    setLoadingEq(true);
+    setLoadError(false);
+    setSelected(new Set());
+    setStatusFilter('all');
+    equipmentService.getPropertyEquipment(propertyId)
+      .then(list => { if (active) setEquipments(list ?? []); })
+      .catch(() => { if (active) { setEquipments([]); setLoadError(true); } })
+      .finally(() => active && setLoadingEq(false));
+    return () => { active = false; };
+  }, [propertyId]);
 
-  const toggleProperty = (propertyId: number) => {
-    setPropertyData(prev =>
-      prev.map(d => d.property.id === propertyId ? { ...d, expanded: !d.expanded } : d)
-    );
-  };
+  const selectedProperty = properties.find(p => p.id === propertyId);
 
-  // Stats — đếm theo từng thiết bị riêng lẻ (đã tách số lượng), phân theo nguồn
-  const stats = useMemo(() => {
-    let total = 0, handover = 0, reno = 0;
-    for (const d of propertyData) {
-      for (const u of buildUnits(d)) {
-        total += 1;
-        if (u.source === 'PURCHASED') reno += 1; else handover += 1;
-      }
-    }
-    return { total, handover, reno, buildings: propertyData.length };
-  }, [propertyData]);
+  // Đếm theo tình trạng (trên toàn bộ thiết bị của nhà, không phụ thuộc search).
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    equipments.forEach(e => { c[e.status] = (c[e.status] ?? 0) + 1; });
+    return c;
+  }, [equipments]);
 
-  // Lọc toà nhà: theo tên/địa chỉ hoặc có thiết bị khớp từ khoá + đúng nguồn đang lọc
-  const filteredProperties = useMemo(() => {
-    const q = search.toLowerCase();
-    return propertyData.filter(d => {
-      const units = buildUnits(d);
-      const matchSource = sourceFilter === 'all' || units.some(u => u.source === sourceFilter);
-      if (!matchSource) return false;
-      if (!q) return true;
-      return (
-        d.property.propertyName.toLowerCase().includes(q) ||
-        d.property.shortAddress?.toLowerCase().includes(q) ||
-        units.some(u => u.catalogName.toLowerCase().includes(q))
-      );
+  const disabledCount = useMemo(() => equipments.filter(isDisabled).length, [equipments]);
+
+  const filtered = useMemo(() => {
+    const kw = search.toLowerCase();
+    return equipments.filter(e => {
+      const matchStatus =
+        statusFilter === 'all' ? true
+        : statusFilter === FILTER_DISABLED ? isDisabled(e)
+        : e.status === statusFilter;
+      const matchKw = !kw ||
+        equipName(e).toLowerCase().includes(kw) ||
+        (e.catalogName ?? '').toLowerCase().includes(kw) ||
+        equipCode(e).toLowerCase().includes(kw) ||
+        roomLabel(e).toLowerCase().includes(kw);
+      return matchStatus && matchKw;
     });
-  }, [propertyData, search, sourceFilter]);
+  }, [equipments, search, statusFilter]);
 
-  const SOURCE_TABS: { key: SourceFilter; label: string }[] = [
-    { key: 'all',              label: 'Tất cả' },
-    { key: 'INITIAL_HANDOVER', label: 'Nhà gốc' },
-    { key: 'PURCHASED',        label: 'Cải tạo' },
-  ];
+  // Nhóm theo phòng
+  const grouped = useMemo(() => {
+    const map = new Map<string, MaintenanceEquipmentResponse[]>();
+    filtered.forEach(e => {
+      const key = roomLabel(e);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(e);
+    });
+    return Array.from(map.entries());
+  }, [filtered]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-3 py-32 text-slate-400">
-        <Loader2 className="w-5 h-5 animate-spin" />
-        <span className="text-sm">Đang tải dữ liệu...</span>
-      </div>
-    );
-  }
+  // ── Chọn để in ──────────────────────────────────────────────────────────
+  const toggleOne = (id: number) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleRoom = (items: MaintenanceEquipmentResponse[]) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      // Bỏ qua thiết bị đã gỡ — không in tem cho món không còn trong phòng.
+      const printable = items.filter(e => !isDisabled(e));
+      const allOn = printable.every(e => next.has(e.id));
+      printable.forEach(e => (allOn ? next.delete(e.id) : next.add(e.id)));
+      return next;
+    });
+  const clearSelection = () => setSelected(new Set());
 
-  if (fetchError) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-32">
-        <AlertCircle className="w-8 h-8 text-rose-400" />
-        <p className="text-sm text-rose-600">{fetchError}</p>
-        <button onClick={load}
-          className="px-4 py-2 text-sm font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">
-          Thử lại
-        </button>
-      </div>
-    );
-  }
+  // Tem cần in: nếu có chọn -> in mục đã chọn; nếu không -> in toàn bộ đang lọc.
+  // Luôn loại thiết bị đã gỡ (DISABLED) khỏi tem in.
+  const toPrint = (selected.size > 0
+    ? equipments.filter(e => selected.has(e.id))
+    : filtered
+  ).filter(e => !isDisabled(e));
+
+  const handlePrint = () => window.print();
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2.5 mb-1">
-          <div className="w-1 h-6 bg-cyan-500 rounded-full" />
-          <h1 className="text-xl font-bold text-slate-900">Danh mục thiết bị</h1>
-        </div>
-        <p className="text-sm text-slate-500 ml-3.5">
-          Quản lý thiết bị theo từng toà nhà — phân biệt thiết bị <strong>nhà gốc</strong> (chủ nhà bàn giao, nhập nhà hàng loạt)
-          và thiết bị <strong>cải tạo</strong> (bổ sung/thay thế qua đợt cải tạo).
-        </p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Tổng thiết bị</p>
-              <p className="text-2xl font-bold text-slate-800 mt-2">
-                {loadingData ? <Loader2 className="w-5 h-5 animate-spin inline text-slate-400" /> : stats.total}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">đã tách riêng lẻ (QR: chỉ nhóm cải tạo)</p>
+      {/* ============ MÀN HÌNH (ẩn khi in) ============ */}
+      <div className="print:hidden space-y-6">
+        {/* Tiêu đề */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-1 h-6 bg-primary-600 rounded-full" />
+              <h1 className="text-xl font-bold text-slate-900">Trang thiết bị & Mã QR</h1>
             </div>
-            <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center">
-              <Package className="w-4 h-4 text-slate-500" />
-            </div>
+            <p className="text-sm text-slate-500 ml-3.5">
+              Xem toàn bộ thiết bị trong tòa nhà và in tem QR để dán — khách thuê quét QR để báo bảo trì.
+            </p>
           </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Từ nhà gốc</p>
-              <p className="text-2xl font-bold text-violet-700 mt-2">
-                {loadingData ? <Loader2 className="w-5 h-5 animate-spin inline text-violet-400" /> : stats.handover}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">chủ nhà bàn giao (bàn giao)</p>
-            </div>
-            <div className="w-9 h-9 rounded-lg bg-violet-50 border border-violet-100 flex items-center justify-center">
-              <Building2 className="w-4 h-4 text-violet-500" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Từ cải tạo</p>
-              <p className="text-2xl font-bold text-amber-700 mt-2">
-                {loadingData ? <Loader2 className="w-5 h-5 animate-spin inline text-amber-400" /> : stats.reno}
-              </p>
-              <p className="text-xs text-slate-500 mt-1">bổ sung/thay thế khi cải tạo</p>
-            </div>
-            <div className="w-9 h-9 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center">
-              <Wrench className="w-4 h-4 text-amber-500" />
-            </div>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200/70 shadow-sm p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Số toà nhà</p>
-              <p className="text-2xl font-bold text-cyan-700 mt-2">{stats.buildings}</p>
-              <p className="text-xs text-slate-500 mt-1">đang quản lý thiết bị</p>
-            </div>
-            <div className="w-9 h-9 rounded-lg bg-cyan-50 border border-cyan-100 flex items-center justify-center">
-              <Building2 className="w-4 h-4 text-cyan-500" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Toolbar: search + lọc nguồn */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            className="w-full pl-9 pr-4 py-2 text-sm bg-white border border-slate-200 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary-400 transition"
-            placeholder="Tìm tòa nhà hoặc thiết bị..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-lg self-start">
-          {SOURCE_TABS.map(t => (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {selected.size > 0 && (
+              <button
+                onClick={clearSelection}
+                className="px-3 py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-700"
+              >
+                Bỏ chọn
+              </button>
+            )}
             <button
-              key={t.key}
-              onClick={() => setSourceFilter(t.key)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${
-                sourceFilter === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
+              onClick={handlePrint}
+              disabled={toPrint.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 disabled:opacity-40 transition-colors"
             >
-              {t.label}
+              <Printer className="w-4 h-4" />
+              {selected.size > 0 ? `In tem đã chọn (${selected.size})` : `In tất cả tem QR (${filtered.length})`}
             </button>
+          </div>
+        </div>
+
+        {/* Bộ chọn nhà + tìm kiếm */}
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-col md:flex-row gap-3">
+          <select
+            value={propertyId ?? ''}
+            onChange={e => setPropertyId(Number(e.target.value))}
+            className="input-field text-sm md:min-w-[280px]"
+            disabled={loadingProps}
+          >
+            {loadingProps && <option>Đang tải danh sách nhà…</option>}
+            {properties.map(p => (
+              <option key={p.id} value={p.id}>{p.propertyName} — {p.shortAddress}</option>
+            ))}
+          </select>
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Tìm theo tên, mã thiết bị, phòng…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="input-field pl-9 text-sm w-full"
+            />
+          </div>
+        </div>
+
+        {/* Bộ lọc tình trạng */}
+        {equipments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterChip
+              label="Tất cả" count={equipments.length}
+              active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}
+            />
+            {STATUS_ORDER.filter(s => statusCounts[s] > 0).map(s => (
+              <FilterChip
+                key={s}
+                label={STATUS_MAP[s]?.label ?? s}
+                count={statusCounts[s]}
+                active={statusFilter === s}
+                danger={s === 'BROKEN'}
+                warning={s === 'MAINTENANCE'}
+                onClick={() => setStatusFilter(s)}
+              />
+            ))}
+            {disabledCount > 0 && (
+              <FilterChip
+                label="Đã gỡ"
+                count={disabledCount}
+                active={statusFilter === FILTER_DISABLED}
+                onClick={() => setStatusFilter(FILTER_DISABLED)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Tổng quan nhanh */}
+        {selectedProperty && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <Package className="w-4 h-4 text-slate-400" />
+            <span><strong className="text-slate-800">{filtered.length}</strong> thiết bị</span>
+            <span className="text-slate-300">·</span>
+            <span>{grouped.length} phòng/khu vực</span>
+            <span className="text-slate-300">·</span>
+            <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selectedProperty.propertyName}</span>
+          </div>
+        )}
+
+        {/* Danh sách theo phòng */}
+        {loadingEq ? (
+          <div className="py-16 text-center"><Loader2 className="w-6 h-6 text-slate-300 animate-spin mx-auto" /></div>
+        ) : loadError ? (
+          <div className="bg-white rounded-xl border border-rose-100 shadow-sm py-16 text-center">
+            <div className="w-14 h-14 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3">
+              <AlertTriangle className="w-7 h-7 text-rose-400" />
+            </div>
+            <p className="text-sm font-medium text-slate-600">Không tải được danh sách thiết bị</p>
+            <button onClick={() => setPropertyId(propertyId)} className="mt-3 text-sm font-semibold text-primary-600 hover:underline">
+              Thử lại
+            </button>
+          </div>
+        ) : grouped.length === 0 ? (
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm py-16 text-center">
+            <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Package className="w-7 h-7 text-slate-300" />
+            </div>
+            <p className="text-sm font-medium text-slate-500">
+              {equipments.length === 0 ? 'Nhà này chưa có thiết bị nào' : 'Không có thiết bị khớp bộ lọc'}
+            </p>
+          </div>
+        ) : (
+          grouped.map(([room, items]) => {
+            const brokenCount = items.filter(e => e.status === 'BROKEN').length;
+            const removedCount = items.filter(isDisabled).length;
+            const printable = items.filter(e => !isDisabled(e));
+            const allSelected = printable.length > 0 && printable.every(e => selected.has(e.id));
+            return (
+              <div key={room} className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2 min-w-0">
+                    <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0" /> <span className="truncate">{room}</span>
+                  </h3>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-xs text-slate-400">{items.length} thiết bị</span>
+                    {brokenCount > 0 && (
+                      <span className="text-xs font-semibold text-rose-600">{brokenCount} hỏng</span>
+                    )}
+                    {removedCount > 0 && (
+                      <span className="text-xs font-semibold text-slate-500">{removedCount} đã gỡ</span>
+                    )}
+                    {printable.length > 0 && (
+                      <button
+                        onClick={() => toggleRoom(items)}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-primary-600"
+                      >
+                        {allSelected ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                        Chọn phòng
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {items.map(e => {
+                    const st = STATUS_MAP[e.status] ?? STATUS_MAP.GOOD;
+                    const wInfo = warrantyInfo(e.warrantyExpiredDate);
+                    const isSel = selected.has(e.id);
+                    const broken = e.status === 'BROKEN';
+                    const removed = isDisabled(e);
+                    return (
+                      <div
+                        key={e.id}
+                        className={`flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4 ${removed ? 'bg-slate-50/80' : broken ? 'bg-rose-50/60' : ''} ${isSel ? 'ring-1 ring-inset ring-primary-200 bg-primary-50/40' : ''}`}
+                      >
+                        {removed ? (
+                          <span className="flex-shrink-0 text-slate-300" title="Đã gỡ — không in tem">
+                            <Square className="w-5 h-5" />
+                          </span>
+                        ) : (
+                          <button onClick={() => toggleOne(e.id)} className="flex-shrink-0 text-slate-400 hover:text-primary-600">
+                            {isSel ? <CheckSquare className="w-5 h-5 text-primary-600" /> : <Square className="w-5 h-5" />}
+                          </button>
+                        )}
+                        <button onClick={() => setQrModal(e)} className={`flex-shrink-0 ${removed ? 'opacity-40' : ''}`} title="Xem QR lớn">
+                          <QRCodeSVG value={qrPayload(e)} size={56} level="M" className="rounded-lg border border-slate-200" />
+                        </button>
+                        <div className={`flex-1 min-w-0 ${removed ? 'opacity-70' : ''}`}>
+                          <p className="font-semibold text-slate-900 truncate">{equipName(e)}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 truncate">
+                            {e.catalogName}{e.houseArea ? ` · ${areaLabel(e.houseArea)}` : ''} · Mã <span className="font-mono font-semibold text-slate-600">{equipCode(e)}</span>
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            {removed && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600"
+                                title={e.disabledReason || 'Đã gỡ khỏi phòng theo yêu cầu khách'}
+                              >
+                                ⛔ Đã gỡ
+                              </span>
+                            )}
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                              <Wrench className="w-3 h-3" /> {e.maintenanceCount} lần bảo trì
+                            </span>
+                            {wInfo && (
+                              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${wInfo.cls}`}>
+                                <ShieldCheck className="w-3 h-3" /> {wInfo.label}
+                              </span>
+                            )}
+                          </div>
+                          {removed && e.disabledReason && (
+                            <p className="text-[11px] text-slate-400 mt-1 truncate">Lý do: {e.disabledReason}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setQrModal(e)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-primary-600 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition-colors flex-shrink-0"
+                        >
+                          <QrCode className="w-3.5 h-3.5" /> QR lớn
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ============ TEM IN (chỉ hiện khi in) ============ */}
+      <div className="hidden print:block">
+        <h2 className="text-lg font-bold mb-1">Tem QR thiết bị — {selectedProperty?.propertyName}</h2>
+        <p className="text-xs text-slate-500 mb-4">{selectedProperty?.shortAddress}</p>
+        <div className="grid grid-cols-3 gap-4">
+          {toPrint.map(e => (
+            <div key={e.id} className="border border-slate-300 rounded-lg p-3 flex flex-col items-center text-center break-inside-avoid">
+              <QRCodeSVG value={qrPayload(e)} size={150} level="M" />
+              <p className="font-bold text-sm mt-2 leading-tight">{equipName(e)}</p>
+              <p className="text-[11px] text-slate-500">{roomLabel(e)}</p>
+              <p className="text-[11px] font-mono font-semibold text-slate-600">{equipCode(e)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{selectedProperty?.propertyName}</p>
+            </div>
           ))}
         </div>
       </div>
 
-      {loadingData && (
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Đang tải thiết bị từ {propertyData.length} tòa nhà...
-        </div>
+      {/* ============ MODAL QR ĐƠN LẺ ============ */}
+      {qrModal && (
+        <QrModal equipment={qrModal} propertyName={selectedProperty?.propertyName} onClose={() => setQrModal(null)} />
       )}
+    </div>
+  );
+};
 
-      {/* Danh sách toà nhà */}
-      <div className="space-y-3">
-        {filteredProperties.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-slate-400">
-            <Building2 className="w-8 h-8" />
-            <p className="text-sm">Không tìm thấy tòa nhà nào.</p>
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+const FilterChip = ({
+  label, count, active, danger, warning, onClick,
+}: {
+  label: string; count: number; active: boolean; danger?: boolean; warning?: boolean; onClick: () => void;
+}) => {
+  const base = active
+    ? 'bg-primary-600 text-white border-primary-600'
+    : danger
+      ? 'bg-white text-rose-600 border-rose-200 hover:bg-rose-50'
+      : warning
+        ? 'bg-white text-amber-600 border-amber-200 hover:bg-amber-50'
+        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
+  return (
+    <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors ${base}`}>
+      {label}
+      <span className={`text-[10px] font-bold px-1.5 rounded-full ${active ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
+    </button>
+  );
+};
+
+const QrModal = ({
+  equipment, propertyName, onClose,
+}: {
+  equipment: MaintenanceEquipmentResponse; propertyName?: string; onClose: () => void;
+}) => {
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const code = equipCode(equipment);
+
+  const downloadPng = () => {
+    const canvas = canvasWrapRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `QR-${code}.png`;
+    a.click();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-4">
+          <div className="min-w-0">
+            <h3 className="font-bold text-slate-900 truncate">{equipName(equipment)}</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {roomLabel(equipment)} · <span className="font-mono font-semibold">{code}</span>
+            </p>
           </div>
-        ) : (
-          filteredProperties.map(data => (
-            <PropertyAccordion
-              key={data.property.id}
-              data={data}
-              search={search}
-              sourceFilter={sourceFilter}
-              onToggle={() => toggleProperty(data.property.id)}
-              onShowQr={setQrModal}
-            />
-          ))
-        )}
-
-        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 mt-1">
-          <Info className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Thiết bị ở đây được import từ 2 nguồn Excel: <strong>Nhập nhà hàng loạt</strong> tạo ra thiết bị{' '}
-            <strong className="text-violet-600">Nhà gốc</strong> (chủ nhà bàn giao), còn <strong>Nhập cải tạo</strong> tạo ra thiết bị{' '}
-            <strong className="text-amber-600">Cải tạo</strong> (bổ sung/thay thế). Chỉ thiết bị <strong>Cải tạo</strong> có{' '}
-            <strong>mã QR</strong> thật (quét bằng app tenant/manager ra đúng thiết bị) — thiết bị{' '}
-            <strong className="text-violet-600">Nhà gốc</strong> hiện chỉ ghi nhận theo số lượng, chưa tách được từng cái nên chưa có QR riêng.
-          </p>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700 flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      </div>
 
-      {/* QR Modal */}
-      {qrModal && <QrModal {...qrModal} onClose={() => setQrModal(null)} />}
+        <div className="flex justify-center bg-slate-50 rounded-xl py-6">
+          <QRCodeSVG value={qrPayload(equipment)} size={220} level="M" />
+        </div>
+        {/* Canvas ẩn để xuất PNG */}
+        <div ref={canvasWrapRef} className="hidden">
+          <QRCodeCanvas value={qrPayload(equipment)} size={512} level="M" />
+        </div>
+
+        <p className="text-[11px] text-slate-400 text-center mt-3">
+          {propertyName} · Khách quét mã này bằng app để báo bảo trì.
+        </p>
+
+        <button
+          onClick={downloadPng}
+          className="mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors"
+        >
+          <Download className="w-4 h-4" /> Tải tem PNG
+        </button>
+      </div>
     </div>
   );
 };

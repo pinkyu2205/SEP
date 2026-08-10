@@ -120,6 +120,36 @@ const CLASSES: EquipmentClass[] = [
 const GENERIC: EquipmentClass = { key: 'generic', label: 'thiết bị', vi: [], labels: [] };
 
 /**
+ * Nhãn quá chung để KẾT TỘI chụp nhầm.
+ *
+ * Chúng có mặt trong `labels` của vài nhóm vì đó là manh mối hợp lệ khi ta đang tìm
+ * đúng nhóm đang khai (luật 1) hoặc chỉ cần biết ảnh có dính dáng phòng ốc (luật 4).
+ * Nhưng ở luật 2 — luật buộc tội "ảnh này là thứ KHÁC" — chúng gây oan:
+ *
+ *   • `furniture` nằm trong cả bed/wardrobe/table. Khai máy lạnh mà máy trả
+ *     "furniture 0.7" thì `CLASSES.find` chộp `bed` trước → "nhìn ra giường / nệm".
+ *   • `kitchen appliance` đúng với tủ lạnh không kém gì với bếp.
+ *   • `wood`/`fixture`/`window` là vật liệu và bối cảnh, không phải cái cửa.
+ *   • `bathroom` đúng với máy giặt đặt trong nhà tắm — rất phổ biến ở phòng trọ.
+ *
+ * Không phải lo xa: Google Vision trả `Furniture`/`Lighting` rất thường xuyên, nên
+ * luật 2 nhiều khả năng đã chặn oan từ trước. Model local 21 lớp (BE 09/08/2026) chỉ
+ * làm nặng thêm vì nó trả đúng một nhãn thắng, và `furniture` là một trong 21 lớp đó.
+ */
+const AMBIGUOUS_LABELS = new Set([
+  'furniture', 'fixture', 'wood', 'textile', 'ceiling', 'window',
+  'lighting', 'electrical supply', 'screen', 'bathroom', 'plumbing',
+  'kitchen appliance',
+]);
+
+/** CLASSES nhưng chỉ giữ nhãn đủ đặc trưng để buộc tội — dựng sẵn, chỉ dùng cho luật 2. */
+const DISCRIMINATING = CLASSES.map(c => ({
+  key: c.key,
+  label: c.label,
+  labels: c.labels.filter(l => !AMBIGUOUS_LABELS.has(l)),
+}));
+
+/**
  * Những thứ RÕ RÀNG không phải thiết bị trong phòng. Thấy các nhãn này với điểm cao
  * mà không thấy thiết bị nào → kết luận chụp sai. Đây là cái bắt được ảnh bàn tay,
  * ảnh selfie, ảnh chụp tờ giấy — thứ mà OCR chịu thua.
@@ -148,6 +178,10 @@ const INDOOR_ISH_LABELS = [
   'wall', 'ceiling', 'floor', 'flooring', 'tile', 'room', 'interior design',
   'building', 'house', 'property', 'apartment', 'real estate',
   'door', 'window', 'glass', 'pipe', 'wire', 'cable', 'switch', 'socket',
+  // `light` trần: model local của BE (labels.txt dòng 18) trả đúng chữ này, mà mọi từ
+  // khoá của nhóm đèn đều dài hơn ("light fixture", "lighting") nên không khớp ngược
+  // được. Thiếu dòng này thì ảnh cái đèn chụp đúng lại rơi vào luật 4 → bị chặn oan.
+  'light', 'lamp',
   'metal', 'steel', 'plastic', 'wood', 'aluminium', 'composite material',
   'bedroom', 'bathroom', 'kitchen', 'living room', 'office',
 ];
@@ -187,8 +221,9 @@ export function validateEquipmentPhoto(
     return { status: 'match' };
   }
 
-  // 2. Thấy rõ một loại thiết bị KHÁC → chụp nhầm.
-  const other = CLASSES.find(c =>
+  // 2. Thấy rõ một loại thiết bị KHÁC → chụp nhầm. Chỉ xét nhãn đặc trưng: nhãn chung
+  //    như "furniture" khớp với ba nhóm cùng lúc nên không kết tội được (AMBIGUOUS_LABELS).
+  const other = DISCRIMINATING.find(c =>
     c.key !== cls.key && hitLabel(list, c.labels, MISMATCH_MIN_SCORE));
   if (other) {
     return {

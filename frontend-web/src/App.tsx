@@ -11,7 +11,6 @@ import { Dashboard } from '@/pages/host/HostDashboard';
 import { EquipmentCatalogPage } from '@/pages/admin/EquipmentCatalogPage';
 import { FinancialManagement } from '@/pages/host/finance/FinancialManagement';
 import { MaintenanceList } from '@/pages/host/maintenance/MaintenanceList';
-import { EquipmentQrManager } from '@/pages/host/equipments/EquipmentQrManager';
 import { ManagerList } from '@/pages/host/managers/ManagerList';
 import { NotificationCenter } from '@/pages/host/notifications/NotificationCenter';
 import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
@@ -21,6 +20,7 @@ import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
+import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
@@ -113,6 +113,7 @@ function App() {
             <Route path="/admin/onboarding" element={<DraftOnboardingList />} />
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
@@ -134,7 +135,6 @@ function App() {
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />
-            <Route path="/host/equipments" element={<EquipmentQrManager />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
             <Route element={<ProtectedRoute allowedRoles={['host']} />}>

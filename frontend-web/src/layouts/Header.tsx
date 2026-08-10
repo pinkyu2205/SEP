@@ -20,7 +20,6 @@ const ROUTE_LABELS: Record<string, string> = {
   '/host/billing': 'Hoá đơn & Thanh toán',
   '/host/receivables': 'Công nợ phải thu',
   '/host/deposits': 'Sổ cọc',
-  '/host/equipments': 'Danh mục tài sản',
   '/host/reports': 'Báo cáo & Phân tích',
   '/host/notifications': 'Thông báo',
   '/host/settings': 'Cài đặt',

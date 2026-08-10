@@ -4,3 +4,4 @@ export * from './apiError';
 export * from './meterPhoto';
 export * from './equipmentPhoto';
 export * from './contractStatus';
+export * from './roomPhoto';

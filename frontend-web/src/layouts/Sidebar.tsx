@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   Wrench, DollarSign, BarChart3, Bell, Settings,
-  QrCode, Coins, PiggyBank, CreditCard,
+  Coins, PiggyBank, CreditCard,
 } from 'lucide-react';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { useWebAuth } from '@/auth/WebAuthContext';
@@ -33,10 +33,11 @@ const SECTIONS: SidebarSection[] = [
     items: [{ label: 'Quản lý hợp đồng', path: '/host/contracts', icon: FileText }],
   },
   {
-    label: 'Giám sát & Tài sản',
+    label: 'Giám sát',
+    // Nhánh dev đã xoá hẳn module thiết bị của host (pages/host/equipments) và
+    // route /host/equipments, nên bỏ luôn mục "Thiết bị & Mã QR" ở đây.
     items: [
       { label: 'Giám sát bảo trì', path: '/host/maintenance', icon: Wrench },
-      { label: 'Thiết bị & Mã QR', path: '/host/equipments', icon: QrCode },
     ],
   },
   {

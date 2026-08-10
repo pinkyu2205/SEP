@@ -19,6 +19,8 @@ import QRCode from 'react-native-qrcode-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal'
+import { MeterOverrideModal } from '../../components/common/MeterOverrideModal'
+import type { MeterOverrideKind } from '@/services/manager/meterOverrideService'
 import { DatePickerField } from '../../components/common/DatePickerField'
 import { BorderRadius, Colors, Shadow, Spacing, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '../../constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
@@ -27,15 +29,22 @@ import {
   ApiRoom,
   realPropertyService,
 } from '@/services/manager/propertyApi'
-import { showAlert, validateMeterPhoto } from '@/utils';
+import {
+  DEFAULT_DIGIT_CONFIG,
+  splitMeterReading,
+  showAlert,
+  validateMeterPhoto,
+  validateRoomPhoto,
+  type MeterDigitConfig,
+} from '@/utils';
+import { visionService, type VisionLabel } from '@/services/shared/visionService';
 import {
   ContractAddedEquipmentInput,
   ContractAvailableEquipmentItem,
   defaultTenantUsername,
   OnboardTenantRequest,
   realTenantService,
-  TenantContractResponse,
-} from '@/services/tenant/tenantService'
+  TenantContractResponse,} from '@/services/tenant/tenantService'
 
 type RentalMode = 'room' | 'whole_house'
 
@@ -128,6 +137,9 @@ type UiRoom = {
   area: number
   rentPrice: number
   maxOccupants: number
+  /** Số chữ số mặt đồng hồ của phòng — dùng để cắt phần lẻ, xem meterDigitConfig. */
+  elecDigits: MeterDigitConfig
+  waterDigits: MeterDigitConfig
 }
 
 const mapProperty = (p: ApiProperty): UiProperty => ({
@@ -144,6 +156,15 @@ const mapRoom = (r: ApiRoom): UiRoom => ({
   area: r.area ?? 0,
   rentPrice: r.price ?? 0,
   maxOccupants: r.maxOccupants ?? 0,
+  // BE cũ chưa trả 4 field này -> rơi về mặc định của DEFAULT_DIGIT_CONFIG.
+  elecDigits: {
+    integerDigits: r.elecIntegerDigits ?? DEFAULT_DIGIT_CONFIG.elec.integerDigits,
+    decimalDigits: r.elecDecimalDigits ?? DEFAULT_DIGIT_CONFIG.elec.decimalDigits,
+  },
+  waterDigits: {
+    integerDigits: r.waterIntegerDigits ?? DEFAULT_DIGIT_CONFIG.water.integerDigits,
+    decimalDigits: r.waterDecimalDigits ?? DEFAULT_DIGIT_CONFIG.water.decimalDigits,
+  },
 })
 
 const toIsoDate = (ddmmyyyy: string): string => {
@@ -247,8 +268,12 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const draftLoadedRef = useRef(false)
   const completedRef = useRef(false)
 
-  // Điện nước + ảnh đồng hồ
+  // Điện nước + ảnh đồng hồ.
+  // `meters` = phần NGUYÊN, `metersDec` = phần THẬP PHÂN (các chữ số thường in nền đỏ).
+  // Tách làm hai vì mặt công tơ có hai vùng riêng và người nhập cần sửa được từng vùng;
+  // gộp một ô thì không phân biệt được 3081,5 với 30815 — sai gấp 10 lần tiền điện.
   const [meters, setMeters] = useState({ elec: '', water: '' })
+  const [metersDec, setMetersDec] = useState({ elec: '', water: '' })
   const [elecMeterUrl, setElecMeterUrl] = useState('')
   const [waterMeterUrl, setWaterMeterUrl] = useState('')
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
@@ -258,6 +283,14 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // Nút "Chọn ảnh" từ thư viện CHỈ hiện sau khi chụp bằng camera bị lỗi (mất quyền/không
   // dùng được) — feedback demo: tránh manager tiện tay chọn ảnh cũ thay vì chụp tại chỗ.
   const [gallerySOS, setGallerySOS] = useState<{ elec?: boolean; water?: boolean }>({})
+  // Mã admin cấp cho phép nhập chỉ số KHI KHÔNG CHỤP ĐƯỢC ẢNH (mentor ý 5).
+  // BE chỉ tiêu thụ token khi request KHÔNG kèm ảnh đồng hồ tương ứng, và ghi vết
+  // vào bảng audit — xem services/manager/meterOverrideService.ts.
+  const [meterOverride, setMeterOverride] = useState<{
+    elec?: { token: string; reason: string }
+    water?: { token: string; reason: string }
+  }>({})
+  const [overrideTarget, setOverrideTarget] = useState<MeterOverrideKind | null>(null)
   // true khi manager tự gõ/sửa số (khác với OCR tự điền) — bắt buộc tick xác nhận
   // chịu trách nhiệm trước khi được lưu (feedback demo).
   const [manualEdited, setManualEdited] = useState<{ elec?: boolean; water?: boolean }>({})
@@ -354,6 +387,16 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const selectedWholeHouse = wholeHouseProperties.find(
     (p) => p.id === selectedWholeHouseId,
   )
+  /**
+   * Số chữ số mặt đồng hồ đang áp dụng. Nhà nguyên căn không có bản ghi `room` nên
+   * BE chưa có chỗ cấu hình — rơi về mặc định (điện 5+1, nước 5+3).
+   */
+  const meterDigitConfig = (kind: 'elec' | 'water'): MeterDigitConfig => {
+    if (rentalMode === 'room' && selectedRoom) {
+      return kind === 'elec' ? selectedRoom.elecDigits : selectedRoom.waterDigits
+    }
+    return DEFAULT_DIGIT_CONFIG[kind]
+  }
   // Lọc nhà theo từ khoá tìm kiếm (tên hoặc địa chỉ, không phân biệt hoa thường)
   const matchesHouseSearch = (p: UiProperty) => {
     const kw = houseSearch.trim().toLowerCase()
@@ -413,6 +456,10 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   const rentValue = parseNum(tenantInfo.monthlyRent)
   const depositValue = rentValue * depositMonths
+  // TỔNG khách phải chuyển = tiền nhà tháng đầu + cọc — đúng bằng số PayOS trừ
+  // (BE: TenantContractPaymentAmounts.resolveInitialPaymentAmount). Hiển thị mỗi
+  // `depositValue` là ghi thiếu nguyên một tháng tiền nhà so với app ngân hàng.
+  const totalDueValue = rentValue + depositValue
 
   // Ngày hợp đồng hiệu lực = hôm nay (khoá cứng). Ngày kết thúc: sau hôm nay, tối đa MAX_LEASE_YEARS năm.
   const todayStr = new Date().toLocaleDateString('en-GB') // dd/MM/yyyy
@@ -715,10 +762,39 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     rentValue > 0
   // Nhập tay (gõ đè lên số OCR đọc, hoặc OCR fail phải tự gõ) bắt buộc tick xác nhận
   // chịu trách nhiệm — feedback demo: không được lưu số nhập tay mà không cam kết.
+  // Ảnh đồng hồ là bằng chứng cho chỉ số — chỉ kiểm số thì xoá ảnh đi vẫn qua được bước.
+  /**
+   * Mỗi đồng hồ phải có BẰNG CHỨNG: ảnh mặt số, hoặc mã admin cấp kèm lý do khi
+   * không chụp được (mentor ý 5). Không được bỏ trống cả hai — chỉ kiểm con số thì
+   * xoá ảnh đi vẫn qua được bước.
+   */
+  const meterHasEvidence = (kind: 'elec' | 'water') =>
+    !!(kind === 'elec' ? elecMeterUrl : waterMeterUrl) || !!meterOverride[kind]
+
   const hasRequiredMeters = () =>
     !!meters.elec.trim() && !!meters.water.trim() &&
+    meterHasEvidence('elec') && meterHasEvidence('water') &&
     (!manualEdited.elec || manualConfirmed.elec) &&
     (!manualEdited.water || manualConfirmed.water)
+
+  /**
+   * Chỉ số thật của một đồng hồ = phần nguyên + phần lẻ.
+   * Phần lẻ để trống nghĩa là mặt số không có vùng đỏ (vd công tơ 3 pha gián tiếp).
+   */
+  const meterValue = (kind: 'elec' | 'water'): number => {
+    const int = onlyDigits(meters[kind])
+    const dec = onlyDigits(metersDec[kind])
+    if (!int) return 0
+    return Number(dec ? `${int}.${dec}` : int)
+  }
+
+  /** Chỉ số sau khi làm tròn theo luật mentor (>5 mới lên) — chỉ để hiện đối chiếu. */
+  const meterRounded = (kind: 'elec' | 'water'): number =>
+    splitMeterReading(
+      metersDec[kind] ? `${onlyDigits(meters[kind])}.${onlyDigits(metersDec[kind])}` : onlyDigits(meters[kind]),
+      kind,
+      meterDigitConfig(kind),
+    ).rounded
 
   const handleNext = async () => {
     switch (currentLabel) {
@@ -807,6 +883,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         break
       }
       case 'Điện nước':
+        if (!elecMeterUrl || !waterMeterUrl)
+          return showAlert(
+            'Thiếu ảnh đồng hồ',
+            'Cần có ảnh đồng hồ của cả điện và nước làm bằng chứng cho chỉ số ghi nhận.',
+          )
         if (!hasRequiredMeters())
           return showAlert(
             'Lỗi',
@@ -910,8 +991,26 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         return
       }
 
+      // Không tách được dãy số → ảnh mờ/xa/loá. Từ chối để bắt chụp lại, vì ảnh không
+      // đọc nổi số thì không còn giá trị làm bằng chứng đối soát.
+      if (!check.reading) {
+        showAlert(
+          'Ảnh chưa đọc được chỉ số',
+          `Không tách được dãy số trên đồng hồ ${label} — thường do ảnh mờ, chụp xa hoặc bị loá. `
+            + 'Chụp lại gần hơn, lấy rõ phần ô số và tránh ánh sáng phản chiếu.',
+          undefined,
+          '🚫',
+        )
+        return
+      }
+
       keepPhoto(url)
-      if (check.reading) setMeters((prev) => ({ ...prev, [kind]: check.reading as string }))
+      // Cắt phần nguyên / phần lẻ theo cấu hình của chính phòng này. Dãy OCR đọc ra
+      // là TOÀN BỘ ô số ("030815"), phần lẻ nằm ở cuối — không tách là ghi thành
+      // 30815 thay vì 3081,5.
+      const split = splitMeterReading(check.reading as string, kind, meterDigitConfig(kind))
+      setMeters((prev) => ({ ...prev, [kind]: split.integerPart }))
+      setMetersDec((prev) => ({ ...prev, [kind]: split.decimalPart }))
       if (check.confidence === 'low') {
         showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — xem lại ảnh và chỉ số trước khi lưu.`)
       }
@@ -951,9 +1050,35 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       const urls = await Promise.all(
         uris.map((u) => uploadImageToCloudinary(u)),
       )
-      const now = new Date().toISOString()
-      setConditionPhotos((prev) => [...prev, ...urls])
-      setConditionPhotosCapturedAt((prev) => [...prev, ...urls.map(() => now)])
+      // Kiểm nội dung từng ảnh (xem validateRoomPhoto): chặn ảnh chế/poster/đồng hồ
+      // lọt vào bộ bằng chứng hiện trạng.
+      const accepted: string[] = []
+      const rejected: string[] = []
+      for (const url of urls) {
+        let labels: VisionLabel[] = []
+        try {
+          labels = await visionService.detectLabels(url)
+        } catch {
+          // Vision lỗi → validateRoomPhoto tự cho qua, không chặn luồng đón khách.
+        }
+        const check = validateRoomPhoto(labels)
+        if (check.ok) accepted.push(url)
+        else rejected.push(check.reason || 'Ảnh không hợp lệ.')
+      }
+
+      if (accepted.length > 0) {
+        const now = new Date().toISOString()
+        setConditionPhotos((prev) => [...prev, ...accepted])
+        setConditionPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
+      }
+      if (rejected.length > 0) {
+        showAlert(
+          rejected.length === urls.length ? 'Ảnh không hợp lệ' : `Đã bỏ ${rejected.length} ảnh không hợp lệ`,
+          rejected[0],
+          undefined,
+          '🚫',
+        )
+      }
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Upload ảnh thất bại.'))
     } finally {
@@ -1055,12 +1180,21 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     rentAmount: rentValue,
     deposit: depositValue,
     depositMonths,
-    initialElectricReading: parseNum(meters.elec),
-    initialWaterReading: parseNum(meters.water),
+    // Gửi GIÁ TRỊ THẬT còn nguyên phần lẻ (3081.5), không làm tròn ở đây: làm tròn
+    // lúc ghi là mất số vĩnh viễn, còn giữ số lẻ thì lúc phát hành hoá đơn muốn làm
+    // tròn kiểu gì cũng được. `parseNum` cũ xoá sạch dấu chấm nên không dùng lại được.
+    initialElectricReading: meterValue('elec'),
+    initialWaterReading: meterValue('water'),
     electricMeterImageUrl: elecMeterUrl || undefined,
     electricMeterCapturedAt: meterCapturedAt.elec,
     waterMeterImageUrl: waterMeterUrl || undefined,
     waterMeterCapturedAt: meterCapturedAt.water,
+    // Mã cho phép nhập tay khi không có ảnh. BE chỉ tiêu thụ token khi ảnh tương ứng
+    // TRỐNG — có ảnh thì bỏ qua, nên gửi kèm luôn cũng không sai.
+    electricMeterOverrideToken: meterOverride.elec?.token,
+    electricMeterOverrideReason: meterOverride.elec?.reason,
+    waterMeterOverrideToken: meterOverride.water?.token,
+    waterMeterOverrideReason: meterOverride.water?.reason,
     roomConditionUrls: conditionPhotos,
     roomConditionPhotos: conditionPhotos.map((url, i) => ({
       url,
@@ -1724,6 +1858,28 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             <Text style={styles.galleryFallbackLink}>Camera không dùng được? Chọn ảnh từ thư viện</Text>
           </TouchableOpacity>
         )}
+        {/* Đường lùi CUỐI CÙNG khi cả chụp lẫn chọn ảnh đều không được (mentor ý 5).
+            Chỉ hiện sau khi đã thử báo camera lỗi — không bày sẵn ngang hàng với nút
+            chụp, kẻo thành lối tắt mặc định. */}
+        {gallerySOS[kind] && !url && !meterOverride[kind] && (
+          <TouchableOpacity onPress={() => setOverrideTarget(kind === 'elec' ? 'ELEC' : 'WATER')}>
+            <Text style={styles.overrideLink}>
+              🔑 Không chụp được ảnh? Xin mã từ quản trị để nhập tay
+            </Text>
+          </TouchableOpacity>
+        )}
+        {!!meterOverride[kind] && (
+          <View style={styles.overrideBadge}>
+            <Text style={styles.overrideBadgeText}>
+              🔑 Nhập tay có mã · {meterOverride[kind]!.reason}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setMeterOverride((prev) => ({ ...prev, [kind]: undefined }))}
+            >
+              <Text style={styles.overrideBadgeClear}>Bỏ</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {!!url && (
           <View style={styles.meterThumbWrap}>
             <TouchableOpacity
@@ -1749,18 +1905,63 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
           </Text>
         )}
-        <TextInput
-          style={styles.input}
-          value={meters[kind]}
-          onChangeText={(v) => {
-            setMeters((prev) => ({ ...prev, [kind]: v }))
-            setManualEdited((prev) => ({ ...prev, [kind]: true }))
-            setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
-          }}
-          keyboardType='numeric'
-          placeholder='OCR tự điền, có thể chỉnh'
-          placeholderTextColor={Colors.textMuted}
-        />
+        {/* Quy ước đọc số — phải giống nhau giữa lúc đón khách và các kỳ hoá đơn sau,
+            nếu không hiệu số giữa 2 kỳ sẽ sai. */}
+        <View style={styles.meterHintBox}>
+          <Text style={styles.meterHintText}>
+            • Nhập phần số <Text style={styles.meterHintStrong}>ĐEN</Text>
+            {kind === 'elec' ? ' (kWh)' : ' (m³)'} vào ô trái, phần{' '}
+            <Text style={styles.meterHintRed}>ĐỎ</Text> (thập phân) vào ô phải.
+          </Text>
+          <Text style={styles.meterHintText}>
+            • Đồng hồ <Text style={styles.meterHintStrong}>không có</Text> ô đỏ (công tơ
+            3 pha…) → để trống ô phải.
+          </Text>
+          <Text style={styles.meterHintText}>
+            • Chữ số đang nhảy giữa 2 số → lấy số{' '}
+            <Text style={styles.meterHintStrong}>NHỎ HƠN</Text>.
+          </Text>
+        </View>
+        {/* Hai ô tách rời đúng như hai vùng trên mặt đồng hồ. Gộp một ô thì không
+            phân biệt được 3081,5 với 30815 — chênh 10 lần tiền điện. */}
+        <View style={styles.meterSplitRow}>
+          <TextInput
+            style={[styles.input, styles.meterReadingInput, styles.meterIntInput]}
+            value={meters[kind]}
+            onChangeText={(v) => {
+              setMeters((prev) => ({ ...prev, [kind]: onlyDigits(v) }))
+              setManualEdited((prev) => ({ ...prev, [kind]: true }))
+              setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+            }}
+            keyboardType='numeric'
+            placeholder='Phần đen'
+            placeholderTextColor={Colors.textMuted}
+          />
+          <Text style={styles.meterSplitDot}>,</Text>
+          <TextInput
+            style={[styles.input, styles.meterReadingInput, styles.meterDecInput]}
+            value={metersDec[kind]}
+            onChangeText={(v) => {
+              setMetersDec((prev) => ({
+                ...prev,
+                [kind]: onlyDigits(v).slice(0, meterDigitConfig(kind).decimalDigits || 3),
+              }))
+              setManualEdited((prev) => ({ ...prev, [kind]: true }))
+              setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+            }}
+            keyboardType='numeric'
+            placeholder='đỏ'
+            placeholderTextColor={Colors.textMuted}
+          />
+          <Text style={styles.meterSplitUnit}>{kind === 'elec' ? 'kWh' : 'm³'}</Text>
+        </View>
+        {!!meters[kind] && (
+          <Text style={styles.meterRoundedNote}>
+            Ghi nhận <Text style={styles.meterHintStrong}>{meterValue(kind)}</Text>
+            {kind === 'elec' ? ' kWh' : ' m³'}
+            {!!metersDec[kind] && ` · làm tròn để tính tiền: ${meterRounded(kind)}`}
+          </Text>
+        )}
         {manualEdited[kind] && (
           <TouchableOpacity
             style={styles.confirmRow}
@@ -2055,18 +2256,11 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
       {priceMode === 'agreed' ? (
         <>
-          <Text style={[styles.label, { marginTop: Spacing.base }]}>
-            Hình thức thu cọc
-          </Text>
-          {/* Hệ thống thu cọc 100% chuyển khoản qua PayOS — không còn tiền mặt */}
-          <View style={styles.methodRow}>
-            <View style={[styles.methodChip, styles.methodChipActive]}>
-              <Text style={[styles.methodChipText, styles.methodChipTextActive]}>
-                💳 Chuyển khoản (PayOS)
-              </Text>
-            </View>
-          </View>
-
+          {/*
+            Trước 08/08/2026 chỗ này có nhãn "Hình thức thu cọc" + 1 chip "Chuyển khoản
+            (PayOS)". Chip đó không bấm được và không có lựa chọn nào khác — hệ thống
+            thu cọc 100% chuyển khoản. Mentor yêu cầu bỏ vì bày ra một lựa chọn giả.
+          */}
           <Text style={styles.hint}>
             Nhấn "Tiếp tục" để tạo hợp đồng và sang bước thanh toán cọc qua PayOS.
           </Text>
@@ -2088,8 +2282,8 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
       >
         <Text style={styles.sectionTitle}>Thanh toán tiền cọc</Text>
         <Text style={styles.hint}>
-          Khách chuyển khoản tiền cọc {formatVnd(depositValue)} đ qua PayOS. Sau
-          khi hệ thống ghi nhận, mới sang bước xác thực OTP.
+          Khách chuyển khoản {formatVnd(totalDueValue)} đ qua PayOS (tiền nhà tháng
+          đầu + tiền cọc). Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.
         </Text>
 
         {paid ? (
@@ -2101,13 +2295,26 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
           <>
             {!!contract?.payosQrCode && !showWebView && (
               <View style={styles.qrBox}>
-                <Text style={styles.qrAmount}>{formatVnd(depositValue)} đ</Text>
+                <Text style={styles.qrAmountLabel}>Tổng thu</Text>
+                <Text style={styles.qrAmount}>
+                  {formatVnd(contract.initialPaymentAmount ?? totalDueValue)} đ
+                </Text>
+                {/* Tách cấu phần để manager giải thích được với khách. */}
+                <View style={styles.payBreakdown}>
+                  <View style={styles.payBreakdownRow}>
+                    <Text style={styles.payBreakdownLabel}>• Tiền nhà tháng đầu</Text>
+                    <Text style={styles.payBreakdownValue}>{formatVnd(rentValue)} đ</Text>
+                  </View>
+                  <View style={styles.payBreakdownRow}>
+                    <Text style={styles.payBreakdownLabel}>• Tiền cọc ({depositMonths} tháng)</Text>
+                    <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
+                  </View>
+                </View>
                 <View style={styles.qrWrap}>
                   <QRCode value={contract.payosQrCode} size={220} />
                 </View>
                 <Text style={styles.qrCaption}>
-                  Khách quét mã VietQR bằng app ngân hàng để thanh toán tiền
-                  cọc.
+                  Khách quét mã VietQR bằng app ngân hàng để thanh toán.
                 </Text>
               </View>
             )}
@@ -2322,6 +2529,22 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
             ? () => reportCameraBroken(cameraTarget)
             : undefined
         }
+      />
+
+      <MeterOverrideModal
+        visible={overrideTarget !== null}
+        meterKind={overrideTarget ?? 'ELEC'}
+        // Hợp đồng chưa tồn tại ở bước này của luồng đón khách — BE nhận null.
+        contractId={contract?.id ?? null}
+        onCancel={() => setOverrideTarget(null)}
+        onGranted={(token, reason) => {
+          const kind = overrideTarget === 'WATER' ? 'water' : 'elec'
+          setMeterOverride((prev) => ({ ...prev, [kind]: { token, reason } }))
+          setOverrideTarget(null)
+          // Số nhập sau khi xin mã vẫn là số gõ tay -> giữ nguyên yêu cầu tick cam kết.
+          setManualEdited((prev) => ({ ...prev, [kind]: true }))
+          setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
+        }}
       />
 
       {/* Xem ảnh phóng to — chạm bất kỳ đâu để đóng */}
@@ -2828,7 +3051,50 @@ const styles = StyleSheet.create({
   },
   meterRoomBadgeText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
   meterCapturedAt: { fontSize: 11, color: Colors.textMuted, marginTop: 6 },
+  // Chỉ số điện/nước căn PHẢI cho dễ đối chiếu theo hàng đơn vị với mặt đồng hồ.
+  meterReadingInput: { textAlign: 'right' as const },
+  meterSplitRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  meterIntInput: { flex: 3, letterSpacing: 2 },
+  // Ô phần lẻ tô đỏ nhạt cho khớp vùng số đỏ trên mặt đồng hồ — nhìn là biết đang nhập vùng nào.
+  meterDecInput: {
+    flex: 1,
+    letterSpacing: 2,
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+    color: '#B91C1C',
+    fontWeight: '800' as const,
+  },
+  meterSplitDot: { fontSize: 20, fontWeight: '800' as const, color: Colors.textMuted },
+  meterSplitUnit: { fontSize: 13, fontWeight: '700' as const, color: Colors.textMuted, minWidth: 34 },
+  meterRoundedNote: { fontSize: 12, color: Colors.textMuted, marginTop: 6, textAlign: 'right' as const },
+  meterHintBox: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    gap: 2,
+  },
+  meterHintText: { fontSize: 11, color: '#92400E', lineHeight: 16 },
+  meterHintStrong: { fontWeight: '800' as const },
+  meterHintRed: { fontWeight: '800' as const, color: '#DC2626' },
   galleryFallbackLink: { fontSize: 11, color: Colors.textMuted, textDecorationLine: 'underline', marginTop: 4 },
+  overrideLink: { fontSize: 11, color: '#B45309', fontWeight: '700' as const, textDecorationLine: 'underline', marginTop: 6 },
+  overrideBadge: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 8,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: BorderRadius.md,
+    paddingVertical: 6,
+    paddingHorizontal: Spacing.sm,
+    marginTop: 6,
+  },
+  overrideBadgeText: { flex: 1, fontSize: 11, fontWeight: '700' as const, color: '#B91C1C' },
+  overrideBadgeClear: { fontSize: 11, fontWeight: '700' as const, color: '#B91C1C', textDecorationLine: 'underline' },
   meterCard: {
     backgroundColor: Colors.white,
     padding: Spacing.base,
@@ -3007,12 +3273,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
+  qrAmountLabel: { fontSize: 12, color: Colors.textSecondary },
   qrAmount: {
     fontSize: 22,
     fontWeight: '800',
     color: Colors.primary,
+    marginBottom: Spacing.sm,
+  },
+  payBreakdown: {
+    alignSelf: 'stretch',
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    gap: 4,
     marginBottom: Spacing.md,
   },
+  payBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  payBreakdownLabel: { fontSize: 12, color: Colors.textSecondary },
+  payBreakdownValue: { fontSize: 12, fontWeight: '700' as const, color: Colors.textPrimary },
   qrWrap: {
     padding: Spacing.md,
     backgroundColor: Colors.white,
