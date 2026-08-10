@@ -67,8 +67,16 @@ export const API_CONFIG = {
   PUBLIC_BASE_URL:
     process.env.EXPO_PUBLIC_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api/public',
   // EAS projectId — BẮT BUỘC để lấy Expo Push Token (getExpoPushTokenAsync).
-  // Lấy sau khi chạy `eas init`. Để trống khi chưa cấu hình push.
-  EAS_PROJECT_ID: process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? '',
+  //
+  // `eas init` đã ghi sẵn id vào app.json (`extra.eas.projectId`), nên đọc thẳng từ đó
+  // làm nguồn mặc định. Trước đây chỉ đọc env: .env để TRỐNG -> getExpoToken() thoát
+  // sớm -> máy không bao giờ đăng ký push token -> BE gửi thông báo mà không ai nhận.
+  // Env vẫn được ưu tiên để build nội bộ trỏ sang project Expo khác mà không sửa code.
+  EAS_PROJECT_ID:
+    process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+    (Constants.expoConfig?.extra as any)?.eas?.projectId ||
+    (Constants as any).easConfig?.projectId ||
+    '',
   TIMEOUT: 15000, // 15 seconds
   ENDPOINTS: {
     // Auth

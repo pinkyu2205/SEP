@@ -46,6 +46,18 @@ const normalizeType = (row: BeNotificationRow): string => {
     || raw.includes('UTILITY') || raw.includes('INVOICE')) {
     return raw.includes('OVERDUE') ? 'bill_overdue' : 'new_bill';
   }
+  /**
+   * Tiền onboard (thuê tháng đầu + cọc) được PayOS ghi nhận — BE 08/08/2026.
+   * Hai type cùng một sự kiện nhưng khác người nhận và khác màn đích:
+   *   DEPOSIT_PAID_TENANT  → khách, mở Hoá đơn (tin CÓ số tiền)
+   *   DEPOSIT_PAID_MANAGER → quản lý, mở tiếp luồng đón khách (tin KHÔNG có số tiền)
+   * Không tách thì cả hai rơi xuống nhánh fallback và nằm sai tab.
+   */
+  if (raw.startsWith('DEPOSIT_PAID')) {
+    return raw.endsWith('_MANAGER') ? 'contract_assigned' : 'new_bill';
+  }
+  // Host duyệt/từ chối giá → quản lý quay lại màn tiếp tục hợp đồng.
+  if (raw.startsWith('PRICE_APPROVAL')) return 'contract_assigned';
   if (raw === 'MAINTENANCE') {
     // BE dùng chung 1 type — phân biệt qua nội dung: ticket mới / đã xong / cập nhật.
     if (/mới/i.test(row.title)) return 'maintenance_new';

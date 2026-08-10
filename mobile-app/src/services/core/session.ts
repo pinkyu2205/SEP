@@ -16,6 +16,12 @@ export const SESSION_KEYS = {
   user: 'user',
   /** Lựa chọn "nhà đang thuê" của tenant — thuộc về phiên, đăng xuất là bỏ. */
   selectedContract: 'tenant_selected_contract_id',
+  /**
+   * Chủ nhân của lựa chọn trên (id tài khoản). Máy test hay đăng nhập nhiều tài khoản
+   * tenant khác nhau — thiếu mốc này thì HĐ của khách trước bị dùng lại cho khách sau,
+   * BE trả 403/404 và trang chủ hiện "Không tải được dữ liệu".
+   */
+  selectedContractOwner: 'tenant_selected_contract_owner',
   /** Lần cuối mở/dùng app — mốc để tự đăng xuất khi bỏ lâu không dùng. */
   lastActiveAt: 'session_last_active_at',
 } as const;
@@ -55,6 +61,7 @@ export async function clearSession(): Promise<void> {
       SESSION_KEYS.refreshToken,
       SESSION_KEYS.user,
       SESSION_KEYS.selectedContract,
+      SESSION_KEYS.selectedContractOwner,
       SESSION_KEYS.lastActiveAt,
     ]);
   } catch {

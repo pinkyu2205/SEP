@@ -33,6 +33,15 @@ android/app/build/
 .env.production
 .env.staging
 
+# Khoá Firebase/FCM — commit lên là lộ, phải tải lại từ Firebase Console
+google-services.json
+GoogleService-Info.plist
+*-firebase-adminsdk-*.json
+serviceAccountKey.json
+# Keystore ký app Android — mất là không cập nhật được app đã phát hành
+*.keystore
+*.jks
+
 # IDE
 .vscode/
 .idea/

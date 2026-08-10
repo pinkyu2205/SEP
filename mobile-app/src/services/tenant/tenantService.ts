@@ -83,6 +83,16 @@ export interface OnboardTenantRequest {
   electricMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ điện
   waterMeterImageUrl?: string;
   waterMeterCapturedAt?: string; // ISO-8601 — thời điểm chụp ảnh đồng hồ nước
+  /**
+   * Mã cho phép NHẬP TAY chỉ số khi không chụp được ảnh (BE 08/08/2026).
+   * Lấy từ `POST /api/v1/manager/meter-override/verify`, dùng một lần, TTL 15 phút.
+   * BE chỉ tiêu thụ token khi ảnh đồng hồ tương ứng TRỐNG; `reason` là bắt buộc và
+   * được ghi vào bảng audit cho admin soi (`GET /api/v1/admin/meter-overrides`).
+   */
+  electricMeterOverrideToken?: string;
+  electricMeterOverrideReason?: string;
+  waterMeterOverrideToken?: string;
+  waterMeterOverrideReason?: string;
   roomConditionUrls?: string[]; // legacy — vẫn gửi được, BE tự set capturedAt = lúc lưu
   roomConditionPhotos?: EvidencePhoto[]; // ưu tiên field này — có capturedAt từng ảnh
   roomConditionNote?: string;
@@ -119,6 +129,14 @@ export interface TenantContractResponse {
   expectedReceptionDate?: string; // yyyy-MM-dd — ngày manager dự kiến đến đón khách
   status: string;
   paymentStatus?: string; // PENDING | PAID | FAILED | CANCELLED
+  /**
+   * Mốc PayOS ghi nhận khoản thu lúc đón khách (tiền nhà tháng đầu + cọc).
+   * BE set trong `completeDepositPayment` từ 08/08/2026 — trước đó chỉ có `paidAt`.
+   * Dùng để hiện "đã thu" mà không phải suy từ `paymentStatus`.
+   */
+  depositPaidAt?: string;
+  depositMethod?: string; // PAYOS | CASH
+  paidAt?: string;
   // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
   // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
   terminatedAt?: string;

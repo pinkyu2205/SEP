@@ -24,6 +24,16 @@ export interface ApiRoom {
   area?: number;
   maxOccupants?: number;
   status: string; // DRAFT | AVAILABLE | RENTED | MAINTENANCE
+  /**
+   * Số chữ số phần nguyên / phần thập phân của mặt đồng hồ phòng này (BE trả từ
+   * 08/08/2026, mặc định điện 5+1, nước 5+3). Dùng để cắt dãy số OCR đọc được —
+   * KHÔNG dò được màu chữ số vì Vision chỉ trả chữ, không trả màu pixel.
+   * Xem `utils/meterPhoto.ts` → splitMeterReading.
+   */
+  elecIntegerDigits?: number;
+  elecDecimalDigits?: number;
+  waterIntegerDigits?: number;
+  waterDecimalDigits?: number;
 }
 
 interface SpringPage<T> {

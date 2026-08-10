@@ -11,6 +11,7 @@ import {
   MapPin,
   Menu,
   Package,
+  PackageCheck,
   Search,
   Settings,
   Settings2,
@@ -54,6 +55,7 @@ const navItems: SidebarItem[] = [
 
   // ── VẬN HÀNH ─────────────────────────────────────────────────────
   { type: 'section', label: 'Vận hành' },
+  { path: '/admin/handover', label: 'Tiến độ bàn giao', icon: PackageCheck },
   { path: '/admin/zones', label: 'Quản lý khu vực', icon: MapPin },
   { path: '/admin/zones/managers', label: 'Khu vực Manager', icon: UserRound },
   { path: '/admin/maintenance', label: 'Bảo trì & thiết bị', icon: Wrench, badge: PLATFORM_MAINTENANCE_REQUESTS.filter(i => i.status !== 'resolved').length },
