@@ -39,18 +39,22 @@ export interface HandoverStatus {
   rooms?: RoomHandover[] | null;
 }
 
+/**
+ * ⚠️ `api` bóc sẵn `.data` ở response interceptor (`api.ts`) — các hàm dưới trả THẲNG
+ * payload, không phải `AxiosResponse`. Bản đầu của file này viết
+ * `const { data } = await api.get(...)`, tức bóc hai lần, nên trang luôn hiện trống
+ * dù request trả 200. Generic thứ hai của axios là kiểu sau khi đã bóc.
+ */
 export const handoverService = {
   /** Bảng tóm tắt mọi toà. `rooms` luôn null ở đây — payload nhẹ. */
   list: async (): Promise<HandoverStatus[]> => {
-    const { data } = await api.get<HandoverStatus[]>(`${ADMIN}/handover-status`);
-    return data ?? [];
+    const rows = await api.get<unknown, HandoverStatus[]>(`${ADMIN}/handover-status`);
+    return rows ?? [];
   },
 
   /** Chi tiết 1 toà, kèm `rooms[]`. */
-  detail: async (propertyId: number): Promise<HandoverStatus> => {
-    const { data } = await api.get<HandoverStatus>(`${ADMIN}/handover-status`, {
+  detail: (propertyId: number): Promise<HandoverStatus> =>
+    api.get<unknown, HandoverStatus>(`${ADMIN}/handover-status`, {
       params: { propertyId },
-    });
-    return data;
-  },
+    }),
 };

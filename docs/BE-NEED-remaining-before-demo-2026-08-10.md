@@ -1,4 +1,4 @@
-# BE NEED — Chỉ còn 5 việc, cập nhật sau commit `f465f7b`
+# BE NEED — Phần còn lại, cập nhật sau commit `f465f7b`
 
 **Ngày:** 10/08/2026 (bản rút gọn, thay cho `BE-NEED-vision-labels-align-2026-08-10.md`)
 **Người gửi:** team FE (mobile)
@@ -8,7 +8,7 @@ Hai việc Vision đã xong ở `f465f7b` — cảm ơn:
 - ✅ `labels.txt`: `light` → `light fixture` (FE đã test lại, ảnh đèn hết bị chặn oan)
 - ✅ `rate-limit-per-hour: ${VISION_RATE_LIMIT_PER_HOUR:20}`
 
-Dưới đây là **toàn bộ phần còn lại**. Hai mục đầu là chặn demo.
+Dưới đây là **toàn bộ phần còn lại**. Mục 1, 1b, 1c, 2 là chặn demo — riêng **1c là lỗi code**, ba mục kia chỉ là biến môi trường và xác nhận cấu hình.
 
 ---
 
@@ -32,6 +32,94 @@ Deploy mà quên set, BE sẽ trả cho FE link kiểu `http://localhost:8080/up
 ```
 APP_PUBLIC_BASE_URL=https://<domain-that-cua-BE>
 ```
+
+## 1c. 🔴 `contractId` của meter-override — tính năng đang chết ở đúng chỗ nó sinh ra để phục vụ
+
+**Đây là lỗi phải sửa code, không phải cấu hình.** Đã test trực tiếp vào BE local hôm nay.
+
+### Hiện trạng
+
+BE hoạt động đúng khi có hợp đồng:
+
+```
+POST /api/v1/manager/meter-override/verify
+{"passcode":"<đúng>","contractId":22,"meterKind":"ELEC"}
+→ 200 {"valid":true,"overrideToken":"17f48c11-…","expiresAt":"…"}
+
+{"passcode":"<sai>", "contractId":22,"meterKind":"ELEC"}
+→ 403 "Mã không đúng. Liên hệ admin để lấy mã."
+```
+
+Nhưng đúng request mà app gửi thì:
+
+```
+{"passcode":"<đúng>","contractId":null,"meterKind":"ELEC"}
+→ 400 {"fieldErrors":{"contractId":"must not be null"}}
+```
+
+### Vì sao app gửi null
+
+Kịch bản mentor (ý 5) là: **manager đang đón khách mới, tới bước nhập chỉ số thì không chụp được ảnh đồng hồ → xin mã admin để nhập tay.**
+
+Ở đúng thời điểm đó **hợp đồng chưa tồn tại**. Trong `OnboardingScreenV2`, hợp đồng chỉ được tạo ở bước cuối (`onboardRoomTenant` / `onboardWholeHouseTenant`), tức là *sau* bước chỉ số và ngay trước bước thu cọc. Nên FE không có `contractId` nào để gửi.
+
+Nói gọn: endpoint đang viết theo giả định *"đã có hợp đồng rồi mới xin mã"*, còn nghiệp vụ thực tế là *"xin mã giữa lúc đang tạo hợp đồng"*. Hai bên lệch nhau đúng một trường, và hệ quả là tính năng chống-tắc-luồng này **chưa từng dùng được ở luồng đón khách mới** — cũng là luồng duy nhất mentor yêu cầu.
+
+Bảng `meter_override_logs` hiện rỗng vì chưa lần nào tiêu thụ được token.
+
+### Sửa — 3 chỗ, cùng một ý
+
+Bỏ ràng buộc hợp đồng khi chưa có, giữ nguyên mọi ràng buộc còn lại:
+
+```diff
+  // MeterOverrideVerifyRequest.java
+- @NotNull
+  private Long contractId;   // null khi HĐ chưa được tạo (đang giữa luồng đón khách)
+```
+
+```diff
+  // MeterOverrideServiceImpl.verifyPasscode
+- tenantContractRepository.findById(request.getContractId())
+-         .orElseThrow(() -> new BusinessException("Không tìm thấy hợp đồng ID: " + request.getContractId()));
++ if (request.getContractId() != null) {
++     tenantContractRepository.findById(request.getContractId())
++             .orElseThrow(() -> new BusinessException("Không tìm thấy hợp đồng ID: " + request.getContractId()));
++ }
+```
+
+```diff
+  // MeterOverrideServiceImpl.consumeOverrideIfPresent
+- if (!token.getContractId().equals(contractId)) {
++ // Token xin trước khi HĐ tồn tại thì không có gì để so — các ràng buộc còn lại vẫn đủ.
++ if (token.getContractId() != null && !token.getContractId().equals(contractId)) {
+      throw new BusinessException("Mã override không khớp hợp đồng");
+  }
+```
+
+Chỗ thứ ba là bắt buộc: thiếu nó thì token có `contractId = null` sẽ ném NPE lúc tiêu thụ, tức là sửa nửa vời còn hỏng nặng hơn hiện tại.
+
+### Nới như vậy có mất an toàn không
+
+Không đáng kể. Token vẫn buộc vào:
+
+| Ràng buộc | Còn nguyên? |
+|---|---|
+| `managerId` — token của ai người đó dùng | ✅ |
+| `meterKind` — mã xin cho điện không dùng cho nước | ✅ |
+| TTL 15 phút | ✅ |
+| Dùng một lần (`usedAt`) | ✅ |
+| Bắt buộc có `reason`, ghi vào `meter_override_logs` | ✅ |
+| Chỉ tiêu thụ khi **không có ảnh** đồng hồ tương ứng | ✅ |
+| Sai 5 lần khoá 5 phút | ✅ |
+
+Thứ duy nhất mất là "token này chỉ dùng cho đúng hợp đồng số N" — mà ràng buộc đó **về nguyên tắc không thể có** ở thời điểm hợp đồng chưa sinh ra.
+
+### Kiểm lại sau khi sửa
+
+1. Đón khách mới → bước chỉ số → không chụp ảnh → xin mã → nhập tay → đi tiếp được.
+2. `GET /api/v1/admin/meter-overrides` phải xuất hiện 1 dòng: ai, hợp đồng nào, loại đồng hồ, số đã nhập, lý do.
+3. Dùng lại đúng token đó lần hai → phải báo "Mã override đã được sử dụng".
+4. Có ảnh đồng hồ mà vẫn gửi kèm token → token **không** bị tiêu thụ, không sinh log.
 
 ## 2. 🔴 Xác nhận webhook PayOS trỏ domain thật
 
@@ -81,6 +169,7 @@ Commit `2506173` đã **nới quyền**: ba endpoint `/manager/invoices`, `/mana
 |---|---|---|---|
 | 1 | Xác nhận server có `MANAGER_OVERRIDE_PASSCODE` + `OCR_SPACE_API_KEY` | 5 phút | 🔴 **bắt buộc** |
 | 1b | Set `APP_PUBLIC_BASE_URL` = domain thật | 2 phút | 🔴 **bắt buộc** |
+| 1c | Cho `contractId` nhận null ở meter-override (3 chỗ, có diff sẵn) | 10 phút | 🔴 **bắt buộc** — không sửa thì ý 5 của mentor coi như chưa làm |
 | 2 | Xác nhận webhook PayOS + test 1 giao dịch thật; chốt `AMOUNT_DIVISOR` và return URL | — | 🔴 **bắt buộc** |
 | 3 | Chốt phương án OTP (bật Twilio hay né) | — | ✅ nên chốt |
 | 4 | File `.onnx` + chỉnh `min-score` | sau khi có dataset | ❌ sau demo |
