@@ -22,6 +22,7 @@ import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
+import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
@@ -116,6 +117,7 @@ function App() {
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
             <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/meter-override" element={<MeterOverridePasscodes />} />
+            <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />

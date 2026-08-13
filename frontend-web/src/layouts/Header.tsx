@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bell, ChevronRight, Home, Search } from 'lucide-react';
+import { ChevronRight, Home, Search } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
-import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
+import { NotificationBell } from '@/components/NotificationBell';
 import { UserMenu } from './UserMenu';
 
 const initialsOf = (name?: string) =>
@@ -37,7 +37,6 @@ const formatVNDate = (date: Date) => {
 export const Header = () => {
   const location = useLocation();
   const { user, logout } = useWebAuth();
-  const { count: unreadCount } = useUnreadNotifications();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -102,18 +101,9 @@ export const Header = () => {
 
         <div className="h-5 w-px bg-slate-200 hidden lg:block" />
 
-        <Link
-          to="/host/notifications"
-          className="relative p-2 text-slate-400 hover:text-slate-600 transition-colors rounded-lg hover:bg-slate-100"
-          title="Thông báo"
-        >
-          <Bell className="h-4.5 w-4.5" style={{ width: '1.1rem', height: '1.1rem' }} />
-          {unreadCount > 0 && (
-            <span className="absolute top-1 right-1 min-w-[16px] h-4 flex items-center justify-center px-1 text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white">
-              {unreadCount > 9 ? '9+' : unreadCount}
-            </span>
-          )}
-        </Link>
+        {/* Chuông cũ chỉ là link kèm badge đếm MỘT LẦN lúc mở trang — mở app cả buổi
+            số vẫn đứng yên. Giờ dùng chung khay realtime với cổng Admin. */}
+        <NotificationBell seeAllTo="/host/notifications" accent="cyan" />
 
         <div className="h-5 w-px bg-slate-200" />
 

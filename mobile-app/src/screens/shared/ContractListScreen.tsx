@@ -124,7 +124,7 @@ const FILTER_TABS: Array<{ key: 'all' | ContractStatus; label: string }> = [
   { key: 'terminated',      label: 'Đã thanh lý' },
 ];
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 // ===================== MAP API → UI =====================
 // ISO (yyyy-MM-dd) -> dd/MM/yyyy. Giữ nguyên nếu không parse được.

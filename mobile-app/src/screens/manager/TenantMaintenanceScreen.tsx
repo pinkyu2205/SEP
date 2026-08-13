@@ -114,7 +114,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 const isOpen = (t: MaintenanceTicket) =>
   t.status === 'pending' || t.status === 'accepted' || t.status === 'in_progress';
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 // ── Ticket Card ──────────────────────────────────────────────────────────
 const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> = ({ ticket, onPress }) => {

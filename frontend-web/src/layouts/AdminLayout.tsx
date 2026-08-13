@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
-  Bell,
   CreditCard,
   FileText,
   FilePlus,
@@ -21,8 +20,10 @@ import {
   UserRound,
   Wrench,
   X,
+  Zap,
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
+import { NotificationBell } from '@/components/NotificationBell';
 import { maintenanceService } from '@/services/maintenance.service';
 import { AppSidebar, type SidebarSection } from './AppSidebar';
 import { UserMenu } from './UserMenu';
@@ -57,6 +58,9 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Tài chính & Hợp đồng',
     items: [
       { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
+      // xem services/evnBill.service.ts để biết vì sao đổi.
+      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
     ],
   },
@@ -176,15 +180,10 @@ export const AdminLayout = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Chấm đỏ trước đây bật theo AUDIT_LOGS mock nên luôn sáng dù hệ thống
-                không có cảnh báo nào. Chưa có API nhật ký bảo mật → để chuông trung tính. */}
-            <Link
-              to="/admin/security"
-              className="relative rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-              title="Nhật ký & bảo mật"
-            >
-              <Bell className="h-4 w-4" />
-            </Link>
+            {/* Trước 13/08/2026 chuông này chỉ là icon trỏ sang trang nhật ký bảo mật,
+                không đọc dữ liệu gì (chấm đỏ cũ bật theo mock AUDIT_LOGS nên luôn sáng).
+                Giờ nó là khay thông báo thật, số tự cập nhật — xem NotificationBell. */}
+            <NotificationBell seeAllTo="/admin/security" accent="cyan" />
             <UserMenu
               accent="cyan"
               name={sidebarUser.name}

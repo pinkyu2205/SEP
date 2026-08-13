@@ -18,7 +18,7 @@ const STATUS_META: Record<InvoiceStatus, { label: string; color: string; bg: str
   overdue: { label: 'Quá hạn', color: '#EF4444', bg: '#FEE2E2' },
 };
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 export const BuildingInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;

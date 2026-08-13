@@ -211,7 +211,7 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'paid',    label: 'Đã thanh toán' },
 ];
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 // ── Invoice Detail Modal ────────────────────────────────────────────────
 const InvoiceDetailModal: React.FC<{

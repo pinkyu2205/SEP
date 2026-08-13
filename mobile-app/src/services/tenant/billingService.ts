@@ -148,6 +148,12 @@ const METHOD_MAP: Record<string, BillPaymentMethod> = {
   QR: 'qr', BANK_TRANSFER: 'bank_transfer', CASH: 'cash', EWALLET: 'ewallet', OTHER: 'other',
 };
 
+/** Trường tiền của BE có thể null/thiếu → về 0 thay vì để null lọt xuống màn hình. */
+const money = (v: number | null | undefined): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   id: String(inv.id),
   code: inv.code,
@@ -161,10 +167,14 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   tenantPhone: '',
   month: inv.month,
   year: inv.year,
-  items: inv.items ?? [],
-  totalAmount: inv.totalAmount,
-  lateFee: inv.lateFee ?? 0,
-  grandTotal: inv.grandTotal,
+  // Ép mọi trường TIỀN về số ngay tại cửa ngõ. `inv.items ?? []` cũ chỉ chắn được mảng
+  // null, không chắn được phần tử có `amount: null` — mà BE trả đúng như vậy, làm màn
+  // Lịch sử hoá đơn ngã trắng ở `formatCurrency(li.amount)` (13/08/2026).
+  // Khai báo kiểu là `number` nhưng dữ liệu thật không đảm bảo, nên đừng tin kiểu.
+  items: (inv.items ?? []).map(li => ({ ...li, amount: money(li.amount) })),
+  totalAmount: money(inv.totalAmount),
+  lateFee: money(inv.lateFee),
+  grandTotal: money(inv.grandTotal),
   status: STATUS_MAP[inv.status] ?? 'pending',
   dueDate: inv.dueDate,
   createdAt: inv.createdAt,

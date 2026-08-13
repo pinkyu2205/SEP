@@ -93,7 +93,7 @@ const mapContractToTenant = (
 const getDaysRemaining = (dateStr: string): number =>
   Math.ceil((new Date(dateStr).getTime() - TODAY.getTime()) / 86400000);
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 const AVATAR_PALETTE = [
   { bg: '#EEF2FF', text: '#4F46E5' },

@@ -3,11 +3,23 @@
  */
 
 /**
- * Format số tiền VND
+ * Format số tiền VND.
+ *
  * @example formatCurrency(1500000) => "1.500.000 đ"
+ * @example formatCurrency(null)    => "0 đ"
+ *
+ * CHỊU ĐƯỢC null/undefined/NaN (13/08/2026). Kiểu khai báo là `number` nhưng BE thỉnh
+ * thoảng trả null cho các trường tiền (vd `items[].amount` của hoá đơn tenant), và hàm
+ * này có 57 chỗ gọi trong app — gọi thẳng `amount.toLocaleString` thì một giá trị null
+ * từ BE là NGÃ TRẮNG CẢ MÀN HÌNH, không chỉ hỏng một dòng.
+ *
+ * Đó chính là lỗi "Cannot read property 'toLocaleString' of null" ở màn Lịch sử hoá đơn
+ * của khách thuê. Chỗ ép kiểu dữ liệu về số nằm ở `toSharedBill` (billingService.ts);
+ * hàm này là lưới an toàn cuối cùng cho những đường chưa đi qua mapper đó.
  */
-export const formatCurrency = (amount: number): string => {
-  return amount.toLocaleString('vi-VN') + ' đ';
+export const formatCurrency = (amount: number | null | undefined): string => {
+  const n = Number(amount);
+  return (Number.isFinite(n) ? n : 0).toLocaleString('vi-VN') + ' đ';
 };
 
 /**

@@ -51,7 +51,7 @@ const FILTERS: { id: 'all' | ExtendedStatus; label: string }[] = [
   { id: 'disabled',    label: 'Ngưng khai thác' },
 ];
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;

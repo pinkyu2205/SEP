@@ -130,7 +130,7 @@ const parseViDate = (str: string): Date => {
 const getDaysRemaining = (dateStr: string): number =>
   Math.ceil((parseViDate(dateStr).getTime() - TODAY.getTime()) / 86400000);
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 const STATUS_CFG: Record<ContractStatus, { label: string; color: string; bg: string }> = {
   draft:          { label: 'Nháp',            color: '#64748B', bg: '#F1F5F9' },

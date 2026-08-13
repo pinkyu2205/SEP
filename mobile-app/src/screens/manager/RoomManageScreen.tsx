@@ -52,7 +52,7 @@ const WHOLE_META: Record<'rented' | 'vacant' | 'maintenance', {
   maintenance: { label: 'Đang bảo trì',  color: '#D97706', bg: '#FFFBEB', dot: '🟡' },
 };
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const fmtDate = (iso?: string) => (iso ? iso.split('-').reverse().join('/') : '—');
 
 // ======================== SUMMARY BOX ========================

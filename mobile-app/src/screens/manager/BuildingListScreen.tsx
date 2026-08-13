@@ -28,7 +28,7 @@ const HOUSE_STATUS: Record<WholeHouseRentalStatus, { label: string; color: strin
   maintenance: { label: 'Đang bảo trì', color: Colors.error, bg: Colors.errorLight },
 };
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 export const BuildingListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
