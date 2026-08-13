@@ -684,20 +684,44 @@ const InspectionSection: React.FC<{
   }
 
   /**
+   * Nối mô tả mới vào cuối ghi chú đang có, ngăn bằng dấu chấm.
+   *
+   * Chỉ thêm dấu chấm khi câu trước chưa có dấu kết — không thì ra "… sạch.. Phòng…".
+   */
+  const joinSentences = (prev: string, add: string) => {
+    const left = (prev || '').trim()
+    const right = (add || '').trim()
+    if (!right) return left
+    if (!left) return right
+    return /[.!?…]$/.test(left) ? `${left} ${right}` : `${left}. ${right}`
+  }
+
+  /**
    * Soạn ghi chú hiện trạng từ ảnh (BE `POST /api/v1/vision/describe-room`).
    *
    * Kết quả luôn là BẢN NHÁP: đổ vào ô ghi chú cho manager đọc lại và sửa, không tự
    * lưu. Biên bản hiện trạng là căn cứ trừ cọc lúc trả phòng — để máy viết rồi lưu
    * thẳng là ký một văn bản không ai đọc.
    *
-   * Không ghi đè chữ manager đã gõ (`noteTouched`) trừ khi bấm nút "Tạo lại mô tả".
+   * Hai chế độ:
+   *   • `append` — chạy tự động mỗi khi thêm ảnh. Chỉ mô tả ẢNH VỪA THÊM rồi nối vào
+   *     cuối ghi chú. Vì chỉ thêm chứ không đè nên KHÔNG cần xét `noteTouched`: chữ
+   *     manager gõ và các câu mô tả trước đó đều còn nguyên. Mỗi ảnh cũng chỉ tốn một
+   *     ảnh trong payload thay vì gửi lại cả bộ.
+   *   • mặc định (thay thế) — nút "Tạo lại mô tả": soạn lại từ TOÀN BỘ ảnh và ghi đè,
+   *     dùng khi ghi chú đã rối và muốn làm lại từ đầu.
+   *
    * Lỗi quota/model là lỗi MỀM: im lặng bỏ qua khi chạy tự động sau lúc upload, chỉ
    * báo khi manager chủ động bấm nút — không được chặn luồng đón khách.
    */
-  const describeFromPhotos = async (urls: string[], opts?: { force?: boolean }) => {
+  const describeFromPhotos = async (
+    urls: string[],
+    opts?: { force?: boolean; append?: boolean },
+  ) => {
     const force = opts?.force === true
+    const append = opts?.append === true
     if (describing || urls.length === 0) return
-    if (noteTouched && !force) return
+    if (!append && noteTouched && !force) return
 
     try {
       setDescribing(true)
@@ -706,9 +730,13 @@ const InspectionSection: React.FC<{
         if (force) showAlert('Chưa tạo được mô tả', 'Model không trả về nội dung. Nhập tay giúp nhé.')
         return
       }
-      setNote(result.description)
+      if (append) {
+        setNote((prev) => joinSentences(prev, result.description))
+      } else {
+        setNote(result.description)
+        setNoteTouched(false)
+      }
       setAiDrafted(true)
-      setNoteTouched(false)
     } catch (err: any) {
       if (!force) return // chạy nền sau upload — không làm phiền
       const code = err?.response?.data?.code
@@ -721,10 +749,16 @@ const InspectionSection: React.FC<{
     }
   }
 
-  /** Nút "Tạo lại mô tả" — hỏi trước khi đè lên chữ manager đã gõ. */
+  /**
+   * Nút "Tạo lại mô tả" — soạn lại từ TOÀN BỘ ảnh và ghi đè.
+   *
+   * Hỏi trước khi đè nếu ô ghi chú đang có chữ, bất kể chữ đó do manager gõ hay do AI
+   * nối vào: sau vài lần thêm ảnh thì hai loại đã trộn lẫn, không tách ra được nữa nên
+   * cứ có chữ là hỏi.
+   */
   const regenerateDescription = () => {
-    if (noteTouched && note.trim()) {
-      showAlert('Tạo lại mô tả?', 'Ghi chú đang có sẽ bị thay bằng mô tả mới từ ảnh.', [
+    if (note.trim()) {
+      showAlert('Tạo lại mô tả?', 'Ghi chú đang có sẽ bị thay bằng mô tả mới từ toàn bộ ảnh.', [
         { text: 'Hủy', style: 'cancel' },
         { text: 'Tạo lại', onPress: () => void describeFromPhotos(photos, { force: true }) },
       ])
@@ -759,14 +793,15 @@ const InspectionSection: React.FC<{
 
       if (accepted.length > 0) {
         const now = new Date().toISOString()
-        setPhotos((prev) => {
-          const next = [...prev, ...accepted]
-          // Mô tả trên TOÀN BỘ ảnh chứ không chỉ lô vừa thêm — mentor muốn "chụp nhiều
-          // ảnh thì ghi chú thêm", nên mỗi lần thêm ảnh là soạn lại từ cả bộ.
-          void describeFromPhotos(next)
-          return next
-        })
+        setPhotos((prev) => [...prev, ...accepted])
         setPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
+        // Mô tả CHỈ ẢNH VỪA THÊM rồi nối vào cuối ghi chú — mentor muốn "chụp thêm ảnh
+        // thì ghi chú thêm vào", nên thêm câu chứ không soạn lại từ đầu.
+        //
+        // Gọi ở đây chứ KHÔNG gọi trong hàm cập nhật của `setPhotos`: hàm đó phải thuần,
+        // React StrictMode chạy nó hai lần nên đặt lời gọi mạng vào trong là gửi hai
+        // request và nối mô tả hai lần.
+        void describeFromPhotos(accepted, { append: true })
       }
       if (rejected.length > 0) {
         showAlert(
@@ -1090,7 +1125,9 @@ const InspectionSection: React.FC<{
                     <ActivityIndicator size="small" color={Colors.primary} />
                   ) : (
                     <Text style={styles.aiBtnText}>
-                      ✨ {noteTouched ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
+                      {/* Đã có chữ trong ô → nút này là "làm lại từ đầu", nên phải nói
+                          rõ là TẠO LẠI để không ai bấm nhầm rồi mất phần đã soạn. */}
+                      ✨ {note.trim() ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -1113,9 +1150,12 @@ const InspectionSection: React.FC<{
             {describing && (
               <Text style={styles.aiHint}>Đang đọc ảnh để soạn mô tả…</Text>
             )}
-            {!!note && aiDrafted && !noteTouched && (
+            {/* Bỏ điều kiện `!noteTouched`: giờ AI NỐI thêm chứ không đè, nên ô ghi chú
+                thường là chữ manager gõ trộn với câu AI soạn. Vẫn phải nhắc đọc lại —
+                đây là căn cứ trừ cọc lúc trả phòng. */}
+            {!!note && aiDrafted && (
               <Text style={styles.aiHint}>
-                ✨ Mô tả do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
+                ✨ Có phần do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
               </Text>
             )}
           </View>
