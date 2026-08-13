@@ -1,15 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, ScrollView,
   RefreshControl, TextInput, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_SHORT, RENT_AMOUNT_HIDDEN_NOTE } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow,
+  RENT_AMOUNT_HIDDEN_NOTE, DEPOSIT_AMOUNT_HIDDEN_NOTE,
+} from '@/constants';
 import { formatCurrency, showAlert } from '@/utils';
 import { realManagerInvoiceService, ManagerPayment } from '@/services/manager/invoiceService';
 import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
-import { realTenantService } from '@/services/tenant/tenantService';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -22,8 +24,9 @@ import { realTenantService } from '@/services/tenant/tenantService';
  *   • Tiền cọc — nằm trên hợp đồng, không có trong bảng thanh toán (xem depositService).
  *
  * SỐ TIỀN (xem @/constants/managerVisibility):
- *   • Tiền nhà — ẩn, chỉ hiện đã thu / chờ xác nhận / bị từ chối.
- *   • Tiền cọc, điện, nước, dịch vụ — HIỆN số tiền.
+ *   • Tiền nhà VÀ tiền cọc — ẩn, chỉ hiện trạng thái đã thu / chờ xác nhận / từ chối.
+ *     (cọc: ẩn 07/08 → mở lại 10/08 → ẩn lại 13/08/2026)
+ *   • Điện, nước, dịch vụ — HIỆN số tiền.
  */
 
 type Filter = 'all' | 'VERIFIED' | 'PENDING_VERIFY' | 'REJECTED' | 'DEPOSIT';
@@ -185,30 +188,18 @@ const fromDeposit = (d: ManagerDeposit): Entry => ({
   contractStatus: d.contractStatus,
 });
 
-/**
- * Một dòng giao dịch. Tách thành component riêng để dòng tiền cọc tự xin số tiền
- * khi được render — `/api/v1/manager/deposits` không trả số tiền, phải hỏi từng hợp
- * đồng. Nhờ SectionList chỉ render phần đang nhìn thấy, quản 100 nhà cũng chỉ gọi
- * đúng số hợp đồng đang hiện trên màn hình, và kết quả được cache lại.
- */
+/** Một dòng giao dịch trong dòng thời gian. */
 const TxnRow: React.FC<{
   entry: Entry;
-  depositAmount?: number | null;
   onPress: (e: Entry) => void;
-  onNeedDeposit: (contractId: number) => void;
-}> = React.memo(({ entry, depositAmount, onPress, onNeedDeposit }) => {
-  useEffect(() => {
-    if (entry.kind === 'DEPOSIT' && entry.contractId != null) onNeedDeposit(entry.contractId);
-  }, [entry.kind, entry.contractId, onNeedDeposit]);
-
+}> = React.memo(({ entry, onPress }) => {
   const mc = methodOf(entry.method);
   const st = statusOf(entry.status);
   const isDeposit = entry.kind === 'DEPOSIT';
-  const hidden = !isDeposit && isAmountHidden(entry.invoiceKind);
+  // Tiền cọc ẩn lại từ 13/08/2026 — xem @/constants/managerVisibility.
+  const hidden = isDeposit || isAmountHidden(entry.invoiceKind);
 
-  const amountText = isDeposit
-    ? (depositAmount == null ? '…' : formatCurrency(depositAmount))
-    : hidden ? '•••' : formatCurrency(entry.amount ?? 0);
+  const amountText = hidden ? '•••' : formatCurrency(entry.amount ?? 0);
 
   return (
     <TouchableOpacity style={s.row} activeOpacity={0.7} onPress={() => onPress(entry)}>
@@ -255,10 +246,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   const [selected, setSelected] = useState<Entry | null>(null);
   const [acting, setActing] = useState(false);
 
-  /** contractId → số tiền cọc (null = đã hỏi nhưng BE không trả được). */
-  const [depositAmounts, setDepositAmounts] = useState<Record<number, number | null>>({});
-  const askedRef = useRef<Set<number>>(new Set());
-
   const load = useCallback(() => {
     Promise.all([
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
@@ -269,17 +256,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  /**
-   * Số tiền cọc chỉ có trên chính hợp đồng (`TenantContractResponse.deposit`);
-   * `/api/v1/manager/deposits` không trả field này. Hỏi 1 lần cho mỗi hợp đồng.
-   */
-  const ensureDepositAmount = useCallback((contractId: number) => {
-    if (askedRef.current.has(contractId)) return;
-    askedRef.current.add(contractId);
-    realTenantService.getContract(contractId)
-      .then(c => setDepositAmounts(prev => ({ ...prev, [contractId]: Number(c?.deposit ?? 0) || null })))
-      .catch(() => setDepositAmounts(prev => ({ ...prev, [contractId]: null })));
-  }, []);
+  // Trước 13/08/2026 chỗ này có `ensureDepositAmount` — gọi
+  // GET /api/v1/tenant-contracts/{id} cho từng dòng cọc chỉ để lấy field `deposit`
+  // (endpoint /manager/deposits không trả số tiền). Nay cọc ẩn số nên bỏ hẳn,
+  // đỡ một loạt request mỗi lần cuộn danh sách.
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
@@ -387,8 +367,9 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Thu & Đối soát</Text>
+          {/* Cọc bỏ khỏi vế "hiện số tiền" từ 13/08/2026 — chỉ còn điện/nước/dịch vụ. */}
           <Text style={s.subtitle}>
-            Tiền cọc · điện nước · dịch vụ · {RENT_AMOUNT_HIDDEN_SHORT}
+            Điện nước · dịch vụ · Không hiển thị tiền thuê & tiền cọc
           </Text>
         </View>
       </View>
@@ -476,12 +457,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
             </View>
           )}
           renderItem={({ item }) => (
-            <TxnRow
-              entry={item}
-              depositAmount={item.contractId != null ? depositAmounts[item.contractId] : undefined}
-              onPress={setSelected}
-              onNeedDeposit={ensureDepositAmount}
-            />
+            <TxnRow entry={item} onPress={setSelected} />
           )}
           ListEmptyComponent={
             <View style={s.emptyBox}>
@@ -502,8 +478,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         const st = statusOf(e.status);
         const mc = methodOf(e.method);
         const isDeposit = e.kind === 'DEPOSIT';
-        const hidden = !isDeposit && isAmountHidden(e.invoiceKind);
-        const depAmount = e.contractId != null ? depositAmounts[e.contractId] : undefined;
+        const hidden = isDeposit || isAmountHidden(e.invoiceKind);
         const canVerify = !isDeposit && e.status.toUpperCase() === 'PENDING_VERIFY';
 
         return (
@@ -540,18 +515,12 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                     {hidden ? (
                       <>
                         <Text style={s.amountHidden}>Không hiển thị</Text>
-                        <Text style={s.amountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
+                        <Text style={s.amountNote}>
+                          {isDeposit ? DEPOSIT_AMOUNT_HIDDEN_NOTE : RENT_AMOUNT_HIDDEN_NOTE}
+                        </Text>
                       </>
-                    ) : isDeposit && depAmount == null ? (
-                      <Text style={s.amountHidden}>
-                        {askedRef.current.has(e.contractId ?? -1) && depAmount === null
-                          ? 'Không lấy được số tiền cọc'
-                          : 'Đang tải...'}
-                      </Text>
                     ) : (
-                      <Text style={s.amountValue}>
-                        {formatCurrency(isDeposit ? (depAmount ?? 0) : (e.amount ?? 0))}
-                      </Text>
+                      <Text style={s.amountValue}>{formatCurrency(e.amount ?? 0)}</Text>
                     )}
                     {isDeposit && !!e.depositMonths && (
                       <Text style={s.amountNote}>Tương đương {e.depositMonths} tháng tiền nhà</Text>

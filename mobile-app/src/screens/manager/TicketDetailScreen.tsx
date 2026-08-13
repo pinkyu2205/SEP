@@ -56,7 +56,7 @@ const today = () => new Date().toISOString().split('T')[0];
 const mkEntry = (status: TicketStatus, note: string): TimelineEntry =>
   ({ status, note, updatedBy: 'Manager', updatedAt: now() });
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 /** Số ngày còn lại trước khi auto-confirm (3 ngày từ lúc báo sửa xong). */
 const autoConfirmDaysLeft = (since?: string): number | null => {

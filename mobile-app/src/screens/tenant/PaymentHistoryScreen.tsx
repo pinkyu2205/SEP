@@ -254,20 +254,48 @@ export const PaymentHistoryScreen: React.FC = () => {
     );
   }, [transactions, typeFilter, methodFilter, query]);
 
-  /** Gom theo tháng, mới nhất trước; trong mỗi tháng cũng mới nhất trước. */
+  /**
+   * TIỀN CỌC GHIM LÊN ĐẦU, phần còn lại gom theo tháng (mới nhất trước).
+   *
+   * Cọc là khoản đóng MỘT LẦN lúc nhận nhà và sẽ được hoàn lại khi trả phòng — khách
+   * tra nó nhiều nhất mà nó lại nằm lọt thỏm ở tháng xa nhất cuối danh sách, phải cuộn
+   * qua hàng chục giao dịch mới thấy. Ghim lên trên để mở màn là thấy ngay.
+   *
+   * Cũng vì bản chất khác (một lần, được hoàn) nên không nhập vào tổng theo tháng cùng
+   * tiền phòng/điện/nước — cộng chung sẽ ra một con số không có nghĩa gì.
+   *
+   * Ghim rồi thì cọc KHÔNG lặp lại ở nhóm tháng nữa, nếu không khách đếm ra hai lần.
+   */
   const sections = useMemo(() => {
+    const deposits = filtered.filter(t => t.invoiceType === 'DEPOSIT');
+    const rest = filtered.filter(t => t.invoiceType !== 'DEPOSIT');
+
     const byMonth = new Map<string, Txn[]>();
-    for (const t of filtered) {
+    for (const t of rest) {
       byMonth.set(t.monthKey, [...(byMonth.get(t.monthKey) ?? []), t]);
     }
-    return [...byMonth.entries()]
+    const monthSections = [...byMonth.entries()]
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([key, items]) => ({
         key,
         title: monthLabel(key),
+        pinned: false,
         total: sumReal(items),
         data: items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
       }));
+
+    if (!deposits.length) return monthSections;
+
+    return [
+      {
+        key: '__deposit__',
+        title: '🔐 Tiền cọc',
+        pinned: true,
+        total: sumReal(deposits),
+        data: deposits.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+      },
+      ...monthSections,
+    ];
   }, [filtered]);
 
   const hasFilter = typeFilter !== 'all' || methodFilter !== 'all' || !!query.trim();
@@ -474,10 +502,15 @@ export const PaymentHistoryScreen: React.FC = () => {
           </>
         }
         renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionMeta}>
-              {section.data.length} giao dịch · {formatCurrency(section.total)}
+          <View style={[styles.sectionHeader, section.pinned && styles.sectionHeaderPinned]}>
+            <Text style={[styles.sectionTitle, section.pinned && styles.sectionTitlePinned]}>
+              {section.title}
+            </Text>
+            <Text style={[styles.sectionMeta, section.pinned && styles.sectionMetaPinned]}>
+              {/* Cọc nói rõ "được hoàn khi trả phòng" — khách hay tưởng đây là khoản mất hẳn. */}
+              {section.pinned
+                ? `${formatCurrency(section.total)} · hoàn lại khi trả phòng`
+                : `${section.data.length} giao dịch · ${formatCurrency(section.total)}`}
             </Text>
           </View>
         )}
@@ -574,6 +607,16 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
   sectionMeta: { fontSize: 11, fontWeight: '600', color: Colors.textMuted },
+
+  // Mục Tiền cọc ghim đầu — nền riêng để tách khỏi dãy nhóm-theo-tháng bên dưới,
+  // nếu không nó trông như "một tháng nào đó" và mất luôn ý nghĩa ghim.
+  sectionHeaderPinned: {
+    backgroundColor: '#ECFEFF', borderWidth: 1, borderColor: '#A5F3FC',
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs,
+    marginTop: Spacing.sm,
+  },
+  sectionTitlePinned: { color: '#0E7490' },
+  sectionMetaPinned:  { color: '#0891B2' },
 
   // Thẻ giao dịch
   card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm },

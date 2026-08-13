@@ -1,6 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  View, Text, StyleSheet, SectionList, TouchableOpacity,
   ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,8 +16,27 @@ import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 type Invoice = SharedBill;
 type InvoiceStatus = BillStatus;
-type TypeFilter = 'all' | InvoiceType;
 type StatusFilter = 'all' | 'unpaid' | InvoiceStatus;
+type TypeFilter = 'all' | InvoiceType;
+
+/**
+ * MÀN HOÁ ĐƠN = HỘP THƯ ĐẦY ĐỦ — chốt 13/08/2026.
+ *
+ * Đây là nơi khách thấy MỌI khoản phải trả mà hệ thống gửi tới: tiền phòng, điện, nước,
+ * phí bảo trì, tiền cọc. Cũng là nơi DUY NHẤT bấm thanh toán được (Thao tác nhanh không
+ * có lối nào khác) — nên không được loại bớt loại nào ra khỏi đây.
+ *
+ * Vấn đề cũ không phải "thừa loại" mà là "trộn lẫn": mọi hoá đơn nằm chung một danh sách
+ * phẳng, phân biệt bằng hàng chip "Loại" (Tất cả/Phòng/Điện/Nước) — vừa chiếm chỗ, vừa
+ * bị cắt mất chip cuối trên máy màn nhỏ, và khách phải bấm lọc mới biết mình nợ những gì.
+ *
+ * Giờ gom sẵn theo TỪNG LOẠI, mỗi nhóm có tiêu đề + số lượng + tổng tiền của nhóm. Nhìn
+ * một phát thấy ngay "nợ gì, mỗi thứ bao nhiêu" mà không phải bấm lọc. Nhóm rỗng tự ẩn.
+ *
+ * Thứ tự cố định theo mức độ khách quan tâm, KHÔNG theo số tiền — để vị trí các nhóm
+ * đứng yên giữa các tháng, khách quen tay.
+ */
+const GROUP_ORDER: InvoiceType[] = ['rent', 'electricity', 'water', 'maintenance', 'deposit'];
 
 const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
   pending:   { label: 'Chờ thanh toán',    color: Colors.warning, bg: Colors.warningLight },
@@ -35,18 +54,54 @@ const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: str
   deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
-const TYPE_FILTER_TABS: { key: TypeFilter; label: string }[] = [
-  { key: 'all',         label: 'Tất cả' },
-  { key: 'rent',        label: '🏠 Phòng' },
-  { key: 'electricity', label: '⚡ Điện' },
-  { key: 'water',       label: '💧 Nước' },
+/**
+ * Bộ lọc trạng thái — ĐỦ 5 trạng thái hoá đơn của hệ thống (xem STATUS_CONFIG).
+ *
+ * Bản trước chỉ có 4 chip (Chưa trả / Quá hạn / Đã trả / Tất cả) nên hoá đơn ở trạng
+ * thái `partial` và `cancelled` không có đường nào lọc tới — khách trả góp một phần rồi
+ * thì không tìm lại được hoá đơn đó.
+ *
+ * Nhãn viết ĐỦ CHỮ: "Chưa TT"/"Đã TT" là tiếng lóng nội bộ, khách thuê không có nghĩa
+ * vụ đoán "TT" là thanh toán.
+ *
+ * "Chưa trả" CỐ Ý chồng lấn với "Quá hạn" và "Chờ trả" — nó là bộ lọc mặc định gộp mọi
+ * khoản còn nợ, thứ khách mở app ra là muốn thấy. Chồng lấn trong bộ lọc là chuyện bình
+ * thường, y như chip "Tất cả".
+ *
+ * `match` dùng chung cho cả lọc lẫn đếm — trước đây điều kiện lọc viết rời trong
+ * `filtered`, thêm chip mới là dễ quên đồng bộ, số trên chip lệch với danh sách.
+ *
+ * `color` cho mỗi chip một màu riêng khi được chọn, lấy đúng màu trạng thái ở
+ * STATUS_CONFIG để chip và badge trên thẻ hoá đơn nói cùng một ngôn ngữ màu.
+ */
+const STATUS_FILTER_TABS: {
+  key: StatusFilter;
+  label: string;
+  color: string;
+  match: (i: Invoice) => boolean;
+}[] = [
+  { key: 'unpaid',    label: 'Cần trả',     color: Colors.primary,   match: i => i.status === 'pending' || i.status === 'overdue' || i.status === 'partial' },
+  { key: 'pending',   label: 'Chờ trả',     color: Colors.warning,   match: i => i.status === 'pending' },
+  { key: 'overdue',   label: 'Quá hạn',     color: Colors.error,     match: i => i.status === 'overdue' },
+  { key: 'partial',   label: 'Trả 1 phần',  color: Colors.info,      match: i => i.status === 'partial' },
+  { key: 'cancelled', label: 'Đã huỷ',      color: Colors.textMuted, match: i => i.status === 'cancelled' },
+  { key: 'all',       label: 'Tất cả',      color: Colors.primary,   match: () => true },
 ];
 
-const STATUS_FILTER_TABS: { key: StatusFilter; label: string }[] = [
-  { key: 'unpaid',  label: 'Chưa TT' },
-  { key: 'overdue', label: 'Quá hạn' },
-  { key: 'paid',    label: 'Đã TT' },
-  { key: 'all',     label: 'Tất cả' },
+/**
+ * Bộ lọc LOẠI PHÍ — đủ 5 loại, dựng thẳng từ GROUP_ORDER nên không thể lệch với các
+ * nhóm trong danh sách.
+ *
+ * Có nhóm rồi vẫn cần lọc: nhóm giúp NHÌN, lọc giúp TÌM. Khi khách có chục hoá đơn thì
+ * bấm "Điện" nhanh hơn cuộn tìm nhóm Điện.
+ */
+const TYPE_FILTER_TABS: { key: TypeFilter; label: string; color: string }[] = [
+  { key: 'all', label: 'Tất cả', color: Colors.primary },
+  ...GROUP_ORDER.map(t => ({
+    key: t as TypeFilter,
+    label: `${TYPE_CONFIG[t].icon} ${TYPE_CONFIG[t].label}`,
+    color: TYPE_CONFIG[t].color,
+  })),
 ];
 
 type PendingCharge = Awaited<ReturnType<typeof realTenantBillingService.listPendingCharges>>[number];
@@ -62,8 +117,8 @@ export const InvoiceListScreen: React.FC = () => {
   // bất ngờ khi hóa đơn MAINTENANCE xuất hiện kỳ tới.
   const [pendingCharges, setPendingCharges] = useState<PendingCharge[]>([]);
   const [loading, setLoading]   = useState(true);
-  const [typeFilter, setTypeFilter]     = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('unpaid');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
 
   const reload = useCallback(() => {
@@ -82,21 +137,76 @@ export const InvoiceListScreen: React.FC = () => {
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 
-  const filtered = invoices.filter(i => {
-    if (typeFilter !== 'all' && i.invoiceType !== typeFilter) return false;
-    if (statusFilter === 'unpaid') return i.status === 'pending' || i.status === 'overdue';
-    if (statusFilter === 'all') return true;
-    return i.status === statusFilter;
-  });
+  /**
+   * HOÁ ĐƠN ĐÃ TRẢ KHÔNG NẰM Ở MÀN NÀY (13/08/2026).
+   *
+   * Màn Hoá đơn chỉ còn thứ khách CÒN PHẢI TRẢ. Mọi hoá đơn đã thanh toán dồn sang màn
+   * Lịch sử (nút "Lịch sử" góc trên) — nếu để lẫn thì chip "Tất cả" trộn cả đã trả lẫn
+   * chưa trả, và tổng của nhóm cộng luôn phần đã trả nên đọc ra số nợ sai gấp mấy lần.
+   *
+   * Lọc ngay từ nguồn thay vì trong từng bộ lọc: chỉ một chỗ để sau này ai đọc cũng thấy.
+   */
+  const owing = invoices.filter(i => i.status !== 'paid');
 
+  const activeTab = STATUS_FILTER_TABS.find(t => t.key === statusFilter) ?? STATUS_FILTER_TABS[0];
+  const matchType = (i: Invoice) => typeFilter === 'all' || i.invoiceType === typeFilter;
+  const filtered = owing.filter(i => activeTab.match(i) && matchType(i));
+
+  /**
+   * Số trên chip = số hoá đơn khách sẽ THẤY nếu bấm chip đó, tức đã tính cả bộ lọc kia.
+   * Đếm rời từng trục thì chip ghi "3" mà bấm vào ra 0 — số đó chỉ làm người dùng mất tin.
+   */
+  const statusCounts = useMemo(
+    () => Object.fromEntries(
+      STATUS_FILTER_TABS.map(t => [t.key, owing.filter(i => t.match(i) && matchType(i)).length]),
+    ) as Record<StatusFilter, number>,
+    [invoices, typeFilter],
+  );
+  const typeCounts = useMemo(
+    () => Object.fromEntries(
+      TYPE_FILTER_TABS.map(t => [
+        t.key,
+        owing.filter(i => activeTab.match(i) && (t.key === 'all' || i.invoiceType === t.key)).length,
+      ]),
+    ) as Record<TypeFilter, number>,
+    [invoices, statusFilter],
+  );
+
+  /**
+   * Gom theo loại, thứ tự cố định (xem GROUP_ORDER). Mỗi nhóm mang sẵn tổng tiền để
+   * tiêu đề nhóm hiện luôn — khỏi cần thẻ tổng ở trên liệt kê lại từng loại.
+   * Loại lạ ngoài GROUP_ORDER vẫn được gom vào cuối chứ không bị nuốt mất.
+   */
+  const sections = useMemo(() => {
+    /**
+     * Tổng của nhóm CHỈ cộng khoản CÒN NỢ, không cộng hoá đơn đã trả.
+     *
+     * Trước đây cộng tất: chọn "Tất cả" thì nhóm Tiền phòng hiện "15.341.935 đ" trong
+     * khi khách chỉ còn nợ 4.677.419 đ — con số đó đọc như số tiền phải trả nên gây
+     * hiểu nhầm nặng. Nhóm nào đã trả hết thì `owed = 0` và tiêu đề ghi "Đã trả đủ".
+     */
+    const owedOf = (rows: Invoice[]) =>
+      rows.filter(i => i.status === 'pending' || i.status === 'overdue')
+        .reduce((s, i) => s + i.grandTotal, 0);
+
+    const seen = new Set<string>();
+    const build = (type: InvoiceType) => {
+      const data = filtered.filter(i => i.invoiceType === type);
+      seen.add(type);
+      const cfg = TYPE_CONFIG[type];
+      return { key: type, title: `${cfg.icon} ${cfg.label}`, owed: owedOf(data), data };
+    };
+    const known = GROUP_ORDER.map(build);
+    const rest = filtered.filter(i => !seen.has(i.invoiceType));
+    return [
+      ...known,
+      ...(rest.length ? [{ key: 'other', title: '📄 Khoản khác', owed: owedOf(rest), data: rest }] : []),
+    ].filter(s => s.data.length > 0);
+  }, [filtered]);
+
+  const unpaid = invoices.filter(i => i.status === 'pending' || i.status === 'overdue');
   const overdueCount = invoices.filter(i => i.status === 'overdue').length;
-  const pendingTotal = invoices
-    .filter(i => i.status === 'pending' || i.status === 'overdue')
-    .reduce((sum, i) => sum + i.grandTotal, 0);
-  const paidCount = invoices.filter(i => i.status === 'paid').length;
-
-  const unpaidByType = (type: InvoiceType) =>
-    invoices.filter(i => i.invoiceType === type && (i.status === 'pending' || i.status === 'overdue'));
+  const pendingTotal = unpaid.reduce((sum, i) => sum + i.grandTotal, 0);
 
   const handlePay = (invoice: Invoice) => setPayingInvoice(invoice);
 
@@ -215,9 +325,12 @@ export const InvoiceListScreen: React.FC = () => {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Hóa đơn</Text>
-          <Text style={styles.subtitle}>Tiền phòng · Điện · Nước</Text>
+          <Text style={styles.subtitle}>Khoản còn phải trả · đã trả xem ở Lịch sử</Text>
         </View>
-        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('InvoiceHistory')}>
+        {/* Trỏ về PaymentHistory — cùng màn với ô "Lịch sử TT" ngoài Thao tác nhanh.
+            Trước 13/08/2026 nút này mở InvoiceHistoryScreen riêng, dẫn tới hai màn lịch
+            sử chồng nhau (màn kia là tập cha). Nay một màn, hai lối vào. */}
+        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('PaymentHistory')}>
           <Text style={styles.historyBtnText}>Lịch sử</Text>
         </TouchableOpacity>
       </View>
@@ -241,7 +354,7 @@ export const InvoiceListScreen: React.FC = () => {
             {overdueCount > 0 && (
               <TouchableOpacity
                 style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
-                onPress={() => { setTypeFilter('all'); setStatusFilter('overdue'); }}
+                onPress={() => setStatusFilter('overdue')}
               >
                 <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
                   ⚠️ {overdueCount} quá hạn
@@ -250,85 +363,90 @@ export const InvoiceListScreen: React.FC = () => {
             )}
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.summaryTypesScroll}
-            contentContainerStyle={styles.summaryTypes}
-          >
-            {(['rent', 'electricity', 'water'] as InvoiceType[]).map(type => {
-              const bills = unpaidByType(type);
-              if (!bills.length) return null;
-              const cfg = TYPE_CONFIG[type];
-              const total = bills.reduce((s, b) => s + b.grandTotal, 0);
-              const isActive = typeFilter === type && statusFilter === 'unpaid';
-              return (
-                <TouchableOpacity
-                  key={type}
-                  style={[styles.typeChip, { backgroundColor: cfg.bg }, isActive && styles.typeChipActive]}
-                  onPress={() => { setTypeFilter(type); setStatusFilter('unpaid'); }}
-                >
-                  <Text style={styles.typeChipIcon}>{cfg.icon}</Text>
-                  <Text style={[styles.typeChipLabel, { color: cfg.color }]} numberOfLines={1}>
-                    {cfg.label}
-                  </Text>
-                  <Text style={[styles.typeChipAmount, { color: cfg.color }]} numberOfLines={1}>
-                    {formatCurrency(total)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          {/* Cố tình KHÔNG liệt kê từng loại ở đây nữa: tiêu đề mỗi nhóm bên dưới đã
+              mang tổng của nhóm, liệt kê lại là cùng một con số hiện hai lần. */}
         </View>
       )}
 
-      {/* ── Filter row 1: Loại ── */}
+      {/* ── Lọc LOẠI PHÍ ── */}
       <View style={styles.filterBlock}>
-        <Text style={styles.filterLabel}>Loại</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
           {TYPE_FILTER_TABS.map(f => {
             const isActive = typeFilter === f.key;
+            const count = typeCounts[f.key] ?? 0;
+            const empty = count === 0 && !isActive;
             return (
               <TouchableOpacity
                 key={f.key}
-                style={[styles.filterChip, isActive && styles.filterChipActive]}
+                style={[
+                  styles.filterChip,
+                  isActive && { backgroundColor: f.color, borderColor: f.color },
+                  empty && styles.filterChipEmpty,
+                ]}
                 onPress={() => setTypeFilter(f.key)}
               >
-                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>{f.label}</Text>
+                <Text style={[styles.filterText, isActive && styles.filterTextActive, empty && styles.filterTextEmpty]}>
+                  {f.label}
+                </Text>
+                <Text style={[styles.filterCount, isActive && styles.filterCountActive, empty && styles.filterTextEmpty]}>
+                  {count}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      {/* ── Filter row 2: Trạng thái ── */}
+      {/* ── Lọc TRẠNG THÁI ── */}
       <View style={[styles.filterBlock, styles.filterBlockLast]}>
-        <Text style={styles.filterLabel}>Trạng thái</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
           {STATUS_FILTER_TABS.map(f => {
             const isActive = statusFilter === f.key;
-            const activeStyle = f.key === 'overdue' ? styles.filterChipOverdue
-              : f.key === 'paid' ? styles.filterChipPaid
-              : styles.filterChipActive;
+            const count = statusCounts[f.key] ?? 0;
+            // Chip rỗng vẫn bấm được, chỉ mờ đi — ẩn hẳn thì hàng chip nhảy chỗ mỗi lần
+            // khách trả xong một hoá đơn, bấm nhầm liên tục.
+            const empty = count === 0 && !isActive;
             return (
               <TouchableOpacity
                 key={f.key}
-                style={[styles.filterChip, isActive && activeStyle]}
+                style={[
+                  styles.filterChip,
+                  isActive && { backgroundColor: f.color, borderColor: f.color },
+                  empty && styles.filterChipEmpty,
+                ]}
                 onPress={() => setStatusFilter(f.key)}
               >
-                <Text style={[styles.filterText, isActive && styles.filterTextActive]}>{f.label}</Text>
+                <Text style={[styles.filterText, isActive && styles.filterTextActive, empty && styles.filterTextEmpty]}>
+                  {f.label}
+                </Text>
+                <Text style={[styles.filterCount, isActive && styles.filterCountActive, empty && styles.filterTextEmpty]}>
+                  {count}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      <FlatList
-        data={filtered}
+      <SectionList
+        sections={sections}
         renderItem={renderInvoice}
         keyExtractor={i => i.id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.groupHead}>
+            <Text style={styles.groupTitle}>{section.title}</Text>
+            <Text style={styles.groupCount}>{section.data.length}</Text>
+            <View style={{ flex: 1 }} />
+            {/* Chỉ nêu số CÒN NỢ. Nhóm đã trả hết ghi thẳng "Đã trả đủ" thay vì một số
+                tiền — số tiền ở đây luôn bị đọc thành "phải trả". */}
+            {section.owed > 0
+              ? <Text style={styles.groupTotal}>Còn nợ {formatCurrency(section.owed)}</Text>
+              : <Text style={styles.groupPaidOff}>✓ Đã trả đủ</Text>}
+          </View>
+        )}
         ListHeaderComponent={
           pendingCharges.length > 0 ? (
             <View style={styles.pendingChargeCard}>
@@ -363,15 +481,25 @@ export const InvoiceListScreen: React.FC = () => {
           ) : (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>
-                {statusFilter === 'paid' ? '✅' : '📄'}
+                {statusFilter === 'unpaid' || statusFilter === 'all' ? '✅' : '📄'}
               </Text>
-              <Text style={styles.emptyTitle}>Không có hóa đơn</Text>
+              {/* Câu trạng thái rỗng bám theo NHÃN chip đang chọn. Rỗng ở màn này là
+                  TIN VUI (hết nợ), không phải "không tìm thấy gì" — nên nói cho đúng. */}
+              <Text style={styles.emptyTitle}>
+                {statusFilter === 'unpaid' || statusFilter === 'all'
+                  ? 'Bạn không còn khoản nào phải trả'
+                  : 'Không có hóa đơn'}
+              </Text>
               <Text style={styles.emptyDesc}>
-                {statusFilter === 'paid'
-                  ? 'Chưa có hóa đơn nào đã thanh toán.'
-                  : statusFilter === 'unpaid'
-                    ? 'Tất cả hóa đơn đã được thanh toán.'
-                    : 'Không có hóa đơn nào phù hợp với bộ lọc này.'}
+                {statusFilter === 'unpaid' || statusFilter === 'all'
+                  ? 'Mọi hoá đơn đã thanh toán xong. Xem lại các khoản đã trả ở mục Lịch sử.'
+                  : statusFilter === 'overdue'
+                    ? 'Không có hoá đơn nào quá hạn — bạn đang đóng đúng hạn.'
+                    : statusFilter === 'partial'
+                      ? 'Không có hoá đơn nào trả dở dang.'
+                      : statusFilter === 'cancelled'
+                        ? 'Không có hoá đơn nào bị huỷ.'
+                        : 'Không có hoá đơn nào đang chờ thanh toán.'}
               </Text>
             </View>
           )
@@ -417,17 +545,19 @@ const styles = StyleSheet.create({
   summaryTotalLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
   summaryTotalValue: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 1 },
   // flexGrow: 0 — không có nó thì ScrollView ngang bị kéo giãn theo chiều dọc.
-  summaryTypesScroll: { flexGrow: 0, marginTop: Spacing.sm },
-  summaryTypes: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: Spacing.md },
-  typeChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1.5, borderColor: 'transparent',
+  // Tiêu đề nhóm "🏠 Tiền phòng" / "⚡ Điện, nước & phí khác".
+  groupHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: Spacing.lg, paddingBottom: Spacing.sm,
   },
-  typeChipActive: { borderColor: Colors.primary + '80' },
-  typeChipIcon: { fontSize: 12 },
-  typeChipLabel: { fontSize: 11, fontWeight: '700' },
-  typeChipAmount: { fontSize: 11, fontWeight: '800' },
+  groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginRight: 6 },
+  groupTotal:   { fontSize: 13, fontWeight: '800', color: Colors.textSecondary },
+  groupPaidOff: { fontSize: 12, fontWeight: '700', color: Colors.success },
+  groupCount: {
+    fontSize: 12, fontWeight: '700', color: Colors.textSecondary,
+    backgroundColor: Colors.background, borderRadius: BorderRadius.full,
+    minWidth: 22, textAlign: 'center', paddingHorizontal: 7, paddingVertical: 2,
+  },
   overduePill: {
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs,
@@ -442,19 +572,25 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.lg, paddingBottom: Spacing.xs,
   },
   filterBlockLast: { paddingBottom: Spacing.sm },
-  filterLabel: {
-    fontSize: 11, fontWeight: '700', color: Colors.textMuted,
-    width: 72, flexShrink: 0,
-  },
   filterChips: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingRight: Spacing.lg },
   filterChip: {
-    height: 32, paddingHorizontal: 14, borderRadius: BorderRadius.full,
-    justifyContent: 'center', alignItems: 'center',
+    height: 32, paddingHorizontal: 12, borderRadius: BorderRadius.full,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
-  filterChipActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterChipOverdue: { backgroundColor: Colors.error,   borderColor: Colors.error   },
-  filterChipPaid:    { backgroundColor: Colors.success, borderColor: Colors.success },
+  // Trạng thái không có hoá đơn nào: mờ đi nhưng VẪN bấm được (xem chú thích chỗ render).
+  filterChipEmpty: { opacity: 0.45 },
+  // Số đếm — nền nhạt để tách khỏi nhãn mà không cần thêm dấu ngoặc.
+  filterCount: {
+    fontSize: 11, fontWeight: '800', color: Colors.textSecondary,
+    backgroundColor: Colors.background, borderRadius: BorderRadius.full,
+    minWidth: 18, textAlign: 'center', paddingHorizontal: 5, paddingVertical: 1,
+    overflow: 'hidden',
+  },
+  filterCountActive: { color: Colors.white, backgroundColor: '#FFFFFF33' },
+  filterTextEmpty: { color: Colors.textMuted },
+  // Màu chip khi được chọn nay lấy từ `color` của từng tab (STATUS_FILTER_TABS /
+  // TYPE_FILTER_TABS) nên không còn ba style cứng cho primary/error/success.
   filterText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterTextActive: { color: Colors.white },
 

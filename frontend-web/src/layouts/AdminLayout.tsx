@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
-  Bell,
   CreditCard,
   FileText,
   FilePlus,
@@ -21,38 +20,21 @@ import {
   UserRound,
   Wrench,
   X,
+  Zap,
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
+import { NotificationBell } from '@/components/NotificationBell';
 import { maintenanceService } from '@/services/maintenance.service';
-import {
-  UnreadNotificationsProvider,
-  useUnreadNotifications,
-} from '@/contexts/UnreadNotificationsContext';
+import { UnreadNotificationsProvider } from '@/contexts/UnreadNotificationsContext';
 import { AppSidebar, type SidebarSection } from './AppSidebar';
 import { UserMenu } from './UserMenu';
 
-/**
- * Chuông + badge số chưa đọc. Tách thành component con vì hook `useUnreadNotifications`
- * phải nằm DƯỚI provider — provider bọc ở ngoài `AdminLayout` nên chính `AdminLayout`
- * gọi hook sẽ chỉ nhận giá trị mặc định (0).
+/*
+ * Provider vẫn bọc quanh layout dù chuông không còn dùng tới: trang
+ * /admin/notifications (render trong <Outlet/>) gọi `useUnreadNotifications().refresh`
+ * để badge nhảy ngay sau khi đánh dấu đã đọc. Gỡ provider thì hook rơi về context
+ * mặc định — refresh thành no-op, không lỗi gì cả nên rất khó phát hiện.
  */
-const NotificationBell = () => {
-  const { count } = useUnreadNotifications();
-  return (
-    <Link
-      to="/admin/notifications"
-      className="relative rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-      title="Thông báo"
-    >
-      <Bell className="h-4 w-4" />
-      {count > 0 && (
-        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
-          {count > 99 ? '99+' : count}
-        </span>
-      )}
-    </Link>
-  );
-};
 
 /**
  * Menu Admin Portal. Badge phải là số THẬT — trước đây đếm từ mock
@@ -84,6 +66,9 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Tài chính & Hợp đồng',
     items: [
       { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
+      // xem services/evnBill.service.ts để biết vì sao đổi.
+      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
     ],
   },
@@ -204,9 +189,15 @@ export const AdminLayout = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Chuông giờ trỏ vào Trung tâm thông báo (số thật từ API), không còn trỏ
-                nhầm sang "Nhật ký & bảo mật" như trước. */}
-            <NotificationBell />
+            {/* Trước 13/08/2026 chuông này chỉ là icon trỏ sang trang nhật ký bảo mật,
+                không đọc dữ liệu gì (chấm đỏ cũ bật theo mock AUDIT_LOGS nên luôn sáng).
+                Giờ nó là khay thông báo thật, số tự cập nhật — xem NotificationBell.
+
+                "Xem tất cả" trỏ /admin/notifications chứ không phải /admin/security:
+                khay này chỉ liệt kê bảng `notifications`, còn trang kia gộp thêm
+                `host_notifications` (nhắc việc: căn chờ duyệt giá, HĐ chờ duyệt…),
+                nên nó mới là chỗ xem đủ. Nhật ký bảo mật là việc khác. */}
+            <NotificationBell seeAllTo="/admin/notifications" accent="cyan" />
             <UserMenu
               accent="cyan"
               name={sidebarUser.name}

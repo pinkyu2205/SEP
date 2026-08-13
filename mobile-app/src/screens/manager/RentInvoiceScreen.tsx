@@ -18,7 +18,7 @@ import { realTenantService, TenantContractResponse } from '@/services/tenant/ten
 import { realManagerInvoiceService, RentInvoiceLite } from '@/services/manager/invoiceService';
 import { checkoutService } from '@/services/manager/checkoutService';
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const fmtDay = (iso: string) => iso.split('-').reverse().join('/');
 
 interface PropItem { id: number; name: string; wholeHouse: boolean }

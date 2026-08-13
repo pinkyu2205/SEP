@@ -110,8 +110,10 @@ const TicketCard: React.FC<{
         {ticket.assignedTo && (
           <Text style={s.cardAssigned} numberOfLines={1}>🔧 {ticket.assignedTo.split(' ')[0]}</Text>
         )}
-        {ticket.repairCost !== undefined && ticket.status === 'closed' && (
-          <Text style={s.cardCost}>{ticket.repairCost.toLocaleString('vi-VN')}đ</Text>
+        {/* `!== undefined` KHÔNG chắn được null — BE trả null cho phiếu chưa nhập chi phí,
+            và null lọt qua điều kiện này rồi nổ ở toLocaleString. Dùng `!= null` chắn cả hai. */}
+        {ticket.repairCost != null && ticket.status === 'closed' && (
+          <Text style={s.cardCost}>{Number(ticket.repairCost).toLocaleString('vi-VN')}đ</Text>
         )}
       </View>
 

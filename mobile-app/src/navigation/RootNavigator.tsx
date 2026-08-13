@@ -46,7 +46,6 @@ import { PaymentHistoryScreen } from '@/screens/tenant/PaymentHistoryScreen';
 import { TenantOnboardingScreen } from '@/screens/tenant/TenantOnboardingScreen';
 import { TenantNotificationScreen } from '@/screens/tenant/TenantNotificationScreen';
 import { ScanScreen } from '@/screens/tenant/ScanScreen';
-import { InvoiceHistoryScreen } from '@/screens/tenant/InvoiceHistoryScreen';
 import { MaintenanceHistoryScreen } from '@/screens/tenant/MaintenanceHistoryScreen';
 import { InvoiceDetailScreen } from '@/screens/tenant/InvoiceDetailScreen';
 import { PaymentHistoryDetailScreen } from '@/screens/tenant/PaymentHistoryDetailScreen';
@@ -187,11 +186,10 @@ export const RootNavigator: React.FC = () => {
               component={ProfileScreen}
               options={{ animation: 'slide_from_right' }}
             />
-            <Stack.Screen
-              name="InvoiceHistory"
-              component={InvoiceHistoryScreen}
-              options={{ animation: 'slide_from_right' }}
-            />
+            {/* Route "InvoiceHistory" ĐÃ BỎ 13/08/2026 — nó mở một màn lịch sử riêng
+                trùng nội dung với "PaymentHistory" (màn kia là tập cha: có đủ mọi loại
+                khoản, gom theo tháng, lọc được cả tiền cọc). Nay nút "Lịch sử" trong màn
+                Hoá đơn và ô "Lịch sử TT" ngoài Thao tác nhanh cùng trỏ về PaymentHistory. */}
             <Stack.Screen
               name="MaintenanceHistory"
               component={MaintenanceHistoryScreen}

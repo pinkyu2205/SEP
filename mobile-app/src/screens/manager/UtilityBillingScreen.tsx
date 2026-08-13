@@ -11,30 +11,30 @@ import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  UTILITY_CYCLE, UTILITY_WINDOW_TEXT, isUtilityWindowOpen,
-  utilityWindowDaysLeft, utilityWindowReason,
+  UTILITY_WINDOW_TEXT, alreadySentReason, currentPeriod,
 } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realPropertyService } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
+import { managerEvnBillService, evnUnitPrice, type EvnBill } from '@/services/manager/evnBillService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '@/components/common';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';
-type ElecStep = 'select_property' | 'evn_upload' | 'room_readings' | 'review' | 'done';
+/**
+ * `evn_bill` = XEM hoá đơn EVN admin đã phát hành (trước 13/08/2026 là `evn_upload`,
+ * manager tự chụp/nhập). Nhà nguyên căn kết thúc luôn ở bước này.
+ */
+type ElecStep = 'select_property' | 'evn_bill' | 'room_readings' | 'review' | 'done';
 type WaterStep = 'bill_entry' | 'room_readings' | 'review' | 'done';
 
-interface EVNData {
-  totalKwh: number;
-  totalAmount: number;
-  billingPeriod: string;
-  imageUploaded: boolean;
-}
-
-/** Ảnh sắp chụp dùng cho việc gì: hoá đơn EVN hay mặt đồng hồ điện của 1 phòng. */
-type CameraTarget = { kind: 'evn' } | { kind: 'meter'; roomId: string };
+/**
+ * Ảnh sắp chụp: chỉ còn mặt đồng hồ điện của 1 phòng.
+ * Ảnh hoá đơn EVN đã chuyển sang admin tải trên web (`/admin/evn-bills`).
+ */
+type CameraTarget = { kind: 'meter'; roomId: string };
 
 /** Chỉ số cũ lấy từ đâu: hoá đơn kỳ trước (kỳ 2+) hay lúc đón khách (kỳ 1). */
 type PrevReadingSource = 'last_invoice' | 'handover';
@@ -109,7 +109,13 @@ interface BillingProperty {
 
 const ROOM_STATUS_RENTED = 'RENTED';
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+// Chịu được null/undefined: số tiền ở đây đến từ BE (hoá đơn EVN admin đẩy, hoá đơn đã
+// phát hành) nên không đảm bảo là số — cùng lỗi đã làm ngã màn Lịch sử hoá đơn của khách
+// thuê ngày 13/08/2026. Xem `formatCurrency` trong @/utils/helpers.
+const fmt = (n: number | null | undefined) => {
+  const v = Number(n);
+  return (Number.isFinite(v) ? v : 0).toLocaleString('vi-VN') + 'đ';
+};
 const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
 /**
  * Cho gõ CHỈ SỐ đồng hồ có phần thập phân ("3081.5") — khác `onlyDigits` vốn xoá sạch
@@ -153,66 +159,16 @@ const normalizeVi = (s: string) =>
     .toLowerCase()
     .trim();
 
-// Ngưỡng lọc số vô lý khi đọc hoá đơn (số bảng kê, mã số thuế, năm... hay bị OCR trộn vào).
-const MAX_PLAUSIBLE_KWH = 100_000;
-
 /**
- * Đọc best-effort hoá đơn EVN từ kết quả OCR (endpoint /ocr/meter trả rawText + numbers).
- * EVN tính điện bậc thang nên KHÔNG có đơn giá sẵn → chỉ lấy Tổng kWh, Tổng tiền, Kỳ.
- * Luôn cần manager xác nhận lại (BE chưa có parser hoá đơn riêng — xem doc/ gap #8).
+ * Parser hoá đơn EVN ĐÃ CHUYỂN SANG WEB (13/08/2026).
  *
- * Dò nhãn trên bản BỎ DẤU vì nhiều OCR trả tiếng Việt mất dấu; chữ số không đổi khi bỏ dấu
- * nên vẫn lấy đúng giá trị.
+ * Người tải hoá đơn giờ là admin trên `/admin/evn-bills`, nên logic OCR + dò tổng kWh /
+ * tổng tiền / kỳ nằm ở `frontend-web/src/utils/evnInvoiceParser.ts`. Manager chỉ ĐỌC kết
+ * quả admin đã chốt qua `managerEvnBillService` — cố tình không còn đường nhập tay ở đây,
+ * vì cho manager nhập lại chính là thứ thay đổi này loại bỏ.
+ *
+ * OCR ảnh ĐỒNG HỒ (`realTenantService.ocrMeter`) thì GIỮ NGUYÊN — đó vẫn là việc của manager.
  */
-const parseEvnInvoice = (
-  ocr: { reading?: string; numbers?: string[]; rawText?: string },
-): { totalKwh: string; totalAmount: string; billingPeriod: string } => {
-  const flat = normalizeVi((ocr.rawText || '').replace(/\s+/g, ' '));
-  const out = { totalKwh: '', totalAmount: '', billingPeriod: '' };
-
-  // ── Kỳ hoá đơn: "tu 07/04/2022 den 06/05/2022", hoặc fallback "thang 5/2022" ──
-  const range = flat.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:den|-|–|~)\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
-  if (range) out.billingPeriod = `${range[1]} – ${range[2]}`;
-  else {
-    const m = flat.match(/thang\s*(\d{1,2})\s*\/\s*(\d{4})/);
-    if (m) out.billingPeriod = `Tháng ${m[1]}/${m[2]}`;
-  }
-
-  // ── Tổng tiền: ưu tiên dòng "tổng cộng tiền thanh toán" / "total payment" ──
-  const amt =
-    flat.match(/tong cong tien thanh toan[^\d]*([\d.,]+)/) ||
-    flat.match(/total payment[^\d]*([\d.,]+)/) ||
-    flat.match(/tong cong[^\d]*([\d.,]+)/) ||
-    flat.match(/cong tien hang[^\d]*([\d.,]+)/);
-  if (amt) out.totalAmount = onlyDigits(amt[1]);
-
-  if (!out.totalAmount && ocr.numbers?.length) {
-    // Fallback: chỉ tin số có dấu phân cách nghìn ("399.585"). Loại được số bảng kê /
-    // mã số thuế viết liền (11818865) vốn hay lớn hơn cả tổng tiền.
-    const moneyLike = ocr.numbers
-      .filter(n => /\d{1,3}([.,]\d{3})+/.test(n))
-      .map(n => Number(onlyDigits(n)))
-      .filter(n => n > 0);
-    if (moneyLike.length) out.totalAmount = String(Math.max(...moneyLike));
-  }
-
-  // ── Tổng kWh ──
-  // Xoá ngày tháng TRƯỚC khi dò, nếu không "2022" trong "06/05/2022 kWh" bị đọc thành số kWh
-  // → đơn giá sai cả chục lần. Sau đó ưu tiên "kwh <số>" (cột ĐVT rồi tới cột Số lượng).
-  const noDates = flat
-    .replace(/\d{1,2}\/\d{1,2}\/\d{4}/g, ' ')
-    .replace(/\d{1,2}\/\d{4}/g, ' ');
-  const kwh =
-    noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/) ||
-    noDates.match(/([\d.,]+)\s*kwh/) ||
-    noDates.match(/tieu thu[^\d]*?([\d.,]+)/);
-  if (kwh) {
-    const n = Number(onlyDigits(kwh[1]));
-    if (n > 0 && n <= MAX_PLAUSIBLE_KWH) out.totalKwh = String(n);
-  }
-
-  return out;
-};
 
 // Map property + rooms + hợp đồng (BE) -> shape màn ghi chỉ số dùng.
 const mapBillingProperty = (
@@ -283,27 +239,25 @@ const mapBillingProperty = (
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState<MainTab>('electricity');
-  // Cửa sổ chốt sổ: chỉ gửi hoá đơn điện/nước được trong ngày 1–10 hằng tháng,
-  // để mọi nhà chốt cùng một kỳ (xem @/constants/utilityCycle).
-  const windowOpen = isUtilityWindowOpen();
-  const windowClosedReason = utilityWindowReason();
-  const daysLeft = utilityWindowDaysLeft();
   /**
-   * Chặn gửi hoá đơn khi: (1) ngoài cửa sổ ngày 1–10, hoặc (2) kỳ này đã thu đủ.
+   * Chặn gửi hoá đơn khi KHÁCH ĐÓ đã nhận hoá đơn loại này trong kỳ.
    * Trả true = bị chặn. Luôn nói rõ lý do thay vì để nút im lặng.
+   *
+   * 13/08/2026: khoá theo NGÀY (cửa sổ 1–10) đã bỏ — gửi được mọi ngày. Thay bằng khoá
+   * theo SỐ LẦN: 1 khách / 1 loại / 1 kỳ. Xem @/constants/utilityCycle.
+   *
+   * Khác chỗ cũ ở một điểm quan trọng: chốt cũ chỉ chặn khi khách đã trả ĐỦ tiền, nên
+   * trước lúc khách trả thì manager vẫn bấm gửi lại được bao nhiêu lần cũng được. Giờ
+   * cứ ĐÃ GỬI là khoá, không quan tâm đã thu tiền hay chưa.
    */
-  const blockedFromSending = (type: 'ELECTRICITY' | 'WATER') => {
-    if (!windowOpen) {
-      showAlert('Đã chốt sổ kỳ này', windowClosedReason ?? UTILITY_WINDOW_TEXT);
-      return true;
-    }
-    const settled = type === 'ELECTRICITY' ? elecSettled : waterSettled;
-    if (settled) {
-      showAlert(
-        'Kỳ này đã chốt xong',
-        `Khách đã thanh toán đủ hoá đơn ${type === 'ELECTRICITY' ? 'điện' : 'nước'} của kỳ này. `
-        + 'Hệ thống khoá gửi lại để tránh trùng hoá đơn — sẽ mở lại vào kỳ thanh toán tháng sau.',
-      );
+  const blockedFromSending = (
+    type: 'ELECTRICITY' | 'WATER',
+    roomKey: string,
+    target: string,
+  ) => {
+    const sentKeys = type === 'ELECTRICITY' ? elecSentKeys : waterSentKeys;
+    if (sentKeys.has(roomKey)) {
+      showAlert('Kỳ này đã gửi rồi', alreadySentReason(type, target), undefined, '🔒');
       return true;
     }
     return false;
@@ -316,16 +270,29 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   // ── Electricity state ──────────────────────────────────────────────────────
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const [evnData,            setEvnData]            = useState<EVNData | null>(null);
   const [elecStep,           setElecStep]           = useState<ElecStep>('select_property');
   const [roomElecReadings,   setRoomElecReadings]   = useState<RoomMeterReading[]>([]);
-  const [editingEvn,         setEditingEvn]         = useState(false);
-  const [evnEditForm,        setEvnEditForm]        = useState({ totalKwh: '', totalAmount: '', billingPeriod: '' });
-  const [evnImageUrl,        setEvnImageUrl]        = useState('');           // ảnh hoá đơn EVN
-  const [evnScanning,        setEvnScanning]        = useState(false);        // đang upload + OCR hoá đơn
   const [ocrRoomId,          setOcrRoomId]          = useState<string | null>(null); // phòng đang OCR đồng hồ
   /** Đang mở camera trong app cho việc gì (null = đóng). */
   const [cameraTarget,       setCameraTarget]       = useState<CameraTarget | null>(null);
+
+  /**
+   * Hoá đơn EVN của kỳ này do ADMIN phát hành (chỉ đọc). null = admin chưa đẩy.
+   * Trước 13/08/2026 đây là `evnData` do chính manager chụp/nhập — xem evnBillService.
+   */
+  const [evnBill,        setEvnBill]        = useState<EvnBill | null>(null);
+  const [evnBillLoading, setEvnBillLoading] = useState(false);
+  const [evnBillError,   setEvnBillError]   = useState<string | null>(null);
+  /** Đang gửi hoá đơn nhà nguyên căn (nút gửi thẳng ở bước 2). */
+  const [sendingWholeHouse, setSendingWholeHouse] = useState(false);
+
+  /**
+   * Khoá "1 khách 1 hoá đơn/kỳ": tập khoá phòng ĐÃ nhận hoá đơn của kỳ đang chốt.
+   * Khoá phòng = roomId dạng chuỗi; nhà nguyên căn dùng `house-<propId>-unit`.
+   * Nạp từ BE mỗi lần vào bước ghi chỉ số nên khoá còn hiệu lực qua cả lần mở app khác.
+   */
+  const [elecSentKeys,  setElecSentKeys]  = useState<Set<string>>(new Set());
+  const [waterSentKeys, setWaterSentKeys] = useState<Set<string>>(new Set());
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
@@ -382,37 +349,26 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const waterProperty    = properties.find(p => p.id === waterPropertyId);
   const isWholeHouse     = selectedProperty?.type === 'whole_house';
 
-  // ── Khoá theo kỳ ───────────────────────────────────────────────────────────
-  // Kỳ đã gửi hoá đơn VÀ khách đã thanh toán hết → chốt sổ, không gửi lại được.
-  // Mở lại khi sang kỳ sau (tháng mới → chưa có hoá đơn nào của kỳ đó).
-  const periodSettled = useCallback((propId: string | null, type: 'ELECTRICITY' | 'WATER') => {
-    if (!propId) return false;
-    const now = new Date();
-    const list = histInvoices.filter(i =>
-      i.type === type
-      && i.propertyId === Number(propId)
-      && i.month === now.getMonth() + 1
-      && i.year === now.getFullYear());
-    return list.length > 0 && list.every(i => (i.status || '').toUpperCase() === 'PAID');
-  }, [histInvoices]);
-
-  const elecSettled  = periodSettled(selectedPropertyId, 'ELECTRICITY');
-  const waterSettled = periodSettled(waterPropertyId, 'WATER');
-  const canSendElec  = windowOpen && !elecSettled;
-  const canSendWater = windowOpen && !waterSettled;
-
   /**
-   * CHỈ SỐ CŨ CỦA KỲ ĐANG CHỐT = chỉ số MỚI của kỳ liền trước.
+   * CHỈ SỐ CŨ CỦA KỲ ĐANG CHỐT = chỉ số MỚI của kỳ liền trước, VÀ phòng nào đã gửi kỳ này.
    *
-   * Kỳ 1 (phòng chưa có hoá đơn điện/nước nào) mới lấy mốc ghi lúc đón khách; kỳ 2 lấy
-   * số cuối kỳ 1, kỳ 3 lấy số cuối kỳ 2... Trả map roomId(string) → chỉ số mới gần nhất;
-   * phòng không có trong map nghĩa là chưa từng chốt kỳ nào.
+   * Hai thứ này lấy từ cùng một lần gọi API nên gộp làm một:
+   *  • `lastReadings` — kỳ 1 (phòng chưa có hoá đơn nào) lấy mốc ghi lúc đón khách; kỳ 2
+   *    lấy số cuối kỳ 1, kỳ 3 lấy số cuối kỳ 2...
+   *  • `sentKeys` — phòng đã có hoá đơn CÙNG `billingPeriod` với kỳ đang chốt. Đây là cái
+   *    chặn gửi trùng; so bằng chuỗi kỳ chứ không bằng tháng tạo, vì hoá đơn kỳ tháng 7
+   *    hoàn toàn có thể được gửi trong tháng 8.
+   *
+   * Khoá phòng: roomId dạng chuỗi, nhà nguyên căn dùng `house-<propId>-unit`.
    */
-  const fetchLastReadings = async (
+  const fetchRoomHistory = async (
     propId: string,
     type: 'ELECTRICITY' | 'WATER',
-  ): Promise<Map<string, number>> => {
-    const result = new Map<string, number>();
+    period?: string,
+  ): Promise<{ lastReadings: Map<string, number>; sentKeys: Set<string> }> => {
+    const lastReadings = new Map<string, number>();
+    const sentKeys = new Set<string>();
+    const wanted = (period || '').trim();
     try {
       const invoices = await realManagerInvoiceService.listUtilityInvoices(Number(propId), { type });
       // Mới nhất trước, để phần tử đầu tiên của mỗi phòng là kỳ gần nhất.
@@ -422,15 +378,20 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         return tb - ta || (b.id ?? 0) - (a.id ?? 0);
       });
       for (const inv of sorted) {
-        if (inv.newReading == null) continue;
         // Nhà nguyên căn không có roomId → khớp theo phần tử phòng duy nhất của nhà đó.
         const key = inv.roomId != null ? String(inv.roomId) : `house-${propId}-unit`;
-        if (!result.has(key)) result.set(key, Number(inv.newReading));
+        if (inv.newReading != null && !lastReadings.has(key)) {
+          lastReadings.set(key, Number(inv.newReading));
+        }
+        // Hoá đơn đã huỷ không tính là "đã gửi" — huỷ xong phải gửi lại được.
+        const cancelled = (inv.status || '').toUpperCase() === 'CANCELLED';
+        if (wanted && !cancelled && (inv.billingPeriod || '').trim() === wanted) sentKeys.add(key);
       }
     } catch {
       // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
+      // Cố tình KHÔNG chặn gửi khi lỗi mạng: chặn nhầm còn tệ hơn, vì BE vẫn chặn trùng.
     }
-    return result;
+    return { lastReadings, sentKeys };
   };
 
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
@@ -462,91 +423,57 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   /** Ảnh đã chọn/đã chụp xong thì đưa về đúng chỗ xử lý. */
   const handlePhoto = async (target: CameraTarget, uri: string) => {
-    if (target.kind === 'evn') await scanEvnInvoice(uri);
-    else await captureRoomMeter(target.roomId, uri);
+    await captureRoomMeter(target.roomId, uri);
   };
 
-  // ── EVN helpers ────────────────────────────────────────────────────────────
-  // Tải/chụp hoá đơn EVN -> OCR best-effort -> tự điền form để manager xác nhận.
-  const scanEvnInvoice = async (uri: string) => {
+  // ── Hoá đơn EVN (admin phát hành) ──────────────────────────────────────────
+  /**
+   * Vào bước 2: lấy hoá đơn EVN kỳ này admin đã đẩy + lịch sử chỉ số của nhà.
+   *
+   * Không tìm thấy hoá đơn KHÔNG phải lỗi — nghĩa là admin chưa tải lên. Màn hình hiện
+   * trạng thái chờ; manager cố tình không có đường nhập tay thay admin.
+   *
+   * Nạp lịch sử ngay tại đây (chứ không đợi sang bước 3) vì nhà NGUYÊN CĂN gửi thẳng ở
+   * bước này, vẫn cần chỉ số cũ để ghi vào hoá đơn và cần biết kỳ này đã gửi chưa.
+   */
+  const enterEvnStep = async (propId: string) => {
+    setElecStep('evn_bill');
+    setEvnBillLoading(true);
+    setEvnBillError(null);
+    setEvnBill(null);
+
+    const { month, year } = currentPeriod();
+    let bill: EvnBill | null = null;
     try {
-      setEvnScanning(true);
-      const url = await uploadImageToCloudinary(uri);
-      setEvnImageUrl(url);
-
-      let parsed = { totalKwh: '', totalAmount: '', billingPeriod: '' };
-      // Khi không đọc được, phải phân biệt được 3 nguyên nhân (API lỗi / OCR trả rỗng /
-      // parser không khớp) — nếu không thì mọi trường hợp đều ra cùng một thông báo vô dụng.
-      let diag = '';
-      try {
-        // Dùng /ocr/evn-bill (isTable=true, đọc bảng hoá đơn) chứ KHÔNG phải /ocr/meter
-        // vốn dành cho ảnh đồng hồ.
-        const ocr = await realTenantService.ocrEvnBill(url);
-        const rawLen = (ocr?.rawText || '').length;
-        if (__DEV__) console.log('[EVN OCR] response:', JSON.stringify(ocr));
-
-        // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên với
-        // dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Chỉ dùng số của BE để bù ô còn trống.
-        parsed = parseEvnInvoice(ocr);
-        const beKwh = Number(ocr?.totalKwh ?? 0);
-        const beAmt = Number(ocr?.totalAmount ?? 0);
-        if (!parsed.totalKwh && beKwh > 0 && beKwh <= MAX_PLAUSIBLE_KWH) parsed.totalKwh = String(beKwh);
-        if (!parsed.totalAmount && beAmt > 0) parsed.totalAmount = String(beAmt);
-        if (!parsed.billingPeriod && ocr?.billingPeriod) parsed.billingPeriod = ocr.billingPeriod;
-
-        if (__DEV__) console.log('[EVN OCR] parsed:', parsed);
-        diag = rawLen === 0
-          ? 'OCR chạy xong nhưng không trả về chữ nào (rawText rỗng) → engine OCR bên BE không đọc được ảnh này.'
-          : `OCR đọc được ${rawLen} ký tự nhưng không khớp mẫu hoá đơn EVN (xem log [EVN OCR] trong terminal).`;
-      } catch (err: any) {
-        const status = err?.response?.status;
-        diag = `Gọi API OCR lỗi${status ? ` (HTTP ${status})` : ''}: ${
-          err?.response?.data?.message || err?.message || 'không rõ'
-        }`;
-        if (__DEV__) console.warn('[EVN OCR] lỗi:', diag, err);
-      }
-
-      setEvnEditForm(parsed);
-      setEvnData({
-        totalKwh: Number(parsed.totalKwh) || 0,
-        totalAmount: Number(parsed.totalAmount) || 0,
-        billingPeriod: parsed.billingPeriod,
-        imageUploaded: true,
-      });
-      setEditingEvn(true); // luôn mở form để manager kiểm tra/sửa
-      const got = parsed.totalKwh || parsed.totalAmount || parsed.billingPeriod;
-      showAlert(
-        got ? 'Đã quét hoá đơn' : 'Đã tải hoá đơn',
-        got
-          ? 'Hệ thống đã đọc sơ bộ. Vui lòng KIỂM TRA và sửa lại tổng kWh / tổng tiền / kỳ cho đúng hoá đơn.'
-          : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay tổng kWh, tổng tiền và kỳ thanh toán.'
-            + (__DEV__ && diag ? `\n\n[DEV] ${diag}` : ''),
+      bill = await managerEvnBillService.getForPeriod(Number(propId), month, year);
+      setEvnBill(bill);
+    } catch (e: any) {
+      setEvnBillError(
+        e?.response?.data?.message
+          || e?.message
+          || 'Không tải được hoá đơn điện của kỳ này.',
       );
-    } catch {
-      showAlert('Lỗi', 'Không tải/đọc được ảnh hoá đơn. Bạn có thể nhập tay số liệu.');
     } finally {
-      setEvnScanning(false);
+      setEvnBillLoading(false);
     }
-  };
 
-  // Xoá ảnh hoá đơn EVN đã tải nhầm/chụp mờ + số liệu OCR đọc từ nó, đưa bước 2 về trạng thái đầu.
-  // (Alert nhiều nút không chạy callback trên web — xoá thẳng như chooseImageSource đang làm.)
-  const clearEvnImage = () => {
-    const doClear = () => {
-      setEvnImageUrl('');
-      setEvnData(null);
-      setEvnEditForm({ totalKwh: '', totalAmount: '', billingPeriod: '' });
-      setEditingEvn(false);
-    };
-    if (Platform.OS === 'web') { doClear(); return; }
-    showAlert(
-      'Xoá ảnh hoá đơn EVN?',
-      'Ảnh và số liệu đã nhận diện (kWh, tổng tiền, kỳ) sẽ bị xoá. Bạn có thể tải/chụp lại ảnh khác.',
-      [
-        { text: 'Huỷ', style: 'cancel' },
-        { text: 'Xoá', style: 'destructive', onPress: doClear },
-      ],
+    const prop = properties.find(p => p.id === propId);
+    const { lastReadings, sentKeys } = await fetchRoomHistory(
+      propId, 'ELECTRICITY', bill?.billingPeriod,
     );
+    setElecSentKeys(sentKeys);
+    if (prop) {
+      setRoomElecReadings(prop.rooms.map(r => ({
+        roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
+        // Kỳ 2 trở đi: chỉ số cũ = chỉ số MỚI của kỳ liền trước. Kỳ 1 (chưa có hoá đơn
+        // nào) mới rơi về mốc ghi lúc đón khách.
+        prevReading: lastReadings.get(r.id) ?? r.prevElec,
+        prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
+        newReading: '', hasPhoto: false,
+        // Phòng đã nhận hoá đơn kỳ này (từ lần mở app trước) hiện luôn trạng thái đã gửi.
+        sent: sentKeys.has(r.id),
+      })));
+    }
   };
 
   // Xoá ảnh đồng hồ của 1 phòng. Giữ nguyên chỉ số đã nhập vì manager có thể nhập tay
@@ -567,31 +494,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     );
   };
 
-  const saveEvnEdit = () => {
-    const kwh = Number(onlyDigits(evnEditForm.totalKwh));
-    const amt = Number(onlyDigits(evnEditForm.totalAmount));
-    if (!kwh || !amt || !evnEditForm.billingPeriod.trim()) {
-      showAlert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn EVN.');
-      return;
-    }
-    setEvnData({ totalKwh: kwh, totalAmount: amt, billingPeriod: evnEditForm.billingPeriod, imageUploaded: true });
-    setEditingEvn(false);
-  };
-
-  const initRoomElecReadings = async (propId: string) => {
-    const prop = properties.find(p => p.id === propId);
-    if (!prop) return;
-    const lastReadings = await fetchLastReadings(propId, 'ELECTRICITY');
-    setRoomElecReadings(prop.rooms.map(r => ({
-      roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
-      // Kỳ 2 trở đi: chỉ số cũ = chỉ số MỚI của kỳ liền trước. Kỳ 1 (chưa có hoá đơn
-      // nào) mới rơi về mốc ghi lúc đón khách.
-      prevReading: lastReadings.get(r.id) ?? r.prevElec,
-      prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
-      newReading: '', hasPhoto: false, sent: false,
-    })));
-    setElecStep('room_readings');
-  };
+  // Chỉ số + trạng thái đã nạp sẵn ở `enterEvnStep`, đây chỉ là chuyển bước.
+  const goToRoomReadings = () => setElecStep('room_readings');
 
   /**
    * Chụp/chọn ảnh đồng hồ điện 1 phòng -> upload + OCR -> tự điền chỉ số mới.
@@ -654,34 +558,36 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const updateRoomElec = (roomId: string, patch: Partial<RoomMeterReading>) =>
     setRoomElecReadings(prev => prev.map(r => (r.roomId === roomId ? { ...r, ...patch } : r)));
 
+  /** Đơn giá 1 kWh admin đã chốt cho kỳ này. 0 khi chưa có hoá đơn EVN. */
+  const elecUnitPrice = evnBill ? evnUnitPrice(evnBill) : 0;
+
   // Gửi hóa đơn ĐIỆN (riêng) cho 1 phòng cụ thể (multi-room)
   const sendSingleRoomElec = async (roomId: string) => {
-    if (blockedFromSending('ELECTRICITY')) return;
-    if (!evnData || !selectedProperty) return;
+    if (!evnBill || !selectedProperty) return;
     const room = roomElecReadings.find(r => r.roomId === roomId);
     if (!room) return;
+    if (blockedFromSending('ELECTRICITY', room.roomId, `Phòng ${room.roomCode} (${room.tenantName})`)) return;
     const newVal = Number(room.newReading);
     if (!newVal || newVal <= room.prevReading) {
       showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
-    // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
-    const feePerKwh   = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
     const consumption = roundConsumptionByMentorRule(Math.max(newVal - room.prevReading, 0));
-    const fee         = Math.round(consumption * feePerKwh);
+    const fee         = Math.round(consumption * elecUnitPrice);
 
     try {
       await realManagerInvoiceService.createRoomUtilityInvoice(
         Number(selectedProperty.id), Number(room.roomId),
         {
-          type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+          type: 'ELECTRICITY', billingPeriod: evnBill.billingPeriod,
           prevReading: room.prevReading, newReading: newVal, consumption,
-          unitPrice: Math.round(feePerKwh), amount: fee, meterImageUrl: room.meterImageUrl,
+          unitPrice: elecUnitPrice, amount: fee, meterImageUrl: room.meterImageUrl,
         },
       );
       setRoomElecReadings(prev => prev.map(r =>
         r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r,
       ));
+      setElecSentKeys(prev => new Set(prev).add(room.roomId));
       setUtilReloadKey(k => k + 1);
       showAlert('Đã gửi', `Hóa đơn điện phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
     } catch (e: any) {
@@ -691,43 +597,44 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   // Gửi hóa đơn ĐIỆN (riêng) cho tất cả phòng chưa gửi (multi-room)
   const sendAllUnsent = async () => {
-    if (blockedFromSending('ELECTRICITY')) return;
-    if (!evnData || !selectedProperty) return;
-    const unsent = roomElecReadings.filter(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading);
+    if (!evnBill || !selectedProperty) return;
+    // Lọc cả `sent` (trong phiên) lẫn `elecSentKeys` (kỳ này đã gửi từ lần trước) để
+    // không phòng nào nhận hoá đơn thứ hai của cùng một kỳ.
+    const unsent = roomElecReadings.filter(r =>
+      !r.sent && !elecSentKeys.has(r.roomId)
+      && r.newReading && Number(r.newReading) > r.prevReading);
     if (!unsent.length) { showAlert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
 
-    // Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh ghi trên hoá đơn nhà nước.
-    const feePerKwh = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
     const now = new Date().toISOString().split('T')[0];
 
     try {
       await Promise.all(unsent.map(r => {
         const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
-        const fee = Math.round(consumption * feePerKwh);
+        const fee = Math.round(consumption * elecUnitPrice);
         return realManagerInvoiceService.createRoomUtilityInvoice(
           Number(selectedProperty.id), Number(r.roomId),
           {
-            type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+            type: 'ELECTRICITY', billingPeriod: evnBill.billingPeriod,
             prevReading: r.prevReading, newReading: Number(r.newReading), consumption,
-            unitPrice: Math.round(feePerKwh), amount: fee, meterImageUrl: r.meterImageUrl,
+            unitPrice: elecUnitPrice, amount: fee, meterImageUrl: r.meterImageUrl,
           },
         );
       }));
 
+      const sentIds = new Set(unsent.map(r => r.roomId));
       let total = 0;
       setRoomElecReadings(prev => prev.map(r => {
-        if (!r.sent && r.newReading && Number(r.newReading) > r.prevReading) {
-          const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
-          const fee = Math.round(consumption * feePerKwh);
-          total += fee;
-          return { ...r, consumption, fee, sent: true };
-        }
-        return r;
+        if (!sentIds.has(r.roomId)) return r;
+        const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
+        const fee = Math.round(consumption * elecUnitPrice);
+        total += fee;
+        return { ...r, consumption, fee, sent: true };
       }));
+      setElecSentKeys(prev => new Set([...prev, ...sentIds]));
 
       setHistoryEntries(prev => [{
         id: `he-${Date.now()}`, type: 'electricity',
-        propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
+        propertyName: selectedProperty.name, billingPeriod: evnBill.billingPeriod,
         totalAmount: total, roomCount: unsent.length, sentAt: now,
       }, ...prev]);
 
@@ -739,48 +646,67 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
-  // Gửi hóa đơn ĐIỆN (riêng) cho nhà nguyên căn (whole_house)
+  /**
+   * Gửi hóa đơn ĐIỆN cho nhà NGUYÊN CĂN — gửi thẳng, KHÔNG cần chụp đồng hồ.
+   *
+   * Cả căn nhà chỉ có một khách, và hoá đơn EVN admin đẩy xuống đã là hoá đơn của đúng
+   * căn đó: tiền phải thu = đúng tổng tiền EVN, số điện tiêu thụ = đúng tổng kWh EVN.
+   * Bắt manager leo lên chụp đồng hồ chỉ để chép lại con số đã biết là việc thừa —
+   * đó là lý do bước 3 bị bỏ cho nhà nguyên căn từ 13/08/2026.
+   *
+   * Chỉ số ghi vào hoá đơn vẫn liên tục để kỳ sau còn mốc: newReading = chỉ số cũ + tổng
+   * kWh của kỳ. (Nhà theo phòng thì ngược lại — vẫn phải chụp từng đồng hồ, vì đơn giá
+   * dùng chung nhưng mỗi phòng tiêu thụ khác nhau.)
+   */
   const sendWholeHouseElec = async () => {
-    if (blockedFromSending('ELECTRICITY')) return;
-    if (!evnData || !selectedProperty) return;
+    if (!evnBill || !selectedProperty) return;
     const unit = roomElecReadings[0];
     if (!unit) return;
-    const newVal = Number(unit.newReading);
-    if (!newVal || newVal <= unit.prevReading) {
-      showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
-      return;
-    }
-    const consumption = roundConsumptionByMentorRule(newVal - unit.prevReading);
-    const fee = Math.round(evnData.totalAmount); // nhà nguyên căn trả toàn bộ tiền EVN
+    if (blockedFromSending('ELECTRICITY', unit.roomId, unit.tenantName)) return;
+
+    const consumption = evnBill.totalKwh;
+    const fee         = Math.round(evnBill.totalAmount); // nguyên căn trả toàn bộ tiền EVN
+    const newVal      = unit.prevReading + consumption;
     const now = new Date().toISOString().split('T')[0];
 
+    setSendingWholeHouse(true);
     try {
       await realManagerInvoiceService.createPropertyUtilityInvoice(
         Number(selectedProperty.id),
         {
-          type: 'ELECTRICITY', billingPeriod: evnData.billingPeriod,
+          type: 'ELECTRICITY', billingPeriod: evnBill.billingPeriod,
           prevReading: unit.prevReading, newReading: newVal, consumption,
-          unitPrice: consumption > 0 ? Math.round(fee / consumption) : 0,
-          amount: fee, meterImageUrl: unit.meterImageUrl,
+          unitPrice: elecUnitPrice, amount: fee,
+          // Ảnh gửi kèm là ẢNH HOÁ ĐƠN EVN của admin, không phải ảnh đồng hồ —
+          // đó mới là căn cứ khách đối chiếu được với bên điện lực.
+          meterImageUrl: evnBill.imageUrl ?? undefined,
         },
       );
+      setElecSentKeys(prev => new Set(prev).add(unit.roomId));
+      setRoomElecReadings(prev => prev.map(r =>
+        r.roomId === unit.roomId ? { ...r, consumption, fee, sent: true } : r));
       setHistoryEntries(prev => [{
         id: `he-${Date.now()}`, type: 'electricity',
-        propertyName: selectedProperty.name, billingPeriod: evnData.billingPeriod,
+        propertyName: selectedProperty.name, billingPeriod: evnBill.billingPeriod,
         totalAmount: fee, roomCount: 1, sentAt: now,
       }, ...prev]);
       setUtilReloadKey(k => k + 1);
       setElecStep('done');
     } catch (e: any) {
       showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
+    } finally {
+      setSendingWholeHouse(false);
     }
   };
 
   // ── Water helpers ──────────────────────────────────────────────────────────
-  const initRoomWaterReadings = async (propId: string) => {
+  // Nước KHÔNG đổi luồng (13/08/2026): manager vẫn tự nhập hoá đơn nước của cả nhà rồi
+  // chia theo chỉ số từng phòng. Chỉ thêm khoá "1 khách 1 hoá đơn/kỳ" như bên điện.
+  const initRoomWaterReadings = async (propId: string, period: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
-    const lastReadings = await fetchLastReadings(propId, 'WATER');
+    const { lastReadings, sentKeys } = await fetchRoomHistory(propId, 'WATER', period);
+    setWaterSentKeys(sentKeys);
     setRoomWaterReadings(prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
       prevReading: lastReadings.get(r.id) ?? r.prevWater,
@@ -798,7 +724,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       return;
     }
     setWaterBillData({ totalAmount: amt, billingPeriod: waterBillForm.billingPeriod, pricePerM3: price });
-    if (waterPropertyId) initRoomWaterReadings(waterPropertyId);
+    if (waterPropertyId) initRoomWaterReadings(waterPropertyId, waterBillForm.billingPeriod);
   };
 
   const calculateWaterFees = () => {
@@ -814,14 +740,27 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const sendWaterInvoices = async () => {
-    if (blockedFromSending('WATER')) return;
     if (!waterBillData || !waterProperty) return;
     const now = new Date().toISOString().split('T')[0];
     const period = waterBillData.billingPeriod;
     const price  = waterBillData.pricePerM3;
+
+    // Bỏ qua phòng đã nhận hoá đơn nước của kỳ này; hết sạch thì báo rõ chứ đừng gọi API
+    // rỗng rồi hiện màn "đã gửi" như chưa có chuyện gì.
+    const pending = roomWaterReadings.filter(r => !waterSentKeys.has(r.roomId));
+    if (!pending.length) {
+      showAlert(
+        'Kỳ này đã gửi rồi',
+        alreadySentReason('WATER', 'Tất cả phòng của nhà này'),
+        undefined,
+        '🔒',
+      );
+      return;
+    }
+
     try {
       if (waterProperty.type === 'whole_house') {
-        const r = roomWaterReadings[0];
+        const r = pending[0];
         await realManagerInvoiceService.createPropertyUtilityInvoice(
           Number(waterProperty.id),
           {
@@ -831,7 +770,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           },
         );
       } else {
-        await Promise.all(roomWaterReadings.map(r =>
+        await Promise.all(pending.map(r =>
           realManagerInvoiceService.createRoomUtilityInvoice(
             Number(waterProperty.id), Number(r.roomId),
             {
@@ -842,11 +781,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           ),
         ));
       }
-      const totalSent = roomWaterReadings.reduce((s, r) => s + (r.fee ?? 0), 0);
+      setWaterSentKeys(prev => new Set([...prev, ...pending.map(r => r.roomId)]));
+      const totalSent = pending.reduce((s, r) => s + (r.fee ?? 0), 0);
       setHistoryEntries(prev => [{
         id: `hw-${Date.now()}`, type: 'water',
         propertyName: waterProperty.name, billingPeriod: period,
-        totalAmount: totalSent, roomCount: roomWaterReadings.length, sentAt: now,
+        totalAmount: totalSent, roomCount: pending.length, sentAt: now,
       }, ...prev]);
       setUtilReloadKey(k => k + 1);
       setWaterStep('done');
@@ -856,9 +796,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   };
 
   const resetElec = () => {
-    setSelectedPropertyId(null); setEvnData(null);
-    setElecStep('select_property'); setRoomElecReadings([]); setEditingEvn(false);
-    setEvnImageUrl(''); setEvnScanning(false);
+    setSelectedPropertyId(null); setEvnBill(null); setEvnBillError(null);
+    setElecStep('select_property'); setRoomElecReadings([]); setElecSentKeys(new Set());
   };
 
   const resetWater = () => {
@@ -911,13 +850,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
     const stepIndex =
       elecStep === 'select_property' ? 0 :
-      elecStep === 'evn_upload'      ? 1 :
+      elecStep === 'evn_bill'        ? 1 :
       elecStep === 'room_readings'   ? 2 : 3;
 
     return (
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
+        {/* Nhà nguyên căn chỉ còn 2 bước: hoá đơn EVN của admin đã đủ để gửi cho khách. */}
         <StepIndicator
-          steps={['Chọn tòa nhà', 'Hóa đơn EVN', isWholeHouse ? 'Chỉ số & Gửi' : 'Chỉ số phòng', 'Xem trước']}
+          steps={isWholeHouse
+            ? ['Chọn tòa nhà', 'Hóa đơn EVN & Gửi']
+            : ['Chọn tòa nhà', 'Hóa đơn EVN', 'Chỉ số phòng', 'Xem trước']}
           current={stepIndex}
         />
 
@@ -943,335 +885,254 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
             {selectedPropertyId && (
               <TouchableOpacity
                 style={[styles.primaryBtn, { marginTop: Spacing.md }]}
-                onPress={() => setElecStep('evn_upload')}
+                onPress={() => enterEvnStep(selectedPropertyId)}
               >
-                <Text style={styles.primaryBtnText}>Tiếp theo → Tải hóa đơn EVN</Text>
+                <Text style={styles.primaryBtnText}>Tiếp theo → Xem hóa đơn EVN</Text>
               </TouchableOpacity>
             )}
           </View>
         )}
 
-        {/* ── STEP 2: Tải / Chụp hóa đơn EVN ─────────────────────── */}
-        {elecStep === 'evn_upload' && (
-          <View>
-            <SectionHeader title="Bước 2: Tải / Chụp hóa đơn EVN" />
-            {selectedProperty && (
-              <View style={styles.infoBanner}>
-                <Text style={styles.infoBannerText}>
-                  {selectedProperty.type === 'whole_house' ? '🏠' : '🏢'} {selectedProperty.name}
-                  {selectedProperty.type === 'multi_room' && ` · ${selectedProperty.rooms.length} phòng`}
-                </Text>
+        {/* ── STEP 2: Hóa đơn EVN do admin phát hành (chỉ đọc) ───── */}
+        {elecStep === 'evn_bill' && (() => {
+          const unit = roomElecReadings[0];
+          const houseSent = !!unit && elecSentKeys.has(unit.roomId);
+          return (
+            <View>
+              <SectionHeader title={isWholeHouse ? 'Bước 2: Hóa đơn EVN & Gửi' : 'Bước 2: Hóa đơn EVN'} />
+              {selectedProperty && (
+                <View style={styles.infoBanner}>
+                  <Text style={styles.infoBannerText}>
+                    {selectedProperty.type === 'whole_house' ? '🏠' : '🏢'} {selectedProperty.name}
+                    {selectedProperty.type === 'multi_room' && ` · ${selectedProperty.rooms.length} phòng`}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.card}>
+                {evnBillLoading ? (
+                  <View style={styles.scanningRow}>
+                    <ActivityIndicator color={Colors.primary} />
+                    <Text style={styles.scanningText}>Đang tải hóa đơn điện của kỳ này...</Text>
+                  </View>
+                ) : evnBillError ? (
+                  <View style={styles.evnWaitBox}>
+                    <Text style={styles.evnWaitEmoji}>⚠️</Text>
+                    <Text style={styles.evnWaitTitle}>Không tải được hóa đơn</Text>
+                    <Text style={styles.evnWaitText}>{evnBillError}</Text>
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, { marginTop: Spacing.md }]}
+                      onPress={() => selectedPropertyId && enterEvnStep(selectedPropertyId)}
+                    >
+                      <Text style={styles.primaryBtnText}>Thử lại</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : !evnBill ? (
+                  /* Admin chưa đẩy hoá đơn — KHÔNG mở form nhập tay, đó là cả điểm của
+                     thay đổi 13/08/2026. Manager chờ hoặc gọi admin. */
+                  <View style={styles.evnWaitBox}>
+                    <Text style={styles.evnWaitEmoji}>⏳</Text>
+                    <Text style={styles.evnWaitTitle}>Chờ admin gửi hóa đơn EVN</Text>
+                    <Text style={styles.evnWaitText}>
+                      Admin chưa tải hóa đơn điện kỳ {currentPeriod().month}/{currentPeriod().year} của nhà này lên hệ thống.
+                      {'\n\n'}Khi admin gửi xong, số liệu sẽ hiện ở đây và bạn ghi chỉ số như bình thường.
+                      Liên hệ admin nếu đã quá hạn.
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.primaryBtn, { marginTop: Spacing.md }]}
+                      onPress={() => selectedPropertyId && enterEvnStep(selectedPropertyId)}
+                    >
+                      <Text style={styles.primaryBtnText}>🔄 Kiểm tra lại</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.evnResult}>
+                      <View style={styles.evnResultHeader}>
+                        <Text style={styles.evnResultTitle}>Admin đã chốt cho kỳ này</Text>
+                        <View style={[styles.badge, styles.badgeDone]}>
+                          <Text style={[styles.badgeText, { color: Colors.success }]}>Chỉ đọc</Text>
+                        </View>
+                      </View>
+                      <EVNDataRow label="Tổng điện"     value={`${evnBill.totalKwh.toLocaleString('vi-VN')} kWh`} />
+                      <EVNDataRow label="Tổng tiền"     value={fmt(evnBill.totalAmount)} />
+                      <EVNDataRow label="Đơn giá điện"  value={`${fmt(elecUnitPrice)}/kWh`} highlight />
+                      <EVNDataRow label="Kỳ thanh toán" value={evnBill.billingPeriod} />
+                    </View>
+
+                    {!!evnBill.imageUrl && (
+                      <View style={styles.thumbWrap}>
+                        <Image source={{ uri: evnBill.imageUrl }} style={styles.evnThumb} resizeMode="contain" />
+                        <Text style={styles.meterThumbHint}>Ảnh hóa đơn gốc admin tải lên — dùng để đối chiếu với khách.</Text>
+                      </View>
+                    )}
+
+                    <Text style={styles.cardDesc}>
+                      {isWholeHouse
+                        ? 'Nhà nguyên căn: khách trả đúng tổng tiền hóa đơn EVN ở trên, không cần chụp đồng hồ.'
+                        : `Mỗi phòng sẽ tính theo đơn giá ${fmt(elecUnitPrice)}/kWh ở trên. Bước sau bạn chụp đồng hồ từng phòng.`}
+                    </Text>
+                  </>
+                )}
               </View>
-            )}
-            <View style={styles.card}>
-              <Text style={styles.cardDesc}>
-                Tải ảnh hoặc chụp hóa đơn điện chính thức từ EVN. Hệ thống sẽ tự động nhận diện tổng kWh, tổng tiền và kỳ thanh toán.
-              </Text>
-              <TouchableOpacity
-                style={styles.uploadBtn}
-                onPress={() => askPhotoSource({ kind: 'evn' })}
-                disabled={evnScanning}
-              >
-                <Text style={styles.uploadBtnIcon}>📄</Text>
-                <Text style={styles.uploadBtnText}>Tải ảnh / Chụp hóa đơn EVN</Text>
-                <Text style={styles.uploadBtnSub}>Tự nhận diện kWh · số tiền · kỳ thanh toán</Text>
-              </TouchableOpacity>
 
-              {evnScanning && (
-                <View style={styles.scanningRow}>
-                  <ActivityIndicator color={Colors.primary} />
-                  <Text style={styles.scanningText}>Đang tải & đọc hóa đơn...</Text>
-                </View>
-              )}
+              <View style={styles.actionRow}>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('select_property')}>
+                  <Text style={styles.secondaryBtnText}>← Quay lại</Text>
+                </TouchableOpacity>
 
-              {!!evnImageUrl && (
-                <View style={styles.thumbWrap}>
-                  <Image source={{ uri: evnImageUrl }} style={styles.evnThumb} resizeMode="contain" />
+                {/* Nhà nguyên căn: gửi thẳng ngay tại bước này. Nhà nhiều phòng: sang bước chỉ số. */}
+                {evnBill && (isWholeHouse ? (
                   <TouchableOpacity
-                    style={styles.thumbRemoveBtn}
-                    onPress={clearEvnImage}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, (houseSent || sendingWholeHouse) && styles.btnLocked]}
+                    onPress={sendWholeHouseElec}
+                    disabled={sendingWholeHouse}
                   >
-                    <Text style={styles.thumbRemoveIcon}>✕</Text>
+                    {sendingWholeHouse
+                      ? <ActivityIndicator color={Colors.white} />
+                      : (
+                        <Text style={styles.sendBtnText}>
+                          {houseSent ? '🔒 Kỳ này đã gửi' : `⚡ Gửi hóa đơn · ${fmt(evnBill.totalAmount)}`}
+                        </Text>
+                      )}
                   </TouchableOpacity>
-                  <View style={styles.thumbActions}>
-                    <TouchableOpacity
-                      style={styles.thumbActionBtn}
-                      onPress={() => askPhotoSource({ kind: 'evn' })}
-                      disabled={evnScanning}
-                    >
-                      <Text style={styles.thumbActionText}>🔄 Chụp lại</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.thumbActionBtn, styles.thumbActionDanger]}
-                      onPress={clearEvnImage}
-                    >
-                      <Text style={[styles.thumbActionText, styles.thumbActionDangerText]}>🗑 Xoá ảnh</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              {evnData && !editingEvn && (
-                <View style={styles.evnResult}>
-                  <View style={styles.evnResultHeader}>
-                    <Text style={styles.evnResultTitle}>Thông tin đã nhận diện</Text>
-                    <TouchableOpacity onPress={() => setEditingEvn(true)}>
-                      <Text style={styles.editLink}>✏️ Sửa</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <EVNDataRow label="Tổng điện"     value={`${evnData.totalKwh} kWh`} />
-                  <EVNDataRow label="Tổng tiền"     value={fmt(evnData.totalAmount)} />
-                  <EVNDataRow
-                    label="Đơn giá điện"
-                    value={`${fmt(evnData.totalKwh > 0 ? Math.round(evnData.totalAmount / evnData.totalKwh) : 0)}/kWh`}
-                    highlight
-                  />
-                  <EVNDataRow label="Kỳ thanh toán" value={evnData.billingPeriod} />
-                </View>
-              )}
-
-              {editingEvn && (
-                <View style={styles.evnEditForm}>
-                  <Text style={styles.formLabel}>Tổng kWh</Text>
-                  <TextInput style={styles.input} keyboardType="numeric" value={groupThousands(evnEditForm.totalKwh)}
-                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalKwh: onlyDigits(t) }))} />
-                  <Text style={styles.formLabel}>Tổng tiền (đ)</Text>
-                  <TextInput style={styles.input} keyboardType="numeric" value={groupThousands(evnEditForm.totalAmount)}
-                    onChangeText={t => setEvnEditForm(f => ({ ...f, totalAmount: onlyDigits(t) }))} />
-                  <Text style={styles.formLabel}>Kỳ thanh toán</Text>
-                  <TextInput style={styles.input} value={evnEditForm.billingPeriod}
-                    onChangeText={t => setEvnEditForm(f => ({ ...f, billingPeriod: t }))} />
-                  <TouchableOpacity style={styles.primaryBtn} onPress={saveEvnEdit}>
-                    <Text style={styles.primaryBtnText}>Lưu</Text>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, { flex: 1, marginLeft: Spacing.sm }]}
+                    onPress={goToRoomReadings}
+                  >
+                    <Text style={styles.primaryBtnText}>Tiếp theo → Nhập chỉ số</Text>
                   </TouchableOpacity>
-                </View>
-              )}
+                ))}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* ── STEP 3: Chỉ số điện từng phòng ────────────────────────
+            CHỈ nhà nhiều phòng tới đây. Nhà nguyên căn đã gửi xong ở bước 2 vì hoá đơn
+            EVN của admin chính là hoá đơn của căn đó — không cần chụp đồng hồ. */}
+        {elecStep === 'room_readings' && evnBill && (
+          <View>
+            <SectionHeader title="Bước 3: Chỉ số điện từng phòng" />
+            <View style={styles.infoBanner}>
+              <Text style={styles.infoBannerText}>
+                EVN: {evnBill.totalKwh.toLocaleString('vi-VN')} kWh · {fmt(evnBill.totalAmount)}
+                {' '}· {fmt(elecUnitPrice)}/kWh · {evnBill.billingPeriod}
+              </Text>
             </View>
 
-            <View style={styles.actionRow}>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('select_property')}>
-                <Text style={styles.secondaryBtnText}>← Quay lại</Text>
-              </TouchableOpacity>
-              {evnData && !editingEvn && (
-                <TouchableOpacity
-                  style={[styles.primaryBtn, { flex: 1, marginLeft: Spacing.sm }]}
-                  onPress={() => selectedPropertyId && initRoomElecReadings(selectedPropertyId)}
-                >
-                  <Text style={styles.primaryBtnText}>Tiếp theo → Nhập chỉ số</Text>
+            {/* Tóm tắt tiến trình */}
+            <View style={styles.progressRow}>
+              <Text style={styles.progressText}>
+                Đã gửi: {roomElecReadings.filter(r => r.sent).length}/{roomElecReadings.length} phòng
+              </Text>
+              {roomElecReadings.some(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading) && (
+                <TouchableOpacity style={styles.sendAllBtn} onPress={sendAllUnsent}>
+                  <Text style={styles.sendAllBtnText}>Gửi tất cả →</Text>
                 </TouchableOpacity>
               )}
             </View>
-          </View>
-        )}
 
-        {/* ── STEP 3: Chỉ số phòng ─────────────────────────────────── */}
-        {elecStep === 'room_readings' && evnData && (
-          <View>
-            {isWholeHouse ? (
-              /* ── Nhà nguyên căn: 1 card duy nhất ── */
-              <>
-                <SectionHeader title="Bước 3: Chỉ số điện nhà nguyên căn" />
-                <View style={styles.infoBanner}>
-                  <Text style={styles.infoBannerText}>
-                    EVN: {evnData.totalKwh} kWh · {fmt(evnData.totalAmount)} · {evnData.billingPeriod}
-                  </Text>
-                </View>
-                {roomElecReadings[0] && (() => {
-                  const r = roomElecReadings[0];
-                  return (
-                    <View style={styles.roomCard}>
-                      <View style={styles.roomCardHeader}>
-                        <View>
-                          <Text style={styles.roomCode}>{r.roomCode}</Text>
-                          <Text style={styles.roomTenant}>{r.tenantName}</Text>
-                        </View>
-                        {r.hasPhoto && (
-                          <View style={[styles.badge, styles.badgeDone]}>
-                            <Text style={[styles.badgeText, { color: Colors.success }]}>Có ảnh</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
-                      <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        placeholder="Nhập chỉ số tháng trước"
-                        value={r.prevReading ? String(r.prevReading) : ''}
-                        onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
-                      />
-                      <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
-                      <View style={styles.readingRow}>
-                        <TextInput
-                          style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
-                          keyboardType="numeric"
-                          placeholder={`> ${r.prevReading}`}
-                          value={r.newReading}
-                          onChangeText={t => updateRoomElec(r.roomId, { newReading: decimalDigits(t) })}
-                        />
-                        <TouchableOpacity
-                          style={styles.ocrBtn}
-                          onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
-                          disabled={ocrRoomId === r.roomId}
-                        >
-                          {ocrRoomId === r.roomId
-                            ? <ActivityIndicator color={Colors.primary} />
-                            : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
-                      {renderMeterPhoto(r)}
-                      {r.newReading && Number(r.newReading) > r.prevReading && (
-                        <View style={styles.calcPreview}>
-                          <Text style={styles.calcPreviewText}>
-                            Tiêu thụ: {roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading)} kWh
-                            {' '}· Tiền điện: {fmt(evnData.totalAmount)}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })()}
-                <View style={styles.actionRow}>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('evn_upload')}>
-                    <Text style={styles.secondaryBtnText}>← Quay lại</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, !canSendElec && styles.btnLocked]}
-                    onPress={sendWholeHouseElec}
-                  >
-                    <Text style={styles.sendBtnText}>{canSendElec ? '⚡ Gửi hóa đơn điện' : elecSettled ? '🔒 Kỳ này đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              /* ── Nhà nhiều phòng: mỗi phòng gửi riêng lẻ ── */
-              <>
-                <SectionHeader title="Bước 3: Chỉ số điện từng phòng" />
-                <View style={styles.infoBanner}>
-                  <Text style={styles.infoBannerText}>
-                    EVN: {evnData.totalKwh} kWh · {fmt(evnData.totalAmount)} · {evnData.billingPeriod}
-                  </Text>
-                </View>
-
-                {/* Tóm tắt tiến trình */}
-                <View style={styles.progressRow}>
-                  <Text style={styles.progressText}>
-                    Đã gửi: {roomElecReadings.filter(r => r.sent).length}/{roomElecReadings.length} phòng
-                  </Text>
-                  {roomElecReadings.some(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading) && (
-                    <TouchableOpacity
-                      style={[styles.sendAllBtn, !canSendElec && styles.btnLocked]}
-                      onPress={sendAllUnsent}
-                    >
-                      <Text style={styles.sendAllBtnText}>{canSendElec ? 'Gửi tất cả →' : elecSettled ? '🔒 Đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                {roomElecReadings.map((r, idx) => (
-                  <View key={r.roomId} style={[styles.roomCard, r.sent && styles.roomCardSent]}>
-                    <View style={styles.roomCardHeader}>
-                      <View>
-                        <Text style={styles.roomCode}>{r.roomCode}</Text>
-                        <Text style={styles.roomTenant}>{r.tenantName}</Text>
-                      </View>
-                      <View style={[
-                        styles.badge,
-                        r.sent ? styles.badgeSent : r.hasPhoto ? styles.badgeDone : styles.badgePending,
-                      ]}>
-                        <Text style={[styles.badgeText, {
-                          color: r.sent ? Colors.white : r.hasPhoto ? Colors.success : Colors.textMuted,
-                        }]}>
-                          {r.sent ? '✓ Đã gửi' : r.hasPhoto ? 'Có ảnh' : 'Chưa chụp'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {r.sent && <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>}
-
-                    {r.sent ? (
-                      /* Phòng đã gửi: hiện tóm tắt */
-                      <View style={styles.sentSummary}>
-                        <Text style={styles.sentSummaryText}>
-                          {r.consumption} kWh · {fmt(r.fee ?? 0)} — đã gửi hóa đơn
-                        </Text>
-                      </View>
-                    ) : (
-                      /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
-                      <>
-                        <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
-                        <TextInput
-                          style={styles.input}
-                          keyboardType="numeric"
-                          placeholder="Nhập chỉ số tháng trước"
-                          value={r.prevReading ? String(r.prevReading) : ''}
-                          onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
-                        />
-                        <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
-                        <View style={styles.readingRow}>
-                          <TextInput
-                            style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
-                            keyboardType="numeric"
-                            placeholder={`> ${r.prevReading}`}
-                            value={r.newReading}
-                            onChangeText={t => updateRoomElec(r.roomId, { newReading: decimalDigits(t) })}
-                          />
-                          <TouchableOpacity
-                            style={styles.ocrBtn}
-                            onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
-                            disabled={ocrRoomId === r.roomId}
-                          >
-                            {ocrRoomId === r.roomId
-                              ? <ActivityIndicator color={Colors.primary} />
-                              : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
-                          </TouchableOpacity>
-                        </View>
-                        <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
-                        {renderMeterPhoto(r)}
-                        {r.newReading && Number(r.newReading) > r.prevReading && (() => {
-                          const unitPrice = evnData.totalKwh > 0 ? evnData.totalAmount / evnData.totalKwh : 0;
-                          const consumption = roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading);
-                          const fee = Math.round(consumption * unitPrice);
-                          return (
-                            <>
-                              <View style={styles.calcPreview}>
-                                <Text style={styles.calcPreviewText}>
-                                  {consumption} kWh × {fmt(Math.round(unitPrice))}/kWh = {fmt(fee)}
-                                </Text>
-                              </View>
-                              <TouchableOpacity
-                                style={[styles.sendRoomBtn, !canSendElec && styles.btnLocked]}
-                                onPress={() => sendSingleRoomElec(r.roomId)}
-                              >
-                                <Text style={styles.sendRoomBtnText}>
-                                  {canSendElec
-                                    ? `⚡ Gửi hóa đơn phòng ${r.roomCode} · ${fmt(fee)}`
-                                    : elecSettled
-                                      ? '🔒 Kỳ này đã thu đủ'
-                                      : '🔒 Ngoài hạn chốt sổ (ngày 1–10)'}
-                                </Text>
-                              </TouchableOpacity>
-                            </>
-                          );
-                        })()}
-                      </>
-                    )}
+            {roomElecReadings.map(r => (
+              <View key={r.roomId} style={[styles.roomCard, r.sent && styles.roomCardSent]}>
+                <View style={styles.roomCardHeader}>
+                  <View>
+                    <Text style={styles.roomCode}>{r.roomCode}</Text>
+                    <Text style={styles.roomTenant}>{r.tenantName}</Text>
                   </View>
-                ))}
-
-                <View style={styles.actionRow}>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('evn_upload')}>
-                    <Text style={styles.secondaryBtnText}>← Quay lại</Text>
-                  </TouchableOpacity>
-                  {roomElecReadings.every(r => r.sent) && (
-                    <TouchableOpacity style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={() => setElecStep('done')}>
-                      <Text style={styles.sendBtnText}>Hoàn tất ✓</Text>
-                    </TouchableOpacity>
-                  )}
+                  <View style={[
+                    styles.badge,
+                    r.sent ? styles.badgeSent : r.hasPhoto ? styles.badgeDone : styles.badgePending,
+                  ]}>
+                    <Text style={[styles.badgeText, {
+                      color: r.sent ? Colors.white : r.hasPhoto ? Colors.success : Colors.textMuted,
+                    }]}>
+                      {r.sent ? '✓ Đã gửi' : r.hasPhoto ? 'Có ảnh' : 'Chưa chụp'}
+                    </Text>
+                  </View>
                 </View>
-              </>
-            )}
+
+                {r.sent && <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>}
+
+                {r.sent ? (
+                  /* Phòng đã gửi kỳ này: chỉ hiện tóm tắt, không cho gửi lần hai. */
+                  <View style={styles.sentSummary}>
+                    <Text style={styles.sentSummaryText}>
+                      {r.consumption != null
+                        ? `${r.consumption} kWh · ${fmt(r.fee ?? 0)} — đã gửi hóa đơn`
+                        : 'Đã gửi hóa đơn điện của kỳ này'}
+                    </Text>
+                  </View>
+                ) : (
+                  /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
+                  <>
+                    <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="Nhập chỉ số tháng trước"
+                      value={r.prevReading ? String(r.prevReading) : ''}
+                      onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
+                    />
+                    <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
+                    <View style={styles.readingRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
+                        keyboardType="numeric"
+                        placeholder={`> ${r.prevReading}`}
+                        value={r.newReading}
+                        onChangeText={t => updateRoomElec(r.roomId, { newReading: decimalDigits(t) })}
+                      />
+                      <TouchableOpacity
+                        style={styles.ocrBtn}
+                        onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
+                        disabled={ocrRoomId === r.roomId}
+                      >
+                        {ocrRoomId === r.roomId
+                          ? <ActivityIndicator color={Colors.primary} />
+                          : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
+                    {renderMeterPhoto(r)}
+                    {r.newReading && Number(r.newReading) > r.prevReading && (() => {
+                      // Đơn giá do admin chốt, dùng chung cho mọi phòng của nhà này.
+                      const consumption = roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading);
+                      const fee = Math.round(consumption * elecUnitPrice);
+                      return (
+                        <>
+                          <View style={styles.calcPreview}>
+                            <Text style={styles.calcPreviewText}>
+                              {consumption} kWh × {fmt(elecUnitPrice)}/kWh = {fmt(fee)}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.sendRoomBtn}
+                            onPress={() => sendSingleRoomElec(r.roomId)}
+                          >
+                            <Text style={styles.sendRoomBtnText}>
+                              ⚡ Gửi hóa đơn phòng {r.roomCode} · {fmt(fee)}
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+              </View>
+            ))}
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={() => setElecStep('evn_bill')}>
+                <Text style={styles.secondaryBtnText}>← Quay lại</Text>
+              </TouchableOpacity>
+              {roomElecReadings.every(r => r.sent) && (
+                <TouchableOpacity style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={() => setElecStep('done')}>
+                  <Text style={styles.sendBtnText}>Hoàn tất ✓</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         )}
 
@@ -1483,12 +1344,21 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => setWaterStep('room_readings')}>
                 <Text style={styles.secondaryBtnText}>← Sửa</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, !canSendWater && styles.btnLocked]}
-                onPress={sendWaterInvoices}
-              >
-                <Text style={styles.sendBtnText}>{canSendWater ? '💧 Gửi hóa đơn nước' : waterSettled ? '🔒 Kỳ này đã thu đủ' : '🔒 Đã chốt sổ'}</Text>
-              </TouchableOpacity>
+              {(() => {
+                // Khoá khi MỌI phòng của nhà đã nhận hoá đơn nước kỳ này (1 khách 1 lần/kỳ).
+                const allSent = roomWaterReadings.length > 0
+                  && roomWaterReadings.every(r => waterSentKeys.has(r.roomId));
+                return (
+                  <TouchableOpacity
+                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, allSent && styles.btnLocked]}
+                    onPress={sendWaterInvoices}
+                  >
+                    <Text style={styles.sendBtnText}>
+                      {allSent ? '🔒 Kỳ này đã gửi' : '💧 Gửi hóa đơn nước'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
           </View>
         )}
@@ -1571,22 +1441,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         ))}
       </View>
 
-      {/* Cửa sổ chốt sổ — hiện ở cả 2 tab điện/nước để manager biết còn gửi được không */}
-      {activeTab !== 'history' && (() => {
-        const settled = activeTab === 'electricity' ? elecSettled : waterSettled;
-        const canSend = activeTab === 'electricity' ? canSendElec : canSendWater;
-        return (
-          <View style={[styles.windowBar, canSend ? styles.windowBarOpen : styles.windowBarClosed]}>
-            <Text style={[styles.windowBarText, { color: canSend ? Colors.success : Colors.error }]}>
-              {canSend
-                ? `● Đang mở chốt sổ — còn ${daysLeft} ngày (hết ngày ${UTILITY_CYCLE.closeDay})`
-                : settled
-                  ? '🔒 Kỳ này đã thu đủ và chốt sổ — mở lại vào kỳ thanh toán tháng sau.'
-                  : `🔒 ${windowClosedReason}`}
-            </Text>
-          </View>
-        );
-      })()}
+      {/* Nhắc quy tắc gửi — không còn cửa sổ ngày 1–10, chỉ còn "1 khách 1 hoá đơn/kỳ". */}
+      {activeTab !== 'history' && (
+        <View style={[styles.windowBar, styles.windowBarOpen]}>
+          <Text style={[styles.windowBarText, { color: Colors.success }]}>
+            ● {UTILITY_WINDOW_TEXT}
+          </Text>
+        </View>
+      )}
 
       {activeTab === 'electricity' && renderElecTab()}
       {activeTab === 'water'       && renderWaterTab()}
@@ -2040,6 +1902,12 @@ const styles = StyleSheet.create({
   evnResultTitle:  { fontSize: 13, fontWeight: '700', color: Colors.success },
   editLink:        { fontSize: 13, color: Colors.primary, fontWeight: '600' },
   evnEditForm:     { marginTop: Spacing.md },
+
+  // Trạng thái "chờ admin đẩy hoá đơn EVN" / lỗi tải — thay cho form nhập tay cũ.
+  evnWaitBox:   { alignItems: 'center', paddingVertical: Spacing.lg, paddingHorizontal: Spacing.sm },
+  evnWaitEmoji: { fontSize: 40, marginBottom: Spacing.sm },
+  evnWaitTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.xs },
+  evnWaitText:  { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
 
   infoBanner: {
     backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,

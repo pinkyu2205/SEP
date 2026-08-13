@@ -169,7 +169,7 @@ const STATUS_CONFIG: Record<EquipmentStatus, { label: string; color: string; bg:
 
 const CATEGORIES = ['Tất cả', 'Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng'];
 
-const fmt = (n: number) => n.toLocaleString('vi-VN') + 'đ';
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 const MAINTENANCE_TYPE_LABELS = { repair: 'Sửa chữa', maintenance: 'Bảo trì định kỳ', replacement: 'Thay thế' };
 
