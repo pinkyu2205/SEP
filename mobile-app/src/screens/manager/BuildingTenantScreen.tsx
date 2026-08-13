@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingTenantInfo, PaymentRisk } from '@/data/managedProperties';
 
 const RISK_META: Record<PaymentRisk, { label: string; color: string; bg: string }> = {
@@ -80,7 +80,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
               ))}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Giá thuê</Text>
-                <Text style={styles.detailVal}>{prop?.monthlyRent ? `${prop.monthlyRent.toLocaleString('vi-VN')}đ/tháng` : 'Chưa cấu hình'}</Text>
+                <Text style={styles.detailVal}>{HIDDEN_AMOUNT_TEXT}</Text>
               </View>
             </View>
           </View>

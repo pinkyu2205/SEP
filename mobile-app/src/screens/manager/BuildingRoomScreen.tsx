@@ -51,7 +51,7 @@ const FILTERS: { id: 'all' | ExtendedStatus; label: string }[] = [
   { id: 'disabled',    label: 'Ngưng khai thác' },
 ];
 
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+// `fmt` đã bỏ 13/08/2026 — màn này không còn hiện số tiền nào (giá phòng đã ẩn với manager).
 
 export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
@@ -236,7 +236,7 @@ export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
                         </View>
                       </View>
                       <Text style={[styles.roomMeta, isDisabled && { opacity: 0.6 }]}>
-                        {r.area}m² · {fmt(r.rentPrice)}/th
+                        {r.area}m²
                         {r.tenantName ? ` · ${r.tenantName}` : ''}
                       </Text>
                       {isDisabled && (
@@ -271,7 +271,7 @@ export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
                 <View style={styles.sheetHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.sheetCode}>{actionRoom.code}</Text>
-                    <Text style={styles.sheetMeta}>{actionRoom.area}m² · {fmt(actionRoom.rentPrice)}/tháng</Text>
+                    <Text style={styles.sheetMeta}>{actionRoom.area}m²</Text>
                     {actionRoom.tenantName && (
                       <Text style={styles.sheetTenant}>👤 {actionRoom.tenantName}</Text>
                     )}

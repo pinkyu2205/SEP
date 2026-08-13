@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import { ManagedProperty, WholeHouseRentalStatus } from '@/data/managedProperties';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
@@ -119,7 +119,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
           {activeContract && (
             <View style={s.heroStats}>
               <View style={s.heroStat}>
-                <Text style={s.heroStatVal}>{fmtShort(monthlyRent)}</Text>
+                <Text style={s.heroStatVal}>{HIDDEN_AMOUNT}</Text>
                 <Text style={s.heroStatLbl}>Giá thuê/tháng</Text>
               </View>
               <View style={s.heroStatDivider} />
@@ -178,8 +178,8 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
                   : 'Chưa có'}
                 highlight={daysLeft != null && daysLeft <= 30}
               />
-              <InfoRow label="Giá thuê" value={monthlyRent ? `${fmt(monthlyRent)}/tháng` : 'Chưa cấu hình'} highlight />
-              <InfoRow label="Tiền cọc" value={fmt(activeContract.deposit ?? 0)} />
+              <InfoRow label="Giá thuê" value={HIDDEN_AMOUNT_TEXT} />
+              <InfoRow label="Tiền cọc" value={HIDDEN_AMOUNT_TEXT} />
               <InfoRow
                 label="Trạng thái cọc"
                 value={depositPaid ? '✓ Đã đóng cọc' : 'Chưa đóng cọc'}

@@ -5,7 +5,7 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import {
   roomOperationService, OpStatus, OpRoom, OpProperty,
 } from '@/services/manager/roomService';
@@ -107,8 +107,9 @@ const RoomCard: React.FC<{ room: Room; onAction: () => void }> = ({ room, onActi
       )}
 
       <View style={[cardSt.priceRow, isDisabled && { opacity: 0.45 }]}>
-        <Text style={cardSt.priceChip}>💰 {(room.rentPrice / 1000000).toFixed(1)}tr/th</Text>
-        <Text style={cardSt.priceChip}>🔒 {(room.deposit / 1000000).toFixed(1)}tr cọc</Text>
+        {/* Chip giá thuê + cọc đã BỎ 13/08/2026 — manager không được thấy hai khoản này
+            (xem @/constants/managerVisibility). Chip điện/nước giữ lại vì manager tự
+            chốt chỉ số và phát hành hoá đơn, không thấy đơn giá thì không làm được. */}
         {room.electricityRate ? (
           <Text style={cardSt.priceChip}>⚡ {room.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
         ) : null}
@@ -511,8 +512,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                 {!!w.tenantPhone && <InfoLine label="Điện thoại" value={w.tenantPhone} />}
                 {!!w.contractCode && <InfoLine label="Hợp đồng" value={w.contractCode} />}
                 <InfoLine label="Đến ngày" value={fmtDate(w.contractEndDate)} />
-                {!!w.monthlyRent && <InfoLine label="Tiền thuê" value={`${fmt(w.monthlyRent)}/tháng`} strong />}
-                {!!w.deposit && <InfoLine label="Tiền cọc" value={fmt(w.deposit)} />}
+                <InfoLine label="Tiền thuê" value={HIDDEN_AMOUNT_TEXT} />
+                <InfoLine label="Tiền cọc" value={HIDDEN_AMOUNT_TEXT} />
               </View>
             ) : (
               <View style={styles.houseInfo}>
@@ -521,7 +522,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                     ? '🔧 Căn nhà đang bảo trì — chưa nhận khách.'
                     : 'Chưa có khách thuê.'}
                 </Text>
-                {!!w.monthlyRent && <InfoLine label="Giá chào thuê" value={`${fmt(w.monthlyRent)}/tháng`} strong />}
+                <InfoLine label="Giá chào thuê" value={HIDDEN_AMOUNT_TEXT} />
               </View>
             )}
           </View>
@@ -843,8 +844,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                 <Text style={styles.detailSectionLabel}>Thông tin phòng (chỉ đọc)</Text>
                 <View style={styles.detailTable}>
                   {[
-                    { label: 'Giá thuê',   value: fmt(actionRoom.rentPrice) + '/tháng' },
-                    { label: 'Tiền cọc',   value: fmt(actionRoom.deposit) },
+                    { label: 'Giá thuê',   value: HIDDEN_AMOUNT_TEXT },
+                    { label: 'Tiền cọc',   value: HIDDEN_AMOUNT_TEXT },
                     ...(actionRoom.electricityRate ? [{ label: 'Điện', value: fmt(actionRoom.electricityRate) + '/kWh' }] : []),
                     ...(actionRoom.waterRate ? [{ label: 'Nước', value: fmt(actionRoom.waterRate) + '/m³' }] : []),
                     { label: 'Diện tích',  value: `${actionRoom.area} m²` },

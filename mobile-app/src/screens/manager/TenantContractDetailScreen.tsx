@@ -5,7 +5,7 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, Shadow } from '@/constants';
+import { Colors, Spacing, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 
 const SH = Dimensions.get('window').height;
 const TODAY = new Date(2026, 4, 21);
@@ -303,8 +303,11 @@ export const TenantContractDetailScreen: React.FC = () => {
           {/* Financial terms */}
           <View style={s.section}>
             <Text style={s.sectionTitle}>Điều khoản tài chính</Text>
-            <InfoRow label="Tiền thuê hàng tháng" value={fmt(contract.monthlyRent)} accent />
-            <InfoRow label="Tiền đặt cọc" value={fmt(contract.depositAmount)} />
+            {/* Tiền thuê + cọc ẩn với manager (13/08/2026). Phí dịch vụ và đơn giá
+                điện/nước bên dưới VẪN hiện — manager phát hành hoá đơn cho hai khoản
+                đó nên phải thấy. Xem @/constants/managerVisibility. */}
+            <InfoRow label="Tiền thuê hàng tháng" value={HIDDEN_AMOUNT_TEXT} />
+            <InfoRow label="Tiền đặt cọc" value={HIDDEN_AMOUNT_TEXT} />
             <InfoRow label="Phí dịch vụ / tháng" value={fmt(contract.serviceCharge)} />
             <InfoRow label="Đơn giá điện" value={`${contract.electricityRate.toLocaleString('vi-VN')}đ/kWh`} />
             <InfoRow label="Đơn giá nước" value={`${contract.waterRate.toLocaleString('vi-VN')}đ/m³`} />

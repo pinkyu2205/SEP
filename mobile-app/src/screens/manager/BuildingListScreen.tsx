@@ -28,7 +28,7 @@ const HOUSE_STATUS: Record<WholeHouseRentalStatus, { label: string; color: strin
   maintenance: { label: 'Đang bảo trì', color: Colors.error, bg: Colors.errorLight },
 };
 
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+// `fmt` đã bỏ 13/08/2026 — màn này không còn hiện số tiền nào (giá thuê đã ẩn với manager).
 
 export const BuildingListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -316,9 +316,7 @@ const WholeHouseCard = ({ prop, onPress }: { prop: ManagedProperty; onPress: () 
         {prop.tenantName && (
           <Text style={s.houseLine} numberOfLines={1}>Khách thuê: <Text style={s.houseStrong}>{prop.tenantName}</Text></Text>
         )}
-        {prop.monthlyRent && (
-          <Text style={s.houseLine}>Giá thuê: <Text style={s.houseStrong}>{fmt(prop.monthlyRent)}/tháng</Text></Text>
-        )}
+        {/* Dòng "Giá thuê" đã BỎ 13/08/2026 — xem @/constants/managerVisibility. */}
         {prop.contractEndDate && (
           <Text style={s.houseLine}>Hợp đồng: <Text style={s.houseStrong}>đến {prop.contractEndDate}</Text></Text>
         )}
