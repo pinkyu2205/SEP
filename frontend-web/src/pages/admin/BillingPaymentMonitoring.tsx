@@ -8,6 +8,8 @@ import {
   type AdminInvoiceRow, type AdminInvoiceStatus, type AdminInvoiceType, type AdminPaymentRow,
   type AdminDepositRow, type AdminDepositStatus,
 } from '@/services/admin.service';
+import toast from 'react-hot-toast';
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
 
 /**
@@ -110,6 +112,8 @@ export const BillingPaymentMonitoring = () => {
   const [loading, setLoading] = useState(true);
   const [depositsLoading, setDepositsLoading] = useState(true);
   const [error, setError] = useState(false);
+  /** Tăng lên để buộc nạp lại danh sách (dùng cho event realtime). */
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Kỳ + loại + trạng thái lọc phía server (BE nhận đúng 3 tham số này).
   useEffect(() => {
@@ -125,16 +129,31 @@ export const BillingPaymentMonitoring = () => {
       .catch(() => { if (active) { setInvoices([]); setError(true); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [period, typeFilter, statusFilter]);
+  }, [period, typeFilter, statusFilter, reloadKey]);
 
-  // Giao dịch thanh toán + tiền cọc — lấy 1 lần, không phụ thuộc bộ lọc hoá đơn.
+  // Giao dịch thanh toán + tiền cọc — không phụ thuộc bộ lọc hoá đơn, chỉ nạp lại khi
+  // có event realtime.
   useEffect(() => {
     adminService.listPayments().then(setPayments).catch(() => setPayments([]));
     adminService.listDeposits()
       .then(setDeposits)
       .catch(() => setDeposits([]))
       .finally(() => setDepositsLoading(false));
-  }, []);
+  }, [reloadKey]);
+
+  /**
+   * Khách thanh toán → BE bắn `INVOICE_PAID` qua WebSocket → nạp lại danh sách.
+   *
+   * Refetch thay vì tự sửa dòng tại chỗ: payload cố tình KHÔNG có số tiền, mà bảng này
+   * hiện tiền — vá dòng bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới. Refetch cũng lo
+   * luôn trường hợp hoá đơn vừa PAID không nằm trong bộ lọc đang xem.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    setReloadKey(k => k + 1);
+    const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
+    toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+  });
 
   // Đổi bộ lọc/tab thì về trang 1 và đóng dòng đang mở.
   useEffect(() => { setPage(1); setOpenId(null); },

@@ -114,7 +114,7 @@ export const BuildingRoomScreen: React.FC<any> = ({ navigation, route }) => {
     closeAction();
     showAlert('Đón khách', `Tạo check-in cho phòng ${r.code}?`, [
       { text: 'Hủy', style: 'cancel' },
-      { text: 'Đón khách', onPress: () => navigation.navigate('OnboardingV2') },
+      { text: 'Đón khách', onPress: () => navigation.navigate('ResumeContract') },
     ]);
   };
 

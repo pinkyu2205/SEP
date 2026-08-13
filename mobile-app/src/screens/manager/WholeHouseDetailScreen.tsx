@@ -154,7 +154,7 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
             <Text style={s.vacantEmoji}>🔑</Text>
             <Text style={s.vacantTitle}>Nhà đang trống</Text>
             <Text style={s.vacantText}>Chưa có khách thuê. Đón khách để bắt đầu hợp đồng cho nhà này.</Text>
-            <TouchableOpacity style={s.vacantBtn} onPress={() => navigation.navigate('OnboardingV2')}>
+            <TouchableOpacity style={s.vacantBtn} onPress={() => navigation.navigate('ResumeContract')}>
               <Text style={s.vacantBtnText}>+ Đón khách</Text>
             </TouchableOpacity>
           </View>

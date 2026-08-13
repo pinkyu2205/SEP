@@ -24,8 +24,35 @@ import {
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { maintenanceService } from '@/services/maintenance.service';
+import {
+  UnreadNotificationsProvider,
+  useUnreadNotifications,
+} from '@/contexts/UnreadNotificationsContext';
 import { AppSidebar, type SidebarSection } from './AppSidebar';
 import { UserMenu } from './UserMenu';
+
+/**
+ * Chuông + badge số chưa đọc. Tách thành component con vì hook `useUnreadNotifications`
+ * phải nằm DƯỚI provider — provider bọc ở ngoài `AdminLayout` nên chính `AdminLayout`
+ * gọi hook sẽ chỉ nhận giá trị mặc định (0).
+ */
+const NotificationBell = () => {
+  const { count } = useUnreadNotifications();
+  return (
+    <Link
+      to="/admin/notifications"
+      className="relative rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
+      title="Thông báo"
+    >
+      <Bell className="h-4 w-4" />
+      {count > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
+    </Link>
+  );
+};
 
 /**
  * Menu Admin Portal. Badge phải là số THẬT — trước đây đếm từ mock
@@ -108,6 +135,7 @@ export const AdminLayout = () => {
   const brand = { title: 'Hoàng Bình Land', subtitle: 'Admin Portal', icon: ShieldCheck };
 
   return (
+    <UnreadNotificationsProvider>
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
       <aside className="sticky top-0 hidden h-screen flex-shrink-0 select-none lg:block">
         <AppSidebar
@@ -176,15 +204,9 @@ export const AdminLayout = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Chấm đỏ trước đây bật theo AUDIT_LOGS mock nên luôn sáng dù hệ thống
-                không có cảnh báo nào. Chưa có API nhật ký bảo mật → để chuông trung tính. */}
-            <Link
-              to="/admin/security"
-              className="relative rounded-xl border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800"
-              title="Nhật ký & bảo mật"
-            >
-              <Bell className="h-4 w-4" />
-            </Link>
+            {/* Chuông giờ trỏ vào Trung tâm thông báo (số thật từ API), không còn trỏ
+                nhầm sang "Nhật ký & bảo mật" như trước. */}
+            <NotificationBell />
             <UserMenu
               accent="cyan"
               name={sidebarUser.name}
@@ -201,5 +223,6 @@ export const AdminLayout = () => {
         </main>
       </div>
     </div>
+    </UnreadNotificationsProvider>
   );
 };

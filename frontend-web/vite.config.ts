@@ -16,6 +16,14 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // STOMP over native WebSocket (BE WebSocketConfig, endpoint /ws). Bắt buộc
+      // `ws: true` — thiếu nó thì request Upgrade dừng ở dev server, client báo
+      // "connection lost" mà backend không hề thấy ai kết nối.
+      '/ws': {
+        target: 'ws://localhost:8080',
+        ws: true,
+        changeOrigin: true,
+      },
       // Goong REST (autocomplete/geocode/place detail) bị CORS khi gọi thẳng từ
       // browser → proxy qua dev server cho cùng origin. Xem goong.service.ts.
       '/goong-rest': {

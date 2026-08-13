@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Platform, Modal, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Platform, Modal, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
@@ -37,12 +37,23 @@ const mkTenantEntry = (status: MaintenanceStatus, note: string): MaintenanceTime
 export const MaintenanceDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { request: routeRequest } = route.params as { request: MaintenanceRequest };
+  /**
+   * Hai đường vào màn này:
+   *   • Từ danh sách  → `{ request }` (đủ dữ liệu, hiện được ngay)
+   *   • Từ THÔNG BÁO  → `{ requestId }` (chỉ có id, phải tự nạp)
+   *
+   * Trước 13/08/2026 chỗ này destructure thẳng `route.params` rồi đọc `routeRequest.id`
+   * — vào bằng deep-link không kèm `request` là ném TypeError và **crash app khách**.
+   * Notification bảo trì hiện trỏ về `MaintenanceList` nên chưa lộ, nhưng sẽ lộ ngay
+   * khi BE gửi `screen: "MaintenanceDetail"`.
+   */
+  const params = (route.params ?? {}) as { request?: MaintenanceRequest; requestId?: number | string };
+  const routeRequest = params.request;
 
   // Ticket luôn tới từ BE thật (id số) — nạp bản mới nhất, route param chỉ dùng khi
   // đang tải hoặc offline. Không còn đọc từ mock store: id thật (vd "1") có thể trùng
   // id mock hardcode trong maintenanceStore.ts, từng khiến màn hiện nhầm ticket giả.
-  const idNum = Number(routeRequest.id);
+  const idNum = Number(routeRequest?.id ?? params.requestId);
   const isRealId = Number.isFinite(idNum) && idNum > 0;
   const [realRequest, setRealRequest] = useState<MaintenanceRequest | undefined>(undefined);
   useEffect(() => {
@@ -77,8 +88,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const [disputeReason, setDisputeReason] = useState('');
   const [chargeBusy,    setChargeBusy]    = useState(false);
 
-  const currentStatusMeta = STATUS_META[request.status] || STATUS_META.pending;
-  const priorityColor = getMaintenancePriorityColor(request.priority);
+  // `request` chưa có ở lần render đầu khi vào bằng deep-link (chỉ có `requestId`).
+  const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.pending;
+  const priorityColor = getMaintenancePriorityColor(request?.priority ?? 'medium');
 
   // ── Actions ────────────────────────────────────────────────────────
 
@@ -94,6 +106,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
       finally { setBusy(false); }
       return;
     }
+    // Nhánh mock/offline — chỉ chạy khi id không phải id thật, lúc đó luôn vào từ danh
+    // sách nên `request` chắc chắn có. Guard để TS yên tâm.
+    if (!request) return;
     tenantMaintenanceStore.update(request.id, {
       status: 'closed',
       tenantConfirmedAt: nowIso().slice(0, 10),
@@ -138,6 +153,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       finally { setBusy(false); }
       return;
     }
+    if (!request) return; // nhánh mock/offline — xem ghi chú ở confirmDone
     tenantMaintenanceStore.update(request.id, {
       status: 'rejected',
       rejectReason: reason,
@@ -178,6 +194,26 @@ export const MaintenanceDetailScreen: React.FC = () => {
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi khiếu nại. Vui lòng thử lại.')); }
     finally { setChargeBusy(false); }
   };
+
+  // Vào bằng deep-link (chỉ có `requestId`) thì lần render đầu chưa có dữ liệu — hiện
+  // trạng thái chờ thay vì để phần bên dưới đọc `request.xxx` rồi crash. Đặt SAU toàn
+  // bộ hook để không đổi số lượng hook giữa các lần render.
+  if (!request) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>← Quay lại</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Chi tiết yêu cầu</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>

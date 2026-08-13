@@ -17,6 +17,7 @@ import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
 import { PropertyList } from '@/pages/host/properties/PropertyList';
 import { ReportsAnalytics } from '@/pages/host/reports/ReportsAnalytics';
 import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
+import { AdminNotificationCenter } from '@/pages/admin/notifications/AdminNotificationCenter';
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
@@ -120,6 +121,7 @@ function App() {
             <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
+            <Route path="/admin/notifications" element={<AdminNotificationCenter />} />
             <Route path="/admin/settings" element={<SystemConfiguration />} />
             <Route path="/admin/security" element={<ActivityLogsSecurity />} />
           </Route>

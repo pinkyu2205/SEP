@@ -20,19 +20,23 @@ import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 
 const QUICK_ACTIONS = [
-  { emoji: '🤝', label: 'Đón khách',  route: 'OnboardingV2',      color: Colors.primary },
+  // Từ 13/08/2026 "Đón khách" và "Khách chờ đón" là MỘT luồng — cả hai vào
+  // ResumeContract. Màn wizard cũ (OnboardingV2) đã gỡ khỏi navigator.
+  { emoji: '🤝', label: 'Đón khách',  route: 'ResumeContract',    color: Colors.primary },
   // "Hóa đơn" chỉ còn lo tiền nhà/phòng; mọi khoản thu khác (cọc, bảo trì, điện
   // nước) xem ở "Thu & Đối soát" để hai việc không lẫn vào nhau.
   { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
   { emoji: '💳', label: 'Thu & Đối soát', route: 'ManagerPaymentHistory', color: Colors.info },
   { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
   { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
+  // Danh sách phòng còn thiếu ảnh công tơ kỳ này. Không có lối vào từ đây thì màn chỉ
+  // mở được bằng cách bấm thông báo — mà cron chỉ gửi 1 lần/ngày, lỡ là mất.
+  { emoji: '📸', label: 'Cần chụp số', route: 'MeterReadingPending', color: Colors.warning },
   // Màn này gồm cả nhà nguyên căn (không có phòng) nên không gọi là "Phòng".
   { emoji: '🏠', label: 'Nhà & phòng', route: 'RoomManage',       color: Colors.success },
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
-  { emoji: '📨', label: 'Khách chờ đón', route: 'ResumeContract',  color: Colors.warning },
   { emoji: '🚪', label: 'Trả phòng',  route: 'CheckoutRequests',   color: Colors.error },
 ] as const;
 

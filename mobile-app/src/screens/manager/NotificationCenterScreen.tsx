@@ -12,8 +12,9 @@ import { navigateFromNotification } from '@/navigation/navigationRef';
 type NotifType =
   | 'new_bill' | 'bill_overdue' | 'payment_success' | 'payment_pending_verify'
   | 'contract_expiring' | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
+  | 'maintenance_confirm' | 'maintenance_cost' | 'maintenance_cancelled' | 'maintenance_rejected'
   | 'contract_assigned' | 'checkout_request'
-  | 'equipment_damaged' | 'tenant_onboarded' | 'system';
+  | 'equipment_damaged' | 'tenant_onboarded' | 'meter_reading_due' | 'system';
 
 type NotifPriority = 'high' | 'normal' | 'low';
 
@@ -42,10 +43,18 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   maintenance_new: { icon: '🔧', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
   maintenance_resolved: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
   maintenance_accepted: { icon: '🔧', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },
+  // Bốn nhánh bảo trì tách từ BE 13/08/2026. Cùng category 'Bảo trì' nên tab lọc
+  // (khớp theo tiền tố 'maintenance') vẫn gom đủ.
+  maintenance_confirm: { icon: '📝', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
+  maintenance_cost: { icon: '💵', color: Colors.accent, bg: Colors.primaryBg, category: 'Bảo trì' },
+  maintenance_cancelled: { icon: '🚫', color: Colors.textSecondary, bg: Colors.divider, category: 'Bảo trì' },
+  maintenance_rejected: { icon: '↩️', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
   contract_assigned: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
   checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Trả phòng' },
   equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
   tenant_onboarded: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Khách thuê' },
+  // Chưa có ảnh công tơ kỳ này → BE chặn phát hành hoá đơn điện/nước cho tới khi chụp.
+  meter_reading_due: { icon: '📸', color: Colors.warning, bg: Colors.warningLight, category: 'Chốt số' },
   system: { icon: '🔔', color: Colors.textSecondary, bg: Colors.divider, category: 'Hệ thống' },
 };
 // BE có thể gửi type FE chưa biết — luôn fallback, KHÔNG để cfg undefined làm crash render.
@@ -58,7 +67,10 @@ const FILTER_TABS = [
   { key: 'maintenance_new', label: 'Bảo trì' },
   { key: 'checkout_request', label: 'Trả phòng' },
   { key: 'contract_expiring', label: 'Hợp đồng' },
+  // Lọc theo tiền tố (xem `filtered`): key 'payment_*' gom cả `payment_success` mà
+  // BE bắn khi khách vừa thanh toán.
   { key: 'payment_pending_verify', label: 'Thanh toán' },
+  { key: 'meter_reading_due', label: 'Chốt số' },
 ];
 
 function timeAgo(dateStr: string): string {
