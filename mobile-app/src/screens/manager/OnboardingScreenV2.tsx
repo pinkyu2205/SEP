@@ -61,6 +61,10 @@ interface HouseholdMemberForm {
 
 const MODE_STEP = 'Chọn loại'
 const HANDOVER_STEP = 'Bàn giao thiết bị'
+// Từ BE 609de59/276b613 (12/08/2026) QR onboard thu MỘT lần gồm cọc + tiền nhà chu kỳ
+// đầu, nên nhãn "Thanh toán cọc" cũ là sai. Đặt hằng để đổi chữ không phải sửa 5 chỗ so
+// sánh chuỗi rải rác trong file.
+const PAYMENT_STEP = 'Thanh toán'
 const ROOM_STEPS = [
   MODE_STEP,
   'Chọn phòng',
@@ -70,7 +74,7 @@ const ROOM_STEPS = [
   'Hiện trạng phòng',
   HANDOVER_STEP,
   'Tạo hợp đồng',
-  'Thanh toán cọc',
+  PAYMENT_STEP,
   'Xác nhận',
 ]
 const WHOLE_HOUSE_STEPS = [
@@ -82,7 +86,7 @@ const WHOLE_HOUSE_STEPS = [
   'Hiện trạng nhà',
   HANDOVER_STEP,
   'Tạo hợp đồng',
-  'Thanh toán cọc',
+  PAYMENT_STEP,
   'Xác nhận',
 ]
 
@@ -232,9 +236,17 @@ const DRAFT_TTL_MS = 3 * 24 * 3600 * 1000 // nháp quá 3 ngày tự dọn
 // Cooldown gửi lại OTP (giây)
 const OTP_RESEND_COOLDOWN = 30
 
-// OnboardingScreenV2 — bản đón khách khớp đầy đủ backend (xem kế hoạch tiếp khách):
-// nối đúng luồng send-otp, fallback username = t{phone}, thu cọc 100% chuyển khoản PayOS,
-// chặn submit khi role lookup không hợp lệ. Màn cũ OnboardingScreen được giữ làm dự phòng.
+// ⛔ NGỪNG SỬ DỤNG TỪ 13/08/2026 — KHÔNG đăng ký route, KHÔNG có lối vào nào.
+//
+// Toàn bộ luồng đón khách gom về ResumeContractScreen. Màn này còn nằm trong repo chỉ để
+// tra cứu; mọi sửa đổi liên quan đón khách phải làm bên ResumeContractScreen.
+//
+// Đừng nối lại vào navigator: hai màn cùng tạo hợp đồng sẽ lệch nhau ngay khi BE đổi
+// luồng thanh toán (đã xảy ra với đợt gộp QR cọc + tiền nhà 12/08/2026 — một màn sửa,
+// màn kia còn text cũ nói "tiền nhà thu riêng").
+//
+// Bản gốc: nối đúng luồng send-otp, fallback username = t{phone}, thu 100% chuyển khoản
+// PayOS, chặn submit khi role lookup không hợp lệ.
 export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   const [step, setStep] = useState(0)
   const [rentalMode, setRentalMode] = useState<RentalMode | null>(null)
@@ -457,12 +469,6 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   const rentValue = parseNum(tenantInfo.monthlyRent)
   const depositValue = rentValue * depositMonths
-  // Số khách phải chuyển lúc đón khách = CHỈ TIỀN CỌC, từ BE commit 92c87d8 (10/08/2026).
-  // Trước đó QR gộp cả tiền nhà tháng đầu; giờ tiền nhà tách thành hoá đơn RENT riêng
-  // (cycleType FIRST, tính theo ngày ở) phát sau khi HĐ ACTIVE, khách trả trên app.
-  // Đây chỉ là số DỰ PHÒNG khi BE chưa trả `initialPaymentAmount` — cộng thêm
-  // `rentValue` vào đây là đọc thừa nguyên một tháng tiền nhà cho khách.
-  const totalDueValue = depositValue
 
   // Ngày hợp đồng hiệu lực = hôm nay (khoá cứng). Ngày kết thúc: sau hôm nay, tối đa MAX_LEASE_YEARS năm.
   const todayStr = new Date().toLocaleDateString('en-GB') // dd/MM/yyyy
@@ -493,7 +499,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
 
   // Poll trạng thái thanh toán khi ở bước "Thanh toán cọc"
   useEffect(() => {
-    if (currentLabel !== 'Thanh toán cọc' || !contract || paid) return
+    if (currentLabel !== PAYMENT_STEP || !contract || paid) return
     const timer = setInterval(async () => {
       try {
         // chủ động hỏi PayOS (local không có webhook) -> đồng bộ trạng thái
@@ -2305,91 +2311,32 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
     )
   }
 
-  /**
-   * "Sau khi nhận nhà sẽ thu thêm" — xem trước tiền nhà chu kỳ đầu.
-   *
-   * Từ 10/08/2026 QR chỉ thu cọc, tiền nhà tháng vào ở phát thành hoá đơn riêng tính
-   * theo số ngày ở thật. Khách vừa chuyển một khoản lớn xong mà hôm sau lại thấy hoá
-   * đơn thì rất dễ nghĩ bị thu hai lần — nói trước ngay tại màn thu tiền là cách rẻ
-   * nhất để tránh chuyện đó.
-   *
-   * Trả null khi BE không gửi (bản BE cũ, hoặc ẩn tiền khỏi manager theo ý 15) — thà
-   * không hiện gì còn hơn tự tính một con số có thể lệch với hoá đơn BE phát ra.
-   */
-  const renderFirstRentPreview = () => {
-    const b = contract?.firstRentPaymentBreakdown
-    if (!b) return null
-
-    // Vào ở ≤3 ngày cuối tháng: BE không phát hoá đơn riêng mà gộp sang tháng sau.
-    const deferred = b.kind === 'RENT_FIRST_DEFERRED' || b.deferredToNextMonth
-    return (
-      <View style={styles.nextDueBox}>
-        <View style={styles.nextDueHead}>
-          <Text style={styles.nextDueTitle}>{b.title}</Text>
-          {deferred ? (
-            <Text style={styles.nextDueBadge}>Gộp tháng sau</Text>
-          ) : (
-            <Text style={styles.nextDueAmount}>{formatVnd(b.totalAmount)} đ</Text>
-          )}
-        </View>
-        {!!b.formula && !deferred && (
-          <Text style={styles.nextDueFormula}>{b.formula}</Text>
-        )}
-        <Text style={styles.nextDueNote}>{b.explanation}</Text>
-      </View>
-    )
-  }
-
   const renderPaymentStep = () => {
     return (
       <ScrollView
         style={styles.stepContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.sectionTitle}>Thanh toán tiền cọc</Text>
+        <Text style={styles.sectionTitle}>Thanh toán lúc nhận nhà</Text>
+        {/* Không hiện số tiền ở bước này (góp ý mentor 12/08/2026): manager cầm máy chìa
+            QR cho khách, số tiền là chuyện giữa khách và hệ thống. BE cũng đã mask
+            `initialPaymentAmount`/breakdown cho ROLE_MANAGER — đừng dựng lại số bằng
+            cách tự tính ở FE, làm vậy là vô hiệu hoá luôn phần mask của BE. */}
         <Text style={styles.hint}>
-          Khách chuyển khoản {formatVnd(contract?.initialPaymentAmount ?? totalDueValue)} đ
-          qua PayOS — đây là <Text style={styles.hintStrong}>tiền cọc</Text>, chưa gồm tiền
-          nhà. Sau khi hệ thống ghi nhận, mới sang bước xác thực OTP.
+          Khách quét QR để trả <Text style={styles.hintStrong}>một lần</Text> gồm tiền cọc
+          và tiền nhà chu kỳ đầu. Số tiền hiện trong app ngân hàng của khách. Sau khi hệ
+          thống ghi nhận, mới sang bước xác thực OTP.
         </Text>
 
         {paid ? (
           <View style={styles.paidBox}>
             <Text style={styles.paidIcon}>✅</Text>
-            <Text style={styles.paidText}>Đã nhận thanh toán tiền cọc!</Text>
+            <Text style={styles.paidText}>Đã nhận thanh toán!</Text>
           </View>
         ) : (
           <>
             {!!contract?.payosQrCode && !showWebView && (
               <View style={styles.qrBox}>
-                <Text style={styles.qrAmountLabel}>Tiền cọc thu qua QR</Text>
-                <Text style={styles.qrAmount}>
-                  {formatVnd(contract.initialPaymentAmount ?? totalDueValue)} đ
-                </Text>
-                {/* Tách cấu phần để manager giải thích được với khách. Dùng các dòng BE
-                    dựng sẵn nếu có (`depositPaymentBreakdown.lines`) — khi ẩn tiền khỏi
-                    manager thì BE trả null, lúc đó rơi về cách tính tại chỗ. */}
-                <View style={styles.payBreakdown}>
-                  {contract.depositPaymentBreakdown?.lines?.length ? (
-                    contract.depositPaymentBreakdown.lines.map((l, i) => (
-                      <View key={`${l.key}-${i}`} style={styles.payBreakdownRow}>
-                        <Text style={styles.payBreakdownLabel}>• {l.label}</Text>
-                        <Text style={styles.payBreakdownValue}>
-                          {l.amount != null ? `${formatVnd(l.amount)} đ` : l.displayValue}
-                        </Text>
-                      </View>
-                    ))
-                  ) : (
-                    <View style={styles.payBreakdownRow}>
-                      <Text style={styles.payBreakdownLabel}>• Tiền cọc ({depositMonths} tháng)</Text>
-                      <Text style={styles.payBreakdownValue}>{formatVnd(depositValue)} đ</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Khoản khách sẽ phải trả TIẾP sau khi nhận nhà. Nói trước ở đây để
-                    manager không bị khách chất vấn "sao vừa đóng xong lại có hoá đơn". */}
-                {renderFirstRentPreview()}
                 <View style={styles.qrWrap}>
                   <QRCode value={contract.payosQrCode} size={220} />
                 </View>
@@ -2521,7 +2468,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
         return renderHandoverEquipmentStep()
       case 'Tạo hợp đồng':
         return renderContractStep()
-      case 'Thanh toán cọc':
+      case PAYMENT_STEP:
         return renderPaymentStep()
       case 'Xác nhận':
         return renderConfirmationStep()
@@ -2534,7 +2481,7 @@ export const OnboardingScreenV2: React.FC<any> = ({ navigation }) => {
   // và khi đã gửi Host duyệt giá (Case 2 — màn chờ duyệt có nút riêng).
   const showNextButton =
     currentLabel !== 'Xác nhận' &&
-    !(currentLabel === 'Thanh toán cọc' && !paid) &&
+    !(currentLabel === PAYMENT_STEP && !paid) &&
     !submittedForApproval
 
   return (

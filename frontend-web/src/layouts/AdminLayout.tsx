@@ -25,8 +25,16 @@ import {
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
 import { maintenanceService } from '@/services/maintenance.service';
+import { UnreadNotificationsProvider } from '@/contexts/UnreadNotificationsContext';
 import { AppSidebar, type SidebarSection } from './AppSidebar';
 import { UserMenu } from './UserMenu';
+
+/*
+ * Provider vẫn bọc quanh layout dù chuông không còn dùng tới: trang
+ * /admin/notifications (render trong <Outlet/>) gọi `useUnreadNotifications().refresh`
+ * để badge nhảy ngay sau khi đánh dấu đã đọc. Gỡ provider thì hook rơi về context
+ * mặc định — refresh thành no-op, không lỗi gì cả nên rất khó phát hiện.
+ */
 
 /**
  * Menu Admin Portal. Badge phải là số THẬT — trước đây đếm từ mock
@@ -112,6 +120,7 @@ export const AdminLayout = () => {
   const brand = { title: 'Hoàng Bình Land', subtitle: 'Admin Portal', icon: ShieldCheck };
 
   return (
+    <UnreadNotificationsProvider>
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
       <aside className="sticky top-0 hidden h-screen flex-shrink-0 select-none lg:block">
         <AppSidebar
@@ -182,8 +191,13 @@ export const AdminLayout = () => {
           <div className="flex items-center gap-2">
             {/* Trước 13/08/2026 chuông này chỉ là icon trỏ sang trang nhật ký bảo mật,
                 không đọc dữ liệu gì (chấm đỏ cũ bật theo mock AUDIT_LOGS nên luôn sáng).
-                Giờ nó là khay thông báo thật, số tự cập nhật — xem NotificationBell. */}
-            <NotificationBell seeAllTo="/admin/security" accent="cyan" />
+                Giờ nó là khay thông báo thật, số tự cập nhật — xem NotificationBell.
+
+                "Xem tất cả" trỏ /admin/notifications chứ không phải /admin/security:
+                khay này chỉ liệt kê bảng `notifications`, còn trang kia gộp thêm
+                `host_notifications` (nhắc việc: căn chờ duyệt giá, HĐ chờ duyệt…),
+                nên nó mới là chỗ xem đủ. Nhật ký bảo mật là việc khác. */}
+            <NotificationBell seeAllTo="/admin/notifications" accent="cyan" />
             <UserMenu
               accent="cyan"
               name={sidebarUser.name}
@@ -200,5 +214,6 @@ export const AdminLayout = () => {
         </main>
       </div>
     </div>
+    </UnreadNotificationsProvider>
   );
 };

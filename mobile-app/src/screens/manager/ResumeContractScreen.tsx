@@ -42,7 +42,12 @@ const parseNum = (s: string) => Number(onlyDigits(s)) || 0
  * Không tách thì chỉ số bị ghi to gấp 10 lần và sai luôn tiền điện cả kỳ thuê.
  * Màn này dùng số chữ số MẶC ĐỊNH (điện 5+1, nước 5+3) vì `TenantContractResponse`
  * chưa mang cấu hình của phòng — trùng đúng mặc định BE, và người nhập vẫn sửa
- * được trực tiếp trong ô. Màn đón khách (OnboardingScreenV2) thì đọc cấu hình thật.
+ * được trực tiếp trong ô.
+ *
+ * ⚠️ Từ 13/08/2026 đây là luồng đón khách DUY NHẤT (OnboardingScreenV2 đã gỡ). Màn cũ
+ * đọc `electricDecimalDigits`/`waterDecimalDigits` thật của phòng, màn này thì không —
+ * phòng nào cấu hình khác mặc định sẽ phải sửa tay. Cần BE trả 2 field đó trong
+ * `TenantContractResponse` để bỏ hẳn phần đoán.
  */
 const toReadingValue = (raw: string, kind: 'elec' | 'water'): string => {
   const s = splitMeterReading(raw, kind)
@@ -59,7 +64,7 @@ const readErr = (err: any, fallback: string): string =>
 
 const STATUS_META: Record<ContractPriceApprovalStatus, { label: string; color: string; bg: string }> = {
   PENDING_PRICE_APPROVAL: { label: 'Chờ Host duyệt giá', color: '#D97706', bg: '#FFFBEB' },
-  APPROVED_AWAITING_DEPOSIT: { label: 'Đã duyệt — chờ thu cọc', color: '#0891B2', bg: '#ECFEFF' },
+  APPROVED_AWAITING_DEPOSIT: { label: 'Đã duyệt — chờ thu tiền', color: '#0891B2', bg: '#ECFEFF' },
   PRICE_REJECTED: { label: 'Host từ chối giá', color: '#DC2626', bg: '#FEF2F2' },
 }
 
@@ -530,6 +535,12 @@ const InspectionSection: React.FC<{
     (contract.roomConditionPhotos ?? []).map((p) => p.capturedAt),
   )
   const [note, setNote] = useState(contract.roomConditionNote ?? '')
+  // AI mô tả hiện trạng (mentor 12/08/2026 — BE `describe-room` từ 13/08/2026).
+  // `noteTouched` khởi tạo theo việc HĐ đã có ghi chú sẵn hay chưa: có sẵn nghĩa là
+  // ai đó đã viết, AI không được đè lên.
+  const [noteTouched, setNoteTouched] = useState(!!contract.roomConditionNote)
+  const [aiDrafted, setAiDrafted] = useState(false)
+  const [describing, setDescribing] = useState(false)
   const [ocrLoading, setOcrLoading] = useState<'elec' | 'water' | null>(null)
   // Các số khác OCR đọc được trên cùng ảnh — hiện thành nút bấm để đổi nhanh khi máy
   // chọn nhầm (hay gặp: bắt trúng serial "Số SX" thay vì ô chỉ số).
@@ -672,6 +683,56 @@ const InspectionSection: React.FC<{
     if (uri) await handleMeterPhoto(kind, uri)
   }
 
+  /**
+   * Soạn ghi chú hiện trạng từ ảnh (BE `POST /api/v1/vision/describe-room`).
+   *
+   * Kết quả luôn là BẢN NHÁP: đổ vào ô ghi chú cho manager đọc lại và sửa, không tự
+   * lưu. Biên bản hiện trạng là căn cứ trừ cọc lúc trả phòng — để máy viết rồi lưu
+   * thẳng là ký một văn bản không ai đọc.
+   *
+   * Không ghi đè chữ manager đã gõ (`noteTouched`) trừ khi bấm nút "Tạo lại mô tả".
+   * Lỗi quota/model là lỗi MỀM: im lặng bỏ qua khi chạy tự động sau lúc upload, chỉ
+   * báo khi manager chủ động bấm nút — không được chặn luồng đón khách.
+   */
+  const describeFromPhotos = async (urls: string[], opts?: { force?: boolean }) => {
+    const force = opts?.force === true
+    if (describing || urls.length === 0) return
+    if (noteTouched && !force) return
+
+    try {
+      setDescribing(true)
+      const result = await visionService.describeRoom(urls)
+      if (!result?.description) {
+        if (force) showAlert('Chưa tạo được mô tả', 'Model không trả về nội dung. Nhập tay giúp nhé.')
+        return
+      }
+      setNote(result.description)
+      setAiDrafted(true)
+      setNoteTouched(false)
+    } catch (err: any) {
+      if (!force) return // chạy nền sau upload — không làm phiền
+      const code = err?.response?.data?.code
+      showAlert(
+        code === 'VISION_DESCRIBE_QUOTA' ? 'Hết lượt tạo mô tả' : 'Chưa tạo được mô tả',
+        readErr(err, 'Không tạo được mô tả từ ảnh. Nhập tay giúp nhé.'),
+      )
+    } finally {
+      setDescribing(false)
+    }
+  }
+
+  /** Nút "Tạo lại mô tả" — hỏi trước khi đè lên chữ manager đã gõ. */
+  const regenerateDescription = () => {
+    if (noteTouched && note.trim()) {
+      showAlert('Tạo lại mô tả?', 'Ghi chú đang có sẽ bị thay bằng mô tả mới từ ảnh.', [
+        { text: 'Hủy', style: 'cancel' },
+        { text: 'Tạo lại', onPress: () => void describeFromPhotos(photos, { force: true }) },
+      ])
+      return
+    }
+    void describeFromPhotos(photos, { force: true })
+  }
+
   const uploadConditionPhotos = async (uris: string[]) => {
     if (uris.length === 0) return
     try {
@@ -698,7 +759,13 @@ const InspectionSection: React.FC<{
 
       if (accepted.length > 0) {
         const now = new Date().toISOString()
-        setPhotos((prev) => [...prev, ...accepted])
+        setPhotos((prev) => {
+          const next = [...prev, ...accepted]
+          // Mô tả trên TOÀN BỘ ảnh chứ không chỉ lô vừa thêm — mentor muốn "chụp nhiều
+          // ảnh thì ghi chú thêm", nên mỗi lần thêm ảnh là soạn lại từ cả bộ.
+          void describeFromPhotos(next)
+          return next
+        })
         setPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
       }
       if (rejected.length > 0) {
@@ -1011,15 +1078,46 @@ const InspectionSection: React.FC<{
           </View>
 
           <View>
-            <Text style={styles.label}>Ghi chú hiện trạng</Text>
+            <View style={styles.noteHead}>
+              <Text style={styles.label}>Ghi chú hiện trạng</Text>
+              {photos.length > 0 && (
+                <TouchableOpacity
+                  style={styles.aiBtn}
+                  onPress={regenerateDescription}
+                  disabled={describing}
+                >
+                  {describing ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Text style={styles.aiBtnText}>
+                      ✨ {noteTouched ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
             <TextInput
               style={[styles.input, styles.notesInput]}
               value={note}
-              onChangeText={setNote}
+              onChangeText={(t) => {
+                setNote(t)
+                // Người dùng đã tự gõ → AI không được ghi đè nữa (chỉ ghi khi bấm
+                // "Tạo lại mô tả"). Mất chữ manager vừa gõ vì một lần upload ảnh là
+                // lỗi khó chịu hơn nhiều so với việc phải bấm thêm một nút.
+                setNoteTouched(true)
+              }}
               multiline
               placeholder="Tường sạch, cửa tốt, máy lạnh đã kiểm tra..."
               placeholderTextColor={Colors.textMuted}
             />
+            {describing && (
+              <Text style={styles.aiHint}>Đang đọc ảnh để soạn mô tả…</Text>
+            )}
+            {!!note && aiDrafted && !noteTouched && (
+              <Text style={styles.aiHint}>
+                ✨ Mô tả do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
+              </Text>
+            )}
           </View>
 
           <TouchableOpacity style={[styles.primaryBtn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
@@ -1204,28 +1302,20 @@ const DepositOtpPanel: React.FC<{
     }
   }
 
-  const depositValue = contract.deposit
-  // Khách chuyển lúc đón = CHỈ TIỀN CỌC (BE commit 92c87d8, 10/08/2026). Tiền nhà
-  // tháng vào ở tách thành hoá đơn RENT riêng, tính theo ngày ở, phát sau khi HĐ ACTIVE.
-  // Ưu tiên số BE trả kèm link thanh toán; chưa gọi tạo link thì lấy tiền cọc của HĐ.
-  // Cộng thêm `rentAmount` vào đây là báo khách chuyển thừa nguyên một tháng tiền nhà.
-  const totalDue = payInfo.initialPaymentAmount ?? depositValue ?? 0
-
+  // KHÔNG dựng lại số tiền ở màn manager (góp ý mentor 12/08/2026). BE đã mask
+  // `deposit` / `rentAmount` / `initialPaymentAmount` / breakdown cho ROLE_MANAGER;
+  // tự tính bù ở FE là vô hiệu hoá luôn phần mask đó. Số tiền hiện trong app ngân
+  // hàng của khách khi quét QR.
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
       <View style={[styles.banner, { backgroundColor: '#ECFEFF' }]}>
         <Text style={styles.bannerIcon}>{contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? '✅' : '🤝'}</Text>
         <Text style={styles.bannerTitle}>
-          {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu cọc'}
+          {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu tiền'}
         </Text>
         <Text style={styles.bannerDesc}>
-          {contract.tenantFullName}
-          {contract.rentAmount != null ? ` · ${formatVnd(contract.rentAmount)} đ/tháng` : ''}.{' '}
-          {/* `totalDue` = 0 khi BE chưa trả số (ẩn tiền khỏi manager, hoặc chưa tạo link
-              thanh toán). Ghi "Thu 0 đ tiền cọc" thì manager đọc thành không phải thu gì. */}
-          {totalDue > 0 ? `Thu ${formatVnd(totalDue)} đ tiền cọc` : 'Tạo mã thanh toán để thu cọc'}
-          {' '}rồi xác thực OTP để kích hoạt hợp đồng.
-          Tiền nhà tính theo ngày ở sẽ phát hoá đơn riêng cho khách trả trên app.
+          {contract.tenantFullName}. Tạo mã thanh toán để khách quét, rồi xác thực OTP
+          để kích hoạt hợp đồng.
         </Text>
         {!!contract.expectedReceptionDate && (
           <Text style={styles.bannerReception}>
@@ -1250,37 +1340,23 @@ const DepositOtpPanel: React.FC<{
               {busy ? (
                 <ActivityIndicator color={Colors.white} />
               ) : (
-                <Text style={styles.primaryBtnText}>Tạo mã thanh toán cọc</Text>
+                <Text style={styles.primaryBtnText}>Tạo mã thanh toán</Text>
               )}
             </TouchableOpacity>
           )}
           {!!payInfo.payosQrCode && (
             <View style={styles.qrBox}>
-              <Text style={styles.qrAmountLabel}>Tiền cọc thu qua QR</Text>
-              <Text style={styles.qrAmount}>{formatVnd(totalDue)} đ</Text>
-              {/* QR chỉ thu cọc (BE 10/08/2026). Giữ lại dòng tách cấu phần để manager
-                  nói được số tháng cọc, và thêm dòng nhắc tiền nhà đi đường riêng —
-                  không có nó thì khách tưởng đã trả xong mọi thứ. */}
-              <View style={styles.payBreakdown}>
-                <View style={styles.payBreakdownRow}>
-                  <Text style={styles.payBreakdownLabel}>
-                    • Tiền cọc{contract.depositMonths ? ` (${contract.depositMonths} tháng)` : ''}
-                  </Text>
-                  {/* `contract.deposit` bị BE ẩn khỏi manager (null) nên trước đây dòng
-                      này hiện "0 đ" ngay dưới tổng 2.500.000 — tự mâu thuẫn. Từ
-                      10/08/2026 QR CHỈ thu cọc, nên tổng chính là tiền cọc: lấy
-                      `totalDue` khi không có `deposit`. */}
-                  <Text style={styles.payBreakdownValue}>{formatVnd(depositValue ?? totalDue)} đ</Text>
-                </View>
-              </View>
-              <Text style={styles.qrNextDueNote}>
-                Tiền nhà tính theo số ngày ở sẽ phát hoá đơn riêng sau khi kích hoạt hợp
-                đồng — khách thanh toán trên app, không thu ở đây.
-              </Text>
               <View style={styles.qrWrap}>
                 <QRCode value={payInfo.payosQrCode} size={200} />
               </View>
               <Text style={styles.qrCaption}>Khách quét VietQR bằng app ngân hàng.</Text>
+              {/* Từ BE 609de59/276b613 (12/08/2026) QR thu MỘT lần gồm cọc + tiền nhà chu
+                  kỳ đầu. Câu cũ ở đây nói "tiền nhà thu riêng, không thu ở đây" — sai
+                  hẳn, khách đọc xong sẽ tưởng còn phải trả thêm một khoản nữa. */}
+              <Text style={styles.qrNextDueNote}>
+                Mã này thu một lần gồm tiền cọc và tiền nhà chu kỳ đầu. Số tiền hiện
+                trong app ngân hàng của khách khi quét.
+              </Text>
             </View>
           )}
           {/* Đã bỏ nút "Mở trang thanh toán PayOS" và khối WebView đi kèm: khách quét mã
@@ -1297,7 +1373,7 @@ const DepositOtpPanel: React.FC<{
         <View style={styles.formCard}>
           <View style={styles.paidBox}>
             <Text style={styles.paidIcon}>✅</Text>
-            <Text style={styles.paidText}>Đã ghi nhận thu cọc!</Text>
+            <Text style={styles.paidText}>Đã ghi nhận thanh toán!</Text>
           </View>
           <Text style={[styles.label, { marginTop: Spacing.md }]}>
             Mã OTP gửi tới SĐT khách {contract.tenantPhone}
@@ -1644,6 +1720,18 @@ const styles = StyleSheet.create({
   },
   removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
   notesInput: { minHeight: 80, textAlignVertical: 'top' },
+  // AI mô tả hiện trạng
+  noteHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  aiBtn: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    marginBottom: 4,
+  },
+  aiBtnText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  aiHint: { fontSize: 11, color: Colors.textMuted, marginTop: 4, fontStyle: 'italic' },
   previewBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',

@@ -312,11 +312,11 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   const handleCheckIn = (room: Room) => {
     closeAction();
     showAlert(
-      'Đón khách mới',
-      `Tạo hợp đồng và đón khách mới cho phòng ${room.code}?`,
+      'Đón khách',
+      `Mở danh sách khách chờ đón để xử lý phòng ${room.code}?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        { text: 'Tiến hành', onPress: () => navigation.navigate('OnboardingV2') },
+        { text: 'Tiến hành', onPress: () => navigation.navigate('ResumeContract') },
       ],
     );
   };
@@ -544,9 +544,9 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
               </>
             ) : (
               <ActionItem
-                icon="🏠" label="Đón khách mới" primary
-                sublabel="Tạo hợp đồng và bàn giao nhà"
-                onPress={() => navigation.navigate('OnboardingV2')}
+                icon="🏠" label="Đón khách" primary
+                sublabel="Mở danh sách khách chờ đón để bàn giao nhà"
+                onPress={() => navigation.navigate('ResumeContract')}
               />
             )}
             <ActionItem

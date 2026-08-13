@@ -7,9 +7,9 @@ import { ChangePasswordScreen } from '@/screens/auth/ChangePasswordScreen';
 import { TutorialScreen } from '@/screens/auth/TutorialScreen';
 import { TenantTabNavigator } from './TenantTabNavigator';
 import { ManagerTabNavigator } from './ManagerTabNavigator';
-import { OnboardingScreenV2 } from '@/screens/manager/OnboardingScreenV2';
 import { OnboardingSuccessScreen } from '@/screens/manager/OnboardingSuccessScreen';
 import { UtilityBillingScreen } from '@/screens/manager/UtilityBillingScreen';
+import { MeterReadingPendingScreen } from '@/screens/manager/MeterReadingPendingScreen';
 import { RentInvoiceScreen } from '@/screens/manager/RentInvoiceScreen';
 import { RoomManageScreen } from '@/screens/manager/RoomManageScreen';
 import { BuildingDetailScreen } from '@/screens/manager/BuildingDetailScreen';
@@ -105,9 +105,12 @@ export const RootNavigator: React.FC = () => {
         ) : user?.role === 'manager' ? (
           <Stack.Group screenOptions={baseStackOptions}>
             <Stack.Screen name="ManagerTabs" component={ManagerTabNavigator} options={{ animation: 'fade' }} />
-            <Stack.Screen name="OnboardingV2" component={OnboardingScreenV2} />
+            {/* "OnboardingV2" đã gỡ khỏi navigator (13/08/2026): luồng đón khách gom hết
+                về ResumeContract. File màn cũ còn trong repo nhưng KHÔNG đăng ký route —
+                thêm lại là có hai luồng đón khách song song, đúng thứ đã gây lệch dữ liệu. */}
             <Stack.Screen name="OnboardingSuccess" component={OnboardingSuccessScreen} options={{ gestureEnabled: false }} />
             <Stack.Screen name="UtilityBilling" component={UtilityBillingScreen} />
+            <Stack.Screen name="MeterReadingPending" component={MeterReadingPendingScreen} />
             <Stack.Screen name="RentInvoice" component={RentInvoiceScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
             <Stack.Screen

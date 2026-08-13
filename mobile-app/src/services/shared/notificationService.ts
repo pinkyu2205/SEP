@@ -56,12 +56,48 @@ const normalizeType = (row: BeNotificationRow): string => {
   if (raw.startsWith('DEPOSIT_PAID')) {
     return raw.endsWith('_MANAGER') ? 'contract_assigned' : 'new_bill';
   }
+  /**
+   * Khách vừa thanh toán, báo cho quản lý — BE `PAYMENT_RECEIVED_MANAGER` (13/08/2026,
+   * commit 731acad). Tin KHÔNG kèm số tiền (chính sách ẩn tiền khỏi manager).
+   *
+   * Phải xét TRƯỚC nhánh fallback: chuỗi này không chứa BILL/RENT/INVOICE/UTILITY nên
+   * trước đây rơi thẳng xuống cuối, trả về type thô rồi nằm nhóm "Hệ thống" — đúng loại
+   * thông báo quản lý cần thấy nhất lại là loại khó tìm nhất.
+   */
+  if (raw.startsWith('PAYMENT_RECEIVED')) return 'payment_success';
+  /** Tới kỳ ghi điện/nước mà chưa có ảnh công tơ — BE `METER_READING_DUE`. */
+  if (raw.startsWith('METER_READING')) return 'meter_reading_due';
   // Host duyệt/từ chối giá → quản lý quay lại màn tiếp tục hợp đồng.
   if (raw.startsWith('PRICE_APPROVAL')) return 'contract_assigned';
+  /**
+   * Bảo trì — BE tách thành 8 type theo sự kiện từ 13/08/2026 (commit 23f5d97).
+   * Trước đó dùng chung một type `MAINTENANCE`, FE phải regex tiếng Việt để đoán.
+   *
+   * Lưu ý so sánh: nhánh legacy bên dưới dùng `raw === 'MAINTENANCE'` (so BẰNG), nên
+   * các type mới `MAINTENANCE_*` KHÔNG lọt vào đó — phải map riêng ở đây, không thì
+   * rơi hết xuống fallback và nằm nhóm "Hệ thống", mất khỏi tab Bảo trì.
+   */
+  if (raw.startsWith('MAINTENANCE_')) {
+    switch (raw) {
+      case 'MAINTENANCE_CREATED': return 'maintenance_new';
+      case 'MAINTENANCE_APPROVED': return 'maintenance_accepted';
+      // Khách BẮT BUỘC phải hành động: không xác nhận trong N ngày là hệ thống tự đóng
+      // ticket. Tách riêng khỏi `maintenance_resolved` (màu xanh "xong rồi") vì tô xanh
+      // một việc đang chờ người ta làm là cách nhanh nhất để họ bỏ qua nó.
+      case 'MAINTENANCE_COMPLETED': return 'maintenance_confirm';
+      case 'MAINTENANCE_COST_RESOLVED':
+      case 'MAINTENANCE_COST_DISPUTED': return 'maintenance_cost';
+      case 'MAINTENANCE_CANCELLED': return 'maintenance_cancelled';
+      case 'MAINTENANCE_REJECTED_BY_TENANT': return 'maintenance_rejected';
+      case 'MAINTENANCE_AUTO_CONFIRMED': return 'maintenance_resolved';
+      default: return 'maintenance_accepted'; // type bảo trì BE thêm sau — vẫn đúng tab
+    }
+  }
   if (raw === 'MAINTENANCE') {
-    // BE dùng chung 1 type — phân biệt qua nội dung: ticket mới / đã xong / cập nhật.
+    // LEGACY: bản ghi lưu trước 13/08/2026, BE không phát type này nữa. Nội dung là câu
+    // generic "đã đổi trạng thái thành: <ENUM>" nên không phân loại chính xác được —
+    // đủ để nằm đúng tab là được. Bỏ hẳn nhánh này khi dữ liệu cũ hết hạn hiển thị.
     if (/mới/i.test(row.title)) return 'maintenance_new';
-    if (/DONE|CONFIRMED/.test(row.content)) return 'maintenance_resolved';
     return 'maintenance_accepted';
   }
   // Trả phòng (checkout-request) — nhận diện rộng vì chưa chốt chuỗi type BE.

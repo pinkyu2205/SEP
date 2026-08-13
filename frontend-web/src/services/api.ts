@@ -46,8 +46,31 @@ async function resolveErrorMessage(error: {
     }
   }
   // BE trả lỗi chuẩn dùng field `error`; một số handler (Map-based) chỉ có `message` — ưu tiên error trước.
-  const json = data as { message?: string; error?: string } | undefined;
+  const json = data as { message?: string; error?: string; code?: string } | undefined;
+  // Ngoại lệ: body 403 của `AccessDeniedException` có `error: "Forbidden"` (chữ máy) và
+  // `message` mới là câu tiếng Việt giải thích thiếu quyền gì. Giữ thứ tự ưu tiên cũ ở
+  // đây sẽ hiện đúng chữ "Forbidden" cho người dùng.
+  if (json?.code === 'FORBIDDEN') {
+    return json.message || json.error || 'Bạn không có quyền thực hiện thao tác này';
+  }
   return json?.error || json?.message || error.message || 'Lỗi kết nối đến máy chủ';
+}
+
+/**
+ * Phân biệt hai loại 403 — từ BE commit `94f4dd9` (13/08/2026) mọi `AccessDeniedException`
+ * đều kèm `code: "FORBIDDEN"`.
+ *
+ *  • CÓ code  → thiếu quyền thật (vd manager mở nhà không thuộc mình quản lý).
+ *               Thử lại vô ích, và nuốt im lặng thì người dùng thấy màn trắng không lý do.
+ *  • KHÔNG có → 403 thoáng qua lúc backend cold-start, đúng ca mà cơ chế retry bên dưới
+ *               sinh ra để xử lý.
+ *
+ * Trước 13/08/2026 lỗi phân quyền của BE trả 422 nên vẫn có toast; sau khi BE đổi sang
+ * 403 cho đúng chuẩn thì nó rơi trọn vào nhánh "im lặng" bên dưới và biến mất.
+ */
+function isPermissionDenied(status: number | undefined, data: unknown): boolean {
+  if (status !== 403 || !data || typeof data !== 'object') return false;
+  return (data as { code?: string }).code === 'FORBIDDEN';
 }
 
 // Response interceptor
@@ -63,8 +86,10 @@ api.interceptors.response.use(
     // vừa dậy, JWT filter/DB pool chưa ổn định khiến request GET có token hợp lệ vẫn
     // rớt 401/403 thoáng qua. Thử lại đúng 1 lần cho GET trước khi coi là lỗi thật —
     // tránh hiện "danh sách trống" oan trong lúc chờ backend dậy hẳn.
+    const permissionDenied = isPermissionDenied(status, error.response?.data);
+
     if (
-      (status === 401 || status === 403) &&
+      (status === 401 || (status === 403 && !permissionDenied)) &&
       config &&
       config.method?.toLowerCase() === 'get' &&
       !config._authRetried
@@ -78,7 +103,10 @@ api.interceptors.response.use(
 
     // Cho phép call chủ động tắt toast lỗi (truyền config { skipErrorToast: true })
     const skip = config?.skipErrorToast;
-    if (status !== 401 && status !== 403 && status !== 404 && !skip) {
+    // 401/403/404 vẫn im lặng như cũ (màn tự xử lý), TRỪ 403 thiếu quyền thật — cái đó
+    // không báo thì người dùng chỉ thấy danh sách trống và không hiểu vì sao.
+    const silent = status === 401 || status === 404 || (status === 403 && !permissionDenied);
+    if (!silent && !skip) {
       toast.error(message);
     }
 

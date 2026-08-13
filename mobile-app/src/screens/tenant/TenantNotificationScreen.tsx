@@ -38,6 +38,11 @@ const TYPE_CATEGORY: Record<string, string> = {
   maintenance_new: 'Sửa chữa',
   maintenance_accepted: 'Sửa chữa',
   maintenance_resolved: 'Sửa chữa',
+  // Tách từ BE 13/08/2026 — vẫn chung tab "Sửa chữa", chỉ khác icon/màu.
+  maintenance_confirm: 'Sửa chữa',
+  maintenance_cost: 'Sửa chữa',
+  maintenance_cancelled: 'Sửa chữa',
+  maintenance_rejected: 'Sửa chữa',
   equipment_damaged: 'Thiết bị',
   meter_reading_due: 'Đồng hồ',
   tenant_onboarded: 'Nhận phòng',
@@ -67,6 +72,13 @@ const TYPE_ACCENT: Record<string, { emoji: string; color: string; bg: string }> 
   maintenance_new:        { emoji: '🔧', color: Colors.info,      bg: Colors.infoLight },
   maintenance_accepted:   { emoji: '👷', color: Colors.info,      bg: Colors.infoLight },
   maintenance_resolved:   { emoji: '✅', color: Colors.success,   bg: Colors.successLight },
+  // "Đã sửa xong — vui lòng xác nhận": khách PHẢI bấm, quá N ngày hệ thống tự đóng.
+  // Cố tình dùng màu cảnh báo chứ không phải xanh lá — xanh lá đọc thành "xong rồi,
+  // không cần làm gì", đúng cái hiểu nhầm khiến ticket bị tự đóng.
+  maintenance_confirm:    { emoji: '📝', color: Colors.warning,   bg: Colors.warningLight },
+  maintenance_cost:       { emoji: '💵', color: Colors.accent,    bg: Colors.primaryBg },
+  maintenance_cancelled:  { emoji: '🚫', color: Colors.textMuted, bg: '#F1F5F9' },
+  maintenance_rejected:   { emoji: '↩️', color: Colors.error,     bg: Colors.errorLight },
   equipment_damaged:      { emoji: '⚙️', color: Colors.error,     bg: Colors.errorLight },
   meter_reading_due:      { emoji: '📊', color: Colors.warning,   bg: Colors.warningLight },
   tenant_onboarded:       { emoji: '🏠', color: Colors.success,   bg: Colors.successLight },
@@ -128,9 +140,18 @@ export const TenantNotificationScreen: React.FC = () => {
   // ── Business logic ────────────────────────────────────────────────────────
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
+  /**
+   * Type BE gửi mà FE chưa biết → xếp vào "Hệ thống" thay vì rơi khỏi mọi tab.
+   *
+   * Trước đây `TYPE_CATEGORY[n.type]` trả undefined nên thông báo chỉ hiện ở tab "Tất
+   * cả"; dòng lại ghi nhãn "Khác" mà không có tab "Khác" nào để bấm. Người dùng lọc
+   * theo tab là mất hút thông báo — mỗi lần BE thêm type mới là một lần như vậy.
+   */
+  const categoryOf = (type: string): string => TYPE_CATEGORY[type] ?? 'Hệ thống';
+
   const filtered = filter === 'all'
     ? notifications
-    : notifications.filter(n => TYPE_CATEGORY[n.type] === filter);
+    : notifications.filter(n => categoryOf(n.type) === filter);
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
@@ -192,7 +213,9 @@ export const TenantNotificationScreen: React.FC = () => {
   // ── Card renderer ─────────────────────────────────────────────────────────
   const renderItem = ({ item }: { item: AppNotification }) => {
     const accent  = TYPE_ACCENT[item.type] ?? TYPE_ACCENT.system;
-    const category = TYPE_CATEGORY[item.type] ?? 'Khác';
+    // Cùng một hàm với bộ lọc — nhãn trên thẻ phải khớp tab bấm được, không thì
+    // người dùng thấy "Khác" rồi đi tìm tab "Khác" không tồn tại.
+    const category = categoryOf(item.type);
 
     return (
       <TouchableOpacity
