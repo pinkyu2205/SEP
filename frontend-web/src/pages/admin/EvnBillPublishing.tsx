@@ -28,6 +28,9 @@ import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 
 const PROPERTY_PAGE_SIZE = 200;
 
+/** Số dòng mỗi trang ở bảng "Đã phát hành". */
+const BILLS_PER_PAGE = 10;
+
 const fmtDateTime = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
@@ -257,6 +260,18 @@ export const EvnBillPublishing = () => {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [justPublished, setJustPublished] = useState<EvnBill | null>(null);
+  /** Bộ lọc bảng 'Đã phát hành'. */
+  const [billSearch, setBillSearch] = useState('');
+  const [billStatus, setBillStatus] = useState<'all' | 'published' | 'revoked'>('all');
+  /** Bản ghi đang chờ xác nhận thu hồi (null = hộp thoại đóng). */
+  const [revokeTarget, setRevokeTarget] = useState<EvnBill | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [billPage, setBillPage] = useState(1);
+  /** Ảnh đang xem phóng to (null = đóng). */
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
+  /** Bản ghi đang mở chi tiết (null = đóng). */
+  const [detailBill, setDetailBill] = useState<EvnBill | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ── Tải danh sách nhà ──────────────────────────────────────────────────────
@@ -273,11 +288,20 @@ export const EvnBillPublishing = () => {
     }
   }, []);
 
+  /**
+   * Nạp danh sách đã phát hành của kỳ đang xem.
+   *
+   * Phải hỏi TỪNG NHÀ rồi gộp, vì BE bắt buộc `propertyId` (xem `listForPeriod`).
+   * Do đó hàm này chỉ chạy được SAU khi có danh sách nhà — `properties` nằm trong deps.
+   */
   const loadBills = useCallback(async () => {
+    if (properties.length === 0) { setBills([]); return; }
     setLoadingBills(true);
     try {
-      const rows = await evnBillService.list({ month, year });
-      setBills(rows);
+      const rows = await evnBillService.listForPeriod(properties.map(p => p.id), month, year);
+      // Lưới an toàn cuối: một object lọt xuống đây là `bills.length` thành undefined và
+      // bảng im lặng báo "chưa phát hành gì" — đúng lỗi đã xảy ra 13/08/2026.
+      setBills(Array.isArray(rows) ? rows : []);
       setBillsUnavailable(false);
     } catch {
       setBills([]);
@@ -285,7 +309,7 @@ export const EvnBillPublishing = () => {
     } finally {
       setLoadingBills(false);
     }
-  }, [month, year]);
+  }, [month, year, properties]);
 
   useEffect(() => { loadProperties(); }, [loadProperties]);
   useEffect(() => { loadBills(); }, [loadBills]);
@@ -309,6 +333,48 @@ export const EvnBillPublishing = () => {
     () => new Set(bills.filter((b) => b.status !== 'REVOKED').map((b) => b.propertyId)),
     [bills],
   );
+
+  /**
+   * Lọc bảng đã phát hành. Một kỳ có thể hàng chục nhà, cuộn tìm rất mệt.
+   * Tìm được cả theo tên nhà lẫn chuỗi kỳ (khách hay hỏi theo kỳ in trên giấy).
+   */
+  const visibleBills = useMemo(() => {
+    const q = normalizeVi(billSearch.trim());
+    return bills
+      .filter((b) => {
+        if (billStatus === 'published' && b.status === 'REVOKED') return false;
+        if (billStatus === 'revoked' && b.status !== 'REVOKED') return false;
+        if (!q) return true;
+        return normalizeVi(`${b.propertyName ?? ''} ${b.billingPeriod ?? ''}`).includes(q);
+      })
+      /**
+       * MỚI PHÁT HÀNH LÊN ĐẦU.
+       *
+       * Trước đây thứ tự là do gom từ nhiều nhà (`listForPeriod` chạy theo lô) nên phụ
+       * thuộc thứ tự nhà — admin vừa bấm gửi xong phải đi tìm dòng của mình. Sắp theo
+       * `createdAt` giảm dần để bản vừa tạo luôn nằm trên cùng.
+       * Thiếu `createdAt` thì đẩy xuống cuối chứ không cho lên đầu nhầm.
+       */
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, [bills, billSearch, billStatus]);
+
+  /** Cắt trang — một kỳ có thể hàng trăm nhà, đổ hết ra một bảng thì không đọc nổi. */
+  const totalPages = Math.max(1, Math.ceil(visibleBills.length / BILLS_PER_PAGE));
+  const pagedBills = useMemo(
+    () => visibleBills.slice((billPage - 1) * BILLS_PER_PAGE, billPage * BILLS_PER_PAGE),
+    [visibleBills, billPage],
+  );
+
+  // Đổi bộ lọc / đổi kỳ mà đang đứng ở trang 5 thì bảng trống trơn — kéo về trang 1.
+  useEffect(() => { setBillPage(1); }, [billSearch, billStatus, month, year]);
+
+  // Esc đóng ảnh phóng to — người dùng quen phím này ở mọi trình xem ảnh.
+  useEffect(() => {
+    if (!zoomImage) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setZoomImage(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [zoomImage]);
 
   const unitPrice = evnUnitPrice(Number(onlyDigits(form.totalAmount)), Number(onlyDigits(form.totalKwh)));
 
@@ -402,16 +468,26 @@ export const EvnBillPublishing = () => {
     }
   };
 
-  const revoke = async (bill: EvnBill) => {
-    if (!window.confirm(
-      `Thu hồi hoá đơn EVN của "${bill.propertyName ?? `nhà #${bill.propertyId}`}" kỳ ${bill.billingPeriod}?\n\n`
-      + 'Quản lý sẽ không dùng được đơn giá này nữa. Hoá đơn ĐÃ gửi cho khách thì không bị ảnh hưởng.',
-    )) return;
+  /**
+   * Thu hồi — mở hộp xác nhận riêng thay cho `window.confirm`.
+   *
+   * `window.confirm` của trình duyệt không style được, hiện chuỗi "localhost:5173 cho
+   * biết" ở tiêu đề và khoá cả tab cho tới khi bấm — với một thao tác phá huỷ thì nó
+   * vừa xấu vừa không nêu rõ hậu quả. Hộp riêng cho phép làm nổi nút nguy hiểm và
+   * hiện đúng thông tin bản ghi sắp thu hồi.
+   */
+  const doRevoke = async () => {
+    if (!revokeTarget) return;
+    setRevoking(true);
+    setRevokeError(null);
     try {
-      await evnBillService.revoke(bill.id);
+      await evnBillService.revoke(revokeTarget.id);
+      setRevokeTarget(null);
       loadBills();
     } catch (e: any) {
-      window.alert(e?.response?.data?.message || e?.message || 'Không thu hồi được.');
+      setRevokeError(e?.response?.data?.message || e?.message || 'Không thu hồi được.');
+    } finally {
+      setRevoking(false);
     }
   };
 
@@ -555,7 +631,19 @@ export const EvnBillPublishing = () => {
                 </button>
               ) : (
                 <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <img src={imageUrl} alt="Hoá đơn EVN" className="max-h-72 w-full bg-slate-50 object-contain" />
+                  {/* Bấm để phóng to — ảnh hoá đơn EVN chữ nhỏ, xem ở khung 288px thì
+                      không đọc nổi số để đối chiếu với ô nhập bên cạnh. */}
+                  <button
+                    type="button"
+                    onClick={() => setZoomImage(imageUrl)}
+                    title="Bấm để phóng to"
+                    className="group relative block w-full cursor-zoom-in"
+                  >
+                    <img src={imageUrl} alt="Hoá đơn EVN" className="max-h-72 w-full bg-slate-50 object-contain" />
+                    <span className="absolute right-2 top-2 rounded-lg bg-slate-900/70 px-2 py-1 text-[11px] font-bold text-white opacity-0 transition group-hover:opacity-100">
+                      🔍 Phóng to
+                    </span>
+                  </button>
                   <div className="flex gap-2 border-t border-slate-100 p-2">
                     <button
                       type="button"
@@ -661,6 +749,37 @@ export const EvnBillPublishing = () => {
         title={`Đã phát hành — kỳ ${month}/${year}`}
         subtitle="Quản lý của các nhà dưới đây đã nhận được đơn giá điện và có thể gửi hoá đơn cho khách."
         icon={Zap}
+        action={
+          bills.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5">
+                <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                <input
+                  className="w-44 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                  placeholder="Tìm nhà hoặc kỳ..."
+                  value={billSearch}
+                  onChange={(e) => setBillSearch(e.target.value)}
+                />
+              </div>
+              {([
+                { key: 'all',       label: `Tất cả ${bills.length}` },
+                { key: 'published', label: `Đang hiệu lực ${bills.filter(b => b.status !== 'REVOKED').length}` },
+                { key: 'revoked',   label: `Đã thu hồi ${bills.filter(b => b.status === 'REVOKED').length}` },
+              ] as { key: typeof billStatus; label: string }[]).map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setBillStatus(t.key)}
+                  className={`rounded-full px-2.5 py-1.5 text-xs font-bold transition ${
+                    billStatus === t.key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ) : undefined
+        }
       >
         {billsUnavailable ? (
           <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -679,6 +798,10 @@ export const EvnBillPublishing = () => {
           </div>
         ) : bills.length === 0 ? (
           <EmptyState text={`Chưa phát hành hoá đơn EVN nào cho kỳ ${month}/${year}.`} />
+        ) : visibleBills.length === 0 ? (
+          // Phân biệt "kỳ này chưa phát hành gì" với "có nhưng bộ lọc đang che" —
+          // dùng chung một câu là người dùng tưởng mất dữ liệu.
+          <EmptyState text="Không có bản ghi nào khớp bộ lọc." />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
@@ -694,10 +817,15 @@ export const EvnBillPublishing = () => {
                 </tr>
               </thead>
               <tbody>
-                {bills.map((b) => {
+                {pagedBills.map((b) => {
                   const revoked = b.status === 'REVOKED';
                   return (
-                    <tr key={b.id} className={`border-b border-slate-100 ${revoked ? 'opacity-50' : ''}`}>
+                    <tr
+                      key={b.id}
+                      onClick={() => setDetailBill(b)}
+                      className={`cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 ${revoked ? 'opacity-50' : ''}`}
+                      title="Bấm để xem chi tiết"
+                    >
                       <td className="py-3 pr-3 font-semibold text-slate-800">
                         {b.propertyName ?? `#${b.propertyId}`}
                         {revoked && (
@@ -722,7 +850,7 @@ export const EvnBillPublishing = () => {
                         {!revoked && (
                           <button
                             type="button"
-                            onClick={() => revoke(b)}
+                            onClick={(e) => { e.stopPropagation(); setRevokeTarget(b); setRevokeError(null); }}
                             className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
                           >
                             <Trash2 className="h-3.5 w-3.5" /> Thu hồi
@@ -734,9 +862,230 @@ export const EvnBillPublishing = () => {
                 })}
               </tbody>
             </table>
+
+            {/* Thanh phân trang — chỉ hiện khi thật sự có hơn 1 trang. */}
+            {totalPages > 1 && (
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                <p className="text-xs text-slate-500">
+                  Hiển thị <span className="font-bold text-slate-700">{(billPage - 1) * BILLS_PER_PAGE + 1}
+                  –{Math.min(billPage * BILLS_PER_PAGE, visibleBills.length)}</span> trên{' '}
+                  <span className="font-bold text-slate-700">{visibleBills.length}</span> bản ghi
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={billPage === 1}
+                    onClick={() => setBillPage((p) => Math.max(1, p - 1))}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    ‹ Trước
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setBillPage(p)}
+                      className={`min-w-[32px] rounded-lg px-2 py-1.5 text-xs font-bold transition ${
+                        p === billPage
+                          ? 'bg-indigo-600 text-white'
+                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={billPage === totalPages}
+                    onClick={() => setBillPage((p) => Math.min(totalPages, p + 1))}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Sau ›
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </SectionShell>
+
+      {/* ── Chi tiết hoá đơn đã phát hành ──
+          Bảng chỉ đủ chỗ cho vài cột; ảnh hoá đơn gốc và các mốc thời gian phải mở
+          riêng mới xem được. Bấm bất kỳ dòng nào trong bảng để vào đây. */}
+      {detailBill && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => setDetailBill(null)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-extrabold text-slate-900">
+                  {detailBill.propertyName ?? `Nhà #${detailBill.propertyId}`}
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-500">Kỳ {detailBill.billingPeriod}</p>
+              </div>
+              {detailBill.status === 'REVOKED'
+                ? <StatusPill label="Đã thu hồi" color="bg-slate-200 text-slate-600" />
+                : <StatusPill label="Đang hiệu lực" color="bg-emerald-100 text-emerald-700" />}
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tổng kWh</p>
+                <p className="mt-1 text-lg font-black tabular-nums text-slate-800">
+                  {detailBill.totalKwh.toLocaleString('vi-VN')}
+                </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tổng tiền</p>
+                <p className="mt-1 text-lg font-black tabular-nums text-slate-800">
+                  {formatVnd(detailBill.totalAmount)}
+                </p>
+              </div>
+              <div className="rounded-xl bg-indigo-50 p-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-400">Đơn giá</p>
+                <p className="mt-1 text-lg font-black tabular-nums text-indigo-700">
+                  {formatVnd(detailBill.unitPrice ?? evnUnitPrice(detailBill.totalAmount, detailBill.totalKwh))}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2 rounded-xl border border-slate-100 p-3 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Phát hành lúc</span>
+                <span className="font-semibold text-slate-800">{fmtDateTime(detailBill.createdAt)}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Người phát hành</span>
+                <span className="font-semibold text-slate-800">{detailBill.createdBy ?? '—'}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500">Kỳ (tháng/năm)</span>
+                <span className="font-semibold text-slate-800">{detailBill.month}/{detailBill.year}</span>
+              </div>
+            </div>
+
+            <p className="mt-4 mb-1.5 text-sm font-bold text-slate-700">Ảnh hoá đơn gốc</p>
+            {detailBill.imageUrl ? (
+              <button
+                type="button"
+                onClick={() => setZoomImage(detailBill.imageUrl!)}
+                className="block w-full cursor-zoom-in overflow-hidden rounded-xl border border-slate-200"
+              >
+                <img src={detailBill.imageUrl} alt="Hoá đơn EVN" className="max-h-80 w-full bg-slate-50 object-contain" />
+              </button>
+            ) : (
+              <p className="rounded-xl bg-slate-50 p-4 text-center text-sm text-slate-400">
+                Bản ghi này phát hành không kèm ảnh.
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDetailBill(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Xem ảnh phóng to ──
+          Bấm nền hoặc Esc để đóng. Ảnh để `max-h/max-w` theo viewport nên luôn vừa
+          màn hình, không phải cuộn. */}
+      {zoomImage && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-4"
+          onClick={() => setZoomImage(null)}
+        >
+          <img
+            src={zoomImage}
+            alt="Hoá đơn EVN phóng to"
+            className="max-h-[92vh] max-w-[92vw] rounded-lg bg-white object-contain shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            onClick={() => setZoomImage(null)}
+            className="absolute right-5 top-5 rounded-full bg-white/90 px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-white"
+          >
+            ✕ Đóng
+          </button>
+        </div>
+      )}
+
+      {/* ── Hộp xác nhận thu hồi ──
+          Thay `window.confirm`: hộp của trình duyệt không style được, gắn thêm dòng
+          "localhost:5173 cho biết" và khoá cả tab. Với một thao tác phá huỷ thì cần
+          nêu rõ đang thu hồi bản ghi NÀO và hậu quả ra sao. */}
+      {revokeTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onClick={() => !revoking && setRevokeTarget(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-rose-100 p-2">
+                <AlertTriangle className="h-5 w-5 text-rose-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-extrabold text-slate-900">Thu hồi hoá đơn EVN?</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Quản lý sẽ không dùng được đơn giá này nữa. Hoá đơn ĐÃ gửi cho khách thì
+                  không bị ảnh hưởng.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-1 rounded-xl bg-slate-50 p-3 text-sm">
+              <p className="font-bold text-slate-800">
+                {revokeTarget.propertyName ?? `Nhà #${revokeTarget.propertyId}`}
+              </p>
+              <p className="text-slate-500">Kỳ {revokeTarget.billingPeriod}</p>
+              <p className="text-slate-500">
+                {revokeTarget.totalKwh.toLocaleString('vi-VN')} kWh · {formatVnd(revokeTarget.totalAmount)} ·
+                {' '}{formatVnd(revokeTarget.unitPrice ?? evnUnitPrice(revokeTarget.totalAmount, revokeTarget.totalKwh))}/kWh
+              </p>
+            </div>
+
+            {revokeError && (
+              <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-sm text-rose-700">
+                {revokeError}
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={revoking}
+                onClick={() => setRevokeTarget(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Huỷ
+              </button>
+              <button
+                type="button"
+                disabled={revoking}
+                onClick={doRevoke}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60"
+              >
+                {revoking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Thu hồi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

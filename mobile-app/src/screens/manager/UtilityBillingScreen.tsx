@@ -1,13 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, FlatList, ActivityIndicator, Image, Platform,
+  TextInput, Alert, SectionList, ActivityIndicator, Image, Platform, Modal,
 } from 'react-native';
 import {
   showAlert, validateMeterPhoto, splitMeterReading, roundConsumptionByMentorRule,
 } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Colors, Spacing, BorderRadius, Shadow,
@@ -238,6 +238,7 @@ const mapBillingProperty = (
 
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
+  const route = useRoute<any>();
   const [activeTab, setActiveTab] = useState<MainTab>('electricity');
   /**
    * Chặn gửi hoá đơn khi KHÁCH ĐÓ đã nhận hoá đơn loại này trong kỳ.
@@ -267,6 +268,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   // Lịch sử hóa đơn điện/nước đã gửi (toàn bộ nhà) — dữ liệu thật từ BE.
   const [histInvoices, setHistInvoices] = useState<ManagerInvoice[]>([]);
   const [loadingHist,  setLoadingHist]  = useState(false);
+  /** Lọc lịch sử theo kỳ (YYYY-MM); 'all' = mọi kỳ. */
+  const [histPeriod,   setHistPeriod]   = useState<string>('all');
 
   // ── Electricity state ──────────────────────────────────────────────────────
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
@@ -275,6 +278,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [ocrRoomId,          setOcrRoomId]          = useState<string | null>(null); // phòng đang OCR đồng hồ
   /** Đang mở camera trong app cho việc gì (null = đóng). */
   const [cameraTarget,       setCameraTarget]       = useState<CameraTarget | null>(null);
+  /** Ảnh đang xem phóng to (null = đóng). */
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
 
   /**
    * Hoá đơn EVN của kỳ này do ADMIN phát hành (chỉ đọc). null = admin chưa đẩy.
@@ -343,6 +348,28 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   }, []);
 
   useFocusEffect(useCallback(() => { loadProperties(); loadHistory(); }, [loadProperties, loadHistory]));
+
+  /**
+   * MỞ THẲNG NHÀ ĐƯỢC CHỈ ĐỊNH khi vào từ màn "Cần chụp số"
+   * (`MeterReadingPendingScreen` điều hướng kèm `{ propertyId, roomId, period }`).
+   *
+   * Trước 13/08/2026 màn này không đọc `route.params` nên bấm từ bên kia sang vẫn rơi
+   * vào bước chọn nhà từ đầu — đúng thứ màn kia sinh ra để tránh.
+   *
+   * `jumpedRef` để chỉ nhảy MỘT LẦN: `useFocusEffect` chạy lại mỗi lần quay lại màn,
+   * không chặn thì manager bấm "Quay lại" là bị đá về bước 2 vô hạn, không thoát ra
+   * bước chọn nhà được.
+   */
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    const pid = route?.params?.propertyId;
+    if (jumpedRef.current || !pid || properties.length === 0) return;
+    if (!properties.some(p => p.id === String(pid))) return; // nhà không thuộc manager
+    jumpedRef.current = true;
+    setSelectedPropertyId(String(pid));
+    setActiveTab('electricity');
+    enterEvnStep(String(pid));
+  }, [route?.params?.propertyId, properties]);
   useEffect(() => { loadHistory(); }, [utilReloadKey, loadHistory]);
 
   const selectedProperty = properties.find(p => p.id === selectedPropertyId);
@@ -813,7 +840,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     if (!r.meterImageUrl) return null;
     return (
       <View style={styles.meterThumbRow}>
-        <Image source={{ uri: r.meterImageUrl }} style={styles.meterThumb} resizeMode="cover" />
+        <TouchableOpacity activeOpacity={0.8} onPress={() => setZoomImage(r.meterImageUrl!)}>
+          <Image source={{ uri: r.meterImageUrl }} style={styles.meterThumb} resizeMode="cover" />
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={styles.meterThumbLabel}>Ảnh đồng hồ đã chụp</Text>
           <Text style={styles.meterThumbHint}>Sẽ gửi kèm hoá đơn</Text>
@@ -962,7 +991,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
                     {!!evnBill.imageUrl && (
                       <View style={styles.thumbWrap}>
-                        <Image source={{ uri: evnBill.imageUrl }} style={styles.evnThumb} resizeMode="contain" />
+                        {/* Bấm để phóng to — ảnh hoá đơn EVN chữ nhỏ, xem ở khung thu
+                            nhỏ trên điện thoại thì không đọc nổi số để đối chiếu. */}
+                        <TouchableOpacity activeOpacity={0.8} onPress={() => setZoomImage(evnBill.imageUrl!)}>
+                          <Image source={{ uri: evnBill.imageUrl }} style={styles.evnThumb} resizeMode="contain" />
+                        </TouchableOpacity>
                         <Text style={styles.meterThumbHint}>Ảnh hóa đơn gốc admin tải lên — dùng để đối chiếu với khách.</Text>
                       </View>
                     )}
@@ -1367,13 +1400,85 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     );
   };
 
+  /**
+   * Lịch sử gom theo KỲ, mới nhất trước.
+   *
+   * Trước 13/08/2026 đây là một danh sách phẳng: quản 5–10 nhà, mỗi kỳ vài chục hoá
+   * đơn điện + nước là cuộn mãi không thấy kỳ mình cần. Nay mỗi kỳ một mục, kèm chip
+   * lọc kỳ ở trên.
+   */
+  const histSections = useMemo(() => {
+    const rows = histPeriod === 'all'
+      ? histInvoices
+      : histInvoices.filter(i => `${i.year}-${String(i.month).padStart(2, '0')}` === histPeriod);
+    const byPeriod = new Map<string, ManagerInvoice[]>();
+    for (const i of rows) {
+      const key = `${i.year}-${String(i.month).padStart(2, '0')}`;
+      byPeriod.set(key, [...(byPeriod.get(key) ?? []), i]);
+    }
+    return [...byPeriod.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) => {
+        const [y, m] = key.split('-');
+        return {
+          key,
+          title: `Kỳ ${m}/${y}`,
+          elec: items.filter(i => i.type === 'ELECTRICITY').length,
+          water: items.filter(i => i.type === 'WATER').length,
+          data: items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+        };
+      });
+  }, [histInvoices, histPeriod]);
+
+  /** Các kỳ CÓ dữ liệu — dựng từ chính danh sách nên không có chip rỗng. */
+  const histPeriods = useMemo(() => {
+    const set = new Set(histInvoices.map(i => `${i.year}-${String(i.month).padStart(2, '0')}`));
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [histInvoices]);
+
   const renderHistoryTab = () => (
-    <FlatList
-      data={histInvoices}
+    <SectionList
+      sections={histSections}
       keyExtractor={i => String(i.id)}
       contentContainerStyle={styles.tabContent}
       showsVerticalScrollIndicator={false}
-      ListHeaderComponent={<SectionHeader title="Lịch sử hóa đơn điện / nước đã gửi" />}
+      stickySectionHeadersEnabled={false}
+      ListHeaderComponent={
+        <>
+          <SectionHeader title="Lịch sử hóa đơn điện / nước đã gửi" />
+          {histPeriods.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.histFilterRow}>
+              <TouchableOpacity
+                style={[styles.histChip, histPeriod === 'all' && styles.histChipActive]}
+                onPress={() => setHistPeriod('all')}
+              >
+                <Text style={[styles.histChipText, histPeriod === 'all' && styles.histChipTextActive]}>Mọi kỳ</Text>
+              </TouchableOpacity>
+              {histPeriods.map(p => {
+                const [y, m] = p.split('-');
+                return (
+                  <TouchableOpacity
+                    key={p}
+                    style={[styles.histChip, histPeriod === p && styles.histChipActive]}
+                    onPress={() => setHistPeriod(p)}
+                  >
+                    <Text style={[styles.histChipText, histPeriod === p && styles.histChipTextActive]}>{m}/{y}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+        </>
+      }
+      renderSectionHeader={({ section }) => (
+        <View style={styles.histSectionHead}>
+          <Text style={styles.histSectionTitle}>{section.title}</Text>
+          <Text style={styles.histSectionMeta}>
+            ⚡ {section.elec} · 💧 {section.water}
+          </Text>
+        </View>
+      )}
       renderItem={({ item }) => {
         const st = UTIL_STATUS[item.status] ?? UTIL_STATUS.PENDING;
         return (
@@ -1456,6 +1561,19 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
       {/* Camera trong app: chụp → xem lại → "Dùng ảnh này" mới tải lên & đọc số.
           Dùng cho cả web lẫn điện thoại (web không bật được camera qua ImagePicker). */}
+      {/* Xem ảnh phóng to — chạm nền hoặc nút ✕ để đóng. Dùng chung cho ảnh hoá đơn
+          EVN và ảnh đồng hồ từng phòng. */}
+      <Modal visible={!!zoomImage} transparent animationType="fade" onRequestClose={() => setZoomImage(null)}>
+        <TouchableOpacity style={styles.zoomOverlay} activeOpacity={1} onPress={() => setZoomImage(null)}>
+          {!!zoomImage && (
+            <Image source={{ uri: zoomImage }} style={styles.zoomImage} resizeMode="contain" />
+          )}
+          <TouchableOpacity style={styles.zoomClose} onPress={() => setZoomImage(null)}>
+            <Text style={styles.zoomCloseText}>✕ Đóng</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <CameraCaptureModal
         visible={cameraTarget !== null}
         onCapture={(uri) => {
@@ -2127,6 +2245,36 @@ const styles = StyleSheet.create({
   historyFooter:  { flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.sm },
   historyRooms:   { fontSize: 12, color: Colors.textMuted },
   historyAmount:  { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+
+  // Tab Lịch sử: chip lọc kỳ + tiêu đề mỗi kỳ (13/08/2026).
+  histFilterRow: { flexDirection: 'row', gap: Spacing.xs, paddingBottom: Spacing.sm },
+  histChip: {
+    height: 30, paddingHorizontal: 12, borderRadius: BorderRadius.full,
+    justifyContent: 'center', backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  histChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  histChipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  histChipTextActive: { color: Colors.white },
+  histSectionHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingTop: Spacing.md, paddingBottom: Spacing.xs,
+  },
+  histSectionTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  histSectionMeta:  { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+
+  // Xem ảnh phóng to (13/08/2026) — ảnh hoá đơn EVN và ảnh đồng hồ đều chữ nhỏ.
+  zoomOverlay: {
+    flex: 1, backgroundColor: 'rgba(2,6,23,0.92)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  zoomImage: { width: '96%', height: '85%' },
+  zoomClose: {
+    position: 'absolute', top: 44, right: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: BorderRadius.full,
+    paddingHorizontal: 14, paddingVertical: 8,
+  },
+  zoomCloseText: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
 
   empty: { alignItems: 'center', paddingTop: 60 },
   emptyEmoji: { fontSize: 40, marginBottom: Spacing.sm },

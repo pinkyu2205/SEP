@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Spacing, BorderRadius, canTerminateForUnpaidRent } from '@/constants';
+import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 import {
@@ -33,7 +34,10 @@ const QUICK_ACTIONS = [
   // mở được bằng cách bấm thông báo — mà cron chỉ gửi 1 lần/ngày, lỡ là mất.
   { emoji: '📸', label: 'Cần chụp số', route: 'MeterReadingPending', color: Colors.warning },
   // Màn này gồm cả nhà nguyên căn (không có phòng) nên không gọi là "Phòng".
-  { emoji: '🏠', label: 'Nhà & phòng', route: 'RoomManage',       color: Colors.success },
+  // Gộp 13/08/2026: trước đây ô này mở RoomManage còn nút "Quản lý tất cả toà nhà" ở
+  // dưới mở BuildingList — hai màn khác nhau cho cùng một việc. Nay cả hai vào
+  // BuildingList; từ chi tiết từng nhà đã có sẵn lối sang RoomManage để đổi trạng thái phòng.
+  { emoji: '🏠', label: 'Nhà & phòng', route: 'BuildingList',     color: Colors.success },
   { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
   { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
   { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
@@ -50,6 +54,7 @@ export const ManagerHomeScreen: React.FC = () => {
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   const [draftContracts, setDraftContracts] = useState<TenantContractResponse[]>([]);
+  const [activeContracts, setActiveContracts] = useState<TenantContractResponse[]>([]);
   const [checkouts, setCheckouts] = useState<CheckoutRequestDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,6 +74,13 @@ export const ManagerHomeScreen: React.FC = () => {
       setPayments(pay);
       setDraftContracts(drafts);
       setCheckouts(checkoutList);
+
+      // HĐ đang hiệu lực — để loại hoá đơn của khách ĐÃ chấm dứt khỏi "My Task".
+      // Hỏi theo từng nhà (xem listActiveByProperties) nên phải đợi có `props` trước.
+      const activeCts = await realTenantService
+        .listActiveByProperties(props.map(p => Number(p.id)))
+        .catch(() => [] as TenantContractResponse[]);
+      setActiveContracts(activeCts);
     } catch {
       // Lỗi đã được xử lý/log ở service; giữ dữ liệu cũ.
     } finally {
@@ -105,12 +117,25 @@ export const ManagerHomeScreen: React.FC = () => {
     [properties],
   );
 
+  /**
+   * "My Task" chỉ đếm việc manager CÒN LÀM ĐƯỢC.
+   *
+   * Khách đã chấm dứt hợp đồng thì hoá đơn còn nợ của họ không thuộc về đây — họ đã
+   * rời đi, phần nợ xử lý ở luồng tất toán Trả phòng. BE vẫn giữ trạng thái OVERDUE
+   * nên phải tự lọc (xem belongsToActiveTenant trong @/utils).
+   */
+  const rentingKeys = useMemo(() => activeRentingKeys(activeContracts), [activeContracts]);
+  const actionableInvoices = useMemo(
+    () => invoices.filter(i => belongsToActiveTenant(i, rentingKeys)),
+    [invoices, rentingKeys],
+  );
+
   // Số liệu thật cho "Cần xử lý hôm nay" + badge thao tác nhanh.
-  const overdueCount  = invoices.filter(i => i.status === 'OVERDUE').length;
+  const overdueCount  = actionableInvoices.filter(i => i.status === 'OVERDUE').length;
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
-  const rentTerminable = invoices.filter(i =>
+  const rentTerminable = actionableInvoices.filter(i =>
     i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
-  const unpaidCount   = invoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
+  const unpaidCount   = actionableInvoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   // Lịch đón khách hôm nay — hợp đồng nháp đã gán cho manager này, có ngày dự

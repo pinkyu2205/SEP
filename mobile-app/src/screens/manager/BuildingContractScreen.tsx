@@ -141,8 +141,10 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
 
   const callTenant = (phone?: string) => {
     if (!phone) return showAlert('Thiếu số điện thoại', 'Hợp đồng này chưa có số điện thoại khách thuê.');
+    // KHÔNG in số ra alert khi gọi hỏng — số điện thoại đã ẩn với manager thì đường
+    // thoát lỗi cũng không được để lộ, nếu không việc ẩn ở màn chi tiết thành vô nghĩa.
     Linking.openURL(`tel:${phone}`).catch(() =>
-      showAlert('Không gọi được', `Số điện thoại khách: ${phone}`));
+      showAlert('Không gọi được', 'Không mở được ứng dụng gọi trên máy này.'));
   };
 
   const viewDocument = async (c: TenantContractResponse) => {
@@ -218,10 +220,13 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
             )}
           </View>
 
+          {/* SĐT và CCCD ẨN với manager (13/08/2026) — thông tin định danh cá nhân của
+              khách, manager không cần đọc để vận hành. Nút "Gọi khách" ở trên VẪN gọi
+              được: nó mở app điện thoại với số lấy từ dữ liệu, không hiện số ra màn hình. */}
           <Section title="Khách thuê">
             <Row label="Họ tên" value={selected.tenantFullName} />
-            <Row label="Số điện thoại" value={selected.tenantPhone} />
-            <Row label="CCCD/CMND" value={selected.tenantCccd || 'Chưa có'} />
+            <Row label="Số điện thoại" value="•••" />
+            <Row label="CCCD/CMND" value="•••" />
           </Section>
 
           {/* Không hiện số tiền thuê/cọc — hệ thống thu thẳng của khách
@@ -453,8 +458,10 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
                       </View>
                     </View>
 
+                    {/* Bỏ SĐT khỏi thẻ (13/08/2026) — ẩn ở màn chi tiết mà vẫn in ra
+                        đây thì coi như không ẩn. Chỉ còn tên khách. */}
                     <Text style={styles.cardTenant} numberOfLines={1}>
-                      {c.tenantFullName}{c.tenantPhone ? ` · ${c.tenantPhone}` : ''}
+                      {c.tenantFullName}
                     </Text>
 
                     {/* Thay số tiền bằng trạng thái thu cọc — @/constants/managerVisibility. */}

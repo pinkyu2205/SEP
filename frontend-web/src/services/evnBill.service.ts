@@ -64,6 +64,24 @@ export interface OcrEvnBillResponse {
 }
 
 /**
+ * Bóc danh sách khỏi mọi dạng bọc BE có thể trả: mảng trần, `{items}`, `{content}`
+ * (Spring `Page`) hoặc `{data}`.
+ *
+ * BUG 13/08/2026: bản đầu viết `return rows ?? []` với giả định BE trả MẢNG TRẦN. BE trả
+ * dạng bọc nên `rows` là một object — không null nên `?? []` không cứu được, `bills.length`
+ * thành `undefined`, bảng "Đã phát hành" luôn hiện "Chưa phát hành hoá đơn nào" DÙ bản ghi
+ * có thật (bấm gửi lại thì BE báo 409 "Đã tồn tại hoá đơn EVN cho kỳ này", và app manager
+ * đọc được bình thường vì service mobile đã bóc đúng từ đầu).
+ *
+ * Rút ra: đừng đoán dạng response, bóc hết mọi dạng.
+ */
+const unwrapList = <T,>(d: unknown): T[] => {
+  if (Array.isArray(d)) return d as T[];
+  const o = d as { items?: T[]; content?: T[]; data?: T[] } | null | undefined;
+  return o?.items ?? o?.content ?? o?.data ?? [];
+};
+
+/**
  * ⚠️ `api` đã bóc `.data` trong response interceptor, nên các hàm dưới trả THẲNG payload.
  * Viết `const { data } = await evnBillService.list()` là bóc hai lần → undefined.
  */
@@ -81,8 +99,43 @@ export const evnBillService = {
     api.post<unknown, EvnBill>(`${ADMIN}/evn-bills`, input),
 
   list: async (params?: { propertyId?: number; month?: number; year?: number }): Promise<EvnBill[]> => {
-    const rows = await api.get<unknown, EvnBill[]>(`${ADMIN}/evn-bills`, { params });
-    return rows ?? [];
+    const raw = await api.get<unknown, unknown>(`${ADMIN}/evn-bills`, { params });
+    return unwrapList<EvnBill>(raw);
+  },
+
+  /**
+   * Danh sách đã phát hành của MỘT KỲ, gộp từ nhiều nhà.
+   *
+   * ⚠️ VÁ TẠM CHO BUG BE (13/08/2026): `GET /admin/evn-bills` BẮT BUỘC có `propertyId`
+   * — thiếu nó thì trả `[]` bất kể month/year, dù bản ghi có thật (POST trùng trả 409,
+   * và gọi lại đúng `?propertyId=` thì thấy ngay). Nên không lấy được "tất cả nhà"
+   * bằng một request; phải hỏi từng nhà rồi gộp.
+   *
+   * Chạy theo lô để không bắn hàng trăm request cùng lúc làm nghẽn cả trình duyệt lẫn BE.
+   * Nhà nào lỗi thì bỏ qua nhà đó, không làm hỏng cả bảng.
+   *
+   * BỎ HÀM NÀY khi BE cho `propertyId` thành tuỳ chọn — xem
+   * doc/BE-HANDOFF-evn-bill-admin-2026-08-13.md.
+   */
+  listForPeriod: async (
+    propertyIds: number[],
+    month: number,
+    year: number,
+    batchSize = 8,
+  ): Promise<EvnBill[]> => {
+    const out: EvnBill[] = [];
+    for (let i = 0; i < propertyIds.length; i += batchSize) {
+      const batch = propertyIds.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map(propertyId =>
+          api.get<unknown, unknown>(`${ADMIN}/evn-bills`, { params: { propertyId, month, year } })
+            .then(unwrapList<EvnBill>)
+            .catch(() => [] as EvnBill[]),
+        ),
+      );
+      results.forEach(rows => out.push(...rows));
+    }
+    return out;
   },
 
   /**

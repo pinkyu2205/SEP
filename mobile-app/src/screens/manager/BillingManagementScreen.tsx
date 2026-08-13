@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
   TextInput,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
@@ -12,6 +12,7 @@ import {
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 
 /**
  * HOÁ ĐƠN TIỀN NHÀ — màn theo dõi kỳ thu HIỆN TẠI.
@@ -116,6 +117,10 @@ export const BillingManagementScreen: React.FC = () => {
   const [expandPending, setExpandPending] = useState(false);
   const [expandBuildings, setExpandBuildings] = useState(false);
 
+  const [activeContracts, setActiveContracts] = useState<TenantContractResponse[]>([]);
+  /** Phòng còn khách thuê — dùng lọc việc "Cần xử lý". */
+  const rentingKeys = useMemo(() => activeRentingKeys(activeContracts), [activeContracts]);
+
   const load = useCallback(() => {
     Promise.all([
       // Màn này CHỈ về tiền nhà (RENT). Điện/nước có thống kê riêng ở màn Ghi chỉ số
@@ -123,7 +128,17 @@ export const BillingManagementScreen: React.FC = () => {
       realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
     ])
-      .then(([inv, pay]) => { setInvoices(inv); setPayments(pay); })
+      .then(async ([inv, pay]) => {
+        setInvoices(inv);
+        setPayments(pay);
+        // Cần HĐ đang hiệu lực để loại hoá đơn của khách ĐÃ chấm dứt khỏi "Cần xử lý".
+        // Lấy propertyId từ chính hoá đơn — chúng đã được BE giới hạn theo quyền manager,
+        // nên không cần gọi thêm API danh sách nhà. Xem listActiveByProperties.
+        const ids = [...new Set(inv.map(i => Number(i.propertyId)).filter(Number.isFinite))];
+        const cts = await realTenantService.listActiveByProperties(ids)
+          .catch(() => [] as TenantContractResponse[]);
+        setActiveContracts(cts);
+      })
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -278,15 +293,25 @@ export const BillingManagementScreen: React.FC = () => {
    * Hiện thẳng tên khách + phòng + số ngày trễ để manager biết gọi ai trước,
    * thay vì chỉ đưa một con số rồi bắt tự đi tìm.
    */
+  /**
+   * Khách ĐÃ chấm dứt hợp đồng thì hoá đơn còn nợ của họ KHÔNG nằm trong "Cần xử lý":
+   * họ đã rời đi, manager không đòi được nữa, để lại chỉ làm đầy danh sách bằng việc
+   * không làm được. Phần nợ đó thuộc luồng tất toán ở mục Trả phòng.
+   * BE vẫn giữ hoá đơn ở trạng thái OVERDUE nên phải tự lọc — xem @/utils.
+   */
+  const actionable = useMemo(
+    () => shownInvoices.filter(i => belongsToActiveTenant(i, rentingKeys)),
+    [shownInvoices, rentingKeys],
+  );
   const overdueList = useMemo(
-    () => shownInvoices.filter(i => i.status === 'OVERDUE')
+    () => actionable.filter(i => i.status === 'OVERDUE')
       .sort((a, b) => daysLate(b) - daysLate(a)),
-    [shownInvoices, daysLate],
+    [actionable, daysLate],
   );
   const pendingList = useMemo(
-    () => shownInvoices.filter(i => i.status === 'PENDING')
+    () => actionable.filter(i => i.status === 'PENDING')
       .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')),
-    [shownInvoices],
+    [actionable],
   );
   const hasTodo = pendingVerifications.length > 0 || overdueList.length > 0 || pendingList.length > 0;
   // Chỉ xem nhanh vài giao dịch mới nhất — đủ thì sang màn Lịch sử thanh toán.

@@ -353,7 +353,7 @@ const TenantDetailModal: React.FC<{
             {/* Personal info */}
             <View style={mStyles.section}>
               <Text style={mStyles.sectionTitle}>Thông tin liên hệ</Text>
-              <InfoRow label="📱 Điện thoại" value={tenant.phone} />
+              <InfoRow label="📱 Điện thoại" value={'•••'} />
               {tenant.email && <InfoRow label="✉️ Email" value={tenant.email} />}
               <InfoRow label="🪪 CCCD / MST" value={tenant.cccd} />
             </View>
@@ -605,7 +605,7 @@ const TenantCard: React.FC<{
       <View style={cStyles.middleRow}>
         <View style={cStyles.infoItem}>
           <Text style={cStyles.infoIcon}>📱</Text>
-          <Text style={cStyles.infoText}>{tenant.phone}</Text>
+          <Text style={cStyles.infoText}>{'•••'}</Text>
         </View>
         <View style={cStyles.infoItem}>
           <Text style={cStyles.infoIcon}>📅</Text>

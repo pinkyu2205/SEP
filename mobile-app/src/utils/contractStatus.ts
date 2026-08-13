@@ -74,3 +74,46 @@ const CLOSED_RAW_STATUSES = ['TERMINATED', 'CANCELLED', 'CANCELED', 'ENDED', 'MO
 
 export const isClosedContract = (rawStatus?: string): boolean =>
   CLOSED_RAW_STATUSES.includes((rawStatus || '').toUpperCase());
+
+/**
+ * ─── HOÁ ĐƠN CỦA KHÁCH ĐÃ RỜI ĐI ──────────────────────────────────────────────
+ *
+ * BE giữ hoá đơn ở trạng thái OVERDUE kể cả sau khi hợp đồng đã thanh lý (cố ý — phần
+ * nợ đó còn phải đối soát). Nhưng ở các màn VIỆC CẦN LÀM của manager thì để lại là sai:
+ * khách đã rời đi, manager không đòi được nữa, ô "Cần xử lý" đầy việc không làm được.
+ * Phần nợ đó thuộc luồng tất toán ở mục Trả phòng.
+ *
+ * Cách nhận biết: nạp danh sách hợp đồng ACTIVE rồi xem hoá đơn có khớp phòng nào
+ * đang thuê không. Ghép theo (propertyId, roomNumber) chứ KHÔNG theo mình roomNumber —
+ * số phòng "101" tồn tại ở hầu hết các nhà, ghép thiếu propertyId là lẫn nhà này sang nhà kia.
+ */
+const rentingKey = (propertyId?: number | string | null, roomNumber?: string | null) =>
+  `${propertyId ?? ''}|${(roomNumber ?? '').trim().toLowerCase()}`;
+
+/** Tập phòng CÒN hợp đồng hiệu lực, dựng từ danh sách HĐ ACTIVE. */
+export const activeRentingKeys = (contracts: TenantContractResponse[]): Set<string> =>
+  new Set(
+    contracts
+      .filter(c => !isClosedContract(c.status))
+      .map(c => rentingKey(c.propertyId, c.roomNumber)),
+  );
+
+/**
+ * Hoá đơn này có còn thuộc một khách ĐANG thuê không.
+ *
+ * Nhà nguyên căn không có `roomNumber` → khớp theo nhà. Và khi CHƯA nạp được hợp đồng
+ * nào (mạng lỗi, tập rỗng) thì trả `true` — thà hiện thừa còn hơn giấu mất việc thật
+ * của manager chỉ vì một request hỏng.
+ */
+export const belongsToActiveTenant = (
+  inv: { propertyId?: number | string | null; roomNumber?: string | null },
+  keys: Set<string>,
+): boolean => {
+  if (keys.size === 0) return true;
+  if (!inv.roomNumber) {
+    // Nguyên căn: còn bất kỳ HĐ nào của nhà đó là còn khách.
+    const prefix = `${inv.propertyId ?? ''}|`;
+    return [...keys].some(k => k.startsWith(prefix));
+  }
+  return keys.has(rentingKey(inv.propertyId, inv.roomNumber));
+};

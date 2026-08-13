@@ -8,7 +8,7 @@ import { realPropertyService, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 
-const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
+// `fmt` đã bỏ 13/08/2026 — màn này không còn in số tiền nào (tiền nhà ẩn với manager).
 
 type UIRoomStatus = 'occupied' | 'available' | 'maintenance';
 const ROOM_DOT: Record<UIRoomStatus, string> = {
@@ -30,7 +30,10 @@ const floorOf = (roomNumber: string): number => {
 };
 
 const QUICK_ACTIONS = [
-  { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingInvoice', color: '#F59E0B' },
+  // 'BuildingInvoice' (13/08/2026): màn đó chạy hoàn toàn bằng dữ liệu MOCK
+  // (getBuildingOps/getPropertyById) nên mở ra là trắng trơn + "Tổng phải thu 0đ".
+  // Màn thật là BuildingBilling — nối API và đã dùng ở nơi khác.
+  { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingBilling', color: '#F59E0B' },
   { emoji: '⚡', label: 'Chốt số', desc: 'Điện nước', route: 'UtilityBilling', color: Colors.accent },
   { emoji: '🔧', label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
   { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'RoomManage', color: Colors.success },
@@ -69,7 +72,11 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   }, [pid]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const nav = (r: string) => navigation.navigate(r, { propertyId: String(pid), property: prop });
+  // `propertyName` là BẮT BUỘC với BuildingBilling (nó đọc thẳng từ params để làm tiêu đề);
+  // thiếu thì màn đó hiện tiêu đề trống.
+  const nav = (r: string) => navigation.navigate(r, {
+    propertyId: String(pid), propertyName: prop?.name ?? '', property: prop,
+  });
 
   // Số liệu phòng thật
   const occupied    = rooms.filter(r => r.status === 'RENTED').length;
@@ -93,11 +100,18 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
   const { urgent, upcoming } = useMemo(() => {
     const urgent: IssueItem[] = invoices
       .filter(i => i.status === 'OVERDUE')
+      // Bỏ hoá đơn của khách ĐÃ CHẤM DỨT hợp đồng (13/08/2026): họ không còn ở đây nên
+      // manager không đòi được nữa, để lại chỉ làm ô "Cần xử lý" đầy việc không làm được.
+      // Phần nợ đó xử lý ở luồng tất toán trả phòng, không phải ở đây.
+      // Nhà nguyên căn không có roomNumber → giữ lại, vì không tra được theo phòng.
+      .filter(i => !i.roomNumber || tenantByRoom.has(i.roomNumber))
       .map(i => ({
         key: `inv-${i.id}`, icon: '💸', color: '#EF4444',
         title: `Hoá đơn quá hạn · ${i.roomNumber ? `Phòng ${i.roomNumber}` : 'Nguyên căn'}`,
-        meta: `${i.tenantName ?? ''}${i.tenantName ? ' · ' : ''}${fmt(i.amount)}`,
-        route: 'BuildingInvoice',
+        // KHÔNG in số tiền: tiền nhà bị ẩn với manager nên `i.amount` về 0, `fmt(0)` ra
+        // "0đ" — đọc thành "khách nợ 0 đồng", sai hẳn nghĩa. Chỉ nêu tên khách.
+        meta: i.tenantName ?? 'Cần xử lý',
+        route: 'BuildingBilling',
       }));
     const upcoming: IssueItem[] = rooms
       .filter(r => r.status === 'MAINTENANCE')
@@ -107,7 +121,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
         route: 'RoomManage',
       }));
     return { urgent, upcoming };
-  }, [invoices, rooms]);
+  }, [invoices, rooms, tenantByRoom]);
 
   const totalIssues = urgent.length + upcoming.length;
   const health = urgent.length > 0
@@ -293,7 +307,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
               <View style={{ flex: 1 }}>
                 <Text style={styles.tenantName}>{t.tenantFullName}</Text>
                 <Text style={styles.tenantMeta}>
-                  {t.roomNumber ? `Phòng ${t.roomNumber}` : 'Nguyên căn'} · {t.tenantPhone}
+                  {t.roomNumber ? `Phòng ${t.roomNumber}` : 'Nguyên căn'}
                 </Text>
               </View>
             </TouchableOpacity>

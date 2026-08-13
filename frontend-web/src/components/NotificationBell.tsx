@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bell, Check, Loader2, Radio, RefreshCw } from 'lucide-react';
 import { useRealtimeNotifications } from '@/hooks/useRealtimeNotifications';
+import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import type { AppNotificationDto } from '@/services/notification.service';
 
 /**
@@ -52,8 +53,21 @@ export const NotificationBell = ({
 }) => {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
-  const { items, unreadCount, loading, mode, refresh, markRead, markAllRead } =
+  const { items, unreadCount: listUnread, loading, mode, refresh, markRead, markAllRead } =
     useRealtimeNotifications(types);
+
+  /**
+   * Số trên badge lấy từ CONTEXT, không từ danh sách trong khay.
+   *
+   * Hai chỗ đang đếm hai nguồn khác nhau: khay chỉ đọc bảng `notifications`, còn trang
+   * thông báo (và badge sidebar bên host) gộp thêm `host_notifications`. Để badge tự
+   * đếm thì chuông hiện trống trong khi trang báo hàng chục việc đang chờ — người dùng
+   * tưởng chuông hỏng. Context đã gộp sẵn hai nguồn nên lấy thẳng từ đó cho khớp.
+   *
+   * `|| listUnread` để phòng context chưa kịp nạp (count = 0) mà khay đã có dữ liệu.
+   */
+  const { count: badgeCount, refresh: refreshBadge } = useUnreadNotifications();
+  const unreadCount = badgeCount || listUnread;
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +86,9 @@ export const NotificationBell = ({
   const ring = accent === 'indigo' ? 'focus:ring-indigo-100' : 'focus:ring-cyan-100';
 
   const onRowClick = (n: AppNotificationDto) => {
-    if (!n.read) markRead(n.id);
+    // Đánh dấu đã đọc phải làm mới CẢ badge của context, không thì số trên chuông
+    // đứng yên trong khi dòng trong khay đã mất chấm xanh.
+    if (!n.read) markRead(n.id).then(refreshBadge);
   };
 
   return (
@@ -113,7 +129,7 @@ export const NotificationBell = ({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={refresh}
+                onClick={() => { refresh(); refreshBadge(); }}
                 title="Tải lại"
                 className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
               >
@@ -122,7 +138,7 @@ export const NotificationBell = ({
               {unreadCount > 0 && (
                 <button
                   type="button"
-                  onClick={markAllRead}
+                  onClick={() => markAllRead().then(refreshBadge)}
                   className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 >
                   <Check className="h-3 w-3" /> Đọc hết
