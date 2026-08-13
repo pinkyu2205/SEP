@@ -28,8 +28,13 @@ export interface AppNotificationDto {
   createdAt: string;
 }
 
-/** Thông báo cảnh báo công nợ mà Host cần thấy trên web. */
-export const HOST_OVERDUE_TYPES = ['RENT_OVERDUE_HOST', 'RENT_FIRST_CYCLE_OVERDUE'];
+/**
+ * Thông báo cảnh báo công nợ mà Host cần thấy trên web.
+ *
+ * Bỏ `RENT_FIRST_CYCLE_OVERDUE` (13/08/2026): tiền chu kỳ đầu thu chung với tiền cọc ở
+ * mã QR lúc đón khách nên không còn kỳ đầu nào quá hạn được.
+ */
+export const HOST_OVERDUE_TYPES = ['RENT_OVERDUE_HOST'];
 
 export const notificationService = {
   list: (params: { unreadOnly?: boolean; page?: number; size?: number } = {}): Promise<Page<AppNotificationDto>> =>

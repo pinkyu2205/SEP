@@ -14,6 +14,7 @@ import { tenantService, isTenantEligibleRole } from '../../services/tenant.servi
 import { uploadToCloudinary } from '../../services/upload.service';
 import { extractTenantContractData } from '../../utils/pdfExtract';
 import { draftBlobToFile, openContractBlob } from '../../utils/contractFile';
+import { todayIso } from '@/utils/serverTime';
 
 interface Props {
   onSuccess: () => void;
@@ -21,8 +22,6 @@ interface Props {
   /** Có giá trị → mở modal ở CHẾ ĐỘ SỬA hợp đồng nháp đã tồn tại (không tạo mới). */
   editContract?: TenantContractResponse;
 }
-
-const todayIso = () => new Date().toISOString().split('T')[0];
 
 /** yyyy-MM-dd + n năm → yyyy-MM-dd (dùng cho giới hạn ngày kết thúc). */
 const addYearsIso = (dateStr: string, years: number): string => {

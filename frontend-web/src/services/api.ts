@@ -1,5 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { syncServerTimeFromHeader } from '@/utils/serverTime';
 
 // Local dev: để trống, dùng proxy /api của Vite (xem vite.config.ts).
 // Trên Vercel: set VITE_API_URL trỏ thẳng vào domain backend tương ứng (prod/dev).
@@ -73,10 +74,28 @@ function isPermissionDenied(status: number | undefined, data: unknown): boolean 
   return (data as { code?: string }).code === 'FORBIDDEN';
 }
 
+/**
+ * Header `Date` của response = giờ VPS — xem @/utils/serverTime.
+ *
+ * Trên trình duyệt header này chỉ đọc được khi same-origin (dev qua proxy Vite) hoặc
+ * khi BE đã thêm `Access-Control-Expose-Headers: Date`. Đọc không ra thì hàm sync tự
+ * bỏ qua và app dùng giờ máy như trước.
+ */
+const pickDateHeader = (headers: unknown): unknown => {
+  const h = headers as { date?: unknown; get?: (k: string) => unknown } | undefined;
+  return h?.date ?? h?.get?.('date');
+};
+
 // Response interceptor
 api.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    syncServerTimeFromHeader(pickDateHeader(response.headers));
+    // ⚠️ Client này trả thẳng `response.data` cho nơi gọi (không phải cả response),
+    // nên phải đọc header TRƯỚC dòng return này.
+    return response.data;
+  },
   async (error) => {
+    syncServerTimeFromHeader(pickDateHeader(error.response?.headers));
     const status = error.response?.status;
     const config = error.config as
       | { method?: string; _authRetried?: boolean; skipErrorToast?: boolean }

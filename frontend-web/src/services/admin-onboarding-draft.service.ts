@@ -1,4 +1,5 @@
 import type { EquipmentResponse, InboundContractResponse, PropertyResponse, RenovationResponse } from '@/types/api.types';
+import { nowIso } from '@/utils/serverTime';
 
 export interface AdminContractDraft {
   contract?: InboundContractResponse;
@@ -72,7 +73,7 @@ export const adminOnboardingDraftService = {
     const next: AdminRenovationBatch = {
       ...batch,
       id: `${Date.now()}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
       active: true,
     };
 
@@ -85,7 +86,7 @@ export const adminOnboardingDraftService = {
       rentalMode: property.wholeHouse ? 'whole_house' : 'by_room',
       assignedToHost: property.status === 'ACTIVE',
       hostName: 'Hoàng Bình Land Host',
-      activatedAt: property.status === 'ACTIVE' ? new Date().toISOString() : undefined,
+      activatedAt: property.status === 'ACTIVE' ? nowIso() : undefined,
     });
   },
 

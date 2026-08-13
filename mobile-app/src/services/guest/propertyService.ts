@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import { nowIso } from '@/utils/serverTime';
 import {
   City,
   Ward,
@@ -168,7 +169,7 @@ function mapToListing(p: ApiPropertyResponse, rooms: ApiRoomResponse[]): Propert
     longitude: p.longitude ?? HCM_CENTER.longitude,
     rooms: rooms.map(mapRoom),
     hostName: p.operationManagerName,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso(),
   };
 }
 

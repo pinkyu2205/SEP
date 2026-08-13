@@ -20,6 +20,7 @@ import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/in
 import { managerEvnBillService, evnUnitPrice, type EvnBill } from '@/services/manager/evnBillService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '@/components/common';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';
@@ -139,7 +140,7 @@ const groupThousands = (s: string) => {
  * hard-code "01/05 – 31/05/2026" nên mở app tháng nào cũng thấy kỳ tháng 5/2026.
  * offset: 0 = tháng này, -1 = tháng trước.
  */
-const monthPeriod = (offset = 0, base = new Date()) => {
+const monthPeriod = (offset = 0, base = serverNow()) => {
   const d = new Date(base.getFullYear(), base.getMonth() + offset, 1);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
@@ -632,7 +633,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       && r.newReading && Number(r.newReading) > r.prevReading);
     if (!unsent.length) { showAlert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
 
-    const now = new Date().toISOString().split('T')[0];
+    const now = todayIso();
 
     try {
       await Promise.all(unsent.map(r => {
@@ -694,7 +695,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const consumption = evnBill.totalKwh;
     const fee         = Math.round(evnBill.totalAmount); // nguyên căn trả toàn bộ tiền EVN
     const newVal      = unit.prevReading + consumption;
-    const now = new Date().toISOString().split('T')[0];
+    const now = todayIso();
 
     setSendingWholeHouse(true);
     try {
@@ -768,7 +769,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   const sendWaterInvoices = async () => {
     if (!waterBillData || !waterProperty) return;
-    const now = new Date().toISOString().split('T')[0];
+    const now = todayIso();
     const period = waterBillData.billingPeriod;
     const price  = waterBillData.pricePerM3;
 

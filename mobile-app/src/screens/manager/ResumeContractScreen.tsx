@@ -27,6 +27,7 @@ import {
 import { MeterOverrideModal } from '@/components/common';
 import type { MeterOverrideKind } from '@/services/manager/meterOverrideService';
 import { visionService, type VisionLabel } from '@/services/shared/visionService';
+import { nowIso, serverNow } from '@/utils/serverTime';
 import {
   ContractPriceApprovalStatus,
   realTenantService,
@@ -100,7 +101,7 @@ export const ResumeContractScreen: React.FC = () => {
     if (!raw) return null
     const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
     if (Number.isNaN(d.getTime())) return null
-    const today = new Date()
+    const today = serverNow()
     today.setHours(0, 0, 0, 0)
     return Math.round((d.getTime() - today.getTime()) / 86_400_000)
   }
@@ -624,7 +625,7 @@ const InspectionSection: React.FC<{
     try {
       setOcrLoading(kind)
       const url = await uploadImageToCloudinary(uri)
-      const capturedAt = new Date().toISOString()
+      const capturedAt = nowIso()
 
       let ocr
       try {
@@ -775,7 +776,7 @@ const InspectionSection: React.FC<{
       }
 
       if (accepted.length > 0) {
-        const now = new Date().toISOString()
+        const now = nowIso()
         setPhotos((prev) => {
           const next = [...prev, ...accepted]
           // Mô tả trên TOÀN BỘ ảnh chứ không chỉ lô vừa thêm — mentor muốn "chụp nhiều
@@ -811,42 +812,61 @@ const InspectionSection: React.FC<{
     await uploadConditionPhotos(r.assets.map((a) => a.uri))
   }
 
+  /** Chỉ số của một đồng hồ, đã cắt khoảng trắng. */
+  const readingOf = (kind: 'elec' | 'water') =>
+    (kind === 'elec' ? elecReading : waterReading).trim()
+
+  /**
+   * Ô xác nhận chịu trách nhiệm chỉ hiện khi ĐÃ CÓ SỐ.
+   *
+   * Trước 13/08/2026 nó hiện ngay khi manager chạm vào ô nhập (`manualEdited`), nên tick
+   * được cả khi ô còn trống — xác nhận một con số không tồn tại. Đúng ca đã gặp: xin mã
+   * nhập tay, không gõ gì, tick xác nhận rồi Lưu vẫn qua.
+   */
+  const needsConfirm = (kind: 'elec' | 'water') =>
+    !!manualEdited[kind] && !!readingOf(kind)
+
+  /**
+   * Vì sao CHƯA lưu được (null = lưu được). Dùng cho cả nút Lưu (khoá + làm mờ) lẫn câu
+   * nhắc ngay dưới nút — nút xám mà không nói vì sao thì người dùng đứng hình.
+   *
+   * Thứ tự kiểm đi theo thứ tự thao tác trên màn: số → bằng chứng → xác nhận → ảnh phòng.
+   *
+   * ⚠️ Chỉ số điện VÀ nước đều BẮT BUỘC (yêu cầu 13/08/2026). Trước đây bỏ trống cả hai
+   * thì lọt hết mọi chốt: vòng kiểm cũ chỉ bắt "có số mà thiếu ảnh" và "có ảnh mà thiếu
+   * số", nên không nhập gì cả là lưu được — hợp đồng đón khách xong không có mốc gốc để
+   * tính tiền điện nước cả kỳ thuê.
+   */
+  const saveBlockReason: string | null = (() => {
+    const meters = [
+      { kind: 'elec' as const, url: elecUrl, label: 'điện', hasCode: !!meterOverride.elec },
+      { kind: 'water' as const, url: waterUrl, label: 'nước', hasCode: !!meterOverride.water },
+    ]
+    for (const m of meters) {
+      if (!readingOf(m.kind)) {
+        return `Chưa có chỉ số ${m.label}. Chụp ảnh đồng hồ để OCR tự điền, hoặc xin mã quản trị để nhập tay.`
+      }
+      // Bằng chứng = ảnh HOẶC mã quản trị (BE `requireMeterEvidence` từ 10/08/2026).
+      if (!m.url && !m.hasCode) {
+        return `Chỉ số ${m.label} chưa có bằng chứng. Cần ảnh đồng hồ, hoặc mã quản trị cấp kèm lý do.`
+      }
+      if (needsConfirm(m.kind) && !manualConfirmed[m.kind]) {
+        return `Tick xác nhận chịu trách nhiệm cho chỉ số ${m.label} đã nhập tay.`
+      }
+    }
+    if (photos.length === 0) {
+      return 'Cần ít nhất 1 ảnh hiện trạng phòng để đối chiếu khi khách trả phòng.'
+    }
+    return null
+  })()
+
   const save = async () => {
-    if (
-      (manualEdited.elec && !manualConfirmed.elec) ||
-      (manualEdited.water && !manualConfirmed.water)
-    ) {
-      showAlert('Thiếu xác nhận', 'Vui lòng tick xác nhận chịu trách nhiệm cho số đã nhập tay trước khi lưu.')
+    // Lưới đỡ cuối: nút Lưu đã bị khoá theo `saveBlockReason`, nhưng vẫn kiểm lại ở đây
+    // phòng trường hợp state đổi giữa lúc bấm.
+    if (saveBlockReason) {
+      showAlert('Chưa lưu được', saveBlockReason)
       return
     }
-    // Chỉ số điện nước là căn cứ tính tiền, ảnh đồng hồ là bằng chứng đi kèm — thiếu
-    // một trong hai thì số ghi nhận không đối soát được. Trước đây chỉ cần có số là
-    // lưu được, nên xoá ảnh đi rồi lưu vẫn lọt, để lại chỉ số không có gì chứng minh.
-    const meterPairs: { url: string; reading: string; label: string; hasCode: boolean }[] = [
-      { url: elecUrl, reading: elecReading.trim(), label: 'điện', hasCode: !!meterOverride.elec },
-      { url: waterUrl, reading: waterReading.trim(), label: 'nước', hasCode: !!meterOverride.water },
-    ]
-    for (const m of meterPairs) {
-      // Bằng chứng = ảnh HOẶC mã quản trị. Chốt này viết từ hồi chỉ có đường ảnh, chỉ
-      // xét `!m.url` — thiếu `hasCode` thì xin mã xong vẫn bị đuổi ngay tại đây, không
-      // bao giờ gửi được request lên BE.
-      if (m.reading && !m.url && !m.hasCode)
-        return showAlert(
-          `Thiếu bằng chứng chỉ số ${m.label}`,
-          `Đã nhập chỉ số ${m.label} thì phải có ảnh đồng hồ, hoặc mã quản trị cấp kèm lý do. `
-            + 'Chụp ảnh, bấm "Xin mã từ quản trị", hoặc xoá chỉ số trước khi lưu.',
-        )
-      if (m.url && !m.reading)
-        return showAlert(
-          `Thiếu chỉ số ${m.label}`,
-          `Đã có ảnh đồng hồ ${m.label} nhưng chưa có chỉ số. Nhập chỉ số hoặc xoá ảnh trước khi lưu.`,
-        )
-    }
-    if (photos.length === 0)
-      return showAlert(
-        'Thiếu ảnh hiện trạng phòng',
-        'Cần ít nhất 1 ảnh hiện trạng phòng để đối chiếu khi khách trả phòng.',
-      )
     try {
       setSaving(true)
       const updated = await realTenantService.updateDraftContract(contract.id, {
@@ -865,7 +885,7 @@ const InspectionSection: React.FC<{
         roomConditionUrls: photos,
         roomConditionPhotos: photos.map((url, i) => ({
           url,
-          capturedAt: photosCapturedAt[i] || new Date().toISOString(),
+          capturedAt: photosCapturedAt[i] || nowIso(),
         })),
         roomConditionNote: note || undefined,
       })
@@ -1040,7 +1060,8 @@ const InspectionSection: React.FC<{
                   </View>
                 </View>
               )}
-              {manualEdited[kind] && (
+              {/* Chỉ hiện khi đã CÓ SỐ — xem needsConfirm(). */}
+              {needsConfirm(kind) && (
                 <TouchableOpacity
                   style={styles.confirmRow}
                   activeOpacity={0.7}
@@ -1137,9 +1158,19 @@ const InspectionSection: React.FC<{
             )}
           </View>
 
-          <TouchableOpacity style={[styles.primaryBtn, saving && styles.btnDisabled]} onPress={save} disabled={saving}>
+          {/* Nút chỉ SÁNG khi đã đủ: 2 chỉ số + bằng chứng + xác nhận (nếu nhập tay) +
+              ảnh phòng. Câu nhắc bên dưới nói rõ đang thiếu gì — nút xám không lời giải
+              thích là kiểu bắt người dùng tự đoán. */}
+          <TouchableOpacity
+            style={[styles.primaryBtn, (saving || !!saveBlockReason) && styles.btnDisabled]}
+            onPress={save}
+            disabled={saving || !!saveBlockReason}
+          >
             {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.primaryBtnText}>💾 Lưu hiện trạng</Text>}
           </TouchableOpacity>
+          {!!saveBlockReason && !saving && (
+            <Text style={styles.saveBlockHint}>⚠️ {saveBlockReason}</Text>
+          )}
         </View>
       )}
 
@@ -1660,6 +1691,10 @@ const styles = StyleSheet.create({
   checkboxTick: { color: Colors.white, fontSize: 13, fontWeight: '800' },
   confirmRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   confirmText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
+  saveBlockHint: {
+    fontSize: 12, color: Colors.warning, lineHeight: 17, marginTop: Spacing.xs,
+    textAlign: 'center',
+  },
   // Chỉ số điện/nước căn PHẢI: đọc số theo hàng đơn vị dễ đối chiếu với mặt đồng hồ
   // hơn, và khớp thói quen hiển thị số liệu tiền/lượng.
   meterReadingInput: { textAlign: 'right' },

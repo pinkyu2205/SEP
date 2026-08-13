@@ -1,6 +1,7 @@
 /**
  * Utility functions cho ứng dụng.
  */
+import { serverNow } from './serverTime';
 
 /**
  * Format số tiền VND.
@@ -100,11 +101,44 @@ export const truncateText = (text: string, maxLength: number): string => {
 };
 
 /**
+ * Mốc thời gian `iso` có rơi vào ĐÚNG hôm nay không (theo giờ server).
+ *
+ * So theo NGÀY LOCAL chứ không cắt chuỗi ISO: `paidAt` của BE thường kèm múi giờ, cắt
+ * 10 ký tự đầu là so nhầm sang ngày UTC — ở VN mọi mốc trước 07:00 sáng sẽ bị tính là
+ * hôm qua. Thiếu/hỏng `iso` thì trả false, chỗ gọi tự ẩn đi thay vì hiện nhầm.
+ */
+export const isToday = (iso?: string | null, now: Date = serverNow()): boolean => {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+};
+
+/**
+ * Nhãn kỳ ngắn của một hoá đơn: "T08/2026", hoặc null nếu hoá đơn không thuộc kỳ nào.
+ *
+ * Hoá đơn thu lúc nhận phòng (`HD-ONBOARD-*`) không nằm trong kỳ tháng nào nên BE để
+ * `month`/`year` null. Ghép chuỗi thẳng tay sẽ cho ra "Tnull/undefined" đập vào mặt
+ * khách — chỗ gọi phải chịu được `null` và ẩn dòng đó đi.
+ */
+export const billMonthLabel = (
+  bill: { month?: number | null; year?: number | null },
+): string | null => {
+  const m = Number(bill.month);
+  const y = Number(bill.year);
+  if (!Number.isFinite(m) || m < 1 || m > 12) return null;
+  if (!Number.isFinite(y) || y <= 0) return null;
+  return `T${String(m).padStart(2, '0')}/${y}`;
+};
+
+/**
  * Lấy tháng/năm hiện tại theo chuỗi
  * @example getCurrentMonthYear() => "Tháng 04/2026"
  */
 export const getCurrentMonthYear = (): string => {
-  const now = new Date();
+  const now = serverNow();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   return `Tháng ${month}/${now.getFullYear()}`;
 };
@@ -325,14 +359,14 @@ export const getNotificationTypeEmoji = (type: string): string => {
 
 export const getDaysUntil = (dateStr: string): number => {
   const target = new Date(dateStr);
-  const now = new Date();
+  const now = serverNow();
   const diff = target.getTime() - now.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
 export const formatRelativeTime = (dateStr: string): string => {
   const date = new Date(dateStr);
-  const now = new Date();
+  const now = serverNow();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);

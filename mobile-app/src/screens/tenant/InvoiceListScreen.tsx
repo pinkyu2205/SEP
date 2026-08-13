@@ -7,9 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
-  isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline, firstCycleTenantWarning,
 } from '@/constants';
-import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
+import { billMonthLabel, formatCurrency, formatDate, getDaysUntil } from '@/utils';
 import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
@@ -51,7 +50,9 @@ const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: str
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
+  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem billsStore),
+  // nên nhãn không được để mỗi chữ "Tiền cọc".
+  deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
 /**
@@ -220,15 +221,11 @@ export const InvoiceListScreen: React.FC = () => {
     const cfg     = STATUS_CONFIG[item.status];
     const typeCfg = TYPE_CONFIG[item.invoiceType];
     const isPaid    = item.status === 'paid';
-    // Kỳ đầu chạy chính sách riêng: hạn thật là ngày nhận phòng + 3 ngày, KHÔNG phải
-    // dueDate của BE (BE đang đặt dueDate = đúng ngày nhận phòng nên hôm sau đã gắn
-    // OVERDUE). Trong 3 ngày đó vẫn coi là "chờ thanh toán" để khỏi doạ khách oan.
-    const isFirstCycle = isFirstRentCycleInvoice(item);
-    const firstCycleExpired = isFirstCycle && firstCycleStage(item) === 'expired';
-    const isOverdue = isFirstCycle
-      ? firstCycleExpired && !isPaid
-      : item.status === 'overdue';
-    const dueDate = isFirstCycle ? firstCycleDeadline(item) : item.dueDate;
+    // Bỏ nhánh riêng cho kỳ đầu (13/08/2026): tiền kỳ đầu thu chung với tiền cọc ở mã
+    // QR lúc đón khách nên không còn hoá đơn kỳ đầu chờ thanh toán. Mọi hoá đơn đi
+    // thẳng theo dueDate/status của BE.
+    const isOverdue = item.status === 'overdue';
+    const dueDate = item.dueDate;
     const daysOverdue = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
 
     return (
@@ -247,11 +244,14 @@ export const InvoiceListScreen: React.FC = () => {
                 {typeCfg.icon} {typeCfg.label}
               </Text>
             </View>
-            <Text style={styles.invoiceMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
+            {/* Hoá đơn onboard không thuộc kỳ nào → billMonthLabel trả null, ẩn luôn. */}
+            {!!billMonthLabel(item) && (
+              <Text style={styles.invoiceMonth}>{billMonthLabel(item)}</Text>
+            )}
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: isFirstCycle && !isPaid && !isOverdue ? Colors.warningLight : cfg.bg }]}>
-            <Text style={[styles.statusText, { color: isFirstCycle && !isPaid && !isOverdue ? Colors.warning : cfg.color }]}>
-              {isFirstCycle && !isPaid && !isOverdue ? 'Chờ thanh toán' : cfg.label}
+          <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
+            <Text style={[styles.statusText, { color: cfg.color }]}>
+              {cfg.label}
             </Text>
           </View>
         </View>
@@ -287,22 +287,17 @@ export const InvoiceListScreen: React.FC = () => {
           <Text style={styles.lateFeeText}>+ Phí trả chậm: {formatCurrency(item.lateFee)}</Text>
         )}
 
-        {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ.
-            Kỳ đầu có mốc riêng (3 ngày) nên cảnh báo ngay cả khi CHƯA quá hạn. */}
-        {isFirstCycle && !isPaid ? (
-          <Text style={styles.riskText}>⚠️ {firstCycleTenantWarning(item)}</Text>
-        ) : isOverdue && item.invoiceType === 'rent' ? (
+        {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ. */}
+        {isOverdue && item.invoiceType === 'rent' && (
           <Text style={styles.riskText}>
             {daysOverdue >= RENT_TERMINATION_AFTER_DAYS
               ? '⚠️ Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng.'
               : `⚠️ Tới ngày ${RENT_CYCLE.terminationFromDay} chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
           </Text>
-        ) : null}
+        )}
 
-        {/* Action buttons.
-            Kỳ đầu còn trong 3 ngày: BE đã gắn OVERDUE nhưng ta vẫn coi là chờ thanh
-            toán, nên phải mở nút thường ở đây — không thì hoá đơn không có nút nào. */}
-        {(item.status === 'pending' || (isFirstCycle && !isPaid && !isOverdue)) && (
+        {/* Action buttons */}
+        {item.status === 'pending' && (
           <TouchableOpacity style={styles.payBtn} onPress={() => handlePay(item)}>
             <Text style={styles.payBtnText}>💳 Thanh toán ngay</Text>
           </TouchableOpacity>

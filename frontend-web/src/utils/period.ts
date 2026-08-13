@@ -2,13 +2,25 @@
  * Helper kỳ (YYYY-MM), ngày và định dạng số — dùng chung cho các màn báo cáo/tài
  * chính của cả Host lẫn Admin. Thuần tuý, không phụ thuộc React.
  */
+import { serverNow, currentMonthIso } from '@/utils/serverTime';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 export const ymOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 
-/** Tháng vận hành hiện tại THẬT của hệ thống (BE mặc định về tháng này khi thiếu param). */
+/**
+ * Tháng vận hành hiện tại THẬT của hệ thống (BE mặc định về tháng này khi thiếu param).
+ *
+ * ⚠️ Đây là hằng số tính MỘT LẦN lúc nạp module — thời điểm đó chưa có response API nào
+ * nên chưa biết giờ server, đành lấy giờ máy. Chấp nhận được vì nó chỉ chính xác tới
+ * THÁNG: máy phải sai cả tuần mới ra sai tháng.
+ * Chỗ nào cần đúng tới NGÀY thì dùng `currentMonthIso()`/`todayIso()` của
+ * @/utils/serverTime, đừng suy từ hằng này.
+ */
 export const CURRENT_MONTH = ymOf(new Date());
+
+/** Như `CURRENT_MONTH` nhưng đọc tại thời điểm gọi, theo giờ server. */
+export const currentMonth = (): string => currentMonthIso();
 
 export const shiftMonth = (ym: string, delta: number) => {
   const [y, m] = ym.split('-').map(Number);
@@ -49,7 +61,7 @@ export const daysSince = (iso?: string | null): number => {
   if (!iso) return 0;
   const d = new Date(`${iso.split('T')[0]}T00:00:00`);
   if (Number.isNaN(d.getTime())) return 0;
-  const today = new Date();
+  const today = serverNow();
   today.setHours(0, 0, 0, 0);
   return Math.round((today.getTime() - d.getTime()) / 86_400_000);
 };

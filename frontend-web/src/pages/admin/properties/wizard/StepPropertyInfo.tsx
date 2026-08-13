@@ -10,6 +10,7 @@ import type {
 import { propertyService } from '@/services/property.service';
 import { catalogService } from '@/services/catalog.service';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { serverNow } from '@/utils/serverTime';
 
 // ─── Giới hạn lịch hợp đồng ───────────────────────────────────────────────
 // Ngày bắt đầu: không được trước hôm nay. Ngày kết thúc: tối đa 50 năm kể từ
@@ -20,9 +21,9 @@ const fmtDateInput = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
-const TODAY_STR = fmtDateInput(new Date());
+const TODAY_STR = fmtDateInput(serverNow());
 const addYearsStr = (base: string, years: number) => {
-  const d = base ? new Date(base) : new Date();
+  const d = base ? new Date(base) : serverNow();
   d.setFullYear(d.getFullYear() + years);
   return fmtDateInput(d);
 };

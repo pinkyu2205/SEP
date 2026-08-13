@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { MOCK_PROPERTIES } from './mockData';
+import { todayIso } from '@/utils/serverTime';
 
 // ── Tháng vận hành hiện tại (đồng bộ với các trang dashboard mock) ──────────────
 export const CURRENT_MONTH = '2026-05';
@@ -93,7 +94,7 @@ export const expenseStore = {
     const item: Expense = {
       ...input,
       id: `exp-${Date.now()}`,
-      createdAt: new Date().toISOString().slice(0, 10),
+      createdAt: todayIso(),
     };
     expenses = [item, ...expenses];
     persist(expenses);

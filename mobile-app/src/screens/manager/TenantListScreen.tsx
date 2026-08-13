@@ -9,9 +9,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { serverNow } from '@/utils/serverTime';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const TODAY = new Date();
+const TODAY = serverNow();
 
 // ===================== TYPES =====================
 type TenantStatus = 'active' | 'pending_activation' | 'moved_out' | 'suspended';

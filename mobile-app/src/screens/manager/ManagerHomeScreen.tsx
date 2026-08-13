@@ -19,6 +19,7 @@ import {
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 const QUICK_ACTIONS = [
   // Từ 13/08/2026 "Đón khách" và "Khách chờ đón" là MỘT luồng — cả hai vào
@@ -142,8 +143,8 @@ export const ManagerHomeScreen: React.FC = () => {
   // kiến đón = hôm nay (dữ liệu thật từ /tenant-contracts/managed?status=DRAFT,
   // không cần API riêng — feedback thầy yêu cầu hiện ngay ở màn đầu, không phải
   // bấm vào mới thấy).
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const receptionToday = draftContracts.filter(c => c.expectedReceptionDate === todayIso);
+  const today = todayIso();
+  const receptionToday = draftContracts.filter(c => c.expectedReceptionDate === today);
 
   // Trả phòng: hồ sơ đang chờ CHÍNH MANAGER làm gì đó. Khách gửi yêu cầu / đồng ý
   // quyết toán / phản đối đều rơi vào đây, nên việc mới hiện ngay ở màn đầu chứ không
@@ -184,7 +185,7 @@ export const ManagerHomeScreen: React.FC = () => {
   const heroStatusColor = urgentTotal > 0 ? '#FCD34D' : '#6EE7B7';
 
   const firstName = user?.fullName?.split(' ').pop() ?? 'Quản lý';
-  const todayStr  = new Date().toLocaleDateString('vi-VN', {
+  const todayStr  = serverNow().toLocaleDateString('vi-VN', {
     weekday: 'short', day: 'numeric', month: 'numeric',
   });
 

@@ -11,6 +11,7 @@ import { ManagedProperty } from '@/data/managedProperties';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { getContractTerminationTypeLabel, showAlert, isClosedContract } from '@/utils';
+import { serverNow } from '@/utils/serverTime';
 import {
   getInspectionsByContractId,
   getInspectionStatusLabel,
@@ -780,7 +781,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Gửi duyệt',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -814,7 +815,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Kích hoạt',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -849,7 +850,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Gia hạn',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -884,7 +885,7 @@ export const ContractListScreen: React.FC<Props> = () => {
               text: 'Xác nhận thanh lý',
               style: 'destructive',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {

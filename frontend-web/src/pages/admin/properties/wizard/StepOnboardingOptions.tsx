@@ -12,6 +12,7 @@ import { propertyService } from '@/services/property.service';
 import { catalogService } from '@/services/catalog.service';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { EquipmentSource, ManifestEquipmentStatus, PropertyType } from '@/types/api.types';
+import { serverNow } from '@/utils/serverTime';
 
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
 const fmtDate = (d: string) => (d ? d.split('-').reverse().join('/') : '');
@@ -25,9 +26,9 @@ const fmtDateInput = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
-const TODAY_STR = fmtDateInput(new Date());
+const TODAY_STR = fmtDateInput(serverNow());
 const addYearsStr = (base: string, years: number) => {
-  const d = base ? new Date(base) : new Date();
+  const d = base ? new Date(base) : serverNow();
   d.setFullYear(d.getFullYear() + years);
   return fmtDateInput(d);
 };

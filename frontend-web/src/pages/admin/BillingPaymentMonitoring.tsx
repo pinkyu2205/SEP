@@ -11,6 +11,7 @@ import {
 import toast from 'react-hot-toast';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * Giám sát hoá đơn & thanh toán toàn hệ thống (admin).
@@ -81,7 +82,7 @@ const fmtDateTime = (iso?: string) => {
 
 // 12 kỳ gần nhất, dạng YYYY-MM.
 const buildPeriods = (): string[] => {
-  const now = new Date();
+  const now = serverNow();
   return Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;

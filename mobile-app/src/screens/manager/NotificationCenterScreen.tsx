@@ -7,6 +7,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { navigateFromNotification } from '@/navigation/navigationRef';
+import { serverNow } from '@/utils/serverTime';
 
 // ===================== TYPES =====================
 type NotifType =
@@ -74,7 +75,7 @@ const FILTER_TABS = [
 ];
 
 function timeAgo(dateStr: string): string {
-  const now = new Date();
+  const now = serverNow();
   const date = new Date(dateStr);
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);

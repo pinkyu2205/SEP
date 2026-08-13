@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { CameraCaptureModal } from '@/components/common';
+import { serverNow, todayIso } from '@/utils/serverTime';
 import {
   getInspectionById,
   getInspectionStatusLabel,
@@ -33,9 +34,9 @@ const makeDraftCheckOut = (params: any): RoomInspection => ({
   depositDeductionNotes: '',
   depositDeductionAmount: 0,
   createdBy: 'Manager hiện tại',
-  createdAt: new Date().toISOString().slice(0, 10),
+  createdAt: todayIso(),
   status: 'draft',
-  timeline: [{ label: 'Đang lập biên bản check-out', at: new Date().toLocaleString('vi-VN'), by: 'Manager hiện tại' }],
+  timeline: [{ label: 'Đang lập biên bản check-out', at: serverNow().toLocaleString('vi-VN'), by: 'Manager hiện tại' }],
 });
 
 export const InspectionDetailScreen: React.FC<any> = ({ navigation, route }) => {

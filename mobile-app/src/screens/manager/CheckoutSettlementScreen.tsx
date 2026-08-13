@@ -11,6 +11,7 @@ import { formatDate, showAlert, readApiError } from '@/utils';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenant/selfService';
+import { todayIso } from '@/utils/serverTime';
 
 /**
  * QUYẾT TOÁN TRẢ PHÒNG — bước cuối của luồng checkout.
@@ -24,7 +25,6 @@ import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenan
 
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const readErr = readApiError;
-const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) => {
   const checkoutId: number = route?.params?.checkoutId;

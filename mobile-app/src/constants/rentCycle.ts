@@ -2,9 +2,12 @@
  * Chu kỳ TIỀN PHÒNG TỰ ĐỘNG — nguồn sự thật duy nhất cho manager + tenant.
  *
  * Chính sách (chốt 04/08/2026, bổ sung kỳ đầu/kỳ cuối 05/08/2026):
- *   • KỲ ĐẦU (khách vào giữa tháng): hoá đơn tính từ NGÀY NHẬN PHÒNG đến hết tháng,
- *                             phát hành + thu ngay lúc nhận phòng. Từ tháng sau mới
- *                             theo chu kỳ ngày 1–5 như bình thường.
+ *   • KỲ ĐẦU (khách vào giữa tháng): tiền từ NGÀY NHẬN PHÒNG đến hết tháng nằm NGAY
+ *                             TRONG mã QR lúc đón khách, thu chung một lần với tiền
+ *                             cọc (BE 609de59/276b613, 12/08/2026) — khách rời quầy
+ *                             là đã trả xong. Từ tháng sau mới theo chu kỳ ngày 1–5.
+ *                             Vì vậy KHÔNG có hoá đơn kỳ đầu chờ thanh toán, và cũng
+ *                             không còn mốc nhắc/quá hạn riêng cho kỳ đầu.
  *   • KỲ CUỐI (trả phòng giữa tháng): hoá đơn tính từ ngày 1 đến NGÀY MANAGER DUYỆT
  *                             rời phòng, phát hành ngay lúc duyệt; khách trả phần còn
  *                             lại (chênh lệch vào bảng quyết toán).
@@ -32,8 +35,12 @@
  *
  * File này là NGUỒN SỰ THẬT phía FE. Đổi số ở đây thì phải đổi cả application.yaml
  * của BE, nếu không hai bên nói hai kiểu với cùng một người dùng.
- * Kỳ đầu (nhận phòng giữa tháng) chạy mốc riêng — xem FIRST_RENT_CYCLE cuối file.
+ *
+ * Kỳ đầu chỉ còn là CÁCH CHIA TIỀN theo số ngày ở (partialRentCycle) để giải thích con
+ * số lẻ cho khách, không còn là một kỳ thu riêng.
  */
+
+import { serverNow } from '@/utils/serverTime';
 
 export const RENT_CYCLE = {
   /** Ngày hệ thống tự phát hành hoá đơn tiền phòng. */
@@ -71,13 +78,14 @@ export const RENT_POLICY_FULL =
   `Trả trễ KHÔNG bị phạt tiền, nhưng từ ngày ${RENT_CYCLE.terminationFromDay} mà vẫn chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`;
 /** Câu giải thích 2 kỳ lẻ (vào/ra giữa tháng) — dùng ở màn tiền phòng & trả phòng. */
 export const RENT_PARTIAL_CYCLE_NOTE =
-  'Vào giữa tháng: hoá đơn kỳ đầu tính từ ngày nhận phòng đến hết tháng, thu ngay lúc nhận phòng. ' +
+  'Vào giữa tháng: tiền kỳ đầu tính từ ngày nhận phòng đến hết tháng và đã nằm trong mã QR ' +
+  'lúc đón khách (thu chung một lần với tiền cọc) — không có hoá đơn riêng phải đòi sau. ' +
   'Trả phòng giữa tháng: hoá đơn kỳ cuối tính từ ngày 1 đến ngày quản lý duyệt rời phòng, gửi khách ngay khi duyệt.';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** Date -> "YYYY-MM" */
-export const toMonthKey = (d: Date = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+export const toMonthKey = (d: Date = serverNow()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 
 /** "YYYY-MM" + delta tháng -> "YYYY-MM" */
 export const shiftMonthKey = (month: string, delta: number) => {
@@ -103,13 +111,13 @@ export const dayLabel = (iso: string) => (iso || '').split('-').reverse().join('
  * Kỳ thu mà hôm nay đang nhắc tới.
  * Ngày 28 là nhắc TRƯỚC cho kỳ THÁNG SAU; các mốc còn lại thuộc kỳ tháng hiện tại.
  */
-export const rentNoticeMonth = (now: Date = new Date()): string =>
+export const rentNoticeMonth = (now: Date = serverNow()): string =>
   now.getDate() === RENT_CYCLE.preNoticeDay
     ? shiftMonthKey(toMonthKey(now), 1)
     : toMonthKey(now);
 
 /** Kỳ mà hệ thống phải phát hành hoá đơn tính tới hôm nay (từ ngày 1 là kỳ tháng này). */
-export const rentBillingMonth = (now: Date = new Date()): string => toMonthKey(now);
+export const rentBillingMonth = (now: Date = serverNow()): string => toMonthKey(now);
 
 /** Số ngày của kỳ "YYYY-MM". */
 export const daysInMonth = (month: string): number => {
@@ -181,7 +189,7 @@ export type RentNoticeStage =
   | 'FINAL_WARNING'; // ngày 7: nhắc lần cuối
 
 /** Hôm nay rơi vào mốc nhắc nào (null = hôm nay không nhắc gì). */
-export const rentNoticeStageOf = (now: Date = new Date()): RentNoticeStage | null => {
+export const rentNoticeStageOf = (now: Date = serverNow()): RentNoticeStage | null => {
   const d = now.getDate();
   if (d === RENT_CYCLE.preNoticeDay) return 'PRE_NOTICE';
   if (d === RENT_CYCLE.issueDay) return 'ISSUED';
@@ -192,7 +200,7 @@ export const rentNoticeStageOf = (now: Date = new Date()): RentNoticeStage | nul
 };
 
 /** Số ngày đã quá hạn (0 nếu chưa tới hạn). dueDate: "YYYY-MM-DD". */
-export const daysOverdue = (dueDate: string, now: Date = new Date()): number => {
+export const daysOverdue = (dueDate: string, now: Date = serverNow()): number => {
   if (!dueDate) return 0;
   const [y, m, d] = dueDate.split('-').map(Number);
   if (!y || !m || !d) return 0;
@@ -219,168 +227,10 @@ export const overdueStage = (days: number): RentOverdueStage => {
 export const canTerminateForUnpaidRent = (
   dueDate: string | undefined,
   status: string | undefined,
-  now: Date = new Date(),
+  now: Date = serverNow(),
 ): boolean => {
   const st = (status || '').toUpperCase();
   if (st === 'PAID' || st === 'CANCELLED') return false;
   return daysOverdue(dueDate || '', now) >= RENT_TERMINATION_AFTER_DAYS;
 };
 
-// ══════════════════════════════════════════════════════════════════════════
-// KỲ ĐẦU — hoá đơn ĐẦU TIÊN ngay sau khi khách nhận phòng
-// ══════════════════════════════════════════════════════════════════════════
-/**
- * Khách vào giữa tháng thì hoá đơn kỳ đầu KHÔNG chạy theo lịch ngày 1–5–7–8 của
- * các tháng sau: lúc đó khách vừa nhận phòng, chưa quen app, và tiền kỳ đầu là
- * khoản chốt niềm tin đầu tiên. Chính sách riêng (chốt 07/08/2026):
- *
- *   • Phát hành ngay lúc nhận phòng (BE: generateProratedRentForNewContract).
- *   • D+1, D+2, D+3 : nhắc MỖI NGÀY 1 lần — push điện thoại + thông báo trong app
- *                     mỗi lần khách mở/đăng nhập app.
- *   • Hết D+3 chưa thanh toán → báo quản lý; từ lúc này quản lý ĐƯỢC QUYỀN chấm
- *                     dứt hợp đồng (app không tự cắt).
- *   • Vẫn KHÔNG tính phí phạt trả chậm.
- *
- * ✅ BE đã làm (commit a52c370): hoá đơn kỳ đầu mang `cycleType = FIRST`, hạn đặt
- * `now + billing.first-cycle-grace-days` (mặc định 3), và runDailySweep có nhánh
- * riêng bắn RENT_FIRST_CYCLE_REMINDER mỗi ngày D+1→D+3, quá hạn thì
- * RENT_FIRST_CYCLE_OVERDUE + RENT_FIRST_CYCLE_MANAGER và gắn terminationProposed.
- * FE lo phần hiển thị + nhắc trong app (hooks/useFirstCycleReminder).
- */
-export const FIRST_RENT_CYCLE = {
-  /** Số ngày nhắc liên tục sau ngày nhận phòng (D+1 → D+3), mỗi ngày 1 tin. */
-  reminderDays: 3,
-  /** Quá bấy nhiêu ngày kể từ ngày phát hành mà chưa trả → báo quản lý. */
-  graceDays: 3,
-} as const;
-
-export const FIRST_RENT_CYCLE_NOTE =
-  `Hoá đơn đầu tiên được phát hành ngay khi nhận phòng. Khách có ${FIRST_RENT_CYCLE.graceDays} ngày để thanh toán ` +
-  `và được nhắc mỗi ngày. Quá ${FIRST_RENT_CYCLE.graceDays} ngày mà chưa thanh toán thì quản lý được báo và ` +
-  `có quyền chấm dứt hợp đồng.`;
-
-/** Lấy phần ngày "YYYY-MM-DD" của một chuỗi ISO (có thể kèm giờ). */
-const dateOnly = (iso?: string): string => (iso || '').slice(0, 10);
-
-/** "YYYY-MM-DD" + n ngày -> "YYYY-MM-DD". Chuỗi rỗng/hỏng trả về ''. */
-export const addDays = (iso: string, n: number): string => {
-  const [y, m, d] = dateOnly(iso).split('-').map(Number);
-  if (!y || !m || !d) return '';
-  const dt = new Date(y, m - 1, d + n);
-  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-};
-
-/** Số ngày đã trôi qua kể từ `iso` (âm nếu `iso` ở tương lai). */
-export const daysSince = (iso: string, now: Date = new Date()): number => {
-  const [y, m, d] = dateOnly(iso).split('-').map(Number);
-  if (!y || !m || !d) return 0;
-  const from = new Date(y, m - 1, d);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.floor((today.getTime() - from.getTime()) / 86_400_000);
-};
-
-/** Hình dạng tối thiểu để nhận diện hoá đơn kỳ đầu — khớp cả SharedBill lẫn DTO của BE. */
-export interface RentCycleInvoiceLike {
-  invoiceType?: string;
-  type?: string;
-  month?: number;
-  year?: number;
-  dueDate?: string;
-  createdAt?: string;
-  /** BE sẽ trả FIRST | REGULAR | LAST — xem doc handoff. Chưa có thì FE tự suy ra. */
-  cycleType?: string;
-}
-
-/**
- * Hoá đơn này có phải hoá đơn TIỀN PHÒNG KỲ ĐẦU (ngay sau khi nhận phòng) không.
- *
- * Thứ tự tin cậy:
- *   1. `cycleType` của BE — đường chính từ 08/08/2026, BE đã trả field này.
- *   2. `contractStartDate` — kỳ hoá đơn trùng tháng nhận phòng VÀ nhận phòng sau ngày 1.
- *   3. Suy ra từ khoảng cách phát hành → hạn: kỳ đầu cách tối đa `graceDays`, hoá đơn
- *      tháng thường phát hành ngày 1 / hạn ngày 5 nên cách 4 ngày.
- *
- * Giữ lại 2 & 3 làm lưới đỡ cho hoá đơn TẠO TRƯỚC khi BE thêm cột `cycle_type` —
- * những bản ghi đó có `cycleType = NULL` vĩnh viễn trừ khi chạy migration vá lại.
- */
-export const isFirstRentCycleInvoice = (
-  inv: RentCycleInvoiceLike | null | undefined,
-  contractStartDate?: string,
-): boolean => {
-  if (!inv) return false;
-  const type = (inv.invoiceType || inv.type || '').toLowerCase();
-  if (type !== 'rent') return false;
-
-  const cycleType = (inv.cycleType || '').toUpperCase();
-  if (cycleType) return cycleType === 'FIRST';
-
-  const start = dateOnly(contractStartDate);
-  if (start) {
-    const [sy, sm, sd] = start.split('-').map(Number);
-    if (!sy || !sm || !sd) return false;
-    return sd > 1 && inv.year === sy && inv.month === sm;
-  }
-
-  const created = dateOnly(inv.createdAt);
-  const due = dateOnly(inv.dueDate);
-  if (!created || !due) return false;
-  const gap = daysSince(created, new Date(`${due}T00:00:00`));
-  return gap >= 0 && gap <= FIRST_RENT_CYCLE.graceDays;
-};
-
-/** Ngày phát hành kỳ đầu = ngày nhận phòng (dùng createdAt, fallback dueDate). */
-export const firstCycleIssuedOn = (inv: RentCycleInvoiceLike): string =>
-  dateOnly(inv.createdAt) || dateOnly(inv.dueDate);
-
-/** Hạn thật của kỳ đầu = ngày nhận phòng + graceDays. */
-export const firstCycleDeadline = (inv: RentCycleInvoiceLike): string =>
-  addDays(firstCycleIssuedOn(inv), FIRST_RENT_CYCLE.graceDays);
-
-/** Còn bao nhiêu ngày trong thời hạn kỳ đầu (0 = hết hạn hôm nay hoặc đã qua). */
-export const firstCycleDaysLeft = (
-  inv: RentCycleInvoiceLike,
-  now: Date = new Date(),
-): number => {
-  const left = FIRST_RENT_CYCLE.graceDays - daysSince(firstCycleIssuedOn(inv), now);
-  return left > 0 ? left : 0;
-};
-
-export type FirstCycleStage =
-  | 'reminding'   // còn trong 3 ngày — nhắc mỗi ngày
-  | 'expired';    // quá 3 ngày — đã báo quản lý, được quyền chấm dứt HĐ
-
-export const firstCycleStage = (
-  inv: RentCycleInvoiceLike,
-  now: Date = new Date(),
-): FirstCycleStage =>
-  daysSince(firstCycleIssuedOn(inv), now) > FIRST_RENT_CYCLE.graceDays ? 'expired' : 'reminding';
-
-/**
- * Câu cảnh báo cho khách thuê về hoá đơn kỳ đầu chưa thanh toán.
- * Gom về một chỗ để Home / danh sách / chi tiết hoá đơn nói y hệt nhau.
- */
-export const firstCycleTenantWarning = (
-  inv: RentCycleInvoiceLike,
-  now: Date = new Date(),
-): string => {
-  if (firstCycleStage(inv, now) === 'expired') {
-    return `Đã quá ${FIRST_RENT_CYCLE.graceDays} ngày kể từ ngày nhận phòng — quản lý đã được thông báo và ` +
-      `được quyền chấm dứt hợp đồng. Vui lòng thanh toán ngay.`;
-  }
-  const left = firstCycleDaysLeft(inv, now);
-  return `Hoá đơn đầu tiên — còn ${left} ngày để thanh toán (hạn ${dayLabel(firstCycleDeadline(inv))}). ` +
-    `Quá hạn thì quản lý được quyền chấm dứt hợp đồng.`;
-};
-
-/**
- * Hoá đơn kỳ đầu đã đủ điều kiện để quản lý chấm dứt hợp đồng chưa
- * (chưa thanh toán VÀ đã quá `graceDays` ngày kể từ ngày nhận phòng).
- */
-export const canTerminateForUnpaidFirstRent = (
-  inv: RentCycleInvoiceLike & { status?: string },
-  now: Date = new Date(),
-): boolean => {
-  const st = (inv.status || '').toUpperCase();
-  if (st === 'PAID' || st === 'CANCELLED') return false;
-  return firstCycleStage(inv, now) === 'expired';
-};

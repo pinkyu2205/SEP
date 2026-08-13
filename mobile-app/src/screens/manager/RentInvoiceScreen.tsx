@@ -8,15 +8,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
   RENT_CYCLE, RENT_POLICY_SHORT, RENT_POLICY_FULL, RENT_PARTIAL_CYCLE_NOTE, RENT_REMINDER_STEPS,
-  RENT_TERMINATION_AFTER_DAYS, FIRST_RENT_CYCLE, FIRST_RENT_CYCLE_NOTE,
+  RENT_TERMINATION_AFTER_DAYS,
   toMonthKey, shiftMonthKey, monthLabel, rentIssueDate, rentDueDate,
   daysOverdue, overdueStage, canTerminateForUnpaidRent, partialRentCycle,
-  addDays, daysSince,
 } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, RentInvoiceLite } from '@/services/manager/invoiceService';
 import { checkoutService } from '@/services/manager/checkoutService';
+import { todayIso } from '@/utils/serverTime';
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const fmtDay = (iso: string) => iso.split('-').reverse().join('/');
@@ -176,7 +176,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
               try {
                 const req = await checkoutService.createForTenant({
                   contractId: row.contractId,
-                  expectedMoveOutDate: new Date().toISOString().slice(0, 10),
+                  expectedMoveOutDate: todayIso(),
                   reason: `Chấm dứt hợp đồng do không thanh toán tiền phòng ${monthLabel(month).toLowerCase()} (quá hạn ${od} ngày).`,
                 });
                 checkoutId = req?.id ?? null;
@@ -230,21 +230,20 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
     const status = (inv?.status || '').toUpperCase();
     const paid = status === 'PAID';
     // Kỳ lẻ: khách vào giữa tháng (kỳ đầu) hoặc trả phòng giữa tháng (kỳ cuối).
+    // Kỳ đầu chỉ còn ý nghĩa "tiền chia theo ngày ở" để manager đối chiếu — tiền đó đã
+    // thu chung với cọc ở mã QR lúc đón khách, nên KHÔNG có mốc nhắc/quá hạn riêng nữa.
     const partial = partialRentCycle(month, row.rentAmount, row.startDate, row.endDate);
-    // KỲ ĐẦU chạy mốc riêng: nhắc mỗi ngày trong 3 ngày kể từ ngày nhận phòng, hết 3
-    // ngày là quản lý được quyền chấm dứt — KHÔNG dùng lịch 1/5/7/8 của tháng thường.
-    const isFirstCycle = partial?.kind === 'first';
-    const due = isFirstCycle
-      ? addDays(row.startDate, FIRST_RENT_CYCLE.graceDays)
-      : (inv?.dueDate || rentDueDate(month));
+    const due = inv?.dueDate || rentDueDate(month);
     const unpaid = !!inv && !paid && status !== 'CANCELLED';
     const od = unpaid ? daysOverdue(due) : 0;
     const stage = overdueStage(od);
-    const canTerminate = unpaid && (isFirstCycle ? od > 0 : canTerminateForUnpaidRent(due, status));
-    /** Kỳ đầu còn trong hạn: còn mấy ngày nữa hết 3 ngày. */
-    const firstCycleDaysLeft = isFirstCycle
-      ? Math.max(0, FIRST_RENT_CYCLE.graceDays - daysSince(row.startDate))
-      : 0;
+    const canTerminate = unpaid && canTerminateForUnpaidRent(due, status);
+    /**
+     * Tháng khách mới dọn vào thì BE KHÔNG phát hoá đơn tiền phòng riêng — phần tiền
+     * của tháng đó đã nằm trong mã QR lúc đón khách. Không có `inv` ở đây là ĐÚNG, nên
+     * đừng để nhãn "Chờ phát hành" làm manager tưởng còn khoản phải đòi.
+     */
+    const collectedAtOnboarding = !inv && partial?.kind === 'first';
 
     return (
       <View key={row.key} style={[s.card, paid && s.cardPaid, canTerminate && s.cardRisk]}>
@@ -255,30 +254,26 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
           <View style={[
             s.badge,
-            paid ? s.badgePaid : inv ? (od > 0 ? s.badgeOverdue : s.badgeIssued) : s.badgeMissing,
+            paid || collectedAtOnboarding
+              ? s.badgePaid
+              : inv ? (od > 0 ? s.badgeOverdue : s.badgeIssued) : s.badgeMissing,
           ]}>
-            <Text style={[s.badgeText, { color: inv ? Colors.white : Colors.textMuted }]}>
-              {paid ? '✓ Đã thu' : inv ? (od > 0 ? `Quá hạn ${od} ngày` : '✓ Đã phát hành') : 'Chờ phát hành'}
+            <Text style={[s.badgeText, { color: inv || collectedAtOnboarding ? Colors.white : Colors.textMuted }]}>
+              {collectedAtOnboarding
+                ? '✓ Đã thu lúc đón khách'
+                : paid ? '✓ Đã thu' : inv ? (od > 0 ? `Quá hạn ${od} ngày` : '✓ Đã phát hành') : 'Chờ phát hành'}
             </Text>
           </View>
         </View>
 
-        <Text style={s.due}>
-          Hạn nộp: {fmtDay(due)}
-          {isFirstCycle ? ` · kỳ đầu (${FIRST_RENT_CYCLE.graceDays} ngày kể từ ngày nhận phòng)` : ''}
-          {inv ? (inv.autoIssued === false ? ' · phát hành thủ công (kỳ cũ)' : ' · tự động') : ''}
-        </Text>
-
-        {/* Kỳ đầu: mốc riêng, nói theo "còn mấy ngày" chứ không theo ngày 5/7/8. */}
-        {isFirstCycle && unpaid && !canTerminate && (
-          <View style={s.warnBox}>
-            <Text style={s.warnBoxText}>
-              ⏰ Kỳ đầu — còn {firstCycleDaysLeft} ngày. Khách được nhắc mỗi ngày; hết hạn mà chưa
-              thu được thì bạn được quyền chấm dứt hợp đồng.
-            </Text>
-          </View>
+        {!collectedAtOnboarding && (
+          <Text style={s.due}>
+            Hạn nộp: {fmtDay(due)}
+            {inv ? (inv.autoIssued === false ? ' · phát hành thủ công (kỳ cũ)' : ' · tự động') : ''}
+          </Text>
         )}
-        {!isFirstCycle && stage === 'final' && !canTerminate && (
+
+        {stage === 'final' && !canTerminate && (
           <View style={s.warnBox}>
             <Text style={s.warnBoxText}>
               ⏰ Quá hạn {od} ngày — khách đã được nhắc. Ngày {RENT_CYCLE.finalReminderDay} nhắc lần cuối.
@@ -288,9 +283,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
         {canTerminate && (
           <View style={s.riskBox}>
             <Text style={s.riskText}>
-              {isFirstCycle
-                ? `⛔ Kỳ đầu quá ${FIRST_RENT_CYCLE.graceDays} ngày chưa thanh toán (trễ ${od} ngày) — bạn được quyền chấm dứt hợp đồng.`
-                : `⛔ Quá hạn ${od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.`}
+              ⛔ Quá hạn {od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.
             </Text>
           </View>
         )}
@@ -301,7 +294,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             <Text style={s.partialTitle}>{partial.label}</Text>
             <Text style={s.partialText}>
               {partial.kind === 'first'
-                ? `Khách nhận phòng ${fmtDay(row.startDate)} — phát hành ngay, khách có ${FIRST_RENT_CYCLE.graceDays} ngày để thanh toán.`
+                ? `Khách nhận phòng ${fmtDay(row.startDate)} — phần tiền này đã thu chung với tiền cọc ở mã QR lúc đón khách, không phát hoá đơn riêng.`
                 : `Rời phòng ${fmtDay(row.endDate || '')} — hoá đơn kỳ cuối gửi khách khi duyệt trả phòng.`}
               {' '}Hệ thống tính tiền theo số ngày ở rồi thu trực tiếp của khách.
             </Text>
@@ -310,8 +303,13 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
 
         <View style={s.amountRow}>
           {/* Không hiện số tiền thuê — xem @/constants/managerVisibility. */}
-          <Text style={[s.amount, { fontSize: 14, color: paid ? Colors.success : Colors.textSecondary }]}>
-            {paid ? '✓ Khách đã thanh toán' : inv ? 'Khách chưa thanh toán' : 'Chờ phát hành'}
+          <Text style={[s.amount, {
+            fontSize: 14,
+            color: paid || collectedAtOnboarding ? Colors.success : Colors.textSecondary,
+          }]}>
+            {collectedAtOnboarding
+              ? '✓ Khách đã trả lúc đón khách'
+              : paid ? '✓ Khách đã thanh toán' : inv ? 'Khách chưa thanh toán' : 'Chờ phát hành'}
           </Text>
           {canTerminate && (
             <TouchableOpacity
@@ -376,7 +374,6 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             <View style={s.policyDetail}>
               <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
               <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
-              <Text style={[s.policyText, { marginTop: 6 }]}>🆕 {FIRST_RENT_CYCLE_NOTE}</Text>
             </View>
           )}
         </View>

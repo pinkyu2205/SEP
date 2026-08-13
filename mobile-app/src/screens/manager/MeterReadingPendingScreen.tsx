@@ -5,6 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { serverNow } from '@/utils/serverTime';
 import {
   meterReadingService,
   type PendingMeterReadingItem,
@@ -26,7 +27,7 @@ import {
 
 /** `yyyy-MM` của tháng hiện tại — khớp mặc định phía BE (Asia/Ho_Chi_Minh). */
 const currentPeriod = (): string => {
-  const d = new Date();
+  const d = serverNow();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
@@ -44,7 +45,7 @@ const daysLeft = (iso?: string): number | null => {
   if (!iso) return null;
   const due = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(due.getTime())) return null;
-  const today = new Date();
+  const today = serverNow();
   today.setHours(0, 0, 0, 0);
   return Math.round((due.getTime() - today.getTime()) / 86_400_000);
 };

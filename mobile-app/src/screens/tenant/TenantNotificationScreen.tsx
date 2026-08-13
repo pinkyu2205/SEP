@@ -11,6 +11,7 @@ import { realNotificationService, ApiNotification } from '@/services/shared/noti
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { navigateFromNotification } from '@/navigation/navigationRef';
+import { serverNow } from '@/utils/serverTime';
 
 // Map thông báo BE (ApiNotification) → AppNotification dùng trong UI.
 const mapApiNotif = (n: ApiNotification): AppNotification => ({
@@ -90,7 +91,7 @@ const TYPE_ACCENT: Record<string, { emoji: string; color: string; bg: string }> 
 type Section = { title: string; data: AppNotification[] };
 
 const groupByTime = (items: AppNotification[]): Section[] => {
-  const now = new Date();
+  const now = serverNow();
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const todayMs    = startOfDay(now);
   const yesterMs   = todayMs - 86400000;

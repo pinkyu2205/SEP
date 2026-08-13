@@ -8,6 +8,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
 import type { EquipmentLifecycleStatus } from '@/types';
+import { serverNow } from '@/utils/serverTime';
 
 // ===================== TYPES =====================
 type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';
@@ -490,7 +491,7 @@ export const EquipmentScreen: React.FC = () => {
       return showAlert('Lỗi', 'Vui lòng nhập tên thiết bị và vị trí.');
     }
     const roomLabel = isWholeHouse ? 'Toàn bộ nhà' : newRoom;
-    const assetId = `AST-${new Date().getFullYear()}-${String(equipments.length + 1).padStart(3, '0')}`;
+    const assetId = `AST-${serverNow().getFullYear()}-${String(equipments.length + 1).padStart(3, '0')}`;
     const qrCode = `QR-${roomLabel.toUpperCase().replace(/\s/g, '')}-${Date.now().toString(36).toUpperCase()}`;
     const newEq: EquipmentItem = {
       id: `eq-${Date.now()}`,
@@ -504,7 +505,7 @@ export const EquipmentScreen: React.FC = () => {
       brand: newBrand || undefined,
       qrCode,
       status: 'active',
-      installationDate: new Date().toLocaleDateString('vi-VN'),
+      installationDate: serverNow().toLocaleDateString('vi-VN'),
       maintenanceHistory: [],
     };
     setEquipments(prev => [newEq, ...prev]);

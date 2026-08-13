@@ -15,6 +15,7 @@ import {
   touchSession, isSessionIdleExpired,
 } from '@/services/core/session';
 import { showAlert } from '@/utils';
+import { nowIso } from '@/utils/serverTime';
 
 /**
  * Auth Context - Quản lý trạng thái đăng nhập toàn ứng dụng.
@@ -226,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       phone: profile.phone ?? '',
       role,
       isFirstLogin: res.firstLogin ?? false,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
     };
     setUser(nextUser);
     // Lưu xuống máy: tắt app mở lại là vào thẳng, khỏi đăng nhập lại.

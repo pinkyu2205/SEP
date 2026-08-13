@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { getPropertyById, getBuildingOps, BuildingUtilityReading } from '@/data/managedProperties';
 import { billsStore } from '@/store/billsStore';
+import { todayIso } from '@/utils/serverTime';
 
 export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
   const propertyId: string = route?.params?.propertyId;
@@ -74,7 +75,7 @@ export const BuildingUtilityScreen: React.FC<any> = ({ navigation, route }) => {
         grandTotal: rent + prop.serviceCharge,
         status: 'pending',
         dueDate: '2026-05-15',
-        createdAt: new Date().toISOString().split('T')[0],
+        createdAt: todayIso(),
       }]);
       showAlert('Đã tạo hóa đơn', 'Chỉ số nhà nguyên căn đã được ghi nhận và hóa đơn tháng này đã được cập nhật.');
     }

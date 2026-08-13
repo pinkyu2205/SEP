@@ -8,10 +8,11 @@ import { userService } from '@/services/user.service';
 import { hostService, type HostContractDto, type PropertyPerformanceRow } from '@/services/host.service';
 import type { PropertyResponse, UserResponse } from '@/types/api.types';
 import { formatCurrency } from '@/utils';
+import { currentMonthIso } from '@/utils/serverTime';
 
 type ManagerItem = { id: string; fullName: string; username: string };
 
-const MONTH = new Date().toISOString().slice(0, 7); // YYYY-MM
+const MONTH = currentMonthIso(); // YYYY-MM
 
 const statusCls: Record<string, { label: string; color: string; dot: string }> = {
   ACTIVE:   { label: 'Hoạt động',       color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },

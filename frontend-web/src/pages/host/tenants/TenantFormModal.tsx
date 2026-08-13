@@ -3,6 +3,7 @@ import { X, ShieldAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { RoomResponse, OnboardTenantRequest } from '@/types/api.types';
 import { tenantService } from '@/services/tenant.service';
+import { todayIso } from '@/utils/serverTime';
 
 interface Props {
   propertyId: number;
@@ -19,7 +20,7 @@ export const TenantFormModal = ({ propertyId, propertyName, wholeHouse, rooms, o
     phoneNumber: '',
     cccd: '',
     roomId: '',
-    moveInDate: new Date().toISOString().split('T')[0],
+    moveInDate: todayIso(),
     endDate: '',
     rentAmount: '',
     deposit: '',

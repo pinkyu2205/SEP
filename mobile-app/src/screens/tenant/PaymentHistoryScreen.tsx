@@ -7,11 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { PaymentTransaction } from '@/types';
-import { formatCurrency, formatDateTime } from '@/utils';
+import { formatCurrency, formatDateTime, isOnboardBillCode } from '@/utils';
 import {
-  realTenantBillingService, TenantPayment, TenantInvoiceType,
+  realTenantBillingService, toSharedBill, TenantPayment, TenantInvoiceType,
 } from '@/services/tenant/billingService';
+import { SharedBill } from '@/store/billsStore';
 import { realTenantSelfService } from '@/services/tenant/selfService';
+import { currentMonthIso } from '@/utils/serverTime';
 
 /**
  * Lịch sử thanh toán của khách thuê.
@@ -52,6 +54,35 @@ interface Txn extends PaymentTransaction {
   duplicate?: boolean;
 }
 
+/** Mã hoá đơn thu lúc nhận phòng của một hợp đồng — quy ước BE, dùng ở nhiều màn. */
+const onboardCodeOf = (contractId: number) => `HD-ONBOARD-${contractId}`;
+const isOnboardCode = isOnboardBillCode;
+
+/**
+ * BỎ dòng "Tiền cọc" FE tự dựng khi hợp đồng đó đã có giao dịch onboard.
+ *
+ * Khách chỉ chuyển MỘT lần lúc nhận phòng (cọc + tiền nhà chu kỳ đầu) và BE trả đúng một
+ * bản ghi `HD-ONBOARD-{contractId}` với số tiền gộp trong `/tenant/me/payments`. Dòng
+ * "Tiền cọc" do FE tự dựng từ `contract.deposit` (xem loadDeposits) là cùng lần chuyển
+ * đó — giữ lại là hiện hai dòng, cùng một mã PayOS, tổng bị thổi lên (BE xác nhận
+ * 13/08/2026).
+ *
+ * Vẫn giữ `loadDeposits` cho hợp đồng CŨ chưa có hoá đơn onboard: ở đó dòng tự dựng là
+ * bản ghi duy nhất chứng minh khách đã đóng cọc, xoá đi là mất dữ liệu.
+ *
+ * Tiền cọc của hợp đồng mới khách vẫn tra được: nó nằm trong chi tiết hoá đơn onboard
+ * ("Tiền cọc (N tháng)") và trong màn hợp đồng.
+ */
+const dropDepositsInsideOnboard = (invoicePays: Txn[], depositPays: Txn[]): Txn[] => {
+  const onboardCodes = new Set(
+    invoicePays.map(t => t.invoiceCode).filter(isOnboardCode),
+  );
+  return depositPays.filter(d => {
+    const code = d.contractId != null ? onboardCodeOf(d.contractId) : '';
+    return !onboardCodes.has(code);
+  });
+};
+
 /**
  * Đánh dấu giao dịch trùng.
  *
@@ -88,6 +119,8 @@ const toTxn = (p: TenantPayment): Txn => ({
   tenantName: '',
   roomName: p.roomNumber ? `Phòng ${p.roomNumber}` : '',
   amount: p.amount,
+  // BE đã map `PAYOS` → `QR` cho cả dữ liệu cũ (commit 898f96c) nên không phải suy đoán
+  // "onboard = chuyển khoản" như trước nữa.
   method: PAY_METHOD_MAP[p.method] ?? 'other',
   status: 'verified',
   transferContent: p.transactionId,
@@ -121,6 +154,11 @@ const TYPE_CONFIG: Record<PayKind, { label: string; icon: string; color: string;
   MAINTENANCE: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
   DEPOSIT: { label: 'Tiền cọc', icon: '🔐', color: '#0891B2', bg: '#CFFAFE' },
   OTHER: { label: 'Khác', icon: '💠', color: '#64748B', bg: '#F1F5F9' },
+};
+
+/** Khoản thu lúc nhận phòng — BE để `type = OTHER`, nhận diện theo mã (isOnboardCode). */
+const ONBOARD_TYPE_CFG = {
+  label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5',
 };
 const typeCfg = (t: PayKind) => TYPE_CONFIG[t] ?? TYPE_CONFIG.OTHER;
 
@@ -158,6 +196,8 @@ const norm = (s: string) =>
 export const PaymentHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [transactions, setTransactions] = useState<Txn[]>([]);
+  /** Hoá đơn theo mã — để mở màn chi tiết hoá đơn từ một giao dịch. */
+  const [invoiceByCode, setInvoiceByCode] = useState<Map<string, SharedBill>>(new Map());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -211,8 +251,19 @@ export const PaymentHistoryScreen: React.FC = () => {
     Promise.all([
       realTenantBillingService.listPayments().then(rows => rows.map(toTxn)).catch(() => [] as Txn[]),
       loadDeposits().catch(() => [] as Txn[]),
+      // Nạp kèm hoá đơn để bấm "Xem hoá đơn" ở khoản thu onboard mở được màn chi tiết
+      // (nơi có phần cấu thành của khoản gộp). Route InvoiceDetail nhận cả object hoá
+      // đơn chứ không nhận id, nên phải có sẵn ở đây.
+      realTenantBillingService.listInvoices().then(rows => rows.map(toSharedBill))
+        .catch(() => [] as SharedBill[]),
     ])
-      .then(([invoicePays, depositPays]) => setTransactions(markDuplicates([...invoicePays, ...depositPays])))
+      .then(([invoicePays, depositPays, invoices]) => {
+        setInvoiceByCode(new Map(invoices.filter(i => !!i.code).map(i => [i.code, i])));
+        setTransactions(markDuplicates([
+          ...invoicePays,
+          ...dropDepositsInsideOnboard(invoicePays, depositPays),
+        ]));
+      })
       .catch(() => setTransactions([]))
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [loadDeposits]);
@@ -220,7 +271,7 @@ export const PaymentHistoryScreen: React.FC = () => {
 
   // ── Thống kê trên TOÀN BỘ giao dịch, không đổi theo bộ lọc ──
   const stats = useMemo(() => {
-    const thisMonth = (new Date().toISOString()).slice(0, 7);
+    const thisMonth = currentMonthIso();
     const inMonth = transactions.filter(t => t.monthKey === thisMonth);
     const latest = transactions.reduce<string | null>(
       (m, t) => (!m || t.createdAt > m ? t.createdAt : m), null,
@@ -303,17 +354,30 @@ export const PaymentHistoryScreen: React.FC = () => {
   const renderTransaction = ({ item }: { item: Txn }) => {
     const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
     const status = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
-    const cfg = typeCfg(item.invoiceType);
     const place = [item.propertyName, item.roomName].filter(Boolean).join(' · ');
+    // Hoá đơn onboard mang `type = OTHER` nên rơi vào nhãn "Khác" — vô nghĩa với khách.
+    // Nhận diện theo MÃ và dùng đúng nhãn như các màn hoá đơn khác.
+    const onboard = isOnboardCode(item.invoiceCode);
+    const onboardInvoice = onboard ? invoiceByCode.get(item.invoiceCode) : undefined;
+    const cfg = onboard ? ONBOARD_TYPE_CFG : typeCfg(item.invoiceType);
 
     return (
       <TouchableOpacity
         style={[styles.card, item.duplicate && styles.cardDuplicate]}
         activeOpacity={0.75}
-        onPress={() => (item.contractId
-          // Cọc không có bản ghi giao dịch riêng → mở thẳng hợp đồng chứa nó.
-          ? navigation.navigate('ContractDetail', { contractId: item.contractId })
-          : navigation.navigate('PaymentHistoryDetail', { transaction: item }))}
+        onPress={() => {
+          // Khoản thu lúc nhận phòng là khoản GỘP (cọc + tiền nhà chu kỳ đầu) → mở màn
+          // hoá đơn để khách thấy nó gồm những gì. Màn "Chi tiết giao dịch" chỉ nói được
+          // đã chuyển bao nhiêu, bằng cách nào — không tách được khoản gộp.
+          if (onboardInvoice) {
+            navigation.navigate('InvoiceDetail', { invoice: onboardInvoice });
+          } else if (item.contractId) {
+            // Cọc không có bản ghi giao dịch riêng → mở thẳng hợp đồng chứa nó.
+            navigation.navigate('ContractDetail', { contractId: item.contractId });
+          } else {
+            navigation.navigate('PaymentHistoryDetail', { transaction: item });
+          }
+        }}
       >
         <View style={styles.cardTop}>
           {/* Icon theo LOẠI PHÍ chứ không theo phương thức: khách quan tâm
@@ -343,6 +407,7 @@ export const PaymentHistoryScreen: React.FC = () => {
             </Text>
           </View>
         )}
+
 
         <View style={styles.divider} />
 
@@ -377,7 +442,7 @@ export const PaymentHistoryScreen: React.FC = () => {
             <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
           </View>
           <Text style={styles.detailLink}>
-            {item.contractId ? 'Xem hợp đồng →' : 'Xem chi tiết →'}
+            {onboardInvoice ? 'Xem hoá đơn →' : item.contractId ? 'Xem hợp đồng →' : 'Xem chi tiết →'}
           </Text>
         </View>
       </TouchableOpacity>

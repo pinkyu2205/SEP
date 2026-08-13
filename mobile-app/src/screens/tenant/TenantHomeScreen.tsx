@@ -4,10 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline, firstCycleTenantWarning,
 } from '@/constants';
 import { useAuth, useTenantContract } from '@/hooks';
-import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
+import {
+  billMonthLabel, formatCurrency, formatDate, getDaysUntil, isToday, onboardChargeLines,
+} from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -145,9 +146,10 @@ export const TenantHomeScreen: React.FC = () => {
   };
 
   /**
-   * Khoản thu lúc NHẬN PHÒNG — từ BE commit `92c87d8` (10/08/2026) là **CHỈ TIỀN CỌC**.
-   * Tiền nhà tháng vào ở tách thành hoá đơn RENT riêng (`cycleType = FIRST`, tính theo
-   * số ngày ở), khách trả sau trên app như mọi hoá đơn khác.
+   * Khoản thu lúc NHẬN PHÒNG — từ BE `609de59`/`276b613` (12/08/2026) là khoản GỘP:
+   * tiền cọc + tiền nhà chu kỳ đầu (chia theo số ngày ở từ ngày nhận phòng đến hết
+   * tháng), khách quét QR trả MỘT lần. Không còn hoá đơn tiền nhà kỳ đầu trả sau.
+   * (Giai đoạn 10–12/08/2026 BE có tách riêng hai khoản, nay đã gộp lại.)
    *
    * Mentor 07/08/2026: "tenant chưa xem được đã chuyển và đặt cọc hay chưa" và "tổng
    * 10tr mà hoá đơn hiện 5tr, chưa có tiền tháng". Nguyên nhân là BE không sinh hoá
@@ -158,10 +160,31 @@ export const TenantHomeScreen: React.FC = () => {
    * với hoá đơn seed/cũ mà BE đặt mã khác. Chuỗi dò phải khớp CẢ HAI đời nhãn: cũ là
    * "Thu lúc nhận phòng", mới là "Tiền cọc lúc nhận phòng" — nên chỉ dò phần đuôi.
    */
-  const onboardingBill = allBills.find(
+  const onboardingBillAnyDay = allBills.find(
     b => b.code?.startsWith('HD-ONBOARD-')
       || /lúc nhận phòng/i.test(b.billingPeriod ?? ''),
   );
+
+  /**
+   * Thẻ "Đã thanh toán khi nhận phòng" chỉ hiện ĐÚNG NGÀY thu tiền, hết ngày là tự mất.
+   *
+   * Nó là một BIÊN NHẬN: hôm nhận phòng khách vừa chuyển một khoản lớn nên cần thấy ngay
+   * để đối chiếu với app ngân hàng. Sau hôm đó nó thành thông tin cũ mà vẫn chiếm chỗ
+   * đầu màn hình chính, đẩy những việc đang cần làm (hoá đơn phải trả, bảo trì) xuống
+   * dưới. Khách vẫn tra lại được ở tab Hoá đơn và màn Lịch sử thanh toán bất cứ lúc nào.
+   *
+   * Mốc so là `paidAt`, lùi về `createdAt` cho hoá đơn cũ BE chưa ghi `paidAt`. Không có
+   * mốc nào thì ẩn — không chứng minh được là hôm nay thì đừng hiện.
+   */
+  const onboardingBill = isToday(onboardingBillAnyDay?.paidAt ?? onboardingBillAnyDay?.createdAt)
+    ? onboardingBillAnyDay
+    : undefined;
+
+  /**
+   * Hai khoản thật sự thu lúc nhận phòng: tiền cọc + tiền nhà chu kỳ đầu.
+   * Cách dựng và lý do không lấy thẳng `items`/`breakdown.lines`: xem @/utils/onboardBill.
+   */
+  const onboardLines = onboardChargeLines(onboardingBill);
 
   const unpaidBills = allBills.filter(b => b.status === 'pending' || b.status === 'overdue');
   const overdueInvoices = allBills.filter(b => b.status === 'overdue');
@@ -305,8 +328,9 @@ export const TenantHomeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Khoản thu lúc nhận phòng — tách rõ tiền nhà tháng đầu / tiền cọc để khách
-            đối chiếu được với số tiền app ngân hàng đã trừ (mentor 07/08/2026, ý 10+11). */}
+        {/* Khoản thu lúc nhận phòng — tách rõ tiền cọc / tiền nhà chu kỳ đầu để khách
+            đối chiếu được với số tiền app ngân hàng đã trừ (mentor 07/08/2026, ý 10+11).
+            Nguồn các dòng: xem `onboardLines` ở trên, KHÔNG lấy thẳng `items`. */}
         {!!onboardingBill && (
           <TouchableOpacity
             style={styles.onboardPaidCard}
@@ -320,18 +344,18 @@ export const TenantHomeScreen: React.FC = () => {
                 {formatCurrency(onboardingBill.grandTotal)}
               </Text>
             </View>
-            {onboardingBill.items && onboardingBill.items.length > 0 ? (
-              onboardingBill.items.map((it, i) => (
+            {onboardLines ? (
+              onboardLines.map((it, i) => (
                 <View key={`${it.label}-${i}`} style={styles.onboardPaidRow}>
                   <Text style={styles.onboardPaidLabel}>• {it.label}</Text>
                   <Text style={styles.onboardPaidValue}>{formatCurrency(it.amount)}</Text>
                 </View>
               ))
             ) : (
-              // BE cũ chưa kèm items -> vẫn phải nói được đây là khoản gì, đừng để
-              // khách nhìn một con số trống không.
+              // Không có nguồn nào đáng tin -> vẫn phải nói được đây là khoản gì, đừng
+              // để khách nhìn một con số trống không.
               <Text style={styles.onboardPaidLabel}>
-                Gồm tiền nhà tháng đầu và tiền cọc. Xem chi tiết trong hoá đơn.
+                Gồm tiền cọc và tiền nhà chu kỳ đầu. Xem chi tiết trong hoá đơn.
               </Text>
             )}
             {!!onboardingBill.paidAt && (
@@ -407,15 +431,10 @@ export const TenantHomeScreen: React.FC = () => {
         ) : (
           displayBills.map(bill => {
             const tc = TYPE_CFG[bill.invoiceType];
-            // Kỳ đầu: hạn thật là ngày nhận phòng + 3 ngày, chưa hết 3 ngày thì chưa
-            // gọi là quá hạn dù BE đã gắn OVERDUE (xem constants/rentCycle.ts).
-            const isFirstCycle = isFirstRentCycleInvoice(bill);
             const isPaid = bill.status === 'paid';
-            const isOver = isFirstCycle
-              ? firstCycleStage(bill) === 'expired' && !isPaid
-              : bill.status === 'overdue';
+            const isOver = bill.status === 'overdue';
             const isPending = !isOver && !isPaid;
-            const dueDate = isFirstCycle ? firstCycleDeadline(bill) : bill.dueDate;
+            const dueDate = bill.dueDate;
             return (
               <TouchableOpacity
                 key={bill.id}
@@ -431,7 +450,10 @@ export const TenantHomeScreen: React.FC = () => {
                         {tc.icon} {tc.label}
                       </Text>
                     </View>
-                    <Text style={styles.invMonth}>T{String(bill.month).padStart(2, '0')}/{bill.year}</Text>
+                    {/* Hoá đơn onboard không thuộc kỳ nào → billMonthLabel trả null. */}
+                    {!!billMonthLabel(bill) && (
+                      <Text style={styles.invMonth}>{billMonthLabel(bill)}</Text>
+                    )}
                   </View>
                   <View style={[styles.invStatusBadge, {
                     backgroundColor: isOver ? Colors.errorLight : Colors.warningLight,
@@ -459,11 +481,6 @@ export const TenantHomeScreen: React.FC = () => {
                     {isOver ? `Quá hạn ${Math.abs(getDaysUntil(dueDate))} ngày` : `Hạn: ${formatDate(dueDate)}`}
                   </Text>
                 </View>
-
-                {/* Kỳ đầu có mốc riêng (3 ngày kể từ ngày nhận phòng) — nhắc ngay tại Home. */}
-                {isFirstCycle && (
-                  <Text style={styles.invFirstCycleNote}>⚠️ {firstCycleTenantWarning(bill)}</Text>
-                )}
 
                 {(isOver || isPending) && (
                   <TouchableOpacity
@@ -711,7 +728,6 @@ const styles = StyleSheet.create({
   invAmountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   invAmount: { fontSize: 20, fontWeight: '800', color: Colors.primary },
   invDue: { fontSize: 11, color: Colors.textSecondary },
-  invFirstCycleNote: { fontSize: 11, color: Colors.error, marginTop: 6, lineHeight: 16 },
   invPayBtn: {
     marginTop: Spacing.sm, borderRadius: BorderRadius.md,
     paddingVertical: Spacing.sm + 2, alignItems: 'center',

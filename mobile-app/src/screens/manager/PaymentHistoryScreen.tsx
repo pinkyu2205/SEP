@@ -14,6 +14,7 @@ import { realManagerInvoiceService, ManagerPayment } from '@/services/manager/in
 import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -106,7 +107,7 @@ const dayLabel = (key: string) => {
   const [y, m, d] = key.split('-').map(Number);
   const that = new Date(y, m - 1, d);
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((startOf(new Date()) - startOf(that)) / 86_400_000);
+  const diff = Math.round((startOf(serverNow()) - startOf(that)) / 86_400_000);
   if (diff === 0) return 'Hôm nay';
   if (diff === 1) return 'Hôm qua';
   return `${pad(d)}/${pad(m)}/${y}`;

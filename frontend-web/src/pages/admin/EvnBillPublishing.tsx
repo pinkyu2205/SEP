@@ -11,6 +11,7 @@ import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { parseEvnInvoice, monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * PHÁT HÀNH HOÁ ĐƠN ĐIỆN EVN (Admin).
@@ -236,7 +237,7 @@ const PropertyCombobox = ({
 };
 
 export const EvnBillPublishing = () => {
-  const now = new Date();
+  const now = serverNow();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
 

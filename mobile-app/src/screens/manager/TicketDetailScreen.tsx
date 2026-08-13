@@ -20,6 +20,7 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
 import { showAlert } from '@/utils';
+import { serverNow, todayIso } from '@/utils/serverTime';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, StatusMeta,
   MAINTENANCE_AUTO_CONFIRM_DAYS, EQUIPMENT_REPLACE_SUGGEST_COUNT,
@@ -51,8 +52,8 @@ const APPROVE_PRIORITY_KEYS = ['low', 'medium', 'high', 'urgent'] as const;
 
 const STATUS_FLOW = MAINTENANCE_STATUS_FLOW as TicketStatus[];
 
-const now = () => new Date().toLocaleString('vi-VN');
-const today = () => new Date().toISOString().split('T')[0];
+const now = () => serverNow().toLocaleString('vi-VN');
+const today = () => todayIso();
 const mkEntry = (status: TicketStatus, note: string): TimelineEntry =>
   ({ status, note, updatedBy: 'Manager', updatedAt: now() });
 
@@ -267,7 +268,7 @@ export const TicketDetailScreen: React.FC = () => {
 
   const computeSuggestedCost = (eq: EquipmentDto): { amount: number; note: string } | null => {
     if (!eq.price || !eq.warrantyEndDate) return null;
-    const today = new Date();
+    const today = serverNow();
     const end = new Date(eq.warrantyEndDate);
     if (today > end) {
       return eq.penaltyFee != null

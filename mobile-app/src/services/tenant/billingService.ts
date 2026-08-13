@@ -35,16 +35,15 @@ export interface TenantInvoice {
   dueDate: string;
   createdAt: string;
   /**
-   * FIRST | REGULAR | LAST — phân biệt hoá đơn tiền phòng kỳ đầu (thu ngay lúc nhận
-   * phòng, hạn 3 ngày) với các tháng thường. BE CHƯA trả field này (07/08/2026) —
-   * xem docs/BE-HANDOFF-first-cycle-reminder-2026-08-07.md; trong lúc chờ, FE tự suy
-   * ra bằng isFirstRentCycleInvoice() ở @/constants/rentCycle.
+   * FIRST | REGULAR | LAST do BE gắn. FE chỉ ĐỌC để hiển thị nếu cần, KHÔNG còn nhánh
+   * xử lý riêng cho FIRST: tiền kỳ đầu nay thu chung với tiền cọc ở mã QR lúc đón khách
+   * (BE 609de59/276b613, 12/08/2026) nên không có hoá đơn kỳ đầu chờ thanh toán.
    */
   cycleType?: string;
   /**
    * Cách tính khoản này, BE dựng sẵn từ 10/08/2026 (`PaymentBreakdownResponse`).
-   * Quan trọng nhất với hoá đơn tiền nhà chu kỳ đầu: nó mang công thức chia theo ngày
-   * để khách tự đối chiếu, thay vì thấy một con số lẻ không hiểu ở đâu ra.
+   * Quan trọng nhất với khoản thu lúc nhận phòng: nó mang công thức chia tiền nhà theo
+   * số ngày ở để khách tự đối chiếu, thay vì thấy một con số lẻ không hiểu ở đâu ra.
    */
   paymentBreakdown?: PaymentBreakdown;
   paidAt?: string;
@@ -148,6 +147,20 @@ const METHOD_MAP: Record<string, BillPaymentMethod> = {
   QR: 'qr', BANK_TRANSFER: 'bank_transfer', CASH: 'cash', EWALLET: 'ewallet', OTHER: 'other',
 };
 
+/**
+ * Phương thức thanh toán để hiển thị.
+ *
+ * Trước 13/08/2026 FE phải tự suy "onboard = chuyển khoản" vì BE trả `PAYOS`/`OTHER`,
+ * ra màn hình thành chữ "Khác". BE đã sửa (`PaymentMethods.toPublic`, commit 898f96c):
+ * PayOS → `QR`, tiền mặt → `CASH`, claim chuyển khoản → `BANK_TRANSFER`, áp cho cả dữ
+ * liệu cũ ở đường đọc. Nên bỏ hẳn phần suy đoán — cứ theo đúng thứ BE nói.
+ *
+ * ⚠️ `type = OTHER` là LOẠI hoá đơn onboard, KHÔNG phải phương thức. Đừng bind `type`
+ * vào chỗ "đã trả bằng gì" — đó chính là lỗi cũ.
+ */
+const resolveMethod = (inv: TenantInvoice): BillPaymentMethod | undefined =>
+  (inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined);
+
 /** Trường tiền của BE có thể null/thiếu → về 0 thay vì để null lọt xuống màn hình. */
 const money = (v: number | null | undefined): number => {
   const n = Number(v);
@@ -181,7 +194,7 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   cycleType: inv.cycleType,
   paymentBreakdown: inv.paymentBreakdown,
   paidAt: inv.paidAt,
-  paymentMethod: inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined,
+  paymentMethod: resolveMethod(inv),
   transactionId: inv.transactionId,
   kwhUsed: inv.kwhUsed,
   electricityRate: inv.electricityRate,

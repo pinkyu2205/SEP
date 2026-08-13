@@ -5,9 +5,12 @@ import type { PaymentBreakdown } from '@/services/tenant/tenantService';
 export type BillStatus = 'pending' | 'paid' | 'overdue' | 'partial' | 'cancelled';
 export type BillPaymentMethod = 'qr' | 'bank_transfer' | 'cash' | 'ewallet' | 'other';
 /**
- * `deposit` = khoản thu lúc nhận phòng (`HD-ONBOARD-*`). Tách khỏi `rent` từ 10/08/2026:
- * BE bỏ gộp tiền nhà tháng đầu vào QR đón khách, nên hoá đơn này giờ chỉ còn tiền cọc —
- * để chung nhãn "Tiền phòng" thì khách tưởng đã trả tiền nhà rồi.
+ * `deposit` = khoản thu lúc nhận phòng (`HD-ONBOARD-*`) — GỘP tiền cọc + tiền nhà chu kỳ
+ * đầu, khách quét QR trả một lần (BE 609de59/276b613, 12/08/2026).
+ *
+ * Vẫn tách khỏi `rent` vì đây không phải hoá đơn tiền phòng hằng tháng: nó phát sinh
+ * đúng một lần lúc đón khách và luôn ở trạng thái PAID. Nhãn hiển thị nên nói rõ là
+ * khoản gộp, đừng để mỗi chữ "Tiền cọc" — khách sẽ tưởng chưa trả tiền nhà.
  */
 export type InvoiceType = 'rent' | 'electricity' | 'water' | 'maintenance' | 'deposit';
 
@@ -37,7 +40,7 @@ export interface SharedBill {
   status: BillStatus;
   dueDate: string;
   createdAt: string;
-  /** FIRST | REGULAR | LAST — hoá đơn tiền phòng kỳ đầu chạy mốc nhắc riêng (3 ngày). */
+  /** FIRST | REGULAR | LAST do BE gắn — chỉ để đọc, FE không còn nhánh riêng cho FIRST. */
   cycleType?: string;
   /**
    * Cách tính do BE dựng sẵn (công thức + các dòng đã format). Chỉ hoá đơn mới có;
