@@ -12,6 +12,8 @@ import {
 import { formatCurrency, showAlert } from '@/utils';
 import { realManagerInvoiceService, ManagerPayment } from '@/services/manager/invoiceService';
 import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -239,6 +241,8 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   const initialFilter = (route.params?.filter as Filter | undefined) ?? 'all';
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   const [deposits, setDeposits] = useState<ManagerDeposit[]>([]);
+  /** id các HĐ còn hiệu lực — lọc cọc của khách đã rời đi. */
+  const [activeContractIds, setActiveContractIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>(initialFilter);
@@ -250,8 +254,24 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
     Promise.all([
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
       managerDepositService.list().catch(() => [] as ManagerDeposit[]),
+      managerPropertyService.getScopedProperties().catch(() => [] as { id: number }[]),
     ])
-      .then(([pay, dep]) => { setPayments(pay); setDeposits(dep); })
+      .then(async ([pay, dep, props]) => {
+        setPayments(pay);
+        setDeposits(dep);
+        /**
+         * Cọc của khách ĐÃ trả phòng / chấm dứt HĐ thì không hiện ở đây nữa: khoản đó
+         * đã được tất toán (hoàn lại hoặc trừ vào hư hỏng) ở luồng Trả phòng, để lại
+         * chỉ làm manager tưởng đang giữ tiền của người đã đi.
+         *
+         * Lọc theo `contractId` chứ không theo số phòng — cùng một phòng có thể đã qua
+         * nhiều đời khách, ghép theo phòng là giữ nhầm cọc của người cũ.
+         */
+        const cts = await realTenantService
+          .listActiveByProperties(props.map(p => Number(p.id)))
+          .catch(() => [] as TenantContractResponse[]);
+        setActiveContractIds(new Set(cts.map(c => Number(c.id))));
+      })
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -271,19 +291,34 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
    * Cọc CHƯA thu không phải một lần thanh toán nên không nằm ở đây — nếu để lẫn, nó
    * không có ngày và bị dồn thành một nhóm "không ngày" vô nghĩa ở cuối danh sách.
    */
+  /**
+   * Cọc của khách CÒN Ở. Khách đã trả phòng / chấm dứt HĐ thì cọc đã tất toán ở luồng
+   * Trả phòng (hoàn lại hoặc trừ hư hỏng) — để lại đây làm manager tưởng còn đang giữ
+   * tiền của người đã đi.
+   *
+   * Khi CHƯA nạp được hợp đồng nào thì giữ nguyên danh sách: thà hiện thừa còn hơn
+   * giấu mất khoản thật chỉ vì một request hỏng.
+   */
+  const liveDeposits = useMemo(
+    () => (activeContractIds.size === 0
+      ? deposits
+      : deposits.filter(d => activeContractIds.has(Number(d.contractId)))),
+    [deposits, activeContractIds],
+  );
+
   const timeline = useMemo(() => {
-    const paidDeposits = deposits.filter(d => !!d.paidAt);
+    const paidDeposits = liveDeposits.filter(d => !!d.paidAt);
     return [...payments.map(fromPayment), ...paidDeposits.map(fromDeposit)]
       .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-  }, [payments, deposits]);
+  }, [payments, liveDeposits]);
 
   /**
    * Riêng tab "Tiền cọc" thì hiện ĐỦ cả chưa thu — vào đây từ link "Tất cả tiền cọc"
    * bên màn Hoá đơn nên phải thấy đúng những dòng đang chưa thu ở màn kia.
    */
   const depositEntries = useMemo(
-    () => deposits.map(fromDeposit).sort((a, b) => (b.at || '').localeCompare(a.at || '')),
-    [deposits],
+    () => liveDeposits.map(fromDeposit).sort((a, b) => (b.at || '').localeCompare(a.at || '')),
+    [liveDeposits],
   );
 
   const filtered = useMemo(() => {
@@ -304,24 +339,52 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
    * hàng chục tiêu đề rời rạc, không đối soát theo kỳ được.
    * Trong mỗi kỳ vẫn xếp mới nhất trước và có nhãn ngày trên từng dòng.
    */
+  /**
+   * TIỀN CỌC TÁCH RIÊNG, GHIM LÊN ĐẦU (13/08/2026).
+   *
+   * Trước đây cọc nằm lẫn trong các mục "Kỳ MM/YYYY" cùng tiền điện/nước/dịch vụ. Nhưng
+   * cọc khác hẳn về bản chất: thu MỘT LẦN lúc nhận nhà và sẽ HOÀN LẠI khi khách trả
+   * phòng — trộn vào dòng tiền theo kỳ thì manager đọc ra "kỳ này thu được nhiều" trong
+   * khi phần lớn là khoản sẽ phải trả lại.
+   *
+   * Ghim rồi thì cọc KHÔNG lặp lại ở mục kỳ nữa, nếu không đếm ra hai lần.
+   */
   const sections = useMemo(() => {
+    const deposits = filtered.filter(e => e.kind === 'DEPOSIT');
+    const rest     = filtered.filter(e => e.kind !== 'DEPOSIT');
+
     const map = new Map<string, Entry[]>();
-    for (const e of filtered) {
+    for (const e of rest) {
       const k = (e.at || '').slice(0, 7);
       map.set(k, [...(map.get(k) ?? []), e]);
     }
-    return [...map.entries()]
+    const byPeriod = [...map.entries()]
       .sort((a, b) => (b[0] || '').localeCompare(a[0] || ''))
       .map(([key, data]) => {
         const [y, m] = key.split('-');
         return {
           key,
           title: m ? `Kỳ ${m}/${y}` : 'Chưa thu',
+          pinned: false,
           count: data.length,
-          deposits: data.filter(e => e.kind === 'DEPOSIT').length,
+          deposits: 0,
           data: data.sort((a, b) => (b.at || '').localeCompare(a.at || '')),
         };
       });
+
+    if (deposits.length === 0) return byPeriod;
+
+    return [
+      {
+        key: '__deposit__',
+        title: '🔐 Tiền cọc khách thuê',
+        pinned: true,
+        count: deposits.length,
+        deposits: deposits.length,
+        data: deposits.sort((a, b) => (b.at || '').localeCompare(a.at || '')),
+      },
+      ...byPeriod,
+    ];
   }, [filtered]);
 
   const counts = useMemo(() => ({
@@ -367,10 +430,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Thu & Đối soát</Text>
-          {/* Cọc bỏ khỏi vế "hiện số tiền" từ 13/08/2026 — chỉ còn điện/nước/dịch vụ. */}
-          <Text style={s.subtitle}>
-            Điện nước · dịch vụ · Không hiển thị tiền thuê & tiền cọc
-          </Text>
+          {/* Không rao "không hiển thị tiền thuê & tiền cọc" nữa (13/08/2026): nói ra
+              chính là chỉ cho manager biết có thứ đang bị giấu, mà chẳng giúp họ làm
+              việc gì. Chỗ nào thật sự cần giải thích thì đã có câu trong ô chi tiết. */}
+          <Text style={s.subtitle}>Điện nước · dịch vụ · tiền cọc</Text>
         </View>
       </View>
 
@@ -449,10 +512,13 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
           }
           renderSectionHeader={({ section }) => (
-            <View style={s.monthBar}>
-              <Text style={s.sectionHeader}>{section.title}</Text>
-              <Text style={s.monthMeta}>
-                {section.count} giao dịch{section.deposits > 0 ? ` · ${section.deposits} cọc` : ''}
+            <View style={[s.monthBar, section.pinned && s.depositBar]}>
+              <Text style={[s.sectionHeader, section.pinned && s.depositBarTitle]}>{section.title}</Text>
+              {/* Mục cọc nói rõ "sẽ hoàn lại" — không thì manager đọc thành doanh thu. */}
+              <Text style={[s.monthMeta, section.pinned && s.depositBarMeta]}>
+                {section.pinned
+                  ? `${section.count} khoản · hoàn lại khi trả phòng`
+                  : `${section.count} giao dịch`}
               </Text>
             </View>
           )}
@@ -532,7 +598,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                     <DetailRow label="Toà nhà" value={e.propertyName} />
                     {!!e.roomNumber && <DetailRow label="Phòng" value={e.roomNumber} />}
                     <DetailRow label="Khách thuê" value={e.tenantName} />
-                    {!!e.tenantPhone && <DetailRow label="Điện thoại" value={e.tenantPhone} />}
+                    {/* SĐT ẩn với manager (13/08/2026). */}
                     <DetailRow label="Hình thức" value={e.method ? mc.label : 'Chưa thu'} />
                     <DetailRow
                       label={isDeposit ? 'Thời điểm thu cọc' : e.status.toUpperCase() === 'VERIFIED' ? 'Thời điểm xác nhận' : 'Thời điểm khách báo'}
@@ -649,6 +715,14 @@ const s = StyleSheet.create({
     fontSize: 12, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase',
   },
   monthMeta: { fontSize: 11, color: Colors.textMuted },
+
+  // Mục "Tiền cọc" ghim đầu — nền riêng để không bị đọc nhầm thành một kỳ nữa.
+  depositBar: {
+    backgroundColor: '#ECFEFF', borderWidth: 1, borderColor: '#A5F3FC',
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs,
+  },
+  depositBarTitle: { color: '#0E7490', textTransform: 'none', fontSize: 13 },
+  depositBarMeta:  { color: '#0891B2' },
 
   row: {
     flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md,

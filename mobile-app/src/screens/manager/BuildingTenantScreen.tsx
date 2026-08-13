@@ -32,7 +32,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
   const hasOverdue = (room: string) => ops.invoices.some(i => i.room === room && i.status !== 'paid');
 
   const contact = (t: BuildingTenantInfo) => {
-    showAlert(t.name, `Liên hệ ${t.phone}?`, [
+    showAlert(t.name, 'Gọi cho khách thuê này?', [
       { text: 'Huỷ', style: 'cancel' },
       { text: 'Gọi', onPress: () => {} },
     ]);
@@ -75,7 +75,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
               {(prop?.occupants || []).map(member => (
                 <View key={member.name} style={styles.detailRow}>
                   <Text style={styles.detailLabel}>{member.relation}</Text>
-                  <Text style={styles.detailVal}>{member.name}{member.phone ? ` · ${member.phone}` : ''}</Text>
+                  <Text style={styles.detailVal}>{member.name}</Text>
                 </View>
               ))}
               <View style={styles.detailRow}>
@@ -95,7 +95,7 @@ export const BuildingTenantScreen: React.FC<any> = ({ navigation, route }) => {
                 <View style={styles.avatar}><Text style={styles.avatarText}>{t.name.charAt(0)}</Text></View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.name}>{t.name}</Text>
-                  <Text style={styles.meta}>{t.room} · {t.phone}</Text>
+                  <Text style={styles.meta}>{t.room}</Text>
                 </View>
                 <View style={[styles.badge, { backgroundColor: risk.bg }]}>
                   <Text style={[styles.badgeText, { color: risk.color }]}>{risk.label}</Text>

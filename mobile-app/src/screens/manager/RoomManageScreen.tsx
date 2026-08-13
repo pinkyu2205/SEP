@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, RefreshControl, TextInput,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,9 @@ import {
 } from '@/services/manager/roomService';
 
 // ======================== TYPES ========================
+/** Bộ lọc loại nhà ở màn chọn bất động sản. */
+type PropKind = 'all' | 'multi' | 'whole';
+
 type ActionView = 'menu' | 'status' | 'detail';
 type Room = OpRoom;
 type Property = OpProperty;
@@ -194,6 +197,22 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   const [loadingProps, setLoadingProps] = useState(true);
   const [errorProps, setErrorProps] = useState<string | null>(null);
   const [refreshingProps, setRefreshingProps] = useState(false);
+  /** Tìm + lọc loại nhà ở màn chọn bất động sản. */
+  const [propSearch, setPropSearch] = useState('');
+  const [propKind, setPropKind] = useState<PropKind>('all');
+
+  /** Nhà sau khi lọc — gõ không dấu vẫn tìm được (bỏ dấu cả hai phía). */
+  const visibleProps = useMemo(() => {
+    const strip = (t: string) =>
+      (t || '').normalize('NFD').replace(new RegExp('[\u0300-\u036f]', 'g'), '').replace(/[đĐ]/g, 'd').toLowerCase();
+    const q = strip(propSearch.trim());
+    return properties.filter(p => {
+      if (propKind === 'multi' && p.wholeHouse) return false;
+      if (propKind === 'whole' && !p.wholeHouse) return false;
+      if (!q) return true;
+      return strip(`${p.name} ${p.address ?? ''}`).includes(q);
+    });
+  }, [properties, propSearch, propKind]);
 
   // Phòng của nhà đang chọn
   const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
@@ -378,6 +397,37 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
           <Text style={styles.pageTitle}>Chọn bất động sản</Text>
           <Text style={styles.pageSubtitle}>Vận hành phòng (nhà nhiều phòng) hoặc cả căn (nhà nguyên căn)</Text>
 
+          {/* Tìm + lọc loại nhà (13/08/2026). Manager có thể được giao hàng chục nhà,
+              trước đây phải cuộn tay tìm. Chỉ hiện khi có từ 2 nhà trở lên. */}
+          {properties.length > 1 && (
+            <>
+              <TextInput
+                style={styles.searchBox}
+                placeholder="🔍  Tìm theo tên nhà, địa chỉ..."
+                placeholderTextColor={Colors.textMuted}
+                value={propSearch}
+                onChangeText={setPropSearch}
+              />
+              <View style={styles.propFilterRow}>
+                {([
+                  { key: 'all',   label: `Tất cả ${properties.length}` },
+                  { key: 'multi', label: `🏢 Nhiều phòng ${properties.filter(p => !p.wholeHouse).length}` },
+                  { key: 'whole', label: `🏠 Nguyên căn ${properties.filter(p => p.wholeHouse).length}` },
+                ] as { key: PropKind; label: string }[]).map(f => (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[styles.chip, propKind === f.key && styles.chipActive]}
+                    onPress={() => setPropKind(f.key)}
+                  >
+                    <Text style={[styles.chipText, propKind === f.key && styles.chipTextActive]}>
+                      {f.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
+
           {loadingProps && !refreshingProps ? (
             <View style={styles.emptyState}>
               <ActivityIndicator size="large" color={Colors.primary} />
@@ -396,7 +446,12 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
               <Text style={styles.emptyIcon}>🏢</Text>
               <Text style={styles.emptyText}>Chưa có tòa nhà nào được giao</Text>
             </View>
-          ) : properties.map(p => {
+          ) : visibleProps.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🔍</Text>
+              <Text style={styles.emptyText}>Không có nhà nào khớp bộ lọc</Text>
+            </View>
+          ) : visibleProps.map(p => {
             const pc = p.counts;
             return (
               <TouchableOpacity
@@ -898,6 +953,14 @@ const styles = StyleSheet.create({
   // Property selection
   pageTitle:    { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
   pageSubtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.lg },
+  // Ô tìm + hàng chip lọc loại nhà ở màn chọn bất động sản (13/08/2026).
+  searchBox: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: Spacing.md, paddingVertical: 10,
+    fontSize: 14, color: Colors.textPrimary, marginBottom: Spacing.sm,
+  },
+  propFilterRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.lg, flexWrap: 'wrap' },
 
   propCard: {
     flexDirection: 'row', alignItems: 'center',

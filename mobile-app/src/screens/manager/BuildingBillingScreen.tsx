@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import {
@@ -111,8 +111,17 @@ export const BuildingBillingScreen: React.FC = () => {
       realTenantService.listByProperty(pid).catch(() => [] as TenantContractResponse[]),
     ])
       .then(([list, cts]) => {
-        setInvoices(list.filter(i => i.propertyId === pid));
-        setContracts(cts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE'));
+        const active = cts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE');
+        setContracts(active);
+        // Bỏ hoá đơn của khách ĐÃ chấm dứt hợp đồng (13/08/2026): họ không còn ở đây,
+        // manager không đòi được nữa — phần nợ xử lý ở luồng tất toán Trả phòng.
+        // BE vẫn trả các hoá đơn đó ở trạng thái OVERDUE nên phải tự lọc.
+        // Lọc NGAY TẠI NGUỒN để con số thống kê (đã thu / quá hạn) khớp với danh sách
+        // bên dưới — lọc riêng ở phần hiển thị là hai chỗ đá nhau.
+        const keys = activeRentingKeys(active);
+        setInvoices(
+          list.filter(i => i.propertyId === pid && belongsToActiveTenant(i, keys)),
+        );
       })
       .finally(() => setLoading(false));
   }, [pid]);
@@ -120,6 +129,8 @@ export const BuildingBillingScreen: React.FC = () => {
 
   const [search,           setSearch]           = useState('');
   const [filter,           setFilter]           = useState<FilterType>('all');
+  /** Lọc theo KỲ (YYYY-MM) — 'all' = mọi kỳ. */
+  const [periodFilter,     setPeriodFilter]     = useState<string>('all');
   const [selectedBill,     setSelectedBill]     = useState<ManagerInvoice | null>(null);
   const [showCashModal,    setShowCashModal]    = useState(false);
   const [showEwalletModal, setShowEwalletModal] = useState(false);
@@ -128,8 +139,20 @@ export const BuildingBillingScreen: React.FC = () => {
 
   const isWholeHouse = (b: ManagerInvoice) => !b.roomNumber;
 
+  /**
+   * Các KỲ có hoá đơn, mới nhất trước — dựng từ chính dữ liệu nên không bao giờ có
+   * chip rỗng. Nhà thuê lâu là hàng chục kỳ, cuộn tìm rất mệt.
+   */
+  const periods = useMemo(() => {
+    const set = new Set(invoices.map(b => `${b.year}-${String(b.month).padStart(2, '0')}`));
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [invoices]);
+
   const filteredBills = useMemo(() => {
     let list = invoices;
+    if (periodFilter !== 'all') {
+      list = list.filter(b => `${b.year}-${String(b.month).padStart(2, '0')}` === periodFilter);
+    }
     if (filter !== 'all') list = list.filter(b => toLocalStatus(b.status) === filter);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -140,7 +163,7 @@ export const BuildingBillingScreen: React.FC = () => {
       );
     }
     return [...list].sort((a, b) => STATUS_ORDER[toLocalStatus(a.status)] - STATUS_ORDER[toLocalStatus(b.status)]);
-  }, [invoices, filter, search]);
+  }, [invoices, filter, search, periodFilter]);
 
   // Đếm theo SỐ HOÁ ĐƠN, không cộng tiền — manager không được thấy số tiền thuê
   // (xem @/constants/managerVisibility).
@@ -359,6 +382,32 @@ export const BuildingBillingScreen: React.FC = () => {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* ── Lọc theo KỲ ──────────────────────────────────────────
+          Chỉ hiện khi có từ 2 kỳ trở lên — một kỳ thì hàng chip này thừa. */}
+      {periods.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={s.filterScroll} contentContainerStyle={s.filterContent}>
+          <TouchableOpacity
+            style={[s.filterChip, periodFilter === 'all' && s.filterChipActive]}
+            onPress={() => setPeriodFilter('all')}
+          >
+            <Text style={[s.filterText, periodFilter === 'all' && s.filterTextActive]}>Mọi kỳ</Text>
+          </TouchableOpacity>
+          {periods.map(p => {
+            const [y, m] = p.split('-');
+            return (
+              <TouchableOpacity
+                key={p}
+                style={[s.filterChip, periodFilter === p && s.filterChipActive]}
+                onPress={() => setPeriodFilter(p)}
+              >
+                <Text style={[s.filterText, periodFilter === p && s.filterTextActive]}>{m}/{y}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
 
       {/* ── Filter chips ─────────────────────────────────────────── */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}

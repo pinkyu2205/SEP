@@ -24,12 +24,24 @@
  *   • Phí dịch vụ — manager cũng là người phát hành.
  *   • Chi phí bảo trì, giá thiết bị — đó là khoản manager duyệt chi.
  *
- * ⚠️ CÒN 4 MÀN CHƯA ẨN vì ẩn là HỎNG chức năng, đang chờ chốt hướng xử lý:
- *   • OnboardingScreenV2, ResumeContractScreen — manager TỰ NHẬP giá thuê và cọc khi
- *     đón khách / tái ký. Ẩn ô nhập thì không tạo được hợp đồng.
+ * ⚠️ CÒN 3 MÀN CHƯA ẨN vì ẩn là HỎNG chức năng, đang chờ chốt hướng xử lý:
+ *   • ResumeContractScreen — hai ô NHẬP giá thuê + cọc ở `RejectedPanel` (khi Host từ
+ *     chối giá, manager sửa rồi gửi lại). Phần còn lại của màn đã bỏ hết số tiền.
+ *     ⚠️ Hai ô này từng gửi cọc = 0 âm thầm: BE mask về `null`, `String(null)` ra
+ *     `"null"` (truthy) → parse ra 0. Đã sửa 13/08/2026 — khởi tạo rỗng + chặn chưa nhập.
  *   • CheckoutSettlementScreen — "Tiền cọc còn lại", cần để tất toán trả phòng.
  *   • InspectionDetailScreen — "Khấu trừ cọc", manager tự nhập số tiền trừ.
  * Muốn ẩn nốt thì phải chuyển các số này sang cho admin quyết, manager chỉ xem trạng thái.
+ *
+ * (`OnboardingScreenV2` đã gỡ khỏi navigator 13/08/2026 — luồng đón khách gom về
+ * ResumeContractScreen, nên màn đó không còn nằm trong danh sách này.)
+ *
+ * ─── THÔNG TIN CÁ NHÂN CỦA KHÁCH (13/08/2026) ─────────────────────────────────
+ * SỐ ĐIỆN THOẠI và CCCD của khách thuê cũng ẩn với manager — họ không cần đọc để vận
+ * hành. Đã ẩn ở: BuildingContractScreen (cả danh sách lẫn chi tiết), BuildingDetail,
+ * BuildingTenantScreen, TenantListScreen, CheckoutRequestsScreen, PaymentHistoryScreen.
+ * Nút "Gọi khách" VẪN gọi được — nó mở app điện thoại với số lấy từ dữ liệu chứ không
+ * hiện số ra màn hình; nhánh lỗi cũng đã bỏ việc in số vào alert.
  *
  * TIỀN CỌC — ĐÃ ẨN LẠI 13/08/2026.
  * Lịch sử: ẩn từ 07/08 → mở lại 10/08 (để manager đối soát khách chuyển đủ cọc chưa)

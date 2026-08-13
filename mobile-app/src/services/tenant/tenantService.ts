@@ -335,6 +335,30 @@ export const realTenantService = {
     return data ?? [];
   },
 
+  /**
+   * HĐ ĐANG HIỆU LỰC của nhiều nhà — cho các màn tổng hợp của manager (Trang chủ,
+   * Hoá đơn tiền nhà) biết phòng nào còn khách, để loại hoá đơn của khách đã chấm dứt.
+   *
+   * Vì sao không dùng `listManagedContracts('ACTIVE')` cho gọn: endpoint đó trả rỗng
+   * (13/08/2026, thử với nhiều tài khoản manager) nên bộ lọc thành vô hiệu — im lặng,
+   * không lỗi, rất khó phát hiện. `listByProperty` thì đang chạy thật ở màn
+   * BuildingBilling, nên đi đường đó cho chắc.
+   *
+   * Chạy theo lô để không bắn hàng loạt request cùng lúc; nhà nào lỗi thì bỏ qua nhà đó.
+   */
+  listActiveByProperties: async (propertyIds: number[]): Promise<TenantContractResponse[]> => {
+    const out: TenantContractResponse[] = [];
+    const ids = [...new Set(propertyIds.filter(Number.isFinite))];
+    for (let i = 0; i < ids.length; i += 6) {
+      const batch = ids.slice(i, i + 6);
+      const res = await Promise.all(
+        batch.map(id => realTenantService.listByProperty(id).catch(() => [] as TenantContractResponse[])),
+      );
+      res.forEach(r => out.push(...r));
+    }
+    return out.filter(c => (c.status || '').toUpperCase() === 'ACTIVE');
+  },
+
   // OCR chỉ số đồng hồ từ ảnh đã upload Cloudinary
   ocrMeter: async (imageUrl: string): Promise<OcrMeterResponse> => {
     const { data } = await realApiClient.post<OcrMeterResponse>('/api/v1/ocr/meter', { imageUrl });
@@ -417,7 +441,9 @@ export const realTenantService = {
   // Danh sách HĐ chờ xử lý của manager: gồm DRAFT/PENDING được gán (đón khách v2)
   // và các HĐ chờ/đã duyệt/bị từ chối giá. Chấp nhận array thuần lẫn Spring Page.
   listManagedContracts: async (
-    status?: ContractPriceApprovalStatus | 'DRAFT' | 'PENDING',
+    // 'ACTIVE' thêm 13/08/2026: các màn việc-cần-làm của manager cần biết phòng nào
+    // CÒN khách để loại hoá đơn của khách đã chấm dứt HĐ (xem belongsToActiveTenant).
+    status?: ContractPriceApprovalStatus | 'DRAFT' | 'PENDING' | 'ACTIVE',
   ): Promise<TenantContractResponse[]> => {
     const { data } = await realApiClient.get<
       TenantContractResponse[] | { content?: TenantContractResponse[] }

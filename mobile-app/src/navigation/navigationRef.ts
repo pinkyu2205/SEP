@@ -34,6 +34,13 @@ const fallbackScreen = (type?: string): string | undefined => {
   // đón khách để bấm tiếp OTP, chứ không phải mở màn hoá đơn — nên xét trước.
   if (t.startsWith('DEPOSIT_PAID')) return isManager ? 'ResumeContract' : 'InvoiceList';
   if (t.startsWith('PRICE_APPROVAL')) return isManager ? 'ResumeContract' : 'TenantContracts';
+  // Admin phát hành hoá đơn EVN (13/08/2026) → manager mở thẳng màn Ghi chỉ số để chốt
+  // số từng phòng rồi gửi khách. Phải xét TRƯỚC nhánh chung bên dưới: chuỗi kiểu
+  // 'EVN_BILL_PUBLISHED' có chứa 'BILL' nên nếu để lọt xuống sẽ mở nhầm RentInvoice
+  // (màn tiền phòng) — không có gì để làm ở đó.
+  if (t.includes('EVN') || t.includes('ELECTRIC')) {
+    return isManager ? 'UtilityBilling' : 'InvoiceList';
+  }
   // 'DEPOSIT' phòng các type thu tiền khác BE thêm sau — chuỗi đó KHÔNG chứa 'PAYMENT'
   // nên không lọt vào các từ khoá còn lại.
   if (['BILL', 'RENT', 'INVOICE', 'UTILITY', 'PAYMENT', 'DEPOSIT'].some(k => t.includes(k))) {

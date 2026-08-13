@@ -125,10 +125,9 @@ export const MeterReadingPendingScreen: React.FC = () => {
   const groups = useMemo(() => groupByRoom(items), [items]);
 
   /**
-   * ⚠️ `UtilityBillingScreen` hiện KHÔNG đọc `route.params` — nó có bước chọn nhà
-   * riêng, nên bấm vào chỉ mở màn Chốt số ở bước chọn nhà chứ chưa nhảy thẳng vào
-   * đúng phòng. Vẫn truyền params để khi nào màn đó nhận thì tự động chạy, không phải
-   * sửa lại chỗ này. Sửa `UtilityBillingScreen` phải báo FE phụ trách màn billing.
+   * `UtilityBillingScreen` ĐÃ nhận `route.params` từ 13/08/2026: nó tự chọn nhà theo
+   * `propertyId` và nhảy thẳng vào bước xem hoá đơn EVN, bỏ qua bước chọn nhà.
+   * (`roomId` và `period` vẫn truyền để dành, màn kia chưa dùng tới.)
    */
   const openMeterEntry = (g: Group) =>
     navigation.navigate('UtilityBilling', {

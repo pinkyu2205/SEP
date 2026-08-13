@@ -408,14 +408,31 @@ const RejectedPanel: React.FC<{
   onChanged: (c: TenantContractResponse) => void
 }> = ({ contract, onDone, onChanged }) => {
   const [editing, setEditing] = useState(false)
-  const [rent, setRent] = useState(String(contract.rentAmount))
-  const [deposit, setDeposit] = useState(String(contract.deposit))
+  /**
+   * KHỞI TẠO RỖNG khi BE không trả số (13/08/2026).
+   *
+   * BE mask `rentAmount` và `deposit` về `null` với ROLE_MANAGER. `String(null)` ra
+   * chuỗi `"null"` — mà chuỗi đó TRUTHY, nên nhánh `value={deposit ? ... : ''}` vẫn
+   * chạy, `parseNum("null")` lọc hết chữ còn `""` → `Number("") || 0` → ô hiện **"0"**.
+   *
+   * Hậu quả thật: Host từ chối giá → manager sửa ô giá thuê, KHÔNG đụng ô cọc (nhìn
+   * thấy có số nên tưởng là số cũ) → bấm gửi → hợp đồng sang Host duyệt với **cọc = 0**.
+   * Im lặng, không báo lỗi gì.
+   *
+   * Để rỗng + placeholder thì vừa đúng thật (manager không được phép thấy giá cũ, thì
+   * đừng hiện một con số làm họ tưởng đó là giá cũ) vừa buộc phải nhập có ý thức.
+   */
+  const [rent, setRent] = useState(contract.rentAmount != null ? String(contract.rentAmount) : '')
+  const [deposit, setDeposit] = useState(contract.deposit != null ? String(contract.deposit) : '')
   const [busy, setBusy] = useState(false)
 
   const resubmit = async () => {
     const rentAmount = parseNum(rent)
     const depositVal = parseNum(deposit)
     if (rentAmount <= 0) return showAlert('Lỗi', 'Giá thuê phải lớn hơn 0.')
+    // Chặn theo "CHƯA NHẬP" chứ không phải `depositVal <= 0`: có hợp đồng cọc bằng 0
+    // thật (khách quen, chủ miễn cọc) — chặn theo số là cấm nhầm trường hợp hợp lệ.
+    if (!deposit.trim()) return showAlert('Lỗi', 'Vui lòng nhập tiền cọc trước khi gửi lại.')
     try {
       setBusy(true)
       const updated = await realTenantService.resubmitPriceApproval(contract.id, {

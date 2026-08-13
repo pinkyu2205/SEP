@@ -197,7 +197,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                     <Text style={s.cardMeta}>
                       {r.propertyName || '—'}{r.roomNumber ? ` · Phòng ${r.roomNumber}` : ' · Nguyên căn'}
                     </Text>
-                    {!!r.tenantPhone && <Text style={s.cardMeta}>📞 {r.tenantPhone}</Text>}
+                    {/* SĐT ẩn với manager (13/08/2026) — xem @/constants/managerVisibility. */}
                   </View>
                   <View style={[s.statusChip, { backgroundColor: meta.bg }]}>
                     <Text style={[s.statusChipText, { color: meta.color }]}>{meta.label}</Text>

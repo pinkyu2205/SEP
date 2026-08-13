@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { notificationService, type AppNotificationDto } from '@/services/notification.service';
 
 /**
@@ -28,8 +29,8 @@ const POLL_MS = 20_000;
 /** Bao nhiêu thông báo tải về cho khay chuông. */
 const PAGE_SIZE = 20;
 
-/** Đường dẫn SSE kỳ vọng — BE CHƯA CÓ, hook tự rơi về polling nếu 404/403. */
-const SSE_PATH = '/api/v1/notifications/stream';
+// `SSE_PATH` và `apiBase` đã bỏ 13/08/2026 — kết nối SSE nay do
+// `UnreadNotificationsContext` giữ, hook này chỉ nghe tín hiệu từ đó.
 
 export type RealtimeMode = 'sse' | 'polling';
 
@@ -43,9 +44,6 @@ export interface RealtimeNotifications {
   markRead: (id: number) => Promise<void>;
   markAllRead: () => Promise<void>;
 }
-
-/** Base URL của BE. Rỗng = cùng origin (đi qua proxy dev của Vite). */
-const apiBase = () => (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 export const useRealtimeNotifications = (
   /** Lọc theo loại thông báo. Bỏ trống = lấy tất cả. */
@@ -79,45 +77,24 @@ export const useRealtimeNotifications = (
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Kênh đẩy (SSE) — dùng được thì tắt polling ────────────────────────────
+  /**
+   * ── Kênh đẩy: DÙNG NHỜ SSE CỦA `UnreadNotificationsContext` ────────────────
+   *
+   * Trước 13/08/2026 hook này tự mở `EventSource` riêng tới cùng endpoint mà context
+   * đã mở → MỖI PHIÊN 2 KẾT NỐI tới `/notifications/stream` (dev còn nhân đôi nữa vì
+   * StrictMode), BE phải giữ gấp đôi số emitter mà chẳng thêm thông tin gì.
+   *
+   * Nay chỉ context giữ kết nối. Số chưa đọc của context đổi = có thông báo mới →
+   * hook tải lại danh sách. Một kết nối, một nguồn sự thật.
+   */
+  const { count: unreadSignal } = useUnreadNotifications();
+  const firstSignal = useRef(true);
   useEffect(() => {
-    const base = apiBase();
-    // Token phải đi qua query vì EventSource không set được header.
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    let es: EventSource | null = null;
-    try {
-      es = new EventSource(`${base}${SSE_PATH}?token=${encodeURIComponent(token)}`);
-    } catch {
-      return; // Trình duyệt chặn/URL hỏng → ở lại polling.
-    }
-
-    const onOpen = () => setMode('sse');
-    // Mỗi sự kiện chỉ là tín hiệu "có thay đổi" — vẫn gọi lại API để lấy dữ liệu
-    // chuẩn, thay vì tin vào payload đẩy. Đỡ phải đồng bộ hai nguồn sự thật.
-    const onMessage = () => { load(); };
-    const onError = () => {
-      // BE chưa có endpoint → lỗi ngay lần kết nối đầu. Đóng hẳn để trình duyệt
-      // không tự thử lại vô hạn (EventSource mặc định retry mãi), rồi về polling.
-      setMode('polling');
-      es?.close();
-      es = null;
-    };
-
-    es.addEventListener('open', onOpen);
-    es.addEventListener('message', onMessage);
-    es.addEventListener('notification', onMessage);
-    es.addEventListener('error', onError);
-
-    return () => {
-      es?.removeEventListener('open', onOpen);
-      es?.removeEventListener('message', onMessage);
-      es?.removeEventListener('notification', onMessage);
-      es?.removeEventListener('error', onError);
-      es?.close();
-    };
-  }, [load]);
+    // Bỏ qua lần đầu: `load()` ở trên đã chạy rồi, gọi thêm là thừa một request.
+    if (firstSignal.current) { firstSignal.current = false; return; }
+    setMode('sse');
+    load();
+  }, [unreadSignal, load]);
 
   // ── Polling — chỉ chạy khi CHƯA có SSE và tab đang hiển thị ───────────────
   useEffect(() => {
