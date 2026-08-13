@@ -111,6 +111,24 @@ const markDuplicates = (rows: Txn[]): Txn[] => {
 
 const sumReal = (rows: Txn[]) => rows.reduce((s, t) => (t.duplicate ? s : s + t.amount), 0);
 
+/**
+ * Phương thức của một giao dịch.
+ *
+ * Khoản thu lúc nhận phòng chỉ có MỘT đường vào: quét QR PayOS. Nên hễ BE không nói rõ
+ * được phương thức thì hiển thị QR, thay vì đổ về "Khác" — khách đọc "Khác" không hiểu
+ * mình đã trả bằng gì.
+ *
+ * Bắt theo KẾT QUẢ MAP chứ không so từng chuỗi: dữ liệu thật rơi vào đây có thể là
+ * `OTHER` (bản ghi cũ) hoặc `PAYOS` (BE chưa restart sau khi pull commit 898f96c) —
+ * cả hai đều không có trong PAY_METHOD_MAP nên cùng ra 'other'. So chuỗi thì sót.
+ *
+ * Chỉ áp cho hoá đơn onboard. BE nói rõ QR/CASH/BANK_TRANSFER thì tôn trọng dữ liệu.
+ */
+const methodOfPayment = (p: TenantPayment): Txn['method'] => {
+  const mapped = PAY_METHOD_MAP[p.method] ?? 'other';
+  return isOnboardCode(p.invoiceCode) && mapped === 'other' ? 'qr' : mapped;
+};
+
 const toTxn = (p: TenantPayment): Txn => ({
   id: String(p.id),
   invoiceId: String(p.invoiceId),
@@ -119,9 +137,7 @@ const toTxn = (p: TenantPayment): Txn => ({
   tenantName: '',
   roomName: p.roomNumber ? `Phòng ${p.roomNumber}` : '',
   amount: p.amount,
-  // BE đã map `PAYOS` → `QR` cho cả dữ liệu cũ (commit 898f96c) nên không phải suy đoán
-  // "onboard = chuyển khoản" như trước nữa.
-  method: PAY_METHOD_MAP[p.method] ?? 'other',
+  method: methodOfPayment(p),
   status: 'verified',
   transferContent: p.transactionId,
   createdAt: p.paidAt,

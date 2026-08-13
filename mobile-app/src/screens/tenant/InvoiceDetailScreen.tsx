@@ -179,13 +179,19 @@ export const InvoiceDetailScreen: React.FC = () => {
           <View style={s.card}>
             <InfoRow label="Phòng"        value={invoice.roomName} />
             <InfoRow label="Tòa nhà"      value={invoice.propertyName} />
-            <InfoRow label="Kỳ hóa đơn"  value={`Tháng ${String(invoice.month).padStart(2, '0')}/${invoice.year}`} />
-            <InfoRow
-              label="Hạn thanh toán"
-              value={formatDate(dueDate)}
-              valueStyle={isOverdue ? { color: Colors.error, fontWeight: '700' } : {}}
-              last
-            />
+            {/* Dùng lại `periodLabel` như ở hero — hoá đơn onboard cũ không có
+                month/year, ghép chuỗi thẳng ra "Tháng null/undefined". */}
+            {!!periodLabel && <InfoRow label="Kỳ hóa đơn" value={periodLabel} />}
+            {/* Khoản thu ngay lúc nhận phòng đã trả xong, BE không đặt `dueDate` — hiện
+                dòng "Hạn thanh toán" cho nó là vô nghĩa (và trước đây ra 01/01/1970). */}
+            {!!dueDate && (
+              <InfoRow
+                label="Hạn thanh toán"
+                value={formatDate(dueDate)}
+                valueStyle={isOverdue ? { color: Colors.error, fontWeight: '700' } : {}}
+                last
+              />
+            )}
           </View>
         </View>
 

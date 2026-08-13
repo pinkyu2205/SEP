@@ -21,6 +21,7 @@ import {
   Wrench,
   X,
   Zap,
+  Droplets,
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -69,6 +70,9 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
       { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
+      // Nước đi cùng mô hình với điện từ 14/08/2026 — trước đó manager tự khai đơn giá
+      // nước trong app, không ai đối chiếu được với hoá đơn giấy.
+      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets },
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
     ],
   },

@@ -9,6 +9,7 @@ import { useAuth, useTenantContract } from '@/hooks';
 import {
   billMonthLabel, formatCurrency, formatDate, getDaysUntil, isToday, onboardChargeLines,
 } from '@/utils';
+import { serverNow } from '@/utils/serverTime';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -223,13 +224,21 @@ export const TenantHomeScreen: React.FC = () => {
     );
   }
 
+  /** "Th 4, 13/8" — giống hệt chuỗi ngày ở Trang chủ quản lý. */
+  const todayStr = serverNow().toLocaleDateString('vi-VN', {
+    weekday: 'short', day: 'numeric', month: 'numeric',
+  });
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Header */}
+        {/* Header — dòng ngày ở góc trên trái, đồng bộ với Trang chủ của quản lý
+            (ManagerHomeScreen.headerDate): cùng định dạng, cùng vị trí, và cùng lấy
+            theo GIỜ SERVER chứ không phải đồng hồ máy. */}
         <View style={styles.header}>
           <View>
+            <Text style={styles.headerDate}>{todayStr}</Text>
             <Text style={styles.greeting}>Xin chào 👋</Text>
             <Text style={styles.userName}>{user?.fullName ?? 'Khách thuê'}</Text>
           </View>
@@ -621,6 +630,8 @@ const styles = StyleSheet.create({
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Spacing.base, paddingBottom: Spacing.md },
+  // Khớp ManagerHomeScreen.headerDate để 2 vai nhìn thấy cùng một kiểu ngày.
+  headerDate: { fontSize: 11, fontWeight: '400', color: Colors.textMuted, marginBottom: 3, letterSpacing: 0.1 },
   greeting: { fontSize: 12.5, fontWeight: '500', color: Colors.textMuted },
   // Nhỏ hơn tiêu đề hero (22) để thứ bậc rõ ràng — trước đây 22 vs 26 nhìn giằng nhau.
   userName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },

@@ -150,16 +150,27 @@ const METHOD_MAP: Record<string, BillPaymentMethod> = {
 /**
  * Phương thức thanh toán để hiển thị.
  *
- * Trước 13/08/2026 FE phải tự suy "onboard = chuyển khoản" vì BE trả `PAYOS`/`OTHER`,
- * ra màn hình thành chữ "Khác". BE đã sửa (`PaymentMethods.toPublic`, commit 898f96c):
- * PayOS → `QR`, tiền mặt → `CASH`, claim chuyển khoản → `BANK_TRANSFER`, áp cho cả dữ
- * liệu cũ ở đường đọc. Nên bỏ hẳn phần suy đoán — cứ theo đúng thứ BE nói.
+ * BE đã sửa 13/08/2026 (`PaymentMethods.toPublic`, commit 898f96c): PayOS → `QR`, tiền
+ * mặt → `CASH`, claim chuyển khoản → `BANK_TRANSFER`. Bản ghi MỚI về đúng ngay.
+ *
+ * NHƯNG `toPublic` chỉ viết lại đúng chuỗi `PAYOS`; bản ghi CŨ lưu thẳng `OTHER` thì đi
+ * qua nguyên vẹn và ra màn hình thành chữ "Khác" — khách đọc xong không biết đã trả bằng
+ * gì. Nên vẫn phải che cho dữ liệu cũ: hoá đơn onboard mà BE không nói rõ phương thức
+ * thì chắc chắn là QR PayOS, vì đó là đường thu tiền DUY NHẤT lúc đón khách.
+ *
+ * Chỉ che khi thiếu/`OTHER`. BE ghi rõ `CASH`/`QR`/`BANK_TRANSFER` thì tôn trọng dữ liệu.
+ * Khi nào BE backfill xong mấy dòng `OTHER` cũ thì xoá hàm này đi được.
  *
  * ⚠️ `type = OTHER` là LOẠI hoá đơn onboard, KHÔNG phải phương thức. Đừng bind `type`
- * vào chỗ "đã trả bằng gì" — đó chính là lỗi cũ.
+ * vào chỗ "đã trả bằng gì" — đó là lỗi cũ.
  */
-const resolveMethod = (inv: TenantInvoice): BillPaymentMethod | undefined =>
-  (inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined);
+const resolveMethod = (inv: TenantInvoice): BillPaymentMethod | undefined => {
+  const mapped = inv.paymentMethod ? METHOD_MAP[inv.paymentMethod] ?? 'other' : undefined;
+  if (isOnboardCode(inv.code) && (mapped === undefined || mapped === 'other')) {
+    return 'qr';
+  }
+  return mapped;
+};
 
 /** Trường tiền của BE có thể null/thiếu → về 0 thay vì để null lọt xuống màn hình. */
 const money = (v: number | null | undefined): number => {

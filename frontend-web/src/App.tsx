@@ -24,6 +24,7 @@ import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
 import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
+import { WaterBillPublishing } from '@/pages/admin/WaterBillPublishing';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
@@ -119,6 +120,7 @@ function App() {
             <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/meter-override" element={<MeterOverridePasscodes />} />
             <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />
+            <Route path="/admin/water-bills" element={<WaterBillPublishing />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />

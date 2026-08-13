@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { billMonthLabel } from '@/utils';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
@@ -33,7 +34,8 @@ const periodText = (key: string) => {
   return m ? `T${m}/${y}` : key;
 };
 const monthKey = (i: ManagerInvoice) => `${i.year}-${String(i.month).padStart(2, '0')}`;
-const monthText = (i: ManagerInvoice) => `T${String(i.month).padStart(2, '0')}/${i.year}`;
+/** Hoá đơn không thuộc kỳ nào (thu lúc nhận phòng) thì để gạch, đừng ra "Tnull/undefined". */
+const monthText = (i: ManagerInvoice) => billMonthLabel(i) ?? '—';
 
 const TYPE_CFG: Record<string, { icon: string; label: string; color: string; bg: string }> = {
   RENT:        { icon: '🏠', label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },

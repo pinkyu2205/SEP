@@ -24,11 +24,23 @@ export const formatCurrency = (amount: number | null | undefined): string => {
 };
 
 /**
- * Format ngày tháng Việt Nam
+ * Ngày rỗng/hỏng → null. Chặn cái bẫy `new Date(null)` = **01/01/1970**: BE để trống
+ * `dueDate` cho hoá đơn thu ngay lúc nhận phòng (đã PAID, không có hạn), ghép thẳng vào
+ * `new Date()` là màn hình hiện ngày 1970 như thật.
+ */
+const safeDate = (value?: string | null): Date | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Format ngày tháng Việt Nam. Không có ngày thì trả "—" chứ không bịa ra 1970.
  * @example formatDate('2026-04-29T10:00:00Z') => "29/04/2026"
  */
-export const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
+export const formatDate = (dateStr?: string | null): string => {
+  const date = safeDate(dateStr);
+  if (!date) return '—';
   return date.toLocaleDateString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
@@ -40,8 +52,9 @@ export const formatDate = (dateStr: string): string => {
  * Format ngày tháng đầy đủ với giờ
  * @example formatDateTime('2026-04-29T10:00:00Z') => "29/04/2026, 17:00"
  */
-export const formatDateTime = (dateStr: string): string => {
-  const date = new Date(dateStr);
+export const formatDateTime = (dateStr?: string | null): string => {
+  const date = safeDate(dateStr);
+  if (!date) return '—';
   return date.toLocaleDateString('vi-VN', {
     day: '2-digit',
     month: '2-digit',

@@ -73,7 +73,11 @@ const KIND_TABS: { key: KindFilter; label: string }[] = [
  * khu vực (không dấu cũng ra), lọc nhanh theo loại nhà, và nhà nào đã phát hành hoá đơn
  * kỳ này thì gắn nhãn ngay trong danh sách — đỡ phải chọn rồi mới biết là trùng.
  */
-const PropertyCombobox = ({
+/**
+ * Ô chọn nhà có tìm kiếm + lọc theo loại. Export để trang hoá đơn NƯỚC dùng chung —
+ * danh sách nhà dài hàng chục dòng, `<select>` trần là phải cuộn tay để mò.
+ */
+export const PropertyCombobox = ({
   properties, value, onChange, publishedIds, disabled,
 }: {
   properties: PropertyResponse[];
@@ -315,10 +319,39 @@ export const EvnBillPublishing = () => {
   useEffect(() => { loadProperties(); }, [loadProperties]);
   useEffect(() => { loadBills(); }, [loadBills]);
 
+  /**
+   * Kỳ trọn tháng theo tháng/năm đang chọn ở đầu trang, và kỳ liền trước.
+   * Dùng cho cả giá trị mặc định lẫn 2 nút "Điền nhanh" cạnh ô Kỳ thanh toán.
+   */
+  const selectedMonthPeriod = useMemo(
+    () => monthPeriod(0, new Date(year, month - 1, 1)),
+    [month, year],
+  );
+  const prevMonthPeriod = useMemo(
+    () => monthPeriod(-1, new Date(year, month - 1, 1)),
+    [month, year],
+  );
+
+  /**
+   * Chuỗi kỳ đang gõ có vẻ KHÔNG thuộc tháng đang phát hành.
+   *
+   * KHÔNG so bằng với `selectedMonthPeriod`: kỳ EVN thật là chu kỳ chốt số
+   * ("07/08/2026 – 06/09/2026"), gần như không bao giờ trùng chuỗi trọn tháng — so bằng
+   * là cảnh báo đỏ suốt, admin nhìn quen rồi bỏ qua cả lúc sai thật.
+   * Chỉ soi xem chuỗi có nhắc tới tháng/năm đang chọn hay không. Ảnh EVN của kỳ khác
+   * (vd "07/04/2026 – 06/05/2026" khi đang phát hành kỳ 9) sẽ rơi vào đây.
+   */
+  const periodLooksWrong = useMemo(() => {
+    const raw = form.billingPeriod.trim();
+    if (!raw) return false;
+    const mm = String(month).padStart(2, '0');
+    return !raw.includes(`/${mm}`) || !raw.includes(String(year));
+  }, [form.billingPeriod, month, year]);
+
   // Kỳ mặc định bám theo tháng/năm đang chọn, nhưng chỉ ghi đè khi admin chưa gõ tay.
   useEffect(() => {
-    setForm((f) => (f.billingPeriod ? f : { ...f, billingPeriod: monthPeriod(0, new Date(year, month - 1, 1)) }));
-  }, [month, year]);
+    setForm((f) => (f.billingPeriod ? f : { ...f, billingPeriod: selectedMonthPeriod }));
+  }, [selectedMonthPeriod]);
 
   const selectedProperty = properties.find((p) => p.id === propertyId);
   const isWholeHouse = selectedProperty?.wholeHouse === true;
@@ -434,7 +467,7 @@ export const EvnBillPublishing = () => {
   };
 
   const resetForm = () => {
-    setForm({ ...EMPTY_FORM, billingPeriod: monthPeriod(0, new Date(year, month - 1, 1)) });
+    setForm({ ...EMPTY_FORM, billingPeriod: selectedMonthPeriod });
     clearImage();
     setPublishError(null);
   };
@@ -710,6 +743,33 @@ export const EvnBillPublishing = () => {
                 value={form.billingPeriod}
                 onChange={(e) => setForm((f) => ({ ...f, billingPeriod: e.target.value }))}
               />
+              {/* Điền nhanh kỳ trọn tháng.
+                  OCR đọc kỳ in trên giấy EVN, mà giấy hay là hoá đơn của kỳ khác (ảnh mẫu
+                  cũ, hoặc kỳ chốt số 07/04 – 06/05 lệch hẳn tháng đang phát hành) — sửa
+                  tay từng con số thì lâu và dễ gõ nhầm. Hai nút này ghi đè thẳng. */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-400">Điền nhanh:</span>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, billingPeriod: selectedMonthPeriod }))}
+                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+                >
+                  Kỳ {month}/{year}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, billingPeriod: prevMonthPeriod }))}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Tháng trước
+                </button>
+                {periodLooksWrong && (
+                  <span className="text-xs text-amber-600">
+                    Chuỗi này không nhắc tới {String(month).padStart(2, '0')}/{year} — kiểm lại,
+                    ảnh EVN có thể là của kỳ khác.
+                  </span>
+                )}
+              </div>
               <p className="mt-1 text-xs text-slate-400">
                 Chuỗi này hiện nguyên văn trên hoá đơn khách nhận — ghi đúng kỳ in trên giấy EVN.
               </p>

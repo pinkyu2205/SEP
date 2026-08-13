@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
-import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
+import { showAlert, activeRentingKeys, belongsToActiveTenant, billMonthLabel } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import {
@@ -463,7 +463,7 @@ export const BuildingBillingScreen: React.FC = () => {
                 </View>
                 <View style={s.billTenantRow}>
                   <Text style={s.billTenant}>👤 {item.tenantName || '—'}</Text>
-                  <Text style={s.billMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
+                  <Text style={s.billMonth}>{billMonthLabel(item) ?? '—'}</Text>
                 </View>
                 <View style={s.billAmountRow}>
                   <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
@@ -513,7 +513,7 @@ export const BuildingBillingScreen: React.FC = () => {
                     {[
                       { label: isWholeHouse(selectedBill) ? 'Người đại diện' : 'Khách thuê', val: selectedBill.tenantName || '—' },
                       { label: isWholeHouse(selectedBill) ? 'Tài sản thuê' : 'Phòng', val: isWholeHouse(selectedBill) ? selectedBill.propertyName : `Phòng ${selectedBill.roomNumber}` },
-                      { label: 'Tháng', val: `T${String(selectedBill.month).padStart(2,'0')}/${selectedBill.year}` },
+                      { label: 'Tháng', val: billMonthLabel(selectedBill) ?? '—' },
                       { label: 'Hạn thanh toán', val: selectedBill.dueDate, overdue: st === 'overdue' },
                     ].map((row, i) => (
                       <View key={i} style={s.detailRow}>

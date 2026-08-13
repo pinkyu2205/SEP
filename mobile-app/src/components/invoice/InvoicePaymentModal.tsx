@@ -7,7 +7,7 @@ import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, BorderRadius, Shadow, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants';
-import { formatCurrency, formatDate, showAlert } from '@/utils';
+import { billMonthLabel, formatCurrency, formatDate, showAlert } from '@/utils';
 import { SharedBill, InvoiceType } from '@/store/billsStore';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 
@@ -119,8 +119,10 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
           <Text style={s.modalTitle}>Thanh toán hóa đơn</Text>
 
           <View style={[s.modalTypeBadge, { backgroundColor: tc.bg }]}>
+            {/* Hoá đơn không thuộc kỳ nào (thu lúc nhận phòng) thì billMonthLabel trả
+                null — bỏ luôn phần kỳ, đừng ghép ra "Tnull/undefined". */}
             <Text style={[s.modalTypeText, { color: tc.color }]}>
-              {tc.icon} {tc.label} · T{String(invoice.month).padStart(2, '0')}/{invoice.year}
+              {tc.icon} {tc.label}{billMonthLabel(invoice) ? ` · ${billMonthLabel(invoice)}` : ''}
             </Text>
           </View>
 
@@ -232,7 +234,8 @@ function downloadQrWeb(qrBase64: string, invoice: SharedBill, typeLabel: string)
     ctx.fillText('Thanh toán hóa đơn', W / 2, 44);
     ctx.font = '16px Arial, sans-serif';
     ctx.fillStyle = '#6B7280';
-    ctx.fillText(`${typeLabel} · T${String(invoice.month).padStart(2, '0')}/${invoice.year}`, W / 2, 72);
+    const periodText = billMonthLabel(invoice);
+    ctx.fillText(periodText ? `${typeLabel} · ${periodText}` : typeLabel, W / 2, 72);
 
     ctx.drawImage(img, (W - QR) / 2, 100, QR, QR);
 
