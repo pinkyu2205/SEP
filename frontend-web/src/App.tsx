@@ -31,7 +31,7 @@ import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
 import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from '@/pages/admin/zones/ZoneManagement';
-import { ManagerZoneAssignment } from '@/pages/admin/zones/ManagerZoneAssignment';
+import { AdminZoneOverview, HostZoneOverview } from '@/pages/zones/ZoneOverview';
 import { TaoDraftPage } from '@/pages/admin/onboarding/CreateDraftPage';
 import { DraftOnboardingList } from '@/pages/onboarding/DraftOnboardingList';
 import { CauHinhKhaiThacPage } from '@/pages/admin/onboarding/OperationConfigPage';
@@ -122,7 +122,7 @@ function App() {
             <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />
             <Route path="/admin/water-bills" element={<WaterBillPublishing />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
-            <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
+            <Route path="/admin/zones/assignment" element={<AdminZoneOverview />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/notifications" element={<AdminNotificationCenter />} />
@@ -140,6 +140,7 @@ function App() {
             <Route path="/host/properties/:id" element={<PropertyDetail />} />
             <Route path="/host/operations-managers" element={<ManagerList />} />
             <Route path="/host/managers" element={<ManagerList />} />
+            <Route path="/host/zones" element={<HostZoneOverview />} />
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
   Zap, RefreshCw, Home, UserCog, X, CheckCircle2,
@@ -143,101 +143,6 @@ function ImageLightbox({ urls, index, onIndexChange, onClose }: {
             Mở ảnh gốc
           </a>
         </div>
-      </div>
-    </div>
-  );
-}
-
-type ManagerItem = { id: string; fullName: string; username: string };
-
-// ─── Assign Manager Modal ───────────────────────────────────────────────────
-interface AssignManagerModalProps {
-  managers: ManagerItem[];
-  loadingManagers: boolean;
-  managersError?: string;
-  currentManagerId?: string;
-  isChange?: boolean;
-  onClose: () => void;
-  onConfirm: (managerId: string) => Promise<void>;
-}
-
-function AssignManagerModal({ managers, loadingManagers, managersError, currentManagerId, isChange, onClose, onConfirm }: AssignManagerModalProps) {
-  const [selected, setSelected] = useState(() => currentManagerId || managers[0]?.id || '');
-  const [saving, setSaving] = useState(false);
-
-  const handleConfirm = async () => {
-    if (!selected) return;
-    setSaving(true);
-    await onConfirm(selected);
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 rounded-xl">
-              <UserCog className="w-5 h-5 text-indigo-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">{isChange ? 'Đổi quản lý vận hành' : 'Gán quản lý vận hành'}</h2>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
-
-        {loadingManagers ? (
-          <div className="py-8 text-center text-slate-400">
-            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-500 mb-3" />
-            <p className="text-sm">Đang tải danh sách quản lý...</p>
-          </div>
-        ) : managersError ? (
-          <div className="py-8 text-center">
-            <Users className="w-10 h-10 mx-auto mb-3 text-rose-300" />
-            <p className="text-sm font-semibold text-rose-600">{managersError}</p>
-          </div>
-        ) : managers.length === 0 ? (
-          <div className="py-8 text-center text-slate-400">
-            <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Không có quản lý vận hành nào đang hoạt động.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-500">Chọn quản lý vận hành sẽ phụ trách bất động sản này.</p>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {managers.map(mgr => {
-                const isActive = selected === mgr.id;
-                const isCurrent = mgr.id === currentManagerId;
-                return (
-                  <button key={mgr.id} onClick={() => setSelected(mgr.id)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition ${
-                      isActive ? 'border-indigo-400 bg-indigo-50' : 'border-slate-100 hover:border-slate-200 bg-white'
-                    }`}>
-                    <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0">
-                      {mgr.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-semibold text-sm truncate ${isActive ? 'text-indigo-700' : 'text-slate-800'}`}>{mgr.username}</p>
-                      {mgr.fullName && <p className="text-xs text-slate-400">{mgr.fullName}</p>}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {isCurrent && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Hiện tại</span>}
-                      {isActive && <CheckCircle2 className="w-5 h-5 text-indigo-500" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">Huỷ</button>
-              <button onClick={handleConfirm} disabled={!selected || saving}
-                className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition">
-                {saving ? 'Đang lưu...' : isChange ? 'Xác nhận đổi' : 'Xác nhận gán'}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -409,14 +314,10 @@ export const PropertyDetail = () => {
   const [property, setProperty] = useState<PropertyResponse | null>(null);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
-  const [managers, setManagers] = useState<ManagerItem[]>([]);
-  const [loadingManagers, setLoadingManagers] = useState(false);
-  const [managersError, setManagersError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [roomSearch, setRoomSearch] = useState('');
   const [roomSort, setRoomSort] = useState<RoomSort>('number');
-  const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
   // Chia nội dung thành tab thay vì cuộn 1 trang rất dài.
   const [tab, setTab] = useState<DetailTab>('overview');
@@ -447,7 +348,6 @@ export const PropertyDetail = () => {
         const mgr = mgrs.find(m => m.id === prop.operationManagerId);
         if (mgr) prop.operationManagerName = mgr.fullName || mgr.username;
       }
-      setManagers(mgrs);
       setProperty(prop);
       setRooms(roomList);
       setContracts(contractList ?? []);
@@ -455,24 +355,6 @@ export const PropertyDetail = () => {
       console.error(e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const openAssignModal = async () => {
-    setShowAssignModal(true);
-    setManagers([]);
-    setManagersError(undefined);
-    setLoadingManagers(true);
-    try {
-      const list = await propertyService.getManagers();
-      console.log('[getManagers] result:', list);
-      setManagers(list || []);
-    } catch (e: any) {
-      setManagersError(e?.response?.status === 403
-        ? 'Tài khoản không có quyền xem danh sách quản lý.'
-        : e?.response?.data?.message || 'Không tải được danh sách quản lý.');
-    } finally {
-      setLoadingManagers(false);
     }
   };
 
@@ -487,23 +369,6 @@ export const PropertyDetail = () => {
       setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: status as RoomResponse['status'] } : r));
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.response?.data?.message || 'Cập nhật thất bại, vui lòng thử lại.');
-    }
-  };
-
-  const handleAssignManager = async (managerId: string) => {
-    if (!id) return;
-    try {
-      console.log('[assignManager] sending:', { propertyId: id, operationManagerId: managerId });
-      await propertyService.assignOperationManager(Number(id), managerId);
-      toast.success(property?.operationManagerId ? 'Đổi quản lý thành công!' : 'Gán quản lý thành công!');
-      setShowAssignModal(false);
-      fetchData();
-    } catch (e: any) {
-      const data = e?.response?.data;
-      const msg = data?.message || data?.error || (typeof data === 'string' ? data : null)
-        || `Lỗi ${e?.response?.status ?? ''}: Gán thất bại`;
-      console.error('[assignManager] error:', data);
-      toast.error(msg);
     }
   };
 
@@ -619,38 +484,33 @@ export const PropertyDetail = () => {
                 }`}>
                   {isWholeHouse ? 'Nhà nguyên căn' : 'Nhà chia phòng'}
                 </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
-                  property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
-                }`}>
+                {/* Quản lý đến từ KHU VỰC của nhà, không gán riêng lẻ được nữa —
+                    chip dẫn thẳng sang màn Khu vực để xem/đổi cho cả vùng. */}
+                <Link
+                  to="/host/zones"
+                  title={`Quản lý được phân công theo khu vực${property.zoneName ? ` ${property.zoneName}` : ''} — bấm để xem hoặc đổi cho cả khu vực`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold transition hover:ring-1 hover:ring-indigo-300 ${
+                    property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
+                  }`}
+                >
                   <UserCog className="h-3 w-3" />
                   {property.operationManagerId
                     ? `Quản lý: ${property.operationManagerName || 'Đã gán'}`
-                    : 'Chưa có quản lý'}
-                </span>
+                    : 'Khu vực chưa có quản lý'}
+                </Link>
               </div>
             </div>
           </div>
 
-          {/* Hành động */}
+          {/* Hành động — KHÔNG còn gán quản lý cho từng nhà: quản lý theo khu vực. */}
           <div className="flex shrink-0 items-center gap-2">
-            {(['ACTIVE', 'PENDING_OPERATION_MANAGER', 'PENDING_HOST_REVIEW'].includes(property.status)) ? (
-              <button onClick={openAssignModal}
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/25 transition hover:bg-indigo-700">
-                <UserCog className="h-4 w-4" />
-                {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
-              </button>
-            ) : (
-              <div className="group relative">
-                <button disabled
-                  className="flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-400">
-                  <UserCog className="h-4 w-4" />
-                  {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
-                </button>
-                <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-60 rounded-xl bg-slate-900 p-3 text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100">
-                  Không thể thay đổi quản lý ở trạng thái hiện tại.
-                </div>
-              </div>
-            )}
+            <Link
+              to="/host/zones"
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+            >
+              <MapPin className="h-4 w-4" />
+              Quản lý theo khu vực
+            </Link>
             <button onClick={fetchData} title="Tải lại dữ liệu"
               className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800">
               <RefreshCw className="h-4 w-4" />
@@ -993,18 +853,6 @@ export const PropertyDetail = () => {
           canChange={['DRAFT', 'ACTIVE'].includes(property.status) && selectedRoom.status !== 'RENTED'}
           onClose={() => setSelectedRoom(null)}
           onConfirmStatus={handleUpdateRoomStatus}
-        />
-      )}
-
-      {showAssignModal && (
-        <AssignManagerModal
-          managers={managers}
-          loadingManagers={loadingManagers}
-          managersError={managersError}
-          currentManagerId={property.operationManagerId}
-          isChange={!!property.operationManagerId}
-          onClose={() => setShowAssignModal(false)}
-          onConfirm={handleAssignManager}
         />
       )}
 

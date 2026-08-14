@@ -154,7 +154,7 @@ export const PropertyList = () => {
           helper="trên tổng số nhà" progress={kpi.total ? kpi.room / kpi.total : 0}
           onClick={() => f.setType(f.type === 'room' ? 'all' : 'room')} active={f.type === 'room'} />
         <StatTile icon={AlertCircle} label="Chưa có quản lý" value={kpi.noMgr} tone="rose"
-          helper="cần gán quản lý vận hành" progress={kpi.total ? kpi.noMgr / kpi.total : 0}
+          helper="khu vực chưa được gán quản lý" progress={kpi.total ? kpi.noMgr / kpi.total : 0}
           onClick={() => f.setManager(f.manager === 'unassigned' ? 'all' : 'unassigned')}
           active={f.manager === 'unassigned'} />
       </div>

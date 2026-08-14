@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { hostService } from '@/services/host.service';
 import type { HostContractDto, MasterLease } from '@/services/host.service';
 import { propertyService } from '@/services/property.service';
+import { MaskedField } from '@/components/MaskedField';
 import { formatCurrency } from '@/utils';
 
 /**
@@ -416,8 +417,20 @@ export const ContractList = () => {
                 <div className="bg-slate-50 rounded-xl p-4">
                   <p className="text-xs font-medium text-slate-500 uppercase mb-2">Khách thuê</p>
                   <p className="font-semibold text-slate-900">{selectedContract.lesseeName}</p>
-                  {selectedContract.tenantCccd && <p className="text-xs text-slate-500 mt-1">CCCD: {selectedContract.tenantCccd}</p>}
-                  {selectedContract.tenantPhone && <p className="text-xs text-slate-500">SĐT: {selectedContract.tenantPhone}</p>}
+                  {selectedContract.tenantCccd && (
+                    <MaskedField
+                      value={selectedContract.tenantCccd}
+                      prefix="CCCD:" emptyText="" head={3} tail={3}
+                      className="mt-1 text-xs text-slate-500"
+                    />
+                  )}
+                  {selectedContract.tenantPhone && (
+                    <MaskedField
+                      value={selectedContract.tenantPhone}
+                      prefix="SĐT:" emptyText="" head={3} tail={2}
+                      className="mt-0.5 text-xs text-slate-500"
+                    />
+                  )}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-4">
                   <p className="text-xs font-medium text-slate-500 uppercase mb-2">Bất động sản</p>

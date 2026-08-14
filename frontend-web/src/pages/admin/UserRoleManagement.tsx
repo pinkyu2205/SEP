@@ -28,6 +28,9 @@ import {
   StatusPill,
 } from './shared';
 import { userService } from '@/services/user.service';
+import { propertyService } from '@/services/property.service';
+import { hostService, type HostContractDto } from '@/services/host.service';
+import { UserDetailDrawer } from './users/UserDetailDrawer';
 import type { UserResponse, UserStatus, CreateUserRequest } from '@/types/api.types';
 
 // Hệ thống CHỈ có 4 role (mỗi role = 1 loại tài khoản):
@@ -119,6 +122,20 @@ export const UserRoleManagement = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  /**
+   * Tên thật của người dùng phải tra từ nguồn khác: `UserResponse` của BE CHỈ có
+   * username/phone/role/status, KHÔNG có fullName (xem api.types.ts). Với khách thuê thì
+   * username lại chính là số điện thoại nên cột tên và cột SĐT trùng nhau y hệt.
+   *   • Quản lý  → GET /user/managers trả kèm fullName, khớp theo id
+   *   • Khách thuê → lấy `lesseeName` trên hợp đồng, khớp theo số điện thoại
+   * Không tra được thì mới rơi về username (admin & chủ nhà không có nguồn nào).
+   *
+   * 👉 XOÁ TOÀN BỘ chỗ này khi BE thêm `fullName` vào UserResponse —
+   *    xem doc/BE-NEED-user-fullname-2026-08-14.md
+   */
+  const [nameById, setNameById] = useState<Map<string, string>>(new Map());
+  const [nameByPhone, setNameByPhone] = useState<Map<string, string>>(new Map());
+
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -131,21 +148,47 @@ export const UserRoleManagement = () => {
     }
   };
 
+  // Tra tên chạy song song và được phép hỏng — hỏng thì bảng vẫn hiện, chỉ là rơi về username.
+  const fetchNames = async () => {
+    const [mgrs, ctrs] = await Promise.all([
+      propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
+      hostService.listContracts({ size: 500 }).then(p => p.content).catch(() => [] as HostContractDto[]),
+    ]);
+
+    const byId = new Map<string, string>();
+    mgrs.forEach(m => { if (m.fullName?.trim()) byId.set(m.id, m.fullName.trim()); });
+    setNameById(byId);
+
+    const byPhone = new Map<string, string>();
+    ctrs.forEach(c => {
+      const phone = c.tenantPhone?.trim();
+      const name = c.lesseeName?.trim();
+      // HĐ chấm dứt bị BE gỡ tên khách → bỏ qua, đừng ghi đè tên đã lấy được từ HĐ khác.
+      if (phone && name && !byPhone.has(phone)) byPhone.set(phone, name);
+    });
+    setNameByPhone(byPhone);
+  };
+
+  /** Tên hiển thị của một tài khoản — null nghĩa là không tra được. */
+  const realNameOf = (user: UserResponse): string | null =>
+    nameById.get(user.id) ?? (user.phoneNumber ? nameByPhone.get(user.phoneNumber.trim()) ?? null : null);
+
   useEffect(() => {
     fetchUsers();
+    fetchNames();
   }, []);
 
   const filteredUsers = useMemo(() => {
     const keyword = userSearch.trim().toLowerCase();
     return users.filter(user => {
-      const matchesSearch = !keyword || [user.username, user.phoneNumber]
+      const matchesSearch = !keyword || [user.username, user.phoneNumber, realNameOf(user)]
         .filter(Boolean)
         .some(value => value!.toLowerCase().includes(keyword));
       const matchesRole = roleFilter === 'all' || user.role === roleFilter;
       const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
       return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [roleFilter, statusFilter, userSearch, users]);
+  }, [roleFilter, statusFilter, userSearch, users, nameById, nameByPhone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageCount = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, pageCount);
@@ -225,7 +268,7 @@ export const UserRoleManagement = () => {
               value={userSearch}
               onChange={event => { setUserSearch(event.target.value); setCurrentPage(1); }}
               className="input-field pl-9"
-              placeholder="Tìm theo username, số điện thoại..."
+              placeholder="Tìm theo tên, username, số điện thoại..."
             />
           </div>
           <div className="flex flex-wrap gap-2">
@@ -252,7 +295,7 @@ export const UserRoleManagement = () => {
           <table className="w-full min-w-[800px] text-left text-sm">
             <thead className="table-header">
               <tr>
-                <th className="px-4 py-3">Tài khoản (Username)</th>
+                <th className="px-4 py-3">Người dùng</th>
                 <th className="px-4 py-3">Số điện thoại</th>
                 <th className="px-4 py-3">Vai trò</th>
                 <th className="px-4 py-3">Trạng thái</th>
@@ -267,12 +310,15 @@ export const UserRoleManagement = () => {
               ) : pagedUsers.map(user => {
                 const status = statusMap[user.status] || { label: user.status, color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' };
                 const role = roleMap[user.role] || { label: user.role, color: 'bg-slate-100 text-slate-600' };
+                const realName = realNameOf(user);
 
                 return (
                   <tr key={user.id} className="hover:bg-slate-50 transition">
                     <td className="px-4 py-3">
-                      <p className="font-bold text-slate-900">{user.username}</p>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">{user.id.split('-')[0]}...</p>
+                      {/* CHỈ hiện tên người dùng — không kèm username. Username (với khách thuê
+                          chính là SĐT) trùng cột bên cạnh, in ra chỉ tổ lặp. Cần username thì
+                          mở drawer chi tiết, nó nằm ở hàng thông tin tài khoản. */}
+                      <p className="font-bold text-slate-900">{realName ?? user.username}</p>
                     </td>
                     <td className="px-4 py-3 text-slate-600 font-medium">
                       {user.phoneNumber || '—'}
@@ -471,46 +517,15 @@ export const UserRoleManagement = () => {
         </div>
       )}
 
-      {/* Modal Xem Chi Tiết */}
+      {/* Chi tiết tài khoản — vai trò hiện tại trong hệ thống + lịch sử phân công */}
       {selectedUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button aria-label="Đóng modal" className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={() => setSelectedUser(null)} />
-          <div className="relative w-full max-w-md rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 p-6">
-              <div>
-                <h3 className="text-lg font-black text-slate-950">Chi tiết tài khoản</h3>
-              </div>
-              <button onClick={() => setSelectedUser(null)} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-6 p-6">
-              <div className="rounded-2xl bg-slate-50 p-5 border border-slate-100 text-center">
-                <div className="w-16 h-16 bg-indigo-100 text-indigo-600 font-black text-2xl flex items-center justify-center rounded-full mx-auto mb-3">
-                  {selectedUser.username.charAt(0).toUpperCase()}
-                </div>
-                <p className="text-xl font-black text-slate-950">{selectedUser.username}</p>
-                <p className="mt-1 text-sm font-medium text-slate-500">{selectedUser.phoneNumber}</p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white border border-slate-200 rounded-xl p-4">
-                  <p className="text-xs text-slate-500 font-bold mb-1">Vai trò</p>
-                  <StatusPill label={roleMap[selectedUser.role]?.label || selectedUser.role} color={roleMap[selectedUser.role]?.color || 'bg-slate-100 text-slate-700'} />
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-4">
-                  <p className="text-xs text-slate-500 font-bold mb-1">Trạng thái</p>
-                  <StatusPill label={statusMap[selectedUser.status]?.label || selectedUser.status} color={statusMap[selectedUser.status]?.color || 'bg-slate-100 text-slate-700'} dot={statusMap[selectedUser.status]?.dot} />
-                </div>
-              </div>
-              
-              <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
-                <button onClick={() => updateUserStatus(selectedUser.id, 'ACTIVE')} className="btn-primary w-full py-2.5 rounded-xl font-bold">Kích hoạt tài khoản</button>
-                <button onClick={() => updateUserStatus(selectedUser.id, 'DISABLE')} className="w-full py-2.5 rounded-xl font-bold bg-rose-50 text-rose-700 hover:bg-rose-100">Vô hiệu hóa</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <UserDetailDrawer
+          key={selectedUser.id}
+          user={selectedUser}
+          displayName={realNameOf(selectedUser)}
+          onClose={() => setSelectedUser(null)}
+          onStatusChange={(id, status) => updateUserStatus(id, status)}
+        />
       )}
     </div>
   );

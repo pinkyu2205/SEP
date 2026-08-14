@@ -365,7 +365,7 @@ export const FilterToolbar = ({ f, action }: { f: PropertyListFilters; action?: 
               <option key={k} value={k}>{TYPE_LABEL[k]}</option>
             ))}
           </FilterSelect>
-          <FilterSelect label="Quản lý vận hành" value={f.manager} onChange={v => f.setManager(v as ManagerFilter)}>
+          <FilterSelect label="Quản lý khu vực" value={f.manager} onChange={v => f.setManager(v as ManagerFilter)}>
             {(Object.keys(MANAGER_LABEL) as ManagerFilter[]).map(k => (
               <option key={k} value={k}>{MANAGER_LABEL[k]}</option>
             ))}

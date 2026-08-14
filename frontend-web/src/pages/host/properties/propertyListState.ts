@@ -47,8 +47,14 @@ export const HOST_STATUS_CHIPS: { value: string; label: string; cls: string }[] 
 /**
  * Nhà đã được Host duyệt thành công (chỉ những căn này mới hiện ở màn Bất động sản của Host).
  * - ACTIVE / RENTED / PENDING_OPERATION_MANAGER: chắc chắn đã qua host-confirm.
- * - UNDER_RENOVATION / DISABLED: chỉ tính nếu đã từng được duyệt (đã có giá thuê hoặc đã gán quản lý)
+ * - UNDER_RENOVATION / DISABLED: chỉ tính nếu đã từng được duyệt (đã có giá thuê hoặc đã có quản lý)
  *   → loại các căn admin đang onboarding (cải tạo lần đầu / nháp bị vô hiệu) chưa gửi Host.
+ *
+ * Vế `operationManagerId` vẫn giữ dù quản lý nay đến từ khu vực chứ không gán tay:
+ * đường duy nhất để một nhà có quản lý là host-confirm (tự nhận theo khu vực) hoặc
+ * gán khu vực — mà gán khu vực chỉ chạm vào nhà ĐÃ duyệt. Nên "có quản lý ⇒ đã duyệt"
+ * vẫn đúng. Bỏ vế này sẽ ẩn mất nhà CHIA PHÒNG đang cải tạo, vì loại đó để
+ * `price` null (giá nằm trên từng phòng) nên không qua được `price > 0`.
  * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Host"), PENDING_HOST_REVIEW (đang chờ duyệt).
  */
 export const isHostApproved = (p: PropertyResponse): boolean => {
@@ -80,8 +86,13 @@ export type ViewMode = 'grid' | 'table';
 export const TYPE_LABEL: Record<TypeFilter, string> = {
   all: 'Tất cả loại hình', whole: 'Nhà nguyên căn', room: 'Nhà chia phòng',
 };
+/**
+ * Quản lý vận hành đến từ KHU VỰC của nhà (một quận một quản lý), không gán riêng
+ * từng căn — nên "chưa có quản lý" ở đây nghĩa là *khu vực* của nhà chưa được gán.
+ * Xử lý ở màn /host/zones.
+ */
 export const MANAGER_LABEL: Record<ManagerFilter, string> = {
-  all: 'Tất cả', assigned: 'Đã gán quản lý', unassigned: 'Chưa có quản lý',
+  all: 'Tất cả', assigned: 'Khu vực đã có quản lý', unassigned: 'Khu vực chưa có quản lý',
 };
 
 export const GRID_SIZES = [9, 18, 36];

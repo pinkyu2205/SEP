@@ -73,8 +73,6 @@ export interface ZoneRequest {
   description?: string | null;
   level: number; // 1 = Tỉnh/TP, 2 = Quận/Huyện
   parentId?: string | null; // UUID
-  latitude?: number | null;
-  longitude?: number | null; // phải cùng null hoặc cùng có với latitude
 }
 
 export interface ZoneResponse {
@@ -85,12 +83,10 @@ export interface ZoneResponse {
   parentId?: string;
   parentName?: string;
   fullName: string;
-  latitude?: number | null;
-  longitude?: number | null;
 }
 
 // =============================================================================
-// ZONE — Import Excel + Geocode tâm khu vực (Goong)
+// ZONE — Import Excel
 // =============================================================================
 
 export interface ZoneImportResult {
@@ -109,39 +105,8 @@ export interface ZoneBulkImportResponse {
   districtsCreated: number;
   districtsSkipped: number;
   districtsUpdated: number;
-  districtsWithCoords: number;
-  districtsMissingCoords: number;
   results: ZoneImportResult[];
   errors: [];
-}
-
-export interface ZoneGeocodeCenterResponse {
-  id: string;
-  name: string;
-  parentName: string | null;
-  fullName: string;
-  level: 2;
-  latitude: number;
-  longitude: number;
-  geocodeQuery: string;
-  geocodeSource: 'GOONG';
-}
-
-export interface ZoneGeocodeResultItem {
-  zoneId: string;
-  zoneName: string;
-  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
-  latitude: number | null;
-  longitude: number | null;
-  message: string | null;
-}
-
-export interface ZoneGeocodeBatchResponse {
-  requested: number;
-  succeeded: number;
-  failed: number;
-  skipped: number;
-  results: ZoneGeocodeResultItem[];
 }
 
 // =============================================================================

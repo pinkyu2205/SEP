@@ -284,7 +284,14 @@ export const propertyService = {
   // Gán quản lý vận hành
   // =========================================================================
 
-  /** PATCH /properties/{id}/operation-manager */
+  /**
+   * PATCH /properties/{id}/operation-manager
+   *
+   * ⚠️ CHỈ gọi từ màn "Khu vực & Quản lý" (`pages/zones/ZoneOverview.tsx`), nơi nó chạy
+   * theo lô cho cả một quận. Quản lý vận hành được phân công theo KHU VỰC — một quận một
+   * người — nên đừng thêm lại nút gán/đổi cho từng nhà. (Khi BE làm xong API gán theo lô
+   * ở doc/BE-NEED-zone-manager-assignment-2026-08-14.md thì thay vòng lặp bằng API đó.)
+   */
   assignOperationManager: (id: number, operationManagerId: string): Promise<PropertyActivationResponse> => {
     return api.patch(`${BASE}/${id}/operation-manager`, { operationManagerId });
   },

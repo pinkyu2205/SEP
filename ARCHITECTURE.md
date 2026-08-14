@@ -27,7 +27,13 @@ src/pages/
     HostDashboard.tsx · PropertyReview.tsx
     properties/ contracts/ tenants/ managers/ maintenance/
     equipments/ finance/ reports/ notifications/
+  zones/      → DÙNG CHUNG admin + host — "Khu vực & Quản lý" (ZoneOverview)
 ```
+
+- **`pages/zones/`** là màn dùng chung: cùng dữ liệu, chỉ khác câu chữ theo vai
+  (`<ZoneOverview audience="admin" | "host" />`, route `/admin/zones/assignment` và `/host/zones`).
+  Nghiệp vụ: **một quận/huyện chỉ có MỘT quản lý vận hành**, gán cho khu vực là gán cho mọi
+  nhà bên trong — không còn gán quản lý cho từng căn.
 
 - **Routing** (`src/App.tsx`): `/` = public, `/login` = auth, `/admin/*` = admin, `/host/*` = host.
   URL không đổi khi refactor — chỉ vị trí file thay đổi.

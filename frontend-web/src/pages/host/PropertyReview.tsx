@@ -97,7 +97,6 @@ export const HostPropertyReview = () => {
 
   const [summary, setSummary] = useState<OnboardingSummaryResponse | null>(null);
   const [property, setProperty] = useState<PropertyResponse | null>(null);
-  const [operationManagerId, setOperationManagerId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -142,9 +141,6 @@ export const HostPropertyReview = () => {
         ]);
         setSummary(summaryData);
         setProperty(propertyData);
-        if (propertyData.operationManagerId) {
-          setOperationManagerId(String(propertyData.operationManagerId));
-        }
 
         // Lấy kết quả tính giá đã lưu (nếu có) — 404 = chưa tính, bỏ qua (interceptor không toast 404).
         try {
@@ -208,9 +204,11 @@ export const HostPropertyReview = () => {
   const handleConfirm = async () => {
     if (!canConfirm || !summary || !calc) return;
 
+    // KHÔNG gửi operationManagerId nữa: quản lý vận hành được phân công theo KHU VỰC
+    // (màn /host/zones), không gán riêng cho từng nhà. Nhà thuộc quận chưa có quản lý sẽ
+    // ở trạng thái PENDING_OPERATION_MANAGER cho tới khi Host gán cho khu vực đó.
     const payload: HostConfirmRequest = {
       contingencyPercent: CONTINGENCY_FOR_CONFIRM,
-      ...(operationManagerId ? { operationManagerId } : {}),
     };
 
     if (isRoomScope) {
@@ -252,15 +250,27 @@ export const HostPropertyReview = () => {
           <CheckCircle2 className="h-10 w-10 text-emerald-600" />
         </div>
         <h2 className="text-2xl font-black text-slate-900">Xác nhận thành công!</h2>
-        <p className="mt-3 text-slate-500">
-          Tòa nhà đã chuyển sang trạng thái <span className="font-bold text-emerald-600">ACTIVE</span> và sẵn sàng kinh doanh.
+        <p className="mt-3 text-slate-500">Đã chốt giá cho tòa nhà.</p>
+        <p className="mt-2 text-sm text-slate-500">
+          Nhà sẽ do quản lý của khu vực
+          {property?.zoneName ? <span className="font-semibold text-slate-700"> {property.zoneName}</span> : ''}{' '}
+          phụ trách. Nếu khu vực chưa có quản lý, nhà chờ ở trạng thái{' '}
+          <span className="font-semibold text-violet-600">Chờ gán quản lý</span> cho tới khi bạn gán.
         </p>
-        <button
-          onClick={() => navigate(`/host/properties/${propertyId}`)}
-          className="btn-primary mt-8 rounded-xl px-8 py-3"
-        >
-          Xem chi tiết tòa nhà
-        </button>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={() => navigate(`/host/properties/${propertyId}`)}
+            className="btn-primary rounded-xl px-8 py-3"
+          >
+            Xem chi tiết tòa nhà
+          </button>
+          <button
+            onClick={() => navigate('/host/zones')}
+            className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+          >
+            Gán quản lý khu vực
+          </button>
+        </div>
       </div>
     );
   }
