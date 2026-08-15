@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, ScrollView,
@@ -276,6 +277,12 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Hoá đơn vừa PAID sinh giao dịch mới, và claim chờ duyệt có thể hết hiệu lực → nạp lại.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   // Trước 13/08/2026 chỗ này có `ensureDepositAmount` — gọi
   // GET /api/v1/tenant-contracts/{id} cho từng dòng cọc chỉ để lấy field `deposit`

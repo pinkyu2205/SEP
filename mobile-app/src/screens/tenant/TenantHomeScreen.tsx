@@ -10,7 +10,7 @@ import {
   billMonthLabel, formatCurrency, formatDate, getDaysUntil, isToday, onboardChargeLines,
 } from '@/utils';
 import { serverNow } from '@/utils/serverTime';
-import { SharedBill, InvoiceType } from '@/store/billsStore';
+import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
@@ -228,28 +228,35 @@ export const TenantHomeScreen: React.FC = () => {
   const todayStr = serverNow().toLocaleDateString('vi-VN', {
     weekday: 'short', day: 'numeric', month: 'numeric',
   });
+  // Chỉ lấy tên gọi (từ cuối) như bên manager — tên đầy đủ đứng cùng hàng với ngày và
+  // chuông thì dài quá, bị cắt mất chữ.
+  const firstName = user?.fullName?.trim().split(/\s+/).pop() || 'bạn';
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Header — dòng ngày ở góc trên trái, đồng bộ với Trang chủ của quản lý
-            (ManagerHomeScreen.headerDate): cùng định dạng, cùng vị trí, và cùng lấy
-            theo GIỜ SERVER chứ không phải đồng hồ máy. */}
+        {/* Header — bố cục y hệt Trang chủ của quản lý (ManagerHomeScreen):
+            lời chào một dòng bên trái, ngày đứng sát cái chuông bên phải.
+            Trước đây tenant xếp chồng 3 dòng (ngày / "Xin chào" / tên) với ngày cỡ 11px
+            nằm trên cùng — vừa chìm vừa cao gấp đôi header của manager.
+            Ngày lấy theo GIỜ SERVER, không phải đồng hồ máy. */}
         <View style={styles.header}>
-          <View>
+          <Text style={styles.headerName} numberOfLines={1}>Xin chào, {firstName} 👋</Text>
+
+          <View style={styles.headerRight}>
             <Text style={styles.headerDate}>{todayStr}</Text>
-            <Text style={styles.greeting}>Xin chào 👋</Text>
-            <Text style={styles.userName}>{user?.fullName ?? 'Khách thuê'}</Text>
+            <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('TenantNotifications')}>
+              <Text style={styles.notifIcon}>🔔</Text>
+              {(realUnread ?? data.unreadNotifications) > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>
+                    {(realUnread ?? data.unreadNotifications) > 9 ? '9+' : (realUnread ?? data.unreadNotifications)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.notifBtn} onPress={() => navigation.navigate('TenantNotifications')}>
-            <Text style={{ fontSize: 22 }}>🔔</Text>
-            {(realUnread ?? data.unreadNotifications) > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{realUnread ?? data.unreadNotifications}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </View>
 
         {/* Picker "Nhà đang thuê" — chỉ hiện khi account có ≥2 HĐ ACTIVE */}
@@ -628,16 +635,28 @@ const styles = StyleSheet.create({
   retryBtn: { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   retryBtnText: { color: Colors.white, fontSize: 13, fontWeight: '700' },
 
-  // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Spacing.base, paddingBottom: Spacing.md },
-  // Khớp ManagerHomeScreen.headerDate để 2 vai nhìn thấy cùng một kiểu ngày.
-  headerDate: { fontSize: 11, fontWeight: '400', color: Colors.textMuted, marginBottom: 3, letterSpacing: 0.1 },
-  greeting: { fontSize: 12.5, fontWeight: '500', color: Colors.textMuted },
-  // Nhỏ hơn tiêu đề hero (22) để thứ bậc rõ ràng — trước đây 22 vs 26 nhìn giằng nhau.
-  userName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
-  notifBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  notifBadge: { position: 'absolute', top: 6, right: 6, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  notifBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.white },
+  // ── Header ── Copy nguyên bộ số đo từ ManagerHomeScreen để 2 vai nhìn giống hệt nhau.
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingTop: Spacing.base, paddingBottom: Spacing.md,
+  },
+  // Cụm bên phải: ngày + chuông, cách nhau vừa đủ để đọc ra một cụm chứ không dính nhau.
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  headerDate: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary, letterSpacing: 0.1 },
+  // flexShrink để tên dài thì lời chào tự cắt, không đẩy ngày & chuông ra khỏi màn.
+  headerName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.3, flexShrink: 1 },
+  notifBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  notifIcon: { fontSize: 16 },
+  notifBadge: {
+    position: 'absolute', top: 4, right: 4, minWidth: 14, height: 14,
+    borderRadius: 7, backgroundColor: Colors.error,
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
+  },
+  notifBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
 
   // ── Hero card: phòng + toà nhà + số liệu gộp làm một ──
   // Thang chữ cố định: nhãn 10.5 · phụ 12 · thân 13 · tiêu đề 22.

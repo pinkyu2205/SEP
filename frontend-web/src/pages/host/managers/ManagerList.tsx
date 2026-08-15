@@ -279,6 +279,7 @@ export const ManagerList = () => {
                     {/* Lịch sử phân công — để trên đầu, mở ra cửa sổ riêng */}
                     <div className="mb-3">
                       <AssignmentHistoryButton
+                        userId={mgr.id}
                         subjectName={displayName}
                         extraNote="Lưu ý khi đánh giá: người vừa nhận khu vực vài ngày vẫn bị chấm doanh thu cả tháng."
                       />

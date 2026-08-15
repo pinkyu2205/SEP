@@ -1,341 +1,119 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, Modal, Dimensions,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
+  ActivityIndicator, RefreshControl, Dimensions,
 } from 'react-native';
-import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
-  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
-  RENT_AMOUNT_HIDDEN_NOTE,
-} from '@/constants';
+  realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
+} from '@/services/manager/invoiceService';
 
 const SH = Dimensions.get('window').height;
-const TODAY = new Date(2026, 4, 21);
 
-// ── Types ──────────────────────────────────────────────────────────────
-type InvoiceStatus = 'pending' | 'paid' | 'overdue';
-type FilterKey = 'all' | InvoiceStatus;
+/**
+ * HOÁ ĐƠN CỦA MỘT KHÁCH THUÊ (màn của quản lý vận hành).
+ *
+ * Viết lại 15/08/2026 — bản cũ chạy 100% trên `MOCK_INVOICES` viết cứng trong file:
+ * không gọi API nào, và `tenantId` thật là id hợp đồng từ BE (số) trong khi mock dùng
+ * 't1'/'t2' nên KHÔNG BAO GIỜ khớp → màn luôn rỗng với dữ liệu thật.
+ *
+ * Mỗi hoá đơn là MỘT DÒNG, không gom theo tháng. Lý do: hệ thống phát hành tách bạch
+ * theo loại — tiền phòng do cron tự phát ngày 1, điện/nước phát tay sau khi ghi chỉ số,
+ * khác ngày, khác hạn nộp, khác mã QR. Gom lại thành "thẻ tháng" thì phải bịa ra quy ước
+ * trạng thái cho trường hợp tiền phòng đã trả mà tiền điện chưa. App của khách thuê cũng
+ * đang liệt kê từng hoá đơn riêng — để hai bên nhìn cùng một hình dạng.
+ */
 
-interface TenantInvoice {
-  id: string;
-  tenantId: string;
-  code: string;
-  billingMonth: string;
-  dueDate: string;
-  status: InvoiceStatus;
-  rentFee: number;
-  electricFee: number;
-  electricDetail: string;
-  waterFee: number;
-  waterDetail: string;
-  serviceFee: number;
-  discount: number;
-  depositDeduction: number;
-  total: number;
-  paymentDate?: string;
-  paymentMethod?: string;
-  propertyName: string;
-  roomName: string;
-  /** Số ngày quá hạn. Không có phí phạt — trễ lâu thì leo thang chấm dứt HĐ. */
-  overdueDays?: number;
-}
+type FilterKey = 'all' | 'unpaid' | 'overdue' | 'paid';
 
-// ── Mock invoice data (all tenants, filtered by tenantId at runtime) ───
-const MOCK_INVOICES: TenantInvoice[] = [
-  // Trần Văn A — 1 overdue
-  {
-    id: 'inv-t1-may', tenantId: 't1', code: 'HD-NT-P101-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'overdue',
-    rentFee: 3500000, electricFee: 455000, electricDetail: '130 kWh × 3.500đ/kWh',
-    waterFee: 97500, waterDetail: '6,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 4352500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    overdueDays: 6,
-  },
-  {
-    id: 'inv-t1-apr', tenantId: 't1', code: 'HD-NT-P101-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'paid',
-    rentFee: 3500000, electricFee: 423500, electricDetail: '121 kWh × 3.500đ/kWh',
-    waterFee: 90000, waterDetail: '6 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 4313500, paymentDate: '12/04/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-  },
-  {
-    id: 'inv-t1-mar', tenantId: 't1', code: 'HD-NT-P101-0326',
-    billingMonth: '03/2026', dueDate: '15/03/2026', status: 'paid',
-    rentFee: 3500000, electricFee: 406000, electricDetail: '116 kWh × 3.500đ/kWh',
-    waterFee: 82500, waterDetail: '5,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 50000, depositDeduction: 0,
-    total: 4238500, paymentDate: '10/03/2026', paymentMethod: 'Tiền mặt',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-  },
-  // Lê Thị B — all paid
-  {
-    id: 'inv-t2-may', tenantId: 't2', code: 'HD-NT-P102-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'paid',
-    rentFee: 3200000, electricFee: 392000, electricDetail: '112 kWh × 3.500đ/kWh',
-    waterFee: 75000, waterDetail: '5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 3967000, paymentDate: '08/05/2026', paymentMethod: 'VietQR',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P102',
-  },
-  {
-    id: 'inv-t2-apr', tenantId: 't2', code: 'HD-NT-P102-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'paid',
-    rentFee: 3200000, electricFee: 371000, electricDetail: '106 kWh × 3.500đ/kWh',
-    waterFee: 67500, waterDetail: '4,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 3938500, paymentDate: '14/04/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P102',
-  },
-  // Phạm Văn C — 2 overdue
-  {
-    id: 'inv-t3-may', tenantId: 't3', code: 'HD-NT-P201-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'overdue',
-    rentFee: 3800000, electricFee: 518000, electricDetail: '148 kWh × 3.500đ/kWh',
-    waterFee: 112500, waterDetail: '7,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 4730500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    overdueDays: 6,
-  },
-  {
-    id: 'inv-t3-apr', tenantId: 't3', code: 'HD-NT-P201-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'overdue',
-    rentFee: 3800000, electricFee: 493500, electricDetail: '141 kWh × 3.500đ/kWh',
-    waterFee: 97500, waterDetail: '6,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 0, depositDeduction: 0,
-    total: 4690500, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    overdueDays: 36,
-  },
-  {
-    id: 'inv-t3-mar', tenantId: 't3', code: 'HD-NT-P201-0326',
-    billingMonth: '03/2026', dueDate: '15/03/2026', status: 'paid',
-    rentFee: 3800000, electricFee: 469000, electricDetail: '134 kWh × 3.500đ/kWh',
-    waterFee: 82500, waterDetail: '5,5 m³ × 15.000đ/m³',
-    serviceFee: 300000, discount: 100000, depositDeduction: 0,
-    total: 4551500, paymentDate: '13/03/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-  },
-  // Ngô Thị D — 1 overdue
-  {
-    id: 'inv-t4-may', tenantId: 't4', code: 'HD-NT-P301-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'overdue',
-    rentFee: 3500000, electricFee: 385000, electricDetail: '110 kWh × 3.500đ/kWh',
-    waterFee: 120000, waterDetail: '8 m³ × 15.000đ/m³',
-    serviceFee: 100000, discount: 0, depositDeduction: 0,
-    total: 4105000, propertyName: 'Nhà Nguyễn Trãi', roomName: 'P301',
-    overdueDays: 6,
-  },
-  {
-    id: 'inv-t4-apr', tenantId: 't4', code: 'HD-NT-P301-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'paid',
-    rentFee: 3500000, electricFee: 360500, electricDetail: '103 kWh × 3.500đ/kWh',
-    waterFee: 105000, waterDetail: '7 m³ × 15.000đ/m³',
-    serviceFee: 100000, discount: 0, depositDeduction: 0,
-    total: 4065500, paymentDate: '15/04/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P301',
-  },
-  // Bùi Văn H — 1 overdue
-  {
-    id: 'inv-t8-may', tenantId: 't8', code: 'HD-CMT8-P101-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'overdue',
-    rentFee: 4000000, electricFee: 539000, electricDetail: '154 kWh × 3.500đ/kWh',
-    waterFee: 106000, waterDetail: '7 m³ × 15.000đ/m³',
-    serviceFee: 200000, discount: 0, depositDeduction: 0,
-    total: 4845000, propertyName: 'Nhà CMT8', roomName: 'P101',
-    overdueDays: 6,
-  },
-  {
-    id: 'inv-t8-apr', tenantId: 't8', code: 'HD-CMT8-P101-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'paid',
-    rentFee: 4000000, electricFee: 511000, electricDetail: '146 kWh × 3.500đ/kWh',
-    waterFee: 97500, waterDetail: '6,5 m³ × 15.000đ/m³',
-    serviceFee: 200000, discount: 0, depositDeduction: 0,
-    total: 4808500, paymentDate: '10/04/2026', paymentMethod: 'VietQR',
-    propertyName: 'Nhà CMT8', roomName: 'P101',
-  },
-  // Cao Thị I — all paid
-  {
-    id: 'inv-t9-may', tenantId: 't9', code: 'HD-CMT8-P102-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'paid',
-    rentFee: 3800000, electricFee: 406000, electricDetail: '116 kWh × 3.500đ/kWh',
-    waterFee: 90000, waterDetail: '6 m³ × 15.000đ/m³',
-    serviceFee: 200000, discount: 0, depositDeduction: 0,
-    total: 4496000, paymentDate: '05/05/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà CMT8', roomName: 'P102',
-  },
-  // Gia đình anh Minh — 1 overdue (whole house)
-  {
-    id: 'inv-wh1-may', tenantId: 'wh-1', code: 'HD-NVC-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'overdue',
-    rentFee: 12000000, electricFee: 647500, electricDetail: '185 kWh × 3.500đ/kWh',
-    waterFee: 242500, waterDetail: '16 m³ × 15.000đ/m³ + phí cơ bản',
-    serviceFee: 150000, discount: 0, depositDeduction: 0,
-    total: 13040000, propertyName: 'Nhà Nguyễn Văn Cừ', roomName: 'Nhà nguyên căn',
-    overdueDays: 6,
-  },
-  {
-    id: 'inv-wh1-apr', tenantId: 'wh-1', code: 'HD-NVC-0426',
-    billingMonth: '04/2026', dueDate: '15/04/2026', status: 'paid',
-    rentFee: 12000000, electricFee: 612500, electricDetail: '175 kWh × 3.500đ/kWh',
-    waterFee: 225000, waterDetail: '15 m³ × 15.000đ/m³',
-    serviceFee: 150000, discount: 0, depositDeduction: 0,
-    total: 12987500, paymentDate: '13/04/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Nguyễn Văn Cừ', roomName: 'Nhà nguyên căn',
-  },
-  // Công ty An Phú — all paid
-  {
-    id: 'inv-wh3-may', tenantId: 'wh-3', code: 'HD-THD-0526',
-    billingMonth: '05/2026', dueDate: '15/05/2026', status: 'paid',
-    rentFee: 18000000, electricFee: 875000, electricDetail: '250 kWh × 3.500đ/kWh',
-    waterFee: 300000, waterDetail: '20 m³ × 15.000đ/m³',
-    serviceFee: 500000, discount: 0, depositDeduction: 0,
-    total: 19675000, paymentDate: '01/05/2026', paymentMethod: 'Chuyển khoản',
-    propertyName: 'Nhà Trần Hưng Đạo', roomName: 'Nhà nguyên căn',
-  },
-];
+const TYPE_CFG: Record<ManagerInvoiceType, { label: string; icon: string; color: string; bg: string }> = {
+  RENT:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
+  ELECTRICITY: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
+  WATER:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+  SERVICE:     { label: 'Phí dịch vụ', icon: '🧾', color: '#0891B2', bg: '#CFFAFE' },
+  OTHER:       { label: 'Khoản khác', icon: '📄', color: '#059669', bg: '#ECFDF5' },
+};
 
-// ── Config ──────────────────────────────────────────────────────────────
-const STATUS_CFG: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
-  overdue: { label: 'Quá hạn', color: '#DC2626', bg: '#FEE2E2' },
-  pending: { label: 'Chưa thanh toán', color: '#D97706', bg: '#FEF3C7' },
-  paid:    { label: 'Đã thanh toán',   color: '#16A34A', bg: '#F0FDF4' },
+const STATUS_CFG: Record<ManagerInvoiceStatus, { label: string; color: string; bg: string }> = {
+  OVERDUE:   { label: 'Quá hạn',          color: '#DC2626', bg: '#FEE2E2' },
+  PENDING:   { label: 'Chưa thanh toán',  color: '#D97706', bg: '#FEF3C7' },
+  PARTIAL:   { label: 'Trả một phần',     color: '#2563EB', bg: '#DBEAFE' },
+  PAID:      { label: 'Đã thanh toán',    color: '#16A34A', bg: '#F0FDF4' },
+  CANCELLED: { label: 'Đã huỷ',           color: '#64748B', bg: '#F1F5F9' },
 };
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all',     label: 'Tất cả' },
   { key: 'overdue', label: 'Quá hạn' },
-  { key: 'pending', label: 'Chưa TT' },
-  { key: 'paid',    label: 'Đã thanh toán' },
+  { key: 'unpaid',  label: 'Chưa thu' },
+  { key: 'paid',    label: 'Đã thu' },
 ];
 
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+const matchFilter = (inv: ManagerInvoice, f: FilterKey) =>
+  f === 'all' ? true
+    : f === 'overdue' ? inv.status === 'OVERDUE'
+      : f === 'unpaid' ? inv.status === 'PENDING' || inv.status === 'OVERDUE' || inv.status === 'PARTIAL'
+        : inv.status === 'PAID';
 
-// ── Invoice Detail Modal ────────────────────────────────────────────────
+const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+const fmtDay = (iso?: string) => (iso ? iso.split('T')[0].split('-').reverse().join('/') : '—');
+
+/** "Phòng 101" / "Nhà nguyên căn" → "101" / null, để so với `roomNumber` của hoá đơn. */
+const roomNumberOf = (roomName?: string): string | null => {
+  const m = (roomName || '').match(/\d+\w*/);
+  return m ? m[0] : null;
+};
+
+// ── Chi tiết một hoá đơn ────────────────────────────────────────────────
 const InvoiceDetailModal: React.FC<{
-  invoice: TenantInvoice;
+  invoice: ManagerInvoice;
   tenantName: string;
   onClose: () => void;
 }> = ({ invoice, tenantName, onClose }) => {
-  const cfg = STATUS_CFG[invoice.status];
-  const subtotal = invoice.rentFee + invoice.electricFee + invoice.waterFee + invoice.serviceFee;
-  const isUnpaid = invoice.status !== 'paid';
-
-  const handlePay = () => {
-    showAlert(
-      'Xác nhận thanh toán',
-      `Hóa đơn ${invoice.code}\n\nThao tác này sẽ ghi nhận thanh toán cho hóa đơn tháng ${invoice.billingMonth}.`,
-      [
-        { text: 'Hủy', style: 'cancel' },
-        { text: 'Xác nhận đã thu', style: 'default', onPress: onClose },
-      ],
-    );
-  };
+  const tc = TYPE_CFG[invoice.type] ?? TYPE_CFG.OTHER;
+  const sc = STATUS_CFG[invoice.status] ?? STATUS_CFG.PENDING;
 
   return (
-    <Modal transparent animationType="slide">
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
       <View style={ds.overlay}>
         <View style={ds.sheet}>
-          <View style={ds.handle} />
-          <ScrollView
-            bounces={false}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={ds.content}
-          >
-            {/* Header */}
-            <View style={ds.header}>
-              <View style={ds.headerLeft}>
-                <Text style={ds.invoiceCode}>{invoice.code}</Text>
-                <Text style={ds.invoicePeriod}>Kỳ {invoice.billingMonth}</Text>
+          <View style={[ds.head, { backgroundColor: tc.bg }]}>
+            <View style={ds.headTop}>
+              <Text style={ds.headIcon}>{tc.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[ds.headTitle, { color: tc.color }]}>{tc.label}</Text>
+                <Text style={ds.headCode}>{invoice.code}</Text>
               </View>
-              <View style={ds.headerRight}>
-                <View style={[ds.statusBadge, { backgroundColor: cfg.bg }]}>
-                  <Text style={[ds.statusText, { color: cfg.color }]}>{cfg.label}</Text>
-                </View>
-                <TouchableOpacity onPress={onClose} style={ds.closeBtn}>
-                  <Text style={ds.closeBtnText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Tenant info */}
-            <View style={ds.section}>
-              <Text style={ds.sectionTitle}>Khách thuê</Text>
-              <View style={ds.infoRow}>
-                <Text style={ds.infoLabel}>Tên</Text>
-                <Text style={ds.infoVal}>{tenantName}</Text>
-              </View>
-              <View style={ds.infoRow}>
-                <Text style={ds.infoLabel}>Phòng / Nhà</Text>
-                <Text style={ds.infoVal}>{invoice.roomName} · {invoice.propertyName}</Text>
-              </View>
-              <View style={ds.infoRow}>
-                <Text style={ds.infoLabel}>Hạn thanh toán</Text>
-                <Text style={[ds.infoVal, isUnpaid && { color: '#DC2626', fontWeight: '700' }]}>
-                  {invoice.dueDate}
-                </Text>
-              </View>
-            </View>
-
-            {/* Overdue warning */}
-            {invoice.status === 'overdue' && !!invoice.overdueDays && (
-              <View style={ds.overdueBox}>
-                <Text style={ds.overdueText}>
-                  ⚠️ Quá hạn {invoice.overdueDays} ngày · không tính phí phạt
-                  {invoice.overdueDays >= RENT_TERMINATION_AFTER_DAYS
-                    ? ` — đã nhắc lần cuối ngày ${RENT_CYCLE.finalReminderDay}, bạn được quyền chấm dứt hợp đồng.`
-                    : ` — từ ngày ${RENT_CYCLE.terminationFromDay} mà chưa thanh toán thì được quyền chấm dứt hợp đồng.`}
-                </Text>
-              </View>
-            )}
-
-            {/* Line items */}
-            <View style={ds.section}>
-              <Text style={ds.sectionTitle}>Chi tiết hóa đơn</Text>
-              {/* Tiền thuê + mọi con số CÓ CHỨA tiền thuê (tạm tính, tổng) đều bị ẩn —
-                  xem @/constants/managerVisibility. Điện/nước/dịch vụ vẫn hiện vì
-                  manager tự chốt số và phát hành. */}
-              <View style={ds.subtotalRow}>
-                <Text style={ds.subtotalLabel}>Tiền thuê phòng</Text>
-                <Text style={ds.subtotalVal}>Hệ thống thu</Text>
-              </View>
-              <LineItem label="Tiền điện" amount={invoice.electricFee} detail={invoice.electricDetail} />
-              <LineItem label="Tiền nước" amount={invoice.waterFee} detail={invoice.waterDetail} />
-              {invoice.serviceFee > 0 && (
-                <LineItem label="Phí dịch vụ" amount={invoice.serviceFee} />
-              )}
-            </View>
-
-            {/* Tổng: chỉ nói đã/chưa thanh toán, không cộng ra tiền */}
-            <View style={ds.totalBox}>
-              <Text style={ds.totalLabel}>Tình trạng</Text>
-              <Text style={[ds.totalAmount, { fontSize: 16, color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
-                {isUnpaid ? 'Khách chưa thanh toán' : '✓ Khách đã thanh toán'}
-              </Text>
-            </View>
-            <Text style={ds.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
-
-            {/* Payment info */}
-            {invoice.status === 'paid' && (
-              <View style={ds.paidBox}>
-                <Text style={ds.paidIcon}>✓</Text>
-                <View>
-                  <Text style={ds.paidTitle}>Đã thanh toán</Text>
-                  <Text style={ds.paidSub}>
-                    {invoice.paymentDate} · {invoice.paymentMethod}
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* Pay action */}
-            {isUnpaid && (
-              <TouchableOpacity style={ds.payBtn} onPress={handlePay}>
-                <Text style={ds.payBtnText}>Xác nhận đã thu tiền</Text>
+              <TouchableOpacity onPress={onClose} hitSlop={10}>
+                <Text style={ds.close}>✕</Text>
               </TouchableOpacity>
-            )}
+            </View>
+            <Text style={[ds.headAmount, { color: tc.color }]}>{fmt(invoice.amount)}</Text>
+            <View style={[ds.statusPill, { backgroundColor: sc.bg }]}>
+              <Text style={[ds.statusText, { color: sc.color }]}>{sc.label}</Text>
+            </View>
+          </View>
+
+          <ScrollView contentContainerStyle={ds.body}>
+            <Row label="Khách thuê" value={tenantName} />
+            <Row label="Bất động sản" value={invoice.propertyName} />
+            <Row label="Phòng" value={invoice.roomNumber || 'Nhà nguyên căn'} />
+            <Row label="Kỳ" value={`Tháng ${String(invoice.month).padStart(2, '0')}/${invoice.year}`} />
+            <Row label="Hạn nộp" value={fmtDay(invoice.dueDate)} />
+            <Row label="Ngày phát hành" value={fmtDay(invoice.createdAt)} last />
+
+            {/*
+              KHÔNG có nút "Xác nhận đã thu" ở đây. Bản cũ có, nhưng nó chỉ hiện một hộp
+              thoại rồi đóng modal — không gọi API nào, không ghi nhận gì. Việc xác nhận
+              thanh toán nằm ở màn Lịch sử thanh toán (duyệt claim của khách).
+            */}
+            <Text style={ds.note}>
+              Khách trả xong thì trạng thái ở đây tự đổi. Xác nhận khoản khách báo đã
+              chuyển thì làm ở màn Lịch sử thanh toán.
+            </Text>
           </ScrollView>
         </View>
       </View>
@@ -343,392 +121,306 @@ const InvoiceDetailModal: React.FC<{
   );
 };
 
-const LineItem: React.FC<{
-  label: string;
-  amount: number;
-  detail?: string;
-  isDiscount?: boolean;
-}> = ({ label, amount, detail, isDiscount }) => (
-  <View style={ds.lineItem}>
-    <View style={ds.lineItemLeft}>
-      <Text style={ds.lineItemLabel}>{label}</Text>
-      {detail && <Text style={ds.lineItemDetail}>{detail}</Text>}
+const Row: React.FC<{ label: string; value: string; last?: boolean }> = ({ label, value, last }) => (
+  <>
+    <View style={ds.row}>
+      <Text style={ds.rowLabel}>{label}</Text>
+      <Text style={ds.rowValue}>{value}</Text>
     </View>
-    <Text style={[ds.lineItemAmount, isDiscount && { color: '#16A34A' }]}>
-      {isDiscount && amount < 0 ? '-' : ''}{fmt(Math.abs(amount))}
-    </Text>
-  </View>
+    {!last && <View style={ds.rowDivider} />}
+  </>
 );
 
-const ds = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    maxHeight: SH * 0.92,
-  },
-  handle: {
-    width: 36, height: 4, borderRadius: 2, backgroundColor: '#E2E8F0',
-    alignSelf: 'center', marginTop: 12, marginBottom: 4,
-  },
-  content: { paddingHorizontal: Spacing.xl, paddingBottom: 44, paddingTop: Spacing.md },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.md },
-  headerLeft: { flex: 1 },
-  headerRight: { alignItems: 'flex-end', gap: 8 },
-  invoiceCode: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
-  invoicePeriod: { fontSize: 13, color: '#64748B', marginTop: 2 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  statusText: { fontSize: 12, fontWeight: '700' },
-  closeBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText: { fontSize: 12, color: '#64748B', fontWeight: '700' },
-
-  section: { marginBottom: Spacing.lg },
-  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: Spacing.sm },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  infoLabel: { fontSize: 14, color: '#64748B' },
-  infoVal: { fontSize: 14, fontWeight: '600', color: '#0F172A', textAlign: 'right', flex: 1, marginLeft: 12 },
-
-  overdueBox: { backgroundColor: '#FEF2F2', borderRadius: 10, padding: 12, marginBottom: Spacing.lg, borderLeftWidth: 3, borderLeftColor: '#EF4444' },
-  overdueText: { fontSize: 13, fontWeight: '600', color: '#DC2626' },
-
-  lineItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#F8FAFC' },
-  lineItemLeft: { flex: 1 },
-  lineItemLabel: { fontSize: 14, color: '#0F172A' },
-  lineItemDetail: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  lineItemAmount: { fontSize: 14, fontWeight: '600', color: '#0F172A', marginLeft: 12 },
-
-  subtotalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, marginTop: 4 },
-  subtotalLabel: { fontSize: 13, color: '#64748B' },
-  subtotalVal: { fontSize: 13, color: '#64748B' },
-
-  totalBox: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 16, marginBottom: Spacing.md },
-  totalLabel: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  totalAmount: { fontSize: 20, fontWeight: '800' },
-  hiddenAmountNote: {
-    fontSize: 11.5, color: '#94A3B8', lineHeight: 16,
-    paddingHorizontal: Spacing.base, marginTop: Spacing.sm,
-  },
-
-  paidBox: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#F0FDF4', borderRadius: 12, padding: 14, marginBottom: Spacing.md },
-  paidIcon: { fontSize: 22 },
-  paidTitle: { fontSize: 14, fontWeight: '700', color: '#16A34A' },
-  paidSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
-
-  payBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', ...Shadow.md },
-  payBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-});
-
-// ── Invoice Card ─────────────────────────────────────────────────────────
-const InvoiceCard: React.FC<{ invoice: TenantInvoice; onPress: () => void }> = ({ invoice, onPress }) => {
-  const cfg = STATUS_CFG[invoice.status];
-  const isUnpaid = invoice.status !== 'paid';
+// ── Thẻ hoá đơn trong danh sách ─────────────────────────────────────────
+const InvoiceCard: React.FC<{ invoice: ManagerInvoice; onPress: () => void }> = ({ invoice, onPress }) => {
+  const tc = TYPE_CFG[invoice.type] ?? TYPE_CFG.OTHER;
+  const sc = STATUS_CFG[invoice.status] ?? STATUS_CFG.PENDING;
   return (
-    <TouchableOpacity
-      style={[cs.card, isUnpaid && cs.cardUnpaid]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      {/* Top row */}
-      <View style={cs.topRow}>
-        <View style={cs.monthBadge}>
-          <Text style={cs.monthText}>Tháng</Text>
-          <Text style={cs.monthNum}>{invoice.billingMonth.split('/')[0]}</Text>
-          <Text style={cs.monthYear}>{invoice.billingMonth.split('/')[1]}</Text>
-        </View>
-        <View style={cs.topCenter}>
-          <Text style={cs.invoiceCode}>{invoice.code}</Text>
-          <Text style={cs.roomText}>{invoice.roomName} · {invoice.propertyName}</Text>
-        </View>
-        <View style={[cs.statusPill, { backgroundColor: cfg.bg }]}>
-          <Text style={[cs.statusPillText, { color: cfg.color }]}>{cfg.label}</Text>
-        </View>
+    <TouchableOpacity style={cs.card} onPress={onPress} activeOpacity={0.7}>
+      <View style={[cs.iconWrap, { backgroundColor: tc.bg }]}>
+        <Text style={cs.icon}>{tc.icon}</Text>
       </View>
-
-      <View style={cs.divider} />
-
-      {/* Amounts row */}
-      <View style={cs.amountsRow}>
-        {/* Bỏ ô "Tiền thuê" — @/constants/managerVisibility. */}
-        <AmountItem label="Điện" amount={invoice.electricFee} />
-        <AmountItem label="Nước" amount={invoice.waterFee} />
-        <AmountItem label="Dịch vụ" amount={invoice.serviceFee} />
+      <View style={cs.mid}>
+        <Text style={cs.type} numberOfLines={1}>{tc.label}</Text>
+        <Text style={cs.meta} numberOfLines={1}>
+          Tháng {String(invoice.month).padStart(2, '0')}/{invoice.year} · hạn {fmtDay(invoice.dueDate)}
+        </Text>
+        <Text style={cs.code} numberOfLines={1}>{invoice.code}</Text>
       </View>
-
-      <View style={cs.divider} />
-
-      {/* Footer */}
-      <View style={cs.footer}>
-        <View>
-          <Text style={cs.dueLabel}>Hạn TT: {invoice.dueDate}</Text>
-          {invoice.status === 'overdue' && !!invoice.overdueDays && (
-            <Text style={cs.lateText}>Quá hạn {invoice.overdueDays} ngày</Text>
-          )}
-          {invoice.status === 'paid' && (
-            <Text style={cs.paidOnText}>Đã TT {invoice.paymentDate} · {invoice.paymentMethod}</Text>
-          )}
-        </View>
-        <View style={cs.totalBlock}>
-          <Text style={[cs.totalAmt, { fontSize: 12, color: isUnpaid ? '#DC2626' : '#16A34A' }]}>
-            {isUnpaid ? 'Chưa thanh toán' : '✓ Đã thanh toán'}
-          </Text>
+      <View style={cs.right}>
+        <Text style={cs.amount}>{fmt(invoice.amount)}</Text>
+        <View style={[cs.badge, { backgroundColor: sc.bg }]}>
+          <Text style={[cs.badgeText, { color: sc.color }]}>{sc.label}</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 };
 
-const AmountItem: React.FC<{ label: string; amount: number }> = ({ label, amount }) => (
-  <View style={cs.amountItem}>
-    <Text style={cs.amountLabel}>{label}</Text>
-    <Text style={cs.amountVal}>{(amount / 1000).toFixed(0)}K</Text>
-  </View>
-);
-
-const cs = StyleSheet.create({
-  card: {
-    backgroundColor: '#FFFFFF', borderRadius: 16, padding: Spacing.base,
-    marginBottom: Spacing.sm,
-    shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
-  },
-  cardUnpaid: { borderWidth: 1, borderColor: '#FCA5A5' },
-  topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  monthBadge: { width: 48, height: 52, borderRadius: 12, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' },
-  monthText: { fontSize: 8, fontWeight: '700', color: '#6366F1', textTransform: 'uppercase', letterSpacing: 0.5 },
-  monthNum: { fontSize: 20, fontWeight: '800', color: '#4F46E5', lineHeight: 24 },
-  monthYear: { fontSize: 9, color: '#6366F1', fontWeight: '600' },
-  topCenter: { flex: 1 },
-  invoiceCode: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
-  roomText: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  statusPill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },
-  statusPillText: { fontSize: 11, fontWeight: '700' },
-  divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 10 },
-  amountsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  amountItem: { flex: 1, alignItems: 'center' },
-  amountLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500' },
-  amountVal: { fontSize: 13, fontWeight: '700', color: '#334155', marginTop: 2 },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  dueLabel: { fontSize: 12, color: '#64748B' },
-  lateText: { fontSize: 11, color: '#DC2626', fontWeight: '600', marginTop: 2 },
-  paidOnText: { fontSize: 11, color: '#16A34A', marginTop: 2 },
-  totalBlock: { alignItems: 'flex-end' },
-  totalLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase' },
-  totalAmt: { fontSize: 16, fontWeight: '800' },
-});
-
-// ── Tenant Summary Pill ──────────────────────────────────────────────────
-const TenantSummaryPill: React.FC<{
-  tenantName: string; roomName: string; propertyName: string;
-}> = ({ tenantName, roomName, propertyName }) => (
-  <View style={ts.pill}>
-    <View style={ts.avatar}>
-      <Text style={ts.avatarText}>{tenantName.charAt(0)}</Text>
-    </View>
-    <View>
-      <Text style={ts.name}>{tenantName}</Text>
-      <Text style={ts.sub}>{propertyName} · {roomName}</Text>
-    </View>
-  </View>
-);
-
-const ts = StyleSheet.create({
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#EEF2FF', borderRadius: 12, padding: 12, marginBottom: Spacing.md },
-  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#C7D2FE', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 16, fontWeight: '800', color: '#4F46E5' },
-  name: { fontSize: 14, fontWeight: '700', color: '#1E1B4B' },
-  sub: { fontSize: 12, color: '#4F46E5', marginTop: 1 },
-});
-
-// ── Main Screen ──────────────────────────────────────────────────────────
+// ── Màn chính ───────────────────────────────────────────────────────────
 export const TenantInvoicesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { tenantId, tenantName, roomId, roomName, propertyId, propertyName, autoOpenFirst } =
+  const { tenantName, roomName, propertyId, propertyName, autoOpenFirst } =
     route.params as {
       tenantId: string; tenantName: string; roomId: string; roomName: string;
       propertyId: string; propertyName: string; autoOpenFirst?: boolean;
     };
 
+  const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
-  const [selectedInvoice, setSelectedInvoice] = useState<TenantInvoice | null>(null);
+  const [selected, setSelected] = useState<ManagerInvoice | null>(null);
+  const [autoOpened, setAutoOpened] = useState(false);
 
-  const allInvoices = useMemo(
-    () => MOCK_INVOICES.filter(inv => inv.tenantId === tenantId),
-    [tenantId],
-  );
+  const wantRoom = roomNumberOf(roomName);
+  const propId = Number(propertyId);
 
-  // Sort: overdue → pending → paid, then by billingMonth desc
-  const sortedInvoices = useMemo(() => {
-    const order: Record<InvoiceStatus, number> = { overdue: 0, pending: 1, paid: 2 };
-    return [...allInvoices].sort((a, b) =>
-      order[a.status] !== order[b.status]
-        ? order[a.status] - order[b.status]
-        : b.billingMonth.localeCompare(a.billingMonth),
+  /**
+   * BE chưa có tham số lọc theo hợp đồng/khách trên `/manager/invoices` (chỉ có
+   * period/status/type) nên lấy danh sách của quản lý rồi lọc tại máy theo
+   * bất động sản + số phòng. Khi BE thêm `contractId` thì bỏ phần lọc này đi.
+   */
+  const load = useCallback(async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
+    setError(null);
+    try {
+      const all = await realManagerInvoiceService.listInvoices();
+      const mine = all.filter(inv => {
+        if (inv.propertyId !== propId) return false;
+        // Nhà nguyên căn: hoá đơn không có số phòng.
+        if (!wantRoom) return !inv.roomNumber;
+        return String(inv.roomNumber ?? '') === wantRoom;
+      });
+      setInvoices(mine);
+    } catch (e: any) {
+      setInvoices([]);
+      setError(e?.response?.data?.message || e?.message || 'Không tải được hoá đơn');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [propId, wantRoom]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Khách trả xong → BE bắn INVOICE_PAID → nạp lại ngay, quản lý không phải thoát ra vào lại.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    if (event.propertyId != null && event.propertyId !== propId) return;
+    load(true);
+  });
+
+  const sorted = useMemo(() => {
+    const order: Record<string, number> = { OVERDUE: 0, PENDING: 1, PARTIAL: 2, PAID: 3, CANCELLED: 4 };
+    return [...invoices].sort((a, b) =>
+      (order[a.status] ?? 9) - (order[b.status] ?? 9)
+      || (b.year - a.year) || (b.month - a.month),
     );
-  }, [allInvoices]);
+  }, [invoices]);
 
   const filtered = useMemo(
-    () => activeFilter === 'all' ? sortedInvoices : sortedInvoices.filter(i => i.status === activeFilter),
-    [sortedInvoices, activeFilter],
+    () => sorted.filter(i => matchFilter(i, activeFilter)),
+    [sorted, activeFilter],
   );
 
   const counts = useMemo(() => ({
-    all: allInvoices.length,
-    overdue: allInvoices.filter(i => i.status === 'overdue').length,
-    pending: allInvoices.filter(i => i.status === 'pending').length,
-    paid: allInvoices.filter(i => i.status === 'paid').length,
-  }), [allInvoices]);
+    all: invoices.length,
+    overdue: invoices.filter(i => matchFilter(i, 'overdue')).length,
+    unpaid: invoices.filter(i => matchFilter(i, 'unpaid')).length,
+    paid: invoices.filter(i => matchFilter(i, 'paid')).length,
+  }), [invoices]);
 
   const totalUnpaid = useMemo(
-    () => allInvoices.filter(i => i.status !== 'paid').reduce((s, i) => s + i.total, 0),
-    [allInvoices],
+    () => invoices.filter(i => matchFilter(i, 'unpaid')).reduce((s, i) => s + (i.amount || 0), 0),
+    [invoices],
   );
 
-  // Auto-open first unpaid invoice if navigated from unpaid alert banner
-  useEffect(() => {
-    if (autoOpenFirst) {
-      const first = sortedInvoices.find(i => i.status !== 'paid');
-      if (first) setSelectedInvoice(first);
-    }
-  }, [autoOpenFirst, sortedInvoices]);
+  // Mở sẵn hoá đơn chưa thu đầu tiên khi vào từ cảnh báo nợ — chỉ làm MỘT lần.
+  React.useEffect(() => {
+    if (!autoOpenFirst || autoOpened || loading) return;
+    const first = sorted.find(i => matchFilter(i, 'unpaid'));
+    if (first) { setSelected(first); setAutoOpened(true); }
+  }, [autoOpenFirst, autoOpened, loading, sorted]);
 
   return (
-    <SafeAreaView style={ss.safe}>
-      {/* Header */}
+    <SafeAreaView style={ss.safe} edges={['top', 'left', 'right']}>
       <View style={ss.header}>
-        <TouchableOpacity style={ss.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={ss.backBtn} onPress={() => navigation.goBack()} hitSlop={8}>
           <Text style={ss.backBtnText}>‹</Text>
         </TouchableOpacity>
-        <View style={ss.headerCenter}>
-          <Text style={ss.title} numberOfLines={1}>Hóa đơn của {tenantName}</Text>
-          <Text style={ss.subtitle}>{allInvoices.length} hóa đơn</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={ss.headerTitle} numberOfLines={1}>{tenantName}</Text>
+          <Text style={ss.headerSub} numberOfLines={1}>{roomName} · {propertyName}</Text>
         </View>
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={i => i.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={ss.listContent}
-        ListHeaderComponent={
-          <>
-            {/* Tenant pill */}
-            <TenantSummaryPill
-              tenantName={tenantName}
-              roomName={roomName}
-              propertyName={propertyName}
-            />
+      {/* Tổng còn phải thu — con số quản lý cần thấy đầu tiên */}
+      <View style={ss.summary}>
+        <Text style={ss.summaryLabel}>Còn phải thu</Text>
+        <Text style={[ss.summaryValue, totalUnpaid > 0 && { color: Colors.error }]}>
+          {fmt(totalUnpaid)}
+        </Text>
+      </View>
 
-            {/* Unpaid summary banner */}
-            {totalUnpaid > 0 && (
-              <View style={ss.unpaidBanner}>
-                <Text style={ss.unpaidBannerIcon}>⚠️</Text>
-                <View style={ss.unpaidBannerBody}>
-                  <Text style={ss.unpaidBannerTitle}>Hoá đơn chưa thanh toán</Text>
-                  <Text style={ss.unpaidBannerAmount}>Khách chưa đóng đủ</Text>
-                </View>
-                <Text style={ss.unpaidBannerCount}>{counts.overdue + counts.pending} HĐ</Text>
-              </View>
-            )}
-
-            {/* Filter chips */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={ss.filterScroll}
-              contentContainerStyle={ss.filterContent}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={ss.filterRow}
+      >
+        {FILTERS.map(f => {
+          const on = activeFilter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              style={[ss.chip, on && ss.chipOn]}
+              onPress={() => setActiveFilter(f.key)}
             >
-              {FILTERS.map(f => {
-                const active = activeFilter === f.key;
-                const count = counts[f.key];
-                return (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[ss.filterChip, active && ss.filterChipActive]}
-                    onPress={() => setActiveFilter(f.key)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[ss.filterText, active && ss.filterTextActive]}>{f.label}</Text>
-                    <View style={[ss.filterBadge, active && ss.filterBadgeActive]}>
-                      <Text style={[ss.filterBadgeText, active && ss.filterBadgeTextActive]}>{count}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </>
-        }
-        renderItem={({ item }) => (
-          <InvoiceCard invoice={item} onPress={() => setSelectedInvoice(item)} />
-        )}
-        ListEmptyComponent={
-          <View style={ss.empty}>
-            <Text style={ss.emptyIcon}>🧾</Text>
-            <Text style={ss.emptyTitle}>Không có hóa đơn nào</Text>
-            <Text style={ss.emptyDesc}>
-              {activeFilter === 'all'
-                ? 'Khách thuê này chưa có hóa đơn nào.'
-                : `Không có hóa đơn "${FILTERS.find(f => f.key === activeFilter)?.label}".`}
-            </Text>
-          </View>
-        }
-      />
+              <Text style={[ss.chipText, on && ss.chipTextOn]}>
+                {f.label} {counts[f.key]}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
-      {selectedInvoice && (
+      {loading ? (
+        <View style={ss.state}><ActivityIndicator color={Colors.primary} /><Text style={ss.stateText}>Đang tải hoá đơn...</Text></View>
+      ) : error ? (
+        <View style={ss.state}>
+          <Text style={ss.stateEmoji}>⚠️</Text>
+          <Text style={ss.stateText}>{error}</Text>
+          <TouchableOpacity style={ss.retry} onPress={() => load()}>
+            <Text style={ss.retryText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={ss.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(true); }}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
+            />
+          }
+        >
+          {filtered.length === 0 ? (
+            <View style={ss.state}>
+              <Text style={ss.stateEmoji}>🧾</Text>
+              <Text style={ss.stateText}>
+                {invoices.length === 0
+                  ? 'Khách này chưa có hoá đơn nào.'
+                  : 'Không có hoá đơn nào khớp bộ lọc.'}
+              </Text>
+            </View>
+          ) : (
+            filtered.map(inv => (
+              <InvoiceCard key={inv.id} invoice={inv} onPress={() => setSelected(inv)} />
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      {selected && (
         <InvoiceDetailModal
-          invoice={selectedInvoice}
+          invoice={selected}
           tenantName={tenantName}
-          onClose={() => setSelectedInvoice(null)}
+          onClose={() => setSelected(null)}
         />
       )}
     </SafeAreaView>
   );
 };
 
+// ── Styles ──────────────────────────────────────────────────────────────
 const ss = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F8FAFC' },
-
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.md },
-  backBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  backBtnText: { fontSize: 28, color: '#0F172A', lineHeight: 32 },
-  headerCenter: { flex: 1 },
-  title: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
-  subtitle: { fontSize: 12, color: '#64748B', marginTop: 1 },
-
-  listContent: { paddingHorizontal: Spacing.lg, paddingBottom: 100, paddingTop: Spacing.sm },
-
-  unpaidBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#FEF2F2', borderRadius: 14, padding: 14,
-    marginBottom: Spacing.md, borderWidth: 1, borderColor: '#FCA5A5',
+  safe: { flex: 1, backgroundColor: Colors.background },
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  unpaidBannerIcon: { fontSize: 22 },
-  unpaidBannerBody: { flex: 1 },
-  unpaidBannerTitle: { fontSize: 13, fontWeight: '700', color: '#991B1B' },
-  unpaidBannerAmount: { fontSize: 16, fontWeight: '800', color: '#DC2626', marginTop: 2 },
-  unpaidBannerCount: { fontSize: 13, fontWeight: '700', color: '#EF4444' },
+  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 28, color: Colors.textPrimary, marginTop: -4 },
+  headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
 
-  filterScroll: { flexGrow: 0, marginBottom: Spacing.md },
-  filterContent: { flexDirection: 'row', paddingTop: 4, paddingBottom: 4 },
-  filterChip: {
-    flexShrink: 0, flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 14, paddingVertical: 9,
-    borderRadius: 999, backgroundColor: '#FFFFFF',
-    borderWidth: 1.5, borderColor: '#E2E8F0', marginRight: 8,
+  summary: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.white, marginHorizontal: Spacing.md, marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.md, borderWidth: 1, borderColor: Colors.border,
   },
-  filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterText: { fontSize: 13, fontWeight: '600', color: '#334155' },
-  filterTextActive: { color: '#FFFFFF' },
-  filterBadge: {
-    backgroundColor: '#EEF2FF', borderRadius: 999,
-    minWidth: 22, paddingHorizontal: 5, paddingVertical: 2,
-    alignItems: 'center', justifyContent: 'center', marginLeft: 6,
-  },
-  filterBadgeActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
-  filterBadgeText: { fontSize: 11, fontWeight: '700', color: '#4F46E5', includeFontPadding: false },
-  filterBadgeTextActive: { color: '#FFFFFF' },
+  summaryLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  summaryValue: { fontSize: 18, fontWeight: '900', color: Colors.textPrimary },
 
-  empty: { alignItems: 'center', paddingTop: 64, gap: 8 },
-  emptyIcon: { fontSize: 44 },
-  emptyTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
-  emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
+  filterRow: { gap: 8, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  chipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  chipTextOn: { color: Colors.white },
+
+  list: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xl },
+  state: { alignItems: 'center', paddingVertical: Spacing.xl, gap: Spacing.sm },
+  stateEmoji: { fontSize: 34 },
+  stateText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
+  retry: {
+    marginTop: Spacing.xs, backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  },
+  retryText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
+});
+
+const cs = StyleSheet.create({
+  card: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    padding: Spacing.md, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  iconWrap: { width: 40, height: 40, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center' },
+  icon: { fontSize: 18 },
+  mid: { flex: 1 },
+  type: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  meta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  code: { fontSize: 10, color: Colors.textMuted, marginTop: 1 },
+  right: { alignItems: 'flex-end', gap: 5 },
+  amount: { fontSize: 14, fontWeight: '900', color: Colors.textPrimary },
+  badge: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 3 },
+  badgeText: { fontSize: 10, fontWeight: '800' },
+});
+
+const ds = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    maxHeight: SH * 0.85, overflow: 'hidden',
+  },
+  head: { padding: Spacing.lg },
+  headTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  headIcon: { fontSize: 26 },
+  headTitle: { fontSize: 16, fontWeight: '900' },
+  headCode: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  close: { fontSize: 18, color: Colors.textMuted, fontWeight: '700' },
+  headAmount: { fontSize: 28, fontWeight: '900', marginTop: Spacing.md },
+  statusPill: { alignSelf: 'flex-start', marginTop: Spacing.sm, borderRadius: BorderRadius.full, paddingHorizontal: 12, paddingVertical: 5 },
+  statusText: { fontSize: 12, fontWeight: '800' },
+
+  body: { padding: Spacing.lg },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 11, gap: Spacing.md },
+  rowLabel: { fontSize: 13, color: Colors.textMuted, flex: 1 },
+  rowValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, flex: 2, textAlign: 'right' },
+  rowDivider: { height: 1, backgroundColor: Colors.divider },
+  note: {
+    marginTop: Spacing.lg, fontSize: 12, lineHeight: 18, color: Colors.textMuted,
+    backgroundColor: Colors.background, padding: Spacing.md, borderRadius: BorderRadius.md,
+  },
 });

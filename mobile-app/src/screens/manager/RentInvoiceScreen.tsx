@@ -1,8 +1,9 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, normalizeVi } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -63,6 +64,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
   const [terminatingId, setTerminatingId] = useState<number | null>(null);
   /** Banner chính sách mặc định thu gọn — xem chú thích chỗ render. */
   const [policyOpen, setPolicyOpen] = useState(false);
+  /** Lọc danh sách nhà — manager phụ trách nhiều khu vực thì danh sách này khá dài. */
+  const [search, setSearch] = useState('');
 
   const loadProps = useCallback(async () => {
     try {
@@ -112,6 +115,17 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
       if (!silent) setLoadingRows(false);
     }
   }, []);
+
+  /**
+   * Khách trả tiền phòng → BE bắn `INVOICE_PAID` → nạp lại bảng của toà đang xem.
+   * Nạp im lặng (`silent`) để không nháy spinner giữa lúc quản lý đang thao tác.
+   * Lọc theo `propertyId` khi event có: hoá đơn của toà khác thì bảng này không đổi gì.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID' || selectedId == null) return;
+    if (event.propertyId != null && event.propertyId !== selectedId) return;
+    loadRows(selectedId, month, true);
+  });
 
   const onSelect = (id: number) => { setSelectedId(id); loadRows(id, month); };
   const shiftMonth = (delta: number) => {
@@ -208,22 +222,34 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
     );
   };
 
-  const multi = props.filter(p => !p.wholeHouse);
-  const whole = props.filter(p => p.wholeHouse);
+  // Tìm không dấu: "nguyen can" khớp "NGUYEN_CAN", "mtx06" khớp "MTX#06".
+  const filteredProps = useMemo(() => {
+    const kw = normalizeVi(search.trim()).replace(/[^a-z0-9]/g, '');
+    if (!kw) return props;
+    return props.filter(p => normalizeVi(p.name).replace(/[^a-z0-9]/g, '').includes(kw));
+  }, [props, search]);
 
-  const renderPropRow = (p: PropItem) => (
-    <TouchableOpacity
-      key={p.id}
-      style={[s.propRow, selectedId === p.id && s.propRowActive]}
-      onPress={() => onSelect(p.id)}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={s.propName}>{p.name}</Text>
-        <Text style={s.propMeta}>{p.wholeHouse ? 'Nhà nguyên căn' : 'Nhà nhiều phòng'}</Text>
-      </View>
-      {selectedId === p.id && <Text style={s.check}>✓</Text>}
-    </TouchableOpacity>
-  );
+  const multi = filteredProps.filter(p => !p.wholeHouse);
+  const whole = filteredProps.filter(p => p.wholeHouse);
+
+  /**
+   * Một dòng MỘT HÀNG. Bản trước có thêm dòng phụ "Nhà nguyên căn" / "Nhà nhiều phòng" —
+   * lặp lại y hệt tiêu đề nhóm ngay phía trên, tốn gấp đôi chiều cao mà không thêm thông tin.
+   */
+  const renderPropRow = (p: PropItem) => {
+    const active = selectedId === p.id;
+    return (
+      <TouchableOpacity
+        key={p.id}
+        style={[s.propRow, active && s.propRowActive]}
+        onPress={() => onSelect(p.id)}
+        activeOpacity={0.7}
+      >
+        <Text style={[s.propName, active && s.propNameActive]} numberOfLines={1}>{p.name}</Text>
+        <Text style={[s.propChevron, active && s.propCheck]}>{active ? '✓' : '›'}</Text>
+      </TouchableOpacity>
+    );
+  };
 
   const renderRow = (row: RentRow) => {
     const inv = row.invoice;
@@ -339,46 +365,63 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
         {/* ── Chính sách chu kỳ ──
-            Mặc định THU GỌN: 3 đoạn text dài + 6 chip xuống dòng chiếm gần nửa màn,
-            đẩy phần chọn toà nhà (việc chính) xuống dưới. Giữ lại đúng 1 dòng tóm tắt
-            + dải mốc cuộn ngang; ai cần đọc kỹ thì bấm "Chi tiết". */}
+            Thu gọn còn ĐÚNG MỘT DÒNG. Bản trước tuy đã gọi là "thu gọn" nhưng vẫn gồm
+            tiêu đề + dòng tóm tắt + dải 6 chip mốc nhắc, chiếm gần 1/3 màn và chip thì
+            bị cắt cụt chữ. Dải mốc là thông tin tra cứu, không phải thứ cần thấy mỗi lần
+            mở màn — đẩy hết vào phần "Chi tiết". */}
         <View style={s.policyBox}>
           <TouchableOpacity
             style={s.policyHead}
             onPress={() => setPolicyOpen(o => !o)}
             activeOpacity={0.7}
           >
-            <View style={s.policyHeadText}>
-              <Text style={s.policyTitle}>🤖 Chạy hoàn toàn tự động</Text>
-              <Text style={s.policySummary} numberOfLines={1}>
-                {RENT_POLICY_SHORT} · nhắc khách tự động · trễ không phạt tiền
-              </Text>
-            </View>
+            <Text style={s.policyTitle} numberOfLines={1}>
+              🤖 Tự động · {RENT_POLICY_SHORT}
+            </Text>
             <Text style={s.policyToggle}>{policyOpen ? 'Thu gọn ▴' : 'Chi tiết ▾'}</Text>
           </TouchableOpacity>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.reminderRow}
-          >
-            {RENT_REMINDER_STEPS.map(r => (
-              <View key={r.day} style={s.reminderChip}>
-                <Text style={s.reminderChipDay}>{r.day}</Text>
-                <Text style={s.reminderChipText} numberOfLines={1}>{r.label}</Text>
-              </View>
-            ))}
-          </ScrollView>
-
           {policyOpen && (
             <View style={s.policyDetail}>
-              <Text style={s.policyText}>{RENT_POLICY_FULL}</Text>
+              {/* Dải mốc nhắc — xuống dòng tự nhiên thay vì cuộn ngang, ở đây có chỗ rộng */}
+              <View style={s.reminderRow}>
+                {RENT_REMINDER_STEPS.map(r => (
+                  <View key={r.day} style={s.reminderChip}>
+                    <Text style={s.reminderChipDay}>{r.day}</Text>
+                    <Text style={s.reminderChipText}>{r.label}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={[s.policyText, { marginTop: Spacing.sm }]}>{RENT_POLICY_FULL}</Text>
               <Text style={[s.policyText, { marginTop: 6 }]}>{RENT_PARTIAL_CYCLE_NOTE}</Text>
             </View>
           )}
         </View>
 
-        <Text style={s.sectionTitle}>Chọn tòa nhà / căn hộ</Text>
+        {/* ── Chọn nhà: tiêu đề + ô tìm gộp một hàng, đỡ tốn thêm một dòng ── */}
+        <View style={s.pickHead}>
+          <Text style={s.sectionTitle}>Chọn tòa nhà / căn hộ</Text>
+          {props.length > 0 && <Text style={s.pickCount}>{filteredProps.length}/{props.length}</Text>}
+        </View>
+
+        {props.length > 0 && (
+          <View style={s.searchWrap}>
+            <Text style={s.searchIcon}>🔍</Text>
+            <TextInput
+              style={s.searchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Tìm tòa nhà / căn hộ..."
+              placeholderTextColor={Colors.textMuted}
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+                <Text style={s.searchClear}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {loadingProps ? (
           <View style={s.state}><ActivityIndicator color={Colors.primary} /><Text style={s.stateText}>Đang tải...</Text></View>
@@ -392,11 +435,16 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
         ) : props.length === 0 ? (
           <View style={s.state}><Text style={s.stateEmoji}>🏢</Text><Text style={s.stateText}>Chưa có tòa nhà được giao</Text></View>
+        ) : filteredProps.length === 0 ? (
+          <View style={s.state}>
+            <Text style={s.stateEmoji}>🔍</Text>
+            <Text style={s.stateText}>Không có tòa nhà nào khớp “{search}”</Text>
+          </View>
         ) : (
           <>
             {multi.length > 0 && <Text style={s.groupLabel}>🏢 Nhà nhiều phòng</Text>}
             {multi.map(renderPropRow)}
-            {whole.length > 0 && <Text style={[s.groupLabel, { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>}
+            {whole.length > 0 && <Text style={[s.groupLabel, multi.length > 0 && { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>}
             {whole.map(renderPropRow)}
           </>
         )}
@@ -498,14 +546,12 @@ const s = StyleSheet.create({
     marginBottom: Spacing.md, borderLeftWidth: 3, borderLeftColor: Colors.primary,
   },
   policyHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingRight: Spacing.md },
-  policyHeadText: { flex: 1 },
-  policyTitle: { fontSize: 13, fontWeight: '800', color: Colors.primary },
-  policySummary: { fontSize: 11, color: Colors.primary, opacity: 0.75, marginTop: 1 },
+  policyTitle: { flex: 1, fontSize: 12.5, fontWeight: '800', color: Colors.primary },
   policyToggle: { fontSize: 11, fontWeight: '800', color: Colors.primary },
   policyDetail: { paddingRight: Spacing.md, marginTop: Spacing.sm },
   policyText: { fontSize: 12, color: Colors.primary, lineHeight: 18 },
-  // Dải mốc cuộn ngang: 6 mốc mà xuống dòng thì ăn 2–3 hàng, cuộn ngang giữ đúng 1 hàng.
-  reminderRow: { gap: 6, paddingRight: Spacing.md, marginTop: Spacing.sm },
+  // Nằm trong phần Chi tiết nên có chỗ rộng — cho xuống dòng tự nhiên, khỏi cắt chữ.
+  reminderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingRight: Spacing.md },
   reminderChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: Colors.white, borderRadius: BorderRadius.full,
@@ -517,15 +563,31 @@ const s = StyleSheet.create({
   },
   reminderChipText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
 
+  // Hàng chọn nhà: 1 dòng, padding dọc vừa đủ chạm tay (~44px) thay vì 2 dòng ~64px.
   propRow: {
-    flexDirection: 'row', alignItems: 'center', padding: Spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: 11, paddingHorizontal: Spacing.md,
     backgroundColor: Colors.white, borderRadius: BorderRadius.md,
-    marginBottom: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
+    marginBottom: 6, borderWidth: 1, borderColor: Colors.border,
   },
   propRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  propName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  propMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  check: { fontSize: 16, color: Colors.primary, fontWeight: '900' },
+  propName: { flex: 1, fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  propNameActive: { color: Colors.primary },
+  propChevron: { fontSize: 18, color: Colors.textMuted, fontWeight: '400' },
+  propCheck: { fontSize: 16, color: Colors.primary, fontWeight: '900' },
+
+  // ── Tiêu đề + ô tìm ──
+  pickHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pickCount: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
+    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: Spacing.md, paddingVertical: 8, marginBottom: Spacing.sm,
+  },
+  searchIcon: { fontSize: 13 },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
+  searchClear: { fontSize: 14, color: Colors.textMuted, fontWeight: '700' },
 
   state: { alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.sm },
   stateEmoji: { fontSize: 32 },

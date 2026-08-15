@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import {
   CreditCard, Receipt, Wallet, Clock, AlertTriangle, ChevronDown, Download, RefreshCw,
   Building2, ArrowDownUp, Layers, Lock, PiggyBank, ArrowRight,
@@ -179,6 +181,19 @@ export const BillingPayments = () => {
   }, [period, typeFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * Khách thanh toán → BE bắn `INVOICE_PAID` qua WebSocket → nạp lại danh sách.
+   * Refetch chứ không vá dòng tại chỗ: payload cố tình KHÔNG có số tiền, mà bảng này
+   * hiện tiền; vá bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới. Refetch cũng lo luôn
+   * trường hợp hoá đơn vừa PAID không nằm trong bộ lọc đang xem.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+    const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
+    toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+  });
   // Đổi bộ lọc client thì về trang 1.
   useEffect(() => { setPage(1); setOpenKey(null); }, [q, status, property, sort, perPage]);
 

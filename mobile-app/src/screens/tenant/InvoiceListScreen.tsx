@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity,
@@ -9,7 +10,7 @@ import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
 import { billMonthLabel, formatCurrency, formatDate, getDaysUntil } from '@/utils';
-import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
+import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
@@ -50,7 +51,7 @@ const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: str
   electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
   water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem billsStore),
+  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts),
   // nên nhãn không được để mỗi chữ "Tiền cọc".
   deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
@@ -135,6 +136,16 @@ export const InvoiceListScreen: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
+
+  /**
+   * BE bắn `INVOICE_PAID` khi khách trả xong (QR/PayOS hoặc quản lý xác nhận) → nạp lại.
+   * Refetch chứ không vá dòng: hoá đơn vừa trả có thể đang bị bộ lọc "Chưa thanh toán"
+   * loại ra, phải để danh sách tự dựng lại theo bộ lọc hiện tại.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    reload();
+  });
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 

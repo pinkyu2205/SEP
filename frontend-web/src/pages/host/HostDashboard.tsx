@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
@@ -182,6 +183,12 @@ export const Dashboard = () => {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Doanh thu / công nợ trên dashboard đổi ngay khi có hoá đơn được thanh toán.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   // ── Nhà chờ duyệt giá / đã duyệt giá ──
   const pending = useMemo(() => apiProps.filter(p => p.status === 'PENDING_HOST_REVIEW'), [apiProps]);

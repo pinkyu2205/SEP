@@ -13,7 +13,7 @@ import { exportToExcel } from '@/utils/exportExcel';
 import { hostService } from '@/services/host.service';
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
-import type { Expense, ExpenseCategory } from '@/utils/expenseStore';
+import type { Expense, ExpenseCategory } from '@/types/expense';
 import {
   CURRENT_MONTH, ChipFilter, FilterBar, MonthPicker, Pagination, SearchBox, SelectFilter, TableState,
   fmtDateTime, fmtMillion, matchVi, monthLabel, monthShort, pageSlice, shiftMonth,
@@ -37,8 +37,7 @@ const PERIODS: { key: Period; label: string }[] = [
   { key: 'month', label: 'Tháng' }, { key: 'quarter', label: 'Quý' }, { key: 'year', label: 'Năm' },
 ];
 
-// Hạng mục chi phí — khai báo tại chỗ để không kéo theo expenseStore (module đó
-// seed dữ liệu mock vào localStorage ngay khi import).
+// Hạng mục chi phí — nhãn + màu chỉ dùng ở màn này nên khai báo tại chỗ.
 const CATEGORY_META: Record<ExpenseCategory, { label: string; color: string; dot: string }> = {
   lease: { label: 'Thuê nhà (chủ nhà)', color: 'bg-indigo-50 text-indigo-700', dot: 'bg-indigo-500' },
   maintenance: { label: 'Bảo trì', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },

@@ -8,7 +8,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, BorderRadius, Shadow, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants';
 import { billMonthLabel, formatCurrency, formatDate, showAlert } from '@/utils';
-import { SharedBill, InvoiceType } from '@/store/billsStore';
+import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 
 /**

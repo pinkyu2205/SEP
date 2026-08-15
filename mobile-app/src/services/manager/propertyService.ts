@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SESSION_KEYS } from '@/services/core/session';
 import { realPropertyService, ApiProperty, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { ManagedProperty, WholeHouseRentalStatus } from '@/data/managedProperties';
+import { ManagedProperty, WholeHouseRentalStatus } from '@/types/managedProperty';
 
 /**
  * Adapter nối màn "Quản lý toà nhà" (BuildingListScreen) với backend Spring THẬT.

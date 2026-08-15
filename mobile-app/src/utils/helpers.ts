@@ -391,3 +391,11 @@ export const formatRelativeTime = (dateStr: string): string => {
   if (diffDays < 7) return `${diffDays} ngày trước`;
   return formatDate(dateStr);
 };
+
+/**
+ * Bỏ dấu tiếng Việt + hạ chữ thường để tìm kiếm gõ không dấu:
+ * "thu duc" khớp "Thủ Đức", "nguyen can" khớp "NGUYEN_CAN".
+ * (Bản song sinh của `normalizeVi` bên frontend-web/src/utils/helpers.ts.)
+ */
+export const normalizeVi = (s: string): string =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();

@@ -1,346 +1,293 @@
-import React, { useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, FlatList,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
-import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
-import type { EquipmentLifecycleStatus } from '@/types';
-import { serverNow } from '@/utils/serverTime';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realPropertyService, type ApiProperty, type ApiRoom } from '@/services/manager/propertyApi';
+import type {
+  EquipmentDto,
+  EquipmentLifecycleStatus,
+  EquipmentMaintenanceHistoryDto,
+} from '@/types';
+import {
+  formatCurrency, formatDate, formatDateTime,
+  getEquipmentLifecycleLabel, getEquipmentLifecycleColor, getHouseAreaLabel,
+  normalizeVi, readApiError, showAlert,
+} from '@/utils';
 
-// ===================== TYPES =====================
-type EquipmentStatus = 'active' | 'repairing' | 'damaged' | 'replaced' | 'retired';
-type EquipmentPropertyType = 'MULTI_ROOM' | 'WHOLE_HOUSE';
+/**
+ * Trang thiết bị (Operations Manager) — 100% dữ liệu thật.
+ *
+ * Trước 15/08/2026 màn này chạy trên MOCK_HOUSES + MOCK_EQUIPMENT: 4 căn nhà và 10
+ * thiết bị viết cứng trong file, nút "Thêm" chỉ push vào state, đổi trạng thái chỉ
+ * đổi màu chip. Manager nhìn vào tưởng đang quản lý kho thật.
+ *
+ * Nguồn dữ liệu hiện tại:
+ *   • Nhà      → managerPropertyService.getScopedProperties()  (lọc theo manager đăng nhập)
+ *   • Phòng    → GET /api/v1/properties/{id}/rooms             (chỉ để chọn phòng khi thêm)
+ *   • Thiết bị → GET /api/v1/properties/{id}/equipments
+ *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status-feature
+ *   • Thêm     → POST  /api/v1/properties/{id}/equipments
+ *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-history-feature
+ *
+ * Trạng thái dùng thẳng enum EquipmentStatus của BE (6 giá trị) thay vì bộ 5 nhãn cũ
+ * của FE — bộ cũ phải map lossy (replaced/retired đều thành DISPOSED) nên bấm xong
+ * load lại là nhãn nhảy sang chỗ khác.
+ */
 
-interface MaintenanceRecord {
-  id: string;
-  date: string;
-  type: 'repair' | 'maintenance' | 'replacement';
-  description: string;
-  cost: number;
-  performedBy: string;
-  ticketCode?: string;
-}
-
-interface EquipmentItem {
-  id: string;
-  assetId: string;
-  name: string;
-  houseId: string;
-  houseName: string;
-  roomName: string;
-  propertyType?: EquipmentPropertyType;
-  category: string;
-  brand?: string;
-  model?: string;
-  qrCode: string;
-  status: EquipmentStatus;
-  installationDate: string;
-  purchasePrice?: number;
-  warrantyExpiry?: string;
-  lastMaintenanceAt?: string;
-  maintenanceHistory: MaintenanceRecord[];
-  currentTenantName?: string;
-  notes?: string;
-}
-
-// ===================== MOCK DATA =====================
-const MOCK_HOUSES = [
-  { id: 'h1', name: 'Nhà Nguyễn Trãi', propertyType: 'MULTI_ROOM' as EquipmentPropertyType },
-  { id: 'h2', name: 'Nhà Lê Văn Sỹ', propertyType: 'MULTI_ROOM' as EquipmentPropertyType },
-  { id: 'house-1', name: 'Nhà Nguyễn Văn Cừ', propertyType: 'WHOLE_HOUSE' as EquipmentPropertyType },
-  { id: 'house-3', name: 'Nhà Trần Hưng Đạo', propertyType: 'WHOLE_HOUSE' as EquipmentPropertyType },
+// ===================== HẰNG SỐ =====================
+const STATUS_ORDER: EquipmentLifecycleStatus[] = [
+  'NEW', 'GOOD', 'MAINTENANCE', 'DAMAGED', 'BROKEN', 'DISPOSED',
 ];
 
-const MOCK_EQUIPMENT: EquipmentItem[] = [
-  {
-    id: 'eq1', assetId: 'AST-2024-001', name: 'Điều hòa Daikin 9000BTU',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    category: 'Điện lạnh', brand: 'Daikin', model: 'FTKC25TVMV',
-    qrCode: 'QR-NT-101-AC', status: 'active',
-    installationDate: '01/01/2024', purchasePrice: 8500000,
-    warrantyExpiry: '01/01/2026', lastMaintenanceAt: '15/03/2026',
-    currentTenantName: 'Trần Văn A',
-    maintenanceHistory: [
-      { id: 'm1', date: '15/03/2026', type: 'maintenance', description: 'Vệ sinh định kỳ, nạp gas', cost: 350000, performedBy: 'Thợ Minh' },
-      { id: 'm2', date: '10/09/2025', type: 'maintenance', description: 'Vệ sinh định kỳ', cost: 200000, performedBy: 'Thợ Minh' },
-    ],
-  },
-  {
-    id: 'eq2', assetId: 'AST-2024-002', name: 'Bình nước nóng Ariston 30L',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    category: 'Điện nước', brand: 'Ariston', model: 'SLIM2 30V',
-    qrCode: 'QR-NT-101-WH', status: 'active',
-    installationDate: '01/01/2024', purchasePrice: 4200000,
-    warrantyExpiry: '01/01/2027', currentTenantName: 'Trần Văn A',
-    maintenanceHistory: [],
-  },
-  {
-    id: 'eq3', assetId: 'AST-2024-003', name: 'Giường 1m6 + Nệm',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    category: 'Nội thất', qrCode: 'QR-NT-101-BD', status: 'active',
-    installationDate: '01/01/2024', purchasePrice: 5000000,
-    currentTenantName: 'Trần Văn A', maintenanceHistory: [],
-  },
-  {
-    id: 'eq5', assetId: 'AST-2024-005', name: 'Điều hòa Panasonic 9000BTU',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'P102',
-    category: 'Điện lạnh', brand: 'Panasonic', model: 'CS-N9VKH-8',
-    qrCode: 'QR-NT-102-AC', status: 'repairing',
-    installationDate: '01/01/2024', purchasePrice: 7800000,
-    warrantyExpiry: '01/01/2026', lastMaintenanceAt: '10/05/2026',
-    currentTenantName: 'Lê Thị B',
-    maintenanceHistory: [
-      { id: 'm3', date: '10/05/2026', type: 'repair', description: 'Board mạch bị lỗi, đang chờ phụ kiện', cost: 0, performedBy: 'Trung tâm BH Panasonic', ticketCode: 'TK-2026-003' },
-    ],
-  },
-  {
-    id: 'eq6', assetId: 'AST-2023-006', name: 'Tủ lạnh Sanyo 90L cũ',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    category: 'Thiết bị', brand: 'Sanyo', qrCode: 'QR-NT-201-FR',
-    status: 'replaced', installationDate: '15/06/2023', purchasePrice: 2500000,
-    currentTenantName: 'Phạm Văn C',
-    notes: 'Đã thay bằng Aqua 90L mới (AST-2026-015)',
-    maintenanceHistory: [
-      { id: 'm4', date: '20/04/2026', type: 'replacement', description: 'Tủ bị hỏng máy nén, quyết định thanh lý và mua mới', cost: 0, performedBy: 'Manager' },
-    ],
-  },
-  {
-    id: 'eq7', assetId: 'AST-2024-007', name: 'Máy giặt Toshiba 8kg',
-    houseId: 'h2', houseName: 'Nhà Lê Văn Sỹ', roomName: 'P201',
-    category: 'Thiết bị', brand: 'Toshiba', model: 'AW-M905BV',
-    qrCode: 'QR-LVS-201-WM', status: 'active',
-    installationDate: '15/02/2024', purchasePrice: 5500000,
-    warrantyExpiry: '15/02/2026', maintenanceHistory: [],
-  },
-  {
-    id: 'eq9', assetId: 'AST-2022-009', name: 'Máy bơm nước tổng',
-    houseId: 'h1', houseName: 'Nhà Nguyễn Trãi', roomName: 'Khu vực chung',
-    category: 'Hạ tầng', brand: 'Pentax', model: 'CM 50-200A',
-    qrCode: 'QR-NT-COM-WP', status: 'active',
-    installationDate: '01/06/2022', purchasePrice: 12000000,
-    warrantyExpiry: '01/06/2024', lastMaintenanceAt: '01/01/2026',
-    maintenanceHistory: [
-      { id: 'm5', date: '01/01/2026', type: 'maintenance', description: 'Kiểm tra tổng thể đầu năm, bơm còn tốt', cost: 500000, performedBy: 'Thợ Hùng' },
-    ],
-  },
-  {
-    id: 'eq-house-1', assetId: 'AST-NVC-001', name: 'Máy lạnh phòng khách Daikin 2HP',
-    houseId: 'house-1', houseName: 'Nhà Nguyễn Văn Cừ', roomName: 'Toàn bộ nhà',
-    propertyType: 'WHOLE_HOUSE',
-    category: 'Điện lạnh', brand: 'Daikin', model: 'FTKC50',
-    qrCode: 'QR-NVC-AC-01', status: 'active',
-    installationDate: '01/01/2026', purchasePrice: 18500000,
-    warrantyExpiry: '01/01/2028', currentTenantName: 'Gia đình anh Minh',
-    maintenanceHistory: [],
-  },
-  {
-    id: 'eq-house-2', assetId: 'AST-NVC-002', name: 'Máy bơm nước Pentax',
-    houseId: 'house-1', houseName: 'Nhà Nguyễn Văn Cừ', roomName: 'Toàn bộ nhà',
-    propertyType: 'WHOLE_HOUSE',
-    category: 'Hạ tầng', brand: 'Pentax', model: 'CM 100',
-    qrCode: 'QR-NVC-PUMP-01', status: 'repairing',
-    installationDate: '01/01/2026', purchasePrice: 9500000,
-    lastMaintenanceAt: '20/05/2026', currentTenantName: 'Gia đình anh Minh',
-    maintenanceHistory: [
-      { id: 'm-house-1', date: '20/05/2026', type: 'repair', description: 'Máy bơm yếu, đang kiểm tra tụ và đường cấp nước', cost: 450000, performedBy: 'Thợ Hùng', ticketCode: 'TK-NVC-001' },
-    ],
-  },
-  {
-    id: 'eq-house-3', assetId: 'AST-THD-001', name: 'Tủ điện tổng 3 pha',
-    houseId: 'house-3', houseName: 'Nhà Trần Hưng Đạo', roomName: 'Toàn bộ nhà',
-    propertyType: 'WHOLE_HOUSE',
-    category: 'Hạ tầng', brand: 'Schneider',
-    qrCode: 'QR-THD-POWER-01', status: 'active',
-    installationDate: '15/06/2025', purchasePrice: 22000000,
-    currentTenantName: 'Công ty An Phú',
-    maintenanceHistory: [],
-  },
-];
-
-const STATUS_CONFIG: Record<EquipmentStatus, { label: string; color: string; bg: string; icon: string }> = {
-  active: { label: 'Hoạt động', color: '#16A34A', bg: '#F0FDF4', icon: '✅' },
-  repairing: { label: 'Đang sửa', color: '#F59E0B', bg: '#FFFBEB', icon: '🔧' },
-  damaged: { label: 'Hỏng', color: '#EF4444', bg: '#FEF2F2', icon: '❌' },
-  replaced: { label: 'Đã thay', color: '#6B7280', bg: '#F3F4F6', icon: '🔄' },
-  retired: { label: 'Thanh lý', color: '#94A3B8', bg: '#F8FAFC', icon: '♻️' },
+const STATUS_ICON: Record<EquipmentLifecycleStatus, string> = {
+  NEW: '🆕', GOOD: '✅', MAINTENANCE: '🔧', DAMAGED: '⚠️', BROKEN: '❌', DISPOSED: '♻️',
 };
 
-const CATEGORIES = ['Tất cả', 'Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng'];
+/** Chip lọc nhanh — không liệt kê đủ 6 trạng thái cho đỡ rối, phần còn lại nằm ở "Tất cả". */
+const QUICK_FILTERS: (EquipmentLifecycleStatus | 'all')[] = [
+  'all', 'GOOD', 'MAINTENANCE', 'BROKEN', 'DISPOSED',
+];
 
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+const SOURCE_LABEL: Record<string, string> = {
+  INITIAL_HANDOVER: 'Có sẵn khi nhận nhà',
+  PURCHASED: 'Công ty mua mới',
+  ADDED_BY_TENANT: 'Khách lắp thêm',
+};
 
-const MAINTENANCE_TYPE_LABELS = { repair: 'Sửa chữa', maintenance: 'Bảo trì định kỳ', replacement: 'Thay thế' };
+/** Gợi ý danh mục khi thêm thiết bị — BE nhận chuỗi tự do nên đây chỉ là phím tắt. */
+const CATEGORY_SUGGESTIONS = ['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng'];
 
-// ===================== EQUIPMENT DETAIL MODAL =====================
+const UNCATEGORIZED = 'Chưa phân loại';
+const COMMON_AREA = 'Khu vực chung';
+
+// ===================== TIỆN ÍCH =====================
+const eqName = (e: EquipmentDto): string =>
+  e.equipmentName?.trim() || e.catalogName?.trim() || `Thiết bị #${e.id}`;
+
+const eqCategory = (e: EquipmentDto): string => e.category?.trim() || UNCATEGORIZED;
+
+/** Nhóm hiển thị: phòng nào, hay gắn thẳng vào nhà. */
+const eqGroup = (e: EquipmentDto, wholeHouse: boolean): string => {
+  const room = e.roomNumber?.trim() || e.roomName?.trim();
+  if (room) return room;
+  return wholeHouse ? 'Toàn bộ nhà' : COMMON_AREA;
+};
+
+const eqWarrantyEnd = (e: EquipmentDto): string | null | undefined =>
+  e.warrantyEndDate ?? e.warrantyExpiredDate;
+
+const eqInstalled = (e: EquipmentDto): string | null | undefined =>
+  e.installationDate ?? e.warrantyStartDate;
+
+// ===================== MODAL CHI TIẾT =====================
 const EquipmentDetailModal: React.FC<{
-  item: EquipmentItem;
+  item: EquipmentDto;
+  wholeHouse: boolean;
+  houseName: string;
   onClose: () => void;
-  onStatusChange: (id: string, status: EquipmentStatus) => void;
-}> = ({ item, onClose, onStatusChange }) => {
-  const cfg = STATUS_CONFIG[item.status];
+  onStatusChange: (id: number, status: EquipmentLifecycleStatus) => Promise<void>;
+}> = ({ item, wholeHouse, houseName, onClose, onStatusChange }) => {
+  const cfg = getEquipmentLifecycleColor(item.status);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const totalMaintenanceCost = item.maintenanceHistory.reduce((s, r) => s + r.cost, 0);
+  const [history, setHistory] = useState<EquipmentMaintenanceHistoryDto[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    realEquipmentService
+      .getMaintenanceHistory(item.id)
+      .then((rows) => { if (alive) setHistory(rows ?? []); })
+      .catch((err) => {
+        if (alive) setHistoryError(readApiError(err, 'Không tải được lịch sử bảo trì.'));
+      })
+      .finally(() => { if (alive) setHistoryLoading(false); });
+    return () => { alive = false; };
+  }, [item.id]);
+
+  const totalRepairCost = history.reduce((s, r) => s + (Number(r.repairCost) || 0), 0);
+  const disabled = item.operationalStatus === 'DISABLED';
+
+  const pickStatus = async (status: EquipmentLifecycleStatus) => {
+    setShowStatusPicker(false);
+    setSaving(true);
+    try {
+      await onStatusChange(item.id, status);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <Modal transparent animationType="slide">
+    <Modal transparent animationType="slide" onRequestClose={onClose}>
       <View style={detailStyles.overlay}>
         <ScrollView bounces={false}>
           <View style={detailStyles.content}>
             {/* Header */}
             <View style={detailStyles.header}>
-              <Text style={detailStyles.title}>{item.name}</Text>
+              <Text style={detailStyles.title}>{eqName(item)}</Text>
               <TouchableOpacity onPress={onClose}>
                 <Text style={detailStyles.closeBtn}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Status + Asset ID */}
+            {/* Trạng thái + mã */}
             <View style={detailStyles.idRow}>
               <View style={[detailStyles.statusBadge, { backgroundColor: cfg.bg }]}>
-                <Text style={detailStyles.statusIcon}>{cfg.icon}</Text>
-                <Text style={[detailStyles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+                <Text style={detailStyles.statusIcon}>{STATUS_ICON[item.status] ?? '•'}</Text>
+                <Text style={[detailStyles.statusText, { color: cfg.text }]}>
+                  {getEquipmentLifecycleLabel(item.status)}
+                </Text>
               </View>
-              <Text style={detailStyles.assetId}>#{item.assetId}</Text>
+              <Text style={detailStyles.assetId}>#{item.id}</Text>
             </View>
 
-            {/* QR Code */}
-            <View style={detailStyles.qrBox}>
-              <View style={detailStyles.qrVisual}>
-                <Text style={{ fontSize: 48 }}>📱</Text>
+            {disabled && (
+              <View style={detailStyles.disabledBox}>
+                <Text style={detailStyles.disabledTitle}>Đã gỡ khỏi phòng</Text>
+                <Text style={detailStyles.disabledText}>
+                  Thiết bị không còn tính vào biên bản bàn giao của khách đang thuê
+                  {item.disabledReason ? ` · Lý do: ${item.disabledReason}` : ''}
+                </Text>
+              </View>
+            )}
+
+            {/* QR — chỉ hiện khi BE thực sự có mã */}
+            {item.qrCode ? (
+              <View style={detailStyles.qrBox}>
+                <Text style={{ fontSize: 40 }}>📱</Text>
                 <Text style={detailStyles.qrCode}>{item.qrCode}</Text>
+                <Text style={detailStyles.qrHint}>
+                  Dán mã QR này lên thiết bị để khách scan báo sự cố
+                </Text>
               </View>
-              <Text style={detailStyles.qrHint}>Dán mã QR này lên thiết bị để khách scan báo sự cố</Text>
-            </View>
+            ) : null}
 
-            {/* Info */}
+            {/* Thông tin */}
             <View style={detailStyles.section}>
               <Text style={detailStyles.sectionTitle}>Chi tiết thiết bị</Text>
-              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Loại tài sản</Text><Text style={detailStyles.infoVal}>{item.propertyType === 'WHOLE_HOUSE' ? 'Nhà nguyên căn' : 'Tòa nhà nhiều phòng'}</Text></View>
-              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Vị trí</Text><Text style={detailStyles.infoVal}>{item.houseName} · {item.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : item.roomName}</Text></View>
-              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Danh mục</Text><Text style={detailStyles.infoVal}>{item.category}</Text></View>
-              {item.brand && <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Hãng</Text><Text style={detailStyles.infoVal}>{item.brand}{item.model ? ` - ${item.model}` : ''}</Text></View>}
-              {item.purchasePrice && <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Giá mua</Text><Text style={[detailStyles.infoVal, { color: Colors.primary }]}>{fmt(item.purchasePrice)}</Text></View>}
-              <View style={detailStyles.infoRow}><Text style={detailStyles.infoLabel}>Lắp đặt</Text><Text style={detailStyles.infoVal}>{item.installationDate}</Text></View>
-              {item.warrantyExpiry && (
-                <View style={detailStyles.infoRow}>
-                  <Text style={detailStyles.infoLabel}>Bảo hành</Text>
-                  <Text style={[detailStyles.infoVal, { color: Colors.warning }]}>
-                    Hết: {item.warrantyExpiry}
-                  </Text>
-                </View>
-              )}
-              {item.currentTenantName && (
-                <View style={detailStyles.infoRow}>
-                  <Text style={detailStyles.infoLabel}>Người đang dùng</Text>
-                  <Text style={[detailStyles.infoVal, { color: Colors.primary }]}>{item.currentTenantName}</Text>
-                </View>
-              )}
-              {item.lastMaintenanceAt && (
-                <View style={detailStyles.infoRow}>
-                  <Text style={detailStyles.infoLabel}>Bảo trì gần nhất</Text>
-                  <Text style={detailStyles.infoVal}>{item.lastMaintenanceAt}</Text>
-                </View>
-              )}
+              <Row label="Vị trí" value={`${houseName} · ${eqGroup(item, wholeHouse)}`} />
+              <Row label="Danh mục" value={eqCategory(item)} />
+              {item.houseArea ? <Row label="Khu vực" value={getHouseAreaLabel(item.houseArea)} /> : null}
+              {item.source ? <Row label="Nguồn gốc" value={SOURCE_LABEL[item.source] ?? item.source} /> : null}
+              {item.price != null ? (
+                <Row label="Giá trị" value={formatCurrency(Number(item.price))} highlight />
+              ) : null}
+              <Row label="Lắp đặt" value={formatDate(eqInstalled(item))} />
+              {eqWarrantyEnd(item) ? (
+                <Row label="Bảo hành đến" value={formatDate(eqWarrantyEnd(item))} warn />
+              ) : null}
+              {item.penaltyFee != null ? (
+                <Row label="Phạt nếu hư" value={formatCurrency(Number(item.penaltyFee))} warn />
+              ) : null}
+              {item.lastMaintenanceDate ? (
+                <Row label="Bảo trì gần nhất" value={formatDate(item.lastMaintenanceDate)} />
+              ) : null}
+              {item.note ? <Row label="Ghi chú" value={item.note} /> : null}
             </View>
 
-            {/* Status change */}
+            {/* Đổi trạng thái */}
             <View style={detailStyles.section}>
               <Text style={detailStyles.sectionTitle}>Cập nhật trạng thái</Text>
               <TouchableOpacity
                 style={detailStyles.statusPickerBtn}
+                disabled={saving}
                 onPress={() => setShowStatusPicker(true)}
               >
-                <Text style={[detailStyles.statusPickerText, { color: cfg.color }]}>
-                  {cfg.icon} {cfg.label}
-                </Text>
-                <Text style={detailStyles.statusPickerArrow}>▼</Text>
+                {saving ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <>
+                    <Text style={[detailStyles.statusPickerText, { color: cfg.text }]}>
+                      {STATUS_ICON[item.status] ?? '•'} {getEquipmentLifecycleLabel(item.status)}
+                    </Text>
+                    <Text style={detailStyles.statusPickerArrow}>▼</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
 
-            {/* Maintenance history */}
+            {/* Lịch sử bảo trì */}
             <View style={detailStyles.section}>
               <View style={detailStyles.historyHeader}>
                 <Text style={detailStyles.sectionTitle}>
-                  Lịch sử bảo trì ({item.maintenanceHistory.length})
+                  Lịch sử bảo trì{historyLoading ? '' : ` (${history.length})`}
                 </Text>
-                {totalMaintenanceCost > 0 && (
-                  <Text style={detailStyles.totalCost}>Tổng: {fmt(totalMaintenanceCost)}</Text>
+                {totalRepairCost > 0 && (
+                  <Text style={detailStyles.totalCost}>Tổng: {formatCurrency(totalRepairCost)}</Text>
                 )}
               </View>
-              {item.maintenanceHistory.length === 0 ? (
+
+              {historyLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} style={{ alignSelf: 'flex-start' }} />
+              ) : historyError ? (
+                <Text style={detailStyles.historyErr}>{historyError}</Text>
+              ) : history.length === 0 ? (
                 <Text style={detailStyles.noHistory}>Chưa có lịch sử bảo trì</Text>
               ) : (
-                item.maintenanceHistory.map((record, i) => (
+                history.map((record) => (
                   <View key={record.id} style={detailStyles.historyCard}>
                     <View style={detailStyles.historyCardHeader}>
-                      <View style={[detailStyles.historyTypeBadge, {
-                        backgroundColor: record.type === 'repair' ? Colors.warningLight
-                          : record.type === 'replacement' ? Colors.infoLight
-                          : Colors.successLight
-                      }]}>
-                        <Text style={[detailStyles.historyTypeText, {
-                          color: record.type === 'repair' ? Colors.warning
-                            : record.type === 'replacement' ? Colors.info
-                            : Colors.success
-                        }]}>{MAINTENANCE_TYPE_LABELS[record.type]}</Text>
-                      </View>
-                      <Text style={detailStyles.historyDate}>{record.date}</Text>
+                      <Text style={detailStyles.historyTicket}>#{record.requestCode}</Text>
+                      <Text style={detailStyles.historyDate}>
+                        {formatDateTime(record.maintenanceDate)}
+                      </Text>
                     </View>
-                    <Text style={detailStyles.historyDesc}>{record.description}</Text>
-                    <View style={detailStyles.historyFooter}>
-                      <Text style={detailStyles.historyBy}>👤 {record.performedBy}</Text>
-                      {record.cost > 0 && (
-                        <Text style={detailStyles.historyCost}>{fmt(record.cost)}</Text>
-                      )}
-                      {record.ticketCode && (
-                        <Text style={detailStyles.historyTicket}>#{record.ticketCode}</Text>
-                      )}
-                    </View>
+                    {record.note ? (
+                      <Text style={detailStyles.historyDesc}>{record.note}</Text>
+                    ) : null}
+                    {Number(record.repairCost) > 0 && (
+                      <Text style={detailStyles.historyCost}>
+                        {formatCurrency(Number(record.repairCost))}
+                      </Text>
+                    )}
                   </View>
                 ))
               )}
             </View>
-
-            {item.notes && (
-              <View style={detailStyles.notesBox}>
-                <Text style={detailStyles.notesLabel}>Ghi chú</Text>
-                <Text style={detailStyles.notesText}>{item.notes}</Text>
-              </View>
-            )}
 
             <View style={{ height: 40 }} />
           </View>
         </ScrollView>
       </View>
 
-      {/* Status Picker */}
+      {/* Chọn trạng thái */}
       {showStatusPicker && (
-        <Modal transparent animationType="fade">
+        <Modal transparent animationType="fade" onRequestClose={() => setShowStatusPicker(false)}>
           <TouchableOpacity
             style={detailStyles.pickerOverlay}
+            activeOpacity={1}
             onPress={() => setShowStatusPicker(false)}
           >
             <View style={detailStyles.pickerContent}>
               <Text style={detailStyles.pickerTitle}>Cập nhật trạng thái</Text>
-              {(Object.entries(STATUS_CONFIG) as [EquipmentStatus, typeof STATUS_CONFIG[EquipmentStatus]][]).map(([key, val]) => (
-                <TouchableOpacity
-                  key={key}
-                  style={[detailStyles.pickerOption, item.status === key && detailStyles.pickerOptionActive]}
-                  onPress={() => {
-                    onStatusChange(item.id, key);
-                    setShowStatusPicker(false);
-                    onClose();
-                  }}
-                >
-                  <Text style={detailStyles.pickerOptionIcon}>{val.icon}</Text>
-                  <Text style={[detailStyles.pickerOptionText, { color: val.color }]}>{val.label}</Text>
-                  {item.status === key && <Text style={detailStyles.pickerCheck}>✓</Text>}
-                </TouchableOpacity>
-              ))}
+              {STATUS_ORDER.map((key) => {
+                const c = getEquipmentLifecycleColor(key);
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[detailStyles.pickerOption, item.status === key && detailStyles.pickerOptionActive]}
+                    onPress={() => pickStatus(key)}
+                  >
+                    <Text style={detailStyles.pickerOptionIcon}>{STATUS_ICON[key]}</Text>
+                    <Text style={[detailStyles.pickerOptionText, { color: c.text }]}>
+                      {getEquipmentLifecycleLabel(key)}
+                    </Text>
+                    {item.status === key && <Text style={detailStyles.pickerCheck}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </TouchableOpacity>
         </Modal>
@@ -348,6 +295,23 @@ const EquipmentDetailModal: React.FC<{
     </Modal>
   );
 };
+
+const Row: React.FC<{ label: string; value: string; highlight?: boolean; warn?: boolean }> = ({
+  label, value, highlight, warn,
+}) => (
+  <View style={detailStyles.infoRow}>
+    <Text style={detailStyles.infoLabel}>{label}</Text>
+    <Text
+      style={[
+        detailStyles.infoVal,
+        highlight && { color: Colors.primary },
+        warn && { color: Colors.warning },
+      ]}
+    >
+      {value}
+    </Text>
+  </View>
+);
 
 const detailStyles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -362,14 +326,19 @@ const detailStyles = StyleSheet.create({
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full },
   statusIcon: { fontSize: 14 },
   statusText: { fontSize: 13, fontWeight: '700' },
-  assetId: { fontSize: 13, fontWeight: '600', color: Colors.textMuted, fontFamily: 'monospace' },
+  assetId: { fontSize: 13, fontWeight: '600', color: Colors.textMuted },
+  disabledBox: {
+    backgroundColor: Colors.background, borderRadius: BorderRadius.md, padding: Spacing.md,
+    borderLeftWidth: 3, borderLeftColor: Colors.textMuted, marginBottom: Spacing.lg,
+  },
+  disabledTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
+  disabledText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   qrBox: {
     backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.xl,
     padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.lg,
   },
-  qrVisual: { alignItems: 'center', marginBottom: Spacing.sm },
   qrCode: { fontSize: 16, fontWeight: '800', color: Colors.primary, marginTop: 4, letterSpacing: 1 },
-  qrHint: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center' },
+  qrHint: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm },
   section: { marginBottom: Spacing.lg },
   sectionTitle: {
     fontSize: 13, fontWeight: '700', color: Colors.textSecondary,
@@ -384,29 +353,23 @@ const detailStyles = StyleSheet.create({
   statusPickerBtn: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, borderWidth: 1.5, borderColor: Colors.border,
+    padding: Spacing.base, borderWidth: 1.5, borderColor: Colors.border, minHeight: 52,
   },
   statusPickerText: { fontSize: 15, fontWeight: '700' },
   statusPickerArrow: { fontSize: 12, color: Colors.textMuted },
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.sm },
   totalCost: { fontSize: 13, fontWeight: '700', color: Colors.error },
   noHistory: { fontSize: 14, color: Colors.textMuted, fontStyle: 'italic' },
+  historyErr: { fontSize: 13, color: Colors.error },
   historyCard: {
     backgroundColor: Colors.background, borderRadius: BorderRadius.md,
     padding: Spacing.md, marginBottom: Spacing.sm,
   },
   historyCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.xs },
-  historyTypeBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
-  historyTypeText: { fontSize: 11, fontWeight: '700' },
   historyDate: { fontSize: 12, color: Colors.textMuted },
-  historyDesc: { fontSize: 13, color: Colors.textPrimary, marginBottom: Spacing.sm, lineHeight: 18 },
-  historyFooter: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  historyBy: { fontSize: 12, color: Colors.textSecondary, flex: 1 },
+  historyDesc: { fontSize: 13, color: Colors.textPrimary, marginBottom: Spacing.xs, lineHeight: 18 },
   historyCost: { fontSize: 13, fontWeight: '700', color: Colors.error },
-  historyTicket: { fontSize: 11, color: Colors.primary, fontWeight: '600' },
-  notesBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.md, padding: Spacing.md, borderLeftWidth: 3, borderLeftColor: Colors.warning },
-  notesLabel: { fontSize: 12, fontWeight: '700', color: Colors.textMuted, marginBottom: 4 },
-  notesText: { fontSize: 13, color: Colors.textSecondary },
+  historyTicket: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: Spacing.xl },
   pickerContent: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.xl },
   pickerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.lg },
@@ -417,102 +380,189 @@ const detailStyles = StyleSheet.create({
   pickerCheck: { fontSize: 16, color: Colors.primary, fontWeight: '800' },
 });
 
-// ===================== MAIN COMPONENT =====================
+// ===================== MÀN CHÍNH =====================
 export const EquipmentScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [equipments, setEquipments] = useState(MOCK_EQUIPMENT);
-  const [selectedHouseId, setSelectedHouseId] = useState(MOCK_HOUSES[0].id);
-  const [selectedCategory, setSelectedCategory] = useState('Tất cả');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | EquipmentStatus>('all');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<EquipmentItem | null>(null);
-  const [search, setSearch] = useState('');
 
-  // Add form
+  const [houses, setHouses] = useState<ApiProperty[]>([]);
+  const [selectedHouseId, setSelectedHouseId] = useState<number | null>(null);
+  const [equipments, setEquipments] = useState<EquipmentDto[]>([]);
+  const [rooms, setRooms] = useState<ApiRoom[]>([]);
+
+  const [bootLoading, setBootLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectedCategory, setSelectedCategory] = useState('Tất cả');
+  const [selectedStatus, setSelectedStatus] = useState<EquipmentLifecycleStatus | 'all'>('all');
+  const [search, setSearch] = useState('');
+  const [selectedItem, setSelectedItem] = useState<EquipmentDto | null>(null);
+
+  // Form thêm thiết bị
+  const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newRoom, setNewRoom] = useState('');
-  const [newCategory, setNewCategory] = useState('Nội thất');
-  const [newBrand, setNewBrand] = useState('');
+  const [newCategory, setNewCategory] = useState(CATEGORY_SUGGESTIONS[2]);
+  const [newCost, setNewCost] = useState('');
+  const [newRoomId, setNewRoomId] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const selectedHouse = useMemo(
+    () => houses.find((h) => h.id === selectedHouseId) ?? null,
+    [houses, selectedHouseId],
+  );
+  const isWholeHouse = selectedHouse?.wholeHouse === true;
+
+  // Nạp danh sách nhà trong phạm vi phụ trách (1 lần).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const list = await managerPropertyService.getScopedProperties();
+        if (!alive) return;
+        setHouses(list);
+        setSelectedHouseId(list[0]?.id ?? null);
+      } catch (err) {
+        if (alive) setError(readApiError(err, 'Không tải được danh sách nhà.'));
+      } finally {
+        if (alive) setBootLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const loadEquipment = useCallback(async (propertyId: number, silent = false) => {
+    if (!silent) setListLoading(true);
+    setError(null);
+    try {
+      const [eqs, rms] = await Promise.all([
+        realEquipmentService.getByProperty(propertyId),
+        realPropertyService.getRooms(propertyId).catch(() => [] as ApiRoom[]),
+      ]);
+      setEquipments(eqs ?? []);
+      setRooms(rms ?? []);
+    } catch (err) {
+      setEquipments([]);
+      setError(readApiError(err, 'Không tải được danh sách thiết bị.'));
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
+  // Đổi nhà → nạp lại thiết bị + phòng của nhà đó.
+  useEffect(() => {
+    if (selectedHouseId == null) return;
+    setSelectedCategory('Tất cả');
+    setNewRoomId(null);
+    loadEquipment(selectedHouseId);
+  }, [selectedHouseId, loadEquipment]);
+
+  const onRefresh = useCallback(async () => {
+    if (selectedHouseId == null) return;
+    setRefreshing(true);
+    await loadEquipment(selectedHouseId, true);
+    setRefreshing(false);
+  }, [selectedHouseId, loadEquipment]);
+
+  // Danh mục lấy từ chính dữ liệu — BE cho nhập tự do nên không thể liệt kê cứng.
+  const categories = useMemo(() => {
+    const set = new Set(equipments.map(eqCategory));
+    return ['Tất cả', ...Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'))];
+  }, [equipments]);
 
   const filtered = useMemo(() => {
-    return equipments.filter(e => {
-      const matchHouse = e.houseId === selectedHouseId;
-      const matchCat = selectedCategory === 'Tất cả' || e.category === selectedCategory;
+    const q = normalizeVi(search.trim());
+    return equipments.filter((e) => {
+      const matchCat = selectedCategory === 'Tất cả' || eqCategory(e) === selectedCategory;
       const matchStatus = selectedStatus === 'all' || e.status === selectedStatus;
-      const matchSearch = !search || e.name.toLowerCase().includes(search.toLowerCase()) ||
-        e.assetId.toLowerCase().includes(search.toLowerCase()) ||
-        e.qrCode.toLowerCase().includes(search.toLowerCase());
-      return matchHouse && matchCat && matchStatus && matchSearch;
+      const matchSearch =
+        !q ||
+        normalizeVi(eqName(e)).includes(q) ||
+        normalizeVi(e.qrCode ?? '').includes(q) ||
+        normalizeVi(eqGroup(e, !!isWholeHouse)).includes(q) ||
+        String(e.id) === q;
+      return matchCat && matchStatus && matchSearch;
     });
-  }, [equipments, selectedHouseId, selectedCategory, selectedStatus, search]);
+  }, [equipments, selectedCategory, selectedStatus, search, isWholeHouse]);
 
-  const groupedByRoom = useMemo(() => {
-    const groups: Record<string, EquipmentItem[]> = {};
-    filtered.forEach(eq => {
-      if (!groups[eq.roomName]) groups[eq.roomName] = [];
-      groups[eq.roomName].push(eq);
+  const grouped = useMemo(() => {
+    const groups: Record<string, EquipmentDto[]> = {};
+    filtered.forEach((e) => {
+      const key = eqGroup(e, !!isWholeHouse);
+      (groups[key] ||= []).push(e);
     });
-    return groups;
-  }, [filtered]);
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, 'vi', { numeric: true }));
+  }, [filtered, isWholeHouse]);
 
   const statusCounts = useMemo(() => {
-    const houseEquip = equipments.filter(e => e.houseId === selectedHouseId);
-    return {
-      all: houseEquip.length,
-      active: houseEquip.filter(e => e.status === 'active').length,
-      repairing: houseEquip.filter(e => e.status === 'repairing').length,
-      damaged: houseEquip.filter(e => e.status === 'damaged').length,
-      replaced: houseEquip.filter(e => e.status === 'replaced').length,
-      retired: houseEquip.filter(e => e.status === 'retired').length,
-    };
-  }, [equipments, selectedHouseId]);
+    const counts: Record<string, number> = { all: equipments.length };
+    STATUS_ORDER.forEach((s) => {
+      counts[s] = equipments.filter((e) => e.status === s).length;
+    });
+    return counts;
+  }, [equipments]);
 
-  // Map taxonomy UI (5) ↔ contract BE (4 — Maintenance_BE_Contract.md)
-  const toLifecycle = (s: EquipmentStatus): EquipmentLifecycleStatus =>
-    s === 'active' ? 'GOOD'
-    : s === 'repairing' ? 'MAINTENANCE'
-    : s === 'damaged' ? 'BROKEN'
-    : 'DISPOSED'; // replaced | retired
-
-  const handleStatusChange = (id: string, status: EquipmentStatus) => {
-    setEquipments(prev => prev.map(e => e.id === id ? { ...e, status } : e));
-    // Best-effort gọi BE khi id là số thật; lỗi/không phải id thật → giữ cập nhật cục bộ.
-    const idNum = Number(id);
-    if (Number.isFinite(idNum) && idNum > 0) {
-      realEquipmentService.updateStatus(idNum, toLifecycle(status)).catch(() => { /* fallback cục bộ */ });
+  const handleStatusChange = async (id: number, status: EquipmentLifecycleStatus) => {
+    try {
+      const updated = await realEquipmentService.updateStatus(id, status);
+      // Vá tại chỗ để danh sách phản ánh ngay, không đợi round-trip thứ 2.
+      setEquipments((prev) => prev.map((e) => (e.id === id ? { ...e, ...updated } : e)));
+      showAlert('Đã cập nhật', `Trạng thái thiết bị: ${getEquipmentLifecycleLabel(status)}`);
+    } catch (err) {
+      showAlert('Không cập nhật được', readApiError(err, 'Vui lòng thử lại.'));
+      throw err;
     }
-    showAlert('✅ Cập nhật thành công', `Trạng thái đã được cập nhật: ${STATUS_CONFIG[status].label}`);
   };
 
-  const handleAdd = () => {
-    const selectedHouse = MOCK_HOUSES.find(h => h.id === selectedHouseId);
-    const isWholeHouse = selectedHouse?.propertyType === 'WHOLE_HOUSE';
-    if (!newName.trim() || (!isWholeHouse && !newRoom.trim())) {
-      return showAlert('Lỗi', 'Vui lòng nhập tên thiết bị và vị trí.');
+  const handleAdd = async () => {
+    if (!newName.trim()) return showAlert('Thiếu thông tin', 'Vui lòng nhập tên thiết bị.');
+    if (!newCategory.trim()) return showAlert('Thiếu thông tin', 'Vui lòng nhập danh mục.');
+    if (selectedHouseId == null) return;
+    if (!isWholeHouse && rooms.length > 0 && newRoomId == null) {
+      return showAlert('Thiếu thông tin', 'Chọn phòng lắp thiết bị, hoặc chọn "Khu vực chung".');
     }
-    const roomLabel = isWholeHouse ? 'Toàn bộ nhà' : newRoom;
-    const assetId = `AST-${serverNow().getFullYear()}-${String(equipments.length + 1).padStart(3, '0')}`;
-    const qrCode = `QR-${roomLabel.toUpperCase().replace(/\s/g, '')}-${Date.now().toString(36).toUpperCase()}`;
-    const newEq: EquipmentItem = {
-      id: `eq-${Date.now()}`,
-      assetId,
-      name: newName,
-      houseId: selectedHouseId,
-      houseName: selectedHouse?.name || '',
-      roomName: roomLabel,
-      propertyType: selectedHouse?.propertyType,
-      category: newCategory,
-      brand: newBrand || undefined,
-      qrCode,
-      status: 'active',
-      installationDate: serverNow().toLocaleDateString('vi-VN'),
-      maintenanceHistory: [],
-    };
-    setEquipments(prev => [newEq, ...prev]);
-    setShowAddModal(false);
-    setNewName(''); setNewRoom(''); setNewBrand('');
-    showAlert('✅ Thêm thành công!', `Thiết bị "${newName}" đã được thêm với mã ${assetId}.`);
+
+    setSubmitting(true);
+    try {
+      const cost = Number(newCost.replace(/\D/g, ''));
+      await realEquipmentService.create(selectedHouseId, {
+        equipmentName: newName.trim(),
+        category: newCategory.trim(),
+        cost: Number.isFinite(cost) && cost > 0 ? cost : undefined,
+        roomId: newRoomId ?? undefined,
+      });
+      setShowAddModal(false);
+      setNewName(''); setNewCost(''); setNewRoomId(null);
+      await loadEquipment(selectedHouseId, true);
+      showAlert('Đã thêm thiết bị', `"${newName.trim()}" đã được ghi nhận vào nhà này.`);
+    } catch (err) {
+      showAlert('Không thêm được', readApiError(err, 'Vui lòng thử lại.'));
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  // ---------- Trạng thái rỗng toàn màn ----------
+  if (bootLoading) {
+    return (
+      <SafeAreaView style={[styles.safe, styles.center]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.centerText}>Đang tải danh sách nhà...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (houses.length === 0) {
+    return (
+      <SafeAreaView style={[styles.safe, styles.center]}>
+        <Text style={{ fontSize: 40 }}>🏠</Text>
+        <Text style={styles.centerTitle}>Chưa được giao nhà nào</Text>
+        <Text style={styles.centerText}>
+          {error ?? 'Khi host phân công khu vực, danh sách thiết bị sẽ hiện ở đây.'}
+        </Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -526,7 +576,7 @@ export const EquipmentScreen: React.FC = () => {
           )}
           <View>
             <Text style={styles.title}>Trang thiết bị</Text>
-            <Text style={styles.subtitle}>Tổng: {equipments.filter(e => e.houseId === selectedHouseId).length} thiết bị</Text>
+            <Text style={styles.subtitle}>Tổng: {equipments.length} thiết bị</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddModal(true)}>
@@ -534,194 +584,278 @@ export const EquipmentScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* House Tabs */}
+      {/* Tab nhà */}
       <View style={styles.houseTabsContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.houseTabs}>
-          {MOCK_HOUSES.map(h => (
+          {houses.map((h) => (
             <TouchableOpacity
               key={h.id}
               style={[styles.houseTab, selectedHouseId === h.id && styles.houseTabActive]}
               onPress={() => setSelectedHouseId(h.id)}
             >
-              <Text style={styles.houseEmoji}>{h.propertyType === 'WHOLE_HOUSE' ? '🏡' : '🏠'}</Text>
-              <Text style={[styles.houseTabText, selectedHouseId === h.id && styles.houseTabTextActive]}>
-                {h.name}
+              <Text style={styles.houseEmoji}>{h.wholeHouse ? '🏡' : '🏠'}</Text>
+              <Text
+                style={[styles.houseTabText, selectedHouseId === h.id && styles.houseTabTextActive]}
+                numberOfLines={1}
+              >
+                {h.propertyName}
               </Text>
-              {h.propertyType === 'WHOLE_HOUSE' && (
-                <Text style={[styles.houseTypeMini, selectedHouseId === h.id && styles.houseTypeMiniActive]}>Nguyên căn</Text>
+              {h.wholeHouse && (
+                <Text style={[styles.houseTypeMini, selectedHouseId === h.id && styles.houseTypeMiniActive]}>
+                  Nguyên căn
+                </Text>
               )}
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
-      {/* Status Summary */}
+      {/* Chip trạng thái */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
         style={styles.statusSummaryRow} contentContainerStyle={styles.statusSummaryContent}>
-        {([
-          ['all', 'Tất cả'],
-          ['active', 'Hoạt động'],
-          ['repairing', 'Đang sửa'],
-          ['damaged', 'Hỏng'],
-        ] as const).map(([key, label]) => (
-          <TouchableOpacity
-            key={key}
-            style={[styles.statusChip,
-              selectedStatus === key && styles.statusChipActive,
-              key === 'repairing' && statusCounts.repairing > 0 && styles.statusChipWarning,
-              key === 'damaged' && statusCounts.damaged > 0 && styles.statusChipDanger,
-            ]}
-            onPress={() => setSelectedStatus(key)}
-          >
-            <Text style={[styles.statusChipText,
-              selectedStatus === key && styles.statusChipTextActive,
-              key === 'repairing' && statusCounts.repairing > 0 && { color: Colors.warning },
-              key === 'damaged' && statusCounts.damaged > 0 && { color: Colors.error },
-            ]}>
-              {label} ({statusCounts[key as keyof typeof statusCounts]})
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {QUICK_FILTERS.map((key) => {
+          const label = key === 'all' ? 'Tất cả' : getEquipmentLifecycleLabel(key);
+          const active = selectedStatus === key;
+          const c = key === 'all' ? null : getEquipmentLifecycleColor(key);
+          const hasIssue = (key === 'MAINTENANCE' || key === 'BROKEN') && statusCounts[key] > 0;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[styles.statusChip, active && styles.statusChipActive,
+                !active && hasIssue && { borderColor: c!.text }]}
+              onPress={() => setSelectedStatus(key)}
+            >
+              <Text style={[styles.statusChipText, active && styles.statusChipTextActive,
+                !active && hasIssue && { color: c!.text }]}>
+                {label} ({statusCounts[key] ?? 0})
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
-      {/* Search */}
+      {/* Tìm kiếm */}
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="🔍  Tên, mã tài sản, QR code..."
+          placeholder="🔍  Tên thiết bị, mã QR, phòng..."
           placeholderTextColor={Colors.textMuted}
           value={search}
           onChangeText={setSearch}
         />
       </View>
 
-      {/* Category filter */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-        {CATEGORIES.map(cat => (
-          <TouchableOpacity
-            key={cat}
-            style={[styles.filterChip, selectedCategory === cat && styles.filterChipActive]}
-            onPress={() => setSelectedCategory(cat)}
-          >
-            <Text style={[styles.filterText, selectedCategory === cat && styles.filterTextActive]}>{cat}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Lọc danh mục — ẩn khi nhà chỉ có 1 danh mục, chip lúc đó vô nghĩa */}
+      {categories.length > 2 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={styles.filterRow} contentContainerStyle={styles.filterContent}>
+          {categories.map((cat) => (
+            <TouchableOpacity
+              key={cat}
+              style={[styles.filterChip, selectedCategory === cat && styles.filterChipActive]}
+              onPress={() => setSelectedCategory(cat)}
+            >
+              <Text style={[styles.filterText, selectedCategory === cat && styles.filterTextActive]}>{cat}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
-      {/* Equipment list grouped by room */}
-      <ScrollView showsVerticalScrollIndicator={false} style={styles.listContainer}>
-        {Object.keys(groupedByRoom).length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={{ fontSize: 40 }}>📦</Text>
-            <Text style={styles.emptyText}>Không tìm thấy thiết bị</Text>
-          </View>
-        ) : (
-          Object.entries(groupedByRoom).map(([room, items]) => (
-            <View key={room} style={styles.roomSection}>
-              <Text style={styles.roomTitle}>
-                {items[0]?.propertyType === 'WHOLE_HOUSE' ? '🏡 Nhà nguyên căn' : `🚪 ${room}`} ({items.length})
+      {/* Danh sách theo phòng */}
+      {listLoading ? (
+        <View style={[styles.center, { flex: 1 }]}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.listContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {error ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={onRefresh}>
+                <Text style={styles.retryText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {grouped.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={{ fontSize: 40 }}>📦</Text>
+              <Text style={styles.emptyText}>
+                {equipments.length === 0
+                  ? 'Nhà này chưa có thiết bị nào'
+                  : 'Không có thiết bị khớp bộ lọc'}
               </Text>
-              {items.map(eq => {
-                const cfg = STATUS_CONFIG[eq.status];
-                return (
-                  <TouchableOpacity key={eq.id} style={styles.eqCard} onPress={() => setSelectedItem(eq)}>
-                    <View style={styles.eqCardLeft}>
-                      <View style={styles.eqTitleRow}>
-                        <Text style={styles.eqName}>{eq.name}</Text>
-                        {eq.status !== 'active' && (
-                          <View style={[styles.statusDot, { backgroundColor: cfg.color + '20', borderColor: cfg.color }]}>
-                            <Text style={{ fontSize: 10 }}>{cfg.icon}</Text>
-                          </View>
+            </View>
+          ) : (
+            grouped.map(([room, items]) => (
+              <View key={room} style={styles.roomSection}>
+                <Text style={styles.roomTitle}>
+                  {room === 'Toàn bộ nhà' ? '🏡 Toàn bộ nhà' : room === COMMON_AREA ? `🧰 ${room}` : `🚪 ${room}`} ({items.length})
+                </Text>
+                {items.map((eq) => {
+                  const cfg = getEquipmentLifecycleColor(eq.status);
+                  const warranty = eqWarrantyEnd(eq);
+                  return (
+                    <TouchableOpacity key={eq.id} style={styles.eqCard} onPress={() => setSelectedItem(eq)}>
+                      <View style={styles.eqCardLeft}>
+                        <View style={styles.eqTitleRow}>
+                          <Text style={styles.eqName} numberOfLines={1}>{eqName(eq)}</Text>
+                          {eq.status !== 'GOOD' && eq.status !== 'NEW' && (
+                            <View style={[styles.statusDot, { backgroundColor: cfg.bg, borderColor: cfg.text }]}>
+                              <Text style={{ fontSize: 10 }}>{STATUS_ICON[eq.status]}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.eqAssetId}>
+                          #{eq.id} · {eqCategory(eq)}
+                          {eq.operationalStatus === 'DISABLED' ? ' · Đã gỡ' : ''}
+                        </Text>
+                        {eq.maintenanceCount > 0 && (
+                          <Text style={styles.eqMaint}>🔧 Đã bảo trì {eq.maintenanceCount} lần</Text>
                         )}
                       </View>
-                      <Text style={styles.eqAssetId}>
-                        #{eq.assetId} · {eq.category}{eq.propertyType === 'WHOLE_HOUSE' ? ' · Theo nhà' : ''}
-                      </Text>
-                      {eq.currentTenantName && (
-                        <Text style={styles.eqTenant}>👤 {eq.currentTenantName}</Text>
-                      )}
-                    </View>
-                    <View style={styles.eqCardRight}>
-                      <View style={[styles.eqStatus, { backgroundColor: cfg.bg }]}>
-                        <Text style={[styles.eqStatusText, { color: cfg.color }]}>{cfg.label}</Text>
+                      <View style={styles.eqCardRight}>
+                        <View style={[styles.eqStatus, { backgroundColor: cfg.bg }]}>
+                          <Text style={[styles.eqStatusText, { color: cfg.text }]}>
+                            {getEquipmentLifecycleLabel(eq.status)}
+                          </Text>
+                        </View>
+                        {warranty ? (
+                          <Text style={styles.eqWarranty}>🛡 {formatDate(warranty)}</Text>
+                        ) : null}
                       </View>
-                      {eq.warrantyExpiry && (
-                        <Text style={styles.eqWarranty}>🛡 {eq.warrantyExpiry}</Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          ))
-        )}
-        <View style={{ height: 100 }} />
-      </ScrollView>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))
+          )}
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      )}
 
-      {/* Detail Modal */}
-      {selectedItem && (
+      {/* Chi tiết */}
+      {selectedItem && selectedHouse && (
         <EquipmentDetailModal
           item={selectedItem}
+          wholeHouse={!!isWholeHouse}
+          houseName={selectedHouse.propertyName}
           onClose={() => setSelectedItem(null)}
           onStatusChange={handleStatusChange}
         />
       )}
 
-      {/* Add Modal */}
+      {/* Thêm thiết bị */}
       {showAddModal && (
-        <Modal transparent animationType="slide">
+        <Modal transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Thêm thiết bị mới</Text>
-              <Text style={styles.modalSubtitle}>
-                {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.name}
-                {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.propertyType === 'WHOLE_HOUSE' ? ' · Nhà nguyên căn' : ''}
-              </Text>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Tên thiết bị *</Text>
-                <TextInput style={styles.input} value={newName} onChangeText={setNewName} placeholder="Điều hòa Daikin 9000BTU..." />
-              </View>
-              {MOCK_HOUSES.find(h => h.id === selectedHouseId)?.propertyType !== 'WHOLE_HOUSE' ? (
+            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Thêm thiết bị mới</Text>
+                <Text style={styles.modalSubtitle}>
+                  {selectedHouse?.propertyName}{isWholeHouse ? ' · Nhà nguyên căn' : ''}
+                </Text>
+
                 <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Phòng / Khu vực *</Text>
-                  <TextInput style={styles.input} value={newRoom} onChangeText={setNewRoom} placeholder="P101 / Khu vực chung..." />
+                  <Text style={styles.label}>Tên thiết bị *</Text>
+                  <TextInput
+                    style={styles.input} value={newName} onChangeText={setNewName}
+                    placeholder="Điều hòa Daikin 9000BTU..."
+                    placeholderTextColor={Colors.textMuted}
+                  />
                 </View>
-              ) : (
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Vị trí</Text>
-                  <Text style={styles.wholeHouseLocationHint}>Gắn trực tiếp với toàn bộ nhà nguyên căn</Text>
-                </View>
-              )}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Hãng sản xuất</Text>
-                <TextInput style={styles.input} value={newBrand} onChangeText={setNewBrand} placeholder="Daikin, Panasonic..." />
-              </View>
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Danh mục</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.categoryRow}>
-                    {['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng'].map(c => (
-                      <TouchableOpacity
-                        key={c}
-                        style={[styles.catChip, newCategory === c && styles.catChipActive]}
-                        onPress={() => setNewCategory(c)}
-                      >
-                        <Text style={[styles.catChipText, newCategory === c && { color: Colors.white }]}>{c}</Text>
-                      </TouchableOpacity>
-                    ))}
+
+                {!isWholeHouse && rooms.length > 0 && (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Lắp ở đâu? *</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={styles.categoryRow}>
+                        <TouchableOpacity
+                          style={[styles.catChip, newRoomId === null && styles.catChipActive]}
+                          onPress={() => setNewRoomId(null)}
+                        >
+                          <Text style={[styles.catChipText, newRoomId === null && { color: Colors.white }]}>
+                            {COMMON_AREA}
+                          </Text>
+                        </TouchableOpacity>
+                        {rooms.map((r) => (
+                          <TouchableOpacity
+                            key={r.id}
+                            style={[styles.catChip, newRoomId === r.id && styles.catChipActive]}
+                            onPress={() => setNewRoomId(r.id)}
+                          >
+                            <Text style={[styles.catChipText, newRoomId === r.id && { color: Colors.white }]}>
+                              {r.roomNumber}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
                   </View>
-                </ScrollView>
+                )}
+
+                {isWholeHouse && (
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Vị trí</Text>
+                    <Text style={styles.wholeHouseLocationHint}>Gắn trực tiếp với toàn bộ nhà nguyên căn</Text>
+                  </View>
+                )}
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Danh mục *</Text>
+                  <TextInput
+                    style={styles.input} value={newCategory} onChangeText={setNewCategory}
+                    placeholder="Điện lạnh, Nội thất..."
+                    placeholderTextColor={Colors.textMuted}
+                  />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
+                    <View style={styles.categoryRow}>
+                      {CATEGORY_SUGGESTIONS.map((c) => (
+                        <TouchableOpacity
+                          key={c}
+                          style={[styles.catChip, newCategory === c && styles.catChipActive]}
+                          onPress={() => setNewCategory(c)}
+                        >
+                          <Text style={[styles.catChipText, newCategory === c && { color: Colors.white }]}>{c}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Chi phí mua (không bắt buộc)</Text>
+                  <TextInput
+                    style={styles.input} value={newCost} onChangeText={setNewCost}
+                    keyboardType="numeric" placeholder="8500000"
+                    placeholderTextColor={Colors.textMuted}
+                  />
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg }}>
+                  <TouchableOpacity
+                    style={[styles.cancelBtn, { flex: 1 }]}
+                    disabled={submitting}
+                    onPress={() => setShowAddModal(false)}
+                  >
+                    <Text style={styles.cancelBtnText}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.submitBtn, { flex: 2 }, submitting && { opacity: 0.6 }]}
+                    disabled={submitting}
+                    onPress={handleAdd}
+                  >
+                    {submitting
+                      ? <ActivityIndicator size="small" color={Colors.white} />
+                      : <Text style={styles.submitBtnText}>Thêm thiết bị</Text>}
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={{ flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg }}>
-                <TouchableOpacity style={[styles.cancelBtn, { flex: 1 }]} onPress={() => setShowAddModal(false)}>
-                  <Text style={styles.cancelBtnText}>Hủy</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.submitBtn, { flex: 2 }]} onPress={handleAdd}>
-                  <Text style={styles.submitBtnText}>Thêm thiết bị</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            </ScrollView>
           </View>
         </Modal>
       )}
@@ -731,6 +865,9 @@ export const EquipmentScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
+  center: { alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: Spacing.sm },
+  centerTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary },
+  centerText: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing.lg, paddingTop: Spacing.xl },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center' },
@@ -741,10 +878,10 @@ const styles = StyleSheet.create({
   addBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
   houseTabsContainer: { borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white },
   houseTabs: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, gap: Spacing.md },
-  houseTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.background, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, gap: 6 },
+  houseTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.background, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, gap: 6, maxWidth: 240 },
   houseTabActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
   houseEmoji: { fontSize: 16 },
-  houseTabText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  houseTabText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, flexShrink: 1 },
   houseTabTextActive: { color: Colors.primary },
   houseTypeMini: { fontSize: 10, fontWeight: '700', color: '#D97706', backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: BorderRadius.full },
   houseTypeMiniActive: { backgroundColor: Colors.white, color: Colors.primary },
@@ -752,8 +889,6 @@ const styles = StyleSheet.create({
   statusSummaryContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
   statusChip: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
   statusChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  statusChipWarning: { borderColor: Colors.warning },
-  statusChipDanger: { borderColor: Colors.error },
   statusChipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   statusChipTextActive: { color: Colors.white },
   searchContainer: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
@@ -765,18 +900,21 @@ const styles = StyleSheet.create({
   filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterTextActive: { color: Colors.white },
   listContainer: { flex: 1 },
+  errorBox: { marginHorizontal: Spacing.lg, marginBottom: Spacing.md, padding: Spacing.md, borderRadius: BorderRadius.md, backgroundColor: '#FEF2F2', borderLeftWidth: 3, borderLeftColor: Colors.error, gap: Spacing.xs },
+  errorText: { fontSize: 13, color: Colors.error },
+  retryText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60, gap: Spacing.md },
   emptyText: { fontSize: 14, color: Colors.textSecondary },
   roomSection: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg },
   roomTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   eqCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', backgroundColor: Colors.white, borderRadius: BorderRadius.md, padding: Spacing.base, marginBottom: Spacing.sm, ...Shadow.sm },
   eqCardLeft: { flex: 1 },
-  eqCardRight: { alignItems: 'flex-end', gap: Spacing.xs },
+  eqCardRight: { alignItems: 'flex-end', gap: Spacing.xs, marginLeft: Spacing.sm },
   eqTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 2 },
-  eqName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, flex: 1 },
+  eqName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, flexShrink: 1 },
   statusDot: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   eqAssetId: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
-  eqTenant: { fontSize: 11, color: Colors.primary, fontWeight: '500' },
+  eqMaint: { fontSize: 11, color: Colors.textSecondary, fontWeight: '500' },
   wholeHouseLocationHint: {
     fontSize: 13,
     color: '#D97706',
@@ -803,6 +941,6 @@ const styles = StyleSheet.create({
   catChipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   cancelBtn: { backgroundColor: Colors.background, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
   cancelBtnText: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
-  submitBtn: { backgroundColor: Colors.primary, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center' },
+  submitBtn: { backgroundColor: Colors.primary, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', justifyContent: 'center', minHeight: 48 },
   submitBtnText: { color: Colors.white, fontSize: 15, fontWeight: '700' },
 });

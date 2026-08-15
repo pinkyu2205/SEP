@@ -1,4 +1,4 @@
-import type { SharedBill } from '@/store/billsStore';
+import type { SharedBill } from '@/types/bill';
 
 /**
  * CÁC KHOẢN THẬT SỰ THU trong hoá đơn lúc nhận phòng (`HD-ONBOARD-*`).

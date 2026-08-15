@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ScrollView,
@@ -7,11 +8,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { PaymentTransaction } from '@/types';
-import { formatCurrency, formatDateTime, isOnboardBillCode } from '@/utils';
+import { formatCurrency, formatDate, formatDateTime, isOnboardBillCode } from '@/utils';
 import {
   realTenantBillingService, toSharedBill, TenantPayment, TenantInvoiceType,
 } from '@/services/tenant/billingService';
-import { SharedBill } from '@/store/billsStore';
+import { SharedBill } from '@/types/bill';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import { currentMonthIso } from '@/utils/serverTime';
 
@@ -52,6 +53,16 @@ interface Txn extends PaymentTransaction {
    * tổng. Xem markDuplicates().
    */
   duplicate?: boolean;
+  /**
+   * Dòng được tách ra từ một lần chuyển tiền gộp (xem splitOnboardPayments).
+   * `groupId` = id của lần chuyển gốc, để đếm "N giao dịch" không bị nhân đôi.
+   */
+  splitPart?: boolean;
+  groupId?: string;
+  /** Tên khoản thu, thay cho mã hoá đơn ở dòng tiêu đề của thẻ. */
+  splitLabel?: string;
+  /** Dòng phụ: kỳ tính của phần tiền nhà chu kỳ đầu. */
+  splitNote?: string;
 }
 
 /** Mã hoá đơn thu lúc nhận phòng của một hợp đồng — quy ước BE, dùng ở nhiều màn. */
@@ -110,6 +121,69 @@ const markDuplicates = (rows: Txn[]): Txn[] => {
 };
 
 const sumReal = (rows: Txn[]) => rows.reduce((s, t) => (t.duplicate ? s : s + t.amount), 0);
+
+/** Số LẦN CHUYỂN TIỀN — hai nửa của một khoản gộp chỉ tính là một. */
+const countTxns = (rows: Txn[]) => new Set(rows.map(t => t.groupId ?? t.id)).size;
+
+/**
+ * TÁCH khoản thu lúc nhận phòng thành 2 dòng: tiền cọc và tiền nhà chu kỳ đầu.
+ *
+ * Khách chuyển MỘT lần nhưng thực chất trả hai khoản có bản chất khác hẳn nhau: cọc là
+ * tiền được HOÀN LẠI khi trả phòng, tiền nhà chu kỳ đầu là tiền đã chi. Gộp làm một
+ * dòng `HD-ONBOARD-*` thì khách phải mở vào chi tiết hoá đơn mới biết mình đã đóng cọc
+ * bao nhiêu, và tab lọc "🔐 Tiền cọc" luôn rỗng vì BE gắn hoá đơn onboard là `OTHER`.
+ *
+ * Chia theo `paymentBreakdown.depositAmount` của BE (PaymentBreakdownBuilder
+ * .fromOnboardInvoice — có sẵn cả depositMonths và kỳ tính periodStart/periodEnd).
+ * Phần tiền nhà = **số tiền đã chuyển − cọc**, lấy mốc là số tiền của chính giao dịch
+ * chứ không phải `grandTotal` của hoá đơn, để hai dòng luôn cộng đúng bằng con số ở thẻ
+ * tổng phía trên, kể cả khi BE đổi cách làm tròn.
+ *
+ * Không đủ dữ liệu tin cậy (thiếu breakdown, cọc ≤ 0, hoặc cọc ≥ số đã chuyển) thì GIỮ
+ * NGUYÊN một dòng như cũ — thà hiện gộp còn hơn bịa ra con số.
+ *
+ * Chạy SAU markDuplicates: hàm đó nhận diện trùng theo `invoiceCode`, mà hai nửa dùng
+ * chung một mã — tách trước là nửa sau bị đánh dấu trùng và biến mất khỏi tổng.
+ */
+const splitOnboardPayments = (rows: Txn[], billByCode: Map<string, SharedBill>): Txn[] =>
+  rows.flatMap((t): Txn[] => {
+    if (t.duplicate || !isOnboardCode(t.invoiceCode)) return [t];
+
+    const bd = billByCode.get(t.invoiceCode)?.paymentBreakdown;
+    const deposit = Number(bd?.depositAmount);
+    if (!Number.isFinite(deposit) || deposit <= 0) return [t];
+
+    const rent = t.amount - deposit;
+    if (rent <= 0) return [t];
+
+    const months = Number(bd?.depositMonths);
+    const period = bd?.periodStart && bd?.periodEnd
+      ? `Kỳ ${formatDate(bd.periodStart)} → ${formatDate(bd.periodEnd)}`
+      : undefined;
+
+    return [
+      {
+        ...t,
+        id: `${t.id}-deposit`,
+        groupId: t.id,
+        splitPart: true,
+        amount: deposit,
+        invoiceType: 'DEPOSIT',
+        splitLabel: Number.isFinite(months) && months > 0 ? `Tiền cọc (${months} tháng)` : 'Tiền cọc',
+        splitNote: 'Được hoàn lại khi trả phòng, sau khi trừ hư hỏng (nếu có)',
+      },
+      {
+        ...t,
+        id: `${t.id}-rent`,
+        groupId: t.id,
+        splitPart: true,
+        amount: rent,
+        invoiceType: 'RENT',
+        splitLabel: 'Tiền nhà chu kỳ đầu',
+        splitNote: period,
+      },
+    ];
+  });
 
 /**
  * Phương thức của một giao dịch.
@@ -274,16 +348,26 @@ export const PaymentHistoryScreen: React.FC = () => {
         .catch(() => [] as SharedBill[]),
     ])
       .then(([invoicePays, depositPays, invoices]) => {
-        setInvoiceByCode(new Map(invoices.filter(i => !!i.code).map(i => [i.code, i])));
-        setTransactions(markDuplicates([
-          ...invoicePays,
-          ...dropDepositsInsideOnboard(invoicePays, depositPays),
-        ]));
+        const byCode = new Map(invoices.filter(i => !!i.code).map(i => [i.code, i]));
+        setInvoiceByCode(byCode);
+        setTransactions(splitOnboardPayments(
+          markDuplicates([
+            ...invoicePays,
+            ...dropDepositsInsideOnboard(invoicePays, depositPays),
+          ]),
+          byCode,
+        ));
       })
       .catch(() => setTransactions([]))
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, [loadDeposits]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Trả xong là có giao dịch mới — nạp lại để lịch sử không phải chờ khách tự kéo refresh.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load(true);
+  });
 
   // ── Thống kê trên TOÀN BỘ giao dịch, không đổi theo bộ lọc ──
   const stats = useMemo(() => {
@@ -298,11 +382,13 @@ export const PaymentHistoryScreen: React.FC = () => {
       // Tổng KHÔNG cộng bản ghi trùng — nếu cộng thì số tiền bị thổi lên đúng bằng
       // số tiền của hoá đơn bị ghi lặp.
       total: sumReal(transactions),
-      count: transactions.length,
-      realCount: transactions.length - dups.length,
+      // Đếm theo LẦN CHUYỂN TIỀN (countTxns), không đếm số thẻ: khoản thu lúc nhận
+      // phòng hiện thành 2 thẻ (cọc + tiền nhà) nhưng khách chỉ chuyển một lần.
+      count: countTxns(transactions),
+      realCount: countTxns(transactions.filter(t => !t.duplicate)),
       duplicateCount: dups.length,
       duplicateAmount: dups.reduce((s, t) => s + t.amount, 0),
-      monthTotal: sumReal(inMonth), monthCount: inMonth.length,
+      monthTotal: sumReal(inMonth), monthCount: countTxns(inMonth),
       latest,
       // Cọc là khoản sẽ được hoàn lại khi trả phòng — tách riêng để khách không
       // tưởng toàn bộ số tiền trên kia là chi phí đã mất.
@@ -375,7 +461,12 @@ export const PaymentHistoryScreen: React.FC = () => {
     // Nhận diện theo MÃ và dùng đúng nhãn như các màn hoá đơn khác.
     const onboard = isOnboardCode(item.invoiceCode);
     const onboardInvoice = onboard ? invoiceByCode.get(item.invoiceCode) : undefined;
-    const cfg = onboard ? ONBOARD_TYPE_CFG : typeCfg(item.invoiceType);
+    // Dòng đã tách thì gắn nhãn theo đúng khoản của nó (Tiền cọc / Tiền phòng), chứ
+    // không dùng nhãn gộp "Thu khi nhận phòng" nữa — tách ra mà vẫn chung một nhãn thì
+    // nhìn hệt như bị hiển thị lặp.
+    const cfg = item.splitPart
+      ? typeCfg(item.invoiceType)
+      : onboard ? ONBOARD_TYPE_CFG : typeCfg(item.invoiceType);
 
     return (
       <TouchableOpacity
@@ -403,12 +494,19 @@ export const PaymentHistoryScreen: React.FC = () => {
           </View>
           <View style={{ flex: 1 }}>
             <View style={styles.codeRow}>
-              <Text style={styles.invoiceCode} numberOfLines={1}>{item.invoiceCode}</Text>
+              {/* Dòng tách ra hiện TÊN KHOẢN THU thay vì mã hoá đơn: hai nửa dùng chung
+                  một mã HD-ONBOARD-*, để mã lên đầu thì hai thẻ nhìn y hệt nhau. */}
+              <Text style={styles.invoiceCode} numberOfLines={1}>
+                {item.splitLabel ?? item.invoiceCode}
+              </Text>
               <View style={[styles.typeTag, { backgroundColor: cfg.bg }]}>
                 <Text style={[styles.typeTagText, { color: cfg.color }]}>{cfg.label}</Text>
               </View>
             </View>
             {!!place && <Text style={styles.place} numberOfLines={1}>{place}</Text>}
+            {!!item.splitNote && (
+              <Text style={styles.splitNote} numberOfLines={2}>{item.splitNote}</Text>
+            )}
           </View>
           <Text style={[styles.amountValue, item.duplicate && styles.amountMuted]}>
             {formatCurrency(item.amount)}
@@ -424,6 +522,14 @@ export const PaymentHistoryScreen: React.FC = () => {
           </View>
         )}
 
+
+        {item.splitPart && (
+          <View style={styles.splitBox}>
+            <Text style={styles.splitBoxText}>
+              🔗 Trả chung một lần khi nhận phòng · {item.invoiceCode}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.divider} />
 
@@ -573,7 +679,7 @@ export const PaymentHistoryScreen: React.FC = () => {
             {hasFilter && (
               <View style={styles.filterSummary}>
                 <Text style={styles.filterSummaryText}>
-                  {filtered.length} giao dịch · {formatCurrency(sumReal(filtered))}
+                  {countTxns(filtered)} giao dịch · {formatCurrency(sumReal(filtered))}
                 </Text>
                 <TouchableOpacity onPress={() => { setTypeFilter('all'); setMethodFilter('all'); setQuery(''); }}>
                   <Text style={styles.filterReset}>Xóa lọc</Text>
@@ -591,7 +697,7 @@ export const PaymentHistoryScreen: React.FC = () => {
               {/* Cọc nói rõ "được hoàn khi trả phòng" — khách hay tưởng đây là khoản mất hẳn. */}
               {section.pinned
                 ? `${formatCurrency(section.total)} · hoàn lại khi trả phòng`
-                : `${section.data.length} giao dịch · ${formatCurrency(section.total)}`}
+                : `${countTxns(section.data)} giao dịch · ${formatCurrency(section.total)}`}
             </Text>
           </View>
         )}
@@ -715,6 +821,14 @@ const styles = StyleSheet.create({
   typeTag: { borderRadius: BorderRadius.full, paddingHorizontal: 7, paddingVertical: 2 },
   typeTagText: { fontSize: 10, fontWeight: '700' },
   place: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  // Dòng phụ của khoản tách ra: kỳ tính tiền nhà / ghi chú cọc được hoàn.
+  splitNote: { fontSize: 10.5, color: Colors.textSecondary, marginTop: 3, lineHeight: 15 },
+  // Dải nhắc "cùng một lần chuyển" — để khách không tưởng mình bị thu hai lần.
+  splitBox: {
+    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.sm, paddingVertical: 6, marginTop: Spacing.sm,
+  },
+  splitBoxText: { fontSize: 10.5, color: Colors.textMuted, fontWeight: '600' },
   amountValue: { fontSize: 15, fontWeight: '800', color: Colors.primary },
 
   divider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.sm },

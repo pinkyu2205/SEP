@@ -28,8 +28,6 @@ import {
   StatusPill,
 } from './shared';
 import { userService } from '@/services/user.service';
-import { propertyService } from '@/services/property.service';
-import { hostService, type HostContractDto } from '@/services/host.service';
 import { UserDetailDrawer } from './users/UserDetailDrawer';
 import type { UserResponse, UserStatus, CreateUserRequest } from '@/types/api.types';
 
@@ -122,20 +120,6 @@ export const UserRoleManagement = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  /**
-   * Tên thật của người dùng phải tra từ nguồn khác: `UserResponse` của BE CHỈ có
-   * username/phone/role/status, KHÔNG có fullName (xem api.types.ts). Với khách thuê thì
-   * username lại chính là số điện thoại nên cột tên và cột SĐT trùng nhau y hệt.
-   *   • Quản lý  → GET /user/managers trả kèm fullName, khớp theo id
-   *   • Khách thuê → lấy `lesseeName` trên hợp đồng, khớp theo số điện thoại
-   * Không tra được thì mới rơi về username (admin & chủ nhà không có nguồn nào).
-   *
-   * 👉 XOÁ TOÀN BỘ chỗ này khi BE thêm `fullName` vào UserResponse —
-   *    xem doc/BE-NEED-user-fullname-2026-08-14.md
-   */
-  const [nameById, setNameById] = useState<Map<string, string>>(new Map());
-  const [nameByPhone, setNameByPhone] = useState<Map<string, string>>(new Map());
-
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -148,34 +132,14 @@ export const UserRoleManagement = () => {
     }
   };
 
-  // Tra tên chạy song song và được phép hỏng — hỏng thì bảng vẫn hiện, chỉ là rơi về username.
-  const fetchNames = async () => {
-    const [mgrs, ctrs] = await Promise.all([
-      propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-      hostService.listContracts({ size: 500 }).then(p => p.content).catch(() => [] as HostContractDto[]),
-    ]);
-
-    const byId = new Map<string, string>();
-    mgrs.forEach(m => { if (m.fullName?.trim()) byId.set(m.id, m.fullName.trim()); });
-    setNameById(byId);
-
-    const byPhone = new Map<string, string>();
-    ctrs.forEach(c => {
-      const phone = c.tenantPhone?.trim();
-      const name = c.lesseeName?.trim();
-      // HĐ chấm dứt bị BE gỡ tên khách → bỏ qua, đừng ghi đè tên đã lấy được từ HĐ khác.
-      if (phone && name && !byPhone.has(phone)) byPhone.set(phone, name);
-    });
-    setNameByPhone(byPhone);
-  };
-
-  /** Tên hiển thị của một tài khoản — null nghĩa là không tra được. */
-  const realNameOf = (user: UserResponse): string | null =>
-    nameById.get(user.id) ?? (user.phoneNumber ? nameByPhone.get(user.phoneNumber.trim()) ?? null : null);
+  /**
+   * Tên hiển thị — BE trả sẵn `fullName` trong UserResponse (verify 15/08/2026).
+   * Rơi về username khi thiếu (bản BE cũ trên VPS chưa trả field này).
+   */
+  const realNameOf = (user: UserResponse): string | null => user.fullName?.trim() || null;
 
   useEffect(() => {
     fetchUsers();
-    fetchNames();
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -188,7 +152,7 @@ export const UserRoleManagement = () => {
       const matchesStatus = statusFilter === 'all' || user.status === statusFilter;
       return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [roleFilter, statusFilter, userSearch, users, nameById, nameByPhone]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [roleFilter, statusFilter, userSearch, users]);
 
   const pageCount = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, pageCount);

@@ -55,7 +55,7 @@ export const useBillingRealtime = (
   useEffect(() => {
     if (!enabled) return;
     const token = localStorage.getItem('access_token');
-    if (!token || token === 'mock-jwt-token-demo') return;
+    if (!token) return;
 
     const client = new Client({
       brokerURL: resolveWsUrl(),

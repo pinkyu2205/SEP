@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import {
-  Activity,
+
   BarChart3,
   CreditCard,
   FileText,
@@ -93,7 +93,12 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Hệ thống',
     items: [
       { label: 'Cấu hình hệ thống', path: '/admin/settings', icon: Settings },
-      { label: 'Nhật ký & bảo mật', path: '/admin/security', icon: Activity },
+      // ẨN — màn "Nhật ký & bảo mật" chạy 100% trên AUDIT_LOGS (dữ liệu giả trong
+      // utils/adminMockData.ts): BE chưa có audit log nên không có gì thật để hiện.
+      // Để lại một mục menu hứa hẹn giám sát bảo mật mà mở ra toàn dữ liệu bịa thì
+      // nguy hiểm hơn là không có. Bỏ comment dòng này khi BE làm xong audit log —
+      // xem doc/BE-NEED-audit-log-va-thiet-bi-2026-08-15.md
+      // { label: 'Nhật ký & bảo mật', path: '/admin/security', icon: Activity },
     ],
   },
 ];

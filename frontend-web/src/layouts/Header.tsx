@@ -90,23 +90,31 @@ export const Header = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-        <div className="hidden lg:flex flex-col items-end">
-          <span className="text-[11px] font-semibold text-slate-700 leading-tight">
-            {currentTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </span>
-          <span className="text-[10px] text-slate-400 leading-tight capitalize">
-            {formatVNDate(currentTime)}
-          </span>
+      <div className="ml-2 flex flex-shrink-0 items-center gap-2.5">
+        {/*
+          Đồng hồ + chuông gộp thành MỘT cụm trong khung bo.
+          Trước đây giờ để 11px / ngày 10px — nhỏ hơn cả chữ phụ trên trang, mà lại bị
+          một vạch ngăn tách khỏi chuông nên đọc ra ba mảnh rời rạc.
+
+          `tabular-nums` bắt buộc: đồng hồ chạy từng giây, chữ số không cùng bề rộng thì
+          cả khối co giãn liên tục, kéo theo chuông nhích qua nhích lại.
+        */}
+        <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 py-1 pl-3 pr-1.5">
+          <div className="hidden flex-col items-end leading-none lg:flex">
+            <span className="text-lg font-black tabular-nums tracking-tight text-slate-800">
+              {currentTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+            <span className="mt-1 text-[10px] font-medium capitalize leading-none text-slate-400">
+              {formatVNDate(currentTime)}
+            </span>
+          </div>
+
+          <div className="hidden h-8 w-px bg-slate-200 lg:block" />
+
+          {/* Chuông cũ chỉ là link kèm badge đếm MỘT LẦN lúc mở trang — mở app cả buổi
+              số vẫn đứng yên. Giờ dùng chung khay realtime với cổng Admin. */}
+          <NotificationBell seeAllTo="/host/notifications" accent="cyan" />
         </div>
-
-        <div className="h-5 w-px bg-slate-200 hidden lg:block" />
-
-        {/* Chuông cũ chỉ là link kèm badge đếm MỘT LẦN lúc mở trang — mở app cả buổi
-            số vẫn đứng yên. Giờ dùng chung khay realtime với cổng Admin. */}
-        <NotificationBell seeAllTo="/host/notifications" accent="cyan" />
-
-        <div className="h-5 w-px bg-slate-200" />
 
         {/* Nút đăng xuất trần trước đây nằm ở đây đã gộp vào menu tài khoản —
             AppSidebar cũng có sẵn một nút đăng xuất, để hai nút trần cạnh nhau

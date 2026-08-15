@@ -9,6 +9,7 @@ import { userService } from '@/services/user.service';
 import type { PropertyResponse, UserResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import { Overlay } from '@/components/Overlay';
+import { zoneAssignmentService } from '@/services/zoneAssignment.service';
 import { STATUS_BADGE, typeLabel } from '@/pages/host/properties/propertyListState';
 import {
   groupByZone, isAssignable, loadByManager, previewAssign, unitsOf,
@@ -166,41 +167,30 @@ const AssignModal = ({
   const changeCount = preview ? preview.fresh.length + preview.handover.length : 0;
   const busy = progress !== null;
 
+  /**
+   * MỘT lệnh cho cả khu vực. Bản trước gọi lặp `PATCH /properties/{id}/operation-manager`
+   * cho từng nhà vì BE chưa có API gán theo lô — chết giữa chừng là khu vực nửa nạc nửa mỡ.
+   * BE đã làm endpoint atomic (15/08/2026): đổi bảng phân công + mọi nhà + hợp đồng trong
+   * một transaction, và trả về số nhà/hợp đồng đã ảnh hưởng.
+   */
   const handleApply = async () => {
     if (!preview || !pickedManager || changeCount === 0) return;
-    const targets = [...preview.fresh, ...preview.handover];
-
-    setProgress({ done: 0, total: targets.length });
-    const failed: string[] = [];
-
-    // Tuần tự, KHÔNG song song: BE chưa có API gán theo lô nên mỗi nhà là một
-    // request riêng — bắn song song dễ đá nhau khi BE đổi trạng thái property.
-    for (const p of targets) {
-      try {
-        await propertyService.assignOperationManager(p.id, pickedManager.id);
-      } catch (e: any) {
-        const data = e?.response?.data;
-        failed.push(`${p.propertyName}: ${data?.message || data?.error || e?.message || 'lỗi không rõ'}`);
-      }
-      setProgress((prev) => (prev ? { ...prev, done: prev.done + 1 } : prev));
-    }
-
-    setProgress(null);
-
-    if (failed.length === 0) {
-      toast.success(`Đã gán ${nameOf(pickedManager)} cho ${group.zoneName} — ${targets.length} nhà.`);
+    setProgress({ done: 0, total: changeCount });
+    try {
+      const res = await zoneAssignmentService.assign(group.zoneId, pickedManager.id);
+      const parts = [`${res.affectedProperties} nhà`];
+      if (res.affectedContracts > 0) parts.push(`${res.affectedContracts} hợp đồng`);
+      toast.success(`Đã gán ${nameOf(pickedManager)} cho ${group.zoneName} — ${parts.join(' · ')}.`);
       onDone();
-      return;
+    } catch (e: any) {
+      const data = e?.response?.data;
+      toast.error(
+        data?.message || data?.error || e?.message || 'Không gán được quản lý cho khu vực.',
+        { duration: 6000 },
+      );
+    } finally {
+      setProgress(null);
     }
-    // Chưa atomic (pha 2 BE sẽ gộp thành một transaction) nên phải nói rõ đã đi
-    // được bao nhiêu, đừng để người dùng tưởng cả cụm đã đổi.
-    console.error('[zone-assign] thất bại:', failed);
-    toast.error(
-      `${targets.length - failed.length}/${targets.length} nhà đã đổi. ` +
-      `${failed.length} nhà lỗi — mở lại khu vực để thử tiếp.`,
-      { duration: 7000 },
-    );
-    onDone();
   };
 
   return (
@@ -395,9 +385,7 @@ const AssignModal = ({
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-6 py-4">
           <p className="text-xs text-slate-400">
-            {busy && progress
-              ? `Đang cập nhật ${progress.done}/${progress.total} nhà…`
-              : 'Một khu vực chỉ có một quản lý.'}
+            {busy ? 'Đang cập nhật cả khu vực…' : 'Một khu vực chỉ có một quản lý.'}
           </p>
           <div className="flex items-center gap-2">
             <button

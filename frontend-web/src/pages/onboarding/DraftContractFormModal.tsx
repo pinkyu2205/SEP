@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
@@ -556,6 +557,35 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const standardDeposit = calcDeposit(form.rentAmount, form.depositMonths);
   const depositMismatch = form.rentAmount !== '' && form.deposit !== '' && form.deposit !== standardDeposit;
 
+  /**
+   * GIÁ DUYỆT — giá Host đã chốt cho nhà/phòng này.
+   *
+   * Nhà nguyên căn thì giá nằm ở `property.price`; nhà chia phòng thì ở `room.price`.
+   * Đây là con số Host phê duyệt để kinh doanh, nên hợp đồng lệch khỏi nó là chuyện
+   * PHẢI thấy được — trước đây ô giá thuê tự do gõ, lệch bao nhiêu cũng lưu im lặng,
+   * làm mất hết ý nghĩa của bước duyệt giá và không truy được ai đã hạ giá.
+   *
+   * 🎯 MÔ HÌNH ĐÃ CHỐT (PO 15/08/2026, BE làm xong cùng ngày):
+   * giá hợp đồng LUÔN BẰNG giá niêm yết. Thương lượng xong thì Host cập nhật giá
+   * ở màn chi tiết nhà TRƯỚC, rồi ô này chỉ đọc — không gõ tay được nữa.
+   *
+   * Nhờ vậy chuyện "lệch giá" không còn xảy ra để mà phải xử lý: không có đường nào
+   * nhập một con số Host chưa duyệt. BE cũng tự kiểm lại nên gọi thẳng API cũng không lách được.
+   */
+  const approvedRent = useMemo(() => {
+    if (!selectedProperty) return null;
+    if (isWholeHouse) {
+      const p = selectedProperty.listedPrice ?? selectedProperty.price;
+      return p != null ? Number(p) : null;
+    }
+    const room = allRoomsInProperty.find((r) => String(r.id) === form.roomId);
+    const p = room?.listedPrice ?? room?.price;
+    return p != null ? Number(p) : null;
+  }, [selectedProperty, isWholeHouse, allRoomsInProperty, form.roomId]);
+
+  /** Đã tra được giá niêm yết → ô giá thuê chỉ đọc, lấy thẳng số đó. */
+  const rentLocked = approvedRent != null && approvedRent > 0;
+
   // Có field định danh nào thực sự bị đổi so với dữ liệu gốc không — chỉ khi
   // TRUE mới bắt buộc phải tick xác nhận trước khi lưu (sửa các field khác của
   // HĐ không cần xác nhận lại).
@@ -633,6 +663,8 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     if (sensitiveFieldsChanged && !confirmSensitiveEdit) {
       return toast.error('Vui lòng tick xác nhận trước khi lưu thay đổi thông tin định danh (SĐT/CCCD/ngày sinh).');
     }
+    // Không còn guard "lệch giá": ô giá thuê giờ CHỈ ĐỌC, lấy thẳng giá niêm yết —
+    // không có đường nào nhập lệch nữa. BE cũng tự kiểm lại nên gọi API cũng không lách được.
     if (!isEditMode) {
       if (!selectedProperty) return toast.error('Vui lòng chọn bất động sản');
       if (!isWholeHouse && !form.roomId) return toast.error('Vui lòng chọn phòng');
@@ -1146,10 +1178,28 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                   // Giá thuê đổi → cọc tự tính lại = giá thuê × số tháng cọc.
                   return { ...prev, rentAmount, deposit: calcDeposit(rentAmount, prev.depositMonths) };
                 })}
-                className="input-field text-right"
+                readOnly={rentLocked}
+                className={`input-field text-right ${rentLocked ? 'cursor-not-allowed bg-slate-100 text-slate-600' : ''}`}
                 placeholder="0"
                 required
               />
+              {rentLocked ? (
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Lấy theo giá niêm yết Host đã duyệt. Chốt giá khác với khách?{' '}
+                  <Link
+                    to={`/host/properties/${selectedProperty?.id}`}
+                    target="_blank"
+                    className="font-bold text-indigo-600 hover:underline"
+                  >
+                    Cập nhật giá trước
+                  </Link>
+                  , rồi quay lại.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-amber-600">
+                  Chưa tra được giá niêm yết — chọn nhà/phòng trước.
+                </p>
+              )}
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">

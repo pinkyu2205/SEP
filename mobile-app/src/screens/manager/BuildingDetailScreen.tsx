@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { ManagedProperty } from '@/data/managedProperties';
+import { ManagedProperty } from '@/types/managedProperty';
 import { realPropertyService, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';

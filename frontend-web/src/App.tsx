@@ -16,7 +16,6 @@ import { NotificationCenter } from '@/pages/host/notifications/NotificationCente
 import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
 import { PropertyList } from '@/pages/host/properties/PropertyList';
 import { ReportsAnalytics } from '@/pages/host/reports/ReportsAnalytics';
-import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
 import { AdminNotificationCenter } from '@/pages/admin/notifications/AdminNotificationCenter';
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
@@ -127,7 +126,6 @@ function App() {
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/notifications" element={<AdminNotificationCenter />} />
             <Route path="/admin/settings" element={<SystemConfiguration />} />
-            <Route path="/admin/security" element={<ActivityLogsSecurity />} />
           </Route>
         </Route>
 

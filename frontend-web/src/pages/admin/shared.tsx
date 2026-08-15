@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Filter, MapPin, UserRound, type LucideIcon } from 'lucide-react';
 import type { PlatformAccountStatus, PlatformBillStatus, PlatformRole } from '@/types';
-import type { PlatformContractStatus } from '@/utils/adminMockData';
+
 
 export const PAGE_SIZE = 6;
 
@@ -35,6 +35,9 @@ export const billStatusMap: Record<PlatformBillStatus, { label: string; color: s
   overdue: { label: 'Quá hạn', color: 'bg-rose-100 text-rose-700' },
   pending: { label: 'Chờ đối soát', color: 'bg-blue-100 text-blue-700' },
 };
+
+/** Trạng thái hợp đồng dùng cho nhãn ở các màn giám sát của admin. */
+export type PlatformContractStatus = 'pending' | 'active' | 'expired' | 'rejected' | 'terminated';
 
 export const contractStatusMap: Record<PlatformContractStatus, { label: string; color: string }> = {
   pending: { label: 'Pending', color: 'bg-amber-100 text-amber-700' },

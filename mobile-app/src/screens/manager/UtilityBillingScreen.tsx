@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -373,6 +374,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   }, []);
 
   useFocusEffect(useCallback(() => { loadProperties(); loadHistory(); }, [loadProperties, loadHistory]));
+
+  /**
+   * Hoá đơn điện/nước khách trả xong → nạp lại lịch sử. BE gửi kèm `utilityInvoiceId`
+   * cho loại này, nhưng ở đây cứ nạp lại cả danh sách: `loadHistory` rẻ hơn nhiều so với
+   * việc dò đúng dòng rồi vá tay, mà lại không sợ lệch bộ lọc kỳ đang chọn.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    loadHistory();
+  });
 
   /**
    * MỞ THẲNG NHÀ ĐƯỢC CHỈ ĐỊNH khi vào từ màn "Cần chụp số"

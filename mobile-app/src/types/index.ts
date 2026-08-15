@@ -403,6 +403,9 @@ export interface EquipmentDto {
   lastMaintenanceDate?: string | null;
   operationalStatus?: string;
   currentEffective?: boolean;
+  /** Chỉ có giá trị khi operationalStatus = DISABLED (thiết bị đã gỡ khỏi phòng). */
+  disabledAt?: string | null;
+  disabledReason?: string | null;
 }
 
 export interface EquipmentMaintenanceHistoryDto {

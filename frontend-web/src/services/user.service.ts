@@ -12,13 +12,20 @@ export const userService = {
     return api.get(`/api/v1/user/${id}`);
   },
 
-  // 3. Tạo mới User
-  // BE hiện CHƯA có endpoint admin tạo user: POST /api/v1/user trả 403.
-  // Dùng tạm /api/v1/auth/register (permitAll, tạo được mọi role) để admin tạo account ngay trên web,
-  // khỏi phải mở Postman. Khi BE làm endpoint admin-gated (chỉ ROLE_ADMIN) thì đổi lại đây.
-  // Xem doc/BE-admin-create-user.md.
+  /**
+   * 3. Admin tạo tài khoản — POST /api/v1/user (chỉ ROLE_ADMIN).
+   *
+   * TRƯỚC ĐÂY gọi `/api/v1/auth/register` vì tưởng endpoint này chưa có. Verify lại với BE
+   * 15/08/2026: endpoint ĐÃ CÓ và chạy đúng (tạo được ROLE_OWNER, trả 200).
+   *
+   * KHÔNG quay lại `/auth/register`: đó là endpoint `permitAll` — ai biết đường dẫn cũng tự
+   * tạo được tài khoản. BE nay đã siết nó chỉ cho đăng ký ROLE_TENANT, nên gọi vào đó để tạo
+   * host/manager/admin sẽ bị từ chối ("Chỉ được phép đăng ký tài khoản khách thuê").
+   *
+   * ⚠️ Cần BE trên VPS cập nhật bản mới; bản cũ chưa có endpoint này sẽ trả 403.
+   */
   createUser: (data: CreateUserRequest): Promise<UserResponse> => {
-    return api.post('/api/v1/auth/register', data);
+    return api.post('/api/v1/user', data);
   },
 
   // 4. Chỉnh sửa User (cập nhật data khác nếu backend yêu cầu)

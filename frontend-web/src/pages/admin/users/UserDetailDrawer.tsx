@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AtSign, Ban, Building2, CheckCircle2, ChevronDown, Copy, CreditCard, DoorOpen,
+  AtSign, Ban, Building2, CheckCircle2, ChevronDown, CreditCard, DoorOpen,
   FileText, Loader2, MapPin, Phone, ShieldCheck, UserCog, Users, X,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { Overlay } from '@/components/Overlay';
 import { MaskedField } from '@/components/MaskedField';
 import { propertyService } from '@/services/property.service';
@@ -247,10 +246,11 @@ export const UserDetailDrawer = ({ user, displayName, onClose, onStatusChange }:
   }, [isManager, isTenant, managed, contracts, user.phoneNumber]);
 
   const activeContracts = relatedContracts.filter((c) => c.status === 'ACTIVE');
-  // Tài khoản không lưu CCCD — lấy từ hợp đồng gần nhất có dữ liệu.
+  // CCCD ưu tiên lấy từ hồ sơ tài khoản (BE có trả `cccd`); hồ sơ trống thì mới dò
+  // trong hợp đồng — khách thuê cũ nhập CCCD ở luồng đón khách, chưa gắn lên account.
   const tenantCccd = useMemo(
-    () => (isTenant ? relatedContracts.find((c) => c.tenantCccd)?.tenantCccd : undefined),
-    [isTenant, relatedContracts],
+    () => user.cccd?.trim() || (isTenant ? relatedContracts.find((c) => c.tenantCccd)?.tenantCccd : undefined),
+    [user.cccd, isTenant, relatedContracts],
   );
   const roleInfo = roleMap[role] ?? { label: role, color: 'bg-slate-100 text-slate-700' };
   const statusInfo = statusMap[user.status] ?? statusMap.INACTIVE;
@@ -297,29 +297,16 @@ export const UserDetailDrawer = ({ user, displayName, onClose, onStatusChange }:
                 {user.username}
               </span>
               <MaskedField value={user.phoneNumber} icon={Phone} emptyText="chưa có SĐT" head={3} tail={2} />
-              {/* CCCD chỉ có ở khách thuê — lấy từ hợp đồng, tài khoản không lưu trường này */}
-              {isTenant && (
-                <MaskedField value={tenantCccd} icon={CreditCard} prefix="CCCD" emptyText="chưa có CCCD" head={3} tail={3} />
+              {tenantCccd && (
+                <MaskedField value={tenantCccd} icon={CreditCard} prefix="CCCD" emptyText="" head={3} tail={3} />
               )}
-              {/* ID tài khoản — bấm để copy ĐẦY ĐỦ, dùng khi báo lỗi cho team BE. */}
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard?.writeText(user.id)
-                    .then(() => toast.success('Đã copy ID tài khoản'))
-                    .catch(() => toast.error('Trình duyệt chặn copy — bôi đen để chép tay.'));
-                }}
-                title={`Bấm để copy: ${user.id}`}
-                className="inline-flex items-center gap-1 rounded font-mono text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-              >
-                <Copy className="h-3 w-3" />
-                {user.id.slice(0, 8)}…
-              </button>
+              {/* KHÔNG hiện UUID tài khoản: username đã là định danh duy nhất và đọc được,
+                  UUID chỉ là chi tiết kỹ thuật — cần thì tra ở DevTools/DB, đừng bày lên UI. */}
             </div>
             {(isManager || isOwner) && (
               <AssignmentHistoryButton
-                subjectName={`${user.username} · ${roleInfo.label}`}
-                extraNote="Cần Backend bổ sung bảng lưu vết: thời điểm, khu vực, người cũ → người mới, ai thực hiện."
+                userId={user.id}
+                subjectName={`${displayName || user.username} · ${roleInfo.label}`}
               />
             )}
           </div>

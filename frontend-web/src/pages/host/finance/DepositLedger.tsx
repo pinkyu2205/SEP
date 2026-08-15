@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PiggyBank, Download, ShieldCheck, RotateCcw, AlertTriangle, RefreshCw,
@@ -121,6 +122,15 @@ export const DepositLedger = () => {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * Cọc onboard về dưới dạng hoá đơn `invoiceType = OTHER` (theo doc WebSocket của BE),
+   * nhưng vẫn nạp lại với mọi loại: hoá đơn nào PAID cũng có thể đổi trạng thái sổ cọc.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   const stats = useMemo(() => {
     const held = rows.filter(r => r.status === 'HELD');

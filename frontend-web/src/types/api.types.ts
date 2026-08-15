@@ -178,7 +178,15 @@ export interface PropertyResponse {
   roomsPerFloor?: number;
   totalRooms: number;
   status: string;        // PropertyStatus
+  /** @deprecated Dùng `listedPrice` / `appliedPrice`. Giữ cho code cũ. */
   price?: number;
+  /** Nhà NGUYÊN CĂN: giá niêm yết Host duyệt. Nhà chia phòng thì giá nằm ở từng phòng. */
+  listedPrice?: number;
+  /** Nhà NGUYÊN CĂN: giá hợp đồng đang áp dụng. */
+  appliedPrice?: number;
+  /** true = đang có khách → khoá giá cho tới khi khách rời đi. */
+  priceLocked?: boolean;
+  currentTenant?: string | null;
   createdBy?: number;
   operationManagerId?: string;
   operationManagerName?: string;
@@ -462,7 +470,18 @@ export interface RoomResponse {
   propertyId: number;
   propertyName: string;
   roomNumber: string;
+  /** Tầng — BE có trả nhưng trước đây FE khai thiếu nên không hiện được. */
+  floor?: number | null;
+  /** @deprecated Giữ cho code cũ — dùng `listedPrice` / `appliedPrice` thay thế. */
   price?: number;
+  /** Giá niêm yết: giá Host duyệt, mốc quay về khi khách trả phòng. */
+  listedPrice?: number;
+  /** Giá đang áp dụng: giá hợp đồng hiện hành. Hoá đơn/doanh thu chạy theo số này. */
+  appliedPrice?: number;
+  /** true = đang có khách thuê → KHÔNG sửa được giá cho tới khi khách rời đi. */
+  priceLocked?: boolean;
+  /** Tên khách đang thuê (null khi trống). */
+  currentTenant?: string | null;
   deposit?: number;
   area: number;
   maxOccupants?: number;
@@ -472,6 +491,27 @@ export interface RoomResponse {
   status: RoomStatus;
   electricMeterCode?: string;
   waterMeterCode?: string;
+}
+
+/**
+ * Một dòng lịch sử đổi giá — `GET /properties/{id}/price-history`.
+ * BE trả sẵn `changeTypeLabel` tiếng Việt nên FE không phải tự map.
+ */
+export interface PriceHistoryItem {
+  id: number;
+  propertyId: number;
+  roomId?: number | null;
+  roomNumber?: string | null;
+  /** HOP_DONG · DIEU_KHOAN_HD · TU_DONG · HOST_DOI */
+  changeType: string;
+  changeTypeLabel: string;
+  oldPrice: number;
+  newPrice: number;
+  reason?: string | null;
+  contractId?: number | null;
+  changedBy: string;
+  changedByName?: string;
+  changedAt: string;
 }
 
 // =============================================================================
@@ -675,10 +715,21 @@ export interface HostConfirmResponse {
 // USER
 // =============================================================================
 
+/**
+ * Hồ sơ tài khoản. Verify trực tiếp với BE 15/08/2026 (`GET /api/v1/user`):
+ * BE CÓ trả `fullName` / `cccd` / `avatarUrl` / `createAt` / `isFirstLogin` — trước đây FE
+ * khai thiếu nên màn Người dùng phải tra tên vòng qua /user/managers + hợp đồng. Đã bỏ.
+ * Vẫn để optional vì VPS có thể còn chạy bản BE cũ chưa trả các field này.
+ */
 export interface UserResponse {
   id: string; // UUID
   username: string;
+  fullName?: string | null;
   phoneNumber?: string;
+  cccd?: string | null;
+  avatarUrl?: string | null;
+  createAt?: string | null;
+  isFirstLogin?: boolean | null;
   role: string;
   status: UserStatus;
 }

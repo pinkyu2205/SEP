@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
@@ -143,6 +144,12 @@ export const BillingManagementScreen: React.FC = () => {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Danh sách hoá đơn của quản lý — khách trả xong là đổi trạng thái ngay.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();

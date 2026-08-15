@@ -9,7 +9,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   ManagedProperty, WholeHouseRentalStatus,
   getPropPriority, getPriorityMeta, getIssueCount,
-} from '@/data/managedProperties';
+} from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
 
 const FILTERS = [

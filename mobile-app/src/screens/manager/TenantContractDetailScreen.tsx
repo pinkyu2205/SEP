@@ -1,14 +1,18 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking, ActivityIndicator,
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { serverNow } from '@/utils/serverTime';
 
 const SH = Dimensions.get('window').height;
-const TODAY = new Date(2026, 4, 21);
+// Trước đây là `new Date(2026, 4, 21)` — ngày CỨNG, nên mọi phép "còn bao nhiêu ngày"
+// đều tính theo 21/05/2026 bất kể hôm nay là ngày nào. Dùng giờ server.
+const TODAY = serverNow();
 
 // ── Types ────────────────────────────────────────────────────────────────
 type ContractStatus = 'draft' | 'pending' | 'active' | 'expiring_soon' | 'expired' | 'terminated';
@@ -25,101 +29,17 @@ interface TenantContract {
   endDate: string;
   monthlyRent: number;
   depositAmount: number;
-  serviceCharge: number;
-  electricityRate: number;
-  waterRate: number;
+  // Ba khoản này nằm ở cấu hình BẤT ĐỘNG SẢN, không nằm trên hợp đồng — API hợp đồng
+  // của BE không trả. Để optional và ẩn dòng khi không có, thay vì bịa số.
+  serviceCharge?: number;
+  electricityRate?: number;
+  waterRate?: number;
   termMonths: number;
   status: ContractStatus;
   signingDate?: string;
   notes?: string;
 }
 
-// ── Mock data ────────────────────────────────────────────────────────────
-const MOCK_CONTRACTS: TenantContract[] = [
-  {
-    id: 'c-mt-1', tenantId: 't1', code: 'HĐ-NT-P101-2026',
-    tenantName: 'Trần Văn A', phone: '0901111001',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P101',
-    startDate: '20/01/2026', endDate: '20/01/2027',
-    monthlyRent: 3500000, depositAmount: 3500000, serviceCharge: 300000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '15/01/2026',
-  },
-  {
-    id: 'c-mt-2', tenantId: 't2', code: 'HĐ-NT-P102-2026',
-    tenantName: 'Lê Thị B', phone: '0901111002',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P102',
-    startDate: '01/02/2026', endDate: '15/05/2026',
-    monthlyRent: 3200000, depositAmount: 3200000, serviceCharge: 300000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 3,
-    status: 'expired', signingDate: '28/01/2026',
-    notes: 'Hợp đồng đã hết hạn. Cần gia hạn hoặc làm hợp đồng mới.',
-  },
-  {
-    id: 'c-mt-3', tenantId: 't3', code: 'HĐ-NT-P201-2026',
-    tenantName: 'Phạm Văn C', phone: '0901111003',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P201',
-    startDate: '15/02/2026', endDate: '15/02/2027',
-    monthlyRent: 3800000, depositAmount: 3800000, serviceCharge: 300000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '10/02/2026',
-  },
-  {
-    id: 'c-mt-4', tenantId: 't4', code: 'HĐ-NT-P301-2026',
-    tenantName: 'Ngô Thị D', phone: '0901111004',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P301',
-    startDate: '01/03/2026', endDate: '01/03/2027',
-    monthlyRent: 3500000, depositAmount: 3500000, serviceCharge: 100000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '25/02/2026',
-  },
-  {
-    id: 'c-mt-5', tenantId: 't5', code: 'HĐ-NT-P302-2026',
-    tenantName: 'Hoàng Thị E', phone: '0901111005',
-    propertyName: 'Nhà Nguyễn Trãi', roomName: 'P302',
-    startDate: '16/05/2026', endDate: '16/05/2027',
-    monthlyRent: 3500000, depositAmount: 3500000, serviceCharge: 300000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'pending',
-  },
-  {
-    id: 'c-mt-8', tenantId: 't8', code: 'HĐ-CMT8-P101-2026',
-    tenantName: 'Bùi Văn H', phone: '0901111008',
-    propertyName: 'Nhà CMT8', roomName: 'P101',
-    startDate: '15/03/2026', endDate: '15/03/2027',
-    monthlyRent: 4000000, depositAmount: 4000000, serviceCharge: 200000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '10/03/2026',
-  },
-  {
-    id: 'c-mt-9', tenantId: 't9', code: 'HĐ-CMT8-P102-2026',
-    tenantName: 'Cao Thị I', phone: '0901111009',
-    propertyName: 'Nhà CMT8', roomName: 'P102',
-    startDate: '20/03/2026', endDate: '20/03/2027',
-    monthlyRent: 3800000, depositAmount: 3800000, serviceCharge: 200000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '15/03/2026',
-  },
-  {
-    id: 'HD-NVC-2026', tenantId: 'wh-1', code: 'HĐ-NVC-2026',
-    tenantName: 'Gia đình anh Minh', phone: '0909111222',
-    propertyName: 'Nhà Nguyễn Văn Cừ', roomName: 'Nhà nguyên căn',
-    startDate: '01/01/2026', endDate: '30/12/2026',
-    monthlyRent: 12000000, depositAmount: 24000000, serviceCharge: 150000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'active', signingDate: '25/12/2025',
-  },
-  {
-    id: 'HD-THD-2025', tenantId: 'wh-3', code: 'HĐ-THD-2025',
-    tenantName: 'Công ty An Phú', phone: '0909333444',
-    propertyName: 'Nhà Trần Hưng Đạo', roomName: 'Nhà nguyên căn',
-    startDate: '15/06/2025', endDate: '15/06/2026',
-    monthlyRent: 18000000, depositAmount: 36000000, serviceCharge: 500000,
-    electricityRate: 3500, waterRate: 15000, termMonths: 12,
-    status: 'expiring_soon', signingDate: '10/06/2025',
-    notes: 'Công ty đã xác nhận muốn gia hạn thêm 12 tháng.',
-  },
-];
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 const parseViDate = (str: string): Date => {
@@ -131,6 +51,54 @@ const getDaysRemaining = (dateStr: string): number =>
   Math.ceil((parseViDate(dateStr).getTime() - TODAY.getTime()) / 86400000);
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
+
+/** Trạng thái BE (UPPER) → trạng thái hiển thị của màn. */
+const statusFromApi = (raw: string, endDate?: string): ContractStatus => {
+  const st = (raw || '').toUpperCase();
+  if (st === 'TERMINATED' || st === 'CANCELLED') return 'terminated';
+  if (st === 'EXPIRED') return 'expired';
+  if (st === 'DRAFT') return 'draft';
+  if (st === 'PENDING') return 'pending';
+  // ACTIVE: còn ≤ 30 ngày thì coi là sắp hết hạn để manager kịp xử lý.
+  if (st === 'ACTIVE' && endDate) {
+    const left = getDaysRemaining(endDate);
+    if (left !== null && left >= 0 && left <= 30) return 'expiring_soon';
+  }
+  return 'active';
+};
+
+/** DTO của BE → shape màn này đang dùng. Field nào BE không trả thì để trống, KHÔNG bịa. */
+const toContract = (
+  c: TenantContractResponse,
+  propertyName: string,
+  roomName: string,
+): TenantContract => {
+  const months = c.endDate && c.startDate
+    ? Math.max(
+        0,
+        Math.round(
+          (new Date(c.endDate).getTime() - new Date(c.startDate).getTime()) / (30 * 86400000),
+        ),
+      )
+    : 0;
+  return {
+    id: String(c.id),
+    tenantId: String(c.id),
+    code: c.contractCode,
+    tenantName: c.tenantFullName,
+    phone: c.tenantPhone,
+    propertyName: c.propertyName || propertyName,
+    roomName: c.roomNumber ? `Phòng ${c.roomNumber}` : roomName,
+    startDate: c.startDate,
+    endDate: c.endDate ?? '',
+    monthlyRent: c.rentAmount ?? 0,
+    depositAmount: c.deposit ?? 0,
+    termMonths: months,
+    status: statusFromApi(c.status, c.endDate),
+    // BE không trả ngày ký riêng — dùng ngày hiệu lực làm mốc "đã ký" trên timeline.
+    signingDate: c.startDate,
+  };
+};
 
 const STATUS_CFG: Record<ContractStatus, { label: string; color: string; bg: string }> = {
   draft:          { label: 'Nháp',            color: '#64748B', bg: '#F1F5F9' },
@@ -194,12 +162,36 @@ export const TenantContractDetailScreen: React.FC = () => {
       propertyId: string; propertyName: string;
     };
 
-  const contract = useMemo(
-    () => MOCK_CONTRACTS.find(c => c.tenantId === tenantId) ?? null,
-    [tenantId],
-  );
+  /**
+   * Hợp đồng THẬT. Bản cũ lọc `MOCK_CONTRACTS` theo `tenantId` — mà `tenantId` truyền vào
+   * là id hợp đồng thật từ BE (số) còn mock dùng 't1'/'t2', nên không bao giờ khớp:
+   * màn luôn báo "không tìm thấy hợp đồng" với dữ liệu thật.
+   *
+   * BE chưa có endpoint lấy 1 hợp đồng theo id cho manager → lấy theo bất động sản rồi
+   * tìm trong đó. Khi BE thêm `GET /contracts/{id}` thì thay bằng một lệnh gọi.
+   */
+  const [contract, setContract] = useState<TenantContract | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const daysRemaining = contract ? getDaysRemaining(contract.endDate) : null;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await realTenantService.listByProperty(Number(propertyId));
+      const c = list.find(x => String(x.id) === String(tenantId));
+      setContract(c ? toContract(c, propertyName, roomName) : null);
+    } catch (e: any) {
+      setContract(null);
+      setError(e?.response?.data?.message || e?.message || 'Không tải được hợp đồng');
+    } finally {
+      setLoading(false);
+    }
+  }, [propertyId, tenantId, propertyName, roomName]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const daysRemaining = contract?.endDate ? getDaysRemaining(contract.endDate) : null;
   const cfg = contract ? STATUS_CFG[contract.status] : null;
 
   const handleRenew = () => {
@@ -230,8 +222,23 @@ export const TenantContractDetailScreen: React.FC = () => {
         </View>
       </View>
 
-      {contract === null ? (
-        // Empty state
+      {loading ? (
+        <View style={s.empty}>
+          <ActivityIndicator color={Colors.primary} />
+          <Text style={s.emptyDesc}>Đang tải hợp đồng...</Text>
+        </View>
+      ) : error ? (
+        // Lỗi mạng/API — KHÁC với "chưa có hợp đồng", đừng gộp làm một kẻo người dùng
+        // tưởng khách chưa ký hợp đồng trong khi thật ra chỉ là rớt mạng.
+        <View style={s.empty}>
+          <Text style={s.emptyIcon}>⚠️</Text>
+          <Text style={s.emptyTitle}>Không tải được hợp đồng</Text>
+          <Text style={s.emptyDesc}>{error}</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={load}>
+            <Text style={s.retryBtnText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      ) : contract === null ? (
         <View style={s.empty}>
           <Text style={s.emptyIcon}>📋</Text>
           <Text style={s.emptyTitle}>Chưa có hợp đồng</Text>
@@ -308,9 +315,16 @@ export const TenantContractDetailScreen: React.FC = () => {
                 đó nên phải thấy. Xem @/constants/managerVisibility. */}
             <InfoRow label="Tiền thuê hàng tháng" value={HIDDEN_AMOUNT_TEXT} />
             <InfoRow label="Tiền đặt cọc" value={HIDDEN_AMOUNT_TEXT} />
-            <InfoRow label="Phí dịch vụ / tháng" value={fmt(contract.serviceCharge)} />
-            <InfoRow label="Đơn giá điện" value={`${contract.electricityRate.toLocaleString('vi-VN')}đ/kWh`} />
-            <InfoRow label="Đơn giá nước" value={`${contract.waterRate.toLocaleString('vi-VN')}đ/m³`} />
+            {/* Ẩn hẳn khi BE không trả — trước đây ba dòng này in số của mock. */}
+            {contract.serviceCharge != null && (
+              <InfoRow label="Phí dịch vụ / tháng" value={fmt(contract.serviceCharge)} />
+            )}
+            {contract.electricityRate != null && (
+              <InfoRow label="Đơn giá điện" value={`${contract.electricityRate.toLocaleString('vi-VN')}đ/kWh`} />
+            )}
+            {contract.waterRate != null && (
+              <InfoRow label="Đơn giá nước" value={`${contract.waterRate.toLocaleString('vi-VN')}đ/m³`} />
+            )}
           </View>
 
           {/* Tenant contact */}
@@ -419,4 +433,9 @@ const s = StyleSheet.create({
   emptyIcon: { fontSize: 52 },
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#334155' },
   emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
+  retryBtn: {
+    marginTop: Spacing.md, backgroundColor: Colors.primary,
+    borderRadius: 999, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
+  },
+  retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 });

@@ -271,6 +271,15 @@ export const HostPropertyReview = () => {
             Gán quản lý khu vực
           </button>
         </div>
+
+        {/* Duyệt xong thường là quay lại duyệt căn tiếp theo — để riêng một dòng cho dễ thấy. */}
+        <button
+          onClick={() => navigate('/host/properties')}
+          className="mx-auto mt-5 flex items-center gap-1.5 text-sm font-bold text-slate-500 transition hover:text-indigo-600"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Về danh sách bất động sản
+        </button>
       </div>
     );
   }

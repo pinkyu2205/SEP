@@ -311,19 +311,19 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
+  /**
+   * Trả phòng đi theo yêu cầu checkout của khách (PENDING → APPROVED → INSPECTING → ...),
+   * xử lý ở màn "Trả phòng". Trước 15/08/2026 nút này mở thẳng InspectionDetail —
+   * màn biên bản MOCK, bấm "Lưu" chỉ hiện alert "Mock: ..." và không ghi gì xuống BE.
+   */
   const handleCheckOut = (room: Room) => {
     closeAction();
     showAlert(
       'Trả phòng',
-      `Tạo biên bản trả phòng cho ${room.tenantName ?? 'khách'} — phòng ${room.code}?`,
+      `Mở danh sách yêu cầu trả phòng để xử lý cho ${room.tenantName ?? 'khách'} — phòng ${room.code}?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Tiến hành check-out',
-          onPress: () => navigation.navigate('InspectionDetail', {
-            mode: 'create_check_out', tenantName: room.tenantName, roomCode: room.code,
-          }),
-        },
+        { text: 'Mở danh sách', onPress: () => navigation.navigate('CheckoutRequests') },
       ],
     );
   };
@@ -609,6 +609,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
               sublabel="Xem và xử lý yêu cầu sửa chữa của căn nhà"
               onPress={() => navigation.navigate('BuildingMaintenance', {
                 propertyId: property.propertyId, propertyName: property.name,
+                propertyType: property.wholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
               })}
             />
             <ActionItem

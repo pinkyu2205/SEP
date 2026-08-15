@@ -9,7 +9,6 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import type { MaintenanceTicket, TicketStatus, TicketCategory } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
-import { getPropertyById } from '@/data/managedProperties';
 import { MAINTENANCE_STATUS_META } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -138,11 +137,16 @@ const TicketCard: React.FC<{
 export const BuildingMaintenanceScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route      = useRoute<any>();
-  const { propertyId } = route.params as { propertyId: string; propertyName?: string };
-  const prop = getPropertyById(propertyId);
-  const isWholeHouse = prop?.propertyType === 'WHOLE_HOUSE';
+  const { propertyId } = route.params as {
+    propertyId: string; propertyName?: string; propertyType?: string;
+    property?: { propertyType?: string };
+  };
+  // Loại nhà lấy từ params (mọi màn gọi tới đây đều biết) — trước đây tra bảng mock
+  // MANAGED_PROPERTIES bằng id thật nên luôn trượt, mặc định thành "theo phòng".
+  const isWholeHouse =
+    (route.params?.propertyType ?? route.params?.property?.propertyType) === 'WHOLE_HOUSE';
 
-  const propertyName = route.params?.propertyName || prop?.name || '';
+  const propertyName = route.params?.propertyName || '';
 
   // Ticket THẬT của nhà này — trước đây màn đọc store mock (useTickets) nên drill từ
   // dashboard thật vào lại thấy dữ liệu giả. Filter propertyId server-side; id không

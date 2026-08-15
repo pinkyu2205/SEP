@@ -1,5 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
-import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/store/billsStore';
+import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/types/bill';
 import type { PaymentBreakdown } from '@/services/tenant/tenantService';
 
 /**

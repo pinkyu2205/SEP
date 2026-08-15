@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -8,7 +9,7 @@ import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines } from '@/utils';
-import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
+import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 // ── Config maps ─────────────────────────────────────────────
@@ -17,7 +18,7 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
   water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
-  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem billsStore),
+  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts),
   // nên nhãn không được để mỗi chữ "Tiền cọc".
   deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
 };
@@ -69,6 +70,25 @@ export const InvoiceDetailScreen: React.FC = () => {
   // track live status updates (e.g. after QR payment)
   const [invoice, setInvoice] = useState<SharedBill>(initialInvoice);
   const [paying, setPaying]   = useState(false);
+
+  /**
+   * Đây là màn khách đang mở mã QR ngồi chờ, nên realtime đáng giá nhất ở đây: BE ghi
+   * nhận PAID (PayOS webhook / quản lý xác nhận) là đóng QR và đổi trạng thái ngay,
+   * khách không phải thoát ra vào lại để biết đã trả xong.
+   *
+   * `invoiceId` của event là number, `SharedBill.id` là string → so sánh dạng chuỗi.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    if (String(event.invoiceId) !== String(invoice.id)) return;
+    setInvoice(prev => ({
+      ...prev,
+      status: 'paid',
+      paidAt: event.paidAt ?? prev.paidAt,
+      transactionId: event.transactionId ?? prev.transactionId,
+    }));
+    setPaying(false); // đóng modal QR nếu đang mở
+  });
 
   const tc  = TYPE_CFG[invoice.invoiceType];
   // Cách tính do BE dựng sẵn (10/08/2026). Hoá đơn cũ/seed không có → khối "Cách tính" ẩn.

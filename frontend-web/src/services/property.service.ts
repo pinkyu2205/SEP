@@ -26,6 +26,7 @@ import type {
   HostConfirmResponse,
   PropertyActivationResponse,
   PropertyPurgeResponse,
+  PriceHistoryItem,
   HandoverEquipmentResponse,
   OperationalEquipmentResponse,
 } from '@/types/api.types';
@@ -167,6 +168,32 @@ export const propertyService = {
   /** PUT /properties/{id}/rooms/{roomId} — sửa thông tin phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
   updateRoom: (id: number, roomId: number, data: Partial<AddRoomRequest>): Promise<RoomResponse> => {
     return api.put(`${BASE}/${id}/rooms/${roomId}`, data);
+  },
+
+  // =========================================================================
+  // GIÁ THUÊ — niêm yết / đang áp dụng / lịch sử
+  //
+  // Mô hình: `listedPrice` là giá Host duyệt (giá bán), `appliedPrice` là giá hợp đồng
+  // đang chạy. Khách trả phòng xong thì applied quay về listed. Đơn vị nào ĐANG CÓ KHÁCH
+  // thì BE khoá giá (`priceLocked = true`) — gọi PATCH sẽ bị từ chối.
+  //
+  // Dùng endpoint RIÊNG cho giá, KHÔNG dùng `PUT rooms/{roomId}`: ràng buộc "chỉ sửa
+  // phòng lúc onboarding" của endpoint kia vẫn đúng cho các field cấu trúc.
+  // =========================================================================
+
+  /** PATCH /properties/{id}/rooms/{roomId}/price — đổi giá niêm yết của MỘT phòng. */
+  updateRoomPrice: (id: number, roomId: number, price: number, reason: string): Promise<RoomResponse> => {
+    return api.patch(`${BASE}/${id}/rooms/${roomId}/price`, { price, reason });
+  },
+
+  /** PATCH /properties/{id}/price — đổi giá niêm yết của nhà NGUYÊN CĂN. */
+  updatePropertyPrice: (id: number, price: number, reason: string): Promise<PropertyResponse> => {
+    return api.patch(`${BASE}/${id}/price`, { price, reason });
+  },
+
+  /** GET /properties/{id}/price-history — lịch sử đổi giá của nhà + mọi phòng bên trong. */
+  getPriceHistory: (id: number): Promise<PriceHistoryItem[]> => {
+    return api.get(`${BASE}/${id}/price-history`);
   },
 
   /** DELETE /properties/{id}/rooms/{roomId} — xoá phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */

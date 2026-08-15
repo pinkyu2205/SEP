@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Clock, Wallet, Download, Receipt, RefreshCw, Building2, ArrowDownUp, Hourglass,
@@ -112,6 +113,12 @@ export const ReceivablesAging = () => {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Hoá đơn vừa PAID thì công nợ đổi ngay — nạp lại thay vì để Host thấy số cũ.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   // ── KPI: tính từ danh sách hoá đơn (đủ kỳ) nên luôn khớp bảng bên dưới ──
   const totals = useMemo(() => {

@@ -4,7 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import type { MaintenanceTicket } from '@/store/maintenanceStore';
-import { getPropertyById } from '@/data/managedProperties';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '@/constants/maintenance';
@@ -134,11 +133,12 @@ export const MaintenanceManagerScreen: React.FC = () => {
     const map = new Map<string, { propertyId: string; propertyName: string; propertyType?: string; tickets: typeof tickets }>();
     tickets.forEach(t => {
       if (!map.has(t.propertyId)) {
-        const prop = getPropertyById(t.propertyId);
         map.set(t.propertyId, {
           propertyId: t.propertyId,
           propertyName: t.propertyName,
-          propertyType: prop?.propertyType || t.propertyType,
+          // Loại nhà lấy thẳng từ ticket. Trước đây còn tra thêm bảng mock
+          // MANAGED_PROPERTIES bằng id thật → luôn trượt, chỉ tốn một lượt tìm.
+          propertyType: t.propertyType,
           tickets: [],
         });
       }
@@ -369,6 +369,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
                 onPress={() => navigation.navigate('BuildingMaintenance', {
                   propertyId: group.propertyId,
                   propertyName: group.propertyName,
+                  propertyType: group.propertyType,
                 })}
                 activeOpacity={0.75}
               >

@@ -76,7 +76,7 @@ export const UnreadNotificationsProvider = ({ children }: { children: React.Reac
     if (!user) return;
 
     const token = localStorage.getItem('access_token');
-    if (!token || token === 'mock-jwt-token-demo') return;
+    if (!token) return;
 
     const base = import.meta.env.VITE_API_URL || '';
     const es = new EventSource(

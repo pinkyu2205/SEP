@@ -28,9 +28,9 @@ import {
 //   • Hiệu suất theo nhà ← GET /host/reports/property-performance?month=
 //                        + GET /host/finance/property-pnl?month=  (doanh thu/chi phí thật)
 //
-// Bản cũ trộn MOCK_PROPERTIES / MOCK_USERS với API và chốt cứng khoảng
-// '2025-12' → CURRENT_MONTH='2026-05' của expenseStore, nên bảng hiện sai kỳ,
-// đánh dấu "Hiện tại" nhầm tháng và chia cho doanh thu 0 → NaN% / -Infinity%.
+// Bản cũ trộn dữ liệu mock với API và chốt cứng khoảng '2025-12' → '2026-05',
+// nên bảng hiện sai kỳ, đánh dấu "Hiện tại" nhầm tháng và chia cho doanh thu 0
+// → NaN% / -Infinity%. Nay CURRENT_MONTH lấy theo giờ server (utils/period.ts).
 // Ở đây mọi tỷ lệ đều đi qua safePct(): doanh thu 0 thì hiện "—", không chia.
 //
 // ⚠ Giới hạn BE đã biết (docs/BE-NEED-host-finance-modules-2026-08-09.md):

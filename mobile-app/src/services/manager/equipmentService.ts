@@ -6,22 +6,27 @@ import type {
 } from '@/types';
 
 /**
- * Equipment service (real backend — Maintenance_BE_Contract.md §2.4).
- * Operations Manager quản lý kho thiết bị theo phòng.
+ * Equipment service (real backend).
+ *
+ * ⚠ Đường dẫn ở đây đã được đối chiếu trực tiếp với source BE
+ * (EquipmentController, GlobalEquipmentController, MaintenanceEquipmentController,
+ * EquipmentQrController) ngày 15/08/2026. Nhóm endpoint không gắn property nằm ở
+ * MaintenanceEquipmentController và ĐỀU có hậu tố `-feature` / `/feature` —
+ * trước đây FE gọi thiếu hậu tố nên toàn bộ sửa thiết bị + đổi trạng thái 404 im lặng.
  */
-export interface UpsertEquipmentBody {
-  equipmentName: string;
-  category: string;
-  roomId?: number;
-  installationDate?: string;
-  warrantyExpiredDate?: string;
-  qrCode?: string;
+
+/** Body của POST /properties/{id}/equipments — khớp CreateAddedEquipmentRequest của BE. */
+export interface CreateEquipmentBody {
+  equipmentName: string; // bắt buộc
+  category: string; // bắt buộc
+  cost?: number;
+  roomId?: number; // bỏ trống = gắn thẳng vào nhà (nguyên căn / khu vực chung)
 }
 
 export const realEquipmentService = {
-  /** Thiết bị theo phòng */
+  /** Thiết bị theo phòng — GET /api/v1/equipment/feature?roomId= */
   getByRoom: async (roomId: number): Promise<EquipmentDto[]> => {
-    const { data } = await realApiClient.get<EquipmentDto[]>('/api/v1/equipment', {
+    const { data } = await realApiClient.get<EquipmentDto[]>('/api/v1/equipment/feature', {
       params: { roomId },
     });
     return data;
@@ -36,12 +41,12 @@ export const realEquipmentService = {
   },
 
   getById: async (id: number): Promise<EquipmentDto> => {
-    const { data } = await realApiClient.get<EquipmentDto>(`/api/v1/equipment/${id}`);
+    const { data } = await realApiClient.get<EquipmentDto>(`/api/v1/equipment/${id}/feature`);
     return data;
   },
 
-  /** Thêm thiết bị vào property/phòng */
-  create: async (propertyId: number, body: UpsertEquipmentBody): Promise<EquipmentDto> => {
+  /** Thêm thiết bị lắp thêm vào property/phòng */
+  create: async (propertyId: number, body: CreateEquipmentBody): Promise<EquipmentDto> => {
     const { data } = await realApiClient.post<EquipmentDto>(
       `/api/v1/properties/${propertyId}/equipments`,
       body,
@@ -49,8 +54,9 @@ export const realEquipmentService = {
     return data;
   },
 
-  update: async (id: number, body: Partial<UpsertEquipmentBody>): Promise<EquipmentDto> => {
-    const { data } = await realApiClient.put<EquipmentDto>(`/api/v1/equipment/${id}`, body);
+  /** Sửa thông tin thiết bị — BE nhận nguyên EquipmentResponse, gửi phần thay đổi là đủ. */
+  update: async (id: number, body: Partial<EquipmentDto>): Promise<EquipmentDto> => {
+    const { data } = await realApiClient.put<EquipmentDto>(`/api/v1/equipment/${id}/feature`, body);
     return data;
   },
 
@@ -58,9 +64,10 @@ export const realEquipmentService = {
     id: number,
     status: EquipmentLifecycleStatus,
   ): Promise<EquipmentDto> => {
-    const { data } = await realApiClient.patch<EquipmentDto>(`/api/v1/equipment/${id}/status`, {
-      status,
-    });
+    const { data } = await realApiClient.patch<EquipmentDto>(
+      `/api/v1/equipment/${id}/status-feature`,
+      { status },
+    );
     return data;
   },
 
@@ -82,9 +89,15 @@ export const realEquipmentService = {
     return data;
   },
 
+  /**
+   * Lịch sử bảo trì của 1 thiết bị.
+   * Lưu ý BE có 2 endpoint gần giống nhau: `/maintenance-history` (trả
+   * MaintenanceRequestResponse — phiếu bảo trì) và `/maintenance-history-feature`
+   * (trả EquipmentMaintenanceHistoryResponse — đúng shape FE cần). Dùng cái sau.
+   */
   getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
-      `/api/v1/equipment/${id}/maintenance-history`,
+      `/api/v1/equipment/${id}/maintenance-history-feature`,
     );
     return data;
   },
