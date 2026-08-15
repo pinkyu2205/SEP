@@ -78,6 +78,11 @@ interface BillingRow {
   status: AdminInvoiceStatus;
   dueDate?: string;
   createdAt?: string;
+  /** `HD-ONBOARD-*` — vỏ bọc gộp cọc + tiền nhà kỳ đầu, KHÔNG cộng vào tổng. */
+  isOnboardEnvelope?: boolean;
+  /** Tiền nhà kỳ đầu, thu chung lần với cọc — vẫn là doanh thu thật, vẫn cộng. */
+  collectedAtOnboard?: boolean;
+  collectedInInvoiceCode?: string;
 }
 
 const fromAdminRow = (r: AdminInvoiceRow): BillingRow => ({
@@ -92,7 +97,20 @@ const fromAdminRow = (r: AdminInvoiceRow): BillingRow => ({
   status: r.status,
   dueDate: r.dueDate,
   createdAt: r.createdAt,
+  isOnboardEnvelope: r.isOnboardEnvelope,
+  collectedAtOnboard: r.collectedAtOnboard,
+  collectedInInvoiceCode: r.collectedInInvoiceCode,
 });
+
+/**
+ * Cộng tiền, BỎ QUA vỏ bọc `HD-ONBOARD-*`.
+ *
+ * Khách nhận phòng chuyển MỘT lần gồm tiền cọc (giữ hộ, hoàn lại khi trả phòng — không
+ * phải doanh thu) và tiền nhà chu kỳ đầu (doanh thu, đã có hoá đơn `HD-RENT-*` riêng).
+ * Cộng cả vỏ bọc là vừa tính trùng tiền nhà vừa coi tiền cọc là doanh thu.
+ */
+const sumMoney = (list: BillingRow[]) =>
+  list.reduce((s, r) => (r.isOnboardEnvelope ? s : s + r.amount), 0);
 
 type StatusKey = 'all' | AdminInvoiceStatus;
 type TypeKey = 'all' | AdminInvoiceType;
@@ -246,16 +264,15 @@ export const BillingPayments = () => {
   const paged = pageSlice(filtered, page, perPage);
 
   const stats = useMemo(() => {
-    const sum = (list: BillingRow[]) => list.reduce((s, r) => s + r.amount, 0);
     const scoped = rows.filter(r => property === 'all' || r.propertyName === property);
     const paid = scoped.filter(r => r.status === 'PAID');
     const pending = scoped.filter(r => r.status === 'PENDING' || r.status === 'PARTIAL');
     const overdue = scoped.filter(r => r.status === 'OVERDUE');
     return {
-      total: scoped.length, totalAmt: sum(scoped),
-      paid: paid.length, paidAmt: sum(paid),
-      pending: pending.length, pendingAmt: sum(pending),
-      overdue: overdue.length, overdueAmt: sum(overdue),
+      total: scoped.length, totalAmt: sumMoney(scoped),
+      paid: paid.length, paidAmt: sumMoney(paid),
+      pending: pending.length, pendingAmt: sumMoney(pending),
+      overdue: overdue.length, overdueAmt: sumMoney(overdue),
     };
   }, [rows, property]);
 
@@ -274,6 +291,12 @@ export const BillingPayments = () => {
         'Khách thuê': r.tenantName, 'Số tiền (₫)': r.amount,
         'Ngày phát hành': fmtDate(r.createdAt), 'Hạn thu': fmtDate(r.dueDate),
         'Trạng thái': STATUS_META[r.status].label,
+        // Cột này để người mở file Excel không cộng nhầm cột "Số tiền": dòng vỏ bọc
+        // HD-ONBOARD chứa cả tiền cọc (phải trả lại khách) lẫn tiền nhà đã có dòng riêng.
+        'Ghi chú đối soát': r.isOnboardEnvelope
+          ? 'Khoản gộp (cọc + tiền nhà kỳ đầu) — KHÔNG cộng vào tổng, xem 2 dòng thành phần'
+          : r.collectedAtOnboard
+            ? `Thu chung với tiền cọc trong ${r.collectedInInvoiceCode}` : '',
       })),
     }]);
   };
@@ -382,7 +405,7 @@ export const BillingPayments = () => {
           <div>
             <h2 className="text-base font-semibold text-slate-900">Danh sách hoá đơn</h2>
             <p className="text-xs text-slate-500">
-              {filtered.length} hoá đơn · tổng {formatCurrency(filtered.reduce((s, r) => s + r.amount, 0))}
+              {filtered.length} hoá đơn · tổng {formatCurrency(sumMoney(filtered))}
               {fullAccess && ' · bấm vào dòng để xem giao dịch khách đã báo'}
             </p>
           </div>
@@ -449,6 +472,16 @@ export const BillingPayments = () => {
                       <td className="px-5 py-3.5 font-mono text-xs font-bold text-slate-700">{r.code}</td>
                       <td className="px-4 py-3.5">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${type.color}`}>{type.label}</span>
+                        {r.isOnboardEnvelope && (
+                          <span className="ml-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                            Khoản gộp — không tính vào tổng
+                          </span>
+                        )}
+                        {r.collectedAtOnboard && (
+                          <span className="ml-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                            Thu cùng cọc lúc nhận phòng
+                          </span>
+                        )}
                         <p className="mt-1 text-xs text-slate-500">{r.periodLabel}</p>
                       </td>
                       <td className="px-4 py-3.5">
@@ -459,7 +492,12 @@ export const BillingPayments = () => {
                         </p>
                       </td>
                       <td className="px-4 py-3.5 text-slate-700">{r.tenantName}</td>
-                      <td className="px-4 py-3.5 text-right font-semibold tabular-nums text-slate-900">{formatCurrency(r.amount)}</td>
+                      {/* Vỏ bọc thanh toán làm mờ: hai phần của nó đã được tính ở hoá đơn
+                          tiền nhà và sổ cọc, nên nó không nằm trong tổng. */}
+                      <td className={`px-4 py-3.5 text-right font-semibold tabular-nums ${
+                        r.isOnboardEnvelope ? 'text-slate-400' : 'text-slate-900'}`}>
+                        {formatCurrency(r.amount)}
+                      </td>
                       <td className="px-4 py-3.5 text-xs tabular-nums text-slate-500">{fmtDate(r.createdAt)}</td>
                       <td className={`px-4 py-3.5 text-xs tabular-nums ${r.status === 'OVERDUE' ? 'font-bold text-rose-600' : 'text-slate-500'}`}>
                         {fmtDate(r.dueDate)}
@@ -495,6 +533,22 @@ export const BillingPayments = () => {
                                   <dd className="font-black text-slate-950">{formatCurrency(r.amount)}</dd>
                                 </div>
                               </dl>
+
+                              {r.collectedAtOnboard && (
+                                <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-800">
+                                  Tiền nhà chu kỳ đầu, khách trả <b>chung một lần với tiền cọc</b> lúc nhận phòng
+                                  (mã gộp {r.collectedInInvoiceCode}) nên hoá đơn này không có giao dịch riêng.
+                                  Đây là <b>doanh thu thật</b> và đã được tính vào tổng phía trên.
+                                </p>
+                              )}
+                              {r.isOnboardEnvelope && (
+                                <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+                                  Đây là <b>khoản thu gộp</b> lúc nhận phòng, không phải một khoản thu riêng:
+                                  <br />• <b>Tiền cọc</b> — giữ hộ, hoàn lại khi khách trả phòng. Không phải doanh thu.
+                                  <br />• <b>Tiền nhà chu kỳ đầu</b> — đã có hoá đơn riêng <b>HD-RENT-…</b> cùng kỳ.
+                                  <br />Hai phần đã được tính ở đúng chỗ, nên dòng này <b>không cộng vào tổng</b>.
+                                </p>
+                              )}
                             </div>
                             <div>
                               <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Giao dịch khách đã báo ({claims.length})</p>

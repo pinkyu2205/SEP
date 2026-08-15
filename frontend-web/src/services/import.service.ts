@@ -41,6 +41,25 @@ export interface BulkImportErrorResult {
 const isUploadSizeError = (status: number | undefined, raw: string | undefined) =>
   status === 413 || /max(imum)?\s*upload\s*size|upload size exceeded|sizelimitexceeded|filesizelimit/i.test(raw ?? '');
 
+/**
+ * `fetch` reject = request chưa từng tới server. Trong màn import, nguyên nhân số 1
+ * KHÔNG phải mất mạng mà là **file Excel đang mở trong Excel**: trình duyệt giữ tham
+ * chiếu tới file trên đĩa, Excel lưu đè làm tham chiếu hỏng, đọc blob thất bại.
+ * (Ca thật 16/08/2026: file khoá `~$....xlsx` sinh lúc 03:40, file bị ghi đè 03:42,
+ * lỗi hiện 03:42 — cùng file đó gửi bằng curl thì BE trả 200.)
+ *
+ * Chrome/Edge ném `NotReadableError`/`NotFoundError`, còn mất mạng hay CORS thì ném
+ * `TypeError: Failed to fetch` — tách hai nhánh để không đổ lỗi nhầm cho đường truyền.
+ */
+const networkFailMessage = (e: unknown): string => {
+  const name = (e as { name?: string })?.name ?? '';
+  if (name === 'NotReadableError' || name === 'NotFoundError') {
+    return 'Không đọc được file — có thể bạn đang mở nó trong Excel. Hãy đóng file rồi chọn lại.';
+  }
+  return 'Không gửi được file lên máy chủ. Kiểm tra: (1) file có đang mở trong Excel không '
+    + '— đóng lại rồi chọn lại; (2) backend đã chạy chưa; (3) kết nối mạng.';
+};
+
 const UPLOAD_SIZE_MESSAGE =
   'File vượt quá giới hạn dung lượng của máy chủ (mặc định 1MB). ' +
   'Đây là cấu hình phía Backend — cần nâng spring.servlet.multipart.max-file-size/max-request-size. ' +
@@ -63,11 +82,18 @@ async function postExcel(endpoint: string, file: File, dryRun: boolean): Promise
 
   const token = localStorage.getItem('access_token');
 
-  const res = await fetch(`${API_BASE}${endpoint}?dryRun=${dryRun}`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: form,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}?dryRun=${dryRun}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+  } catch (e) {
+    // fetch reject = CHƯA tới được server. Không gói lại thì chỗ gọi rơi vào nhánh
+    // "lỗi không xác định" và người dùng không có manh mối nào để sửa.
+    throw { status: 0, message: networkFailMessage(e), errors: [] } as BulkImportErrorResult;
+  }
 
   let body: any = null;
   try {
@@ -162,11 +188,17 @@ export const importService = {
 
     const token = localStorage.getItem('access_token');
 
-    const res = await fetch(`${API_BASE}${IMAGES_ZIP_ENDPOINT}?dryRun=${dryRun}`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: form,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${IMAGES_ZIP_ENDPOINT}?dryRun=${dryRun}`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+    } catch (e) {
+      // Cùng bẫy với postExcel — file .zip đang mở/đang được ghi thì đọc blob hỏng.
+      throw { status: 0, message: networkFailMessage(e), errors: [] } as BulkImportErrorResult;
+    }
 
     let body: any = null;
     try { body = await res.json(); } catch { /* body rỗng / không phải JSON */ }

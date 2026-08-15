@@ -982,6 +982,29 @@ export interface TenantContractResponse {
   terminatedAt?: string;
   terminationReason?: string;
   terminationType?: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'NO_SHOW' | 'OTHER';
+
+  // --- Biên bản bàn giao lúc manager đón khách ---
+  // BE lưu đủ trong TenantContractResponse (không phải endpoint riêng): chỉ số công tơ
+  // chốt lúc nhận phòng, ảnh chụp mặt đồng hồ, và ảnh hiện trạng phòng.
+  // Ảnh nằm trên Cloudinary, mở thẳng URL được.
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  electricMeterCapturedAt?: string;
+  waterMeterCapturedAt?: string;
+  /** Ảnh hiện trạng phòng — bản có kèm thời điểm chụp. */
+  roomConditionPhotos?: { url: string; capturedAt?: string }[];
+  /** Bản chỉ có URL (đời cũ) — dùng khi `roomConditionPhotos` trống. */
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
+
+  /** NONE | PERCENT | SCHEDULE — điều khoản tăng giá theo năm. */
+  rentEscalationType?: string;
+  /** Giá niêm yết lúc host duyệt (đối chiếu với `rentAmount` đã chốt với khách). */
+  listedPrice?: number;
+  notes?: string;
+  signedAt?: string;
 }
 
 // =============================================================================

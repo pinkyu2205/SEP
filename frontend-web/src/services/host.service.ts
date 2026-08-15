@@ -63,6 +63,8 @@ export interface ReceivablesAging {
 export interface DepositItem {
   tenantName: string; propertyName: string; roomCode: string;
   amount: number; heldSince: string; status: 'HELD' | 'REFUNDED' | 'FORFEITED';
+  /** BE có trả — dùng để ghép khoản cọc vào đúng hợp đồng ở màn chi tiết HĐ. */
+  contractId?: number; contractCode?: string; endDate?: string;
 }
 export interface DepositsResponse { totalHeld: number; items: DepositItem[]; }
 

@@ -33,6 +33,8 @@ interface ManagerInvoiceDto {
   id: number;
   code: string;
   type: string;
+  /** Hợp đồng phát sinh hoá đơn — dùng để lọc hoá đơn của MỘT hợp đồng. */
+  contractId?: number | null;
   propertyId: number;
   propertyName: string;
   roomNumber?: string | null;
@@ -50,13 +52,28 @@ interface ManagerInvoiceDto {
    * docs/BE-NEED-admin-billing-fields-2026-08-07.md. Đọc sẵn để BE thêm là chạy ngay.
    */
   billingPeriod?: string | null;
+  /** FIRST | REGULAR | LAST — chu kỳ của hoá đơn tiền nhà. */
+  cycleType?: string | null;
+  /**
+   * BE bật cờ này cho CẢ HAI hoá đơn của một lần thu lúc nhận phòng:
+   * `HD-ONBOARD-*` (nơi tiền thật sự chuyển) và `HD-RENT-*` chu kỳ đầu
+   * (bản ghi kế toán cho phần tiền nhà đã nằm trong hoá đơn kia).
+   * Xem `ManagerBillingServiceImpl`: note bắt đầu `ONBOARD|` hoặc chứa `onboardPaid=true`.
+   */
+  onboardPaid?: boolean | null;
 }
+
+/** Hoá đơn thu gộp lúc nhận phòng — nơi tiền THẬT SỰ chuyển. */
+const isOnboardCode = (code?: string | null): boolean =>
+  !!code && code.startsWith('HD-ONBOARD-');
 
 /** 1 dòng hoá đơn đã chuẩn hoá cho UI admin. */
 export interface AdminInvoiceRow {
   id: number;
   code: string;
   type: AdminInvoiceType;
+  /** Hợp đồng phát sinh hoá đơn — lọc hoá đơn theo hợp đồng ở màn chi tiết HĐ. */
+  contractId?: number;
   propertyId: number;
   propertyName: string;
   roomNumber?: string;
@@ -71,6 +88,29 @@ export interface AdminInvoiceRow {
   status: AdminInvoiceStatus;
   dueDate?: string;
   createdAt?: string;
+  /**
+   * `HD-ONBOARD-*` — **VỎ BỌC THANH TOÁN**, không phải một khoản thu riêng.
+   *
+   * Lúc đón khách, khách chuyển MỘT lần gồm hai thứ bản chất khác hẳn nhau:
+   *   • tiền cọc          9.500.000  → khoản GIỮ HỘ, hoàn lại khi trả phòng (công nợ)
+   *   • tiền nhà kỳ đầu   5.209.677  → doanh thu thật
+   *   ────────────────────────────
+   *   HD-ONBOARD-1       14.709.677  ← chỉ là tổng của hai dòng trên
+   *
+   * Hai phần đó đã được ghi ở nơi khác: tiền nhà ở `HD-RENT-*` chu kỳ đầu, tiền cọc ở
+   * sổ cọc (tab "Tiền cọc"). Nên dòng này **KHÔNG được cộng vào tổng hoá đơn** — cộng
+   * vào là vừa tính trùng tiền nhà, vừa tính tiền cọc thành doanh thu trong khi đó là
+   * tiền sẽ phải trả lại khách.
+   */
+  isOnboardEnvelope: boolean;
+  /**
+   * Hoá đơn tiền nhà chu kỳ đầu, đã thu chung một lần với tiền cọc lúc nhận phòng.
+   * **Vẫn là doanh thu thật và vẫn cộng vào tổng** — cờ này chỉ để hiện nhãn giải thích
+   * vì sao hoá đơn không có giao dịch riêng.
+   */
+  collectedAtOnboard: boolean;
+  /** Mã hoá đơn gộp đã thu khoản này (chỉ có khi `collectedAtOnboard`). */
+  collectedInInvoiceCode?: string;
 }
 
 export interface AdminInvoiceQuery {
@@ -94,7 +134,18 @@ const invoiceToRow = (d: ManagerInvoiceDto): AdminInvoiceRow => {
   const status = (d.status || '').toUpperCase() as AdminInvoiceStatus;
   const month = d.month ?? undefined;
   const year = d.year ?? undefined;
+  const isOnboardEnvelope = isOnboardCode(d.code);
+  // `onboardPaid` bật ở cả hai hoá đơn của một lần thu; cái KHÔNG phải vỏ bọc chính là
+  // hoá đơn tiền nhà chu kỳ đầu — nó là doanh thu thật, vẫn cộng vào tổng.
+  const collectedAtOnboard = !!d.onboardPaid && !isOnboardEnvelope;
   return {
+    contractId: d.contractId ?? undefined,
+    isOnboardEnvelope,
+    collectedAtOnboard,
+    // Mã vỏ bọc suy từ contractId trong mã tiền nhà: HD-RENT-{contractId}-{kỳ}.
+    collectedInInvoiceCode: collectedAtOnboard
+      ? `HD-ONBOARD-${(d.code || '').split('-')[2] ?? ''}`
+      : undefined,
     id: d.id,
     code: d.code,
     type: INVOICE_TYPES.includes(type) ? type : 'OTHER',
