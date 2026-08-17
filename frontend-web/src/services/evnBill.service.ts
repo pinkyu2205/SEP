@@ -22,6 +22,23 @@ import api from './api';
 
 const ADMIN = '/api/v1/admin';
 
+/**
+ * ─── ĐỔI ROUTE 18/08/2026: `/admin/evn-bills` → `/admin/utility-bills?type=ELECTRIC` ───
+ *
+ * File này viết trước theo contract ĐỀ XUẤT (`/admin/evn-bills`), nhưng BE chọn cách
+ * khác: gộp điện và nước vào MỘT endpoint `/admin/utility-bills`, phân biệt bằng `type`
+ * (`AdminUtilityBillController`). Không có route `evn-bills` nào trong BE — nên mọi lần
+ * admin bấm phát hành đều nhận 404 "Route không tồn tại".
+ *
+ * Bên nước (`waterBill.service.ts`) đã đi đúng route này từ đầu, đó là lý do trang nước
+ * chạy được trong khi trang điện thì không.
+ *
+ * BE dùng tên field trung tính `totalQuantity` cho cả kWh và m³; FE điện vẫn giữ tên
+ * `totalKwh` cho dễ đọc nên phải map hai chiều ở `toEvnBill` / lúc gửi lên.
+ */
+const BASE = `${ADMIN}/utility-bills`;
+const TYPE = 'ELECTRIC';
+
 /** Hoá đơn EVN admin đã phát hành cho 1 nhà trong 1 kỳ. */
 export interface EvnBill {
   id: number;
@@ -51,7 +68,17 @@ export interface CreateEvnBillInput {
   year: number;
   totalKwh: number;
   totalAmount: number;
-  imageUrl?: string;
+  imageUrl?: string;
+  /**
+   * Chỉ số công tơ CŨ / MỚI in trên giấy EVN — chỉ có nghĩa với NHÀ NGUYÊN CĂN.
+   *
+   * BE (bản 2 luồng) dùng luôn hai số này để TỰ phát hành hoá đơn cho khách thuê trong
+   * cùng transaction, nên FE không phải gọi thêm `createForWholeHouse`. BE bản cũ bỏ qua
+   * hai field này (Jackson mặc định không lỗi với field lạ) nên gửi kèm là an toàn cho
+   * cả hai bản — xem chú thích ở chỗ gọi trong EvnBillPublishing.
+   */
+  prevReading?: number;
+  newReading?: number;
 }
 
 /** Kết quả OCR ảnh hoá đơn EVN (BE: OcrEvnBillResponse, endpoint đã có sẵn). */
@@ -75,6 +102,15 @@ export interface OcrEvnBillResponse {
  *
  * Rút ra: đừng đoán dạng response, bóc hết mọi dạng.
  */
+/**
+ * `UtilityBillResponse` (BE) → `EvnBill` (FE). Chỉ khác nhau ở tên trường số lượng.
+ * Giữ nguyên mọi field khác, kể cả 4 field nhiệm vụ ghi chỉ số BE thêm 17/08/2026.
+ */
+const toEvnBill = (row: any): EvnBill => ({
+  ...row,
+  totalKwh: row?.totalKwh ?? row?.totalQuantity ?? 0,
+});
+
 const unwrapList = <T,>(d: unknown): T[] => {
   if (Array.isArray(d)) return d as T[];
   const o = d as { items?: T[]; content?: T[]; data?: T[] } | null | undefined;
@@ -95,12 +131,18 @@ export const evnBillService = {
    * BE phải IDEMPOTENT theo (propertyId, month, year): kỳ đó đã có bản PUBLISHED thì
    * trả 409 chứ đừng tạo thêm — hai bản cùng kỳ sẽ làm manager tính theo đơn giá khác nhau.
    */
-  publish: (input: CreateEvnBillInput): Promise<EvnBill> =>
-    api.post<unknown, EvnBill>(`${ADMIN}/evn-bills`, input),
+  publish: async (input: CreateEvnBillInput): Promise<EvnBill> => {
+    const { totalKwh, ...rest } = input;
+    // BE nhận `totalQuantity` (dùng chung cho kWh/m³) — xem ghi chú ở BASE.
+    const row = await api.post<unknown, any>(BASE, {
+      ...rest, type: TYPE, totalQuantity: totalKwh,
+    });
+    return toEvnBill(row);
+  },
 
   list: async (params?: { propertyId?: number; month?: number; year?: number }): Promise<EvnBill[]> => {
-    const raw = await api.get<unknown, unknown>(`${ADMIN}/evn-bills`, { params });
-    return unwrapList<EvnBill>(raw);
+    const raw = await api.get<unknown, unknown>(BASE, { params: { ...params, type: TYPE } });
+    return unwrapList<any>(raw).map(toEvnBill);
   },
 
   /**
@@ -128,8 +170,8 @@ export const evnBillService = {
       const batch = propertyIds.slice(i, i + batchSize);
       const results = await Promise.all(
         batch.map(propertyId =>
-          api.get<unknown, unknown>(`${ADMIN}/evn-bills`, { params: { propertyId, month, year } })
-            .then(unwrapList<EvnBill>)
+          api.get<unknown, unknown>(BASE, { params: { propertyId, month, year, type: TYPE } })
+            .then((raw) => unwrapList<any>(raw).map(toEvnBill))
             .catch(() => [] as EvnBill[]),
         ),
       );
@@ -144,7 +186,7 @@ export const evnBillService = {
    * ấy chỉ tạo ra hoá đơn mồ côi tính theo đơn giá không còn tồn tại.
    */
   revoke: (id: number): Promise<void> =>
-    api.delete<unknown, void>(`${ADMIN}/evn-bills/${id}`),
+    api.delete<unknown, void>(`${BASE}/${id}`),
 };
 
 /** Đơn giá 1 kWh = tổng tiền EVN ÷ tổng kWh. EVN tính bậc thang nên không có sẵn đơn giá. */

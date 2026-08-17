@@ -185,10 +185,8 @@ export const Dashboard = () => {
   useEffect(() => { load(); }, [load]);
 
   // Doanh thu / công nợ trên dashboard đổi ngay khi có hoá đơn được thanh toán.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
-  });
+  // Nạp lại theo cả 3 lớp (WS · poll dự phòng · quay lại tab) — xem useBillingRealtime.
+  useBillingRealtime({ onRefresh: load });
 
   // ── Nhà chờ duyệt giá / đã duyệt giá ──
   const pending = useMemo(() => apiProps.filter(p => p.status === 'PENDING_HOST_REVIEW'), [apiProps]);

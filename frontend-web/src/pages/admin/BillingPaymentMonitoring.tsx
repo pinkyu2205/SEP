@@ -11,7 +11,7 @@ import {
 } from '@/services/admin.service';
 import toast from 'react-hot-toast';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
-import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
+import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd, RealtimeBadge } from './shared';
 import { serverNow } from '@/utils/serverTime';
 import { InvoiceUnlockPanel } from './InvoiceUnlockPanel';
 
@@ -151,11 +151,14 @@ export const BillingPaymentMonitoring = () => {
    * hiện tiền — vá dòng bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới. Refetch cũng lo
    * luôn trường hợp hoá đơn vừa PAID không nằm trong bộ lọc đang xem.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    setReloadKey(k => k + 1);
-    const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
-    toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+  const { connected: liveOn } = useBillingRealtime({
+    // Nạp lại cho CẢ 3 lớp: event WS, nhịp poll dự phòng, quay lại tab.
+    onRefresh: () => setReloadKey(k => k + 1),
+    onEvent: (event) => {
+      if (event.event !== 'INVOICE_PAID') return;
+      const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
+      toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+    },
   });
 
   // Đổi bộ lọc/tab thì về trang 1 và đóng dòng đang mở.
@@ -260,12 +263,18 @@ export const BillingPaymentMonitoring = () => {
         ? 'Toàn bộ hoá đơn thật của hệ thống (tiền phòng, điện, nước, dịch vụ, bảo trì) — mới phát hành nằm trên đầu'
         : 'Tiền cọc thu theo hợp đồng, không phải hoá đơn — mới thu nằm trên đầu'}
       icon={CreditCard}
-      action={tab === 'invoices' ? (
-        <select value={period} onChange={e => setPeriod(e.target.value)} className="input-field w-44">
-          <option value="">Tất cả các kỳ</option>
-          {periods.map(p => <option key={p} value={p}>{periodLabel(p)}</option>)}
-        </select>
-      ) : undefined}
+      action={(
+        <div className="flex items-center gap-3">
+          {/* Nói rõ trang đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
+          <RealtimeBadge connected={liveOn} />
+          {tab === 'invoices' && (
+            <select value={period} onChange={e => setPeriod(e.target.value)} className="input-field w-44">
+              <option value="">Tất cả các kỳ</option>
+              {periods.map(p => <option key={p} value={p}>{periodLabel(p)}</option>)}
+            </select>
+          )}
+        </div>
+      )}
     >
       {/* Cọc nằm trên hợp đồng (TenantContract.deposit), hoá đơn nằm ở bảng riêng —
           2 dòng tiền khác nhau nên tách tab thay vì trộn chung một bảng. */}

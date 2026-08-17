@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  FilePlus, FileSpreadsheet, RefreshCw, Trash2, Building2, Phone, CalendarClock,
+  FilePlus, FileSpreadsheet, RefreshCw, Trash2, Phone, CalendarClock,
   FileDown, Pencil, Search, Eye, EyeOff, Users, AlertTriangle,
   CalendarDays, FileWarning, X,
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import { normalizeVi } from '../../utils/helpers';
 import { todayIso } from '../../utils/serverTime';
 import { fmtDate } from '../../utils/period';
 import { openContractBlob } from '../../utils/contractFile';
-import { StatCard } from '../admin/shared';
+import { StatCard, Pagination } from '../admin/shared';
 import { DraftContractFormModal } from './DraftContractFormModal';
 import { DraftContractImportModal } from './DraftContractImportModal';
 
@@ -25,6 +25,13 @@ const maskPhone = (phone?: string | null): string => {
   if (digits.length <= 5) return digits;
   return `${digits.slice(0, 3)}•••${digits.slice(-2)}`;
 };
+
+/**
+ * 20 dòng/trang. KHÔNG dùng `PAGE_SIZE` (=6) của các trang admin khác: ở đó mỗi bản ghi
+ * là một thẻ lớn, còn đây là bảng dòng mảnh — 6 dòng/trang thì 80 hồ sơ thành 14 trang,
+ * bấm số trang nhiều hơn là đọc dữ liệu.
+ */
+const ROWS_PER_PAGE = 20;
 
 /** So khớp không dấu trên nhiều trường — gõ "quan" ra "Nguyễn Minh Quân". */
 const matchVi = (term: string, ...fields: (string | number | null | undefined)[]): boolean => {
@@ -234,6 +241,20 @@ export const DraftOnboardingList = () => {
   const hasFilter = !!search.trim() || propertyFilter !== 'all' || managerFilter !== 'all'
     || scheduleFilter !== 'all' || fileFilter !== 'all';
 
+  /**
+   * PHÂN TRANG — trước đây trang này đổ HẾT (80 hồ sơ, 50 nhà) vào một lưới masonry:
+   * mỗi nhà là một thẻ riêng có header 2 dòng, mà phần lớn nhà chỉ có 1 hồ sơ, nên một
+   * hồ sơ chiếm 5 dòng. Cuộn mãi không hết và không có cách nào nhảy tới cuối danh sách.
+   * Nay là bảng, mỗi hồ sơ 1 dòng, cắt trang 20 dòng.
+   */
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filteredDrafts.length / ROWS_PER_PAGE));
+  // Đổi lọc/sắp xếp thì về trang 1, không thì đang ở trang 4 mà lọc còn 2 trang là màn trắng.
+  useEffect(() => { setPage(1); },
+    [search, propertyFilter, managerFilter, scheduleFilter, fileFilter, sortBy]);
+  const pageStart = (page - 1) * ROWS_PER_PAGE;
+  const pageItems = filteredDrafts.slice(pageStart, pageStart + ROWS_PER_PAGE);
+
   const clearFilters = () => {
     setSearch(''); setPropertyFilter('all'); setManagerFilter('all');
     setScheduleFilter('all'); setFileFilter('all');
@@ -388,153 +409,159 @@ export const DraftOnboardingList = () => {
           </button>
         </div>
       ) : (
-        /* Masonry bằng CSS columns thay vì grid: các nhà có số hồ sơ lệch nhau nhiều
-           (1 vs 3), grid 2 cột sẽ để lại khoảng trắng dài bằng cột cao nhất. */
-        <div className="columns-1 gap-5 xl:columns-2">
-          {groups.map(({ propertyId, property, items }) => {
-            const lateCount = items.filter(
-              (d) => d.expectedReceptionDate && d.expectedReceptionDate < today,
-            ).length;
-            return (
-              <div
-                key={propertyId}
-                className="mb-5 break-inside-avoid overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-              >
-                {/* Group header — quản lý phụ trách CHỈ hiện ở đây; trước kia lặp lại
-                    trên từng dòng dù cả nhóm luôn cùng một người. */}
-                <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50">
-                      <Building2 className="h-4 w-4 text-indigo-600" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-slate-900">
-                        {property?.propertyName || `Nhà #${propertyId}`}
-                      </p>
-                      <p className="truncate text-xs text-slate-400">
-                        {property?.shortAddress}
-                        {property?.operationManagerName ? ` · ${property.operationManagerName}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {lateCount > 0 && (
-                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
-                        {lateCount} quá hạn
-                      </span>
-                    )}
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500 ring-1 ring-slate-200">
-                      {items.length} hồ sơ
-                    </span>
-                  </div>
-                </div>
+        /* BẢNG thay cho lưới thẻ theo nhà.
 
-                {/* Rows */}
-                <div className="divide-y divide-slate-100">
-                  {items.map((d) => {
-                    const late = d.expectedReceptionDate && d.expectedReceptionDate < today
-                      ? overdueDays(d.expectedReceptionDate, today) : 0;
-                    const isToday = d.expectedReceptionDate === today;
-                    // Vạch màu bên trái: quét mắt một lượt là thấy dòng nào gấp.
-                    const accent = late > 0 ? 'border-l-rose-500' : isToday ? 'border-l-amber-400' : 'border-l-transparent';
-                    return (
-                      <div key={d.id} className={`border-l-[3px] ${accent} px-4 py-3 transition-colors hover:bg-slate-50/60`}>
-                        {/* Hàng 1: tên + nhãn tình trạng + nút thao tác */}
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="min-w-0 truncate text-sm font-bold text-slate-900">
-                            {d.tenantFullName || 'Khách chưa đặt tên'}
-                          </p>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            {late > 0 ? (
-                              <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
-                                Quá hạn {late} ngày
-                              </span>
-                            ) : isToday ? (
-                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
-                                Đón hôm nay
-                              </span>
-                            ) : null}
-                            {/* Nút icon thay 3 nút chữ: mỗi nhà có nhiều hồ sơ, lặp lại
-                                "Sửa / File HĐ / Huỷ" bằng chữ chiếm cả một dòng mỗi dòng. */}
-                            <button
-                              onClick={() => setEditing(d)} title="Sửa hồ sơ"
-                              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => viewContract(d)}
-                              disabled={!d.contractFileAvailable || viewingId === d.id}
-                              title={d.contractFileAvailable ? 'Mở file hợp đồng' : 'Chưa có file hợp đồng'}
-                              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-                            >
-                              <FileDown className={`h-3.5 w-3.5 ${viewingId === d.id ? 'animate-pulse' : ''}`} />
-                            </button>
-                            <button
-                              onClick={() => cancelDraft(d)} title="Huỷ hồ sơ"
-                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Hàng 2: phòng · giá · cọc — thông tin chốt của hồ sơ */}
-                        <p className="mt-1 truncate text-xs text-slate-600">
-                          <span className="font-semibold text-slate-700">
-                            {d.roomNumber ? `Phòng ${d.roomNumber}` : 'Nguyên căn'}
-                          </span>
-                          {' · '}{formatCurrency(d.rentAmount)}/tháng
-                          {' · '}<span className="text-slate-400">cọc {formatCurrency(d.deposit)}</span>
+           Vì sao đổi: gom theo nhà chỉ đáng khi mỗi nhóm có nhiều hồ sơ, mà thực tế 50 nhà /
+           80 hồ sơ — gần như nhà nào cũng đúng 1 hồ sơ. Mỗi thẻ nhà lại có header 2 dòng cộng
+           dòng hồ sơ 3 dòng, thành ra 1 hồ sơ chiếm 5 dòng và trang dài vô tận. Nay tên nhà
+           là MỘT CỘT, mỗi hồ sơ 1 dòng, quét mắt theo cột nào cũng được. */
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1080px] text-left text-sm">
+              <thead className="table-header">
+                <tr>
+                  <th className="px-4 py-2.5 font-bold">Khách thuê</th>
+                  <th className="px-4 py-2.5 font-bold">Nhà · phòng</th>
+                  <th className="px-4 py-2.5 font-bold">Quản lý</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Giá thuê · cọc</th>
+                  <th className="px-4 py-2.5 font-bold">Ngày đón</th>
+                  <th className="px-4 py-2.5 font-bold">Hợp đồng</th>
+                  <th className="px-4 py-2.5 text-right font-bold">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pageItems.map((d) => {
+                  const late = d.expectedReceptionDate && d.expectedReceptionDate < today
+                    ? overdueDays(d.expectedReceptionDate, today) : 0;
+                  const isToday = d.expectedReceptionDate === today;
+                  const property = properties[d.propertyId];
+                  return (
+                    /* Vạch màu bên trái: quét một lượt là thấy dòng nào gấp. */
+                    <tr
+                      key={d.id}
+                      className={`border-l-[3px] transition-colors hover:bg-slate-50/60 ${
+                        late > 0 ? 'border-l-rose-500' : isToday ? 'border-l-amber-400' : 'border-l-transparent'
+                      }`}
+                    >
+                      {/* Khách + SĐT (che, bấm mắt để xem đủ) */}
+                      <td className="px-4 py-2.5">
+                        <p className="font-bold text-slate-900">
+                          {d.tenantFullName || 'Khách chưa đặt tên'}
                         </p>
+                        <span className="flex items-center gap-1 text-[11px] text-slate-400">
+                          <Phone className="h-3 w-3" />
+                          {revealedPhones.has(d.id) ? (d.tenantPhone || '—') : maskPhone(d.tenantPhone)}
+                          {d.tenantPhone && (
+                            <button
+                              type="button"
+                              onClick={() => togglePhoneReveal(d.id)}
+                              title={revealedPhones.has(d.id) ? 'Ẩn số điện thoại' : 'Hiện số điện thoại'}
+                              className="text-slate-400 hover:text-slate-700"
+                            >
+                              {revealedPhones.has(d.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                            </button>
+                          )}
+                        </span>
+                      </td>
 
-                        {/* Hàng 3: ngày đón · SĐT · mã HĐ — gộp 3 dòng cũ thành 1 */}
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <CalendarClock className={`h-3 w-3 ${late > 0 ? 'text-rose-500' : isToday ? 'text-amber-500' : ''}`} />
-                            {d.expectedReceptionDate ? (
-                              <span className={late > 0 ? 'font-semibold text-rose-600' : isToday ? 'font-semibold text-amber-600' : ''}>
-                                {fmtDate(d.expectedReceptionDate)}
-                              </span>
-                            ) : (
-                              <span className="font-medium text-amber-600">Chưa đặt ngày đón</span>
-                            )}
+                      {/* Nhà · phòng — thay cho header nhóm cũ */}
+                      <td className="max-w-[240px] px-4 py-2.5">
+                        <p className="truncate font-semibold text-slate-700">
+                          {property?.propertyName || `Nhà #${d.propertyId}`}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-400">
+                          {d.roomNumber ? `Phòng ${d.roomNumber}` : 'Nguyên căn'}
+                          {property?.shortAddress ? ` · ${property.shortAddress}` : ''}
+                        </p>
+                      </td>
+
+                      <td className="max-w-[150px] px-4 py-2.5">
+                        {d.assignedManagerName || property?.operationManagerName ? (
+                          <span className="block truncate text-xs text-slate-600">
+                            {d.assignedManagerName || property?.operationManagerName}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {revealedPhones.has(d.id) ? (d.tenantPhone || '—') : maskPhone(d.tenantPhone)}
-                            {d.tenantPhone && (
-                              <button
-                                type="button"
-                                onClick={() => togglePhoneReveal(d.id)}
-                                title={revealedPhones.has(d.id) ? 'Ẩn số điện thoại' : 'Hiện số điện thoại'}
-                                className="text-slate-400 hover:text-slate-700"
-                              >
-                                {revealedPhones.has(d.id) ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                              </button>
-                            )}
+                        ) : (
+                          <span className="text-xs font-medium text-amber-600">Chưa có</span>
+                        )}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                        <p className="font-semibold text-slate-800">{formatCurrency(d.rentAmount)}</p>
+                        <p className="text-[11px] text-slate-400">cọc {formatCurrency(d.deposit)}</p>
+                      </td>
+
+                      {/* Ngày đón + nhãn trễ hạn */}
+                      <td className="whitespace-nowrap px-4 py-2.5">
+                        {d.expectedReceptionDate ? (
+                          <>
+                            <span className={`flex items-center gap-1 font-semibold ${
+                              late > 0 ? 'text-rose-600' : isToday ? 'text-amber-600' : 'text-slate-700'
+                            }`}>
+                              <CalendarClock className="h-3.5 w-3.5" />
+                              {fmtDate(d.expectedReceptionDate)}
+                            </span>
+                            {late > 0 ? (
+                              <span className="text-[11px] font-bold text-rose-600">Quá hạn {late} ngày</span>
+                            ) : isToday ? (
+                              <span className="text-[11px] font-bold text-amber-600">Đón hôm nay</span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-xs font-medium text-amber-600">Chưa đặt ngày</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-2.5">
+                        {d.contractCode && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
+                            {d.contractCode}
                           </span>
-                          {d.contractCode && (
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
-                              {d.contractCode}
-                            </span>
-                          )}
-                          {!d.assignedManagerName && (
-                            <span className="font-medium text-amber-600">Chưa có quản lý phụ trách</span>
-                          )}
-                          {!d.contractFileAvailable && (
-                            <span className="flex items-center gap-1 font-medium text-violet-600">
-                              <FileWarning className="h-3 w-3" /> Chưa có file HĐ
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+                        )}
+                        {!d.contractFileAvailable && (
+                          <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-violet-600">
+                            <FileWarning className="h-3 w-3" /> Chưa có file
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                        <button
+                          onClick={() => setEditing(d)} title="Sửa hồ sơ"
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => viewContract(d)}
+                          disabled={!d.contractFileAvailable || viewingId === d.id}
+                          title={d.contractFileAvailable ? 'Mở file hợp đồng' : 'Chưa có file hợp đồng'}
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <FileDown className={`h-3.5 w-3.5 ${viewingId === d.id ? 'animate-pulse' : ''}`} />
+                        </button>
+                        <button
+                          onClick={() => cancelDraft(d)} title="Huỷ hồ sơ"
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Phân trang — nói rõ đang xem dòng nào trên tổng bao nhiêu, không chỉ số trang. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+            <p className="text-xs text-slate-500">
+              Hiện <b className="text-slate-700">{pageStart + 1}–{pageStart + pageItems.length}</b>
+              {' / '}<b className="text-slate-700">{filteredDrafts.length}</b> hồ sơ
+              {filteredDrafts.length !== drafts.length ? ` (đã lọc từ ${drafts.length})` : ''}
+            </p>
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          </div>
         </div>
       )}
 

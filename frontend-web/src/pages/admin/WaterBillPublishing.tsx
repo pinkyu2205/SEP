@@ -5,6 +5,7 @@ import {
 } from '@/services/waterBill.service';
 import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
+import { utilityInvoiceService } from '@/services/utilityInvoice.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
@@ -33,8 +34,17 @@ interface BillForm {
   totalQuantity: string;
   totalAmount: string;
   billingPeriod: string;
+  /**
+   * Chỉ số đồng hồ CŨ / MỚI in trên giấy nước. Chỉ bắt buộc với NHÀ NGUYÊN CĂN vì
+   * loại đó phát hành thẳng cho khách (BE chặn: consumption = newReading − prevReading).
+   * Nhà chia phòng bỏ trống — quản lý đọc đồng hồ từng phòng.
+   */
+  prevReading: string;
+  newReading: string;
 }
-const EMPTY_FORM: BillForm = { totalQuantity: '', totalAmount: '', billingPeriod: '' };
+const EMPTY_FORM: BillForm = {
+  totalQuantity: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
+};
 
 const PROPERTY_PAGE_SIZE = 200;
 
@@ -57,6 +67,8 @@ export const WaterBillPublishing = () => {
   const [uploading, setUploading] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  /** Lần phát hành vừa rồi có gửi thẳng cho khách thuê không (chỉ nguyên căn). */
+  const [issuedToTenant, setIssuedToTenant] = useState(false);
   /** Câu nhắc sau khi đọc ảnh — OCR chỉ là gợi ý, admin vẫn phải soát. */
   const [scanNote, setScanNote] = useState<string | null>(null);
   /** Ảnh đang xem phóng to. Hoá đơn nước chữ nhỏ, xem ở khung thumbnail không đọc nổi số. */
@@ -121,8 +133,22 @@ export const WaterBillPublishing = () => {
     [bills, propertyId],
   );
 
+  /**
+   * Nguyên căn đi luồng KHÁC: phát hành thẳng cho khách thuê, quản lý chỉ nhận thông báo.
+   * Xem services/utilityInvoice.service.ts.
+   */
+  const selectedProperty = properties.find((p) => p.id === propertyId);
+  const isWholeHouse = selectedProperty?.wholeHouse === true;
+  const prevReadingNum = Number(onlyDigits(form.prevReading) || 0);
+  const newReadingNum = Number(onlyDigits(form.newReading) || 0);
+  /** Hiệu hai chỉ số phải bằng tổng m³ — kiểm ở FE để không nhận 422 sau khi đã tạo tổng. */
+  const readingMismatch = isWholeHouse
+    && !!form.prevReading && !!form.newReading
+    && newReadingNum - prevReadingNum !== quantity;
+
   const formReady = !!propertyId && quantity > 0 && amount > 0
-    && !!form.billingPeriod.trim() && !existingBill;
+    && !!form.billingPeriod.trim() && !existingBill
+    && (!isWholeHouse || (!!form.prevReading && !!form.newReading && !readingMismatch));
 
   /**
    * Upload ảnh rồi ĐỌC THỬ để điền sẵn 3 ô. Chỉ điền vào ô còn TRỐNG — admin đã gõ tay
@@ -138,9 +164,13 @@ export const WaterBillPublishing = () => {
       try {
         const parsed = parseWaterInvoice(await waterBillService.ocr(url));
         setForm((f) => ({
+          ...f,
           totalQuantity: f.totalQuantity || (parsed.totalQuantity != null ? String(parsed.totalQuantity) : ''),
           totalAmount: f.totalAmount || (parsed.totalAmount != null ? String(parsed.totalAmount) : ''),
           billingPeriod: parsed.billingPeriod || f.billingPeriod,
+          // Chỉ số đồng hồ đọc từ bộ ba tự khớp phép trừ — chỉ điền ô còn trống.
+          prevReading: f.prevReading || (parsed.prevReading != null ? String(parsed.prevReading) : ''),
+          newReading: f.newReading || (parsed.newReading != null ? String(parsed.newReading) : ''),
         }));
         const got = parsed.totalQuantity != null || parsed.totalAmount != null;
         setScanNote(got
@@ -161,15 +191,70 @@ export const WaterBillPublishing = () => {
     if (!formReady || !propertyId) return;
     setPublishing(true);
     setPublishError(null);
+    setIssuedToTenant(false);
+    const period = form.billingPeriod.trim();
     try {
-      await waterBillService.create({
+      const created = await waterBillService.create({
         propertyId,
-        billingPeriod: form.billingPeriod.trim(),
+        billingPeriod: period,
         month, year,
         totalQuantity: quantity,
         totalAmount: amount,
         imageUrl: imageUrl || undefined,
+        // Nguyên căn: BE (bản 2 luồng) dùng luôn 2 số này để TỰ phát hành hoá đơn cho
+        // khách trong cùng transaction. BE cũ bỏ qua field lạ nên gửi kèm là an toàn.
+        prevReading: isWholeHouse ? prevReadingNum : undefined,
+        newReading: isWholeHouse ? newReadingNum : undefined,
       });
+
+      /**
+       * NGUYÊN CĂN — phát hành thẳng cho khách. Giấy nước của căn nhà đã đủ chỉ số cũ /
+       * mới / tổng tiền của đúng khách đó, không phải chia cho ai nên không cần quản lý
+       * đi đọc đồng hồ.
+       *
+       * ⚠️ Hai bước không nguyên tử — nếu bước dưới lỗi thì tổng đã tạo mà khách chưa
+       * nhận. Báo lỗi rõ để admin đừng phát hành lại. Sửa gốc ở BE: xem
+       * doc/BE-NEED-nguyen-can-tu-phat-hanh-hoa-don-tien-ich.
+       */
+      if (isWholeHouse) {
+        try {
+          await utilityInvoiceService.createForWholeHouse(propertyId, {
+            type: 'WATER',
+            billingPeriod: period,
+            prevReading: prevReadingNum,
+            newReading: newReadingNum,
+            consumption: quantity,
+            // Lấy đơn giá BE trả về nếu có: BE tính ở scale 8, FE tự chia sẽ lệch
+            // và rơi vào AMOUNT_MISMATCH.
+            unitPrice: created?.unitPrice ?? unitPrice,
+            amount,
+            meterImageUrl: imageUrl || undefined,
+          });
+          setIssuedToTenant(true);
+        } catch (e: any) {
+          /**
+           * `INVOICE_ALREADY_EXISTS` KHÔNG phải lỗi: BE (bản 2 luồng) đã tự phát hành hoá
+           * đơn cho khách khi tạo hoá đơn tổng, nên lệnh gọi này thành dư. Khách đã có
+           * hoá đơn → coi như thành công.
+           *
+           * Vẫn giữ lệnh gọi vì BE/FE không deploy cùng lúc: bỏ hẳn bây giờ mà BE chưa lên
+           * thì nguyên căn tạo hoá đơn tổng rồi im lặng KHÔNG gửi cho khách. XOÁ khối này
+           * khi bản BE mới đã chạy ở mọi môi trường (BE yêu cầu 17/08/2026).
+           */
+          const code = e?.response?.data?.code;
+          const msg = e?.response?.data?.message || e?.message || '';
+          if (code === 'INVOICE_ALREADY_EXISTS' || /da ton tai|đã tồn tại/i.test(msg)) {
+            setIssuedToTenant(true);
+          } else {
+            setPublishError(
+              'Đã tạo hoá đơn tổng nhưng CHƯA gửi được cho khách thuê: '
+              + (msg || 'lỗi không rõ')
+              + '. Đừng phát hành lại — vào mục đã phát hành để gửi lại cho khách.',
+            );
+          }
+        }
+      }
+
       setForm({ ...EMPTY_FORM, billingPeriod: selectedMonthPeriod });
       setImageUrl('');
       setPropertyId(null);
@@ -399,6 +484,79 @@ export const WaterBillPublishing = () => {
               </p>
             </div>
 
+            {/* ── Luồng sau khi phát hành, khác nhau theo LOẠI NHÀ ──
+                Nói trước khi bấm: một loại tới tay khách ngay, một loại còn phải qua quản lý
+                đọc đồng hồ. Admin cần biết mình đang tạo ra việc cho ai. */}
+            {!!propertyId && (
+              <div className={`rounded-xl border p-4 ${
+                isWholeHouse ? 'border-cyan-200 bg-cyan-50' : 'border-violet-200 bg-violet-50'
+              }`}>
+                <p className={`text-xs font-black uppercase tracking-wide ${
+                  isWholeHouse ? 'text-cyan-700' : 'text-violet-700'
+                }`}>
+                  {isWholeHouse ? 'Nguyên căn — gửi thẳng cho khách thuê' : 'Nhà chia phòng — quản lý đọc đồng hồ'}
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                  {isWholeHouse ? (
+                    <>
+                      Cả căn chỉ một khách thuê, giấy nước đã ghi đủ chỉ số cũ · mới · tổng tiền
+                      của chính căn đó — không còn gì phải chia. Bấm phát hành là <b>hoá đơn tới
+                      tay khách ngay</b>. Quản lý chỉ nhận thông báo để vào xem.
+                    </>
+                  ) : (
+                    <>
+                      Giấy nước chỉ có tổng của cả nhà nên phải chia về từng phòng theo đồng hồ
+                      riêng. Bấm phát hành là hệ thống chốt <b>đơn giá</b> rồi giao việc cho quản
+                      lý: <b>đi chụp đồng hồ và ghi số từng phòng trong NGÀY HÔM NAY</b>, rồi gửi
+                      hoá đơn cho từng khách.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* ── Chỉ số đồng hồ — CHỈ nguyên căn ──
+                Hoá đơn nguyên căn đi thẳng tới khách nên phải mang đúng hai số in trên giấy. */}
+            {isWholeHouse && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số cũ (m³) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số đầu kỳ trên giấy"
+                    value={form.prevReading}
+                    onChange={(e) => setForm((f) => ({ ...f, prevReading: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số mới (m³) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số cuối kỳ trên giấy"
+                    value={form.newReading}
+                    onChange={(e) => setForm((f) => ({ ...f, newReading: e.target.value }))}
+                  />
+                </div>
+                {readingMismatch ? (
+                  <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
+                    Chỉ số mới − chỉ số cũ = {(newReadingNum - prevReadingNum).toLocaleString('vi-VN')} m³,
+                    không khớp tổng {quantity.toLocaleString('vi-VN')} m³ ở trên. Sửa cho khớp rồi mới
+                    phát hành được.
+                  </p>
+                ) : (
+                  <p className="sm:col-span-2 text-xs text-slate-400">
+                    Hai số này in trên hoá đơn khách nhận. Hiệu của chúng phải bằng đúng tổng m³.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className={`rounded-xl border p-4 ${unitPrice > 0 ? 'border-sky-200 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Đơn giá hệ thống sẽ dùng</p>
               <p className={`mt-1 text-3xl font-black tabular-nums ${unitPrice > 0 ? 'text-sky-700' : 'text-slate-300'}`}>
@@ -418,6 +576,15 @@ export const WaterBillPublishing = () => {
               </p>
             )}
 
+            {/* Nói đúng việc đã xảy ra: khách đã có hoá đơn, hay mới chỉ giao việc
+                cho quản lý. Hai kết quả khác nhau nên không dùng chung một câu. */}
+            {issuedToTenant && !publishError && (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                Đã phát hành cho khách thuê — khách nhận hoá đơn và thanh toán được ngay.
+                Quản lý nhận thông báo để vào xem.
+              </p>
+            )}
+
             <button
               type="button"
               onClick={publish}
@@ -425,7 +592,7 @@ export const WaterBillPublishing = () => {
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-bold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Gửi cho quản lý
+              {isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Gửi cho quản lý đọc đồng hồ'}
             </button>
           </div>
         </div>

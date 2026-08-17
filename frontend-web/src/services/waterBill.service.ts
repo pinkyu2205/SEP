@@ -54,7 +54,10 @@ export interface CreateWaterBillInput {
   year: number;
   totalQuantity: number;
   totalAmount: number;
-  imageUrl?: string;
+  imageUrl?: string;
+  /** Chỉ số đồng hồ CŨ / MỚI — chỉ có nghĩa với nhà nguyên căn. Xem CreateEvnBillInput. */
+  prevReading?: number;
+  newReading?: number;
 }
 
 /** Bóc danh sách khỏi mọi dạng bọc BE có thể trả — cùng lý do đã gặp ở evnBill.service. */

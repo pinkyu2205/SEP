@@ -279,10 +279,11 @@ export const realManagerInvoiceService = {
     return data;
   },
 
-  // POST /api/v1/manager/invoices/{id}/mark-paid  — manager tự ghi nhận đã thu (tiền mặt/CK tay)
-  // method: CASH | BANK_TRANSFER | QR | EWALLET | OTHER. (BE TODO — FE gọi sẵn)
-  markInvoicePaid: async (id: number | string, body: { method: string; note?: string }) => {
-    const { data } = await realApiClient.post(`/api/v1/manager/invoices/${id}/mark-paid`, body);
-    return data;
-  },
+  /**
+   * `markInvoicePaid` đã XOÁ 17/08/2026 — `POST /manager/invoices/{id}/mark-paid` KHÔNG
+   * tồn tại trên BE (kiểm tra `ManagerBillingController`), mọi lần gọi đều 404. Nó từng
+   * là chỗ "quản lý tự khai đã thu", nay thay bằng luồng thu hộ có passcode admin +
+   * QR thật: `createPaymentQr` ở trên.
+   */
+
 };
