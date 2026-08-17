@@ -27,9 +27,10 @@ import {
 import { MeterOverrideModal } from '@/components/common';
 import type { MeterOverrideKind } from '@/services/manager/meterOverrideService';
 import { visionService, type VisionLabel } from '@/services/shared/visionService';
-import { nowIso, serverNow } from '@/utils/serverTime';
+import { nowIso, serverNow, todayIso } from '@/utils/serverTime';
+import { DatePickerField } from '@/components/common/DatePickerField';
+import { maskTenantPhone } from '@/constants/managerVisibility';
 import {
-  ContractPriceApprovalStatus,
   realTenantService,
   TenantContractResponse,} from '@/services/tenant/tenantService'
 
@@ -45,7 +46,7 @@ const parseNum = (s: string) => Number(onlyDigits(s)) || 0
  * chưa mang cấu hình của phòng — trùng đúng mặc định BE, và người nhập vẫn sửa
  * được trực tiếp trong ô.
  *
- * ⚠️ Từ 13/08/2026 đây là luồng đón khách DUY NHẤT (OnboardingScreenV2 đã gỡ). Màn cũ
+ * ⚠️ Từ 13/08/2026 đây là luồng đón khách DUY NHẤT (màn OnboardingScreenV2 cũ đã xoá 17/08/2026). Màn cũ
  * đọc `electricDecimalDigits`/`waterDecimalDigits` thật của phòng, màn này thì không —
  * phòng nào cấu hình khác mặc định sẽ phải sửa tay. Cần BE trả 2 field đó trong
  * `TenantContractResponse` để bỏ hẳn phần đoán.
@@ -63,11 +64,97 @@ const formatDateVi = (iso?: string): string => {
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback
 
-const STATUS_META: Record<ContractPriceApprovalStatus, { label: string; color: string; bg: string }> = {
-  PENDING_PRICE_APPROVAL: { label: 'Chờ Host duyệt giá', color: '#D97706', bg: '#FFFBEB' },
-  APPROVED_AWAITING_DEPOSIT: { label: 'Đã duyệt — chờ thu tiền', color: '#0891B2', bg: '#ECFEFF' },
-  PRICE_REJECTED: { label: 'Host từ chối giá', color: '#DC2626', bg: '#FEF2F2' },
+/** Đón sớm tối đa mấy ngày so với ngày vào ở — khớp `contract.max-early-move-in-days` của BE. */
+const MAX_EARLY_ONBOARD_DAYS = 3
+
+/**
+ * Số ngày còn lại tới ngày vào ở (âm = đã qua).
+ *
+ * Để ở module-level vì DANH SÁCH và PANEL THAO TÁC phải dùng chung một cách tính —
+ * lệch nhau là thẻ báo "chưa tới hạn" nhưng mở ra vẫn thao tác được như thường.
+ *
+ * Tính theo `moveInDate` chứ không phải `expectedReceptionDate`: BE ràng buộc trên ngày
+ * vào ở (`contract.max-early-move-in-days`), ngày hẹn đón chỉ là lịch làm việc.
+ */
+const daysUntilOnboard = (c: TenantContractResponse): number | null => {
+  const raw = c.moveInDate || c.expectedReceptionDate
+  if (!raw) return null
+  const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  const today = serverNow()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((d.getTime() - today.getTime()) / 86_400_000)
 }
+
+/** Chưa tới cửa sổ đón: còn hơn MAX_EARLY_ONBOARD_DAYS ngày nữa mới tới ngày vào ở. */
+const isTooEarly = (c: TenantContractResponse): boolean => {
+  const d = daysUntilOnboard(c)
+  return d != null && d > MAX_EARLY_ONBOARD_DAYS
+}
+
+/**
+ * Một nhãn trạng thái DUY NHẤT cho mỗi hợp đồng — dùng chung cho chip lọc và nhãn
+ * trên thẻ, để hai chỗ không bao giờ phân loại lệch nhau.
+ */
+type StatusKey = 'paid_wait_otp' | 'wait_price' | 'price_rejected' | 'wait_transfer' | 'draft'
+
+const STATUS_KEYS: StatusKey[] = ['paid_wait_otp', 'wait_price', 'price_rejected', 'wait_transfer', 'draft']
+
+const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string; bg: string }> = {
+  // Khách ĐÃ chuyển tiền nhưng chưa xong OTP là việc gấp nhất — manager chỉ cần bấm
+  // tiếp là xong. Trạng thái này phải thắng mọi nhãn khác.
+  paid_wait_otp:  { label: '✅ Đã thu — chờ OTP',    short: 'Chờ OTP',      color: '#047857', bg: '#ECFDF5' },
+  wait_price:     { label: 'Chờ Host duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
+  price_rejected: { label: 'Host từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
+  wait_transfer:  { label: 'Chờ khách chuyển tiền',  short: 'Chờ chuyển tiền', color: '#0891B2', bg: '#ECFEFF' },
+  draft:          { label: 'Chờ đón khách',          short: 'Chờ đón',      color: '#D97706', bg: '#FFFBEB' },
+}
+
+const statusKeyOf = (c: TenantContractResponse): StatusKey => {
+  const paid = c.paymentStatus === 'PAID' || !!c.depositPaidAt
+  if (c.status === 'PENDING' && paid) return 'paid_wait_otp'
+  if (c.priceApprovalStatus === 'PENDING_PRICE_APPROVAL') return 'wait_price'
+  if (c.priceApprovalStatus === 'PRICE_REJECTED') return 'price_rejected'
+  if (c.status === 'PENDING' || c.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT') return 'wait_transfer'
+  return 'draft'
+}
+
+/**
+ * Ngày HẸN ĐÓN của hợp đồng (yyyy-MM-dd) — dùng cho bộ lọc theo ngày.
+ * Ưu tiên `expectedReceptionDate` vì đó là lịch làm việc của manager; hồ sơ nào chưa
+ * đặt lịch thì lùi về ngày vào ở.
+ */
+const receptionDayOf = (c: TenantContractResponse): string | null => {
+  const raw = c.expectedReceptionDate || c.moveInDate
+  return raw ? String(raw).slice(0, 10) : null
+}
+
+const WEEKDAYS_VI = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7']
+
+/** "Thứ 7" từ 'yyyy-MM-dd' — ghép ngày trong tuần vào tiêu đề nhóm cho dễ hình dung. */
+const weekdayVi = (iso: string): string => {
+  const d = new Date(`${iso}T00:00:00`)
+  return Number.isNaN(d.getTime()) ? '' : WEEKDAYS_VI[d.getDay()]
+}
+
+/** yyyy-MM-dd ↔ DD/MM/YYYY (DatePickerField nhận/trả định dạng Việt). */
+const isoToVi = (iso: string): string => {
+  const [y, m, d] = iso.split('-')
+  return d ? `${d}/${m}/${y}` : ''
+}
+const viToIso = (vi: string): string => {
+  const [d, m, y] = vi.split('/')
+  return y ? `${y}-${m}-${d}` : ''
+}
+
+type TimeKey = 'all' | 'overdue' | 'ready' | 'early'
+
+const TIME_CHIPS: { key: TimeKey; label: string }[] = [
+  { key: 'all', label: 'Mọi thời điểm' },
+  { key: 'overdue', label: '⚠️ Quá hạn' },
+  { key: 'ready', label: '✅ Đón được' },
+  { key: 'early', label: '🗓 Chưa tới hạn' },
+]
 
 export const ResumeContractScreen: React.FC = () => {
   const navigation = useNavigation<any>()
@@ -81,47 +168,70 @@ export const ResumeContractScreen: React.FC = () => {
   const [viewingContract, setViewingContract] = useState(false)
   const [search, setSearch] = useState('')
 
+  const [statusFilter, setStatusFilter] = useState<StatusKey | 'all'>('all')
+  const [timeFilter, setTimeFilter] = useState<TimeKey>('all')
+  /** Lọc theo ĐÚNG một ngày hẹn đón — '' = tắt. Lưu dạng ISO yyyy-MM-dd. */
+  const [dateFilter, setDateFilter] = useState('')
+  /** Panel lọc mặc định ĐÓNG — mở màn là thấy hợp đồng ngay, không phải cuộn qua bộ lọc. */
+  const [filterOpen, setFilterOpen] = useState(false)
+
   /**
-   * Hợp đồng còn quá xa ngày vào ở thì KHÔNG hiện — tránh manager đón khách sớm.
+   * Số ngày còn lại tới ngày vào ở (âm = đã qua).
    *
-   * BE chặn ở tận bước xác thực OTP (`TenantOnboardingServiceImpl`, luật
-   * `contract.max-early-move-in-days`): quá 3 ngày là ném "Chỉ được nhận nhà sớm tối đa
-   * 3 ngày". Nhưng lúc đó manager đã chụp ảnh đồng hồ, chụp hiện trạng, thu cọc xong
-   * xuôi — hỏng nguyên một lượt làm việc, và tiền cọc thì đã vào thật.
-   *
-   * Lọc theo `moveInDate` chứ không phải `expectedReceptionDate`: BE ràng buộc trên
-   * ngày vào ở, còn ngày hẹn đón chỉ là lịch làm việc của manager. Thiếu `moveInDate`
-   * thì lùi về ngày hẹn đón, thiếu cả hai thì vẫn hiện (không đoán bừa mà giấu mất
-   * hợp đồng của người ta).
+   * Tính theo `moveInDate` chứ không phải `expectedReceptionDate`: BE ràng buộc trên
+   * ngày vào ở (`contract.max-early-move-in-days`), còn ngày hẹn đón chỉ là lịch làm
+   * việc của manager. Thiếu `moveInDate` thì lùi về ngày hẹn đón.
    */
-  const MAX_EARLY_ONBOARD_DAYS = 3
 
-  const daysUntilOnboard = (c: TenantContractResponse): number | null => {
-    const raw = c.moveInDate || c.expectedReceptionDate
-    if (!raw) return null
-    const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
-    if (Number.isNaN(d.getTime())) return null
-    const today = serverNow()
-    today.setHours(0, 0, 0, 0)
-    return Math.round((d.getTime() - today.getTime()) / 86_400_000)
+  // Dùng todayIso(date) chứ KHÔNG toISOString(): hàm kia trả ngày theo UTC, ở VN
+  // (UTC+7) mọi thời điểm trước 07:00 sáng đều ra ngày hôm trước — xem serverTime.ts.
+  const activeFilterCount =
+    (statusFilter !== 'all' ? 1 : 0) + (timeFilter !== 'all' ? 1 : 0) + (dateFilter ? 1 : 0)
+
+  const clearFilters = () => {
+    setStatusFilter('all'); setTimeFilter('all'); setDateFilter('')
   }
 
-  const tooEarly = (c: TenantContractResponse) => {
-    const d = daysUntilOnboard(c)
-    return d != null && d > MAX_EARLY_ONBOARD_DAYS
-  }
+  const tomorrowIso = useMemo(() => {
+    const d = serverNow()
+    d.setDate(d.getDate() + 1)
+    return todayIso(d)
+  }, [])
 
-  const hiddenEarlyCount = useMemo(() => list.filter(tooEarly).length, [list])
+  /*
+   * Hợp đồng chưa tới cửa sổ đón (xem `isTooEarly` ở module-level):
+   *
+   * Trước 17/08/2026 những hồ sơ này bị ẨN khỏi danh sách. Lý do ẩn là có thật — BE chặn
+   * ở tận bước xác thực OTP, lúc đó manager đã chụp ảnh đồng hồ, chụp hiện trạng, thu cọc
+   * xong xuôi, hỏng nguyên một lượt làm việc mà tiền cọc thì đã vào.
+   *
+   * Nhưng ẩn đi thì manager không thấy được lịch sắp tới của mình. Nay HIỆN HẾT, đổi cách
+   * bảo vệ: gắn nhãn + đếm ngược trên thẻ, và KHOÁ HẲN panel thao tác khi mở ra
+   * (ContractActionPanel) — chỉ cho xem, không chụp/không thu tiền được.
+   */
 
   const filteredList = useMemo(() => {
-    const inWindow = list.filter((c) => !tooEarly(c))
+    let out = list
+
+    if (statusFilter !== 'all') out = out.filter((c) => statusKeyOf(c) === statusFilter)
+    if (dateFilter) out = out.filter((c) => receptionDayOf(c) === dateFilter)
+
+    if (timeFilter !== 'all') {
+      out = out.filter((c) => {
+        const d = daysUntilOnboard(c)
+        if (timeFilter === 'overdue') return d != null && d < 0
+        if (timeFilter === 'ready') return d == null || (d >= 0 && d <= MAX_EARLY_ONBOARD_DAYS)
+        return d != null && d > MAX_EARLY_ONBOARD_DAYS // 'early'
+      })
+    }
+
     const q = search.trim().toLowerCase()
-    if (!q) return inWindow
+    if (!q) return out
     // Trước 08/08/2026 chỉ lọc theo tên khách — mentor phản ánh "search không ra".
     // Lúc đón dở, manager thường chỉ nhớ SỐ PHÒNG hoặc SĐT chứ hiếm khi nhớ đúng
     // họ tên đầy đủ; hợp đồng nháp thì tên còn có thể để trống.
     const digits = q.replace(/[^\d]/g, '')
-    return inWindow.filter((c) => {
+    return out.filter((c) => {
       const haystack = [
         c.tenantFullName,
         c.tenantPhone,
@@ -136,7 +246,67 @@ export const ResumeContractScreen: React.FC = () => {
       // Gõ SĐT có/không dấu cách, dấu chấm đều phải ra.
       return digits.length >= 3 && haystack.replace(/[^\d]/g, '').includes(digits)
     })
-  }, [list, search])
+  }, [list, search, statusFilter, timeFilter, dateFilter])
+
+  /** Đếm cho chip trạng thái — tính trên toàn bộ, không đổi theo bộ lọc đang chọn. */
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = { all: list.length }
+    STATUS_KEYS.forEach((k) => { c[k] = list.filter((x) => statusKeyOf(x) === k).length })
+    return c
+  }, [list])
+
+  const timeCounts = useMemo(() => {
+    const days = list.map(daysUntilOnboard)
+    return {
+      all: list.length,
+      overdue: days.filter((d) => d != null && d < 0).length,
+      ready: days.filter((d) => d == null || (d >= 0 && d <= MAX_EARLY_ONBOARD_DAYS)).length,
+      early: days.filter((d) => d != null && d > MAX_EARLY_ONBOARD_DAYS).length,
+    }
+  }, [list])
+
+  /**
+   * Gom hợp đồng THEO NGÀY HẸN ĐÓN, sắp tăng dần (quá hạn lên đầu, chưa đặt ngày xuống
+   * cuối). Nhờ vậy cuộn danh sách chính là đọc lịch làm việc — không cần dùng bộ lọc,
+   * cũng không phải tự nhẩm "17/08 là hôm nay hay mai".
+   */
+  const dayGroups = useMemo(() => {
+    const map = new Map<string, TenantContractResponse[]>()
+    filteredList.forEach((c) => {
+      const k = receptionDayOf(c) ?? ''
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(c)
+    })
+    return [...map.entries()]
+      .map(([key, items]) => ({ key, items }))
+      .sort((a, b) => {
+        if (!a.key) return 1
+        if (!b.key) return -1
+        return a.key.localeCompare(b.key)
+      })
+  }, [filteredList])
+
+  /** Nhãn tiêu đề nhóm ngày: "HÔM NAY", "NGÀY MAI", "CÒN 14 NGÀY", "QUÁ HẠN 3 NGÀY". */
+  const dayHeader = (iso: string): { main: string; sub: string; color: string; bg: string } => {
+    if (!iso) return { main: 'CHƯA ĐẶT NGÀY ĐÓN', sub: '', color: '#B45309', bg: '#FFFBEB' }
+    const today = todayIso()
+    const diff = Math.round(
+      (new Date(`${iso}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / 86_400_000,
+    )
+    const sub = weekdayVi(iso)
+    if (diff < 0) return { main: `QUÁ HẠN ${Math.abs(diff)} NGÀY · ${formatDateVi(iso)}`, sub, color: '#B91C1C', bg: '#FEF2F2' }
+    if (diff === 0) return { main: `HÔM NAY · ${formatDateVi(iso)}`, sub, color: '#B45309', bg: '#FFF7ED' }
+    if (diff === 1) return { main: `NGÀY MAI · ${formatDateVi(iso)}`, sub, color: '#0E7490', bg: '#ECFEFF' }
+    return { main: `CÒN ${diff} NGÀY · ${formatDateVi(iso)}`, sub, color: Colors.textSecondary, bg: Colors.background }
+  }
+
+
+  /**
+   * Mở hợp đồng. Chưa tới cửa sổ đón thì hỏi lại — đây là thứ thay cho việc ẩn thẻ:
+   * manager vẫn xem được hồ sơ, nhưng không thể lỡ tay làm cả quy trình rồi bị BE
+   * chặn ở bước cuối.
+   */
+  const openContract = (c: TenantContractResponse) => setSelected(c)
 
   const handleViewContract = async () => {
     if (!selected) return
@@ -285,22 +455,117 @@ export const ResumeContractScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <Header onBack={() => navigation.goBack()} title="Hợp đồng chờ xử lý" />
-      <View style={styles.searchBox}>
+      {/* MỘT hàng: tìm kiếm + nút Lọc. Trước đây 3 hàng chip luôn mở, cộng ô tìm là
+          4 hàng — ăn gần nửa màn hình điện thoại trước khi thấy hợp đồng nào. */}
+      <View style={styles.topRow}>
         <TextInput
-          style={styles.searchInput}
+          style={styles.searchInputFlex}
           value={search}
           onChangeText={setSearch}
-          placeholder="Tìm theo tên, SĐT, số phòng, mã HĐ..."
+          placeholder="Tìm tên, SĐT, phòng, mã HĐ..."
           placeholderTextColor={Colors.textMuted}
         />
+        <TouchableOpacity
+          style={[styles.filterBtn, (filterOpen || activeFilterCount > 0) && styles.filterBtnOn]}
+          onPress={() => setFilterOpen((o) => !o)}
+        >
+          <Text style={[styles.filterBtnText, (filterOpen || activeFilterCount > 0) && styles.filterBtnTextOn]}>
+            ⚙︎ Lọc{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+          </Text>
+        </TouchableOpacity>
       </View>
-      {/* Nói rõ có bao nhiêu hợp đồng đang bị giấu. Giấu im lặng thì manager tìm không
-          thấy khách của mình rồi tưởng hỏng dữ liệu — tốn một cuộc gọi cho admin. */}
-      {hiddenEarlyCount > 0 && (
-        <Text style={styles.earlyHiddenNote}>
-          🗓 {hiddenEarlyCount} hợp đồng chưa tới hạn đón (còn hơn {MAX_EARLY_ONBOARD_DAYS} ngày
-          nữa mới tới ngày vào ở) nên tạm ẩn. Chỉ đón được sớm tối đa {MAX_EARLY_ONBOARD_DAYS} ngày.
-        </Text>
+
+      {/* Đang lọc gì + kết quả, gói trong MỘT hàng. Bấm ✕ trên chip để bỏ từng cái —
+          không phải mở panel ra chỉ để tắt một bộ lọc. */}
+      {activeFilterCount > 0 && (
+        <ScrollView
+          horizontal showsHorizontalScrollIndicator={false}
+          style={styles.chipRow} contentContainerStyle={styles.chipRowBody}
+        >
+          <Text style={styles.countInline}>{filteredList.length}/{list.length}</Text>
+          {statusFilter !== 'all' && (
+            <TouchableOpacity style={styles.activeChip} onPress={() => setStatusFilter('all')}>
+              <Text style={styles.activeChipText}>{STATUS_UI[statusFilter].short} ✕</Text>
+            </TouchableOpacity>
+          )}
+          {timeFilter !== 'all' && (
+            <TouchableOpacity style={styles.activeChip} onPress={() => setTimeFilter('all')}>
+              <Text style={styles.activeChipText}>
+                {TIME_CHIPS.find((t) => t.key === timeFilter)?.label} ✕
+              </Text>
+            </TouchableOpacity>
+          )}
+          {!!dateFilter && (
+            <TouchableOpacity style={styles.activeChip} onPress={() => setDateFilter('')}>
+              <Text style={styles.activeChipText}>📅 {isoToVi(dateFilter)} ✕</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={clearFilters}>
+            <Text style={styles.clearFilter}>Xoá hết</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+
+      {/* Panel lọc — mặc định ĐÓNG. Gộp "lịch đón" và "chọn ngày" làm một nhóm vì
+          cùng nói về thời điểm. */}
+      {filterOpen && (
+        <View style={styles.filterPanel}>
+          <Text style={styles.filterLabel}>Trạng thái</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowBody}>
+            {(['all', ...STATUS_KEYS] as (StatusKey | 'all')[]).map((k) => {
+              const active = statusFilter === k
+              return (
+                <TouchableOpacity
+                  key={k}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setStatusFilter(k)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {k === 'all' ? 'Tất cả' : STATUS_UI[k].short} ({statusCounts[k] ?? 0})
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </ScrollView>
+
+          <Text style={styles.filterLabel}>Lịch đón</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowBody}>
+            {TIME_CHIPS.map(({ key, label }) => {
+              const active = timeFilter === key
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.chip, active && styles.chipActive]}
+                  onPress={() => setTimeFilter(key)}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    {label} ({timeCounts[key]})
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+            <TouchableOpacity
+              style={[styles.chip, dateFilter === todayIso() && styles.chipActive]}
+              onPress={() => setDateFilter((d) => (d === todayIso() ? '' : todayIso()))}
+            >
+              <Text style={[styles.chipText, dateFilter === todayIso() && styles.chipTextActive]}>Hôm nay</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chip, dateFilter === tomorrowIso && styles.chipActive]}
+              onPress={() => setDateFilter((d) => (d === tomorrowIso ? '' : tomorrowIso))}
+            >
+              <Text style={[styles.chipText, dateFilter === tomorrowIso && styles.chipTextActive]}>Ngày mai</Text>
+            </TouchableOpacity>
+          </ScrollView>
+
+          <View style={styles.panelDatePicker}>
+            <DatePickerField
+              value={dateFilter ? isoToVi(dateFilter) : ''}
+              onChange={(v) => setDateFilter(v ? viToIso(v) : '')}
+              placeholder="📅 Chọn ngày khác"
+            />
+          </View>
+        </View>
       )}
       <ScrollView
         contentContainerStyle={styles.listBody}
@@ -317,29 +582,43 @@ export const ResumeContractScreen: React.FC = () => {
             <Text style={styles.emptyText}>Không tìm thấy khách hàng nào khớp.</Text>
           </View>
         ) : (
-          filteredList.map((c) => {
-            // Khách ĐÃ chuyển tiền nhưng chưa xong OTP là việc gấp nhất — manager chỉ
-            // cần bấm tiếp là xong. Trạng thái này phải thắng mọi nhãn khác.
-            const paid = c.paymentStatus === 'PAID' || !!c.depositPaidAt
-            const meta = c.status === 'PENDING' && paid
-              ? { label: '✅ Đã thu — chờ OTP', color: '#047857', bg: '#ECFDF5' }
-              : c.priceApprovalStatus
-                ? STATUS_META[c.priceApprovalStatus]
-                : c.status === 'DRAFT'
-                  ? { label: 'Nháp — chờ đón khách', color: '#D97706', bg: '#FFFBEB' }
-                  : c.status === 'PENDING'
-                    ? { label: 'Chờ khách chuyển tiền', color: '#0891B2', bg: '#ECFEFF' }
-                    : null
+          dayGroups.map(({ key, items }) => (
+          <View key={key} style={styles.dayGroup}>
+            {/* Tiêu đề ngày: đọc "HÔM NAY" / "NGÀY MAI" / "CÒN 14 NGÀY" thay vì tự nhẩm
+                từ 17/08/2026. Nhóm theo ngày rồi thì cuộn danh sách = đọc lịch làm việc. */}
+            {(() => {
+              const h = dayHeader(key)
+              return (
+                <View style={[styles.dayHead, { backgroundColor: h.bg }]}>
+                  <Text style={[styles.dayHeadMain, { color: h.color }]}>{h.main}</Text>
+                  <Text style={[styles.dayHeadSub, { color: h.color }]}>
+                    {h.sub}{h.sub ? ' · ' : ''}{items.length} khách
+                  </Text>
+                </View>
+              )
+            })()}
+            {items.map((c) => {
+            const meta = STATUS_UI[statusKeyOf(c)]
+            const days = daysUntilOnboard(c)
+            const early = days != null && days > MAX_EARLY_ONBOARD_DAYS
+            const overdue = days != null && days < 0
             return (
               <TouchableOpacity
                 key={c.id}
-                style={styles.card}
-                onPress={() => setSelected(c)}
+                style={[
+                  styles.card,
+                  // Vạch màu trái: đỏ = quá ngày vào ở, xám = chưa tới hạn đón.
+                  overdue && styles.cardOverdue,
+                  early && styles.cardEarly,
+                ]}
+                onPress={() => openContract(c)}
                 activeOpacity={0.85}
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{c.tenantFullName}</Text>
-                  {!!c.tenantPhone && <Text style={styles.cardPhone}>📞 {c.tenantPhone}</Text>}
+                  {!!c.tenantPhone && (
+                    <Text style={styles.cardPhone}>📞 {maskTenantPhone(c.tenantPhone)}</Text>
+                  )}
                   <Text style={styles.cardMeta}>
                     {c.contractCode}
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
@@ -352,18 +631,27 @@ export const ResumeContractScreen: React.FC = () => {
                   {c.rentAmount != null && (
                     <Text style={styles.cardPrice}>{formatVnd(c.rentAmount)} đ/tháng</Text>
                   )}
-                  {!!c.expectedReceptionDate && (
-                    <Text style={styles.cardReception}>📅 Hẹn đón khách: {formatDateVi(c.expectedReceptionDate)}</Text>
+                  {/* Ngày hẹn đón đã nằm ở tiêu đề nhóm — không lặp lại trên thẻ.
+                      Chỉ nói phần tiêu đề nhóm KHÔNG nói được: chưa được phép đón. */}
+                  {early && (
+                    <Text style={styles.cardEarlyNote}>
+                      🗓 Chỉ đón sớm được {MAX_EARLY_ONBOARD_DAYS} ngày trước ngày vào ở
+                    </Text>
+                  )}
+                  {overdue && (
+                    <Text style={styles.cardOverdueNote}>
+                      ⚠️ Đã qua ngày vào ở {Math.abs(days!)} ngày
+                    </Text>
                   )}
                 </View>
-                {meta && (
-                  <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
-                    <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
-                  </View>
-                )}
+                <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+                  <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
+                </View>
               </TouchableOpacity>
             )
-          })
+            })}
+          </View>
+          ))
         )}
       </ScrollView>
     </SafeAreaView>
@@ -377,6 +665,34 @@ const ContractActionPanel: React.FC<{
   onChanged: (c: TenantContractResponse) => void
 }> = ({ contract, onDone, onChanged }) => {
   const status = contract.priceApprovalStatus
+
+  /**
+   * CHƯA TỚI HẠN ĐÓN → chỉ cho XEM, khoá mọi thao tác.
+   *
+   * Trước 17/08/2026 chỗ này chỉ hỏi một hộp thoại "vẫn mở để xem thông tin?" rồi mở
+   * nguyên panel thao tác — bấm OK là chụp ảnh, nhập chỉ số, thu tiền được hết. Hỏi
+   * xong vẫn cho làm thì câu hỏi đó vô nghĩa, mà hậu quả thì thật: BE chặn ở bước OTP
+   * SAU KHI đã thu cọc.
+   */
+  const early = daysUntilOnboard(contract)
+  if (isTooEarly(contract)) {
+    return (
+      <ScrollView contentContainerStyle={styles.panelBody}>
+        <View style={[styles.banner, { backgroundColor: '#FFF7ED' }]}>
+          <Text style={styles.bannerIcon}>🗓</Text>
+          <Text style={styles.bannerTitle}>Chưa tới hạn đón khách</Text>
+          <Text style={styles.bannerDesc}>
+            {contract.tenantFullName} vào ở ngày {formatDateVi(contract.moveInDate)} — còn {early} ngày.
+            Hệ thống chỉ cho đón sớm tối đa {MAX_EARLY_ONBOARD_DAYS} ngày, nên chưa chốt chỉ số
+            và thu tiền được.
+          </Text>
+          <Text style={styles.bannerReception}>
+            Khách đổi lịch vào sớm hơn? Mở hồ sơ bên web để sửa ngày vào ở.
+          </Text>
+        </View>
+      </ScrollView>
+    )
+  }
 
   if (status === 'PENDING_PRICE_APPROVAL') {
     return (
@@ -644,8 +960,14 @@ const InspectionSection: React.FC<{
         return
       }
 
-      // Chặn ảnh có người (mentor ý 8) — xem ghi chú dài ở OnboardingScreenV2.
-      // Chỉ hỏi Vision khi OCR không thấy đơn vị kWh/m³, để không đốt quota vô ích.
+      // Chặn ảnh có người (mentor ý 8). `validateMeterPhoto` chỉ soi CHỮ do OCR đọc,
+      // nên ảnh chụp mặt mà trong khung có bất kỳ dãy 4–8 chữ số nào (tờ lịch, số nhà,
+      // màn hình điện thoại) vẫn lọt qua luật cuối của nó.
+      //
+      // Chỉ hỏi Vision khi OCR KHÔNG thấy đơn vị kWh/m³ (`confidence !== 'high'`):
+      // đọc được đơn vị nghĩa là trong khung có mặt đồng hồ thật, không cần hỏi thêm.
+      // Nhờ vậy ca dùng bình thường không tốn thêm lượt Vision nào — quan trọng vì
+      // trần đang là 20 ảnh/giờ/tài khoản, mà đón một khách đã hết 2 ảnh đồng hồ.
       if (check.confidence !== 'high') {
         try {
           const person = findPersonLabel(await visionService.detectLabels(url))
@@ -1262,6 +1584,24 @@ const DepositOtpPanel: React.FC<{
   const [otpSending, setOtpSending] = useState(false)
   const otpSentRef = React.useRef(false)
 
+  /**
+   * Đã lưu hiện trạng phòng chưa — điều kiện để lộ nút "Tạo mã thanh toán".
+   *
+   * Thu tiền TRƯỚC khi chốt chỉ số công tơ và chụp ảnh phòng là mất luôn bằng chứng
+   * gốc: khách vào ở rồi thì không còn cách nào chứng minh hiện trạng lúc bàn giao,
+   * lúc trả phòng tranh chấp hư hỏng/điện nước là không có gì đối chiếu. Chỉ số điện
+   * nước còn tệ hơn — chốt sau khi khách đã dùng thì kỳ hoá đơn đầu tiên sai hẳn.
+   *
+   * Điều kiện khớp đúng `saveBlockReason` của InspectionSection (2 chỉ số + ≥1 ảnh
+   * phòng) — không đặt lỏng hơn, kẻo nút hiện ra trong khi hiện trạng chưa lưu xong.
+   * `contract` được cập nhật qua `onChanged` ngay sau khi lưu nên nút tự hiện.
+   */
+  const inspectionSaved =
+    contract.initialElectricReading != null
+    && contract.initialWaterReading != null
+    && ((contract.roomConditionPhotos?.length ?? 0) > 0
+      || (contract.roomConditionUrls?.length ?? 0) > 0)
+
   // Poll trạng thái thanh toán (PayOS, local không có webhook).
   useEffect(() => {
     if (paid) return
@@ -1295,7 +1635,7 @@ const DepositOtpPanel: React.FC<{
     try {
       setOtpSending(true)
       await realTenantService.sendContractOtp(contract.id)
-      showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${contract.tenantPhone}.`)
+      showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${maskTenantPhone(contract.tenantPhone)}.`)
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Không gửi được OTP.'))
     } finally {
@@ -1379,7 +1719,13 @@ const DepositOtpPanel: React.FC<{
           {/* Bỏ khối "Hình thức thu cọc": hệ thống thu 100% chuyển khoản qua PayOS,
               không còn tiền mặt, nên đó là một ô chọn chỉ có đúng một lựa chọn —
               chiếm chỗ mà không cho người dùng quyết định gì. */}
-          {!payInfo.payosQrCode && !payInfo.payosCheckoutUrl && (
+          {/* Chưa lưu hiện trạng thì KHÔNG hiện nút — một dòng nói đúng việc phải làm.
+              (Lý do dài dòng đã bỏ: manager cần biết LÀM GÌ, không cần nghe giảng.) */}
+          {!inspectionSaved ? (
+            <Text style={styles.stepLockNote}>
+              🔒 Lưu hiện trạng phòng xong mới thu được tiền
+            </Text>
+          ) : !payInfo.payosQrCode && !payInfo.payosCheckoutUrl ? (
             <TouchableOpacity
               style={[styles.primaryBtn, busy && styles.btnDisabled]}
               onPress={createPayment}
@@ -1391,7 +1737,7 @@ const DepositOtpPanel: React.FC<{
                 <Text style={styles.primaryBtnText}>Tạo mã thanh toán</Text>
               )}
             </TouchableOpacity>
-          )}
+          ) : null}
           {!!payInfo.payosQrCode && (
             <View style={styles.qrBox}>
               <View style={styles.qrWrap}>
@@ -1423,9 +1769,10 @@ const DepositOtpPanel: React.FC<{
             <Text style={styles.paidIcon}>✅</Text>
             <Text style={styles.paidText}>Đã ghi nhận thanh toán!</Text>
           </View>
-          <Text style={[styles.label, { marginTop: Spacing.md }]}>
-            Mã OTP gửi tới SĐT khách {contract.tenantPhone}
-          </Text>
+          <View style={{ marginTop: Spacing.md }}>
+            <Text style={styles.label}>Mã OTP gửi tới SĐT khách</Text>
+            <Text style={styles.label}>{maskTenantPhone(contract.tenantPhone)}</Text>
+          </View>
           <TextInput
             style={[styles.input, styles.otpInput]}
             value={otp}
@@ -1503,17 +1850,6 @@ const styles = StyleSheet.create({
   },
   viewContractBarDisabledText: { color: Colors.textMuted, fontSize: 12, fontStyle: 'italic' },
 
-  searchBox: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
-  searchInput: {
-    backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    fontSize: 14,
-    color: Colors.textPrimary,
-  },
   listBody: { padding: Spacing.lg, gap: Spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 80, gap: Spacing.md },
   emptyIcon: { fontSize: 44 },
@@ -1536,19 +1872,76 @@ const styles = StyleSheet.create({
   cardProperty: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   cardPrice: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
   cardReception: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  earlyHiddenNote: {
-    marginHorizontal: Spacing.base,
-    marginBottom: Spacing.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.sm,
-    backgroundColor: '#FFF7ED',
-    borderWidth: 1,
-    borderColor: '#FED7AA',
-    fontSize: 11,
-    lineHeight: 16,
+  stepLockNote: {
+    fontSize: 12.5,
     color: '#9A3412',
+    textAlign: 'center',
+    paddingVertical: Spacing.sm,
   },
+
+  cardEarlyNote: { fontSize: 11, color: '#9A3412', marginTop: 4, lineHeight: 15 },
+  cardOverdueNote: { fontSize: 11, fontWeight: '700', color: Colors.error, marginTop: 4 },
+  // Vạch màu bên trái để quét mắt: đỏ = quá ngày vào ở, cam nhạt = chưa tới hạn đón.
+  cardOverdue: { borderLeftWidth: 3, borderLeftColor: Colors.error },
+  cardEarly: { borderLeftWidth: 3, borderLeftColor: '#FDBA74' },
+
+  chipRow: { maxHeight: 46, flexGrow: 0 },
+  chipRowBody: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, gap: Spacing.sm },
+  chip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  chipTextActive: { color: Colors.white },
+  topRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md,
+  },
+  searchInputFlex: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 9,
+    fontSize: 13.5, color: Colors.textPrimary,
+  },
+  filterBtn: {
+    paddingHorizontal: Spacing.md, paddingVertical: 9, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  filterBtnOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  filterBtnTextOn: { color: Colors.white },
+
+  filterPanel: {
+    marginHorizontal: Spacing.lg, marginTop: Spacing.sm,
+    padding: Spacing.sm, paddingBottom: Spacing.md,
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.lg,
+  },
+  filterLabel: {
+    fontSize: 11, fontWeight: '800', color: Colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.4,
+    paddingHorizontal: Spacing.sm, paddingTop: Spacing.xs,
+  },
+  panelDatePicker: { paddingHorizontal: Spacing.sm, marginTop: Spacing.xs },
+
+  dayGroup: { gap: Spacing.md },
+  dayHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md, paddingVertical: 7,
+    borderRadius: BorderRadius.md,
+  },
+  dayHeadMain: { fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
+  dayHeadSub: { fontSize: 11, fontWeight: '600', opacity: 0.85 },
+
+  countInline: { fontSize: 12, fontWeight: '700', color: Colors.textMuted, alignSelf: 'center' },
+  activeChip: {
+    paddingHorizontal: Spacing.md, paddingVertical: 5, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primaryBg, borderWidth: 1, borderColor: Colors.primary,
+  },
+  activeChipText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
+  clearFilter: { fontSize: 12, fontWeight: '700', color: Colors.primary, alignSelf: 'center' },
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
   statusText: { fontSize: 11, fontWeight: '700' },
 

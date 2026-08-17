@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   CreditCard, Search, Loader2, AlertCircle, ChevronDown, Receipt, Wallet,
@@ -12,6 +13,7 @@ import toast from 'react-hot-toast';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
 import { serverNow } from '@/utils/serverTime';
+import { InvoiceUnlockPanel } from './InvoiceUnlockPanel';
 
 /**
  * Giám sát hoá đơn & thanh toán toàn hệ thống (admin).
@@ -513,6 +515,16 @@ export const BillingPaymentMonitoring = () => {
                             )}
                           </div>
                         </div>
+
+                        {/* Phát mã cho quản lý thu hộ (tiền mặt / trả hộ) — gắn theo
+                            đúng hoá đơn đang mở để không phát nhầm sang hoá đơn khác. */}
+                        <InvoiceUnlockPanel
+                          invoiceId={inv.id}
+                          invoiceCode={inv.code}
+                          canCollect={inv.status === 'PENDING'
+                            || inv.status === 'OVERDUE'
+                            || inv.status === 'PARTIAL'}
+                        />
                       </td>
                     </tr>
                   )}
@@ -564,7 +576,7 @@ export const BillingPaymentMonitoring = () => {
                   </td>
                   <td className="px-4 py-3">
                     <p className="text-slate-700">{d.tenantName}</p>
-                    {d.tenantPhone && <p className="text-xs text-slate-400">{d.tenantPhone}</p>}
+                    {d.tenantPhone && <MaskedField value={d.tenantPhone} emptyText="" className="text-xs text-slate-400" />}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <p className="font-bold text-slate-950">{formatVnd(d.amount)}</p>

@@ -327,6 +327,49 @@ export interface AdminHost {
   name: string;
 }
 
+/**
+ * ─── MỞ KHOÁ THU HỘ (17/08/2026) ─────────────────────────────────────────────
+ *
+ * Quản lý không được tự tạo giao dịch trên hoá đơn của khách. Nhưng có hai ca thật
+ * buộc phải làm thế: khách trả TIỀN MẶT tại phòng, và khách nhờ NGƯỜI KHÁC trả hộ.
+ * Cửa đó mở tự do thì quản lý ghi nhận thu bừa được, nên mỗi lần phải xin admin một
+ * mã 6 số dùng một lần, gắn cứng đúng 1 hoá đơn + 1 mục đích.
+ *
+ * Admin phát mã ở đây rồi đọc cho quản lý qua điện thoại. Mọi lần quản lý nhập mã —
+ * đúng hay sai — đều vào log để admin soát lại.
+ */
+export type InvoiceUnlockPurpose = 'CASH_COLLECT' | 'PROXY_PAY';
+
+export interface InvoiceUnlockPasscode {
+  id: number;
+  /** 6 chữ số. Chỉ đọc cho quản lý qua điện thoại, đừng gửi qua chat nhóm. */
+  passcode: string;
+  invoiceId: number;
+  purpose: InvoiceUnlockPurpose;
+  note?: string | null;
+  expiresAt: string;
+  usedAt?: string | null;
+  createdAt: string;
+  /** Còn dùng được không (chưa dùng + chưa hết hạn) — BE tự tính. */
+  usable: boolean;
+  message?: string | null;
+}
+
+export interface InvoiceUnlockLog {
+  id: number;
+  managerId: string;
+  managerName?: string | null;
+  invoiceId: number;
+  invoiceCode?: string | null;
+  purpose: InvoiceUnlockPurpose;
+  adminName?: string | null;
+  /** false = nhập sai mã. Nhiều dòng false liên tiếp là dấu hiệu cần để ý. */
+  success: boolean;
+  /** QR_CREATED khi đã tạo được mã QR. */
+  paymentResult?: string | null;
+  createdAt: string;
+}
+
 export const adminService = {
   /**
    * Toàn bộ hoá đơn THẬT của hệ thống, mới nhất trước (BE sort sẵn theo createdAt DESC).
@@ -372,6 +415,36 @@ export const adminService = {
   getHosts: async (): Promise<AdminHost[]> => {
     const res = await api.get<unknown, AdminHost[]>(
       `${ADMIN}/hosts`, { skipErrorToast: true } as object,
+    );
+    return Array.isArray(res) ? res : [];
+  },
+
+  /**
+   * Phát mã mở khoá cho MỘT hoá đơn. `ttlMinutes` để trống = 15 phút (BE clamp 1..60).
+   * BE trả 429 khi admin phát quá 20 mã/giờ.
+   */
+  generateUnlockPasscode: async (payload: {
+    invoiceId: number; purpose: InvoiceUnlockPurpose;
+    ttlMinutes?: number; note?: string;
+  }): Promise<InvoiceUnlockPasscode> => {
+    return await api.post<unknown, InvoiceUnlockPasscode>(
+      `${ADMIN}/invoice-unlock/passcodes`, payload,
+    );
+  },
+
+  /** `activeOnly` = chỉ mã còn dùng được. */
+  listUnlockPasscodes: async (activeOnly = false): Promise<InvoiceUnlockPasscode[]> => {
+    const res = await api.get<unknown, InvoiceUnlockPasscode[]>(
+      `${ADMIN}/invoice-unlock/passcodes`,
+      { params: { activeOnly }, skipErrorToast: true } as object,
+    );
+    return Array.isArray(res) ? res : [];
+  },
+
+  /** Nhật ký mở khoá — gồm cả lần nhập SAI mã. */
+  listUnlockLogs: async (): Promise<InvoiceUnlockLog[]> => {
+    const res = await api.get<unknown, InvoiceUnlockLog[]>(
+      `${ADMIN}/invoice-unlock/logs`, { skipErrorToast: true } as object,
     );
     return Array.isArray(res) ? res : [];
   },

@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { useEffect, useMemo, useState } from 'react';
 import { FileText, Search } from 'lucide-react';
 import type { PropertyResponse, TenantContractResponse } from '@/types/api.types';
@@ -138,7 +139,7 @@ export const ContractMonitoring = () => {
                     <td className="px-4 py-3 font-mono text-xs font-bold text-slate-800">{c.contractCode}</td>
                     <td className="px-4 py-3">
                       <p className="font-semibold text-slate-800">{c.tenantFullName || '—'}</p>
-                      <p className="text-xs text-slate-500">{c.tenantPhone}</p>
+                      <MaskedField value={c.tenantPhone} emptyText="" className="text-xs text-slate-500" />
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-semibold text-slate-800">{property?.propertyName ?? `Nhà #${c.propertyId}`}</p>

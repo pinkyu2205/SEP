@@ -10,6 +10,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
+import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
 
 const SH = Dimensions.get('window').height;
 
@@ -72,9 +73,15 @@ const InvoiceDetailModal: React.FC<{
   invoice: ManagerInvoice;
   tenantName: string;
   onClose: () => void;
-}> = ({ invoice, tenantName, onClose }) => {
+  /** Mở luồng thu tiền mặt / trả hộ cho hoá đơn này. */
+  onCollect: () => void;
+}> = ({ invoice, tenantName, onClose, onCollect }) => {
   const tc = TYPE_CFG[invoice.type] ?? TYPE_CFG.OTHER;
   const sc = STATUS_CFG[invoice.status] ?? STATUS_CFG.PENDING;
+  // Hoá đơn đã thu / đã huỷ thì không còn gì để nộp thay khách.
+  const collectable = invoice.status === 'PENDING'
+    || invoice.status === 'OVERDUE'
+    || invoice.status === 'PARTIAL';
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
@@ -106,13 +113,23 @@ const InvoiceDetailModal: React.FC<{
             <Row label="Ngày phát hành" value={fmtDay(invoice.createdAt)} last />
 
             {/*
-              KHÔNG có nút "Xác nhận đã thu" ở đây. Bản cũ có, nhưng nó chỉ hiện một hộp
-              thoại rồi đóng modal — không gọi API nào, không ghi nhận gì. Việc xác nhận
-              thanh toán nằm ở màn Lịch sử thanh toán (duyệt claim của khách).
+              KHÔNG có nút "Xác nhận đã thu" tự do ở đây. Bản cũ có, nhưng nó chỉ hiện một
+              hộp thoại rồi đóng modal — không gọi API nào, không ghi nhận gì.
+
+              Thay bằng "Thu tiền hộ khách": nộp thay khách bằng QR thật, và phải có mã
+              admin cấp cho đúng hoá đơn này (xem CollectPaymentSheet). Việc duyệt khoản
+              khách TỰ BÁO đã chuyển vẫn nằm ở màn Thu & Đối soát.
             */}
+            {collectable && (
+              <TouchableOpacity style={ds.collectBtn} onPress={onCollect}>
+                <Text style={ds.collectBtnText}>💵  Thu tiền hộ khách</Text>
+                <Text style={ds.collectBtnSub}>Khách trả tiền mặt · hoặc có người trả hộ</Text>
+              </TouchableOpacity>
+            )}
+
             <Text style={ds.note}>
-              Khách trả xong thì trạng thái ở đây tự đổi. Xác nhận khoản khách báo đã
-              chuyển thì làm ở màn Lịch sử thanh toán.
+              Khách tự trả xong thì trạng thái ở đây tự đổi. Xác nhận khoản khách báo đã
+              chuyển thì làm ở màn Thu & Đối soát.
             </Text>
           </ScrollView>
         </View>
@@ -173,6 +190,8 @@ export const TenantInvoicesScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [selected, setSelected] = useState<ManagerInvoice | null>(null);
+  /** Hoá đơn đang mở luồng thu hộ (tiền mặt / trả hộ) — null là đang đóng. */
+  const [collecting, setCollecting] = useState<ManagerInvoice | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
 
   const wantRoom = roomNumberOf(roomName);
@@ -331,6 +350,21 @@ export const TenantInvoicesScreen: React.FC = () => {
           invoice={selected}
           tenantName={tenantName}
           onClose={() => setSelected(null)}
+          // Đóng modal chi tiết trước rồi mới mở sheet thu tiền: hai Modal lồng nhau
+          // trên Android chỉ hiện cái dưới, sheet sẽ không bấm được.
+          onCollect={() => { setCollecting(selected); setSelected(null); }}
+        />
+      )}
+
+      {collecting && (
+        <CollectPaymentSheet
+          invoiceId={collecting.id}
+          invoiceCode={collecting.code}
+          tenantName={tenantName}
+          roomLabel={collecting.roomNumber || 'Nhà nguyên căn'}
+          onClose={() => setCollecting(null)}
+          // QR đã tạo → nạp lại để bắt trạng thái PAID khi webhook về.
+          onQrCreated={load}
         />
       )}
     </SafeAreaView>
@@ -419,6 +453,14 @@ const ds = StyleSheet.create({
   rowLabel: { fontSize: 13, color: Colors.textMuted, flex: 1 },
   rowValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, flex: 2, textAlign: 'right' },
   rowDivider: { height: 1, backgroundColor: Colors.divider },
+  collectBtn: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
+    paddingVertical: 13, paddingHorizontal: Spacing.md, alignItems: 'center',
+    marginTop: Spacing.md, ...Shadow.md,
+  },
+  collectBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  collectBtnSub: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+
   note: {
     marginTop: Spacing.lg, fontSize: 12, lineHeight: 18, color: Colors.textMuted,
     backgroundColor: Colors.background, padding: Spacing.md, borderRadius: BorderRadius.md,

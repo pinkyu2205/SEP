@@ -607,7 +607,7 @@ interface Props {
 export const ContractListScreen: React.FC<Props> = () => {
   const navigation = useNavigation<any>();
   // Tạo/sửa hợp đồng đã bỏ khỏi app manager (03/08/2026) — hợp đồng sinh ra từ
-  // luồng tiếp nhận nhà (OnboardingScreenV2), màn này chỉ để xem & vận hành.
+  // luồng đón khách (ResumeContractScreen), màn này chỉ để xem & vận hành.
   type ViewMode = 'dashboard' | 'detail';
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
   const tab = 'tenant' as const; // Màn này chỉ quản lý HĐ giữa manager ↔ khách thuê.

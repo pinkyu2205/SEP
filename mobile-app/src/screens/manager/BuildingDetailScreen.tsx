@@ -74,8 +74,8 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
 
   // `propertyName` là BẮT BUỘC với BuildingBilling (nó đọc thẳng từ params để làm tiêu đề);
   // thiếu thì màn đó hiện tiêu đề trống.
-  const nav = (r: string) => navigation.navigate(r, {
-    propertyId: String(pid), propertyName: prop?.name ?? '', property: prop,
+  const nav = (r: string, extra?: Record<string, unknown>) => navigation.navigate(r, {
+    propertyId: String(pid), propertyName: prop?.name ?? '', property: prop, ...extra,
   });
 
   // Số liệu phòng thật
@@ -261,18 +261,29 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
           ) : floors.map((floor, fi) => (
             <View key={floor} style={fi > 0 ? styles.floorBlockDivider : undefined}>
               <Text style={styles.floorTitle}>Tầng {floor}</Text>
-              {rooms.filter(r => floorOf(r.roomNumber) === floor).map(r => {
-                const st = mapRoomStatus(r.status);
-                const tenantName = tenantByRoom.get(r.roomNumber);
-                return (
-                  <TouchableOpacity key={r.id} style={styles.roomRow} onPress={() => nav('RoomManage')}>
-                    <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[st] }]} />
-                    <Text style={styles.roomCode}>{r.roomNumber}</Text>
-                    <Text style={styles.roomStatus}>{ROOM_STATUS_LABEL[st]}</Text>
-                    {!!tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{tenantName}</Text>}
-                  </TouchableOpacity>
-                );
-              })}
+              {rooms
+                .filter(r => floorOf(r.roomNumber) === floor)
+                // BE trả theo thứ tự bảng: phòng nào vừa đổi trạng thái thì nhảy xuống
+                // cuối, nên hay ra 102 · 103 · 104 · 101. `numeric` để "9" trước "10".
+                .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, 'vi', { numeric: true }))
+                .map(r => {
+                  const st = mapRoomStatus(r.status);
+                  const tenantName = tenantByRoom.get(r.roomNumber);
+                  return (
+                    // Mở thẳng phòng vừa bấm ở màn Quản lý nhà & phòng — trước đây bấm
+                    // phòng nào cũng chỉ mở màn đó ở bước "Chọn bất động sản".
+                    <TouchableOpacity
+                      key={r.id}
+                      style={styles.roomRow}
+                      onPress={() => nav('RoomManage', { roomCode: r.roomNumber })}
+                    >
+                      <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[st] }]} />
+                      <Text style={styles.roomCode}>{r.roomNumber}</Text>
+                      <Text style={styles.roomStatus}>{ROOM_STATUS_LABEL[st]}</Text>
+                      {!!tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{tenantName}</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
             </View>
           ))}
         </View>

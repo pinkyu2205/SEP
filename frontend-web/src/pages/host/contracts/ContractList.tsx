@@ -335,7 +335,7 @@ export const ContractList = () => {
                           <User className="w-4 h-4 text-slate-400" />
                           <span className="font-medium text-slate-900">{c.lesseeName}</span>
                         </div>
-                        {c.tenantPhone && <div className="text-xs text-slate-400 mt-0.5">{c.tenantPhone}</div>}
+                        {c.tenantPhone && <MaskedField value={c.tenantPhone} emptyText="" className="text-xs text-slate-400 mt-0.5" />}
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-medium text-slate-900">{c.propertyName}</div>

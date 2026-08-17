@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -21,14 +22,27 @@ import {
 // hiện chỉ duyệt hợp đồng ACTIVE nên không thấy khoản đã hoàn / HĐ hết hạn; chỉ
 // dùng khi /host/contracts không trả được dữ liệu.
 //
-// Quy ước trạng thái cọc bám đúng mapDepositStatus() của BE:
-//   TERMINATED → REFUNDED (đã tất toán) · còn lại → HELD (đang giữ)
-//   DRAFT / PENDING → cọc chưa vào két, KHÔNG đưa vào sổ.
+// CẬP NHẬT 17/08/2026 — BE đã sửa, ĐỔI NGUỒN CHÍNH sang /host/finance/deposits.
+//
+// Trước đây trang này tự suy trạng thái cọc từ trạng thái HỢP ĐỒNG (TERMINATED →
+// "Đã hoàn", còn lại → "Đang giữ") vì BE cũng làm đúng như vậy. Suy kiểu đó sai ở
+// hai đầu: khoản CHƯA THU BAO GIỜ mà HĐ đã thanh lý thì thành "Đã hoàn" (không thể
+// hoàn thứ chưa thu), còn khoản chưa thu của HĐ đang chạy thì thành "Đang giữ" và
+// bị cộng vào tổng đang giữ — tổng phồng lên nhiều lần.
+//
+// BE giờ có `DepositLedgerStatusResolver`: xét `paymentStatus` trước (chưa PAID →
+// NOT_COLLECTED), rồi mới tới quyết toán trả phòng thật (`refundPaidAt`, khấu trừ)
+// — và `/host/finance/deposits` đã duyệt TOÀN BỘ hợp đồng (không còn chỉ ACTIVE),
+// trả kèm contractId/contractCode/endDate. Vì vậy endpoint đó nay là nguồn CHÍNH;
+// /host/contracts chỉ còn là dự phòng khi endpoint kia lỗi.
 // ══════════════════════════════════════════════════════════════════════════════
 
-type DepositStatus = 'HELD' | 'REFUNDED' | 'FORFEITED';
+type DepositStatus = 'NOT_COLLECTED' | 'HELD' | 'REFUNDED' | 'FORFEITED';
 
 const STATUS_META: Record<DepositStatus, { label: string; color: string; dot: string }> = {
+  // Chưa thu: KHÔNG nằm trong tổng đang giữ — đây là khoản còn phải đi thu, không
+  // phải khoản đang nắm của khách.
+  NOT_COLLECTED: { label: 'Chưa thu', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
   HELD: { label: 'Đang giữ', color: 'bg-indigo-50 text-indigo-700', dot: 'bg-indigo-500' },
   REFUNDED: { label: 'Đã hoàn', color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
   FORFEITED: { label: 'Tịch thu', color: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
@@ -70,18 +84,29 @@ const contractToRow = (c: HostContractDto): DepositRow | null => {
   };
 };
 
-// Dự phòng: item từ /host/finance/deposits không có mã HĐ / ngày kết thúc.
-const depositItemToRow = (d: DepositItem, i: number): DepositRow => ({
-  key: `dep-${i}`,
-  code: '—',
-  tenantName: d.tenantName,
-  propertyName: d.propertyName,
-  roomCode: d.roomCode,
-  amount: d.amount,
-  heldSince: d.heldSince,
-  status: (STATUS_META[d.status as DepositStatus] ? d.status : 'HELD') as DepositStatus,
-  needsSettlement: false,
-});
+/** Nguồn CHÍNH — trạng thái do BE quyết (DepositLedgerStatusResolver). */
+const depositItemToRow = (d: DepositItem, i: number): DepositRow => {
+  // Status lạ (BE thêm giá trị mới) thì để nguyên chuỗi thay vì im lặng quy về HELD —
+  // quy về HELD là cách khoản 'chưa thu' từng bị đếm vào tổng đang giữ.
+  const status = (STATUS_META[d.status as DepositStatus]
+    ? d.status
+    : 'NOT_COLLECTED') as DepositStatus;
+  return {
+    key: d.contractId != null ? `c${d.contractId}` : `dep-${i}`,
+    code: d.contractCode ?? '—',
+    tenantName: d.tenantName?.trim() || '(chưa có tên khách)',
+    propertyName: d.propertyName,
+    roomCode: d.roomCode ?? 'NGUYEN_CAN',
+    amount: d.amount,
+    heldSince: d.heldSince,
+    endDate: d.endDate,
+    status,
+    // Cần tất toán = ĐÃ thu, HĐ đã qua ngày kết thúc mà cọc vẫn đang giữ.
+    needsSettlement: status === 'HELD' && !!d.endDate && d.endDate < todayIso(),
+  };
+};
+
+const todayIso = (): string => new Date().toLocaleDateString('en-CA');
 
 type StatusKey = 'all' | DepositStatus;
 
@@ -107,17 +132,19 @@ export const DepositLedger = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const contractPage = await hostService.listContracts({ size: 500 }).catch(() => null);
-    const derived = (contractPage?.content ?? [])
-      .map(contractToRow)
-      .filter((r): r is DepositRow => r !== null);
+    // Nguồn chính: endpoint cọc — trạng thái đã do BE xét từ paymentStatus + quyết toán.
+    const res = await hostService.getDeposits().catch(() => null);
+    const items = (res?.items ?? []).map(depositItemToRow);
 
-    if (derived.length) {
-      setRows(derived);
+    if (items.length) {
+      setRows(items);
     } else {
-      // /host/contracts trống hoặc lỗi → thử endpoint cọc chuyên biệt.
-      const res = await hostService.getDeposits().catch(() => null);
-      setRows((res?.items ?? []).map(depositItemToRow));
+      // Dự phòng khi endpoint cọc lỗi: suy từ hợp đồng. Kém chính xác (không biết
+      // đã thu chưa) nên chỉ dùng khi không còn gì khác.
+      const contractPage = await hostService.listContracts({ size: 500 }).catch(() => null);
+      setRows((contractPage?.content ?? [])
+        .map(contractToRow)
+        .filter((r): r is DepositRow => r !== null));
     }
     setLoading(false);
   }, []);
@@ -145,6 +172,7 @@ export const DepositLedger = () => {
 
   const statusCounts = useMemo(() => ({
     all: rows.length,
+    NOT_COLLECTED: rows.filter(r => r.status === 'NOT_COLLECTED').length,
     HELD: rows.filter(r => r.status === 'HELD').length,
     REFUNDED: rows.filter(r => r.status === 'REFUNDED').length,
     FORFEITED: rows.filter(r => r.status === 'FORFEITED').length,
@@ -268,6 +296,7 @@ export const DepositLedger = () => {
             onChange={onFilter(setStatus)}
             options={[
               { key: 'all', label: 'Tất cả', count: statusCounts.all },
+              { key: 'NOT_COLLECTED', label: 'Chưa thu', count: statusCounts.NOT_COLLECTED },
               { key: 'HELD', label: 'Đang giữ', count: statusCounts.HELD },
               { key: 'REFUNDED', label: 'Đã hoàn', count: statusCounts.REFUNDED },
               { key: 'FORFEITED', label: 'Tịch thu', count: statusCounts.FORFEITED },
@@ -294,7 +323,7 @@ export const DepositLedger = () => {
                   <tr key={r.key} className="transition-colors hover:bg-slate-50">
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-slate-900">{r.tenantName}</p>
-                      <p className="text-xs text-slate-400">{r.code}{r.tenantPhone ? ` · ${r.tenantPhone}` : ''}</p>
+                      <p className="flex items-center gap-1 text-xs text-slate-400">{r.code}{r.tenantPhone && <> · <MaskedField value={r.tenantPhone} emptyText="" className="text-xs text-slate-400" /></>}</p>
                     </td>
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-slate-900">{r.propertyName}</p>

@@ -21,6 +21,12 @@
  *     tiền thì không làm được việc. Giữ cả ĐƠN GIÁ điện/nước trên thẻ phòng vì lý do đó.
  *   • Phí dịch vụ — manager cũng là người phát hành.
  *   • Chi phí bảo trì, giá thiết bị — đó là khoản manager duyệt chi.
+ *   • **Số tiền trong luồng THU HỘ** (17/08/2026) — `POST /manager/invoices/{id}/payment-qr`
+ *     trả `amount` không mask, và `CollectPaymentSheet` hiện số đó to ở giữa màn.
+ *     Cố ý: quản lý là người bấm chuyển đúng số đó (khách trả tiền mặt) hoặc đọc số
+ *     cho người trả hộ. Ẩn số ở đây là hỏng chức năng chứ không phải bảo mật.
+ *     Bù lại, mỗi lần mở luồng này đều phải có passcode admin và đều vào
+ *     `invoice_unlock_log` — kiểm soát bằng dấu vết, không bằng cách che số.
  *
  * ⚠️ CÒN 2 MÀN CHƯA ẨN vì ẩn là HỎNG chức năng, đang chờ chốt hướng xử lý:
  *   • ResumeContractScreen — hai ô NHẬP giá thuê + cọc ở `RejectedPanel` (khi Host từ
@@ -30,7 +36,7 @@
  *   • CheckoutSettlementScreen — "Tiền cọc còn lại", cần để tất toán trả phòng.
  * Muốn ẩn nốt thì phải chuyển các số này sang cho admin quyết, manager chỉ xem trạng thái.
  *
- * (`OnboardingScreenV2` đã gỡ khỏi navigator 13/08/2026 — luồng đón khách gom về
+ * (Màn đón khách cũ đã xoá hẳn 17/08/2026 — luồng đón khách gom về
  * ResumeContractScreen, nên màn đó không còn nằm trong danh sách này.)
  *
  * ─── THÔNG TIN CÁ NHÂN CỦA KHÁCH (13/08/2026) ─────────────────────────────────
@@ -39,6 +45,14 @@
  * TenantListScreen, CheckoutRequestsScreen, PaymentHistoryScreen.
  * Nút "Gọi khách" VẪN gọi được — nó mở app điện thoại với số lấy từ dữ liệu chứ không
  * hiện số ra màn hình; nhánh lỗi cũng đã bỏ việc in số vào alert.
+ *
+ * CHỈNH 17/08/2026 — hiện 3 SỐ CUỐI, không cho bấm xem đủ.
+ * Ẩn sạch số hoá ra bất tiện: quản lý không đối chiếu được người vừa gọi cho mình là
+ * khách nào, và hai khách trùng tên trong cùng một nhà thì không phân biệt nổi. Ba số
+ * cuối đủ để đối chiếu mà vẫn không đọc ra được số đầy đủ, nên KHÔNG kèm nút xem đủ
+ * (khác màn của host/admin — hai role đó được xem trọn số, bấm để mở).
+ * Dùng `maskTenantPhone`/`maskTenantCccd` bên dưới, đừng gọi `maskMiddle` trực tiếp
+ * ở màn manager nữa — mỗi màn tự chọn head/tail là lại lệch nhau như trước.
  *
  * TIỀN CỌC — ĐÃ ẨN LẠI 13/08/2026.
  * Lịch sử: ẩn từ 07/08 → mở lại 10/08 (để manager đối soát khách chuyển đủ cọc chưa)
@@ -78,3 +92,25 @@ export const RENT_AMOUNT_HIDDEN_SHORT = 'Không hiển thị số tiền thuê';
  */
 export const DEPOSIT_AMOUNT_HIDDEN_NOTE =
   'Số tiền cọc do hệ thống quản lý. Bạn vẫn đối soát được bằng trạng thái đã thu / chưa thu cọc ở trên.';
+
+/** Số ký tự cuối còn để lộ trên màn manager. */
+const PII_VISIBLE_TAIL = 3;
+
+/**
+ * Che phần đầu, giữ 3 ký tự cuối: `0932892123` → `•••••••123`.
+ *
+ * Số dấu chấm bám theo độ dài thật để không gợi ý sai độ dài số. Chuỗi quá ngắn
+ * (≤3 ký tự) thì không che — che nữa là mất luôn 3 số cuối, thành ô trống vô nghĩa.
+ */
+const maskTail = (value?: string | null): string => {
+  const v = (value ?? '').trim();
+  if (!v) return '';
+  if (v.length <= PII_VISIBLE_TAIL) return v;
+  return '•'.repeat(v.length - PII_VISIBLE_TAIL) + v.slice(-PII_VISIBLE_TAIL);
+};
+
+/** SĐT khách hiển thị cho quản lý — 3 số cuối. Rỗng → '—'. */
+export const maskTenantPhone = (phone?: string | null): string => maskTail(phone) || '—';
+
+/** CCCD/MST khách hiển thị cho quản lý — 3 số cuối. Rỗng → 'Chưa có'. */
+export const maskTenantCccd = (cccd?: string | null): string => maskTail(cccd) || 'Chưa có';

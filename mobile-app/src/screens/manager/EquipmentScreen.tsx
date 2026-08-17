@@ -4,7 +4,7 @@ import {
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
 import { managerPropertyService } from '@/services/manager/propertyService';
@@ -383,6 +383,15 @@ const detailStyles = StyleSheet.create({
 // ===================== MÀN CHÍNH =====================
 export const EquipmentScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+
+  /**
+   * Mở màn này từ một phòng cụ thể (bảng thao tác phòng → "Xem thiết bị trong phòng")
+   * thì mở đúng nhà đó và lọc sẵn theo số phòng. Trước 17/08/2026 màn này bỏ qua route
+   * params và luôn chọn `list[0]` — bấm từ phòng 101 nhà A lại ra thiết bị của nhà B.
+   */
+  const paramPropertyId: number | undefined =
+    route?.params?.propertyId != null ? Number(route.params.propertyId) : undefined;
 
   const [houses, setHouses] = useState<ApiProperty[]>([]);
   const [selectedHouseId, setSelectedHouseId] = useState<number | null>(null);
@@ -396,7 +405,8 @@ export const EquipmentScreen: React.FC = () => {
 
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
   const [selectedStatus, setSelectedStatus] = useState<EquipmentLifecycleStatus | 'all'>('all');
-  const [search, setSearch] = useState('');
+  // Lọc sẵn theo phòng vừa bấm — `eqGroup` trả về số phòng nên ô tìm khớp được luôn.
+  const [search, setSearch] = useState<string>(() => route?.params?.roomCode ?? '');
   const [selectedItem, setSelectedItem] = useState<EquipmentDto | null>(null);
 
   // Form thêm thiết bị
@@ -421,7 +431,11 @@ export const EquipmentScreen: React.FC = () => {
         const list = await managerPropertyService.getScopedProperties();
         if (!alive) return;
         setHouses(list);
-        setSelectedHouseId(list[0]?.id ?? null);
+        // Nhà từ params nếu nằm trong phạm vi phụ trách, không thì nhà đầu danh sách.
+        const wanted = paramPropertyId != null && list.some((h) => h.id === paramPropertyId)
+          ? paramPropertyId
+          : list[0]?.id ?? null;
+        setSelectedHouseId(wanted);
       } catch (err) {
         if (alive) setError(readApiError(err, 'Không tải được danh sách nhà.'));
       } finally {

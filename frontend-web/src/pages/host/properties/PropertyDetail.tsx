@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
@@ -245,7 +246,7 @@ function RoomDetailModal({
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold shrink-0">{tenant.tenantFullName.charAt(0).toUpperCase()}</div>
                 <div className="min-w-0">
                   <p className="font-bold text-slate-900 truncate">{tenant.tenantFullName}</p>
-                  <p className="text-sm text-slate-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 shrink-0" /> {tenant.tenantPhone}</p>
+                  <MaskedField value={tenant.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -704,7 +705,7 @@ export const PropertyDetail = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 truncate">{activeContract.tenantFullName}</p>
-                    <p className="text-sm text-slate-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 shrink-0" /> {activeContract.tenantPhone}</p>
+                    <MaskedField value={activeContract.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
                   </div>
                   <span className="ml-auto shrink-0 text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">Đang thuê</span>
                 </div>
@@ -844,7 +845,7 @@ export const PropertyDetail = () => {
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-bold leading-tight text-slate-800">{tenant.tenantFullName}</p>
-                        <p className="truncate text-[11px] text-slate-500">{tenant.tenantPhone}</p>
+                        <MaskedField value={tenant.tenantPhone} emptyText="" className="text-[11px] text-slate-500" />
                       </div>
                     </div>
                   ) : room.structureDescription ? (

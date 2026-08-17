@@ -61,7 +61,7 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
   },
   {
     label: 'Đón khách',
-    items: [{ label: 'Hợp đồng nháp', path: '/admin/onboarding', icon: UserPlus }],
+    items: [{ label: 'Hồ sơ đón khách', path: '/admin/onboarding', icon: UserPlus }],
   },
   {
     label: 'Tài chính & Hợp đồng',
