@@ -154,10 +154,8 @@ export const DepositLedger = () => {
    * Cọc onboard về dưới dạng hoá đơn `invoiceType = OTHER` (theo doc WebSocket của BE),
    * nhưng vẫn nạp lại với mọi loại: hoá đơn nào PAID cũng có thể đổi trạng thái sổ cọc.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
-  });
+  // Nạp lại theo cả 3 lớp (WS · poll dự phòng · quay lại tab) — xem useBillingRealtime.
+  useBillingRealtime({ onRefresh: load });
 
   const stats = useMemo(() => {
     const held = rows.filter(r => r.status === 'HELD');

@@ -12,6 +12,7 @@
  * chỉ trả rawText + danh sách số.
  */
 import { serverNow } from '@/utils/serverTime';
+import { findReadingTriple } from '@/utils/meterReadingExtract';
 
 /** Kết quả OCR thô mà parser nhận vào. */
 export interface EvnOcrInput {
@@ -23,6 +24,9 @@ export interface ParsedEvnInvoice {
   totalKwh: string;
   totalAmount: string;
   billingPeriod: string;
+  /** Chỉ số công tơ đọc được — chỉ nhà nguyên căn mới cần (xem meterReadingExtract). */
+  prevReading?: string;
+  newReading?: string;
 }
 
 // Dải dấu thanh/dấu phụ Unicode (U+0300–U+036F) mà NFD tách ra khỏi nguyên âm.
@@ -86,6 +90,23 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
   if (kwh) {
     const n = Number(onlyDigits(kwh[1]));
     if (n > 0 && n <= MAX_PLAUSIBLE_KWH) out.totalKwh = String(n);
+  }
+
+  /**
+   * Chỉ số công tơ + kiểm chéo tổng kWh.
+   *
+   * Dò theo nhãn không đủ với bảng kê EVN Hà Nội: hàng dữ liệu là
+   * `18006996 · 1 · 16.087 · 15.404 · 683` nên "số ngay sau nhãn (kWh)" ra MÃ CÔNG TƠ
+   * 18.006.996 — quá ngưỡng nên bị loại và ô kWh bỏ TRỐNG (đã kiểm trên hoá đơn thật).
+   * `findReadingTriple` tìm bộ ba tự khớp phép trừ (16.087 − 15.404 = 683) nên không bị
+   * mã công tơ / hệ số nhân / tiền thuế lừa.
+   */
+  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH);
+  if (triple) {
+    out.prevReading = String(triple.prevReading);
+    out.newReading = String(triple.newReading);
+    // Bộ ba đã tự chứng minh bằng phép trừ → tin nó hơn số dò theo nhãn.
+    out.totalKwh = String(triple.consumption);
   }
 
   return out;

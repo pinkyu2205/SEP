@@ -403,6 +403,31 @@ export const BuildingCard = ({
 );
 
 // ─── Pagination — thanh phân trang dùng chung ────────────────────────────────
+/**
+ * Chỉ báo nguồn cập nhật của trang.
+ *
+ * Có mặt vì lần trước realtime chết mà KHÔNG ai biết: nginx trên VPS không chuyển tiếp
+ * header Upgrade nên WebSocket chưa từng nối được, client thì lặng lẽ thử lại mỗi 5 giây,
+ * còn người dùng chỉ thấy "số không nhảy, phải F5". Nay nói thẳng đang ở lớp nào:
+ *   • Trực tiếp   — WebSocket đang nối, thanh toán về là đổi ngay.
+ *   • Tự làm mới  — WS không nối được, đang hỏi lại mỗi 20 giây (vẫn đúng, chỉ chậm hơn).
+ */
+export const RealtimeBadge = ({ connected }: { connected: boolean }) => (
+  <span
+    title={connected
+      ? 'Đang nhận cập nhật tức thì qua WebSocket'
+      : 'WebSocket chưa kết nối — trang đang tự hỏi lại mỗi 20 giây'}
+    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${
+      connected ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+    }`}
+  >
+    <span className={`h-1.5 w-1.5 rounded-full ${
+      connected ? 'bg-emerald-500' : 'bg-slate-400'
+    }`} />
+    {connected ? 'Trực tiếp' : 'Tự làm mới'}
+  </span>
+);
+
 export const Pagination = ({
   page, totalPages, onChange,
 }: { page: number; totalPages: number; onChange: (p: number) => void }) => {

@@ -1637,7 +1637,29 @@ const DepositOtpPanel: React.FC<{
       await realTenantService.sendContractOtp(contract.id)
       showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${maskTenantPhone(contract.tenantPhone)}.`)
     } catch (err: any) {
-      showAlert('Lỗi', readErr(err, 'Không gửi được OTP.'))
+      /**
+       * BE trả đúng một câu cho MỌI lỗi Twilio: "Không gửi được SMS OTP. Vui lòng thử lại
+       * sau." — câu đó gây hiểu sai vì bấm lại bao nhiêu lần cũng y hệt (đã thử bằng curl
+       * 17/10/2026: gọi liên tiếp đều 422 cùng nội dung). Nguyên nhân nằm ở cấu hình
+       * Twilio phía server, không phải sự cố tạm thời:
+       *   • tài khoản Twilio thử nghiệm chỉ gửi được tới số đã xác minh, mà SĐT khách
+       *     trong dữ liệu mẫu là số ảo → không bao giờ gửi được;
+       *   • Twilio chặn SMS tới Việt Nam nếu chưa bật Geo permissions;
+       *   • Verify Service chưa bật "Enable Custom Verification Code" (BE dùng setCustomCode).
+       *
+       * Nên nói thẳng để quản lý khỏi bấm lại vô ích, và chỉ đúng người xử lý.
+       * Xem doc/BE-BUG-otp-sms-that-bai.
+       */
+      const msg = readErr(err, 'Không gửi được OTP.')
+      const isSmsFailure = /kh(ô|o)ng g(ử|u)i (đ|d)()?(ư|u)()?(ợ|o)c sms/i.test(msg)
+      showAlert(
+        isSmsFailure ? 'Không gửi được SMS' : 'Lỗi',
+        isSmsFailure
+          ? 'Server không gửi được SMS tới số của khách. Bấm lại cũng sẽ lỗi y hệt — đây là '
+            + 'vấn đề cấu hình SMS phía hệ thống, không phải mạng của bạn.\n\n'
+            + 'Báo admin kiểm tra Twilio (số khách đã xác minh chưa · đã bật gửi SMS về Việt Nam chưa).'
+          : msg,
+      )
     } finally {
       setOtpSending(false)
     }

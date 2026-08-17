@@ -15,6 +15,7 @@
  * Kết quả LUÔN cần admin soát lại — BE chỉ trả rawText + danh sách số, không có parser
  * hoá đơn riêng.
  */
+import { findReadingTriple } from '@/utils/meterReadingExtract';
 
 export interface WaterOcrInput {
   rawText?: string;
@@ -28,6 +29,9 @@ export interface ParsedWaterInvoice {
   totalAmount?: number;
   /** Kỳ in trên giấy, vd "07/12/2024 – 06/01/2025". */
   billingPeriod?: string;
+  /** Chỉ số đồng hồ đọc được — chỉ nhà nguyên căn mới cần. */
+  prevReading?: number;
+  newReading?: number;
 }
 
 /** Bỏ dấu tiếng Việt + thường hoá để dò nhãn không phụ thuộc cách gõ dấu của OCR. */
@@ -74,6 +78,9 @@ const amountAfterLabel = (
   return undefined;
 };
 
+/** m³ một kỳ của một hộ/căn — quá ngưỡng này là OCR bắt nhầm ô tiền. */
+const MAX_PLAUSIBLE_M3 = 9999;
+
 export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
   const raw = ocr?.rawText ?? '';
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -98,9 +105,23 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
     const prev = amountAfterLabel(lines, /so doc thang truoc/, { small: true });
     if (now != null && prev != null && now >= prev) out.totalQuantity = now - prev;
   }
-  // m³ của một hộ hiếm khi tới 4 chữ số — số quá lớn gần như chắc chắn là OCR bắt nhầm
-  // ô tiền. Thà bỏ trống để admin gõ còn hơn điền một con số vô lý.
-  if (out.totalQuantity != null && out.totalQuantity > 9999) delete out.totalQuantity;
+  // m³ quá lớn gần như chắc chắn là OCR bắt nhầm ô tiền. Thà bỏ trống để admin gõ.
+  if (out.totalQuantity != null && out.totalQuantity > MAX_PLAUSIBLE_M3) delete out.totalQuantity;
+
+  /**
+   * Chỉ số đồng hồ + kiểm chéo m³.
+   *
+   * Giấy nước thật (Thủ Đức) viết `CS Mới: 4936  CS cũ: 3458  Tiêu thụ: 1478 m3` —
+   * KHÔNG khớp nhãn nào ở trên (`so luong tieu thu`, `so doc thang nay/truoc`) nên
+   * parser cũ trả về rỗng hoàn toàn, admin phải gõ tay cả 3 ô. `findReadingTriple` bắt
+   * bộ ba tự khớp phép trừ nên đọc được bất kể nhãn viết tắt kiểu gì và cột nào in trước.
+   */
+  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3);
+  if (triple) {
+    out.prevReading = triple.prevReading;
+    out.newReading = triple.newReading;
+    out.totalQuantity = triple.consumption;
+  }
 
   // ── Kỳ: "Thời gian sử dụng: 07/12/2024 - 06/01/2025" ──
   const periodLine = lines.find((l) => /thoi gian su dung|tu ngay/.test(norm(l)));
