@@ -33,6 +33,24 @@ export interface EvnBill {
   imageUrl?: string | null;
   status?: 'PUBLISHED' | 'REVOKED';
   createdAt?: string;
+  /**
+   * ─── NHIỆM VỤ GHI CHỈ SỐ TRONG NGÀY (BE 17/08/2026) ────────────────────────
+   *
+   * Admin phát hành hoá đơn tổng là giao việc cho quản lý: đi chụp đồng hồ và ghi số
+   * TỪNG PHÒNG **ngay trong ngày**, không để sang hôm sau — số đọc muộn thì lệch với kỳ
+   * của hoá đơn nhà nước, tính cho khách không còn khớp.
+   *
+   * BE tính sẵn 4 field này nên app không phải gọi thêm API rồi tự trừ để biết còn thiếu
+   * bao nhiêu phòng (và tự đoán mốc hạn — thứ không suy ra được từ dữ liệu phòng).
+   */
+  /** Số phòng có HĐ ACTIVE cần ghi chỉ số. Nhà nguyên căn = 0 (khách nhận hoá đơn trực tiếp). */
+  roomsTotal?: number;
+  /** Số phòng đã ghi xong trong kỳ này. */
+  roomsDone?: number;
+  /** Hạn chụp — luôn là NGÀY PHÁT HÀNH. null với nhà nguyên căn (không có việc gì để làm). */
+  readingDeadline?: string | null;
+  /** BE chốt: đã qua hạn mà chưa ghi đủ phòng. */
+  overdue?: boolean;
 }
 
 /** Đơn giá 1 kWh = tổng tiền ÷ tổng kWh (EVN bậc thang, hoá đơn không in đơn giá). */
@@ -50,11 +68,25 @@ export const managerEvnBillService = {
     month: number,
     year: number,
   ): Promise<EvnBill | null> => {
-    const { data } = await realApiClient.get<{ items?: EvnBill[] } | EvnBill[]>(
-      '/api/v1/manager/evn-bills',
-      { params: { propertyId, month, year } },
+    /**
+     * ⚠️ ROUTE: `/manager/utility-bills?type=ELECTRIC`, KHÔNG phải `/manager/evn-bills`.
+     *
+     * BE gộp điện + nước vào một endpoint (`ManagerUtilityBillController`), phân biệt
+     * bằng `type`. Route `evn-bills` chưa từng tồn tại — gọi vào đó là 404, app hiện
+     * "Không tải được hoá đơn · Route không tồn tại" ở đúng bước 2 (đã gặp 18/08/2026).
+     * Bên nước (`waterBillService`) đi đúng route này từ đầu nên tab Nước vẫn chạy.
+     *
+     * BE trả `totalQuantity` (tên dùng chung cho kWh/m³) nên phải map sang `totalKwh`.
+     */
+    const { data } = await realApiClient.get<{ items?: any[] } | any[]>(
+      '/api/v1/manager/utility-bills',
+      { params: { propertyId, month, year, type: 'ELECTRIC' } },
     );
-    const items = Array.isArray(data) ? data : data?.items ?? [];
+    const rows = Array.isArray(data) ? data : data?.items ?? [];
+    const items: EvnBill[] = rows.map((r) => ({
+      ...r,
+      totalKwh: r?.totalKwh ?? r?.totalQuantity ?? 0,
+    }));
     // Bản bị admin thu hồi coi như không có — manager không được tính theo đơn giá đã huỷ.
     return items.find((b) => b.status !== 'REVOKED') ?? null;
   },

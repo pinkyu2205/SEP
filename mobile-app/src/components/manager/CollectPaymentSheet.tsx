@@ -79,14 +79,27 @@ export const CollectPaymentSheet: React.FC<{
   onClose: () => void;
   /** Gọi khi QR đã tạo — màn ngoài nên nạp lại danh sách để bắt trạng thái PAID. */
   onQrCreated?: () => void;
-}> = ({ invoiceId, invoiceCode, tenantName, roomLabel, onClose, onQrCreated }) => {
-  const [step, setStep] = useState<Step>('mode');
-  const [purpose, setPurpose] = useState<InvoiceUnlockPurpose | null>(null);
+  /**
+   * Hình thức đã chọn sẵn từ màn ngoài → vào thẳng bước nhập mã.
+   * Màn hoá đơn hiện HAI nút (tiền mặt · trả hộ) nên quản lý đã chọn xong trước khi
+   * sheet mở; bắt chọn lại lần nữa trong sheet là thêm một bước vô nghĩa.
+   */
+  initialPurpose?: InvoiceUnlockPurpose;
+}> = ({ invoiceId, invoiceCode, tenantName, roomLabel, onClose, onQrCreated, initialPurpose }) => {
+  const [step, setStep] = useState<Step>(initialPurpose ? 'passcode' : 'mode');
+  const [purpose, setPurpose] = useState<InvoiceUnlockPurpose | null>(initialPurpose ?? null);
 
   const [passcode, setPasscode] = useState('');
   const [payerName, setPayerName] = useState('');
   const [payerPhone, setPayerPhone] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * Dòng phụ dưới lỗi. Tách khỏi `err` vì hai thứ khác bản chất: `err` là NGUYÊN NHÂN
+   * (mã sai / PayOS từ chối / mạng), còn dòng này là HỆ QUẢ với cái mã vừa nhập.
+   * Gộp một dòng thì đọc thành "mã sai nên đã bị dùng", trong khi mã có thể hoàn toàn
+   * đúng mà lỗi nằm ở bước sau.
+   */
+  const [errHint, setErrHint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [qr, setQr] = useState<ManagerPaymentQr | null>(null);
@@ -115,10 +128,12 @@ export const CollectPaymentSheet: React.FC<{
     if (!purpose || !canSubmit || busy) return;
     setBusy(true);
     setErr(null);
+    setErrHint(null);
     try {
       const verified = await managerInvoiceUnlockService.verifyPasscode(invoiceId, passcode);
       if (!verified.valid || !verified.unlockToken) {
         setErr(verified.message ?? 'Mã không đúng hoặc đã hết hạn.');
+        setErrHint('Nhập lại cho đúng, hoặc xin admin mã mới nếu mã đã quá 15 phút.');
         return;
       }
 
@@ -139,10 +154,11 @@ export const CollectPaymentSheet: React.FC<{
         onQrCreated?.();
       } catch (e: any) {
         setPasscode('');
-        setErr(
-          `${e?.response?.data?.message || e?.message || 'Không tạo được mã QR.'}`
-          + ' Mã vừa nhập đã bị dùng — xin admin mã mới.',
-        );
+        const cause = e?.response?.data?.message || e?.message || 'Không tạo được mã QR.';
+        setErr(`Mã admin ĐÚNG, nhưng không tạo được QR: ${cause}`);
+        // KHÔNG nhắc lại con số vừa nhập ở đây: mã dùng một lần, in ra chỉ thêm chỗ rò rỉ.
+        setErrHint('Mã vừa nhập dùng một lần nên đã tiêu — xin admin mã mới để thử lại. '
+          + 'Nếu vẫn lỗi y hệt thì đó là lỗi phía hệ thống, báo kỹ thuật chứ đừng xin mã tiếp.');
       }
     } catch (e: any) {
       setErr(e?.response?.data?.message || e?.message || 'Không kiểm tra được mã — thử lại.');
@@ -181,7 +197,7 @@ export const CollectPaymentSheet: React.FC<{
                     <TouchableOpacity
                       key={key}
                       style={[s.modeCard, { backgroundColor: cfg.bg, borderColor: `${cfg.color}33` }]}
-                      onPress={() => { setPurpose(key); setStep('passcode'); setErr(null); }}
+                      onPress={() => { setPurpose(key); setStep('passcode'); setErr(null); setErrHint(null); }}
                       activeOpacity={0.85}
                     >
                       <Text style={s.modeIcon}>{cfg.icon}</Text>
@@ -209,9 +225,11 @@ export const CollectPaymentSheet: React.FC<{
                 <View style={[s.modeBanner, { backgroundColor: ui.bg }]}>
                   <Text style={s.modeIcon}>{ui.icon}</Text>
                   <Text style={[s.modeBannerText, { color: ui.color }]}>{ui.title}</Text>
-                  <TouchableOpacity onPress={() => { setStep('mode'); setErr(null); }} hitSlop={8}>
-                    <Text style={s.changeLink}>Đổi</Text>
-                  </TouchableOpacity>
+                  {!initialPurpose && (
+                    <TouchableOpacity onPress={() => { setStep('mode'); setErr(null); setErrHint(null); }} hitSlop={8}>
+                      <Text style={s.changeLink}>Đổi</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {purpose === 'PROXY_PAY' && (
@@ -222,7 +240,7 @@ export const CollectPaymentSheet: React.FC<{
                       placeholder="Hỏi và ghi đúng tên người đang đứng trước bạn"
                       placeholderTextColor={Colors.textMuted}
                       value={payerName}
-                      onChangeText={t => { setPayerName(t); setErr(null); }}
+                      onChangeText={t => { setPayerName(t); setErr(null); setErrHint(null); }}
                     />
                     <Text style={s.label}>SĐT người trả hộ</Text>
                     <TextInput
@@ -244,10 +262,11 @@ export const CollectPaymentSheet: React.FC<{
                   keyboardType="number-pad"
                   maxLength={6}
                   value={passcode}
-                  onChangeText={t => { setPasscode(t.replace(/\D/g, '')); setErr(null); }}
+                  onChangeText={t => { setPasscode(t.replace(/\D/g, '')); setErr(null); setErrHint(null); }}
                 />
 
                 {!!err && <Text style={s.errText}>{err}</Text>}
+            {!!errHint && <Text style={s.errHint}>{errHint}</Text>}
 
                 <Text style={s.hint}>
                   Mã dùng một lần, hạn 15 phút, gắn đúng hoá đơn này. Nhập sai 3 lần thì
@@ -376,6 +395,9 @@ const s = StyleSheet.create({
   errText: {
     fontSize: 13, color: Colors.error, fontWeight: '600',
     marginTop: Spacing.sm, lineHeight: 18,
+  },
+  errHint: {
+    fontSize: 12, color: Colors.textSecondary, lineHeight: 17, marginTop: 4,
   },
   hint: {
     fontSize: 12, color: Colors.textMuted, lineHeight: 17, marginTop: Spacing.sm,

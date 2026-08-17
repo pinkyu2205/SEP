@@ -6,7 +6,7 @@ import { showAlert, activeRentingKeys, belongsToActiveTenant, billMonthLabel } f
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import {
-  Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE,
+  Colors, Spacing, BorderRadius, Shadow,
   RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
 import {
@@ -15,6 +15,7 @@ import {
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -33,14 +34,10 @@ const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: stri
   cancelled: { label: 'Đã huỷ',              color: '#9CA3AF', bg: '#F3F4F6', icon: '🚫' },
 };
 
-const FILTERS: { id: FilterType; label: string }[] = [
-  { id: 'all',     label: 'Tất cả' },
-  // Thứ tự + nhãn khớp với 3 ô số ở thẻ tổng quan và với màn Lịch sử hoá đơn.
-  { id: 'paid',    label: 'Đã thu' },
-  { id: 'pending', label: 'Chưa thu' },
-  { id: 'overdue', label: 'Quá hạn' },
-  { id: 'partial', label: 'Một phần' },
-];
+// `FILTERS` đã xoá cùng hàng chip trạng thái (17/08/2026) — 3 ô trên thẻ tổng quan
+// mới là chỗ lọc. Giữ mảng lại thì nó thành hằng chết, vẫn nằm trong bundle và làm
+// người đọc sau tưởng hàng chip vẫn còn.
+// Hoá đơn PARTIAL vẫn có nhãn riêng (STATUS_CONFIG.partial) và lọt vào ô "Chưa thu".
 
 const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3, cancelled: 4 };
 
@@ -51,6 +48,10 @@ const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, parti
  * phát hành cùng ngày hạn nộp). Bỏ hẳn: tiền kỳ đầu nay thu chung với tiền cọc ở mã QR
  * lúc đón khách nên không còn hoá đơn kỳ đầu chờ thu.
  */
+/** "2026-09-05" → "05/09/2026". Trước đây in thẳng ISO, lệch với mọi màn khác. */
+const fmtDay = (iso?: string | null): string =>
+  iso ? iso.split('T')[0].split('-').reverse().join('/') : '—';
+
 const lateDays = (inv: ManagerInvoice): number => {
   if (!inv.dueDate) return 0;
   const d = new Date(`${inv.dueDate.slice(0, 10)}T00:00:00`);
@@ -126,9 +127,10 @@ export const BuildingBillingScreen: React.FC = () => {
   /** Lọc theo KỲ (YYYY-MM) — 'all' = mọi kỳ. */
   const [periodFilter,     setPeriodFilter]     = useState<string>('all');
   const [selectedBill,     setSelectedBill]     = useState<ManagerInvoice | null>(null);
-  const [showCashModal,    setShowCashModal]    = useState(false);
-  const [showEwalletModal, setShowEwalletModal] = useState(false);
-  const [cashNote,         setCashNote]         = useState('');
+  /** Hoá đơn + hình thức đang mở luồng thu hộ — null là đóng. */
+  const [collecting, setCollecting] = useState<
+    { bill: ManagerInvoice; purpose: 'CASH_COLLECT' | 'PROXY_PAY' } | null
+  >(null);
   const [submitting,       setSubmitting]       = useState(false);
 
   const isWholeHouse = (b: ManagerInvoice) => !b.roomNumber;
@@ -271,21 +273,16 @@ export const BuildingBillingScreen: React.FC = () => {
     );
   };
 
-  const recordPaid = async (method: string, note?: string) => {
-    if (!selectedBill) return;
-    setSubmitting(true);
-    try {
-      await realManagerInvoiceService.markInvoicePaid(selectedBill.id, { method, note });
-      setShowCashModal(false); setShowEwalletModal(false);
-      setSelectedBill(null); setCashNote('');
-      showAlert('✅ Thành công', 'Đã ghi nhận thanh toán.');
-      load();
-    } catch (e: any) {
-      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không ghi nhận được (BE chưa có endpoint?).');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  /**
+   * `recordPaid` đã XOÁ (17/08/2026) cùng 3 nút "Tiền mặt · Ví điện tử · CK ngân hàng".
+   *
+   * Nó gọi `POST /manager/invoices/{id}/mark-paid` — endpoint BE **không tồn tại**
+   * (`ManagerBillingController` không có route nào như vậy), nên mọi lần bấm đều 404 và
+   * quản lý nhận thông báo lỗi mơ hồ. Tệ hơn: kể cả có endpoint thì đó vẫn là "quản lý
+   * tự khai đã thu", không có dòng tiền thật nào khớp lại được.
+   *
+   * Thay bằng luồng THU HỘ có kiểm soát: passcode admin → QR thật (CollectPaymentSheet).
+   */
 
   return (
     <SafeAreaView style={s.safe}>
@@ -403,19 +400,11 @@ export const BuildingBillingScreen: React.FC = () => {
         </ScrollView>
       )}
 
-      {/* ── Filter chips ─────────────────────────────────────────── */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={s.filterScroll} contentContainerStyle={s.filterContent}>
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.id}
-            style={[s.filterChip, filter === f.id && s.filterChipActive]}
-            onPress={() => setFilter(f.id)}
-          >
-            <Text style={[s.filterText, filter === f.id && s.filterTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Hàng chip trạng thái đã BỎ (17/08/2026): 3 ô "Đã thu · Chưa thu · Quá hạn"
+          trên thẻ tổng quan vốn đã bấm được và lọc đúng cùng thứ đó — để thêm một hàng
+          chip nữa là hai chỗ điều khiển cùng một bộ lọc, mà hàng chip lại tràn khỏi mép
+          màn hình (chip "Một phần" bị cắt). Trạng thái PARTIAL nay lọc bằng ô "Chưa thu".
+          Chỉ còn MỘT hàng chip: lọc theo kỳ. */}
 
       {/* ── Bill list ────────────────────────────────────────────── */}
       {loading ? (
@@ -451,27 +440,29 @@ export const BuildingBillingScreen: React.FC = () => {
                 onPress={() => setSelectedBill(item)}
                 activeOpacity={0.8}
               >
+                {/* PHÒNG + KHÁCH lên đầu (thứ quản lý tìm), mã hoá đơn xuống dòng phụ.
+                    Bỏ dòng "Chưa thanh toán" cỡ lớn ở cuối thẻ: nó lặp lại y nguyên chip
+                    trạng thái ở góc trên, làm thẻ cao thêm một dòng mà không thêm thông tin. */}
                 <View style={s.billCardHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.billCode}>{item.code}</Text>
-                    <Text style={s.billRoom}>{isWholeHouse(item) ? 'Nhà nguyên căn' : `Phòng ${item.roomNumber}`}</Text>
+                    <Text style={s.billRoomStrong} numberOfLines={1}>
+                      {isWholeHouse(item) ? 'Nhà nguyên căn' : `Phòng ${item.roomNumber}`}
+                      {item.tenantName ? `  ·  ${item.tenantName}` : ''}
+                    </Text>
+                    <Text style={s.billCode} numberOfLines={1}>
+                      {item.code}
+                      {billMonthLabel(item) ? `  ·  ${billMonthLabel(item)}` : ''}
+                    </Text>
                   </View>
                   <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
                     <Text style={s.statusIcon}>{cfg.icon}</Text>
                     <Text style={[s.statusText, { color: cfg.color }]}>{cfg.label}</Text>
                   </View>
                 </View>
-                <View style={s.billTenantRow}>
-                  <Text style={s.billTenant}>👤 {item.tenantName || '—'}</Text>
-                  <Text style={s.billMonth}>{billMonthLabel(item) ?? '—'}</Text>
-                </View>
-                <View style={s.billAmountRow}>
-                  <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
-                  {/* Không hiện số tiền thuê — xem @/constants/managerVisibility. */}
-                  <Text style={[s.billTotal, st === 'overdue' && { color: Colors.error }]}>
-                    {st === 'paid' ? '✓ Đã thanh toán' : st === 'overdue' ? 'Quá hạn' : 'Chưa thanh toán'}
-                  </Text>
-                </View>
+                <Text style={[s.billDue, st === 'overdue' && { color: Colors.error, fontWeight: '700' }]}>
+                  Hạn thu {fmtDay(item.dueDate)}
+                  {st === 'overdue' ? `  ·  quá ${lateDays(item)} ngày` : ''}
+                </Text>
               </TouchableOpacity>
             );
           }}
@@ -488,7 +479,7 @@ export const BuildingBillingScreen: React.FC = () => {
       )}
 
       {/* ── Bill Detail Modal ─────────────────────────────────────── */}
-      {selectedBill && !showCashModal && !showEwalletModal && (() => {
+      {selectedBill && !collecting && (() => {
         const st  = toLocalStatus(selectedBill.status);
         const cfg = STATUS_CONFIG[st];
         return (
@@ -531,36 +522,39 @@ export const BuildingBillingScreen: React.FC = () => {
                       {st === 'paid' ? '✓ Khách đã thanh toán' : 'Khách chưa thanh toán'}
                     </Text>
                   </View>
-                  <Text style={s.hiddenAmountNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
+                  {/* Một dòng là đủ — hằng RENT_AMOUNT_HIDDEN_NOTE dài 2 câu, nhét vào
+                      mỗi hoá đơn thì đọc mệt mà không thêm thông tin gì. */}
+                  <Text style={s.hiddenAmountNote}>Không hiển thị số tiền thuê với quản lý.</Text>
 
                   {st !== 'paid' && st !== 'cancelled' && (
                     <View style={s.paymentActions}>
-                      <Text style={s.paymentActionsTitle}>Ghi nhận thanh toán</Text>
-                      {/* Đã bỏ nút "Hiện QR cho khách quét": QR do FE tự ghép URL
-                          img.vietqr.io từ `invoice.amount`, mà từ BE commit a52c370
-                          `amount` là NULL với tài khoản quản lý → mã QR sinh ra sai số
-                          tiền. Khách tự thanh toán trong app của mình (PayOS); ở đây
-                          quản lý chỉ GHI NHẬN khoản đã nhận ngoài luồng app.
-                          Muốn có lại QR thì BE phải trả `payosQrCode` trong
-                          ManagerInvoiceResponse — xem docs/BE-NEED-*-2026-08-08.md. */}
+                      <Text style={s.paymentActionsTitle}>Khách trả trực tiếp cho bạn?</Text>
+                      {/* 17/08/2026: nay ĐÃ có QR thật cho luồng thu hộ — BE trả `qrCode`
+                          kèm số tiền đúng trong `POST /manager/invoices/{id}/payment-qr`
+                          (phải có passcode admin). Khác hẳn cách cũ: FE tự ghép URL
+                          img.vietqr.io từ `invoice.amount`, mà field đó bị mask NULL cho
+                          quản lý nên QR sinh ra sai số tiền. */}
                       <Text style={s.paymentActionsHint}>
-                        Khách thuê thanh toán trong app của mình. Chỉ dùng các nút dưới khi
-                        khách trả trực tiếp cho bạn.
+                        Bình thường khách tự trả trong app của họ. Chỉ dùng nút này khi khách
+                        đưa tiền mặt cho bạn, hoặc có người tới trả hộ.
                       </Text>
-                      <View style={s.payAltRow}>
-                        <TouchableOpacity style={s.payAltBtn} onPress={() => setShowCashModal(true)}>
-                          <Text style={s.payAltIcon}>💵</Text>
-                          <Text style={s.payAltText}>Tiền mặt</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={s.payAltBtn} onPress={() => setShowEwalletModal(true)}>
-                          <Text style={s.payAltIcon}>👛</Text>
-                          <Text style={s.payAltText}>Ví điện tử</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={s.payAltBtn} disabled={submitting} onPress={() => recordPaid('BANK_TRANSFER')}>
-                          <Text style={s.payAltIcon}>🏦</Text>
-                          <Text style={s.payAltText}>CK ngân hàng</Text>
-                        </TouchableOpacity>
-                      </View>
+                      {/* HAI nút cho HAI ca — đúng như đã chốt. Cả hai đều cần mã admin. */}
+                      <TouchableOpacity
+                        style={s.collectBtn}
+                        activeOpacity={0.85}
+                        onPress={() => { setCollecting({ bill: selectedBill, purpose: 'CASH_COLLECT' }); setSelectedBill(null); }}
+                      >
+                        <Text style={s.collectBtnText}>💵  Khách trả tiền mặt</Text>
+                        <Text style={s.collectBtnSub}>Bạn nhận tiền mặt rồi tự chuyển vào QR</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[s.collectBtn, s.collectBtnAlt]}
+                        activeOpacity={0.85}
+                        onPress={() => { setCollecting({ bill: selectedBill, purpose: 'PROXY_PAY' }); setSelectedBill(null); }}
+                      >
+                        <Text style={s.collectBtnText}>👥  Có người trả hộ</Text>
+                        <Text style={s.collectBtnSub}>Người trả hộ tự quét QR · phải ghi tên họ</Text>
+                      </TouchableOpacity>
                     </View>
                   )}
 
@@ -631,63 +625,19 @@ export const BuildingBillingScreen: React.FC = () => {
       })()}
 
 
-      {/* ── Cash Modal ───────────────────────────────────────────── */}
-      {showCashModal && selectedBill && (
-        <Modal transparent animationType="slide">
-          <View style={s.modalOverlay}>
-            <View style={s.modalContent}>
-              <Text style={s.modalTitle}>💵 Ghi nhận tiền mặt</Text>
-              {/* ⚠️ Không hiện số tiền cần thu (@/constants/managerVisibility) — manager
-                  phải đối chiếu số trên app của khách trước khi bấm xác nhận. */}
-              <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
-                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
-              </View>
-              <Text style={s.cashHint}>
-                Số tiền hiển thị trên app của khách thuê. Đối chiếu đúng số đó rồi mới xác nhận.
-              </Text>
-              <TextInput
-                style={s.cashNoteInput}
-                placeholder="Ghi chú (tùy chọn)..."
-                value={cashNote}
-                onChangeText={setCashNote}
-                multiline
-              />
-              <TouchableOpacity style={s.confirmPayBtn} disabled={submitting} onPress={() => recordPaid('CASH', cashNote)}>
-                <Text style={s.confirmPayBtnText}>✅ Xác nhận đã thu tiền mặt</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowCashModal(false); setCashNote(''); }}>
-                <Text style={s.cancelBtnText}>Hủy</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+      {/* Sheet THU HỘ — dùng chung với màn hoá đơn của khách thuê. */}
+      {collecting && (
+        <CollectPaymentSheet
+          invoiceId={collecting.bill.id}
+          invoiceCode={collecting.bill.code}
+          tenantName={collecting.bill.tenantName || 'Khách thuê'}
+          roomLabel={isWholeHouse(collecting.bill) ? 'Nhà nguyên căn' : `Phòng ${collecting.bill.roomNumber}`}
+          initialPurpose={collecting.purpose}
+          onClose={() => setCollecting(null)}
+          onQrCreated={load}
+        />
       )}
 
-      {/* ── E-wallet Modal ───────────────────────────────────────── */}
-      {showEwalletModal && selectedBill && (
-        <Modal transparent animationType="slide">
-          <View style={s.modalOverlay}>
-            <View style={s.modalContent}>
-              <Text style={s.modalTitle}>👛 Ví điện tử</Text>
-              <View style={s.cashAmountBox}>
-                <Text style={s.cashAmountLabel}>Hoá đơn</Text>
-                <Text style={[s.cashAmount, { fontSize: 18 }]}>{selectedBill.code}</Text>
-              </View>
-              <Text style={s.cashHint}>Chọn ví điện tử khách đã thanh toán:</Text>
-              {['MoMo', 'ZaloPay', 'VNPay', 'Ví khác'].map(wallet => (
-                <TouchableOpacity key={wallet} style={s.ewalletOption} disabled={submitting} onPress={() => recordPaid('EWALLET', wallet)}>
-                  <Text style={s.ewalletOptionText}>👛 {wallet}</Text>
-                  <Text style={s.ewalletOptionArrow}>→</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setShowEwalletModal(false)}>
-                <Text style={s.cancelBtnText}>Hủy</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-      )}
     </SafeAreaView>
   );
 };
@@ -744,17 +694,13 @@ const s = StyleSheet.create({
   },
   billCardOverdue:  { borderColor: Colors.error + '50', borderWidth: 1.5 },
   billCardHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.sm },
-  billCode:         { fontSize: 14, fontWeight: '700', color: Colors.primary },
-  billRoom:         { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  // Mã hoá đơn xuống hàng phụ: quản lý tìm theo PHÒNG/KHÁCH, mã chỉ để đối chiếu.
+  billCode:         { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  billRoomStrong:   { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   statusBadge:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full, gap: 4 },
   statusIcon:       { fontSize: 11 },
   statusText:       { fontSize: 11, fontWeight: '700' },
-  billTenantRow:    { flexDirection: 'row', justifyContent: 'space-between', marginBottom: Spacing.sm },
-  billTenant:       { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  billMonth:        { fontSize: 12, color: Colors.textMuted },
-  billAmountRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-  billDue:          { fontSize: 12, color: Colors.textSecondary },
-  billTotal:        { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  billDue:          { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
 
   emptyState: { alignItems: 'center', paddingTop: 80, gap: Spacing.md },
   emptyText:  { fontSize: 14, color: Colors.textMuted },
@@ -802,21 +748,10 @@ const s = StyleSheet.create({
   paymentActionsHint: {
     fontSize: 12, color: Colors.textMuted, lineHeight: 17, marginBottom: Spacing.md,
   },
-  payAltRow:    { flexDirection: 'row', gap: Spacing.sm },
-  payAltBtn:    {
-    flex: 1, backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
-  },
-  payAltIcon: { fontSize: 20, marginBottom: 4 },
-  payAltText: { fontSize: 11, fontWeight: '600', color: Colors.textSecondary, textAlign: 'center' },
 
   paidInfo:     { backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg, padding: Spacing.md },
   paidInfoText: { fontSize: 14, color: Colors.success, lineHeight: 22, fontWeight: '500' },
 
-  confirmPayBtn: {
-    backgroundColor: Colors.success, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md,
-  },
   confirmPayBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
 
   cashAmountBox:   {
@@ -826,19 +761,15 @@ const s = StyleSheet.create({
   cashAmountLabel: { fontSize: 12, color: Colors.textSecondary, marginBottom: 4 },
   cashAmount:      { fontSize: 28, fontWeight: '800', color: Colors.primary },
   cashHint:        { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: Spacing.md, lineHeight: 18 },
-  cashNoteInput:   {
-    borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    padding: Spacing.md, fontSize: 14, marginBottom: Spacing.lg, minHeight: 80,
+  collectBtn: {
+    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
+    paddingVertical: 13, alignItems: 'center', marginTop: Spacing.sm, ...Shadow.md,
   },
-  cancelBtn:     { alignItems: 'center', paddingVertical: Spacing.sm },
-  cancelBtnText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
+  collectBtnAlt: { backgroundColor: '#4F46E5', marginTop: Spacing.xs },
+  collectBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
+  collectBtnSub: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
 
-  ewalletOption: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md, paddingVertical: 14, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border,
-  },
+
   ewalletOptionText:  { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
   ewalletOptionArrow: { fontSize: 16, color: Colors.textMuted },
   heroFigure: { flexDirection: 'row', alignItems: 'baseline', gap: 2 },

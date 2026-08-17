@@ -115,10 +115,8 @@ export const ReceivablesAging = () => {
   useEffect(() => { load(); }, [load]);
 
   // Hoá đơn vừa PAID thì công nợ đổi ngay — nạp lại thay vì để Host thấy số cũ.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
-  });
+  // Nạp lại theo cả 3 lớp (WS · poll dự phòng · quay lại tab) — xem useBillingRealtime.
+  useBillingRealtime({ onRefresh: load });
 
   // ── KPI: tính từ danh sách hoá đơn (đủ kỳ) nên luôn khớp bảng bên dưới ──
   const totals = useMemo(() => {

@@ -73,8 +73,8 @@ const InvoiceDetailModal: React.FC<{
   invoice: ManagerInvoice;
   tenantName: string;
   onClose: () => void;
-  /** Mở luồng thu tiền mặt / trả hộ cho hoá đơn này. */
-  onCollect: () => void;
+  /** Mở luồng thu hộ với hình thức đã chọn. */
+  onCollect: (purpose: 'CASH_COLLECT' | 'PROXY_PAY') => void;
 }> = ({ invoice, tenantName, onClose, onCollect }) => {
   const tc = TYPE_CFG[invoice.type] ?? TYPE_CFG.OTHER;
   const sc = STATUS_CFG[invoice.status] ?? STATUS_CFG.PENDING;
@@ -120,11 +120,18 @@ const InvoiceDetailModal: React.FC<{
               admin cấp cho đúng hoá đơn này (xem CollectPaymentSheet). Việc duyệt khoản
               khách TỰ BÁO đã chuyển vẫn nằm ở màn Thu & Đối soát.
             */}
+            {/* HAI nút cho HAI ca, không bắt chọn lại trong sheet. */}
             {collectable && (
-              <TouchableOpacity style={ds.collectBtn} onPress={onCollect}>
-                <Text style={ds.collectBtnText}>💵  Thu tiền hộ khách</Text>
-                <Text style={ds.collectBtnSub}>Khách trả tiền mặt · hoặc có người trả hộ</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity style={ds.collectBtn} onPress={() => onCollect('CASH_COLLECT')}>
+                  <Text style={ds.collectBtnText}>💵  Khách trả tiền mặt</Text>
+                  <Text style={ds.collectBtnSub}>Bạn nhận tiền mặt rồi tự chuyển vào QR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[ds.collectBtn, ds.collectBtnAlt]} onPress={() => onCollect('PROXY_PAY')}>
+                  <Text style={ds.collectBtnText}>👥  Có người trả hộ</Text>
+                  <Text style={ds.collectBtnSub}>Người trả hộ tự quét QR · phải ghi tên họ</Text>
+                </TouchableOpacity>
+              </>
             )}
 
             <Text style={ds.note}>
@@ -190,8 +197,10 @@ export const TenantInvoicesScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
   const [selected, setSelected] = useState<ManagerInvoice | null>(null);
-  /** Hoá đơn đang mở luồng thu hộ (tiền mặt / trả hộ) — null là đang đóng. */
-  const [collecting, setCollecting] = useState<ManagerInvoice | null>(null);
+  /** Hoá đơn + hình thức đang mở luồng thu hộ — null là đang đóng. */
+  const [collecting, setCollecting] = useState<
+    { inv: ManagerInvoice; purpose: 'CASH_COLLECT' | 'PROXY_PAY' } | null
+  >(null);
   const [autoOpened, setAutoOpened] = useState(false);
 
   const wantRoom = roomNumberOf(roomName);
@@ -352,16 +361,17 @@ export const TenantInvoicesScreen: React.FC = () => {
           onClose={() => setSelected(null)}
           // Đóng modal chi tiết trước rồi mới mở sheet thu tiền: hai Modal lồng nhau
           // trên Android chỉ hiện cái dưới, sheet sẽ không bấm được.
-          onCollect={() => { setCollecting(selected); setSelected(null); }}
+          onCollect={(purpose) => { setCollecting({ inv: selected, purpose }); setSelected(null); }}
         />
       )}
 
       {collecting && (
         <CollectPaymentSheet
-          invoiceId={collecting.id}
-          invoiceCode={collecting.code}
+          invoiceId={collecting.inv.id}
+          invoiceCode={collecting.inv.code}
           tenantName={tenantName}
-          roomLabel={collecting.roomNumber || 'Nhà nguyên căn'}
+          roomLabel={collecting.inv.roomNumber || 'Nhà nguyên căn'}
+          initialPurpose={collecting.purpose}
           onClose={() => setCollecting(null)}
           // QR đã tạo → nạp lại để bắt trạng thái PAID khi webhook về.
           onQrCreated={load}
@@ -458,6 +468,7 @@ const ds = StyleSheet.create({
     paddingVertical: 13, paddingHorizontal: Spacing.md, alignItems: 'center',
     marginTop: Spacing.md, ...Shadow.md,
   },
+  collectBtnAlt: { backgroundColor: '#4F46E5', marginTop: Spacing.sm },
   collectBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
   collectBtnSub: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
 
