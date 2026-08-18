@@ -149,6 +149,30 @@ export const hostService = {
     api.get(`${FINANCE}/receivables-aging`),
   getDeposits: (status?: string): Promise<DepositsResponse> =>
     api.get(`${FINANCE}/deposits`, { params: status ? { status } : {} }),
+
+  /**
+   * Đánh dấu ĐÃ HOÀN CỌC cho khách — host là người chuyển tiền từ 18/08/2026.
+   *
+   * ⚠️ BE CHƯA CÓ ENDPOINT NÀY. Từ 18/08/2026 app quản lý bỏ bước "Ghi nhận hoàn cọc"
+   * (form đó buộc phải hiện tiền cọc — thứ manager không được biết, xem
+   * `mobile-app/src/constants/managerVisibility.ts`), nên không còn ai gọi
+   * `POST /api/v1/checkout-requests/{id}/refund` nữa và cọc nằm mãi ở "Đang giữ".
+   *
+   * Không tái dùng được endpoint cũ vì nó nhận **checkoutRequestId**, mà sổ cọc chỉ có
+   * `contractId` — host cũng không có endpoint nào liệt kê checkout-request để tra ra id
+   * (và endpoint kia là `hasAnyRole('MANAGER','ADMIN')` nên host gọi cũng 403).
+   *
+   * Vì vậy gọi theo endpoint ĐỀ NGHỊ trong
+   * `BE-BUG-checkout-disputed-khong-sua-duoc-bien-ban-2026-08-18.md` phần 2. Chừng nào
+   * BE chưa làm thì trả 404/403 — màn Sổ cọc bắt lỗi đó và nói rõ, xem `DepositLedger`.
+   */
+  markDepositRefunded: (contractId: number, body: {
+    method: 'BANK_TRANSFER' | 'CASH';
+    paidAt: string;        // yyyy-MM-dd
+    proofUrl?: string;
+    note?: string;
+  }): Promise<void> =>
+    api.post(`${FINANCE}/deposits/${contractId}/refund`, body),
   getInvoices: (params: { month?: string; status?: string; page?: number; size?: number } = {}): Promise<Page<InvoiceDto>> =>
     api.get('/api/v1/host/invoices', { params }),
 

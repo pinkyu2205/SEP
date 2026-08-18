@@ -101,18 +101,33 @@ export const activeRentingKeys = (contracts: TenantContractResponse[]): Set<stri
 /**
  * Hoá đơn này có còn thuộc một khách ĐANG thuê không.
  *
- * Nhà nguyên căn không có `roomNumber` → khớp theo nhà. Và khi CHƯA nạp được hợp đồng
- * nào (mạng lỗi, tập rỗng) thì trả `true` — thà hiện thừa còn hơn giấu mất việc thật
- * của manager chỉ vì một request hỏng.
+ * Khi CHƯA nạp được hợp đồng nào (mạng lỗi, tập rỗng) thì trả `true` — thà hiện thừa
+ * còn hơn giấu mất việc thật của manager chỉ vì một request hỏng.
+ *
+ * ─── NHÀ NGUYÊN CĂN ──────────────────────────────────────────────────────────
+ * Bản trước chỉ xử một chiều: hoá đơn KHÔNG có `roomNumber` thì khớp theo nhà. Chiều
+ * ngược lại — HỢP ĐỒNG không có `roomNumber` mà HOÁ ĐƠN lại có — thì rơi thẳng xuống
+ * `keys.has(...)` và trượt, vì key của HĐ là `1|` còn key của hoá đơn là `1|phòng-nào-đó`.
+ *
+ * Đúng chuyện đã xảy ra với MTX#01 NGUYEN_CAN (18/08/2026): BE trả về 3 hoá đơn tiền
+ * nhà, có 1 HĐ nguyên căn đang hiệu lực, mà màn "Hoá đơn tiền nhà" của nhà đó trắng
+ * trơn — cả 3 hoá đơn bị lọc mất, không một dấu hiệu nào. Nhà cho thuê theo phòng thì
+ * vẫn đúng nên lỗi này nằm im khá lâu.
+ *
+ * Nguồn sự thật là HỢP ĐỒNG, không phải hoá đơn: hễ nhà có HĐ nguyên căn đang hiệu lực
+ * thì mọi hoá đơn của nhà đó đều thuộc về khách đang ở, bất kể BE có gắn số phòng vào
+ * hoá đơn hay không.
  */
 export const belongsToActiveTenant = (
   inv: { propertyId?: number | string | null; roomNumber?: string | null },
   keys: Set<string>,
 ): boolean => {
   if (keys.size === 0) return true;
+  const prefix = `${inv.propertyId ?? ''}|`;
+  // Key kết thúc ngay sau '|' = HĐ không có số phòng = HĐ nguyên căn của nhà này.
+  if (keys.has(prefix)) return true;
   if (!inv.roomNumber) {
-    // Nguyên căn: còn bất kỳ HĐ nào của nhà đó là còn khách.
-    const prefix = `${inv.propertyId ?? ''}|`;
+    // Hoá đơn nguyên căn: còn bất kỳ HĐ nào của nhà đó là còn khách.
     return [...keys].some(k => k.startsWith(prefix));
   }
   return keys.has(rentingKey(inv.propertyId, inv.roomNumber));

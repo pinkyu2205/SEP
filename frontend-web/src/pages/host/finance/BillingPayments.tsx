@@ -29,7 +29,8 @@ import {
 //     điện, nước, dịch vụ, bảo trì), ngày phát hành, hạn thu thật và các giao dịch
 //     khách đã báo. Đây là nguồn admin đang dùng.
 //     Hiện 2 endpoint này là `@PreAuthorize("hasAnyRole('MANAGER','ADMIN')")` nên
-//     Host gọi bị 403 — xem docs/BE-NEED-host-billing-2026-08-09.md.
+//     Host gọi bị 403 — xem BE-NEED-endpoint-hoa-don-quyen-loc-va-du-lieu-2026-08-18.md
+//     (phần A), gộp chung với các thiếu sót khác của cùng endpoint này.
 //
 //  B. RÚT GỌN — `GET /api/v1/host/invoices?month=` (fallback khi A trả 403)
 //     BE dựng hoá đơn tiền phòng on-the-fly từ hợp đồng ACTIVE của đúng 1 kỳ:

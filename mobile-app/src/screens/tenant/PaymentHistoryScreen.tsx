@@ -364,9 +364,9 @@ export const PaymentHistoryScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // Trả xong là có giao dịch mới — nạp lại để lịch sử không phải chờ khách tự kéo refresh.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load(true);
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: () => load(true),
   });
 
   // ── Thống kê trên TOÀN BỘ giao dịch, không đổi theo bộ lọc ──

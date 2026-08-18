@@ -1,4 +1,5 @@
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import { RealtimeBadge } from '@/components/common';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
@@ -145,10 +146,11 @@ export const BillingManagementScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Danh sách hoá đơn của quản lý — khách trả xong là đổi trạng thái ngay.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
+  // Danh sách hoá đơn của quản lý — khách trả xong là đổi trạng thái ngay, không phải
+  // thoát ra vào lại màn. `onRefresh` để hook dùng được cả lớp poll dự phòng khi WS chết.
+  const { connected: liveOn } = useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: load,
   });
 
   const handleBack = () => {
@@ -302,10 +304,22 @@ export const BillingManagementScreen: React.FC = () => {
     () => shownInvoices.filter(i => belongsToActiveTenant(i, rentingKeys)),
     [shownInvoices, rentingKeys],
   );
+  /**
+   * QUÁ HẠN LẤY THEO MỌI KỲ, không riêng kỳ đang xem.
+   *
+   * Nợ không hết hạn khi sang tháng mới: hoá đơn tháng 8 chưa trả thì tháng 10 vẫn là
+   * việc phải đòi. Trước 18/08/2026 danh sách này dựng từ `actionable` (đã lọc theo kỳ
+   * hiện tại) nên Trang chủ báo "8 hoá đơn quá hạn" mà bấm vào đây lại hiện "Không còn
+   * việc tồn" — hai màn cùng một dữ liệu mà nói ngược nhau.
+   *
+   * Thẻ "Kỳ này đã thu tới đâu" phía trên VẪN theo đúng một kỳ — đó là tiến độ thu của
+   * kỳ, khác việc tồn đọng.
+   */
   const overdueList = useMemo(
-    () => actionable.filter(i => i.status === 'OVERDUE')
+    () => invoices
+      .filter(i => i.status === 'OVERDUE' && matchInvoice(i) && belongsToActiveTenant(i, rentingKeys))
       .sort((a, b) => daysLate(b) - daysLate(a)),
-    [actionable, daysLate],
+    [invoices, matchInvoice, rentingKeys, daysLate],
   );
   const pendingList = useMemo(
     () => actionable.filter(i => i.status === 'PENDING')
@@ -334,6 +348,8 @@ export const BillingManagementScreen: React.FC = () => {
             <Text style={s.title}>Hóa đơn tiền nhà</Text>
             <Text style={s.subtitle}>Kỳ thu {monthLabel}</Text>
           </View>
+          {/* Nói rõ màn đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
+          <RealtimeBadge connected={liveOn} />
         </View>
 
         {loading ? (
@@ -443,7 +459,13 @@ export const BillingManagementScreen: React.FC = () => {
                             <Text style={s.todoItemName}>
                               {inv.tenantName || 'Khách thuê'}{inv.roomNumber ? ` · ${inv.roomNumber}` : ''}
                             </Text>
-                            <Text style={s.todoItemMeta} numberOfLines={1}>{inv.propertyName}</Text>
+                            {/* Danh sách này gồm cả kỳ cũ nên PHẢI ghi rõ kỳ nào —
+                                không thì "trễ 47 ngày" đọc ra như nợ của kỳ đang xem. */}
+                            <Text style={s.todoItemMeta} numberOfLines={1}>
+                              {inv.propertyName}
+                              {(inv.month !== period.month || inv.year !== period.year)
+                                && `  ·  kỳ ${String(inv.month).padStart(2, '0')}/${inv.year}`}
+                            </Text>
                           </View>
                           <View style={s.todoItemRight}>
                             <Text style={[s.todoLate, { color: Colors.error }]}>trễ {late} ngày</Text>
@@ -552,7 +574,7 @@ export const BillingManagementScreen: React.FC = () => {
                   </>
                 )}
               </View>
-            ) : shownInvoices.length > 0 && stats.overdueCount === 0 && (
+            ) : shownInvoices.length > 0 && (
               <View style={s.clearCard}>
                 <Text style={s.clearText}>✅  Không còn việc tồn — kỳ này đang chạy ổn</Text>
               </View>

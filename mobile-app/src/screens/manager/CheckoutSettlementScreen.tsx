@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, ActivityIndicator, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
 import {
   Colors, Spacing, BorderRadius, Shadow, checkoutMeta, CHECKOUT_AUTO_ACCEPT_DAYS,
 } from '@/constants';
 import { formatDate, showAlert, readApiError } from '@/utils';
-import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto, CheckoutSettlementDto } from '@/services/tenant/selfService';
 import { todayIso } from '@/utils/serverTime';
@@ -35,15 +33,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const [settlementMissing, setSettlementMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-
-  // Form ghi nhận hoàn cọc
-  const [method, setMethod] = useState<'BANK_TRANSFER' | 'CASH'>('BANK_TRANSFER');
-  const [proofUrl, setProofUrl] = useState('');
-  const [paidAt, setPaidAt] = useState(todayIso());
-  const [uploading, setUploading] = useState(false);
+  /** Ngày trả phòng thực tế — gửi kèm khi thanh lý hợp đồng. */
   const [actualDate, setActualDate] = useState(todayIso());
-  /** Đã ghi nhận hoàn cọc thành công trong phiên này (BE chưa trả `refundedAt`). */
-  const [refundRecorded, setRefundRecorded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -71,29 +62,68 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const refundAmount = settlement?.refundAmount ?? 0;
   const extraCharge = settlement?.extraChargeAmount ?? 0;
   /**
-   * Đã hoàn cọc chưa. KHÔNG chỉ dựa vào `settlement.refundedAt` của BE: hiện BE nhận
-   * lệnh hoàn cọc (200 OK) nhưng chưa trả lại cờ này, nên nếu chỉ tin BE thì manager
-   * hoàn tiền xong vẫn bị khoá nút thanh lý vĩnh viễn. Ghi nhận thành công trong phiên
-   * cũng tính là đã hoàn.
+   * Đã hoàn cọc chưa — nay chỉ đọc từ BE, vì manager không còn là người ghi nhận
+   * (xem khối SETTLING bên dưới). Bên host đánh dấu ở Sổ cọc thì cờ này bật.
    */
-  const refunded = !!settlement?.refundedAt || refundRecorded;
-  /** Không còn tiền phải chuyển qua lại → có thể đóng hồ sơ. */
-  const moneyDone = refunded || (refundAmount <= 0 && extraCharge <= 0);
+  const refunded = !!settlement?.refundedAt;
+  /**
+   * Còn gì chặn thanh lý hợp đồng không.
+   *
+   * Chỉ còn MỘT thứ chặn: **khách còn nợ tiền** (`extraCharge`). Phần HOÀN cho khách
+   * không chặn nữa — từ 18/08/2026 việc chuyển tiền do bộ phận tài chính làm ngoài app
+   * (1–3 ngày làm việc) và hoàn toàn có thể xong sau khi hợp đồng đã thanh lý. Bắt
+   * manager chờ hoàn cọc xong mới được đóng hồ sơ là khoá họ ở một việc không phải của
+   * họ, và họ cũng không có cách nào biết tiền đã chuyển hay chưa.
+   */
+  const moneyDone = extraCharge <= 0;
 
-  const uploadProof = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (perm.status !== 'granted') return showAlert('Thiếu quyền', 'Cần quyền truy cập thư viện ảnh.');
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (result.canceled || !result.assets?.[0]) return;
-    setUploading(true);
-    try {
-      setProofUrl(await uploadImageToCloudinary(result.assets[0].uri));
-    } catch (e: any) {
-      showAlert('Lỗi upload', readErr(e, 'Không tải được ảnh chứng từ.'));
-    } finally {
-      setUploading(false);
+  /**
+   * ─── MÀN NÀY CHỈ HIỆN KHOẢN KHÁCH PHẢI TRẢ (18/08/2026) ──────────────────────
+   *
+   * Bảng quyết toán đầy đủ (cọc còn lại → trừ các khoản → hoàn lại khách) là bảng của
+   * KHÁCH, không phải của quản lý. Bày nguyên bảng đó ở đây là để lộ đúng hai con số
+   * quản lý không được biết theo @/constants/managerVisibility: **tiền cọc** và **tiền
+   * phòng** (khoản "hoàn tiền phòng những ngày không ở" chính là tiền phòng chia theo
+   * ngày — đọc dòng đó là suy ra giá thuê).
+   *
+   * Nên chỉ liệt kê phần khách PHẢI TRẢ: hoá đơn chưa thanh toán, hư hỏng, và các điều
+   * chỉnh ÂM. Mọi khoản CỘNG cho khách đều bị bỏ — chúng chỉ có nghĩa khi đặt cạnh tiền
+   * cọc, mà tiền cọc thì không hiện ở đây.
+   *
+   * Tiền cọc + phần hoàn được báo thẳng cho khách trong app của khách (xem
+   * CheckoutDetailScreen), kèm mốc "1–3 ngày làm việc về tài khoản khách đã đăng ký".
+   */
+  const charges = React.useMemo(() => {
+    if (!settlement) return [] as Array<{ key: string; label: string; amount: number }>;
+    const rows: Array<{ key: string; label: string; amount: number }> = [];
+
+    const invoices = settlement.unpaidInvoices ?? [];
+    if (invoices.length) {
+      invoices.forEach(inv => rows.push({
+        key: `inv-${inv.id}`,
+        label: `Hoá đơn ${inv.code || `#${inv.id}`}${inv.type ? ` (${inv.type})` : ''}`,
+        amount: inv.amount,
+      }));
+    } else if (settlement.unpaidTotal > 0) {
+      // BE không tách chi tiết thì vẫn phải hiện tổng, không thì khoản nợ biến mất.
+      rows.push({ key: 'inv-total', label: 'Hoá đơn chưa thanh toán', amount: settlement.unpaidTotal });
     }
-  };
+
+    const damages = settlement.damages ?? [];
+    if (damages.length) {
+      damages.forEach((d, i) => rows.push({ key: `dmg-${i}`, label: d.label, amount: d.amount }));
+    } else if (settlement.damageTotal > 0) {
+      rows.push({ key: 'dmg-total', label: 'Hư hỏng', amount: settlement.damageTotal });
+    }
+
+    (settlement.adjustments ?? [])
+      .filter(a => a.amount < 0)
+      .forEach((a, i) => rows.push({ key: `adj-${i}`, label: a.label, amount: Math.abs(a.amount) }));
+
+    return rows;
+  }, [settlement]);
+
+  const chargeTotal = charges.reduce((sum, r) => sum + (r.amount || 0), 0);
 
   const submitSettlement = async () => {
     setBusy(true);
@@ -111,30 +141,6 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
     }
   };
 
-  const submitRefund = async () => {
-    if (method === 'BANK_TRANSFER' && !proofUrl) {
-      return showAlert('Thiếu chứng từ', 'Tải ảnh biên lai chuyển khoản để khách đối chiếu khi cần.');
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt.trim())) {
-      return showAlert('Ngày không hợp lệ', 'Nhập ngày dạng YYYY-MM-DD.');
-    }
-    setBusy(true);
-    try {
-      await checkoutService.refund(checkoutId, {
-        amount: refundAmount,
-        method,
-        proofUrl: proofUrl || undefined,
-        paidAt: paidAt.trim(),
-      });
-      setRefundRecorded(true);
-      showAlert('Đã ghi nhận', 'Đã lưu chứng từ hoàn cọc. Giờ có thể bấm "Hoàn tất trả phòng" bên dưới.');
-      load();
-    } catch (e: any) {
-      showAlert('Lỗi', readErr(e, 'Không ghi nhận được khoản hoàn cọc.'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const doComplete = async () => {
     setBusy(true);
@@ -207,57 +213,42 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           </View>
         ) : (
           <>
-            {/* Bảng quyết toán */}
-            <Text style={s.sectionTitle}>Bảng quyết toán</Text>
+            {/* Khoản khách phải trả — KHÔNG hiện cọc và tiền phòng, xem chú thích ở `charges`. */}
+            <Text style={s.sectionTitle}>Khoản khách phải trả</Text>
             <View style={s.card}>
-              <Row label="Tiền cọc còn lại" value={money(settlement!.depositAmount)} bold />
-
-              {(settlement!.unpaidInvoices ?? []).map(inv => (
-                <Row
-                  key={inv.id}
-                  label={`− Hoá đơn ${inv.code || `#${inv.id}`}${inv.type ? ` (${inv.type})` : ''}`}
-                  value={`−${money(inv.amount)}`}
-                  negative
-                />
+              {charges.map(r => (
+                <Row key={r.key} label={r.label} value={money(r.amount)} negative />
               ))}
-              {!settlement!.unpaidInvoices?.length && settlement!.unpaidTotal > 0 && (
-                <Row label="− Hoá đơn chưa thanh toán" value={`−${money(settlement!.unpaidTotal)}`} negative />
+              {charges.length === 0 && (
+                <Text style={s.helper}>Không có khoản nào khách phải trả.</Text>
               )}
-
-              {(settlement!.damages ?? []).map((d, i) => (
-                <Row key={i} label={`− ${d.label}`} value={`−${money(d.amount)}`} negative />
-              ))}
-              {!settlement!.damages?.length && settlement!.damageTotal > 0 && (
-                <Row label="− Hư hỏng" value={`−${money(settlement!.damageTotal)}`} negative />
-              )}
-
-              {(settlement!.adjustments ?? []).map((a, i) => (
-                <Row
-                  key={`adj-${i}`}
-                  label={a.amount < 0 ? `− ${a.label}` : `+ ${a.label}`}
-                  value={`${a.amount < 0 ? '−' : '+'}${money(Math.abs(a.amount))}`}
-                  negative={a.amount < 0}
-                />
-              ))}
 
               <View style={s.divider} />
-              {refundAmount > 0 ? (
-                <View style={s.resultRow}>
-                  <Text style={s.resultLabel}>HOÀN LẠI KHÁCH</Text>
-                  <Text style={[s.resultValue, { color: Colors.success }]}>{money(refundAmount)}</Text>
-                </View>
-              ) : extraCharge > 0 ? (
-                <View style={s.resultRow}>
+              <View style={s.resultRow}>
+                <Text style={s.resultLabel}>TỔNG KHOẢN TRỪ</Text>
+                <Text style={[s.resultValue, { color: charges.length ? Colors.error : Colors.textSecondary }]}>
+                  {money(chargeTotal)}
+                </Text>
+              </View>
+
+              {/* Khách phải đóng THÊM = tiền mặt thật sự cần thu, quản lý phải biết.
+                  Khác với TỔNG KHOẢN TRỪ ở trên: phần lớn khoản trừ cấn vào cọc. */}
+              {extraCharge > 0 && (
+                <View style={[s.resultRow, { marginTop: Spacing.xs }]}>
                   <Text style={s.resultLabel}>KHÁCH PHẢI ĐÓNG THÊM</Text>
                   <Text style={[s.resultValue, { color: Colors.error }]}>{money(extraCharge)}</Text>
                 </View>
-              ) : (
-                <View style={s.resultRow}>
-                  <Text style={s.resultLabel}>KHÔNG PHÁT SINH</Text>
-                  <Text style={[s.resultValue, { color: Colors.textSecondary }]}>0đ</Text>
-                </View>
               )}
             </View>
+
+            <Text style={s.mutedNote}>
+              {extraCharge > 0
+                ? 'Các khoản trên đã cấn hết tiền cọc, phần còn thiếu khách phải đóng thêm.'
+                : 'Các khoản trên trừ vào tiền cọc — khách không phải đóng thêm. Tiền cọc còn lại và '
+                  + 'tiền phòng những ngày không ở được hoàn thẳng cho khách trong 1–3 ngày làm việc, '
+                  + 'về tài khoản khách đã đăng ký lúc gửi yêu cầu trả phòng.'}
+              {'\n'}Số tiền cọc và tiền phòng không hiện ở đây — khách xem đầy đủ trong app của khách.
+            </Text>
           </>
         )}
 
@@ -293,8 +284,9 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             <NextStep n={1} text="Khách mở app xem biên bản và bảng tiền, bấm Đồng ý hoặc Không đồng ý." />
             <NextStep
               n={2}
+              // Không nhắc lại số tiền hoàn ở đây — đó là cọc + tiền phòng, xem `charges`.
               text={refundAmount > 0
-                ? `Khách đồng ý → bạn chuyển khoản ${money(refundAmount)} cho khách rồi tải ảnh biên lai lên đây.`
+                ? 'Khách đồng ý → chuyển khoản phần hoàn cho khách rồi tải ảnh biên lai lên đây (số tiền hiện ở bước hoàn cọc).'
                 : extraCharge > 0
                   ? `Khách đồng ý → chờ khách thanh toán ${money(extraCharge)} còn thiếu.`
                   : 'Khách đồng ý → không phát sinh tiền, sang thẳng bước cuối.'}
@@ -312,56 +304,34 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           </View>
         )}
 
-        {/* SETTLING → hoàn cọc / chờ khách đóng thêm */}
+        {/**
+          * SETTLING → chờ hoàn cọc / chờ khách đóng thêm.
+          *
+          * VIỆC HOÀN CỌC KHÔNG CÒN Ở APP QUẢN LÝ (18/08/2026). Trước đây manager tự
+          * chuyển khoản rồi upload biên lai, mà form đó buộc phải hiện số tiền hoàn —
+          * chính là tiền cọc còn lại, thứ manager không được biết
+          * (@/constants/managerVisibility). Ẩn số mà giữ form thì manager không biết
+          * chuyển bao nhiêu; nên bỏ hẳn việc chuyển tiền khỏi vai này.
+          *
+          * Nay: bộ phận tài chính (host/admin) chuyển trong 1–3 ngày làm việc về tài
+          * khoản khách đã điền lúc gửi yêu cầu trả phòng — app của khách nói đúng câu đó
+          * (CheckoutDetailScreen). Manager chỉ còn theo dõi và bấm hoàn tất.
+          */}
         {status === 'SETTLING' && (
           <>
             {refundAmount > 0 && !refunded && (
-              <>
-                <Text style={s.sectionTitle}>Ghi nhận hoàn cọc</Text>
-                <View style={s.card}>
-                  <Text style={s.helper}>
-                    Chuyển khoản cho khách ngoài app rồi tải chứng từ lên đây — hệ thống chỉ lưu bằng chứng.
-                  </Text>
-
-                  <Text style={s.label}>Hình thức</Text>
-                  <View style={s.methodRow}>
-                    {(['BANK_TRANSFER', 'CASH'] as const).map(m => (
-                      <TouchableOpacity
-                        key={m}
-                        style={[s.methodChip, method === m && s.methodChipActive]}
-                        onPress={() => setMethod(m)}
-                      >
-                        <Text style={[s.methodChipText, method === m && s.methodChipTextActive]}>
-                          {m === 'BANK_TRANSFER' ? '🏦 Chuyển khoản' : '💵 Tiền mặt'}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={s.label}>Ngày chuyển</Text>
-                  <TextInput style={s.input} value={paidAt} onChangeText={setPaidAt} placeholder="YYYY-MM-DD" />
-
-                  <Text style={s.label}>
-                    Ảnh chứng từ{method === 'BANK_TRANSFER' ? ' (bắt buộc)' : ' (tuỳ chọn)'}
-                  </Text>
-                  {!!proofUrl && <Image source={{ uri: proofUrl }} style={s.proof} />}
-                  <TouchableOpacity style={s.photoBtn} onPress={uploadProof} disabled={uploading}>
-                    <Text style={s.photoBtnText}>
-                      {uploading ? 'Đang tải...' : proofUrl ? '🔄 Đổi ảnh khác' : '🖼️ Tải ảnh biên lai'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[s.primaryBtn, { marginTop: Spacing.md }, busy && s.btnDisabled]}
-                    onPress={submitRefund}
-                    disabled={busy || uploading}
-                  >
-                    <Text style={s.primaryBtnText}>
-                      {busy ? 'Đang lưu...' : `✓ Đã hoàn ${money(refundAmount)}`}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </>
+              <View style={s.infoCard}>
+                <Text style={s.infoTitle}>⏳ Đang chờ hoàn cọc cho khách</Text>
+                <Text style={s.infoText}>
+                  Bộ phận tài chính sẽ chuyển phần còn lại cho khách trong 1–3 ngày làm việc, về tài
+                  khoản khách đã đăng ký khi gửi yêu cầu trả phòng. Bạn không phải chuyển tiền và
+                  không cần tải biên lai.
+                </Text>
+                <Text style={s.infoNote}>
+                  Vẫn hoàn tất trả phòng được ngay — việc chuyển tiền chạy song song, không chặn
+                  thanh lý hợp đồng.
+                </Text>
+              </View>
             )}
 
             {extraCharge > 0 && (
@@ -378,7 +348,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             {refunded && (
               <View style={s.doneCard}>
                 <Text style={s.doneText}>
-                  ✓ Đã hoàn cọc {money(refundAmount)} ngày {formatDate(settlement?.refundedAt ?? paidAt)}
+                  ✓ Đã hoàn cọc cho khách ngày {formatDate(settlement?.refundedAt ?? todayIso())}
                 </Text>
                 <Text style={s.doneSub}>Bấm "Hoàn tất trả phòng" bên dưới để thanh lý hợp đồng.</Text>
               </View>
@@ -405,9 +375,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             </TouchableOpacity>
             {!moneyDone && !settlementMissing && (
               <Text style={s.blockNote}>
-                {refundAmount > 0
-                  ? 'Ghi nhận hoàn cọc trước khi thanh lý hợp đồng.'
-                  : 'Chờ khách thanh toán hoá đơn quyết toán trước khi thanh lý hợp đồng.'}
+                Chờ khách thanh toán hoá đơn quyết toán trước khi thanh lý hợp đồng.
               </Text>
             )}
           </View>
@@ -478,6 +446,7 @@ const s = StyleSheet.create({
   rowBold: { fontWeight: '800', color: Colors.textPrimary },
   divider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.sm },
   resultRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  mutedNote: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18, marginTop: -Spacing.xs, marginBottom: Spacing.md, paddingHorizontal: Spacing.xs },
   resultLabel: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.5 },
   resultValue: { fontSize: 20, fontWeight: '800' },
 
