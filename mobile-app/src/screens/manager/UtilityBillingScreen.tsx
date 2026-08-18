@@ -246,7 +246,14 @@ const mapBillingProperty = (
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const route = useRoute<any>();
-  const [activeTab, setActiveTab] = useState<MainTab>('electricity');
+  /**
+   * Mặc định vào tab Điện (việc chính ở đây là ghi chỉ số). Nhưng khi được gọi từ ô
+   * "Điện/nước quá hạn" ngoài Trang chủ thì việc cần làm là XEM danh sách hoá đơn, nên
+   * bên đó truyền `tab: 'history'` — vào thẳng chỗ đang cần, không bắt mò lại.
+   */
+  const [activeTab, setActiveTab] = useState<MainTab>(
+    (route?.params?.tab as MainTab) ?? 'electricity',
+  );
   /**
    * Chặn gửi hoá đơn khi KHÁCH ĐÓ đã nhận hoá đơn loại này trong kỳ.
    * Trả true = bị chặn. Luôn nói rõ lý do thay vì để nút im lặng.
@@ -364,8 +371,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
   }, []);
 
-  const loadHistory = useCallback(() => {
-    setLoadingHist(true);
+  /** `silent` = nạp ngầm (realtime / poll): giữ danh sách đang hiện, không nháy spinner. */
+  const loadHistory = useCallback((silent = false) => {
+    if (!silent) setLoadingHist(true);
     Promise.all([
       realManagerInvoiceService.listInvoices({ type: 'ELECTRICITY' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listInvoices({ type: 'WATER' }).catch(() => [] as ManagerInvoice[]),
@@ -381,9 +389,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * cho loại này, nhưng ở đây cứ nạp lại cả danh sách: `loadHistory` rẻ hơn nhiều so với
    * việc dò đúng dòng rồi vá tay, mà lại không sợ lệch bộ lọc kỳ đang chọn.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    loadHistory();
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: () => loadHistory(true),
   });
 
   /**
@@ -397,6 +405,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * không chặn thì manager bấm "Quay lại" là bị đá về bước 2 vô hạn, không thoát ra
    * bước chọn nhà được.
    */
+  /**
+   * `navigate()` vào màn ĐANG nằm sẵn trong stack thì chỉ đổi `params`, `useState` ở
+   * trên không chạy lại — thiếu effect này thì bấm "Điện/nước quá hạn" lần thứ hai là
+   * tab không đổi, người dùng tưởng nút hỏng.
+   */
+  useEffect(() => {
+    const t = route?.params?.tab as MainTab | undefined;
+    if (t) setActiveTab(t);
+  }, [route?.params]);
+
   const jumpedRef = useRef(false);
   useEffect(() => {
     const pid = route?.params?.propertyId;

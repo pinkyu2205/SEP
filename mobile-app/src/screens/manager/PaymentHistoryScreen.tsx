@@ -372,9 +372,9 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // Hoá đơn vừa PAID sinh giao dịch mới, và claim chờ duyệt có thể hết hiệu lực → nạp lại.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: load,
   });
 
   // Trước 13/08/2026 chỗ này có `ensureDepositAmount` — gọi
@@ -512,11 +512,26 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
     ];
   }, [filtered]);
 
-  const counts = useMemo(() => ({
-    verified: payments.filter(p => p.status === 'VERIFIED').length,
-    pending: payments.filter(p => p.status === 'PENDING_VERIFY').length,
-    deposits: deposits.filter(d => (d.status || '').toUpperCase() === 'PAID').length,
-  }), [payments, deposits]);
+  /**
+   * ĐẾM TRÊN CHÍNH `timeline` — tức đúng những dòng đang hiện bên dưới.
+   *
+   * Trước 18/08/2026 hai ô đầu đếm trên `payments` (bảng `tenant_payment_claims`) trong
+   * khi danh sách dựng từ BA nguồn (claims + sổ thu + hoá đơn PAID). Khách trả bằng
+   * PayOS/QR **không sinh claim**, chỉ vào sổ thu — nên màn đầy dòng "✓ Đã xác nhận" mà
+   * ô "Đã xác nhận" vẫn đứng ở 0. Ô đếm một tập, danh sách hiện một tập khác.
+   *
+   * Đếm theo cùng điều kiện mà chip lọc dùng (`kind === 'INVOICE'` + so `status`), để ô
+   * số và số dòng bấm ra luôn khớp nhau.
+   */
+  const counts = useMemo(() => {
+    const byStatus = (st: string) =>
+      timeline.filter(e => e.kind === 'INVOICE' && e.status.toUpperCase() === st).length;
+    return {
+      verified: byStatus('VERIFIED'),
+      pending: byStatus('PENDING_VERIFY'),
+      deposits: deposits.filter(d => (d.status || '').toUpperCase() === 'PAID').length,
+    };
+  }, [timeline, deposits]);
 
   /** Xác nhận / từ chối giao dịch khách báo đã chuyển — làm ngay trong sheet chi tiết. */
   const handleVerify = (e: Entry, approved: boolean) => {

@@ -78,16 +78,19 @@ export const InvoiceDetailScreen: React.FC = () => {
    *
    * `invoiceId` của event là number, `SharedBill.id` là string → so sánh dạng chuỗi.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    if (String(event.invoiceId) !== String(invoice.id)) return;
-    setInvoice(prev => ({
-      ...prev,
-      status: 'paid',
-      paidAt: event.paidAt ?? prev.paidAt,
-      transactionId: event.transactionId ?? prev.transactionId,
-    }));
-    setPaying(false); // đóng modal QR nếu đang mở
+  // Chỉ `onEvent`: màn này vá thẳng trạng thái từ payload nên không cần nạp lại API
+  // (và vì thế cũng không cần lớp poll dự phòng).
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID' && String(e.invoiceId) === String(invoice.id),
+    onEvent: (event) => {
+      setInvoice(prev => ({
+        ...prev,
+        status: 'paid',
+        paidAt: event.paidAt ?? prev.paidAt,
+        transactionId: event.transactionId ?? prev.transactionId,
+      }));
+      setPaying(false); // đóng modal QR nếu đang mở
+    },
   });
 
   const tc  = TYPE_CFG[invoice.invoiceType];

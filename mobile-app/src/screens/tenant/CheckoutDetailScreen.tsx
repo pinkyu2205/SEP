@@ -482,6 +482,21 @@ export const CheckoutDetailScreen: React.FC = () => {
               </Text>
             </View>
 
+            {/**
+              * Nói rõ khi nào tiền về và về đâu.
+              * Bảng quyết toán bên quản lý KHÔNG còn hiện tiền cọc và tiền phòng (chính
+              * sách @/constants/managerVisibility), nên app của khách là nơi DUY NHẤT
+              * nói đủ hai khoản đó — thiếu câu này thì khách xem xong không biết bao giờ
+              * nhận được tiền, lại phải hỏi quản lý, mà quản lý cũng không thấy số.
+              */}
+            {settlement.refundAmount > 0 && !settlement.refundedAt && (
+              <Text style={styles.refundEtaNote}>
+                💸 Tiền cọc còn lại và tiền phòng những ngày bạn không ở sẽ được chuyển trong
+                {' '}<Text style={{ fontWeight: '800' }}>1–3 ngày làm việc</Text> sau khi bạn đồng ý,
+                về tài khoản bạn đã điền khi gửi yêu cầu trả phòng.
+              </Text>
+            )}
+
             {!!settlement.refundedAt && (
               <Text style={styles.refundedNote}>
                 ✓ Quản lý đã hoàn cọc ngày {formatDate(settlement.refundedAt)}
@@ -711,6 +726,7 @@ const styles = StyleSheet.create({
   settleTotalLabel: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.4 },
   settleTotalValue: { fontSize: 19, fontWeight: '800' },
   refundedNote: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: Spacing.sm },
+  refundEtaNote: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18, marginTop: Spacing.sm, backgroundColor: Colors.background, padding: Spacing.sm, borderRadius: BorderRadius.md },
 
   // ── Khối xác nhận của khách ──
   confirmBox: {

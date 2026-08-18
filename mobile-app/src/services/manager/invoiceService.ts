@@ -215,18 +215,31 @@ export const realManagerInvoiceService = {
     return unwrap(data);
   },
 
-  // GET /api/v1/manager/invoices?period=&status=&type=
-  listInvoices: async (params?: { period?: string; status?: string; type?: string }): Promise<ManagerInvoice[]> => {
+  /**
+   * GET /api/v1/manager/invoices?period=&status=&type=&size=
+   *
+   * ⚠️ `size` BẮT BUỘC phải truyền. Endpoint trả `Page` của Spring, không truyền size là
+   * dính mặc định **20 bản ghi**. Mọi màn dùng hàm này đều lọc lại phía client (theo nhà,
+   * theo kỳ, theo khách) nên bị cắt ở 20 là mất dữ liệu một cách im lặng: mở "Hoá đơn tiền
+   * nhà" của một nhà mà 20 hoá đơn đầu thuộc nhà khác thì màn hiện "Chưa có hóa đơn tiền
+   * nhà" — trong khi hoá đơn có thật (gặp 18/08/2026 với nhà nguyên căn MTX#01).
+   * Cùng lý do với `listPaymentHistory` bên dưới. Muốn lọc theo nhà ở BE thì cần endpoint
+   * nhận `propertyId` — hiện chưa có.
+   */
+  listInvoices: async (params?: {
+    period?: string; status?: string; type?: string; page?: number; size?: number;
+  }): Promise<ManagerInvoice[]> => {
     const { data } = await realApiClient.get<SpringPage<ManagerInvoice> | ManagerInvoice[]>(
-      '/api/v1/manager/invoices', { params },
+      '/api/v1/manager/invoices', { params: { size: 500, ...params } },
     );
     return unwrap(data);
   },
 
   // GET /api/v1/manager/payments?status=  (giao dịch thanh toán: chờ xác nhận / đã xác nhận)
-  listPayments: async (params?: { status?: string }): Promise<ManagerPayment[]> => {
+  // `size` vì cùng lý do với listInvoices — mặc định 20 là cắt mất giao dịch cũ.
+  listPayments: async (params?: { status?: string; page?: number; size?: number }): Promise<ManagerPayment[]> => {
     const { data } = await realApiClient.get<SpringPage<ManagerPayment> | ManagerPayment[]>(
-      '/api/v1/manager/payments', { params },
+      '/api/v1/manager/payments', { params: { size: 500, ...params } },
     );
     return unwrap(data);
   },
