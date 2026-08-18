@@ -121,10 +121,10 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
    * Nạp im lặng (`silent`) để không nháy spinner giữa lúc quản lý đang thao tác.
    * Lọc theo `propertyId` khi event có: hoá đơn của toà khác thì bảng này không đổi gì.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID' || selectedId == null) return;
-    if (event.propertyId != null && event.propertyId !== selectedId) return;
-    loadRows(selectedId, month, true);
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID' && selectedId != null
+      && (e.propertyId == null || Number(e.propertyId) === selectedId),
+    onRefresh: () => { if (selectedId != null) loadRows(selectedId, month, true); },
   });
 
   const onSelect = (id: number) => { setSelectedId(id); loadRows(id, month); };

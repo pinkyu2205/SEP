@@ -131,12 +131,32 @@ export const ManagerHomeScreen: React.FC = () => {
     [invoices, rentingKeys],
   );
 
-  // Số liệu thật cho "Cần xử lý hôm nay" + badge thao tác nhanh.
-  const overdueCount  = actionableInvoices.filter(i => i.status === 'OVERDUE').length;
+  /**
+   * ─── ĐẾM TÁCH THEO LOẠI HOÁ ĐƠN ──────────────────────────────────────────────
+   *
+   * Mỗi ô ở đây bấm vào là sang một màn khác nhau, mà mỗi màn chỉ hiện đúng LOẠI hoá
+   * đơn của nó: "Hoá đơn tiền nhà" chỉ có RENT, "Ghi chỉ số & Hoá đơn" chỉ có
+   * điện/nước. Nên ô nào cũng phải đếm đúng phần màn đích hiện được.
+   *
+   * Trước 18/08/2026 ô "Hóa đơn quá hạn" đếm MỌI loại rồi dẫn sang màn tiền nhà:
+   * trang chủ báo 9, bấm vào đếm được 1 — 8 cái còn lại là điện/nước, nằm ở màn khác
+   * mà không ô nào chỉ đường tới. Người dùng chỉ thấy hai con số đá nhau.
+   */
+  const isUtility = (i: ManagerInvoice) => i.type === 'ELECTRICITY' || i.type === 'WATER';
+  const overdueRent = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && i.type === 'RENT').length;
+  const overdueUtility = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && isUtility(i)).length;
+  // Loại còn lại (SERVICE / OTHER) chưa có màn riêng — gộp vào ô tiền nhà để không
+  // mất hẳn khỏi danh sách việc, thà lệch một ít còn hơn giấu.
+  const overdueOther = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && i.type !== 'RENT' && !isUtility(i)).length;
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
   const rentTerminable = actionableInvoices.filter(i =>
     i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
-  const unpaidCount   = actionableInvoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
+  /** Badge của ô "Hoá đơn" ở Thao tác nhanh — ô đó mở màn tiền nhà nên chỉ đếm RENT. */
+  const unpaidCount = actionableInvoices.filter(i =>
+    i.type === 'RENT' && (i.status === 'OVERDUE' || i.status === 'PENDING')).length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   /**
@@ -173,7 +193,10 @@ export const ManagerHomeScreen: React.FC = () => {
 
   const priorityItems = [
     { id: 'p0', icon: '🤝', label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
-    { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
+    { id: 'p1', icon: '🧾', label: 'Tiền nhà quá hạn',          count: overdueRent + overdueOther, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
+    // `tab: 'history'` để vào thẳng danh sách hoá đơn điện/nước, không rơi vào bước
+    // ghi chỉ số — việc cần làm ở đây là đi đòi, không phải chụp đồng hồ.
+    { id: 'p1b', icon: '⚡', label: 'Điện/nước quá hạn',        count: overdueUtility, urgency: 'critical', color: Colors.error, route: 'UtilityBilling', params: { tab: 'history' } },
     { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
     { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
       count: checkoutPending > 0 ? checkoutPending : checkoutTodo,

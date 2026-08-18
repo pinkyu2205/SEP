@@ -16,6 +16,8 @@ import { realTenantService, TenantContractResponse } from '@/services/tenant/ten
 import { checkoutService } from '@/services/manager/checkoutService';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import { RealtimeBadge } from '@/components/common';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -89,6 +91,8 @@ export const BuildingBillingScreen: React.FC = () => {
 
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [loading,  setLoading]  = useState(true);
+  /** Số hoá đơn của nhà này bị bộ lọc "còn khách thuê" gạt đi — xem chú thích trong `load`. */
+  const [hiddenCount, setHiddenCount] = useState(0);
 
   /**
    * Hợp đồng đang hiệu lực của nhà này — cần `contractId` để chấm dứt ngay tại màn
@@ -98,9 +102,13 @@ export const BuildingBillingScreen: React.FC = () => {
   const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
   const [terminating, setTerminating] = useState(false);
 
-  // Chỉ lấy hoá đơn TIỀN NHÀ (RENT) của BĐS này — điện/nước có thống kê riêng ở màn Ghi chỉ số.
-  const load = useCallback(() => {
-    setLoading(true);
+  /**
+   * Chỉ lấy hoá đơn TIỀN NHÀ (RENT) của BĐS này — điện/nước có thống kê riêng ở màn Ghi chỉ số.
+   * `silent` = nạp ngầm (realtime / poll): giữ nguyên danh sách đang hiện, không nháy spinner
+   * giữa lúc quản lý đang đọc.
+   */
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     Promise.all([
       realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
       realTenantService.listByProperty(pid).catch(() => [] as TenantContractResponse[]),
@@ -114,13 +122,31 @@ export const BuildingBillingScreen: React.FC = () => {
         // Lọc NGAY TẠI NGUỒN để con số thống kê (đã thu / quá hạn) khớp với danh sách
         // bên dưới — lọc riêng ở phần hiển thị là hai chỗ đá nhau.
         const keys = activeRentingKeys(active);
-        setInvoices(
-          list.filter(i => i.propertyId === pid && belongsToActiveTenant(i, keys)),
-        );
+        const ofThisProperty = list.filter(i => Number(i.propertyId) === pid);
+        const kept = ofThisProperty.filter(i => belongsToActiveTenant(i, keys));
+        setInvoices(kept);
+        /**
+         * Nhà CÓ hoá đơn nhưng bị bộ lọc "còn khách thuê" gạt hết thì màn trắng trơn,
+         * và người dùng chỉ thấy "Chưa có hóa đơn tiền nhà" — sai và không lần ra được
+         * (gặp 18/08/2026 với nhà nguyên căn MTX#01). Đếm lại phần bị ẩn để ô rỗng nói
+         * đúng lý do: hoá đơn có thật, chỉ là không khớp hợp đồng nào đang hiệu lực.
+         */
+        setHiddenCount(ofThisProperty.length - kept.length);
       })
       .finally(() => setLoading(false));
   }, [pid]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  /**
+   * Khách trả tiền phòng → BE bắn `INVOICE_PAID` → bảng tự đổi sang "Đã thanh toán"
+   * NGAY khi quản lý đang đứng ở màn này, không phải thoát ra vào lại.
+   * Lọc theo `propertyId`: hoá đơn của nhà khác thì màn này không có gì thay đổi.
+   */
+  const { connected: liveOn } = useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID'
+      && (e.propertyId == null || Number(e.propertyId) === pid),
+    onRefresh: () => load(true),
+  });
 
   const [search,           setSearch]           = useState('');
   const [filter,           setFilter]           = useState<FilterType>('all');
@@ -296,6 +322,8 @@ export const BuildingBillingScreen: React.FC = () => {
           <Text style={s.headerTitle} numberOfLines={1}>{propertyName}</Text>
           <Text style={s.headerSub}>Hóa đơn tiền nhà</Text>
         </View>
+        {/* Nói rõ màn đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
+        <RealtimeBadge connected={liveOn} />
       </View>
 
       {/* ── Thẻ tổng quan ──
@@ -472,7 +500,16 @@ export const BuildingBillingScreen: React.FC = () => {
           ListEmptyComponent={
             <View style={s.emptyState}>
               <Text style={{ fontSize: 40 }}>🏠</Text>
-              <Text style={s.emptyText}>Chưa có hóa đơn tiền nhà</Text>
+              <Text style={s.emptyText}>
+                {hiddenCount > 0
+                  ? `Nhà này có ${hiddenCount} hoá đơn tiền nhà, nhưng không hoá đơn nào khớp hợp đồng đang hiệu lực`
+                  : 'Chưa có hóa đơn tiền nhà'}
+              </Text>
+              {hiddenCount > 0 && (
+                <Text style={s.emptyHint}>
+                  Khách của các hoá đơn đó đã chấm dứt hợp đồng — phần còn nợ xử lý ở luồng Trả phòng.
+                </Text>
+              )}
             </View>
           }
         />
@@ -704,6 +741,7 @@ const s = StyleSheet.create({
 
   emptyState: { alignItems: 'center', paddingTop: 80, gap: Spacing.md },
   emptyText:  { fontSize: 14, color: Colors.textMuted },
+  emptyHint:  { fontSize: 12, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.xl, marginTop: -Spacing.sm },
 
   modalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent:    {

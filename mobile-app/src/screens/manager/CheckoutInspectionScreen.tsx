@@ -8,7 +8,7 @@ import {
 } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
 import { CameraCaptureModal } from '@/components/common';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
@@ -585,6 +585,35 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           'Chức năng lưu biên bản kiểm phòng chưa có trên máy chủ đang chạy. '
           + 'Báo đội backend triển khai bản có luồng trả phòng rồi thử lại.',
           undefined, '🛠️',
+        );
+        return;
+      }
+      /**
+       * BE chặn ghi biên bản ở một số trạng thái và chỉ trả đúng chuỗi tiếng Anh
+       * `Invalid status for inspection` — người dùng đọc ra không biết mình vừa làm sai
+       * gì hay phải làm gì tiếp.
+       *
+       * Gặp thật 18/08/2026: khách phản đối bảng quyết toán → hồ sơ sang DISPUTED, mà
+       * `POST /checkout-requests/{id}/inspection` chỉ nhận APPROVED/INSPECTING. Tức là
+       * quản lý vào sửa ĐÚNG THỨ khách đang khiếu nại (khoản trừ) thì không lưu được —
+       * luồng tranh chấp không có đường quay lại. Xem BE-BUG-checkout-disputed-*.
+       *
+       * Bắt theo NỘI DUNG lỗi chứ không theo trạng thái: BE mở thêm trạng thái nào thì
+       * nhánh này tự hết chạy, không phải sửa lại danh sách ở đây.
+       */
+      const rawMsg = String(e?.response?.data?.message ?? e?.message ?? '');
+      if (/invalid status for inspection/i.test(rawMsg)) {
+        const st = req?.status;
+        showAlert(
+          'Chưa lưu được biên bản',
+          st === 'DISPUTED'
+            ? 'Khách đã phản đối nên hồ sơ đang ở trạng thái "Khách không đồng ý". Máy chủ hiện '
+              + 'CHƯA cho sửa biên bản ở trạng thái này, nên các khoản trừ vừa nhập chưa được lưu.\n\n'
+              + 'Hiện chỉ gửi lại được bảng quyết toán cũ cho khách. Muốn đổi khoản trừ thì cần '
+              + 'đội backend cho phép ghi biên bản khi hồ sơ bị phản đối.'
+            : `Máy chủ không cho ghi biên bản khi hồ sơ đang ở trạng thái `
+              + `"${checkoutMeta(st).label}". Biên bản chỉ sửa được ở bước kiểm tra phòng.`,
+          undefined, '🔒',
         );
         return;
       }

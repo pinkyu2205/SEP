@@ -235,10 +235,10 @@ export const TenantInvoicesScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   // Khách trả xong → BE bắn INVOICE_PAID → nạp lại ngay, quản lý không phải thoát ra vào lại.
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    if (event.propertyId != null && event.propertyId !== propId) return;
-    load(true);
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID'
+      && (e.propertyId == null || Number(e.propertyId) === propId),
+    onRefresh: () => load(true),
   });
 
   const sorted = useMemo(() => {

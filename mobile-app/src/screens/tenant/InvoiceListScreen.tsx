@@ -142,9 +142,9 @@ export const InvoiceListScreen: React.FC = () => {
    * Refetch chứ không vá dòng: hoá đơn vừa trả có thể đang bị bộ lọc "Chưa thanh toán"
    * loại ra, phải để danh sách tự dựng lại theo bộ lọc hiện tại.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    reload();
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: reload,
   });
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);

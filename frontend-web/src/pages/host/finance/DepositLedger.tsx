@@ -1,5 +1,8 @@
 import { MaskedField } from '@/components/MaskedField';
+import { Overlay } from '@/components/Overlay';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import { uploadToCloudinary } from '@/services/upload.service';
+import toast from 'react-hot-toast';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PiggyBank, Download, ShieldCheck, RotateCcw, AlertTriangle, RefreshCw,
@@ -62,6 +65,14 @@ interface DepositRow {
   status: DepositStatus;
   /** HĐ đã hết hạn nhưng cọc vẫn đang giữ → cần tất toán ở luồng trả phòng. */
   needsSettlement: boolean;
+  /** Cần để gọi endpoint hoàn cọc. Nguồn dự phòng (suy từ HĐ) không có → không hoàn được. */
+  contractId?: number;
+  /**
+   * Trạng thái HỢP ĐỒNG — mốc duy nhất cho biết thủ tục trả phòng đã xong hay chưa.
+   * `TERMINATED` = quản lý đã bấm "Hoàn tất trả phòng" sau khi khách đồng ý bảng quyết
+   * toán, tức cả hai phía đã chốt. Chỉ lúc đó mới được đánh dấu hoàn cọc.
+   */
+  contractStatus?: HostContractDto['status'];
 }
 
 const contractToRow = (c: HostContractDto): DepositRow | null => {
@@ -81,11 +92,17 @@ const contractToRow = (c: HostContractDto): DepositRow | null => {
     endDate: c.endDate,
     status: c.status === 'TERMINATED' ? 'REFUNDED' : 'HELD',
     needsSettlement: c.status === 'EXPIRED',
+    contractStatus: c.status,
   };
 };
 
 /** Nguồn CHÍNH — trạng thái do BE quyết (DepositLedgerStatusResolver). */
-const depositItemToRow = (d: DepositItem, i: number): DepositRow => {
+const depositItemToRow = (
+  d: DepositItem,
+  i: number,
+  /** contractId → trạng thái HĐ; `/host/finance/deposits` không trả trường này. */
+  contractStatuses: Map<string, HostContractDto['status']>,
+): DepositRow => {
   // Status lạ (BE thêm giá trị mới) thì để nguyên chuỗi thay vì im lặng quy về HELD —
   // quy về HELD là cách khoản 'chưa thu' từng bị đếm vào tổng đang giữ.
   const status = (STATUS_META[d.status as DepositStatus]
@@ -103,10 +120,34 @@ const depositItemToRow = (d: DepositItem, i: number): DepositRow => {
     status,
     // Cần tất toán = ĐÃ thu, HĐ đã qua ngày kết thúc mà cọc vẫn đang giữ.
     needsSettlement: status === 'HELD' && !!d.endDate && d.endDate < todayIso(),
+    contractId: d.contractId,
+    contractStatus: d.contractId != null ? contractStatuses.get(String(d.contractId)) : undefined,
   };
 };
 
 const todayIso = (): string => new Date().toLocaleDateString('en-CA');
+
+/**
+ * Vì sao CHƯA được đánh dấu hoàn cọc — trả `null` nghĩa là hoàn được.
+ *
+ * Cọc chỉ trả lại khi **cả quản lý lẫn khách đã chốt xong thủ tục trả phòng**: khách
+ * đồng ý bảng quyết toán → quản lý bấm "Hoàn tất trả phòng" → BE thanh lý hợp đồng
+ * (`TERMINATED`). Trước mốc đó, khoản cọc vẫn đang bảo đảm cho hợp đồng đang chạy —
+ * hoàn cho người còn đang ở là mất tiền thật, không phải lỗi hiển thị.
+ *
+ * `EXPIRED` (hết hạn nhưng chưa thanh lý) CŨNG chưa được: chưa có biên bản kiểm tra
+ * phòng thì chưa biết trừ hư hỏng bao nhiêu.
+ */
+const refundBlockReason = (r: DepositRow): string | null => {
+  if (r.contractId == null) {
+    return 'Khoản này thiếu mã hợp đồng (dữ liệu dự phòng) nên chưa ghi nhận được.';
+  }
+  if (r.contractStatus === 'TERMINATED') return null;
+  if (r.contractStatus === 'EXPIRED') {
+    return 'Hợp đồng đã hết hạn nhưng chưa thanh lý — chờ quản lý kiểm tra phòng và quyết toán xong.';
+  }
+  return 'Chờ quản lý và khách hoàn tất thủ tục trả phòng (khách đồng ý quyết toán, quản lý thanh lý hợp đồng).';
+};
 
 type StatusKey = 'all' | DepositStatus;
 
@@ -129,20 +170,36 @@ export const DepositLedger = () => {
   const [sort, setSort] = useState<SortKey>('newest');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
+  /** Khoản đang mở hộp thoại "Đánh dấu đã hoàn cọc" — null là đóng. */
+  const [refunding, setRefunding] = useState<DepositRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    // Nguồn chính: endpoint cọc — trạng thái đã do BE xét từ paymentStatus + quyết toán.
-    const res = await hostService.getDeposits().catch(() => null);
-    const items = (res?.items ?? []).map(depositItemToRow);
+    /**
+     * Hai nguồn, gọi song song:
+     *  • `/host/finance/deposits` — nguồn CHÍNH, trạng thái cọc do BE xét.
+     *  • `/host/contracts`        — lấy TRẠNG THÁI HỢP ĐỒNG, thứ endpoint cọc không trả.
+     *
+     * Cần trạng thái HĐ để biết thủ tục trả phòng đã xong chưa: nút "Đánh dấu đã hoàn"
+     * chỉ được mở khi HĐ đã `TERMINATED`. Thiếu nó thì nút sáng cho cả khách đang thuê
+     * bình thường — hoàn cọc cho người còn đang ở là sai nghiệp vụ nặng.
+     * (Danh sách HĐ cũng là nguồn DỰ PHÒNG khi endpoint cọc lỗi, nên gọi luôn một thể.)
+     */
+    const [res, contractPage] = await Promise.all([
+      hostService.getDeposits().catch(() => null),
+      hostService.listContracts({ size: 500 }).catch(() => null),
+    ]);
+    const contracts = contractPage?.content ?? [];
+    const contractStatuses = new Map(contracts.map(c => [String(c.id), c.status]));
+
+    const items = (res?.items ?? []).map((d, i) => depositItemToRow(d, i, contractStatuses));
 
     if (items.length) {
       setRows(items);
     } else {
       // Dự phòng khi endpoint cọc lỗi: suy từ hợp đồng. Kém chính xác (không biết
       // đã thu chưa) nên chỉ dùng khi không còn gì khác.
-      const contractPage = await hostService.listContracts({ size: 500 }).catch(() => null);
-      setRows((contractPage?.content ?? [])
+      setRows(contracts
         .map(contractToRow)
         .filter((r): r is DepositRow => r !== null));
     }
@@ -197,7 +254,17 @@ export const DepositLedger = () => {
       // Không có ngày kết thúc (HĐ vô thời hạn) → đẩy xuống cuối.
       case 'ending-soon': sorted.sort((a, b) => (a.endDate ?? '9999').localeCompare(b.endDate ?? '9999')); break;
     }
-    return sorted;
+
+    /**
+     * ĐANG GIỮ luôn lên đầu, bất kể đang sắp theo kiểu gì.
+     *
+     * Đây mới là tiền host thật sự đang nắm và sẽ phải trả lại — cũng là nhóm duy nhất
+     * có việc để làm (đánh dấu đã hoàn). Thực tế sổ có 65 khoản thì 64 khoản "Chưa thu",
+     * xếp lẫn lộn là 1 khoản Đang giữ trôi mất tăm giữa danh sách, phải bấm chip lọc mới
+     * thấy. Sắp xếp người dùng chọn vẫn giữ nguyên — chỉ áp trong từng nhóm.
+     */
+    const groupRank = (s: DepositStatus) => (s === 'HELD' ? 0 : 1);
+    return sorted.sort((a, b) => groupRank(a.status) - groupRank(b.status));
   }, [rows, status, property, q, sort]);
 
   const filteredAmount = useMemo(() => filtered.reduce((s, r) => s + r.amount, 0), [filtered]);
@@ -312,6 +379,7 @@ export const DepositLedger = () => {
                 <th className="px-5 py-3.5">Giữ từ</th>
                 <th className="px-5 py-3.5">Kết thúc HĐ</th>
                 <th className="px-5 py-3.5">Trạng thái</th>
+                <th className="px-5 py-3.5 text-right">Thao tác</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -342,11 +410,31 @@ export const DepositLedger = () => {
                         )}
                       </div>
                     </td>
+                    <td className="px-5 py-3.5 text-right">
+                      {/* Chỉ khoản ĐANG GIỮ mới có gì để hoàn: chưa thu thì không có tiền,
+                          đã hoàn / tịch thu thì đã chốt. */}
+                      {r.status === 'HELD' && (() => {
+                        const blocked = refundBlockReason(r);
+                        return (
+                          <button
+                            onClick={() => setRefunding(r)}
+                            disabled={!!blocked}
+                            title={blocked ?? 'Ghi nhận đã chuyển cọc lại cho khách'}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                              blocked
+                                ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                          >
+                            Đánh dấu đã hoàn
+                          </button>
+                        );
+                      })()}
+                    </td>
                   </tr>
                 );
               })}
               {paged.length === 0 && (
-                <TableState colSpan={6} loading={loading} filtered={activeFilters > 0}
+                <TableState colSpan={7} loading={loading} filtered={activeFilters > 0}
                   empty="Chưa có khoản cọc nào — cọc được ghi nhận khi hợp đồng khách thuê có hiệu lực." />
               )}
             </tbody>
@@ -356,6 +444,151 @@ export const DepositLedger = () => {
         <Pagination page={page} perPage={perPage} total={filtered.length}
           onPage={setPage} onPerPage={setPerPage} unit="khoản cọc" />
       </div>
+
+      {refunding && (
+        <RefundDialog
+          row={refunding}
+          onClose={() => setRefunding(null)}
+          onDone={() => { setRefunding(null); load(); }}
+        />
+      )}
     </div>
+  );
+};
+
+/**
+ * Hộp thoại ghi nhận đã hoàn cọc cho khách.
+ *
+ * Việc chuyển tiền diễn ra NGOÀI app (chuyển khoản tay); ở đây chỉ lưu chứng từ và mốc
+ * thời gian — giống hệt cách bước này từng chạy bên app quản lý trước 18/08/2026.
+ *
+ * Ảnh biên lai bắt buộc khi chuyển khoản: đây là bằng chứng duy nhất khi khách nói chưa
+ * nhận được tiền, mà cọc thì thường là khoản lớn nhất trong cả hợp đồng.
+ */
+const RefundDialog = ({ row, onClose, onDone }: {
+  row: DepositRow; onClose: () => void; onDone: () => void;
+}) => {
+  const [method, setMethod] = useState<'BANK_TRANSFER' | 'CASH'>('BANK_TRANSFER');
+  const [paidAt, setPaidAt] = useState(todayIso());
+  const [proofUrl, setProofUrl] = useState('');
+  const [note, setNote] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  /** Lỗi "BE chưa có endpoint" — hiện nguyên khối thay vì toast, vì nó không tự hết. */
+  const [notReady, setNotReady] = useState(false);
+
+  const pickProof = async (file?: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      setProofUrl(await uploadToCloudinary(file, 'image'));
+    } catch {
+      toast.error('Không tải được ảnh biên lai.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const submit = async () => {
+    if (row.contractId == null) {
+      return toast.error('Khoản này thiếu mã hợp đồng nên chưa ghi nhận được.');
+    }
+    if (method === 'BANK_TRANSFER' && !proofUrl) {
+      return toast.error('Tải ảnh biên lai chuyển khoản để khách đối chiếu khi cần.');
+    }
+    setBusy(true);
+    try {
+      await hostService.markDepositRefunded(row.contractId, {
+        method, paidAt, proofUrl: proofUrl || undefined, note: note.trim() || undefined,
+      });
+      toast.success('Đã ghi nhận hoàn cọc.');
+      onDone();
+    } catch (e: unknown) {
+      // 404 = BE chưa triển khai endpoint · 403 = chưa mở quyền cho host.
+      // Hai cái này KHÔNG phải lỗi thao tác, nói thẳng để khỏi bấm lại vô ích.
+      const st = (e as { response?: { status?: number } })?.response?.status;
+      if (st === 404 || st === 403 || st === 501) setNotReady(true);
+      else toast.error('Không ghi nhận được khoản hoàn cọc.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <h3 className="text-lg font-bold text-slate-900">Đánh dấu đã hoàn cọc</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {row.tenantName} · {row.propertyName}
+            {row.roomCode !== 'NGUYEN_CAN' && ` · Phòng ${row.roomCode}`}
+          </p>
+          <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            Số tiền cọc <span className="font-bold text-slate-900">{formatCurrency(row.amount)}</span>
+            {' '}— tiền chuyển ngoài app, ở đây chỉ lưu chứng từ.
+          </p>
+
+          {notReady ? (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-bold text-amber-800">Backend chưa mở chức năng này</p>
+              <p className="mt-1 text-sm text-amber-700">
+                Endpoint <code className="rounded bg-amber-100 px-1">POST /api/v1/host/finance/deposits/{'{contractId}'}/refund</code>
+                {' '}chưa có (hoặc chưa mở quyền cho Host). Trước đây bước này nằm ở app quản lý, nay đã gỡ
+                vì quản lý không được thấy tiền cọc — nên tạm thời chưa ai ghi nhận được.
+                Báo đội backend theo doc <em>BE-BUG-checkout-disputed…</em> phần 2.
+              </p>
+              <button onClick={onClose}
+                className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">
+                Đã hiểu
+              </button>
+            </div>
+          ) : (
+            <>
+              <label className="mt-4 block text-sm font-medium text-slate-700">Hình thức</label>
+              <div className="mt-1.5 flex gap-2">
+                {([['BANK_TRANSFER', '🏦 Chuyển khoản'], ['CASH', '💵 Tiền mặt']] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setMethod(k)}
+                    className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                      method === k
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <label className="mt-4 block text-sm font-medium text-slate-700">Ngày chuyển</label>
+              <input type="date" value={paidAt} onChange={e => setPaidAt(e.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+
+              <label className="mt-4 block text-sm font-medium text-slate-700">
+                Ảnh biên lai {method === 'BANK_TRANSFER' ? '(bắt buộc)' : '(tuỳ chọn)'}
+              </label>
+              {proofUrl && <img src={proofUrl} alt="Biên lai" className="mt-1.5 max-h-40 rounded-lg border border-slate-200" />}
+              <input type="file" accept="image/*" disabled={uploading}
+                onChange={e => pickProof(e.target.files?.[0])}
+                className="mt-1.5 w-full text-sm text-slate-500 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium" />
+              {uploading && <p className="mt-1 text-xs text-slate-400">Đang tải ảnh...</p>}
+
+              <label className="mt-4 block text-sm font-medium text-slate-700">Ghi chú (tuỳ chọn)</label>
+              <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+                className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                placeholder="Vd: đã trừ tiền điện kỳ cuối theo biên bản" />
+
+              <div className="mt-5 flex gap-2">
+                <button onClick={onClose} disabled={busy}
+                  className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                  Huỷ
+                </button>
+                <button onClick={submit} disabled={busy || uploading}
+                  className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {busy ? 'Đang lưu...' : '✓ Đã hoàn cọc'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </Overlay>
   );
 };
