@@ -80,9 +80,9 @@ export const Sidebar = () => {
   return (
     <aside className="sticky top-0 h-screen flex-shrink-0 select-none">
       <AppSidebar
-        accent="indigo"
+        accent="green"
         storageKey="hbl_sidebar_host"
-        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Host', icon: Building2 }}
+        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Host' }}
         sections={sections}
         user={{
           name: user?.fullName || 'Host',

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { BrandMark } from '@/components/common/BrandLogo';
 import {
   ArrowRight, Building2, Eye, EyeOff, FileText, Loader2, Lock,
   ShieldCheck, User, Wallet, Zap,
@@ -118,8 +119,9 @@ export const WebLogin = () => {
         <div className="relative flex h-full flex-col justify-between px-10 pb-10 pt-24 xl:px-14 xl:pb-14 xl:pt-28">
           {/* thương hiệu */}
           <div className="hbl-anim flex items-center gap-3" style={{ animation: 'hbl-rise 0.7s cubic-bezier(0.22,1,0.36,1)' }}>
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/12 text-white shadow-lg ring-1 ring-white/25 backdrop-blur-md">
-              <Building2 className="h-6 w-6" />
+            {/* Trên ảnh nền tối, logo 2 màu bị chìm và bẩn — đổ trắng một màu (`mono`). */}
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/12 shadow-lg ring-1 ring-white/25 backdrop-blur-md">
+              <BrandMark size={30} mono />
             </div>
             <div>
               <p className="text-lg font-black leading-tight text-white">
@@ -218,8 +220,10 @@ export const WebLogin = () => {
             <div className="p-8">
               {/* Logo + brand */}
               <div className="mb-7 flex flex-col items-center text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/30 ring-1 ring-red-500/20">
-                  <Building2 className="h-7 w-7" />
+                {/* Nền TRẮNG để logo giữ nguyên đỏ/xanh — nền gradient xanh cũ nuốt mất
+                    nửa đỏ của logo. */}
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-lg shadow-slate-900/10 ring-1 ring-slate-200">
+                  <BrandMark size={44} />
                 </div>
                 <h1 className="mt-4 text-xl font-black tracking-tight">
                   <span className="text-green-700">Hoàng Bình</span> <span className="text-red-600">Land</span>

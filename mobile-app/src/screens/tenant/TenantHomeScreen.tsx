@@ -12,6 +12,8 @@ import {
 import { serverNow } from '@/utils/serverTime';
 import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
+import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { checkoutMeta } from '@/constants';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 
@@ -23,23 +25,49 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
 
+/**
+ * Lối tắt tới những màn KHÔNG có trong thanh tab dưới đáy.
+ *
+ * Bản cũ có 9 ô, trong đó 4 ô (Hóa đơn, Sửa chữa, Hợp đồng, Hồ sơ) trỏ đúng 4 tab đang hiện
+ * thường trực ngay bên dưới — cùng route, cùng badge. Chín ô không vừa một hàng nên phải
+ * thêm nút "Xem thêm ▼", tức là giấu bớt lối tắt để nhường chỗ cho những lối tắt thừa.
+ *
+ * Bỏ 4 ô trùng thì còn đúng 4 lối tắt thật, vừa một hàng, không cần đóng/mở gì nữa.
+ */
 const QUICK_ACTIONS = [
-  { emoji: '📄', label: 'Hóa đơn',    route: 'InvoiceList',      badge: 1, color: Colors.primary,       primary: true  },
-  { emoji: '🔧', label: 'Sửa chữa',   route: 'MaintenanceList',  badge: 1, color: Colors.warning,       primary: true  },
-  { emoji: '📱', label: 'Thiết bị',   route: 'RoomEquipment',    badge: 0, color: '#0EA5E9',            primary: true  },
-  { emoji: '📋', label: 'Hợp đồng',   route: 'TenantContracts',  badge: 0, color: Colors.info,          primary: false },
-  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory',   badge: 0, color: Colors.success,       primary: false },
-  { emoji: '📷', label: 'Quét QR',    route: 'Scan',             badge: 0, color: Colors.accent,        primary: false },
-  { emoji: '🏠', label: 'Bàn giao',   route: 'TenantOnboarding', badge: 0, color: Colors.textSecondary, primary: false },
-  { emoji: '🚪', label: 'Trả phòng',  route: 'RequestCheckout',  badge: 0, color: '#DC2626',            primary: false },
-  { emoji: '👤', label: 'Hồ sơ',      route: 'Profile',          badge: 0, color: Colors.primaryDark,   primary: false },
+  { emoji: '📱', label: 'Thiết bị',   route: 'RoomEquipment',    color: '#0EA5E9'      },
+  { emoji: '📷', label: 'Quét QR',    route: 'Scan',             color: Colors.accent  },
+  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory',   color: Colors.success },
+  { emoji: '🏠', label: 'Bàn giao',   route: 'TenantOnboarding', color: Colors.info    },
 ];
 
 // ── Component ──────────────────────────────────────────────
+/** Trạng thái hồ sơ trả phòng coi như đã đóng — không cần hiện trên màn chính nữa. */
+const CLOSED_CHECKOUT = ['COMPLETED', 'CANCELLED', 'CANCELED', 'REJECTED'];
+
+/**
+ * Hồ sơ trả phòng có đang CHỜ KHÁCH LÀM GÌ không.
+ *
+ * Phân biệt hai thứ rất khác nhau về mức độ khẩn: "đang chạy, chờ bên kia xử lý" (chỉ cần
+ * biết) và "đang chờ CHÍNH BẠN" (phải làm ngay, không làm thì hồ sơ đứng). Chỉ cái thứ hai
+ * mới đáng tô màu nổi trên màn chính.
+ */
+const checkoutNeedsTenant = (c: CheckoutRequestDto | null): string | null => {
+  if (!c) return null;
+  const st = (c.status || '').toUpperCase();
+  if (st === 'WAITING_TENANT') return 'Xem và xác nhận bảng quyết toán';
+  const s = c.settlement;
+  if (!s) return null;
+  if (s.chargesSettled === false) return 'Thanh toán khoản phí cuối kỳ';
+  // Host đã chuyển cọc mà khách chưa xác nhận — bước dễ bị bỏ quên nhất cả luồng.
+  if (s.refundedAt && !s.refundConfirmedAt && !s.refundDisputedAt) {
+    return 'Xác nhận bạn đã nhận đủ tiền cọc';
+  }
+  return null;
+};
 export const TenantHomeScreen: React.FC = () => {
   const { user } = useAuth();
   const navigation = useNavigation<any>();
-  const [actionsExpanded, setActionsExpanded] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông từ BE
   // 1 account có thể có nhiều HĐ ACTIVE (nhà/phòng khác nhau) — xem
   // docs/FE-multi-contract-per-phone.md (repo BE). selectedContractId dùng chung
@@ -55,6 +83,14 @@ export const TenantHomeScreen: React.FC = () => {
   // với "gọi API lỗi" (mất mạng/401/500...) — trước đây gộp chung 1 kiểu `null` nên
   // lúc lỗi mạng lại hiện lầm màn "Bạn chưa có phòng đang thuê" dù tài khoản có HĐ.
   const [dashError, setDashError] = useState(false);
+  /**
+   * Hồ sơ trả phòng ĐANG CHẠY (nếu có).
+   *
+   * Trước đây màn này không gọi API checkout lần nào: chỉ có một dòng "Trả phòng" luôn dẫn
+   * tới màn TẠO YÊU CẦU MỚI. Khách đã có yêu cầu đang chờ thì bấm vào bị BE chặn, mà cũng
+   * không có đường nào tới màn xác nhận nhận cọc — tức cả cơ chế đối chứng nằm ngoài tầm với.
+   */
+  const [checkout, setCheckout] = useState<CheckoutRequestDto | null>(null);
 
   const loadDashboard = useCallback(() => {
     if (restoring) return () => {}; // chờ đọc xong lựa chọn cũ từ AsyncStorage trước khi gọi API
@@ -98,6 +134,23 @@ export const TenantHomeScreen: React.FC = () => {
   }, [selectedContractId, restoring]);
 
   useFocusEffect(useCallback(() => loadDashboard(), [loadDashboard]));
+
+  // Tải riêng, KHÔNG gộp vào loadDashboard: lỗi ở đây không được làm hỏng cả màn chính.
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    realTenantSelfService.listMyCheckoutRequests()
+      .then((list) => {
+        if (!active) return;
+        const open = list
+          .filter((r) => !CLOSED_CHECKOUT.includes((r.status || '').toUpperCase()))
+          .sort((a, b) => b.id - a.id)[0];
+        setCheckout(open ?? null);
+      })
+      .catch(() => { if (active) setCheckout(null); });
+    return () => { active = false; };
+  }, []));
+
+  const needsTenant = checkoutNeedsTenant(checkout);
 
   const contractOptions = dash?.contracts ?? [];
   const hasMultipleContracts = contractOptions.length > 1;
@@ -519,46 +572,77 @@ export const TenantHomeScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Thao tác nhanh</Text>
         </View>
         <View style={styles.actionsGrid}>
-          {(actionsExpanded ? QUICK_ACTIONS : QUICK_ACTIONS.slice(0, 4)).map((a, i) => {
-            // Badge số thật: hóa đơn chưa thanh toán / bảo trì đang xử lý.
-            const badge =
-              a.route === 'InvoiceList' ? unpaidBills.length
-              : a.route === 'MaintenanceList' ? (data.maintenance.pending + data.maintenance.inProgress)
-              : 0;
-            return (
-              <TouchableOpacity
-                key={i}
-                style={styles.actionBtn}
-                onPress={() => navigation.navigate(a.route)}
-                activeOpacity={0.75}
-              >
-                <View style={[
-                  styles.actionIconWrap,
-                  { backgroundColor: a.color + (a.primary ? '1A' : '0F') },
-                ]}>
-                  <Text style={styles.actionEmoji}>{a.emoji}</Text>
-                  {badge > 0 && (
-                    <View style={styles.actionBadge}>
-                      <Text style={styles.actionBadgeText}>{badge > 9 ? '9+' : badge}</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={[styles.actionLabel, !a.primary && styles.actionLabelSecondary]}>
-                  {a.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          {QUICK_ACTIONS.map((a) => (
+            <TouchableOpacity
+              key={a.route}
+              style={styles.actionBtn}
+              onPress={() => navigation.navigate(a.route)}
+              activeOpacity={0.75}
+            >
+              <View style={[styles.actionIconWrap, { backgroundColor: a.color + '1A' }]}>
+                <Text style={styles.actionEmoji}>{a.emoji}</Text>
+              </View>
+              <Text style={styles.actionLabel}>{a.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-        <TouchableOpacity
-          style={styles.actionsToggle}
-          onPress={() => setActionsExpanded(e => !e)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.actionsToggleText}>
-            {actionsExpanded ? 'Thu gọn ▲' : `Xem thêm ▼`}
-          </Text>
-        </TouchableOpacity>
+
+        {/*
+          Trả phòng tách hẳn ra khỏi lưới.
+          Bản cũ để nó làm ô thứ 8, cùng kích cỡ và cùng khoảng cách với "Quét QR" — một
+          cú chạm lệch là mở luồng chấm dứt hợp đồng. Việc này khác hẳn về hệ quả nên phải
+          khác hẳn về hình: hàng riêng, viền nhạt, có câu mô tả nó sẽ làm gì.
+        */}
+        {/*
+          Đang có hồ sơ trả phòng → thẻ TIẾN TRÌNH, không phải nút tạo mới.
+          Bản cũ luôn dẫn tới màn tạo yêu cầu, mà BE chặn nếu đã có hồ sơ đang chờ — nên
+          khách vừa bị báo lỗi vừa không có đường nào tới màn xác nhận nhận cọc.
+        */}
+        {checkout ? (
+          <TouchableOpacity
+            style={[styles.checkoutRow, needsTenant && styles.checkoutRowAlert]}
+            onPress={() => navigation.navigate('CheckoutDetail', { requestId: checkout.id })}
+            activeOpacity={0.75}
+          >
+            <View style={[styles.checkoutIconWrap, needsTenant && styles.checkoutIconWrapAlert]}>
+              <Text style={styles.checkoutEmoji}>{needsTenant ? '🔔' : '🚪'}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.checkoutLabel}>Tiến trình trả phòng</Text>
+              {/*
+                Việc CỦA KHÁCH thì hiện nguyên câu việc phải làm; còn lại chỉ hiện trạng thái.
+                Đây là chỗ duy nhất trên màn chính khách biết mình đang bị chờ.
+              */}
+              {needsTenant ? (
+                <Text style={styles.checkoutAlertText} numberOfLines={2}>
+                  Cần bạn: {needsTenant}
+                </Text>
+              ) : (
+                <Text style={styles.checkoutHint} numberOfLines={1}>
+                  {checkoutMeta(checkout.status).label}
+                </Text>
+              )}
+            </View>
+            <Text style={[styles.checkoutChevron, needsTenant && styles.checkoutChevronAlert]}>›</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.checkoutRow}
+            onPress={() => navigation.navigate('RequestCheckout')}
+            activeOpacity={0.75}
+          >
+            <View style={styles.checkoutIconWrap}>
+              <Text style={styles.checkoutEmoji}>🚪</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.checkoutLabel}>Trả phòng</Text>
+              <Text style={styles.checkoutHint} numberOfLines={1}>
+                Gửi yêu cầu để hẹn ngày kiểm phòng và hoàn cọc
+              </Text>
+            </View>
+            <Text style={styles.checkoutChevron}>›</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -769,33 +853,49 @@ const styles = StyleSheet.create({
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
   // ── Quick Actions ──
-  actionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 },
+  // 4 ô chia đều một hàng — `flex: 1` thay cho width % cố định để không phụ thuộc bề ngang máy.
+  actionsGrid: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   actionBtn: {
-    width: '22%', alignItems: 'center',
+    flex: 1, alignItems: 'center',
     backgroundColor: Colors.white,
-    paddingVertical: 10, paddingHorizontal: 2,
+    paddingVertical: 12, paddingHorizontal: 4,
     borderRadius: BorderRadius.md,
     borderWidth: 1, borderColor: Colors.border + '80',
     ...Shadow.sm,
   },
   actionIconWrap: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
   },
-  actionEmoji: { fontSize: 18 },
-  actionBadge: {
-    position: 'absolute', top: -3, right: -3,
-    minWidth: 14, height: 14, borderRadius: 7,
-    backgroundColor: '#EF4444',
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2,
-  },
-  actionBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
-  actionLabel: { fontSize: 9.5, fontWeight: '700', color: Colors.textSecondary, textAlign: 'center' },
-  actionLabelSecondary: { fontWeight: '500', color: Colors.textMuted },
-  actionsToggle: {
-    alignSelf: 'center', paddingVertical: 6, paddingHorizontal: Spacing.base,
+  actionEmoji: { fontSize: 20 },
+  // Bản cũ để 9.5px vì 9 ô phải nhét vừa; còn 4 ô thì chữ đủ chỗ để đọc bình thường.
+  actionLabel: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, textAlign: 'center' },
+
+  // ── Trả phòng: hàng riêng, sắc thái trầm hơn lưới trên ──
+  checkoutRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.white,
+    paddingVertical: 12, paddingHorizontal: 12,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1, borderColor: Colors.border,
     marginBottom: Spacing.sm,
   },
-  actionsToggleText: { fontSize: 12, fontWeight: '600', color: Colors.primary },
+  checkoutIconWrap: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.errorLight,
+  },
+  checkoutEmoji: { fontSize: 17 },
+  checkoutLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  checkoutHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  checkoutChevron: { fontSize: 22, color: Colors.textMuted, marginTop: -2 },
+
+  // ── Biến thể khi hồ sơ trả phòng ĐANG CHỜ KHÁCH ──
+  // Dùng nền hổ phách chứ không phải đỏ: đây là việc cần làm, không phải cảnh báo hỏng hóc.
+  // Đỏ ở màn chính sẽ chọi với badge lỗi thật (hoá đơn quá hạn, yêu cầu sửa chữa).
+  checkoutRowAlert: { backgroundColor: '#FFFBEB', borderColor: '#FCD34D' },
+  checkoutIconWrapAlert: { backgroundColor: '#FEF3C7' },
+  checkoutAlertText: { marginTop: 2, fontSize: 12, lineHeight: 17, fontWeight: '700', color: '#B45309' },
+  checkoutChevronAlert: { color: '#B45309' },
 });

@@ -76,6 +76,11 @@ export const ContractDetailScreen: React.FC = () => {
   const [contract, setContract] = useState<Contract | null>(passedContract ?? null);
   const [loading, setLoading] = useState(!passedContract);
   const [handover, setHandover] = useState<TenantHandoverResponse | null>(null);
+  /**
+   * Giữ nguyên DTO gốc bên cạnh bản đã map: các field quản lý không nằm trong type
+   * Contract dùng chung, mà thêm vào đó chỉ để một màn dùng thì lan ra cả app.
+   */
+  const [detailDto, setDetailDto] = useState<ContractDetailDto | null>(null);
   const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,7 +88,7 @@ export const ContractDetailScreen: React.FC = () => {
     let active = true;
     setLoading(true);
     realTenantSelfService.getContractDetail(contractId)
-      .then(d => { if (active) setContract(mapDetail(d)); })
+      .then(d => { if (active) { setContract(mapDetail(d)); setDetailDto(d); } })
       .catch(() => { if (active) showAlert('Lỗi', 'Không tải được chi tiết hợp đồng.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -175,6 +180,32 @@ export const ContractDetailScreen: React.FC = () => {
             <InfoRow label="Còn lại" value={`${contract.daysUntilExpiry} ngày`} />
           )}
         </SectionCard>
+
+        {/*
+          Hai người khác nhau, đừng gộp:
+          · "Quản lý phụ trách" đổi mỗi khi công ty đổi người phụ trách khu vực.
+          · "Người đón khách" là người đã bàn giao nhà cho khách — không bao giờ đổi, nên
+            khách có việc về lúc nhận nhà thì gọi đúng người này.
+          HĐ tạo trước 20/08/2026 chưa có dữ liệu người đón khách nên ẩn hẳn dòng đó.
+        */}
+        {(detailDto?.assignedManagerName || detailDto?.onboardedByManagerName) && (
+          <SectionCard title="👤 Người phụ trách">
+            {detailDto.assignedManagerName && (
+              <InfoRow label="Quản lý phụ trách" value={detailDto.assignedManagerName} />
+            )}
+            {detailDto.onboardedByManagerName && (
+              <>
+                <InfoRow label="Người đón khách" value={detailDto.onboardedByManagerName} />
+                {detailDto.onboardedByManagerPhone && (
+                  <InfoRow label="SĐT người đón khách" value={detailDto.onboardedByManagerPhone} />
+                )}
+                {detailDto.onboardedAt && (
+                  <InfoRow label="Ngày đón khách" value={formatDate(detailDto.onboardedAt)} />
+                )}
+              </>
+            )}
+          </SectionCard>
+        )}
 
         {/* Tài chính */}
         <SectionCard title="💰 Tài chính">

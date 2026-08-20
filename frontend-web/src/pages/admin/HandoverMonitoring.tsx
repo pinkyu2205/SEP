@@ -40,7 +40,7 @@ const PROPERTY_STATUS: Record<string, { label: string; color: string; dot: strin
 };
 
 const CONTRACT_STATUS: Record<string, { label: string; color: string }> = {
-  DRAFT: { label: 'Nháp', color: 'bg-slate-100 text-slate-600' },
+  DRAFT: { label: 'Chờ đón khách', color: 'bg-sky-100 text-sky-700' },
   PENDING: { label: 'Chờ thu tiền', color: 'bg-amber-100 text-amber-800' },
   ACTIVE: { label: 'Đã giao phòng', color: 'bg-emerald-100 text-emerald-700' },
   TERMINATED: { label: 'Đã chấm dứt', color: 'bg-zinc-200 text-zinc-700' },

@@ -171,6 +171,8 @@ export const TenantContractDetailScreen: React.FC = () => {
    * tìm trong đó. Khi BE thêm `GET /contracts/{id}` thì thay bằng một lệnh gọi.
    */
   const [contract, setContract] = useState<TenantContract | null>(null);
+  /** DTO gốc — các field quản lý không có trong type TenantContract dùng chung. */
+  const [raw, setRaw] = useState<TenantContractResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -181,8 +183,10 @@ export const TenantContractDetailScreen: React.FC = () => {
       const list = await realTenantService.listByProperty(Number(propertyId));
       const c = list.find(x => String(x.id) === String(tenantId));
       setContract(c ? toContract(c, propertyName, roomName) : null);
+      setRaw(c ?? null);
     } catch (e: any) {
       setContract(null);
+      setRaw(null);
       setError(e?.response?.data?.message || e?.message || 'Không tải được hợp đồng');
     } finally {
       setLoading(false);
@@ -335,6 +339,33 @@ export const TenantContractDetailScreen: React.FC = () => {
             <InfoRow label="Tài sản" value={contract.propertyName} />
             <InfoRow label="Phòng / Nhà" value={contract.roomName} />
           </View>
+
+          {/*
+            Hai người khác nhau, đừng gộp:
+            · "Quản lý phụ trách" bị ghi đè mỗi lần host đổi quản lý khu vực.
+            · "Người đón khách" là người đã bàn giao nhà — ghi một lần, không đổi. Manager
+              mới nhận khu vực cần biết hỏi ai về tình trạng phòng lúc giao.
+            HĐ tạo trước 20/08/2026 chưa có dữ liệu người đón khách nên ẩn hẳn dòng đó.
+          */}
+          {(raw?.assignedManagerName || raw?.onboardedByManagerName) && (
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Người phụ trách</Text>
+              {raw.assignedManagerName && (
+                <InfoRow label="Quản lý phụ trách" value={raw.assignedManagerName} />
+              )}
+              {raw.onboardedByManagerName && (
+                <>
+                  <InfoRow label="Người đón khách" value={raw.onboardedByManagerName} />
+                  {raw.onboardedByManagerPhone && (
+                    <InfoRow label="SĐT người đón khách" value={raw.onboardedByManagerPhone} />
+                  )}
+                  {raw.onboardedAt && (
+                    <InfoRow label="Ngày đón khách" value={raw.onboardedAt.slice(0, 10)} />
+                  )}
+                </>
+              )}
+            </View>
+          )}
 
           {/* Notes */}
           {contract.notes && (

@@ -51,7 +51,7 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   maintenance_cancelled: { icon: '🚫', color: Colors.textSecondary, bg: Colors.divider, category: 'Bảo trì' },
   maintenance_rejected: { icon: '↩️', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
   contract_assigned: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
-  checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Trả phòng' },
+  checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Tiễn khách' },
   equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
   tenant_onboarded: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Khách thuê' },
   // Chưa có ảnh công tơ kỳ này → BE chặn phát hành hoá đơn điện/nước cho tới khi chụp.
@@ -66,7 +66,7 @@ const FILTER_TABS = [
   { key: 'unread', label: 'Chưa đọc' },
   { key: 'bill_overdue', label: 'Hóa đơn' },
   { key: 'maintenance_new', label: 'Bảo trì' },
-  { key: 'checkout_request', label: 'Trả phòng' },
+  { key: 'checkout_request', label: 'Tiễn khách' },
   { key: 'contract_expiring', label: 'Hợp đồng' },
   // Lọc theo tiền tố (xem `filtered`): key 'payment_*' gom cả `payment_success` mà
   // BE bắn khi khách vừa thanh toán.

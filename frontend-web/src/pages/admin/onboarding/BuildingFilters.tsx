@@ -365,6 +365,12 @@ export const BulkActionBar = ({ count, onClear, children }: {
 }) => {
   if (count === 0) return null;
   return (
+    <>
+      {/* Chừa chỗ ở cuối trang: thanh này `fixed` nên neo theo viewport và sẽ ĐÈ lên phần
+          cuối nội dung — hay gặp nhất là nút chuyển trang, bấm không được. Ô trống này nằm
+          trong luồng, đẩy nội dung lên vừa đủ để không có gì bị khuất.
+          Component được đặt SAU phân trang trong JSX nên ô trống rơi đúng chỗ cần. */}
+      <div aria-hidden className="h-24" />
     <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
       <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white shadow-2xl">
         <span className="flex items-center gap-2 text-sm font-bold">
@@ -381,5 +387,6 @@ export const BulkActionBar = ({ count, onClear, children }: {
         </button>
       </div>
     </div>
+    </>
   );
 };

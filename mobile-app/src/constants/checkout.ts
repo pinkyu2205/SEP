@@ -41,41 +41,58 @@ export interface CheckoutStatusMeta {
   bg: string;
   /** Việc tiếp theo manager cần làm — hiện dưới thẻ để không phải đoán. */
   managerHint?: string;
+  /**
+   * Chuyện gì đang xảy ra, viết cho KHÁCH đọc.
+   *
+   * Khách không cần biết manager phải làm gì; họ cần biết **đang chờ ai** và **đã tới lượt
+   * mình chưa**. Trước đây màn của khách mượn luôn `label` của trạng thái ("Đã duyệt — chờ
+   * kiểm tra") — đúng nhưng không nói được điều gì sắp xảy đến với họ.
+   */
+  tenantHint?: string;
 }
 
 export const CHECKOUT_STATUS_META: Record<CheckoutStatus, CheckoutStatusMeta> = {
   PENDING: {
     label: 'Chờ duyệt', short: 'Chờ duyệt', color: '#D97706', bg: '#FFFBEB',
     managerHint: 'Duyệt hoặc từ chối yêu cầu của khách.',
+    tenantHint: "Quản lý đang xem yêu cầu của bạn. Thường có phản hồi trong 1–2 ngày.",
   },
   APPROVED: {
     label: 'Đã duyệt — chờ kiểm tra', short: 'Đã duyệt', color: '#0891B2', bg: '#ECFEFF',
     managerHint: 'Đến ngày hẹn, tới phòng lập biên bản kiểm tra.',
+    tenantHint: "Đã duyệt. Quản lý sẽ tới phòng kiểm tra vào ngày đã hẹn — bạn chưa cần làm gì thêm.",
   },
   INSPECTING: {
     label: 'Đang kiểm tra phòng', short: 'Kiểm tra', color: '#7C3AED', bg: '#F5F3FF',
     managerHint: 'Chụp ảnh, đối chiếu thiết bị, chốt điện/nước rồi gửi bảng quyết toán.',
+    tenantHint: "Quản lý đang kiểm tra phòng và chốt chỉ số điện nước. Xong sẽ gửi bảng quyết toán cho bạn.",
   },
   WAITING_TENANT: {
     label: 'Chờ khách xác nhận', short: 'Chờ khách', color: '#2563EB', bg: '#EFF6FF',
     managerHint: 'Đã gửi bảng quyết toán — chờ khách đồng ý.',
+    tenantHint: "Tới lượt bạn: xem bảng quyết toán rồi bấm Đồng ý, hoặc phản hồi nếu thấy chưa đúng.",
   },
   DISPUTED: {
     label: 'Khách không đồng ý', short: 'Tranh chấp', color: '#DC2626', bg: '#FEF2F2',
     managerHint: 'Khách phản đối — chủ nhà đã được báo. Sửa biên bản rồi gửi lại.',
+    tenantHint: "Bạn đã phản hồi. Quản lý và chủ nhà đang xem lại và sẽ gửi bảng mới.",
   },
   SETTLING: {
     label: 'Đang quyết toán', short: 'Quyết toán', color: '#0D9488', bg: '#F0FDFA',
     managerHint: 'Hoàn cọc cho khách (hoặc chờ khách đóng thêm) rồi mới hoàn tất.',
+    tenantHint: "Đang hoàn tiền cọc cho bạn (hoặc chờ bạn đóng phần còn thiếu).",
   },
   COMPLETED: {
     label: 'Đã hoàn tất', short: 'Hoàn tất', color: '#059669', bg: '#ECFDF5',
+    tenantHint: "Đã xong. Hợp đồng kết thúc và tiền cọc đã quyết toán.",
   },
   REJECTED: {
     label: 'Đã từ chối', short: 'Từ chối', color: '#DC2626', bg: '#FEF2F2',
+    tenantHint: "Quản lý đã từ chối yêu cầu. Xem lý do rồi gửi lại nếu cần.",
   },
   CANCELLED: {
     label: 'Khách đã huỷ', short: 'Đã huỷ', color: '#64748B', bg: '#F1F5F9',
+    tenantHint: "Bạn đã huỷ yêu cầu này. Có thể gửi yêu cầu mới bất cứ lúc nào.",
   },
 };
 

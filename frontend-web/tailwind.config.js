@@ -7,6 +7,30 @@ export default {
   theme: {
     extend: {
       colors: {
+        /*
+         * Hai màu lấy thẳng từ logo Hoàng Bình Land: đỏ là nửa chữ H, xanh là nửa chữ B.
+         * Thang màu dựng quanh sắc gốc ở bậc 500 để dùng được cả nền sáng lẫn nền tối.
+         */
+        brand: {
+          red: {
+            200: '#F7B9BC',
+            300: '#F3888C',
+            400: '#EC5A60',
+            500: '#E3242B', // đỏ logo
+            600: '#C51D24',
+            700: '#A3171D',
+            950: '#450A0D',
+          },
+          green: {
+            200: '#B7E3B2',
+            300: '#8FD189',
+            400: '#6BC463',
+            500: '#4CB748', // xanh logo
+            600: '#3D9639',
+            700: '#2F752D',
+            950: '#12300F',
+          },
+        },
         primary: {
           50: '#EEF2FF',
           100: '#E0E7FF',
