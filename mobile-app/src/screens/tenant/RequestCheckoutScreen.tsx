@@ -5,7 +5,11 @@ import {
 import { showAlert } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow, isCheckoutClosed, checkoutMeta } from '@/constants';
+import {
+  Colors, Spacing, BorderRadius, Shadow,
+  isCheckoutClosed, checkoutMeta, checkoutStep, CHECKOUT_FLOW,
+} from '@/constants';
+
 import { Contract } from '@/types';
 import { DatePickerField } from '@/components/common';
 import { realTenantSelfService } from '@/services/tenant/selfService';
@@ -19,6 +23,20 @@ import { serverNow } from '@/utils/serverTime';
  * BE chưa có field riêng cho TK hoàn cọc → gộp vào `note`; ảnh hiện trạng chưa có
  * chỗ chứa nên bỏ (đề nghị BE trong API-ProcessGaps-BE-TODO.md).
  */
+
+/**
+ * Nhãn từng bước viết cho KHÁCH.
+ * Nhãn gốc trong `CHECKOUT_STATUS_META` viết từ góc nhìn điều phối ("Chờ khách xác nhận"),
+ * đọc trên app của chính người khách đó thì lạ — ở đây phải là "Bạn xác nhận".
+ */
+const TENANT_STEP_LABEL: Record<string, string> = {
+  PENDING: 'Gửi yêu cầu',
+  APPROVED: 'Quản lý duyệt',
+  INSPECTING: 'Kiểm tra phòng',
+  WAITING_TENANT: 'Bạn xác nhận quyết toán',
+  SETTLING: 'Hoàn tiền cọc',
+  COMPLETED: 'Hoàn tất',
+};
 
 const REASONS = [
   'Chuyển chỗ ở do công việc',
@@ -138,19 +156,24 @@ export const RequestCheckoutScreen: React.FC = () => {
       return showAlert('Thiếu thông tin', 'Vui lòng chọn lý do trả phòng.');
     }
 
-    // TK hoàn cọc gộp vào note (BE chưa có field riêng) — quản lý đọc được khi duyệt.
-    const noteParts = [note.trim()];
-    if (bankName.trim() || bankAccount.trim() || accountHolder.trim()) {
-      noteParts.push(`TK hoàn cọc: ${bankName.trim()} — ${bankAccount.trim()} — ${accountHolder.trim()}`);
-    }
-
     setSubmitting(true);
     try {
       const created = await realTenantSelfService.createCheckoutRequest({
         contractId,
         expectedMoveOutDate: moveOutIso,
         reason: reasonText,
-        note: noteParts.filter(Boolean).join('\n') || undefined,
+        /*
+         * `note` nay chỉ còn ghi chú khách tự viết.
+         *
+         * Trước đây tài khoản hoàn cọc bị gộp vào đây vì BE chưa có field riêng; sau khi BE
+         * thêm field thì vẫn phải giữ dòng gộp thêm một thời gian nữa vì DTO của quản lý
+         * chưa đọc được. Nay `CheckoutRequestResponse` đã có đủ 3 field nên bỏ hẳn — dữ liệu
+         * một chỗ, không còn hai nguồn phải giữ khớp nhau.
+         */
+        note: note.trim() || undefined,
+        refundBankName: bankName.trim() || undefined,
+        refundBankAccount: bankAccount.trim() || undefined,
+        refundAccountHolder: accountHolder.trim() || undefined,
       });
       showAlert(
         '✅ Đã gửi yêu cầu trả phòng',
@@ -179,6 +202,8 @@ export const RequestCheckoutScreen: React.FC = () => {
   if (openRequest) {
     // Đang chờ CHÍNH KHÁCH xác nhận bảng quyết toán → nhấn mạnh việc phải làm.
     const needsTenantAction = (openRequest.status || '').toUpperCase() === 'WAITING_TENANT';
+    const meta = checkoutMeta(openRequest.status);
+    const currentStep = checkoutStep(openRequest.status);
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
@@ -188,25 +213,71 @@ export const RequestCheckoutScreen: React.FC = () => {
           <Text style={styles.headerTitle}>Yêu cầu trả phòng</Text>
           <View style={{ width: 72 }} />
         </View>
-        <View style={styles.center}>
-          <Text style={{ fontSize: 44, marginBottom: Spacing.md }}>{needsTenantAction ? '📋' : '🕒'}</Text>
-          <Text style={styles.openTitle}>
-            {needsTenantAction ? 'Bạn cần xác nhận bảng quyết toán' : checkoutMeta(openRequest.status).label}
-          </Text>
-          <Text style={styles.openDesc}>
-            {needsTenantAction
-              ? 'Quản lý đã kiểm tra phòng và gửi bảng tiền cọc. Xem lại và bấm Đồng ý, hoặc phản hồi nếu thấy chưa đúng.'
-              : `Yêu cầu trả phòng cho hợp đồng ${openRequest.contractCode || `#${openRequest.contractId}`} đang được xử lý — không thể tạo thêm yêu cầu mới.`}
-          </Text>
+        {/*
+          Hiện TIẾN TRÌNH ngay tại đây, không bắt bấm thêm một nút nữa mới thấy.
+          Bản cũ là một emoji giữa màn hình trắng + nhãn trạng thái + nút "Xem tiến trình":
+          khách vào chỉ biết "đang được xử lý", muốn biết tới đâu phải bấm tiếp. Mà đây đúng
+          là màn khách mở ra để hỏi "tới đâu rồi" — câu trả lời phải nằm sẵn.
+        */}
+        <ScrollView contentContainerStyle={styles.openScroll} showsVerticalScrollIndicator={false}>
+          <View style={[styles.openHero, { backgroundColor: meta.bg }]}>
+            <Text style={[styles.openStatus, { color: meta.color }]}>{meta.label}</Text>
+            <Text style={styles.openHint}>{meta.tenantHint}</Text>
+            <Text style={styles.openContract}>
+              Hợp đồng {openRequest.contractCode || `#${openRequest.contractId}`}
+            </Text>
+          </View>
+
+          <Text style={styles.openSectionTitle}>Tiến trình</Text>
+          <View style={styles.timeline}>
+            {CHECKOUT_FLOW.map((st, i) => {
+              const done = currentStep >= 0 && i < currentStep;
+              const active = i === currentStep;
+              const stepMeta = checkoutMeta(st);
+              return (
+                <View key={st} style={styles.tlRow}>
+                  <View style={styles.tlRail}>
+                    <View style={[
+                      styles.tlDot,
+                      done && styles.tlDotDone,
+                      active && { backgroundColor: meta.color, borderColor: meta.color },
+                    ]}>
+                      {done && <Text style={styles.tlCheck}>✓</Text>}
+                    </View>
+                    {i < CHECKOUT_FLOW.length - 1 && (
+                      <View style={[styles.tlLine, done && styles.tlLineDone]} />
+                    )}
+                  </View>
+                  <View style={styles.tlBody}>
+                    <Text style={[
+                      styles.tlLabel,
+                      done && styles.tlLabelDone,
+                      active && { color: meta.color, fontWeight: '800' },
+                    ]}>
+                      {TENANT_STEP_LABEL[st] ?? stepMeta.short}
+                    </Text>
+                    {active && !!meta.tenantHint && (
+                      <Text style={styles.tlNow}>Đang ở bước này</Text>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
           <TouchableOpacity
-            style={styles.submitBtn}
+            style={[styles.submitBtn, needsTenantAction && styles.submitBtnUrgent]}
             onPress={() => navigation.replace('CheckoutDetail', { requestId: openRequest.id })}
           >
             <Text style={styles.submitBtnText}>
-              {needsTenantAction ? 'Xem bảng quyết toán →' : 'Xem tiến trình'}
+              {needsTenantAction ? 'Xem bảng quyết toán →' : 'Xem chi tiết hồ sơ →'}
             </Text>
           </TouchableOpacity>
-        </View>
+
+          <Text style={styles.openFoot}>
+            Đang có một yêu cầu chưa xong nên chưa gửi thêm yêu cầu mới được.
+          </Text>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -383,6 +454,41 @@ const styles = StyleSheet.create({
 
   scroll: { flex: 1 },
 
+  openScroll: { padding: Spacing.lg, paddingBottom: Spacing.xl },
+  openHero: { borderRadius: BorderRadius.xl, padding: Spacing.lg, marginBottom: Spacing.lg },
+  openStatus: { fontSize: 18, fontWeight: '800' },
+  openHint: { fontSize: 13, color: Colors.textSecondary, marginTop: 6, lineHeight: 19 },
+  openContract: { fontSize: 12, color: Colors.textMuted, marginTop: Spacing.sm },
+  openSectionTitle: {
+    fontSize: 11, fontWeight: '800', color: Colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: Spacing.sm,
+  },
+  timeline: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
+    padding: Spacing.lg, marginBottom: Spacing.lg,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  tlRow: { flexDirection: 'row', gap: Spacing.md },
+  /** Cột chấm + đường nối; `alignItems: center` để đường nối rơi đúng tâm chấm. */
+  tlRail: { alignItems: 'center', width: 20 },
+  tlDot: {
+    width: 18, height: 18, borderRadius: 9,
+    borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.white,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  tlDotDone: { backgroundColor: Colors.success, borderColor: Colors.success },
+  tlCheck: { fontSize: 10, fontWeight: '900', color: Colors.white },
+  tlLine: { width: 2, flex: 1, minHeight: 22, backgroundColor: Colors.border },
+  tlLineDone: { backgroundColor: Colors.success },
+  tlBody: { flex: 1, paddingBottom: Spacing.md },
+  tlLabel: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
+  tlLabelDone: { color: Colors.textSecondary },
+  tlNow: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  submitBtnUrgent: { backgroundColor: Colors.warning },
+  openFoot: {
+    fontSize: 12, color: Colors.textMuted, textAlign: 'center',
+    marginTop: Spacing.md, lineHeight: 17,
+  },
   openTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center' },
   openDesc: {
     fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20,

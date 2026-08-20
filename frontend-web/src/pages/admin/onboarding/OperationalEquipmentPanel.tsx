@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ChevronLeft, ChevronRight, Loader2, Package, Search, ShieldCheck, X,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
+import { CollapsibleSection } from './CollapsibleSection';
 import type { OperationalEquipmentResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 
@@ -38,13 +39,17 @@ const warrantyText = (eq: OperationalEquipmentResponse): { text: string; known: 
 type EffectFilter = 'active' | 'replaced' | 'all';
 type SourceFilter = 'all' | 'PURCHASED' | 'HANDOVER';
 
-const PER_PAGE_OPTIONS = [20, 50, 100];
+const PER_PAGE_OPTIONS = [10, 20, 50, 100];
 
 /**
  * Tab "Thiết bị vận hành" — GET /properties/{id}/equipments.
  * Danh sách dạng bảng gọn + tìm kiếm / lọc / phân trang để chịu được vài trăm–nghìn thiết bị.
  */
-export const OperationalEquipmentPanel = ({ propertyId }: { propertyId: number }) => {
+export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
+  propertyId: number;
+  /** Bọc trong khối thu gọn (mặc định đóng) — dùng ở những trang dài như duyệt giá. */
+  collapsible?: boolean;
+}) => {
   const [items, setItems] = useState<OperationalEquipmentResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -101,27 +106,57 @@ export const OperationalEquipmentPanel = ({ propertyId }: { propertyId: number }
     + (source !== 'all' ? 1 : 0) + (place !== 'all' ? 1 : 0);
   const reset = () => { setSearch(''); setEffect('active'); setSource('all'); setPlace('all'); };
 
-  if (loading) {
+  /**
+   * Bọc nội dung vào vỏ thu gọn khi được yêu cầu. Tóm tắt (số thiết bị + tổng giá trị) nằm
+   * ngay trên tiêu đề nên đóng vẫn đọc được con số quan trọng, khỏi mở ra chỉ để đếm.
+   */
+  const wrap = (content: ReactNode): ReactNode => {
+    if (!collapsible) return content;
     return (
-      <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm text-slate-400">
+      <CollapsibleSection
+        icon={Package}
+        title="Thiết bị vận hành"
+        subtitle="Thiết bị mua mới và bàn giao đang gắn cho toà nhà"
+        summary={loading ? null : (
+          <span className="flex items-center gap-2">
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-bold text-slate-600">
+              {activeCount} đang dùng
+            </span>
+            {totalValue > 0 && (
+              <span className="font-bold text-indigo-700">{formatVND(totalValue)}</span>
+            )}
+          </span>
+        )}
+      >
+        {content}
+      </CollapsibleSection>
+    );
+  };
+
+  // Ở chế độ thu gọn thì vỏ ngoài do CollapsibleSection lo, đừng vẽ thêm khung nữa.
+  const shell = collapsible ? '' : 'rounded-2xl border border-slate-200 bg-white ';
+
+  if (loading) {
+    return wrap(
+      <div className={`${shell}flex items-center gap-2 p-12 text-sm text-slate-400`}>
         <Loader2 className="h-4 w-4 animate-spin" /> Đang tải thiết bị...
-      </div>
+      </div>,
     );
   }
 
   if (all.length === 0) {
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center">
+    return wrap(
+      <div className={`${shell}p-12 text-center`}>
         <Package className="mx-auto mb-3 h-10 w-10 text-slate-300" />
         <p className="font-semibold text-slate-500">Chưa có thiết bị vận hành nào</p>
         <p className="mt-1 text-sm text-slate-400">Thiết bị mua mới được thêm khi nhập cải tạo (đợt 2 / bổ sung).</p>
-      </div>
+      </div>,
     );
   }
 
   const selectCls = 'rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-600 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
 
-  return (
+  return wrap(
     <div className="space-y-3">
       {/* Thanh công cụ */}
       <div className="flex flex-wrap items-center gap-2">
@@ -268,6 +303,6 @@ export const OperationalEquipmentPanel = ({ propertyId }: { propertyId: number }
           </button>
         </div>
       )}
-    </div>
+    </div>,
   );
 };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
-import { Building2, LogIn, Menu, Phone, X } from 'lucide-react';
+import { LogIn, Menu, Phone, X } from 'lucide-react';
+import { BrandMark } from '@/components/common/BrandLogo';
 import clsx from 'clsx';
 import { ROUTES } from '@/utils/routes';
 import { COMPANY, CONTACT } from '@/utils/constants';
@@ -42,8 +43,10 @@ export const PublicHeader = () => {
         <div className="flex h-[68px] items-center justify-between gap-4">
           {/* Logo */}
           <Link to={ROUTES.HOME} className="group flex items-center gap-2.5 flex-shrink-0">
-            <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-green-600 via-emerald-600 to-emerald-500 shadow-glow transition-transform duration-300 group-hover:scale-105">
-              <Building2 className="h-5 w-5 text-white" />
+            {/* Logo để trần trên nền trắng, không bọc ô gradient xanh: ô xanh nuốt mất
+                nửa đỏ của logo, mà đỏ/xanh mới là điểm nhận diện. */}
+            <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center transition-transform duration-300 group-hover:scale-105">
+              <BrandMark size={38} />
             </div>
             <div className="leading-tight">
               <p className="text-base font-extrabold tracking-tight text-slate-900">{COMPANY.name}</p>

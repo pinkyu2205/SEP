@@ -57,6 +57,17 @@ export interface UserAssignmentHistoryItem {
   affectedProperties?: number;
 }
 
+/** Quản lý chưa phụ trách khu vực nào — `GET /api/v1/managers/idle`. */
+export interface IdleManager {
+  id: string;
+  username: string;
+  fullName?: string;
+  phoneNumber?: string;
+  status: string;
+  /** Luôn 0 với danh sách này, BE trả kèm cho rõ nghĩa. */
+  zoneCount: number;
+}
+
 export const zoneAssignmentService = {
   /** GET /api/v1/zones/assignments — mọi khu vực đang có quản lý. Quyền: ADMIN + OWNER. */
   list: (): Promise<ZoneAssignment[]> => api.get('/api/v1/zones/assignments'),
@@ -67,6 +78,34 @@ export const zoneAssignmentService = {
    */
   assign: (zoneId: string, managerId: string): Promise<ZoneHandover> =>
     api.put(`/api/v1/zones/${zoneId}/manager`, { managerId }),
+
+  /**
+   * DELETE /api/v1/zones/{zoneId}/manager — GỠ quản lý, khu vực về "chưa gán".
+   *
+   * ⚠️ Nặng hơn vẻ ngoài của một nút gỡ. BE chạy hai lệnh dây chuyền:
+   *   • Nhà: `operationManagerId = null`, và ACTIVE → **PENDING_OPERATION_MANAGER**
+   *     (nhà rớt khỏi trạng thái đang khai thác).
+   *   • Hợp đồng: `assignedManager = null` cho MỌI hợp đồng chưa TERMINATED — gồm cả
+   *     hợp đồng đang có khách ở.
+   *
+   * Nên chỉ dùng khi thật sự chưa có người thay (quản lý nghỉ việc, tài khoản bị khoá).
+   * Còn lại luôn ưu tiên `assign` sang người mới — khách không bị mất đầu mối liên hệ.
+   */
+  remove: (zoneId: string): Promise<void> =>
+    api.delete(`/api/v1/zones/${zoneId}/manager`),
+
+  /**
+   * POST /api/v1/zones/manager-transfer — gán sang khu vực mới VÀ gỡ khỏi khu vực cũ trong
+   * MỘT transaction (BE thêm 19/08/2026).
+   *
+   * Thay cho cách cũ phải gọi `assign` rồi `remove` nối tiếp: hai lệnh rời nhau, hỏng giữa
+   * chừng là người đó vừa nhận chỗ mới vừa còn ôm chỗ cũ mà không ai biết.
+   */
+  transfer: (managerId: string, toZoneId: string, releaseZoneIds: string[]): Promise<ZoneHandover> =>
+    api.post('/api/v1/zones/manager-transfer', { managerId, toZoneId, releaseZoneIds }),
+
+  /** GET /api/v1/managers/idle — quản lý chưa phụ trách khu vực nào. Quyền: ADMIN + OWNER. */
+  idleManagers: (): Promise<IdleManager[]> => api.get('/api/v1/managers/idle'),
 
   /** GET /api/v1/zones/{zoneId}/handovers — lịch sử bàn giao của một khu vực. */
   handovers: (zoneId: string): Promise<ZoneHandover[]> =>

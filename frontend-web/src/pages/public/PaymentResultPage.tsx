@@ -75,7 +75,7 @@ const PaymentResult = ({ variant }: PaymentResultProps) => {
         )}
 
         <p className="mt-6 text-sm text-slate-500">
-          Bạn có thể đóng trang này và quay lại ứng dụng Onion Home.
+          Bạn có thể đóng trang này và quay lại ứng dụng Hoàng Bình Land.
         </p>
 
         <a

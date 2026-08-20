@@ -24,6 +24,17 @@ import { todayIso } from '@/utils/serverTime';
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const readErr = readApiError;
 
+/** Nhãn tiếng Việt cho `TenantInvoiceType` BE trả trong `finalCharges`. */
+const CHARGE_LABEL: Record<string, string> = {
+  ELECTRICITY: 'Tiền điện',
+  WATER: 'Tiền nước',
+  COMPENSATION: 'Bồi thường hư hỏng',
+  RENT: 'Tiền nhà',
+  SERVICE: 'Phí dịch vụ',
+  MAINTENANCE: 'Phí bảo trì',
+  OTHER: 'Khoản khác',
+};
+
 export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) => {
   const checkoutId: number = route?.params?.checkoutId;
 
@@ -59,8 +70,13 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
 
   const status = (req?.status || '').toUpperCase();
   const meta = checkoutMeta(status);
-  const refundAmount = settlement?.refundAmount ?? 0;
-  const extraCharge = settlement?.extraChargeAmount ?? 0;
+  /**
+   * Cọc KHÔNG còn bị cấn trừ (mô hình mới 20/08/2026) — số hoàn luôn là nguyên cọc.
+   * Màn này không hiện nó (quản lý không được thấy tiền cọc), chỉ dùng để biết đã hoàn chưa.
+   */
+  const chargesTotal = settlement?.chargesTotal ?? 0;
+  const chargesPaid = settlement?.chargesPaid ?? 0;
+  const stillOwed = Math.max(0, chargesTotal - chargesPaid);
   /**
    * Đã hoàn cọc chưa — nay chỉ đọc từ BE, vì manager không còn là người ghi nhận
    * (xem khối SETTLING bên dưới). Bên host đánh dấu ở Sổ cọc thì cờ này bật.
@@ -75,7 +91,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
    * manager chờ hoàn cọc xong mới được đóng hồ sơ là khoá họ ở một việc không phải của
    * họ, và họ cũng không có cách nào biết tiền đã chuyển hay chưa.
    */
-  const moneyDone = extraCharge <= 0;
+  const moneyDone = stillOwed <= 0;
 
   /**
    * ─── MÀN NÀY CHỈ HIỆN KHOẢN KHÁCH PHẢI TRẢ (18/08/2026) ──────────────────────
@@ -97,23 +113,20 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
     if (!settlement) return [] as Array<{ key: string; label: string; amount: number }>;
     const rows: Array<{ key: string; label: string; amount: number }> = [];
 
-    const invoices = settlement.unpaidInvoices ?? [];
+    /**
+     * `finalCharges` gồm CẢ hoá đơn điện/nước kỳ cuối, bồi thường hư hỏng và hoá đơn còn
+     * nợ — BE gộp sẵn từ 20/08/2026, FE không phải ghép từ nhiều mảng như trước.
+     */
+    const invoices = settlement.finalCharges ?? [];
     if (invoices.length) {
       invoices.forEach(inv => rows.push({
         key: `inv-${inv.id}`,
-        label: `Hoá đơn ${inv.code || `#${inv.id}`}${inv.type ? ` (${inv.type})` : ''}`,
+        label: `${CHARGE_LABEL[inv.type ?? ''] ?? 'Hoá đơn'} ${inv.code || `#${inv.id}`}`,
         amount: inv.amount,
       }));
-    } else if (settlement.unpaidTotal > 0) {
+    } else if (chargesTotal > 0) {
       // BE không tách chi tiết thì vẫn phải hiện tổng, không thì khoản nợ biến mất.
-      rows.push({ key: 'inv-total', label: 'Hoá đơn chưa thanh toán', amount: settlement.unpaidTotal });
-    }
-
-    const damages = settlement.damages ?? [];
-    if (damages.length) {
-      damages.forEach((d, i) => rows.push({ key: `dmg-${i}`, label: d.label, amount: d.amount }));
-    } else if (settlement.damageTotal > 0) {
-      rows.push({ key: 'dmg-total', label: 'Hư hỏng', amount: settlement.damageTotal });
+      rows.push({ key: 'inv-total', label: 'Khoản khách phải trả', amount: chargesTotal });
     }
 
     (settlement.adjustments ?? [])
@@ -231,22 +244,20 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
                 </Text>
               </View>
 
-              {/* Khách phải đóng THÊM = tiền mặt thật sự cần thu, quản lý phải biết.
-                  Khác với TỔNG KHOẢN TRỪ ở trên: phần lớn khoản trừ cấn vào cọc. */}
-              {extraCharge > 0 && (
+              {/* Đã thu được bao nhiêu — mô hình mới: khách TRẢ các khoản này, không cấn cọc. */}
+              {chargesPaid > 0 && stillOwed > 0 && (
                 <View style={[s.resultRow, { marginTop: Spacing.xs }]}>
-                  <Text style={s.resultLabel}>KHÁCH PHẢI ĐÓNG THÊM</Text>
-                  <Text style={[s.resultValue, { color: Colors.error }]}>{money(extraCharge)}</Text>
+                  <Text style={s.resultLabel}>CÒN PHẢI THU</Text>
+                  <Text style={[s.resultValue, { color: Colors.error }]}>{money(stillOwed)}</Text>
                 </View>
               )}
             </View>
 
             <Text style={s.mutedNote}>
-              {extraCharge > 0
-                ? 'Các khoản trên đã cấn hết tiền cọc, phần còn thiếu khách phải đóng thêm.'
-                : 'Các khoản trên trừ vào tiền cọc — khách không phải đóng thêm. Tiền cọc còn lại và '
-                  + 'tiền phòng những ngày không ở được hoàn thẳng cho khách trong 1–3 ngày làm việc, '
-                  + 'về tài khoản khách đã đăng ký lúc gửi yêu cầu trả phòng.'}
+              {stillOwed > 0
+                ? 'Khách thanh toán các khoản trên như hoá đơn thường. Trả đủ rồi chủ nhà mới hoàn cọc.'
+                : 'Khách đã thanh toán đủ. Tiền cọc được chủ nhà hoàn NGUYÊN VẸN về tài khoản khách '
+                  + 'đã đăng ký lúc gửi yêu cầu trả phòng, trong 1–3 ngày làm việc.'}
               {'\n'}Số tiền cọc và tiền phòng không hiện ở đây — khách xem đầy đủ trong app của khách.
             </Text>
           </>
@@ -284,12 +295,10 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             <NextStep n={1} text="Khách mở app xem biên bản và bảng tiền, bấm Đồng ý hoặc Không đồng ý." />
             <NextStep
               n={2}
-              // Không nhắc lại số tiền hoàn ở đây — đó là cọc + tiền phòng, xem `charges`.
-              text={refundAmount > 0
-                ? 'Khách đồng ý → chuyển khoản phần hoàn cho khách rồi tải ảnh biên lai lên đây (số tiền hiện ở bước hoàn cọc).'
-                : extraCharge > 0
-                  ? `Khách đồng ý → chờ khách thanh toán ${money(extraCharge)} còn thiếu.`
-                  : 'Khách đồng ý → không phát sinh tiền, sang thẳng bước cuối.'}
+              // Không nhắc số tiền cọc ở đây — quản lý không được thấy (managerVisibility).
+              text={stillOwed > 0
+                ? `Khách đồng ý → chờ khách thanh toán ${money(stillOwed)}. Trả đủ rồi chủ nhà mới hoàn cọc.`
+                : 'Khách đồng ý → không còn khoản nào phải thu, sang thẳng bước cuối.'}
             />
             <NextStep n={3} text="Bấm Hoàn tất trả phòng — hợp đồng thanh lý, phòng về trạng thái trống." last />
 
@@ -319,28 +328,27 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           */}
         {status === 'SETTLING' && (
           <>
-            {refundAmount > 0 && !refunded && (
+            {stillOwed > 0 ? (
               <View style={s.infoCard}>
-                <Text style={s.infoTitle}>⏳ Đang chờ hoàn cọc cho khách</Text>
+                <Text style={s.infoTitle}>Chờ khách thanh toán {money(stillOwed)}</Text>
                 <Text style={s.infoText}>
-                  Bộ phận tài chính sẽ chuyển phần còn lại cho khách trong 1–3 ngày làm việc, về tài
-                  khoản khách đã đăng ký khi gửi yêu cầu trả phòng. Bạn không phải chuyển tiền và
-                  không cần tải biên lai.
+                  Các khoản cuối kỳ đã phát hành thành hoá đơn — khách thanh toán như hoá đơn
+                  thường trong app của họ.
+                </Text>
+                <Text style={s.infoNote}>
+                  Chủ nhà chỉ hoàn cọc sau khi khách trả đủ. Bạn không phải thu tiền mặt.
+                </Text>
+              </View>
+            ) : !refunded && (
+              <View style={s.infoCard}>
+                <Text style={s.infoTitle}>⏳ Khách đã trả đủ — đang chờ hoàn cọc</Text>
+                <Text style={s.infoText}>
+                  Chủ nhà chuyển cọc về tài khoản khách đã đăng ký, trong 1–3 ngày làm việc.
+                  Bạn không phải chuyển tiền và không cần tải biên lai.
                 </Text>
                 <Text style={s.infoNote}>
                   Vẫn hoàn tất trả phòng được ngay — việc chuyển tiền chạy song song, không chặn
                   thanh lý hợp đồng.
-                </Text>
-              </View>
-            )}
-
-            {extraCharge > 0 && (
-              <View style={s.infoCard}>
-                <Text style={s.infoTitle}>Chờ khách đóng thêm {money(extraCharge)}</Text>
-                <Text style={s.infoText}>
-                  {settlement?.extraChargeInvoiceId
-                    ? `Hoá đơn quyết toán #${settlement.extraChargeInvoiceId} đã phát hành — khách thanh toán như hoá đơn thường.`
-                    : 'Hệ thống sẽ phát hành hoá đơn quyết toán để khách thanh toán.'}
                 </Text>
               </View>
             )}

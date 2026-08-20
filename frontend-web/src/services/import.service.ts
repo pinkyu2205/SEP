@@ -76,7 +76,13 @@ const UPLOAD_SIZE_MESSAGE =
  * onboarding (legacy), lease (Khởi tạo nhà) và renovation (Cấu hình khai thác).
  * @throws BulkImportErrorResult khi HTTP != 2xx
  */
-async function postExcel(endpoint: string, file: File, dryRun: boolean): Promise<BulkImportResponse> {
+async function postExcel(
+  endpoint: string,
+  file: File,
+  dryRun: boolean,
+  /** Chỉ áp dụng cho endpoint hợp đồng nháp — bỏ qua dòng lỗi, import phần sạch. */
+  skipInvalidRows?: boolean,
+): Promise<BulkImportResponse> {
   const form = new FormData();
   form.append('file', file);
 
@@ -84,7 +90,9 @@ async function postExcel(endpoint: string, file: File, dryRun: boolean): Promise
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${endpoint}?dryRun=${dryRun}`, {
+    const query = new URLSearchParams({ dryRun: String(dryRun) });
+    if (skipInvalidRows) query.set('skipInvalidRows', 'true');
+    res = await fetch(`${API_BASE}${endpoint}?${query}`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
@@ -172,8 +180,17 @@ export const importService = {
    * render + upload file làm sau (nút Sửa hoặc luồng tạo file ở danh sách nháp).
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
-  importTenantDraftContractsExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
-    return postExcel(TENANT_DRAFT_ENDPOINT, file, dryRun);
+  importTenantDraftContractsExcel(
+    file: File,
+    dryRun: boolean,
+    /**
+     * true = BE import những dòng hợp lệ và trả kèm danh sách lỗi của các dòng bị bỏ, thay
+     * vì ném lỗi chặn cả file (BE thêm 20/08/2026). Nhà host chưa duyệt nằm lẫn trong file
+     * không còn kéo cả lô chết theo.
+     */
+    skipInvalidRows = false,
+  ): Promise<BulkImportResponse> {
+    return postExcel(TENANT_DRAFT_ENDPOINT, file, dryRun, skipInvalidRows);
   },
 
   /**

@@ -239,6 +239,17 @@ export interface TenantContractResponse {
   tenantAccountCreated?: boolean; // true nếu vừa tạo mới tài khoản
   tenantRolePromoted?: boolean;   // true nếu vừa nâng ROLE_USER -> ROLE_TENANT
 
+  /** Người ĐANG phụ trách — đổi mỗi khi host đổi quản lý khu vực. */
+  assignedManagerName?: string;
+  /**
+   * Người THỰC SỰ đón khách lúc onboard (BE thêm 20/08/2026). Ghi một lần, KHÔNG bị ghi đè
+   * khi đổi quản lý khu vực — nên đây mới là người trả lời được các câu hỏi về lúc bàn giao.
+   * HĐ tạo trước 20/08/2026 không có dữ liệu này.
+   */
+  onboardedByManagerName?: string;
+  onboardedByManagerPhone?: string;
+  onboardedAt?: string;
+
   // Duyệt giá (Case 2). Tên field suy ra từ thiết kế — chỉnh nếu BE đặt khác.
   priceApprovalStatus?: ContractPriceApprovalStatus;
   priceRejectReason?: string;

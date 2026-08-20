@@ -102,6 +102,13 @@ export interface MyContractListItem {
   deposit?: number;
   depositAmount?: number;
   status: string;
+  /**
+   * Ngày khách xác nhận đã nhận đủ tiền cọc (BE thêm 20/08/2026).
+   *
+   * Đây là mốc khoá tài khoản, KHÔNG phải trạng thái hợp đồng — xem `accountAccess.ts`.
+   * Rỗng nghĩa là chưa xác nhận, khách vẫn còn việc phải làm trong app.
+   */
+  refundConfirmedAt?: string;
 }
 
 export interface ContractEquipmentDto {
@@ -148,6 +155,19 @@ export interface ContractDetailDto {
   terminationReason?: string;
   terminationType?: string;
   pdfUrl?: string;
+  /**
+   * Người ĐANG phụ trách hợp đồng — đổi mỗi khi host đổi quản lý khu vực.
+   * BE bổ sung cho DTO này 20/08/2026 (trước đó khách không thấy quản lý nào cả).
+   */
+  assignedManagerName?: string;
+  /**
+   * Người THỰC SỰ đón khách lúc bàn giao nhà. Ghi một lần, không bị ghi đè khi đổi quản lý
+   * khu vực — đây mới là người khách nhớ mặt và cần gọi lại khi có việc về lúc nhận nhà.
+   * HĐ tạo trước 20/08/2026 không có dữ liệu này.
+   */
+  onboardedByManagerName?: string;
+  onboardedByManagerPhone?: string;
+  onboardedAt?: string;
 }
 
 // ===== Biên bản bàn giao (đón khách) =====
@@ -221,24 +241,68 @@ export interface CheckoutInspectionDto {
   inspectedByName?: string;
 }
 
-/** Bảng quyết toán — BE TÍNH, FE chỉ hiển thị (để FE cộng trừ là mỗi màn ra một số). */
+/**
+ * Bảng quyết toán — BE TÍNH, FE chỉ hiển thị (để FE cộng trừ là mỗi màn ra một số).
+ *
+ * ĐỔI CẤU TRÚC 20/08/2026 — mô hình **tách cọc khỏi phí cuối kỳ**:
+ *
+ *   Khối A — khách phải trả: điện, nước, bồi thường hư hỏng, hoá đơn còn nợ
+ *   Khối B — công ty phải hoàn: NGUYÊN cọc, không trừ gì
+ *
+ * Trước đây bảng này bù trừ (`refundAmount = deposit − nợ − hư hỏng`). Nay cọc là **ràng
+ * buộc**: khách trả hết khối A thì host hoàn nguyên khối B, không phải nguồn khấu trừ.
+ *
+ * Các field cũ `unpaidInvoices / unpaidTotal / damages / damageTotal / refundAmount /
+ * extraChargeAmount / extraChargeInvoiceId` BE đã BỎ — đừng thêm lại.
+ */
 export interface CheckoutSettlementDto {
-  /** Cọc CÒN LẠI (đã trừ các lần cấn trừ giữa kỳ), không phải số đóng ban đầu. */
+  // ── Khối A: khách phải trả ────────────────────────────────────────────
+  finalCharges?: Array<{ id: number; code?: string; type?: string; amount: number }>;
+  chargesTotal: number;
+  chargesPaid: number;
+  /** Đã trả hết chưa — điều kiện mở khoá hoàn cọc. */
+  chargesSettled?: boolean;
+
+  // ── Khối B: công ty phải hoàn ─────────────────────────────────────────
+  /** NGUYÊN tiền cọc, không trừ khoản nào. */
   depositAmount: number;
-  unpaidInvoices?: Array<{ id: number; code?: string; type?: string; amount: number }>;
-  unpaidTotal: number;
-  damages?: CheckoutDamageItem[];
-  damageTotal: number;
-  /** Điều chỉnh khác: tiền nhà tính lại theo ngày, phí vệ sinh... (âm = trừ khách). */
+  /** Điều chỉnh khác: tiền nhà tính lại theo ngày ở thực tế (dương = hoàn thêm cho khách). */
   adjustments?: Array<{ label: string; amount: number }>;
-  /** > 0 = hoàn lại cho khách. */
-  refundAmount: number;
-  /** > 0 = khách phải đóng thêm. */
-  extraChargeAmount: number;
-  extraChargeInvoiceId?: number | null;
-  /** Đã ghi nhận hoàn cọc chưa (manager chuyển khoản tay + upload chứng từ). */
+  adjustmentTotal?: number;
+
+  /** Host đã ghi nhận CHUYỂN ĐI chưa (chuyển khoản tay + ảnh chứng từ). */
+  /**
+   * Host đã ghi nhận chuyển cọc lúc nào.
+   *
+   * BE đặt tên `refundPaidAt` (khớp cột entity `CheckoutSettlement`). `refundedAt` là tên
+   * FE dùng từ trước — giữ lại để không phá chỗ nào đang đọc, nhưng ĐỌC THÌ ƯU TIÊN
+   * `refundPaidAt`. Dùng `paidAtOf()` bên dưới thay vì đọc thẳng field.
+   */
+  refundPaidAt?: string;
+  /** @deprecated tên cũ của FE — BE không trả field này. */
   refundedAt?: string;
   refundProofUrl?: string;
+  /**
+   * Khách đã xác nhận NHẬN ĐỦ chưa.
+   * Khác `refundedAt`: cái kia là lời của host, cái này là lời của khách. Đủ cả hai mới
+   * khép được hồ sơ tiền nong.
+   */
+  refundConfirmedAt?: string;
+  /**
+   * Khách báo CHƯA nhận được tiền. Có giá trị = hồ sơ đang tranh chấp, chờ admin xử lý.
+   * Loại trừ lẫn nhau với `refundConfirmedAt` — BE chặn cả hai chiều.
+   */
+  refundDisputedAt?: string;
+  refundDisputeReason?: string;
+  /**
+   * Quản trị viên đã kết luận khiếu nại chưa.
+   *
+   * BE cố ý KHÔNG xoá `refundDisputedAt` sau khi xử lý (giữ lịch sử đã từng tranh chấp),
+   * nên chỉ nhìn cờ đó thì khách sẽ thấy "đang tra soát" vĩnh viễn.
+   */
+  refundDisputeResolvedAt?: string;
+  /** RETRANSFERRED = đã chuyển lại · REJECTED = khiếu nại bị bác. */
+  refundDisputeOutcome?: string;
 }
 
 export interface CheckoutRequestDto {
@@ -274,9 +338,23 @@ export interface CreateCheckoutRequestBody {
   contractId: number;
   expectedMoveOutDate: string; // yyyy-MM-dd
   reason: string;
-  // BE chưa có field riêng cho TK hoàn cọc/ảnh — FE gộp thông tin TK vào note
-  // (đã đề nghị field riêng trong API-ProcessGaps-BE-TODO.md).
+  /**
+   * Ghi chú tự do của khách.
+   *
+   * VẪN kèm dòng tóm tắt tài khoản hoàn cọc ở đây, dù 3 field dưới đã có chỗ gửi riêng:
+   * DTO phía quản lý (manager/checkoutService) hiện chỉ đọc `note`, cắt đi là quản lý mất
+   * luôn thông tin đang dùng. Bỏ dòng gộp khi BE trả 3 field đó trong DTO của quản lý.
+   */
   note?: string;
+  /**
+   * Tài khoản khách muốn nhận hoàn cọc — BE nhận field riêng từ 20/08/2026.
+   *
+   * Trước đây FE chỉ gộp vào `note` vì BE chưa có chỗ nhận, nên 3 cột trong DB rỗng và
+   * trang Sổ cọc của host luôn báo "chưa có thông tin tài khoản nhận tiền".
+   */
+  refundBankName?: string;
+  refundBankAccount?: string;
+  refundAccountHolder?: string;
 }
 
 export const realTenantSelfService = {
@@ -378,6 +456,37 @@ export const realTenantSelfService = {
   ): Promise<CheckoutRequestDto> => {
     const { data } = await realApiClient.post<CheckoutRequestDto>(
       `/api/v1/tenant/me/checkout-requests/${id}/settlement/dispute`, body,
+    );
+    return data;
+  },
+
+  /**
+   * Khách xác nhận ĐÃ NHẬN ĐỦ tiền cọc (BE thêm 20/08/2026).
+   *
+   * Không có bước này thì "đã hoàn cọc" chỉ là lời của một bên: ảnh biên lai chứng minh
+   * host ĐÃ CHUYỂN ĐI, không chứng minh tiền TỚI ĐÚNG NGƯỜI. Khách bấm xong mới khép
+   * được hồ sơ về mặt tiền nong.
+   */
+  confirmRefundReceived: async (id: number): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.post<CheckoutRequestDto>(
+      `/api/v1/tenant/me/checkout-requests/${id}/confirm-refund`,
+    );
+    return data;
+  },
+
+  /**
+   * Báo CHƯA nhận được tiền cọc — đối trọng của `confirmRefundReceived`.
+   *
+   * Trước 20/08/2026 khách chỉ có nút xác nhận ĐÃ nhận. Không nhận được thì không có đường
+   * nào báo, nên im lặng bị hiểu thành đồng ý và việc host ghi nhận nhầm/sai không ai phát
+   * hiện được. Đây là lối ra cho đúng tình huống đó.
+   *
+   * BE chỉ nhận khi host đã ghi nhận chuyển tiền và khách CHƯA bấm xác nhận.
+   * `reason` bắt buộc 10–500 ký tự (BE validate, xem DisputeRefundRequest).
+   */
+  disputeRefundReceived: async (id: number, reason: string): Promise<CheckoutRequestDto> => {
+    const { data } = await realApiClient.post<CheckoutRequestDto>(
+      `/api/v1/tenant/me/checkout-requests/${id}/dispute-refund`, { reason },
     );
     return data;
   },

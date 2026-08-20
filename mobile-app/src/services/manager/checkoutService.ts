@@ -26,6 +26,18 @@ export interface SaveInspectionBody {
   /** Ảnh mặt đồng hồ lúc chốt số — bằng chứng khi khách thắc mắc (BE có 05/08/2026). */
   electricMeterImageUrl?: string;
   waterMeterImageUrl?: string;
+  /**
+   * Đơn giá quản lý nhập tay trên biên bản (BE nhận từ 20/08/2026).
+   *
+   * BE lấy đơn giá theo 4 tầng: (1) số gửi ở đây → (2) đơn giá kỳ gần nhất của chính hợp
+   * đồng → (3) đơn giá đăng ký của nhà → (4) không có gì thì báo lỗi chặn.
+   *
+   * Khách trả phòng ngay THÁNG ĐẦU thì tầng 2 chưa có hoá đơn nào, và nhà chưa chắc đã
+   * nhập đơn giá (tầng 3) — nên tầng 1 là đường duy nhất. Không gửi lên là BE chặn với
+   * "Nhà ... chưa có đơn giá điện", dù quản lý đã gõ số trên màn hình.
+   */
+  electricityUnitPrice?: number;
+  waterUnitPrice?: number;
   damages?: CheckoutDamageItem[];
 }
 

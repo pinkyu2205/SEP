@@ -12,14 +12,62 @@ import {
 } from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
 
-const FILTERS = [
-  { id: 'all', label: 'Tất cả' },
-  { id: 'multi_room', label: 'Toà nhà' },
-  { id: 'whole_house', label: 'Nhà nguyên căn' },
-  { id: 'rented', label: 'Đang thuê' },
-  { id: 'vacant', label: 'Trống' },
-  { id: 'maintenance', label: 'Bảo trì' },
+/**
+ * Bộ lọc tách làm HAI chiều độc lập.
+ *
+ * Bản cũ nhét cả 6 lựa chọn vào một `filter` duy nhất — chọn "Nhà nguyên căn" là mất luôn
+ * khả năng lọc trạng thái, nên không hỏi được "nguyên căn nào đang trống", đúng câu mà
+ * manager cần nhất. Tách ra thì loại × trạng thái kết hợp được với nhau.
+ *
+ * Sáu chip cũ nằm trong `ScrollView horizontal`: "Bảo trì" bị khuất ngoài mép phải và
+ * không có dấu hiệu nào báo còn chip phía sau. Nay hai hàng ngắn, `flexWrap` tự xuống
+ * dòng — thấy hết, không phải cuộn.
+ */
+const TYPE_FILTERS = [
+  { id: 'all',         label: 'Tất cả'    },
+  { id: 'multi_room',  label: 'Toà nhà'   },
+  { id: 'whole_house', label: 'Nguyên căn' },
 ] as const;
+
+const STATUS_FILTERS = [
+  { id: 'all',         label: 'Tất cả'    },
+  { id: 'rented',      label: 'Đang thuê' },
+  { id: 'vacant',      label: 'Còn trống' },
+  { id: 'maintenance', label: 'Bảo trì'   },
+] as const;
+
+type TypeFilterId = (typeof TYPE_FILTERS)[number]['id'];
+type StatusFilterId = (typeof STATUS_FILTERS)[number]['id'];
+
+const matchesType = (prop: ManagedProperty, id: TypeFilterId) =>
+  id === 'all'
+  || (id === 'multi_room' ? prop.propertyType === 'MULTI_ROOM' : prop.propertyType === 'WHOLE_HOUSE');
+
+/** Toà nhà xét theo số phòng, nguyên căn xét theo trạng thái thuê của cả căn. */
+const matchesStatus = (prop: ManagedProperty, id: StatusFilterId) => {
+  const multi = prop.propertyType === 'MULTI_ROOM';
+  switch (id) {
+    case 'rented':
+      return multi ? prop.occupied > 0 : prop.rentalStatus === 'rented' || prop.rentalStatus === 'expiring';
+    case 'vacant':
+      return multi ? prop.available > 0 : prop.rentalStatus === 'vacant';
+    case 'maintenance':
+      return multi
+        ? prop.maintenance > 0 || prop.hasMaintenanceIssues
+        : prop.rentalStatus === 'maintenance' || prop.maintenanceCount > 0;
+    default:
+      return true;
+  }
+};
+
+const matchesSearch = (prop: ManagedProperty, query: string) => {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return prop.name.toLowerCase().includes(q)
+    || prop.district.toLowerCase().includes(q)
+    || prop.address.toLowerCase().includes(q)
+    || !!prop.tenantName?.toLowerCase().includes(q);
+};
 
 const HOUSE_STATUS: Record<WholeHouseRentalStatus, { label: string; color: string; bg: string }> = {
   rented: { label: 'Đang thuê', color: Colors.success, bg: Colors.successLight },
@@ -33,7 +81,8 @@ const HOUSE_STATUS: Record<WholeHouseRentalStatus, { label: string; color: strin
 export const BuildingListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilterId>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilterId>('all');
 
   const [properties, setProperties] = useState<ManagedProperty[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,46 +118,41 @@ export const BuildingListScreen: React.FC = () => {
     else navigation.navigate('ManagerHome');
   };
 
-  const filtered = useMemo(() => {
-    let list = [...properties].sort((a, b) => getPropPriority(a) - getPropPriority(b));
+  const query = search.trim();
 
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter(prop =>
-        prop.name.toLowerCase().includes(q) ||
-        prop.district.toLowerCase().includes(q) ||
-        prop.address.toLowerCase().includes(q) ||
-        prop.tenantName?.toLowerCase().includes(q),
-      );
-    }
+  /** Danh sách đã qua tìm kiếm — dùng chung cho cả kết quả lẫn số đếm trên từng chip. */
+  const searched = useMemo(
+    () => [...properties]
+      .sort((a, b) => getPropPriority(a) - getPropPriority(b))
+      .filter(prop => matchesSearch(prop, query)),
+    [properties, query],
+  );
 
-    switch (filter) {
-      case 'multi_room':
-        return list.filter(prop => prop.propertyType === 'MULTI_ROOM');
-      case 'whole_house':
-        return list.filter(prop => prop.propertyType === 'WHOLE_HOUSE');
-      case 'rented':
-        return list.filter(prop =>
-          prop.propertyType === 'MULTI_ROOM'
-            ? prop.occupied > 0
-            : prop.rentalStatus === 'rented' || prop.rentalStatus === 'expiring',
-        );
-      case 'vacant':
-        return list.filter(prop =>
-          prop.propertyType === 'MULTI_ROOM'
-            ? prop.available > 0
-            : prop.rentalStatus === 'vacant',
-        );
-      case 'maintenance':
-        return list.filter(prop =>
-          prop.propertyType === 'MULTI_ROOM'
-            ? prop.maintenance > 0 || prop.hasMaintenanceIssues
-            : prop.rentalStatus === 'maintenance' || prop.maintenanceCount > 0,
-        );
-      default:
-        return list;
-    }
-  }, [filter, search, properties]);
+  const filtered = useMemo(
+    () => searched.filter(prop => matchesType(prop, typeFilter) && matchesStatus(prop, statusFilter)),
+    [searched, typeFilter, statusFilter],
+  );
+
+  /**
+   * Số trên mỗi chip = kết quả nếu bấm chính chip đó, tức là đã tính cả chiều lọc kia.
+   * Nhờ vậy manager biết trước chip nào bấm vào sẽ ra rỗng, không phải bấm thử từng cái.
+   */
+  const typeCounts = useMemo(() => Object.fromEntries(
+    TYPE_FILTERS.map(f => [
+      f.id,
+      searched.filter(p => matchesType(p, f.id) && matchesStatus(p, statusFilter)).length,
+    ]),
+  ) as Record<TypeFilterId, number>, [searched, statusFilter]);
+
+  const statusCounts = useMemo(() => Object.fromEntries(
+    STATUS_FILTERS.map(f => [
+      f.id,
+      searched.filter(p => matchesType(p, typeFilter) && matchesStatus(p, f.id)).length,
+    ]),
+  ) as Record<StatusFilterId, number>, [searched, typeFilter]);
+
+  const filtersActive = typeFilter !== 'all' || statusFilter !== 'all' || query.length > 0;
+  const clearFilters = () => { setTypeFilter('all'); setStatusFilter('all'); setSearch(''); };
 
   const openProperty = (prop: ManagedProperty) => {
     navigation.navigate(prop.propertyType === 'WHOLE_HOUSE' ? 'WholeHouseDetail' : 'BuildingDetail', {
@@ -162,28 +206,62 @@ export const BuildingListScreen: React.FC = () => {
           )}
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={s.filterScroll}
-          contentContainerStyle={s.filterContent}
-        >
-          {FILTERS.map(item => (
-            <TouchableOpacity
-              key={item.id}
-              style={[s.filterChip, filter === item.id && s.filterChipActive]}
-              onPress={() => setFilter(item.id)}
-            >
-              <Text style={[s.filterChipText, filter === item.id && s.filterChipTextActive]} numberOfLines={1}>
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        {/* Hai chiều lọc độc lập — `flexWrap` tự xuống dòng, không cuộn ngang nên
+            không chip nào bị khuất. */}
+        <View style={s.filterGroup}>
+          <Text style={s.filterGroupLabel}>Loại</Text>
+          <View style={s.filterRow}>
+            {TYPE_FILTERS.map(item => {
+              const active = typeFilter === item.id;
+              const count = typeCounts[item.id];
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[s.filterChip, active && s.filterChipActive, !active && count === 0 && s.filterChipEmpty]}
+                  onPress={() => setTypeFilter(item.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.filterChipText, active && s.filterChipTextActive]}>
+                    {item.label} <Text style={[s.filterChipCount, active && s.filterChipCountActive]}>{count}</Text>
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
 
-        <Text style={s.resultCount}>
-          {filtered.length}/{properties.length} bất động sản
-        </Text>
+        <View style={s.filterGroup}>
+          <Text style={s.filterGroupLabel}>Trạng thái</Text>
+          <View style={s.filterRow}>
+            {STATUS_FILTERS.map(item => {
+              const active = statusFilter === item.id;
+              const count = statusCounts[item.id];
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[s.filterChip, active && s.filterChipActive, !active && count === 0 && s.filterChipEmpty]}
+                  onPress={() => setStatusFilter(item.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.filterChipText, active && s.filterChipTextActive]}>
+                    {item.label} <Text style={[s.filterChipCount, active && s.filterChipCountActive]}>{count}</Text>
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={s.resultRow}>
+          <Text style={s.resultCount}>
+            {filtered.length}/{properties.length} bất động sản
+          </Text>
+          {filtersActive && (
+            <TouchableOpacity onPress={clearFilters} activeOpacity={0.7}>
+              <Text style={s.clearFilterText}>Xoá lọc</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {loading && !refreshing ? (
           <View style={s.emptyState}>
@@ -297,45 +375,55 @@ const WholeHouseCard = ({ prop, onPress }: { prop: ManagedProperty; onPress: () 
       onPress={onPress}
       activeOpacity={0.75}
     >
+      {/*
+        Trạng thái thuê đưa lên thẳng hàng tiêu đề. Bản cũ để nó trong một hộp riêng
+        (`houseStatusBox`) — nhà đang trống thì `tenantName` và `contractEndDate` đều rỗng,
+        hộp đó chỉ còn mỗi cái chip "Trống" nằm giữa một mảng xám lớn.
+      */}
       <View style={s.cardHeader}>
         <View style={{ flex: 1 }}>
           <View style={s.nameRow}>
             <Text style={s.cardName} numberOfLines={1}>{prop.name}</Text>
-            <View style={[s.typeBadge, s.houseBadge]}>
-              <Text style={[s.typeBadgeText, s.houseBadgeText]}>Nhà nguyên căn</Text>
+            <View style={[s.houseStatusPill, { backgroundColor: status.bg }]}>
+              <Text style={[s.houseStatusText, { color: status.color }]}>{status.label}</Text>
             </View>
           </View>
           <Text style={s.cardAddress} numberOfLines={1}>{prop.address}</Text>
         </View>
       </View>
 
-      <View style={s.houseStatusBox}>
-        <View style={[s.houseStatusPill, { backgroundColor: status.bg }]}>
-          <Text style={[s.houseStatusText, { color: status.color }]}>{status.label}</Text>
+      {/* Chỉ dựng hộp khi thật sự có gì để ghi vào. */}
+      {(prop.tenantName || prop.contractEndDate) && (
+        <View style={s.houseStatusBox}>
+          {prop.tenantName && (
+            <Text style={s.houseLine} numberOfLines={1}>Khách thuê: <Text style={s.houseStrong}>{prop.tenantName}</Text></Text>
+          )}
+          {/* Dòng "Giá thuê" đã BỎ 13/08/2026 — xem @/constants/managerVisibility. */}
+          {prop.contractEndDate && (
+            <Text style={s.houseLine}>Hợp đồng: <Text style={s.houseStrong}>đến {prop.contractEndDate}</Text></Text>
+          )}
         </View>
-        {prop.tenantName && (
-          <Text style={s.houseLine} numberOfLines={1}>Khách thuê: <Text style={s.houseStrong}>{prop.tenantName}</Text></Text>
-        )}
-        {/* Dòng "Giá thuê" đã BỎ 13/08/2026 — xem @/constants/managerVisibility. */}
-        {prop.contractEndDate && (
-          <Text style={s.houseLine}>Hợp đồng: <Text style={s.houseStrong}>đến {prop.contractEndDate}</Text></Text>
-        )}
-      </View>
+      )}
 
-      <View style={s.cardFooter}>
-        <Text style={s.houseFooterText}>
-          {prop.totalFloors} tầng · {prop.district}
-        </Text>
-        {issueCount > 0 ? (
-          <View style={[s.issuePill, { backgroundColor: Colors.warningLight }]}>
-            <Text style={[s.issuePillText, { color: Colors.warning }]}>{issueCount} bảo trì</Text>
-          </View>
-        ) : (
-          <View style={s.okPill}>
-            <Text style={s.okPillText}>Ổn định</Text>
-          </View>
-        )}
-      </View>
+      {/*
+        Chân card chỉ hiện khi có việc. Bản cũ luôn hiện "{totalFloors} tầng · {district}":
+        nhà nguyên căn không nhập số tầng nên ra "0 tầng", còn quận thì đã nằm sẵn trong
+        dòng địa chỉ ngay trên. Hai thông tin, không cái nào nói thêm được gì.
+        Chip "Ổn định" cũng bỏ với nhà trống — nhà chưa có khách thì không có gì để ổn định.
+      */}
+      {(issueCount > 0 || prop.rentalStatus === 'rented') && (
+        <View style={s.cardFooterRight}>
+          {issueCount > 0 ? (
+            <View style={[s.issuePill, { backgroundColor: Colors.warningLight }]}>
+              <Text style={[s.issuePillText, { color: Colors.warning }]}>{issueCount} bảo trì</Text>
+            </View>
+          ) : (
+            <View style={s.okPill}>
+              <Text style={s.okPillText}>Ổn định</Text>
+            </View>
+          )}
+        </View>
+      )}
     </TouchableOpacity>
   );
 };
@@ -370,19 +458,33 @@ const s = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary },
   searchClear: { fontSize: 18, color: Colors.textMuted, fontWeight: '600', padding: 2 },
 
-  filterScroll: { flexGrow: 0, marginBottom: Spacing.md },
-  filterContent: { paddingBottom: 4, gap: Spacing.sm },
+  filterGroup: { marginBottom: Spacing.sm },
+  filterGroupLabel: {
+    fontSize: 10, fontWeight: '800', color: Colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6,
+  },
+  // Chip rộng theo nội dung + `flexWrap`: không có phép tính tỉ lệ nào để sai, thừa chỗ
+  // thì tự xuống dòng.
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
   filterChip: {
-    height: 32, justifyContent: 'center',
+    height: 30, justifyContent: 'center',
     paddingHorizontal: Spacing.md, borderRadius: BorderRadius.full,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
-    minWidth: 58,
   },
   filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  /** Bấm vào sẽ ra rỗng — làm nhạt để đỡ mất công thử. */
+  filterChipEmpty: { opacity: 0.45 },
   filterChipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   filterChipTextActive: { color: Colors.white },
+  filterChipCount: { fontSize: 11, fontWeight: '800', color: Colors.textMuted },
+  filterChipCountActive: { color: Colors.white, opacity: 0.85 },
 
-  resultCount: { fontSize: 12, color: Colors.textMuted, fontWeight: '600', marginBottom: Spacing.sm },
+  resultRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+  },
+  resultCount: { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
+  clearFilterText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
   emptyState: { alignItems: 'center', paddingVertical: Spacing['3xl'] },
   emptyIcon: { fontSize: 40, marginBottom: Spacing.sm },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
@@ -433,7 +535,8 @@ const s = StyleSheet.create({
   houseStatusText: { fontSize: 11, fontWeight: '900' },
   houseLine: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
   houseStrong: { color: Colors.textPrimary, fontWeight: '800' },
-  houseFooterText: { fontSize: 12, color: Colors.textMuted, fontWeight: '700' },
+  /** Chân card nhà nguyên căn giờ chỉ còn một chip → đẩy về phải, không cần hàng 2 cột. */
+  cardFooterRight: { flexDirection: 'row', justifyContent: 'flex-end' },
 
   cardFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   cardRoomRow: { flexDirection: 'row', alignItems: 'baseline', flexShrink: 1 },

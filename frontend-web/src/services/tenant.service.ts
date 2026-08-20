@@ -92,9 +92,14 @@ export const tenantService = {
     } as never);
   },
 
-  /** GET /tenant-contracts/{id} — chi tiết hợp đồng. */
-  getById: (id: number): Promise<TenantContractResponse> => {
-    return api.get(`/api/v1/tenant-contracts/${id}`);
+  /** GET /tenant-contracts/{id} — chi tiết hợp đồng.
+   *  `silent`: tắt toast lỗi tự động — dùng khi chi tiết chỉ là phần làm giàu thêm cho
+   *  dữ liệu đã có sẵn từ danh sách, hỏng thì im lặng chứ không cần báo người dùng. */
+  getById: (id: number, opts?: { silent?: boolean }): Promise<TenantContractResponse> => {
+    return api.get(
+      `/api/v1/tenant-contracts/${id}`,
+      opts?.silent ? ({ skipErrorToast: true } as never) : undefined,
+    );
   },
 
   /**

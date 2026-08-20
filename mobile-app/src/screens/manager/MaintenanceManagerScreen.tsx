@@ -8,6 +8,7 @@ import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '@/constants/maintenance';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { readApiError } from '@/utils/apiError';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -48,7 +49,14 @@ export const MaintenanceManagerScreen: React.FC = () => {
   const [search, setSearch] = useState('');
   // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
   // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
-  const [loadError, setLoadError] = useState(false);
+  /**
+   * Câu lỗi THẬT từ server, không phải "kiểm tra mạng" đoán bừa.
+   *
+   * Bản cũ chỉ giữ một cờ boolean rồi luôn hiện "kiểm tra mạng rồi mở lại màn này".
+   * Nhưng 500 của server cũng rơi vào đúng nhánh đó — người dùng đi kiểm tra wifi trong
+   * khi lỗi nằm ở backend. `readApiError` phân biệt được mất mạng / 500 / 403 / 404.
+   */
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Khoản bồi thường treo (BE 30/07) — ticket MỌI status (kể cả đã đóng/hủy) còn
   // costAgreementStatus PENDING/DISPUTED; list thường không bao phủ vì đã terminal.
   const [pendingCost, setPendingCost] = useState<MaintenanceTicket[]>([]);
@@ -60,12 +68,13 @@ export const MaintenanceManagerScreen: React.FC = () => {
         .then(page => {
           if (!active) return;
           setRemote(page.content.map(dtoToTicket));
-          setLoadError(false);
+          setLoadError(null);
         })
-        .catch(() => {
+        .catch((err) => {
           if (!active) return;
+          const msg = readApiError(err, 'Không tải được danh sách ticket.');
           setRemote(prev => {
-            if (prev == null) setLoadError(true);
+            if (prev == null) setLoadError(msg);
             return prev;
           });
         });
@@ -254,7 +263,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
           <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
             {loadError ? (
               <View style={s.queueEmpty}>
-                <Text style={s.queueEmptyText}>⚠️ Không tải được danh sách ticket — kiểm tra mạng rồi mở lại màn này.</Text>
+                <Text style={s.queueEmptyText}>⚠️ {loadError}</Text>
               </View>
             ) : openQueue.length === 0 ? (
               <View style={s.queueEmpty}>
