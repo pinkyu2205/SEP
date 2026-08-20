@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { Building2, MapPin, Phone } from 'lucide-react';
+import { MapPin, Phone } from 'lucide-react';
+import { BrandMark } from '@/components/common/BrandLogo';
 import { ROUTES } from '@/utils/routes';
 import { COMPANY, CONTACT } from '@/utils/constants';
 import { telHref } from '@/utils/helpers';
@@ -19,8 +20,9 @@ export const PublicFooter = () => {
           {/* Brand */}
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-green-600 via-emerald-600 to-emerald-500 shadow-glow">
-                <Building2 className="h-5 w-5 text-white" />
+              {/* Chân trang nền tối → nền trắng bọc logo để giữ đúng hai màu. */}
+              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-white">
+                <BrandMark size={32} />
               </div>
               <p className="text-xl font-extrabold text-white">{COMPANY.name}</p>
             </div>

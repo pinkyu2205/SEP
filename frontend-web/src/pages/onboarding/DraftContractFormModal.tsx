@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -332,6 +332,34 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     [properties, form.propertyId],
   );
   const isWholeHouse = selectedProperty?.wholeHouse === true;
+
+  /**
+   * Hợp đồng khách phải nằm TRỌN trong hợp đồng thuê nhà ký với chủ nhà gốc.
+   *
+   *   • Vào ở trước ngày HĐ chủ nhà hiệu lực ⇒ cho thuê căn công ty chưa có quyền quản lý.
+   *   • Kết thúc sau hạn HĐ chủ nhà ⇒ tới ngày trả nhà vẫn còn khách bên trong.
+   *
+   * BE đã chặn cứng (`InboundLeaseRules.assertOccupancyWindow`) nên đây chỉ là lớp chặn sớm
+   * cho đỡ mất công: báo ngay lúc bấm thay vì gõ xong cả form mới nhận 400 từ server.
+   * `leaseStartDate` / `leaseEndDate` do BE mở thêm trong `GET /properties/{id}` (19/08/2026)
+   * — trước đó màn này không có cách nào biết hạn hợp đồng chủ nhà.
+   */
+  const leaseWindowError = useCallback((propertyId?: number | string): string | null => {
+    const p = allProperties.find((x) => String(x.id) === String(propertyId));
+    if (!p?.leaseStartDate && !p?.leaseEndDate) return null; // BE bản cũ chưa trả — để BE tự chặn
+
+    const fmt = (d: string) => d.split('-').reverse().join('/');
+    const moveIn = form.expectedReceptionDate || todayIso();
+    if (p.leaseStartDate && moveIn < p.leaseStartDate) {
+      return `Ngày đón khách (${fmt(moveIn)}) sớm hơn ngày hợp đồng với chủ nhà có hiệu lực `
+        + `(${fmt(p.leaseStartDate)}). Công ty chưa có quyền quản lý căn này trước ngày đó.`;
+    }
+    if (p.leaseEndDate && form.endDate && form.endDate > p.leaseEndDate) {
+      return `Ngày kết thúc hợp đồng khách (${fmt(form.endDate)}) vượt quá hạn hợp đồng với `
+        + `chủ nhà (${fmt(p.leaseEndDate)}). Tới ngày trả nhà sẽ vẫn còn khách bên trong.`;
+    }
+    return null;
+  }, [allProperties, form.expectedReceptionDate, form.endDate]);
 
   // Khi đổi property: nạp phòng (nếu chia phòng). Quản lý phụ trách LUÔN LÀ
   // operationManagerId có sẵn của nhà — nhà đã đi vào hoạt động thì admin đã gán quản
@@ -672,6 +700,15 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         return toast.error('Nhà này chưa có quản lý phụ trách — vui lòng gán quản lý cho nhà trước khi tạo hợp đồng.');
       }
     }
+
+    // Không được cho thuê ngoài phạm vi hợp đồng với chủ nhà gốc. BE đã chặn cứng
+    // (InboundLeaseRules.assertOccupancyWindow), nhưng chặn luôn ở đây để admin biết ngay
+    // lúc nhập thay vì gõ xong cả form mới bị server trả 400.
+    const leaseError = leaseWindowError(
+      isEditMode ? editContract?.propertyId : selectedProperty?.id,
+    );
+    if (leaseError) return toast.error(leaseError, { duration: 7000 });
+
     setShowSummary(true);
   };
 

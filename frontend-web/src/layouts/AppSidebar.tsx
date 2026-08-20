@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import { LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import clsx from 'clsx';
+import { BrandMark } from '@/components/common/BrandLogo';
 
 /**
  * Sidebar dùng chung cho cả Cổng Host và Admin Portal.
@@ -21,7 +22,14 @@ import clsx from 'clsx';
  *    không phải chờ độ trễ mặc định của trình duyệt).
  */
 
-export type SidebarAccent = 'indigo' | 'cyan';
+/**
+ * Màu nhấn hai cổng, lấy đúng hai nửa của logo (20/08/2026 — trước là indigo/cyan, không
+ * liên quan gì tới nhận diện).
+ *
+ *   green → Cổng Host   · xanh chữ B, cổng vận hành hằng ngày
+ *   red   → Admin Portal · đỏ chữ H, cổng quản trị
+ */
+export type SidebarAccent = 'green' | 'red';
 
 export interface SidebarNavItem {
   label: string;
@@ -46,41 +54,38 @@ export interface SidebarUser {
 }
 
 const ACCENT: Record<SidebarAccent, {
-  glow: string; brandBg: string; brandRing: string; eyebrow: string;
+  glow: string; eyebrow: string;
   rail: string; activeBg: string; activeText: string; iconChip: string;
   badge: string; hoverIcon: string; avatar: string;
 }> = {
-  indigo: {
-    glow: 'from-primary-500/25',
-    brandBg: 'bg-primary-600',
-    brandRing: 'shadow-primary-900/40',
-    eyebrow: 'text-primary-200/80',
-    rail: 'bg-primary-400',
-    activeBg: 'bg-primary-500/15',
+  green: {
+    glow: 'from-brand-green-500/25',
+    eyebrow: 'text-brand-green-200/80',
+    rail: 'bg-brand-green-400',
+    activeBg: 'bg-brand-green-500/15',
     activeText: 'text-white',
-    iconChip: 'bg-primary-500 text-white shadow-md shadow-primary-900/40',
-    badge: 'bg-primary-500 text-white',
-    hoverIcon: 'group-hover:text-primary-300',
-    avatar: 'from-primary-500 to-primary-700',
+    iconChip: 'bg-brand-green-500 text-white shadow-md shadow-brand-green-950/40',
+    badge: 'bg-brand-green-500 text-white',
+    hoverIcon: 'group-hover:text-brand-green-300',
+    avatar: 'from-brand-green-500 to-brand-green-700',
   },
-  cyan: {
-    glow: 'from-cyan-500/25',
-    brandBg: 'bg-cyan-500',
-    brandRing: 'shadow-cyan-950/40',
-    eyebrow: 'text-cyan-200/80',
-    rail: 'bg-cyan-400',
-    activeBg: 'bg-cyan-500/15',
+  red: {
+    glow: 'from-brand-red-500/25',
+    eyebrow: 'text-brand-red-200/80',
+    rail: 'bg-brand-red-400',
+    activeBg: 'bg-brand-red-500/15',
     activeText: 'text-white',
-    iconChip: 'bg-cyan-500 text-white shadow-md shadow-cyan-950/40',
-    badge: 'bg-cyan-500 text-white',
-    hoverIcon: 'group-hover:text-cyan-300',
-    avatar: 'from-cyan-500 to-cyan-700',
+    iconChip: 'bg-brand-red-500 text-white shadow-md shadow-brand-red-950/40',
+    badge: 'bg-brand-red-500 text-white',
+    hoverIcon: 'group-hover:text-brand-red-300',
+    avatar: 'from-brand-red-500 to-brand-red-700',
   },
 };
 
 interface AppSidebarProps {
   accent: SidebarAccent;
-  brand: { title: string; subtitle: string; icon: LucideIcon };
+  /** `icon` đã bỏ 20/08/2026 — chỗ đó nay là logo Hoàng Bình Land, không đổi theo cổng. */
+  brand: { title: string; subtitle: string };
   sections: SidebarSection[];
   user?: SidebarUser;
   onLogout?: () => void;
@@ -106,8 +111,7 @@ export const AppSidebar = ({
     if (!collapsible) return;
     try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch { /* private mode */ }
   }, [collapsed, collapsible, storageKey]);
-
-  const BrandIcon = brand.icon;
+
 
   return (
     <div
@@ -121,8 +125,14 @@ export const AppSidebar = ({
 
       {/* Thương hiệu */}
       <div className={clsx('relative flex h-16 flex-shrink-0 items-center gap-3 border-b border-white/5', collapsed ? 'justify-center px-2' : 'px-5')}>
-        <div className={clsx('flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl shadow-lg', a.brandBg, a.brandRing)}>
-          <BrandIcon className="h-[18px] w-[18px] text-white" />
+        {/*
+          Logo thật thay cho ô màu + icon lucide chung chung (Building2 — cái ai cũng dùng).
+          Nền TRẮNG chứ không phải nền màu nhấn: logo hai màu đỏ/xanh đặt trên nền chàm hay
+          cyan sẽ chọi màu và tối lại; nền trắng vừa tách khỏi sidebar tối vừa giữ đúng màu
+          nhận diện.
+        */}
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white shadow-lg shadow-black/20">
+          <BrandMark size={24} />
         </div>
         {!collapsed && (
           <div className="min-w-0 flex-1">
@@ -181,7 +191,7 @@ export const AppSidebar = ({
                             collapsed
                               ? 'absolute right-2 top-1.5 h-4 min-w-4 px-1'
                               : 'h-5 min-w-5 px-1.5',
-                            item.badgeAlert ? 'bg-rose-500 text-white' : a.badge,
+                            item.badgeAlert ? 'bg-amber-400 text-slate-900' : a.badge,
                           )}>
                             {item.badge > 99 ? '99+' : item.badge}
                           </span>

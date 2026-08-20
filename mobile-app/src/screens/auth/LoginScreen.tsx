@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
+import { BrandLockup } from '@/components/common/BrandLogo';
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -79,14 +79,15 @@ export const LoginScreen: React.FC = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        {/* Header / Branding — logo đã có sẵn tên + slogan trong ảnh, không cần Text riêng */}
+        {/*
+          Header / Branding — trước đây là assets/logo.png của bộ nhận diện CŨ (ONION HOME),
+          có sẵn tên + slogan nướng trong ảnh. Nay là logo Hoàng Bình Land (file gốc) — ảnh đã
+          kèm sẵn tên nên chỉ cần thêm dòng slogan bên dưới.
+        */}
         <View style={styles.brandSection}>
           <View style={styles.logoCard}>
-            <Image
-              source={require('../../../assets/logo.png')}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
+            <BrandLockup width={165} />
+            <Text style={styles.brandSlogan}>Nền tảng quản lý cho thuê</Text>
           </View>
         </View>
 
@@ -96,7 +97,7 @@ export const LoginScreen: React.FC = () => {
 
           <Input
             label="Số điện thoại / Tài khoản"
-            placeholder="090... hoặc long2"
+            placeholder="Nhập số điện thoại hoặc tài khoản"
             value={phone}
             onChangeText={setPhone}
             autoCapitalize="none"
@@ -180,14 +181,15 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: Colors.white,
     borderRadius: BorderRadius.xl,
-    paddingVertical: Spacing.lg,
+    paddingVertical: Spacing.base,
     paddingHorizontal: Spacing.base,
     alignItems: 'center',
     ...Shadow.md,
   },
-  logoImage: {
-    width: '100%',
-    height: 120,
+  brandSlogan: {
+    marginTop: Spacing.xs,
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
   // Demo Box
   demoBox: {

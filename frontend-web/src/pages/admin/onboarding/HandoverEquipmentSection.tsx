@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, PackageCheck } from 'lucide-react';
+import { CollapsibleSection } from './CollapsibleSection';
 import { propertyService } from '@/services/property.service';
 import type { HandoverEquipmentResponse } from '@/types/api.types';
 
@@ -31,7 +32,11 @@ const location = (e: HandoverEquipmentResponse): string =>
  * Dữ liệu từ import đợt 1 (GET /properties/{id}/handover-equipments) — CHỈ hiển thị,
  * không gán phòng vận hành, không tính khấu hao. Tự ẩn khi không có dữ liệu.
  */
-export const HandoverEquipmentSection = ({ propertyId }: { propertyId: number }) => {
+export const HandoverEquipmentSection = ({ propertyId, collapsible }: {
+  propertyId: number;
+  /** Bọc trong khối thu gọn (mặc định đóng) — dùng ở những trang dài như duyệt giá. */
+  collapsible?: boolean;
+}) => {
   const [items, setItems] = useState<HandoverEquipmentResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -56,15 +61,10 @@ export const HandoverEquipmentSection = ({ propertyId }: { propertyId: number })
   // Ẩn hẳn section khi căn không có thiết bị bàn giao.
   if (!items || items.length === 0) return null;
 
-  return (
-    <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
-      <h3 className="mb-1 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-500">
-        <PackageCheck className="h-4 w-4 text-emerald-500" /> Thiết bị chủ nhà bàn giao
-      </h3>
-      <p className="mb-4 text-xs text-slate-400">
-        Nội thất/thiết bị chủ nhà gốc bàn giao theo hợp đồng thuê — chỉ để tham khảo, không tính khấu hao.
-      </p>
-      <div className="overflow-hidden rounded-xl border border-slate-200">
+  const totalQty = items.reduce((s, e) => s + (e.quantity || 0), 0);
+
+  const table = (
+    <div className="overflow-hidden rounded-xl border border-slate-200">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
             <tr>
@@ -93,7 +93,36 @@ export const HandoverEquipmentSection = ({ propertyId }: { propertyId: number })
             })}
           </tbody>
         </table>
-      </div>
+    </div>
+  );
+
+  if (collapsible) {
+    return (
+      <CollapsibleSection
+        icon={PackageCheck}
+        iconClass="text-emerald-500"
+        title="Thiết bị chủ nhà bàn giao"
+        subtitle="Chỉ để tham khảo — không tính vào vốn, không khấu hao"
+        summary={
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 font-bold text-slate-600">
+            {items.length} loại · {totalQty} món
+          </span>
+        }
+      >
+        {table}
+      </CollapsibleSection>
+    );
+  }
+
+  return (
+    <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5">
+      <h3 className="mb-1 flex items-center gap-2 text-sm font-black uppercase tracking-widest text-slate-500">
+        <PackageCheck className="h-4 w-4 text-emerald-500" /> Thiết bị chủ nhà bàn giao
+      </h3>
+      <p className="mb-4 text-xs text-slate-400">
+        Nội thất/thiết bị chủ nhà gốc bàn giao theo hợp đồng thuê — chỉ để tham khảo, không tính khấu hao.
+      </p>
+      {table}
     </div>
   );
 };

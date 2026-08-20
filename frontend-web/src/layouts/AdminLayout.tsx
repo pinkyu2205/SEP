@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import {
 
   BarChart3,
-  CreditCard,
+  CreditCard, ShieldAlert,
   FileText,
   FilePlus,
   MapPin,
@@ -67,6 +67,8 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Tài chính & Hợp đồng',
     items: [
       { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      // Khiếu nại hoàn cọc: chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
+      { label: 'Khiếu nại hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
       { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
@@ -133,7 +135,7 @@ export const AdminLayout = () => {
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
       <aside className="sticky top-0 hidden h-screen flex-shrink-0 select-none lg:block">
         <AppSidebar
-          accent="cyan"
+          accent="red"
           storageKey="hbl_sidebar_admin"
           brand={brand}
           sections={sections}
@@ -159,7 +161,7 @@ export const AdminLayout = () => {
             </button>
             {/* Drawer mobile: luôn mở rộng, không cho thu gọn. */}
             <AppSidebar
-              accent="cyan"
+              accent="red"
               brand={brand}
               sections={sections}
               user={sidebarUser}
@@ -206,9 +208,9 @@ export const AdminLayout = () => {
                 khay này chỉ liệt kê bảng `notifications`, còn trang kia gộp thêm
                 `host_notifications` (nhắc việc: căn chờ duyệt giá, HĐ chờ duyệt…),
                 nên nó mới là chỗ xem đủ. Nhật ký bảo mật là việc khác. */}
-            <NotificationBell seeAllTo="/admin/notifications" accent="cyan" />
+            <NotificationBell seeAllTo="/admin/notifications" accent="red" />
             <UserMenu
-              accent="cyan"
+              accent="red"
               name={sidebarUser.name}
               subtitle={sidebarUser.subtitle}
               initials={sidebarUser.initials}

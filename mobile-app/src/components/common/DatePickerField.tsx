@@ -255,19 +255,31 @@ export const DatePickerField: React.FC<Props> = ({
                 return (
                   <TouchableOpacity
                     key={i}
-                    style={[styles.cell, sel && styles.cellSelected, tod && !sel && styles.cellToday]}
+                    style={styles.cell}
                     onPress={() => handleSelect(day)}
                     activeOpacity={dis ? 1 : 0.7}
                   >
-                    <Text style={[
-                      styles.cellText,
-                      isSun && styles.cellSun,
-                      sel && styles.cellTextSelected,
-                      dis && styles.cellDisabled,
-                      tod && !sel && styles.cellTextToday,
+                    {/*
+                      Vòng tròn là một View CON có kích thước cố định, không phải nền của
+                      cả ô. Bản cũ bôi `borderRadius` lên chính `cell` — mà cell rộng 1/7
+                      màn hình và `aspectRatio: 1`, nên vòng tròn to bằng cả ô (~50px) và
+                      hai ngày cạnh nhau dính sát vào nhau, không còn khoảng thở.
+                    */}
+                    <View style={[
+                      styles.dayCircle,
+                      sel && styles.dayCircleSelected,
+                      tod && !sel && styles.dayCircleToday,
                     ]}>
-                      {day}
-                    </Text>
+                      <Text style={[
+                        styles.cellText,
+                        isSun && styles.cellSun,
+                        sel && styles.cellTextSelected,
+                        dis && styles.cellDisabled,
+                        tod && !sel && styles.cellTextToday,
+                      ]}>
+                        {day}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -328,20 +340,30 @@ const styles = StyleSheet.create({
   pickerCellText: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
   pickerCellTextSelected: { color: Colors.white, fontWeight: '700' },
 
-  dayNames: { flexDirection: 'row', marginBottom: Spacing.sm },
-  dayName: { flex: 1, textAlign: 'center', fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+  dayNames: {
+    flexDirection: 'row', marginBottom: 4,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider, paddingBottom: 8,
+  },
+  dayName: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '800', color: Colors.textMuted },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap' },
-  cell: { width: `${100/7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-  cellSelected: { backgroundColor: Colors.primary, borderRadius: 100 },
-  cellToday: { borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 100 },
+  /**
+   * Ô chỉ lo VỊ TRÍ; phần nhìn thấy nằm ở `dayCircle` bên trong.
+   * Bỏ `aspectRatio: 1` (ô cao ~50px trên máy thường) đổi sang chiều cao cố định 42 —
+   * lịch 6 hàng gọn lại ~50px mà vẫn thừa vùng chạm.
+   */
+  cell: { width: `${100 / 7}%`, height: 42, alignItems: 'center', justifyContent: 'center' },
+  /** 34px trong ô cao 42 → còn 8px thở giữa các ngày, hết cảnh hai vòng tròn dính nhau. */
+  dayCircle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  dayCircleSelected: { backgroundColor: Colors.primary },
+  dayCircleToday: { borderWidth: 1.5, borderColor: Colors.primary },
   cellText: { fontSize: 14, color: Colors.textPrimary },
-  cellTextSelected: { color: Colors.white, fontWeight: '700' },
-  cellTextToday: { color: Colors.primary, fontWeight: '700' },
+  cellTextSelected: { color: Colors.white, fontWeight: '800' },
+  cellTextToday: { color: Colors.primary, fontWeight: '800' },
   cellSun: { color: Colors.error },
   cellDisabled: { color: '#D1D5DB' },
 
-  footer: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg },
+  footer: { flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.md },
   cancelBtn: { flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
   cancelText: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
   confirmBtn: { flex: 2, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, backgroundColor: Colors.primary, alignItems: 'center' },

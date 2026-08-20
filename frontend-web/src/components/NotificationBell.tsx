@@ -45,11 +45,11 @@ export const NotificationBell = ({
   seeAllTo,
   /** Chỉ hiện các loại này. Bỏ trống = tất cả. */
   types,
-  accent = 'cyan',
+  accent = 'green',
 }: {
   seeAllTo: string;
   types?: string[];
-  accent?: 'cyan' | 'indigo';
+  accent?: 'green' | 'red';
 }) => {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -83,7 +83,7 @@ export const NotificationBell = ({
     };
   }, [open]);
 
-  const ring = accent === 'indigo' ? 'focus:ring-indigo-100' : 'focus:ring-cyan-100';
+  const ring = accent === 'red' ? 'focus:ring-brand-red-200' : 'focus:ring-brand-green-200';
 
   const onRowClick = (n: AppNotificationDto) => {
     // Đánh dấu đã đọc phải làm mới CẢ badge của context, không thì số trên chuông

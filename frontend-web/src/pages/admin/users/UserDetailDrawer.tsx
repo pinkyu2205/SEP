@@ -114,7 +114,7 @@ const ZoneCard = ({ zone }: { zone: ZoneGroup }) => {
 const CONTRACT_STATUS: Record<string, { label: string; cls: string }> = {
   ACTIVE:     { label: 'Đang thuê',   cls: 'bg-emerald-100 text-emerald-700' },
   PENDING:    { label: 'Chờ xử lý',   cls: 'bg-amber-100 text-amber-700' },
-  DRAFT:      { label: 'Nháp',        cls: 'bg-slate-100 text-slate-500' },
+  DRAFT:      { label: 'Chờ đón khách', cls: 'bg-sky-100 text-sky-700' },
   EXPIRED:    { label: 'Hết hạn',     cls: 'bg-slate-100 text-slate-500' },
   TERMINATED: { label: 'Đã chấm dứt', cls: 'bg-rose-100 text-rose-600' },
 };

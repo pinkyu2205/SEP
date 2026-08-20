@@ -15,7 +15,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/host/operations-managers': 'Quản lý vận hành',
   '/host/managers': 'Quản lý vận hành',
   '/host/tenants': 'Khách thuê',
-  '/host/contracts': 'Phê duyệt hợp đồng',
+  '/host/contracts': 'Quản lý hợp đồng',
   '/host/maintenance': 'Giám sát bảo trì',
   '/host/financial': 'Quản lý tài chính',
   '/host/billing': 'Hoá đơn & Thanh toán',
@@ -113,7 +113,7 @@ export const Header = () => {
 
           {/* Chuông cũ chỉ là link kèm badge đếm MỘT LẦN lúc mở trang — mở app cả buổi
               số vẫn đứng yên. Giờ dùng chung khay realtime với cổng Admin. */}
-          <NotificationBell seeAllTo="/host/notifications" accent="cyan" />
+          <NotificationBell seeAllTo="/host/notifications" accent="green" />
         </div>
 
         {/* Nút đăng xuất trần trước đây nằm ở đây đã gộp vào menu tài khoản —
