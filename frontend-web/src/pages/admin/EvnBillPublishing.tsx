@@ -8,9 +8,14 @@ import {
 } from '@/services/evnBill.service';
 import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
+import { useOccupiedProperties } from '@/services/useOccupiedProperties';
+import { groupThousands } from '@/utils';
+
+
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { parseEvnInvoice, monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
+import { matchBillToProperty } from '@/utils/billPropertyMatch';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 import { serverNow } from '@/utils/serverTime';
 
@@ -35,12 +40,6 @@ const BILLS_PER_PAGE = 10;
 
 const fmtDateTime = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-
-/** Hiển thị số có dấu phân cách nghìn khi gõ ("400000" -> "400.000"). */
-const groupThousands = (s: string) => {
-  const d = onlyDigits(s);
-  return d ? Number(d).toLocaleString('vi-VN') : '';
-};
 
 interface BillForm {
   totalKwh: string;
@@ -271,6 +270,14 @@ export const EvnBillPublishing = () => {
   const [billsUnavailable, setBillsUnavailable] = useState(false);
 
   const [imageUrl, setImageUrl] = useState('');
+  /**
+   * Chữ OCR đọc được từ ảnh, GIỮ LẠI để đối chiếu với căn nhà đang chọn.
+   *
+   * Phải là state chứ không phải một phép kiểm chạy một lần lúc upload: lỗi cần bắt là
+   * "chọn nhầm nhà", mà admin hoàn toàn có thể tải ảnh trước rồi mới đổi ô chọn nhà sau.
+   * Giữ rawText rồi tính lại bằng useMemo thì đổi nhà lúc nào cảnh báo cũng đúng lúc đó.
+   */
+  const [ocrRawText, setOcrRawText] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [form, setForm] = useState<BillForm>(EMPTY_FORM);
@@ -292,6 +299,24 @@ export const EvnBillPublishing = () => {
   /** Bản ghi đang mở chi tiết (null = đóng). */
   const [detailBill, setDetailBill] = useState<EvnBill | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /**
+   * Ô chọn nhà CHỈ hiện căn đang có khách ở.
+   *
+   * Hoá đơn điện/nước chỉ có nghĩa với căn có người ở; đổ ra cả nhà chưa ai thuê thì
+   * admin phải tự nhớ căn nào đang có khách, chọn nhầm là phát hành một hoá đơn không
+   * gửi cho ai. Xem `useOccupiedProperties` để biết vì sao phải hỏi `handover-status`
+   * chứ không dùng được field nào trong danh sách nhà.
+   *
+   * CHỈ lọc ô chọn, KHÔNG lọc `properties` gốc: bảng "đã phát hành" bên dưới vẫn phải
+   * tra được hoá đơn cũ của căn mà khách đã trả phòng.
+   */
+  const { occupiedIds } = useOccupiedProperties();
+  const occupiedProperties = useMemo(
+    () => (occupiedIds ? properties.filter((p) => occupiedIds.has(p.id)) : properties),
+    [properties, occupiedIds],
+  );
+  const hiddenEmptyCount = properties.length - occupiedProperties.length;
+
 
   // ── Tải danh sách nhà ──────────────────────────────────────────────────────
   const loadProperties = useCallback(async () => {
@@ -373,6 +398,20 @@ export const EvnBillPublishing = () => {
    * thông báo. Xem services/utilityInvoice.service.ts để biết vì sao tách theo loại nhà.
    */
   const isWholeHouse = selectedProperty?.wholeHouse === true;
+
+  /**
+   * Ảnh hoá đơn này có phải của căn nhà đang chọn không (xem @/utils/billPropertyMatch).
+   *
+   * Đáng giá nhất với NGUYÊN CĂN: ở loại nhà đó, bấm phát hành là hoá đơn đi thẳng tới
+   * khách trong cùng thao tác — không còn ai đứng giữa để phát hiện nhầm nhà.
+   */
+  const billMatch = useMemo(
+    () => matchBillToProperty(
+      ocrRawText,
+      selectedProperty?.fullAddress || selectedProperty?.shortAddress,
+    ),
+    [ocrRawText, selectedProperty],
+  );
 
   /** Nhà đã có bản PUBLISHED của kỳ này → chặn phát hành lần hai (BE cũng phải chặn). */
   const existingBill = useMemo(
@@ -462,6 +501,7 @@ export const EvnBillPublishing = () => {
       try {
         const ocr = await evnBillService.ocr(url);
         const parsed = parseEvnInvoice(ocr);
+        setOcrRawText(ocr?.rawText ?? '');
 
         // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên
         // với dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Số của BE chỉ dùng để bù
@@ -488,6 +528,9 @@ export const EvnBillPublishing = () => {
             : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay.',
         );
       } catch {
+        // OCR hỏng thì cũng mất luôn đường đối chiếu địa chỉ — xoá rawText cũ để không
+        // đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
+        setOcrRawText('');
         setScanNote('Đã tải ảnh nhưng dịch vụ đọc hoá đơn đang lỗi. Vui lòng nhập tay số liệu.');
       }
     } catch (e: any) {
@@ -500,6 +543,7 @@ export const EvnBillPublishing = () => {
   const clearImage = () => {
     setImageUrl('');
     setScanNote(null);
+    setOcrRawText('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -716,12 +760,21 @@ export const EvnBillPublishing = () => {
                   </button>
                 </div>
               ) : (
-                <PropertyCombobox
-                  properties={properties}
-                  value={propertyId}
-                  onChange={setPropertyId}
-                  publishedIds={publishedIds}
-                />
+                <>
+                  <PropertyCombobox
+                    properties={occupiedProperties}
+                    value={propertyId}
+                    onChange={setPropertyId}
+                    publishedIds={publishedIds}
+                  />
+                  {/* Nói rõ đã giấu bớt — im lặng thì admin tìm một căn quen thuộc,
+                      không thấy, tưởng nhà bị xoá khỏi hệ thống. */}
+                  {hiddenEmptyCount > 0 && (
+                    <p className="mt-1.5 text-xs text-slate-400">
+                      Chỉ hiện nhà đang có khách ở — {hiddenEmptyCount} nhà trống đã được ẩn.
+                    </p>
+                  )}
+                </>
               )}
 
               {selectedProperty && (
@@ -980,6 +1033,46 @@ export const EvnBillPublishing = () => {
               <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                 {publishError}
               </div>
+            )}
+
+            {/*
+              ── Chặn nhầm nhà (24/08/2026) ──
+              Đặt SÁT NÚT PHÁT HÀNH, không phải cạnh ô tải ảnh: đây là thứ cuối cùng cần
+              đọc trước khi tiền đi tới khách, và admin thường chọn nhà xong mới tải ảnh
+              (hoặc ngược lại) nên cảnh báo cạnh ô ảnh dễ bị cuộn qua mất.
+
+              CẢNH BÁO chứ không chặn — OCR ảnh chụp điện thoại sai nhiều, chặn cứng sẽ
+              có ngày admin cầm đúng hoá đơn mà không phát hành được. Lớp hậu kiểm là
+              quyền khiếu nại của khách (trang "Khiếu nại hoá đơn điện/nước").
+            */}
+            {billMatch.verdict === 'mismatch' && (
+              <div className="rounded-lg border-2 border-rose-300 bg-rose-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Ảnh có vẻ KHÔNG phải của căn nhà này
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-rose-700">{billMatch.message}</p>
+                <p className="mt-1.5 text-xs text-rose-600">
+                  Đang chọn: <b>{selectedProperty?.propertyName}</b>
+                  {selectedProperty?.shortAddress ? ` — ${selectedProperty.shortAddress}` : ''}
+                </p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'weak' && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Nên kiểm lại địa chỉ trên ảnh
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-700">{billMatch.message}</p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'match' && (
+              /* Nói cả khi ĐÚNG: cảnh báo chỉ đáng tin khi người dùng thấy nó có chạy
+                 thật. Im lặng lúc đúng thì lúc sai họ sẽ tưởng hệ thống lỗi. */
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <Check className="h-3.5 w-3.5" /> Địa chỉ trên ảnh khớp với căn nhà đang chọn.
+              </p>
             )}
 
             <button

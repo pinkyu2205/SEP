@@ -176,7 +176,23 @@ export interface PropertyResponse {
   totalFloor?: number;   // field thực từ BE
   floorCount?: number;   // alias cũ, giữ tương thích
   roomsPerFloor?: number;
+  /** Số phòng KHAI BÁO trên hồ sơ nhà — có thể lệch với `roomCount` đếm thật. */
   totalRooms: number;
+  /**
+   * ── Sức chứa BE tính sẵn (PropertyOccupancyAssembler, 24/08/2026) ──
+   * Có ở MỌI `PropertyResponse`, gộp bằng 2 query nên không N+1. Nhờ vậy FE bỏ được
+   * vòng gọi `/properties/{id}/rooms` từng nhà — xem `occupancyFromProperty`.
+   */
+  /** Số phòng ĐẾM THẬT. Nguyên căn = 0. */
+  roomCount?: number;
+  /** Phòng còn nhận được khách — ĐÃ trừ phòng bị hợp đồng DRAFT/PENDING giữ chỗ. */
+  availableRooms?: number;
+  rentedRooms?: number;
+  maintenanceRooms?: number;
+  /** Phòng còn ở `RoomStatus.DRAFT` — chưa mở cho thuê. */
+  notOpenedRooms?: number;
+  /** Chỉ có ở `GET /properties/rentable`: căn này nhận được khách mới. */
+  rentalAvailable?: boolean;
   status: string;        // PropertyStatus
   /** @deprecated Dùng `listedPrice` / `appliedPrice`. Giữ cho code cũ. */
   price?: number;

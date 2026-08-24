@@ -42,6 +42,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const [settlement, setSettlement] = useState<CheckoutSettlementDto | null>(null);
   /** BE chưa có API quyết toán → vẫn cho hoàn tất theo luồng cũ, không chặn vận hành. */
   const [settlementMissing, setSettlementMissing] = useState(false);
+  /** Lỗi tải bảng quyết toán KHÁC 404 — hiện ra thay vì âm thầm mở cổng thanh lý. */
+  const [settlementError, setSettlementError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   /** Ngày trả phòng thực tế — gửi kèm khi thanh lý hợp đồng. */
@@ -52,12 +54,27 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
       const detail = await checkoutService.get(checkoutId);
       setReq(detail);
       setActualDate(detail.expectedMoveOutDate || todayIso());
+      /*
+        CHỈ 404 mới coi là "hồ sơ này chưa có bảng quyết toán".
+
+        `settlementMissing` mở cổng cho nút Hoàn tất (vừa cho hiện vừa cho bấm), nên bắt
+        mọi lỗi vào đây là FAIL-OPEN: mạng chập hay BE 500 một nhịp cũng thành "không có
+        quyết toán" và manager thanh lý được hợp đồng còn nợ tiền.
+
+        BE trả 404 (`ResourceNotFoundException` → `GlobalExceptionHandler`) khi thật sự
+        chưa có biên bản kiểm tra; mọi mã khác là trục trặc, phải coi như CHƯA BIẾT và
+        giữ cổng đóng. BE nay cũng đã tự chặn bằng `assertChargesSettledBeforeComplete`
+        nên đây là lớp thứ hai, không phải lớp duy nhất.
+      */
       try {
         setSettlement(detail.settlement ?? await checkoutService.getSettlement(checkoutId));
         setSettlementMissing(false);
-      } catch {
+        setSettlementError(null);
+      } catch (err: any) {
+        const status = err?.response?.status;
         setSettlement(null);
-        setSettlementMissing(true);
+        setSettlementMissing(status === 404);
+        setSettlementError(status === 404 ? null : readErr(err, 'Không tải được bảng quyết toán.'));
       }
     } catch (e: any) {
       showAlert('Lỗi', readErr(e, 'Không tải được hồ sơ trả phòng.'));
@@ -83,13 +100,24 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
    */
   const refunded = !!settlement?.refundedAt;
   /**
-   * Còn gì chặn thanh lý hợp đồng không.
+   * Còn ĐÚNG MỘT thứ chặn thanh lý: khách chưa trả hết khoản cuối kỳ.
+   * Việc hoàn cọc KHÔNG chặn — chạy song song.
    *
-   * Chỉ còn MỘT thứ chặn: **khách còn nợ tiền** (`extraCharge`). Phần HOÀN cho khách
-   * không chặn nữa — từ 18/08/2026 việc chuyển tiền do bộ phận tài chính làm ngoài app
-   * (1–3 ngày làm việc) và hoàn toàn có thể xong sau khi hợp đồng đã thanh lý. Bắt
-   * manager chờ hoàn cọc xong mới được đóng hồ sơ là khoá họ ở một việc không phải của
-   * họ, và họ cũng không có cách nào biết tiền đã chuyển hay chưa.
+   * ─── Từng có điều kiện thứ hai, đã bỏ. Đừng thêm lại. ────────────────────
+   * Sáng 24/08/2026 nút này có thêm cổng `refundPaidAt` (bắt host bấm "đã chuyển cọc"
+   * mới cho hoàn tất). Lý do lúc đó: `terminateActiveContract` bên BE kéo theo
+   * `disableTenantAccountIfNoActiveContracts`, nên thanh lý xong là khách **mất quyền
+   * đăng nhập** — không bấm được "✓ đã nhận đủ" hay "✗ chưa nhận", tức mất luôn nguồn
+   * của màn Khiếu nại hoàn cọc bên admin, đúng lúc cần nó nhất.
+   *
+   * Chiều 24/08/2026 BE sửa gốc: thanh lý KHÔNG còn khoá tài khoản nữa. Việc khoá đi
+   * theo vòng đời cọc — khách bấm ✓ thì khoá, bấm ✗ thì giữ nguyên quyền, im lặng 30
+   * ngày sau khi host chuyển thì cron khoá (`REFUND_SILENCE_DISABLE_DAYS`).
+   *
+   * Cổng kia mất lý do tồn tại, nên bỏ: giữ lại chỉ tổ neo phòng ở trạng thái RENTED
+   * thêm 1–3 ngày chờ một lệnh chuyển khoản, mà không bảo vệ thêm được gì cho khách.
+   * Giải phóng phòng sớm mới là thứ đáng giá — phòng trống không cho thuê được là chi
+   * phí thật.
    */
   const moneyDone = stillOwed <= 0;
 
@@ -215,6 +243,18 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             <Text style={s.disputeBox}>Khách phản đối: {req.disputeReason}</Text>
           )}
         </View>
+
+        {/* Lỗi tải (khác 404): nói rõ là TRỤC TRẶC, và cổng thanh lý vẫn đóng — đừng để
+            người dùng tưởng hồ sơ này vốn không có bảng quyết toán. */}
+        {settlementError && (
+          <View style={s.warnCard}>
+            <Text style={s.warnTitle}>Không tải được bảng quyết toán</Text>
+            <Text style={s.warnText}>{settlementError}</Text>
+            <Text style={s.warnText}>
+              Chưa thanh lý được cho tới khi tải lại được — mở lại màn này để thử lần nữa.
+            </Text>
+          </View>
+        )}
 
         {settlementMissing ? (
           <View style={s.warnCard}>
@@ -347,8 +387,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
                   Bạn không phải chuyển tiền và không cần tải biên lai.
                 </Text>
                 <Text style={s.infoNote}>
-                  Vẫn hoàn tất trả phòng được ngay — việc chuyển tiền chạy song song, không chặn
-                  thanh lý hợp đồng.
+                  Vẫn hoàn tất trả phòng được ngay — thanh lý hợp đồng KHÔNG khoá tài khoản
+                  khách (BE sửa 24/08/2026), nên khách vẫn vào app xác nhận nhận cọc bình thường.
                 </Text>
               </View>
             )}
@@ -369,6 +409,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           <View style={s.card}>
             <Text style={s.label}>Ngày trả phòng thực tế</Text>
             <TextInput style={s.input} value={actualDate} onChangeText={setActualDate} placeholder="YYYY-MM-DD" />
+            {/* Vẫn HIỆN nút khi chưa đủ điều kiện, chỉ làm xám + nói rõ đang chờ gì.
+                Ẩn hẳn thì manager không biết bước này tồn tại và ngồi đợi mò. */}
             <TouchableOpacity
               style={[
                 s.completeBtn,
@@ -381,7 +423,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
             >
               <Text style={s.primaryBtnText}>🏁 Hoàn tất trả phòng (thanh lý HĐ)</Text>
             </TouchableOpacity>
-            {!moneyDone && !settlementMissing && (
+            {!settlementMissing && !moneyDone && (
               <Text style={s.blockNote}>
                 Chờ khách thanh toán hoá đơn quyết toán trước khi thanh lý hợp đồng.
               </Text>

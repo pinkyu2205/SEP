@@ -7,6 +7,20 @@
 export const formatCurrency = (amount: number): string => {
   return Math.round(Number(amount) || 0).toLocaleString('vi-VN') + ' ₫';
 };
+/**
+ * Hiển thị số có dấu phân cách nghìn NGAY KHI GÕ ("22435000" → "22.435.000").
+ *
+ * Dùng cho các ô nhập số tiền / số lượng: state gốc vẫn là chuỗi CHỈ CHỮ SỐ, chỗ này chỉ
+ * lo phần nhìn. Nhập "22435000" trần thì mắt không đếm nổi mấy chữ số — mà đây là ô quyết
+ * định tổng tiền của cả một hoá đơn, gõ dư một số 0 là sai gấp mười lần.
+ *
+ * Cặp với `onlyDigits` ở chiều ngược lại (utils/evnInvoiceParser).
+ */
+export const groupThousands = (raw: string): string => {
+  const digits = (raw || '').replace(/[^\d]/g, '');
+  return digits ? Number(digits).toLocaleString('vi-VN') : '';
+};
+
 
 export const roomStatusMap = {
   available:   { label: 'Còn trống',   color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
