@@ -292,7 +292,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                       onPress={() => goSettlement(r)}
                     >
                       <Text style={status === 'SETTLING' ? s.actionApproveText : s.actionGhostText}>
-                        {status === 'SETTLING' ? '💰 Hoàn cọc & hoàn tất' : 'Xem bảng quyết toán'}
+                        {status === 'SETTLING' ? '🏁 Hoàn tất trả phòng' : 'Xem bảng quyết toán'}
                       </Text>
                     </TouchableOpacity>
                   </View>

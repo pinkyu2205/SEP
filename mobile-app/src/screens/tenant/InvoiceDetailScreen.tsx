@@ -1,16 +1,23 @@
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
-import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines } from '@/utils';
+import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines, showAlert } from '@/utils';
+import { tenantInvoiceDisputeService } from '@/services/tenant/invoiceDisputeService';
 import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
+import { UtilityEvidenceCard } from '@/components/invoice/UtilityEvidenceCard';
+import { InvoiceDisputeModal } from '@/components/invoice/InvoiceDisputeModal';
+import {
+  canDisputeInvoice, isDisputeOpen, disputeReasonLabel, DISPUTE_REJECT_GRACE_DAYS,
+  type InvoiceDispute,
+} from '@/types/invoiceDispute';
 
 // ── Config maps ─────────────────────────────────────────────
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string; gradientTop: string }> = {
@@ -70,6 +77,10 @@ export const InvoiceDetailScreen: React.FC = () => {
   // track live status updates (e.g. after QR payment)
   const [invoice, setInvoice] = useState<SharedBill>(initialInvoice);
   const [paying, setPaying]   = useState(false);
+  /** Ảnh bằng chứng đang xem cỡ lớn (ảnh đồng hồ / hoá đơn gốc). */
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   /**
    * Đây là màn khách đang mở mã QR ngồi chờ, nên realtime đáng giá nhất ở đây: BE ghi
@@ -106,6 +117,62 @@ export const InvoiceDetailScreen: React.FC = () => {
   const canPay    = invoice.status === 'pending' || isOverdue;
   const dueDate   = invoice.dueDate;
   const daysOver  = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
+
+  /**
+   * ─── Khiếu nại hoá đơn điện/nước (24/08/2026) ────────────────────────────
+   *
+   * Chỉ điện/nước mới có đường này: đó là loại hoá đơn duy nhất khách không đối
+   * chiếu được bằng hợp đồng — số tiền đến từ một tờ giấy EVN admin tải lên, hoặc
+   * một con số quản lý đọc từ mặt đồng hồ. Các loại khác đã có đường phản hồi
+   * riêng (xem `canDisputeInvoice`).
+   *
+   * `disputePending` GÁC MỌI LỜI GIỤC TRẢ TIỀN trên màn này. Vừa bảo khách "đang
+   * tra soát, chưa cần trả" mà bên dưới vẫn nhấp nháy "quá hạn 5 ngày" thì khách
+   * không tin cái nào — và lần sau thà trả tiền sai còn hơn đi hỏi.
+   */
+  const dispute        = invoice.dispute;
+  const disputePending = isDisputeOpen(dispute);
+  const isUtility      = invoice.invoiceType === 'electricity' || invoice.invoiceType === 'water';
+  const canDispute     = canDisputeInvoice(invoice.invoiceType, invoice.status, dispute);
+
+  /** Gửi xong thì vá thẳng vào state — khỏi nạp lại cả hoá đơn chỉ để thấy cái banner. */
+  const handleDisputeSubmitted = (d: InvoiceDispute) => {
+    setInvoice(prev => ({ ...prev, dispute: d }));
+    setDisputeOpen(false);
+  };
+
+  /**
+   * Khách tự rút yêu cầu — xem kỹ lại ảnh rồi thấy mình nhầm.
+   *
+   * Không có đường này thì khách đành ngồi đợi admin bác một việc mà chính họ đã biết
+   * là không có gì, trong lúc hoá đơn treo lơ lửng. Rút cũng là hành vi trung thực nên
+   * KHÔNG bị tước quyền khiếu nại lại (xem `canDisputeInvoice`).
+   */
+  const handleWithdraw = () => {
+    showAlert(
+      'Rút yêu cầu tra soát?',
+      'Hoá đơn sẽ trở lại bình thường và hạn thanh toán chạy tiếp. '
+      + 'Nếu sau đó vẫn thấy chưa đúng, bạn gửi lại được.',
+      [
+        { text: 'Để tôi xem thêm', style: 'cancel' },
+        {
+          text: 'Rút yêu cầu',
+          style: 'destructive',
+          onPress: async () => {
+            setWithdrawing(true);
+            try {
+              const d = await tenantInvoiceDisputeService.withdraw(invoice.id);
+              setInvoice(prev => ({ ...prev, dispute: d }));
+            } catch (err: any) {
+              showAlert('Lỗi', err?.response?.data?.message || 'Không rút được yêu cầu.');
+            } finally {
+              setWithdrawing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   /**
    * Dòng kỳ hoá đơn dưới tiêu đề.
@@ -176,8 +243,74 @@ export const InvoiceDetailScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
 
+        {/* ── Trạng thái khiếu nại ──
+            Đặt TRÊN CÙNG, trên cả cảnh báo quá hạn: hoá đơn đang bị tra soát thì mọi
+            con số bên dưới đều đang chờ xác minh — khách cần biết trước khi đọc gì khác. */}
+        {!!dispute && dispute.status !== 'WITHDRAWN' && (
+          <View style={[
+            s.disputeBanner,
+            dispute.status === 'ACCEPTED' && s.disputeBannerOk,
+            dispute.status === 'REJECTED' && s.disputeBannerClosed,
+          ]}>
+            <Text style={s.disputeBannerTitle}>
+              {dispute.status === 'OPEN'     && '⏳ Đang tra soát theo yêu cầu của bạn'}
+              {dispute.status === 'ACCEPTED' && '✅ Đã xác nhận hoá đơn này sai'}
+              {dispute.status === 'REJECTED' && 'ℹ️ Đã tra soát xong — hoá đơn giữ nguyên'}
+            </Text>
+
+            <Text style={s.disputeBannerReason}>
+              Bạn báo: {disputeReasonLabel(dispute.reason)}
+              {dispute.note ? ` — “${dispute.note}”` : ''}
+            </Text>
+
+            {dispute.status === 'OPEN' && (
+              <>
+                <Text style={s.disputeBannerBody}>
+                  Gửi ngày {formatDate(dispute.createdAt)}. Trong lúc chờ kết luận, hoá đơn
+                  tạm ngừng tính quá hạn — bạn chưa cần thanh toán.
+                </Text>
+                <TouchableOpacity
+                  style={s.disputeWithdraw}
+                  onPress={handleWithdraw}
+                  disabled={withdrawing}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.disputeWithdrawText}>
+                    {withdrawing ? 'Đang rút…' : 'Tôi đã xem lại — rút yêu cầu'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {dispute.status !== 'OPEN' && !!dispute.resolutionNote && (
+              <Text style={s.disputeBannerBody}>
+                Phản hồi{dispute.resolvedByName ? ` từ ${dispute.resolvedByName}` : ''}
+                {dispute.resolvedAt ? ` (${formatDate(dispute.resolvedAt)})` : ''}:{' '}
+                {dispute.resolutionNote}
+              </Text>
+            )}
+
+            {dispute.status === 'ACCEPTED' && (
+              <Text style={s.disputeBannerBody}>
+                {dispute.replacementInvoiceCode
+                  ? `Hoá đơn thay thế: ${dispute.replacementInvoiceCode}. Bạn không phải trả bản này.`
+                  : 'Hoá đơn đúng sẽ được phát hành lại — bạn không phải trả bản này.'}
+              </Text>
+            )}
+
+            {/* Bác khiếu nại thì phải nói RÕ hạn mới, đừng chỉ nói "giữ nguyên": khách
+                vừa được cho biết hạn cũ đã dừng, giờ cần biết dừng tới bao giờ. */}
+            {dispute.status === 'REJECTED' && (
+              <Text style={s.disputeBannerBody}>
+                Hạn thanh toán chạy lại, được cộng thêm {DISPUTE_REJECT_GRACE_DAYS} ngày
+                kể từ ngày có kết luận.
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* ── Overdue alert ── */}
-        {isOverdue && (
+        {isOverdue && !disputePending && (
           <View style={s.overdueAlert}>
             <Text style={s.overdueIcon}>🚨</Text>
             <View style={{ flex: 1 }}>
@@ -250,6 +383,36 @@ export const InvoiceDetailScreen: React.FC = () => {
                 last
               />
             </View>
+          </View>
+        )}
+
+        {/* ── Căn cứ tính tiền (điện/nước) ──
+            Bày bằng chứng ngay dưới con số và TRƯỚC khối "Cách tính": khách thắc mắc
+            hoá đơn điện là thắc mắc về CHỈ SỐ, không phải về phép nhân. */}
+        {isUtility && <UtilityEvidenceCard invoice={invoice} onZoom={setZoomImage} />}
+
+        {/* ── Đường khiếu nại ──
+            Đặt ngay sau bằng chứng — đúng chỗ và đúng lúc khách vừa phát hiện có gì
+            không khớp. Nhét tít cuối màn thì người thấy sai phải cuộn đi tìm, mà người
+            không thấy gì sai vẫn bị mời khiếu nại; cả hai đều dở. */}
+        {isUtility && canDispute && (
+          <View style={s.section}>
+            <TouchableOpacity
+              style={s.disputeCta}
+              onPress={() => setDisputeOpen(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={s.disputeCtaIcon}>🚩</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.disputeCtaTitle}>Hoá đơn này không đúng?</Text>
+                <Text style={s.disputeCtaSub}>
+                  {isPaid
+                    ? 'Đã thanh toán vẫn báo được — nếu sai, tiền được hoàn hoặc trừ vào kỳ sau.'
+                    : 'Gửi yêu cầu tra soát. Hoá đơn tạm ngừng tính quá hạn trong lúc chờ.'}
+                </Text>
+              </View>
+              <Text style={s.disputeCtaArrow}>›</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -393,11 +556,13 @@ export const InvoiceDetailScreen: React.FC = () => {
         {/* ── Reminder / pay CTA ── */}
         {canPay && (
           <View style={[s.section, { marginBottom: 100 }]}>
-            <View style={[s.reminderBanner, isOverdue && s.reminderBannerOverdue]}>
-              <Text style={[s.reminderText, isOverdue && { color: Colors.error }]}>
-                {isOverdue
-                  ? `🚨 Đã quá hạn ${daysOver} ngày — vui lòng thanh toán ngay`
-                  : `📅 Vui lòng thanh toán trước ${formatDate(invoice.dueDate)}`}
+            <View style={[s.reminderBanner, isOverdue && !disputePending && s.reminderBannerOverdue]}>
+              <Text style={[s.reminderText, isOverdue && !disputePending && { color: Colors.error }]}>
+                {disputePending
+                  ? '⏸ Đang tra soát — hạn thanh toán tạm dừng, bạn chưa cần trả'
+                  : isOverdue
+                    ? `🚨 Đã quá hạn ${daysOver} ngày — vui lòng thanh toán ngay`
+                    : `📅 Vui lòng thanh toán trước ${formatDate(invoice.dueDate)}`}
               </Text>
             </View>
           </View>
@@ -409,13 +574,20 @@ export const InvoiceDetailScreen: React.FC = () => {
       {/* ── Sticky pay button ── */}
       {canPay && (
         <View style={s.stickyBar}>
+          {/*
+            Đang tra soát thì KHÔNG giục: giữ nút để ai muốn trả vẫn trả được (nhiều
+            khách thích trả cho xong rồi nhận bù sau), nhưng bỏ màu đỏ và bỏ chữ "ngay".
+            Nút đỏ giục trả nằm ngay dưới dòng "bạn chưa cần trả" là tự mâu thuẫn.
+          */}
           <TouchableOpacity
-            style={[s.payBtn, isOverdue && { backgroundColor: Colors.error }]}
+            style={[s.payBtn, isOverdue && !disputePending && { backgroundColor: Colors.error }]}
             onPress={() => setPaying(true)}
             activeOpacity={0.85}
           >
             <Text style={s.payBtnText}>
-              {isOverdue ? '🚨 Thanh toán ngay' : '💳 Thanh toán ngay'}
+              {disputePending
+                ? '💳 Vẫn muốn thanh toán'
+                : isOverdue ? '🚨 Thanh toán ngay' : '💳 Thanh toán ngay'}
             </Text>
             <Text style={s.payBtnAmount}>{formatCurrency(invoice.grandTotal)}</Text>
           </TouchableOpacity>
@@ -427,6 +599,34 @@ export const InvoiceDetailScreen: React.FC = () => {
         invoice={invoice}
         onClose={() => setPaying(false)}
         onUpdate={setInvoice}
+      />
+
+      {/* Xem ảnh cỡ lớn — chỉ số trên mặt đồng hồ không tài nào đọc nổi ở cỡ thumbnail,
+          mà đọc được con số đó mới là toàn bộ mục đích của việc đính ảnh. */}
+      <Modal
+        visible={!!zoomImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setZoomImage(null)}
+      >
+        <TouchableOpacity
+          style={s.zoomOverlay}
+          activeOpacity={1}
+          onPress={() => setZoomImage(null)}
+        >
+          {!!zoomImage && (
+            <Image source={{ uri: zoomImage }} style={s.zoomImage} resizeMode="contain" />
+          )}
+          <Text style={s.zoomHint}>Chạm để đóng</Text>
+        </TouchableOpacity>
+      </Modal>
+
+      <InvoiceDisputeModal
+        visible={disputeOpen}
+        invoiceId={invoice.id}
+        invoiceType={invoice.invoiceType}
+        onClose={() => setDisputeOpen(false)}
+        onSubmitted={handleDisputeSubmitted}
       />
     </SafeAreaView>
   );
@@ -547,4 +747,44 @@ const s = StyleSheet.create({
   itemsFallback: {
     fontSize: 12, lineHeight: 18, color: Colors.textMuted, paddingVertical: 6,
   },
+
+  // ── Khiếu nại hoá đơn ──
+  disputeBanner: {
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.lg,
+    padding: Spacing.base, marginBottom: Spacing.md,
+    borderLeftWidth: 4, borderLeftColor: Colors.warning,
+  },
+  disputeBannerOk:     { backgroundColor: Colors.successLight, borderLeftColor: Colors.success },
+  disputeBannerClosed: { backgroundColor: Colors.background,   borderLeftColor: Colors.textMuted },
+  disputeBannerTitle:  { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  disputeBannerReason: {
+    fontSize: 12, color: Colors.textSecondary, marginTop: 6, lineHeight: 18, fontStyle: 'italic',
+  },
+  disputeBannerBody:   { fontSize: 12, color: Colors.textSecondary, marginTop: 6, lineHeight: 18 },
+  disputeWithdraw: {
+    alignSelf: 'flex-start', marginTop: 10,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: BorderRadius.sm, borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white,
+  },
+  disputeWithdrawText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+
+  disputeCta: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  disputeCtaIcon:  { fontSize: 20 },
+  disputeCtaTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  disputeCtaSub:   { fontSize: 12, color: Colors.textMuted, marginTop: 3, lineHeight: 17 },
+  disputeCtaArrow: { fontSize: 22, color: Colors.textMuted, fontWeight: '300' },
+
+  // ── Xem ảnh bằng chứng cỡ lớn ──
+  zoomOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  zoomImage: { width: '100%', height: '82%' },
+  zoomHint:  { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: Spacing.md },
 });

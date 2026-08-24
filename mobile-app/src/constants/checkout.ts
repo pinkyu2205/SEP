@@ -11,7 +11,8 @@
  *      │ manager chốt bảng tiền
  *   WAITING_TENANT   khách xem biên bản + bảng quyết toán
  *      │ đồng ý              └─ không đồng ý ─► DISPUTED ─► host xử lý ─► quay lại
- *   SETTLING         hoàn cọc (CK tay + chứng từ) / khách đóng thêm qua PayOS
+ *   SETTLING         host/tài chính hoàn cọc · khách đóng thêm qua PayOS nếu còn nợ
+ *                    (manager KHÔNG chuyển tiền — bỏ khỏi vai này 18/08/2026)
  *      │
  *   COMPLETED        BE terminate HĐ + giải phóng phòng/thiết bị
  *
@@ -79,7 +80,10 @@ export const CHECKOUT_STATUS_META: Record<CheckoutStatus, CheckoutStatusMeta> = 
   },
   SETTLING: {
     label: 'Đang quyết toán', short: 'Quyết toán', color: '#0D9488', bg: '#F0FDFA',
-    managerHint: 'Hoàn cọc cho khách (hoặc chờ khách đóng thêm) rồi mới hoàn tất.',
+    // Manager KHÔNG hoàn cọc — chủ nhà/tài chính chuyển, xem CheckoutSettlementScreen.
+    // Nhãn cũ ở đây ("Hoàn cọc cho khách... rồi mới hoàn tất") là sót lại từ trước
+    // 18/08/2026, sai vai và mâu thuẫn với chính màn nó dẫn tới.
+    managerHint: 'Chờ chủ nhà hoàn cọc — bấm hoàn tất để thanh lý hợp đồng.',
     tenantHint: "Đang hoàn tiền cọc cho bạn (hoặc chờ bạn đóng phần còn thiếu).",
   },
   COMPLETED: {

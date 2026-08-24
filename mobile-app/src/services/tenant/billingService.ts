@@ -1,6 +1,8 @@
 import realApiClient from '@/services/core/realApiClient';
 import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/types/bill';
 import type { PaymentBreakdown } from '@/services/tenant/tenantService';
+import type { InvoiceDispute } from '@/types/invoiceDispute';
+
 
 /**
  * Hoá đơn & thanh toán của CHÍNH tenant đang đăng nhập (nối backend Spring THẬT).
@@ -54,6 +56,23 @@ export interface TenantInvoice {
   electricityRate?: number;
   m3Used?: number;
   waterRate?: number;
+  /**
+   * ── Bằng chứng chỉ số + khiếu nại (24/08/2026) ───────────────────────────
+   * Trước đây BE chỉ trả kwhUsed/rate, tức là khách chỉ nhận CON SỐ CUỐI CÙNG mà
+   * không có gì đối chiếu — trong khi ảnh công tơ đã bắt buộc phải có mới cho phát
+   * hành hoá đơn (422 METER_PHOTO_REQUIRED). Dữ liệu vốn đã nằm sẵn trong DB.
+   */
+  prevReading?: number;
+  newReading?: number;
+  meterImageUrl?: string;
+  meterCapturedAt?: string;
+  utilityBillImageUrl?: string;
+  billingAddress?: string;
+  customerCode?: string;
+  dispute?: InvoiceDispute;
+  /** BE chưa trả (24/08/2026) — `toSharedBill` suy từ `roomNumber` khi thiếu. */
+  propertyType?: 'MULTI_ROOM' | 'WHOLE_HOUSE';
+
   // PayOS (khi tạo thanh toán)
   payosCheckoutUrl?: string;
   payosQrCode?: string;
@@ -184,6 +203,18 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   invoiceType: isOnboardCode(inv.code) ? 'deposit' : (TYPE_MAP[inv.type] ?? 'rent'),
   roomId: '',
   roomName: inv.roomNumber ? `Phòng ${inv.roomNumber}` : 'Nhà nguyên căn',
+  /**
+   * Nguyên căn hay chia phòng — quyết định NHÃN ẢNH bằng chứng trên màn hoá đơn:
+   * nguyên căn thì ảnh là tờ hoá đơn EVN gốc, chia phòng thì ảnh là mặt đồng hồ
+   * của riêng phòng đó. Gọi sai tên thì khách mở ra tưởng hệ thống đính nhầm ảnh.
+   *
+   * `SharedBill.propertyType` có sẵn từ lâu nhưng CHƯA TỪNG được điền ở luồng khách
+   * thuê (kiểm 24/08/2026), nên để nguyên là mọi hoá đơn đều rơi vào nhánh "chia
+   * phòng". Suy từ `roomNumber` — chính tín hiệu dòng `roomName` ngay trên đang
+   * dùng: hoá đơn không gắn phòng nào thì đó là hoá đơn của cả căn. Vẫn ưu tiên
+   * giá trị BE gửi nếu sau này BE trả về thật.
+   */
+  propertyType: inv.propertyType ?? (inv.roomNumber ? 'MULTI_ROOM' : 'WHOLE_HOUSE'),
   propertyId: '',
   propertyName: inv.propertyName,
   tenantId: '',
@@ -212,6 +243,15 @@ export const toSharedBill = (inv: TenantInvoice): SharedBill => ({
   m3Used: inv.m3Used,
   waterRate: inv.waterRate,
   billingPeriod: inv.billingPeriod,
+  prevReading: inv.prevReading,
+  newReading: inv.newReading,
+  meterImageUrl: inv.meterImageUrl,
+  meterCapturedAt: inv.meterCapturedAt,
+  utilityBillImageUrl: inv.utilityBillImageUrl,
+  billingAddress: inv.billingAddress,
+  customerCode: inv.customerCode,
+  dispute: inv.dispute,
+
   payosOrderCode: inv.payosOrderCode,
   payosCheckoutUrl: inv.payosCheckoutUrl,
   payosQrCode: inv.payosQrCode,

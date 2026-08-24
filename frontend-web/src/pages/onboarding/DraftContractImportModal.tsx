@@ -11,6 +11,10 @@ import { draftBlobToFile } from '@/utils/contractFile';
 import type { BulkImportError, BulkImportResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { splitErrorRows, type RowSplit } from './draftImportFilter';
+import { propertyService } from '@/services/property.service';
+import { loadPropertyOccupancy } from '@/services/propertyOccupancy.service';
+import { runImportPreflight, type PreflightReport } from './importPreflight';
+import { ImportCapacityPanel } from './ImportCapacityPanel';
 
 const TEMPLATE_URL = '/templates/SLMS2026_import_tenant_draft_contracts.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -46,6 +50,17 @@ export const DraftContractImportModal = ({
   const [confirmOpen, setConfirmOpen] = useState(false);
   /** Phần bị để lại ngoài lần import này — hiện lên cho admin biết, không phải để chặn. */
   const [dropped, setDropped] = useState<RowSplit | null>(null);
+
+  /**
+   * Soát sức chứa NGAY KHI CHỌN FILE, chạy hoàn toàn trên trình duyệt.
+   *
+   * Vì sao không đợi dry-run: dry-run trả lời "dòng nào sai", còn thứ admin thiếu là
+   * "căn nhà này có chứa nổi ngần này khách không". Một file 6 dòng cho căn còn 2 phòng
+   * thì kể cả mọi dòng đều hợp lệ về mặt dữ liệu, vẫn có 4 người không có chỗ — và
+   * không lỗi từng-dòng nào nói ra điều đó. Xem đầu `importPreflight.ts`.
+   */
+  const [preflight, setPreflight] = useState<PreflightReport | null>(null);
+  const [preflighting, setPreflighting] = useState(false);
 
   // Tự động render + upload PDF cho từng HĐ vừa import (hướng A — giữ nguyên kiến
   // trúc "BE chỉ render, FE tự upload Cloudinary" đã dùng cho luồng "Sửa" 1 HĐ,
@@ -102,16 +117,51 @@ export const DraftContractImportModal = ({
     onImported?.();
   };
 
+  /**
+   * Đọc file bằng SheetJS rồi đối chiếu với số phòng thực tế của từng nhà.
+   *
+   * Hai lượt gọi `runImportPreflight` là cố ý: lượt đầu chỉ để biết file nhắc tới NHỮNG
+   * NHÀ NÀO, lượt sau mới soát thật với sức chứa đã nạp. Nạp phòng của toàn bộ nhà trong
+   * hệ thống chỉ để soát một file vài dòng thì quá phí.
+   *
+   * Hỏng ở bất kỳ bước nào cũng chỉ tắt bảng soát, KHÔNG chặn import: đây là lớp cảnh báo
+   * sớm, dry-run của BE mới là nơi phán quyết.
+   */
+  const runPreflight = async (f: File) => {
+    setPreflighting(true);
+    setPreflight(null);
+    try {
+      const [propPage, drafts] = await Promise.all([
+        propertyService.getProperties(0, 200),
+        tenantService.listDrafts().catch(() => []),
+      ]);
+      const properties = propPage.content ?? [];
+
+      const scan = await runImportPreflight(f, properties);
+      if (scan.parseError) { setPreflight(scan); return; }
+
+      const involved = properties.filter((p) => scan.propertyIds.includes(p.id));
+      const occupancy = await loadPropertyOccupancy(involved, drafts);
+      setPreflight(await runImportPreflight(f, properties, occupancy));
+    } catch {
+      setPreflight(null);
+    } finally {
+      setPreflighting(false);
+    }
+  };
+
   const pickFile = (f: File | null | undefined) => {
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
     setFile(f); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
     setDropped(null);
+    void runPreflight(f);
   };
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
     setDropped(null);
+    setPreflight(null); setPreflighting(false);
     setPrintPhase('idle'); setPrintDone(0); setPrintTotal(0); setPrintFailed([]);
     if (inputRef.current) inputRef.current.value = '';
   };
@@ -171,6 +221,8 @@ export const DraftContractImportModal = ({
   };
 
   const busy = phase === 'validating' || phase === 'importing';
+  /** Nhà không đủ phòng cho số khách trong file — nhắc lại lúc xác nhận import. */
+  const overCapacityGroups = preflight?.groups.filter((g) => g.overCapacity > 0) ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 sm:p-8">
@@ -229,6 +281,11 @@ export const DraftContractImportModal = ({
                 </button>
               )}
             </div>
+          )}
+
+          {/* Soát sức chứa — hiện trước mọi kết quả từ BE vì nó có ngay, không cần bấm gì. */}
+          {!!file && phase !== 'done' && (
+            <ImportCapacityPanel loading={preflighting} report={preflight} />
           )}
 
           {dropped && (dropped.waiting.length > 0 || dropped.broken.length > 0) && (
@@ -420,8 +477,25 @@ export const DraftContractImportModal = ({
           tone="primary"
           title="Xác nhận import hợp đồng nháp?"
           message={
-            <>Hệ thống sẽ tạo <b className="text-slate-700">{result?.contractsProcessed ?? 0} hợp đồng nháp</b> từ
-            file <b className="text-slate-700">{file?.name}</b>. Quản lý phụ trách của từng nhà sẽ nhận thông báo đón khách.</>
+            <>
+              <p>
+                Hệ thống sẽ tạo <b className="text-slate-700">{result?.contractsProcessed ?? 0} hợp đồng nháp</b> từ
+                file <b className="text-slate-700">{file?.name}</b>. Quản lý phụ trách của từng nhà sẽ nhận thông báo đón khách.
+              </p>
+              {/*
+                Nhắc lại cảnh báo sức chứa NGAY TRONG hộp xác nhận.
+                Bảng soát nằm phía trên đã cuộn khuất từ lâu khi admin tới được nút này, mà
+                đây là điểm không quay lại được: import xong là quản lý đã nhận thông báo
+                đi đón khách vào những căn nhà không đủ phòng.
+              */}
+              {overCapacityGroups.length > 0 && (
+                <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold leading-relaxed text-rose-800">
+                  ⚠ {overCapacityGroups.map((g) => `${g.label} (thừa ${g.overCapacity} khách)`).join(' · ')}
+                  {' '}— những căn này không đủ phòng cho số khách trong file. Nên hỏi lại chủ nhà
+                  trước khi import.
+                </p>
+              )}
+            </>
           }
           confirmText="Import"
           loading={phase === 'importing'}

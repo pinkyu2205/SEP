@@ -83,7 +83,11 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
   AVAILABLE:   { label: 'Phòng trống',   cls: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500', border: 'border-emerald-200 hover:border-emerald-400' },
   RENTED:      { label: 'Đang thuê',     cls: 'bg-blue-100 text-blue-700',       dot: 'bg-blue-500',    border: 'border-blue-200 hover:border-blue-400' },
   MAINTENANCE: { label: 'Bảo trì',       cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500',   border: 'border-amber-200 hover:border-amber-400' },
-  DRAFT:       { label: 'Nháp',          cls: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400',   border: 'border-slate-200 hover:border-slate-300' },
+  // "Nháp" đọc lên như bản nháp có thể bỏ, trong khi thực chất phòng đã tạo xong và chỉ
+  // còn chờ bật cho thuê — cùng lý do đã đổi nhãn DRAFT của hợp đồng thành "Chờ đón khách".
+  // Gọi đúng tên thì host biết mình phải làm gì; gọi là "Nháp" thì không ai đụng tới,
+  // nhà đứng ở trạng thái hoạt động mà admin không xếp được khách nào vào.
+  DRAFT:       { label: 'Chưa mở cho thuê', cls: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400',   border: 'border-amber-200 hover:border-amber-300' },
 };
 
 const propertyStatusLabel: Record<string, { label: string; cls: string }> = {
