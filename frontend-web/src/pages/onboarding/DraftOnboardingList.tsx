@@ -16,6 +16,9 @@ import { openContractBlob } from '../../utils/contractFile';
 import { StatCard, Pagination } from '../admin/shared';
 import { DraftContractFormModal } from './DraftContractFormModal';
 import { DraftContractImportModal } from './DraftContractImportModal';
+import { buildOccupancyMap, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
+import { PropertyCapacityPanel, type CapacityRow } from './PropertyCapacityPanel';
+
 
 // Che bớt SĐT khách khi hiện danh sách (tránh lộ lọt PII lúc lướt/chụp màn hình) —
 // giữ 3 số đầu + 2 số cuối, admin bấm icon mắt để xem đầy đủ khi cần liên hệ.
@@ -99,6 +102,22 @@ export const DraftOnboardingList = () => {
   const [fileFilter, setFileFilter] = useState<FileFilter>('all');
   const [sortBy, setSortBy] = useState<SortKey>('created_desc');
 
+  /**
+   * ─── Sức chứa: lấy thẳng từ hồ sơ nhà, không gọi thêm request ─────────────
+   *
+   * Trang này vốn chỉ trả lời "có bao nhiêu hồ sơ đang chờ đón". Câu "nhà đó còn mấy
+   * phòng trống" không có chỗ nào trên màn hình, nên admin soạn hợp đồng mà không biết
+   * căn nhà còn chỗ hay không.
+   *
+   * Bản đầu (24/08 sáng) phải hỏi `/properties/{id}/rooms` từng nhà một, nên có cả bộ
+   * cache + nạp theo trang + chặn gọi lại. BE nay trả sẵn số phòng trong chính
+   * `PropertyResponse` (`PropertyOccupancyAssembler`), nên bỏ được toàn bộ khối đó —
+   * chỉ còn một phép dựng đồng bộ từ dữ liệu đã có trong tay.
+   */
+  const [occupancy, setOccupancy] = useState<Map<number, PropertyOccupancy>>(new Map());
+
+
+
   const [revealedPhones, setRevealedPhones] = useState<Set<number>>(new Set());
   const togglePhoneReveal = (id: number) =>
     setRevealedPhones((prev) => {
@@ -121,17 +140,21 @@ export const DraftOnboardingList = () => {
       // Nạp thông tin nhà (tên, quản lý vận hành) cho các property xuất hiện
       // trong danh sách — dùng để nhóm + lọc + hiển thị.
       const uniquePropertyIds = [...new Set(safeList.map((d) => d.propertyId).filter(Boolean))];
-      const missingIds = uniquePropertyIds.filter((id) => !properties[id]);
+      // Gom vào biến cục bộ thay vì đọc lại state: state trong closure này là bản CŨ,
+      // mà phần nạp sức chứa ngay bên dưới cần danh sách nhà ĐẦY ĐỦ vừa lấy về.
+      const known: Record<number, PropertyResponse> = { ...properties };
+      const missingIds = uniquePropertyIds.filter((id) => !known[id]);
       if (missingIds.length > 0) {
         const fetched = await Promise.all(
           missingIds.map((id) => propertyService.getPropertyById(id).catch(() => null)),
         );
-        setProperties((prev) => {
-          const next = { ...prev };
-          fetched.forEach((p) => { if (p) next[p.id] = p; });
-          return next;
-        });
+        fetched.forEach((p) => { if (p) known[p.id] = p; });
+        setProperties(known);
       }
+
+      // Sức chứa dựng thẳng từ hồ sơ nhà vừa lấy về — số "đã có hồ sơ chờ đón" phụ thuộc
+      // danh sách nháp, nên phải dựng lại mỗi lần nạp lại chứ không giữ bản cũ.
+      setOccupancy(buildOccupancyMap(Object.values(known), safeList));
     } finally {
       setLoading(false);
     }
@@ -254,6 +277,52 @@ export const DraftOnboardingList = () => {
     [search, propertyFilter, managerFilter, scheduleFilter, fileFilter, sortBy]);
   const pageStart = (page - 1) * ROWS_PER_PAGE;
   const pageItems = filteredDrafts.slice(pageStart, pageStart + ROWS_PER_PAGE);
+
+  // ─── Khối "Chỗ trống của các nhà ở trang này" ─────────────────────────────
+  //
+  // Phạm vi CỐ TÌNH hẹp: chỉ các nhà có hồ sơ trong trang hiện tại.
+  //
+  // Bản trước có thêm ô tìm kiếm để xem nhà ngoài trang. Bỏ rồi — tìm kiếm chỉ dùng
+  // được khi đã nhớ tên nhà, mà câu hỏi thật ("còn nhà nào trống") phải DUYỆT cả danh
+  // sách mới trả lời được. Việc duyệt đã có màn "Tình trạng nhà & phòng" lo, nơi mỗi
+  // dòng là một NHÀ. Trang này giữ đúng đơn vị của nó: mỗi dòng là một HỢP ĐỒNG.
+  //
+  // Bám theo trang cũng là thứ giữ cho số request luôn hữu hạn (≤ 20 dòng/trang).
+
+  /** Số hồ sơ đang chờ đón của từng nhà — dùng cho thẻ nguyên căn. */
+  const draftCountByProperty = useMemo(() => {
+    const m = new Map<number, number>();
+    drafts.forEach((d) => m.set(d.propertyId, (m.get(d.propertyId) ?? 0) + 1));
+    return m;
+  }, [drafts]);
+
+  /**
+   * Nhà của TRANG hồ sơ đang xem — nguồn mặc định của khối sức chứa.
+   *
+   * Bám theo trang chứ không theo toàn bộ danh sách đã lọc: đó là thứ giữ cho số request
+   * luôn hữu hạn (≤ 20 dòng/trang), và cũng khớp với thứ admin đang nhìn.
+   */
+  const pagePropertyIds = useMemo(
+    () => [...new Set(pageItems.map((d) => d.propertyId))].sort((a, b) => a - b),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredDrafts, page],
+  );
+
+  /**
+   * Khoá phụ thuộc là CHUỖI id, không phải mảng: mảng dựng lại mỗi lần render sẽ làm
+   * effect chạy vô tận.
+   */
+  const capacityRows = useMemo<CapacityRow[]>(
+    () => pagePropertyIds
+      .map((id) => ({ occ: occupancy.get(id), waiting: draftCountByProperty.get(id) ?? 0 }))
+      .filter((r): r is CapacityRow => !!r.occ?.loaded)
+      // Việc phải xử lý lên trước: khai báo lệch thực tế, rồi tới nhà sắp hết chỗ.
+      .sort((a, b) => {
+        if (a.occ.roomCountMismatch !== b.occ.roomCountMismatch) return a.occ.roomCountMismatch ? -1 : 1;
+        return a.occ.available - b.occ.available;
+      }),
+    [pagePropertyIds, occupancy, draftCountByProperty],
+  );
 
   const clearFilters = () => {
     setSearch(''); setPropertyFilter('all'); setManagerFilter('all');
@@ -387,6 +456,19 @@ export const DraftOnboardingList = () => {
           </div>
         </div>
       </div>
+
+      {/*
+        Bảng hồ sơ bên dưới trả lời "đang chờ đón bao nhiêu khách". Khối này trả lời câu
+        còn lại mà trước đây không có chỗ nào nói: "mấy căn này còn chỗ không". Thiếu nó
+        thì admin nhận thêm khách cho một căn đã kín mà không biết, tới lúc mở form soạn
+        hợp đồng mới phát hiện.
+      */}
+      {!loading && (
+        <PropertyCapacityPanel
+          rows={capacityRows}
+          loading={false}
+        />
+      )}
 
       {/* Danh sách — nhóm theo nhà */}
       {loading ? (

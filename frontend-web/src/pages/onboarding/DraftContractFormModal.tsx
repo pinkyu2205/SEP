@@ -16,6 +16,11 @@ import { uploadToCloudinary } from '../../services/upload.service';
 import { extractTenantContractData } from '../../utils/pdfExtract';
 import { draftBlobToFile, openContractBlob } from '../../utils/contractFile';
 import { todayIso } from '@/utils/serverTime';
+import { buildOccupancyMap, occupancyChip, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
+import {
+  CapacityStat, RoomSquares, CapacityBreakdown,
+  RoomCountMismatchNote, RoomsNotOpenedNote, capacityTone, TONE_CARD,
+} from './CapacityBar';
 
 interface Props {
   onSuccess: () => void;
@@ -155,7 +160,8 @@ const suggestPropertyByAddress = (
 const ROOM_STATUS_LABEL: Record<string, string> = {
   RENTED: 'đang có khách',
   MAINTENANCE: 'đang bảo trì',
-  DRAFT: 'chưa định giá',
+  // Phòng đã tạo nhưng chưa ai bật cho thuê — KHÔNG phải chưa có giá.
+  DRAFT: 'chưa mở cho thuê',
   DISABLED: 'ngưng khai thác',
   // Không phải status BE — key nội bộ đánh dấu phòng AVAILABLE nhưng đã có HĐ nháp chờ đón khách.
   HAS_DRAFT: 'đã có hợp đồng nháp chờ đón khách',
@@ -300,6 +306,19 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const [equipmentLoading, setEquipmentLoading] = useState(false);
   const [equipmentLoaded, setEquipmentLoaded] = useState(false);
 
+  /**
+   * Sức chứa từng nhà — nạp NGẦM ngay khi mở form, không chặn gì cả.
+   *
+   * Trước 24/08/2026 ô "Bất động sản" chỉ hiện tên + địa chỉ, nên admin chọn nhà mà
+   * hoàn toàn không biết căn đó còn chỗ hay đã kín; phải chọn xong, đợi phòng tải về,
+   * mở ô "Phòng" ra mới phát hiện hết chỗ rồi quay lại chọn căn khác.
+   *
+   * Nạp theo lô 6 nhà một lượt (xem `loadPropertyOccupancy`). Chưa xong thì `occupancyChip`
+   * trả chuỗi rỗng và ô chọn trông y như cũ — không có trạng thái "đang tải" nào chắn
+   * đường người dùng.
+   */
+  const [occupancy, setOccupancy] = useState<Map<number, PropertyOccupancy>>(new Map());
+
   useEffect(() => {
     (async () => {
       try {
@@ -315,17 +334,54 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           else draftPropertyIds.add(d.propertyId);
         });
         setDraftRoomIds(roomIds);
-        // Chỉ cho chọn nhà ACTIVE (không phải đang bảo trì/đã cho thuê nguyên căn/chưa
-        // hoàn thiện onboarding...) — chặn từ gốc, không phải lọc UI đơn thuần vì BE
-        // cũng ràng buộc tương tự khi tạo hợp đồng. Nhà nguyên căn đã có HĐ nháp cũng ẩn.
-        setProperties(propPage.content.filter(
-          (p) => p.status === 'ACTIVE' && !(p.wholeHouse === true && draftPropertyIds.has(p.id)),
-        ));
+        /*
+          `properties` = MỌI nhà đang khai thác, KHÔNG lọc thêm gì ở đây.
+          Việc "căn nào chọn được" để một mình `visibleProperties` lo.
+
+          Trước 24/08/2026 chỗ này có thêm một tầng lọc riêng — bỏ nhà nguyên căn đã có
+          hồ sơ nháp. Hai tầng lọc nối tiếp làm con số "đã ẩn N nhà" nói dối: nó chỉ đếm
+          phần tầng thứ hai giấu, còn phần tầng này giấu thì im lặng. Thực tế 11 nhà,
+          không căn nào chọn được, mà dòng chú thích ghi "ẩn 4 nhà".
+
+          Gộp về một chỗ cũng bỏ được trùng lặp: `capacityTone` đã coi nguyên căn có hồ
+          sơ nháp là `full` rồi (`wholeHouseTaken`).
+        */
+        const activeProperties = propPage.content.filter((p) => p.status === 'ACTIVE');
+        setProperties(activeProperties);
+        // Đồng bộ, không request nào — BE trả sẵn số phòng trong `PropertyResponse`.
+        setOccupancy(buildOccupancyMap(activeProperties, drafts));
       } catch {
         /* interceptor đã toast */
       }
     })();
   }, []);
+
+  /**
+   * Nhà thật sự chọn được — ẩn bớt nhà không còn nhận khách.
+   *
+   * Trước 24/08/2026 ô này đổ ra MỌI nhà ACTIVE, kể cả những căn đã kín khách hoặc đã
+   * có đủ hồ sơ nháp giữ chỗ từ khâu import. Admin chọn vào, đợi phòng tải xong, rồi
+   * mới nhận dòng chữ "nhà này không còn phòng trống" — mất công cho một lựa chọn đằng
+   * nào cũng không dùng được.
+   *
+   * Hai cách xử lý cho hai nguyên nhân khác nhau:
+   *   • `full`  — kín vì đã có khách / có hồ sơ chờ đón: ẨN HẲN. Không còn việc gì để
+   *     làm với căn đó ở màn này.
+   *   • `setup` — chưa mở phòng cho thuê / chưa tạo phòng: VẪN HIỆN nhưng khoá, kèm lý
+   *     do. Ẩn đi thì căn đó biến mất khỏi mọi tầm mắt và không ai biết là nó đang cần
+   *     kích hoạt phòng — một lỗi phía BE (xem `RoomsNotOpenedNote`).
+   *
+   * Nhà chưa nạp xong sức chứa thì cứ hiện — thà thừa một lựa chọn còn hơn giấu mất một
+   * căn đang trống chỉ vì số liệu về chậm.
+   */
+  const visibleProperties = useMemo(
+    () => properties.filter((p) => {
+      const o = occupancy.get(p.id);
+      return !o?.loaded || capacityTone(o) !== 'full';
+    }),
+    [properties, occupancy],
+  );
+  const hiddenFullCount = properties.length - visibleProperties.length;
 
   const selectedProperty = useMemo(
     () => properties.find((p) => String(p.id) === form.propertyId),
@@ -452,18 +508,15 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  /**
+   * Chỉ ghi `roomId`. Giá thuê do effect đồng bộ với `approvedRent` lo (xem bên dưới).
+   *
+   * Trước 24/08/2026 chính hàm này tự điền `rentAmount` từ `room.price`. Hệ quả: NHÀ
+   * NGUYÊN CĂN không có ô chọn phòng nên hàm không bao giờ chạy, và ô giá thuê đứng
+   * nguyên ở 0đ dù host đã duyệt 37.500.000đ — cọc cũng theo đó mà ra 0.
+   */
   const handleRoomChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const roomId = e.target.value;
-    const room = rooms.find((r) => String(r.id) === roomId);
-    setForm((prev) => {
-      const rentAmount = room?.price != null ? String(room.price) : prev.rentAmount;
-      return {
-        ...prev,
-        roomId,
-        rentAmount,
-        deposit: calcDeposit(rentAmount, prev.depositMonths) || prev.deposit,
-      };
-    });
+    setForm((prev) => ({ ...prev, roomId: e.target.value }));
   };
 
   // Tra cứu SĐT để cảnh báo role không hợp lệ (ADMIN/MANAGER/HOST).
@@ -613,6 +666,26 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
 
   /** Đã tra được giá niêm yết → ô giá thuê chỉ đọc, lấy thẳng số đó. */
   const rentLocked = approvedRent != null && approvedRent > 0;
+
+  /**
+   * Đổ giá niêm yết vào ô giá thuê — NGUỒN DUY NHẤT, cho cả nguyên căn lẫn chia phòng.
+   *
+   * Trước đây việc này nằm trong `handleRoomChange`, tức là chỉ chạy khi CHỌN PHÒNG.
+   * Nhà nguyên căn không có ô phòng nên ô giá đứng ở 0đ trong khi ô chú thích vẫn nói
+   * "Lấy theo giá niêm yết Host đã duyệt" — và vì ô này `readOnly` khi đã tra được giá,
+   * admin cũng không gõ tay chữa được. Cọc tính theo giá nên cũng ra 0 luôn.
+   *
+   * Chỉ ghi khi tra được giá > 0: `approvedRent` null nghĩa là chưa chọn xong nhà/phòng,
+   * lúc đó ô mở cho gõ tay và có thể đang giữ số đọc từ file PDF upload — đừng xoá.
+   * Sửa HĐ cũ thì bỏ qua hẳn, giá đã ký không được tự đổi theo giá niêm yết hiện tại.
+   */
+  useEffect(() => {
+    if (isEditMode || approvedRent == null || approvedRent <= 0) return;
+    const next = String(approvedRent);
+    setForm((prev) => (prev.rentAmount === next
+      ? prev
+      : { ...prev, rentAmount: next, deposit: calcDeposit(next, prev.depositMonths) }));
+  }, [approvedRent, isEditMode]);
 
   // Có field định danh nào thực sự bị đổi so với dữ liệu gốc không — chỉ khi
   // TRUE mới bắt buộc phải tick xác nhận trước khi lưu (sửa các field khác của
@@ -1000,13 +1073,85 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 Bất động sản <span className="text-rose-500">*</span>
               </label>
               <select name="propertyId" value={form.propertyId} onChange={handleChange} className="input-field" required>
-                <option value="">Chọn nhà đang cho thuê...</option>
-                {properties.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.propertyName} — {p.shortAddress || p.fullAddress} {p.wholeHouse ? '(nguyên căn)' : ''}
-                  </option>
-                ))}
+                {/* "Chọn nhà đang cho thuê" đọc ngược nghĩa — nghe như đang tìm nhà ĐÃ
+                    có khách, trong khi đây là chỗ tìm nhà CÒN CHỖ. */}
+                <option value="">Chọn nhà còn chỗ...</option>
+                {visibleProperties.map((p) => {
+                  // Nhét luôn "còn 2/5 phòng" vào nhãn: quyết định chọn nhà nào diễn ra
+                  // NGAY TẠI ĐÂY, thông tin nằm ở dòng chú thích bên dưới là đã muộn.
+                  const occ = occupancy.get(p.id);
+                  const chip = occupancyChip(occ);
+                  // Nhà chưa mở phòng thì có hiện cũng không chọn được — khoá lại kèm lý
+                  // do, thay vì để admin bấm vào rồi mới thấy ô "Phòng" trống trơn.
+                  const blocked = !!occ?.loaded && capacityTone(occ) === 'setup';
+                  return (
+                    <option key={p.id} value={p.id} disabled={blocked}>
+                      {p.propertyName} — {p.shortAddress || p.fullAddress}
+                      {p.wholeHouse ? ' (nguyên căn)' : ''}
+                      {chip ? ` · ${chip}` : ''}
+                    </option>
+                  );
+                })}
               </select>
+
+              {/* Nói rõ đã giấu bớt. Im lặng thì admin tìm một căn quen thuộc, không
+                  thấy, tưởng nhà bị xoá khỏi hệ thống. */}
+              {/*
+                Dùng đúng chữ "hết chỗ" như nhãn trên thẻ sức chứa và chip lọc — cùng một
+                tình trạng thì phải cùng một tên, đừng chỗ này "kín khách" chỗ kia "hết chỗ".
+
+                Tách riêng trường hợp ẩn HẾT: lúc đó ô chọn rỗng trơn, mà một dòng "đã ẩn
+                N nhà" thì không nói cho admin biết là họ đang bế tắc và phải làm gì.
+              */}
+              {visibleProperties.length === 0 && properties.length > 0 ? (
+                <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
+                  Cả {properties.length} nhà đang khai thác đều hết chỗ — không còn phòng nào
+                  nhận thêm khách. Chờ có khách trả phòng, hoặc tiếp nhận thêm nhà mới.
+                </p>
+              ) : hiddenFullCount > 0 && (
+                <p className="mt-1 text-xs text-slate-400">
+                  Chỉ hiện nhà còn chỗ — {hiddenFullCount}/{properties.length} nhà hết chỗ đã được ẩn.
+                </p>
+              )}
+
+              {/*
+                Bảng sức chứa của căn đang chọn.
+                Tách khỏi nhãn `<option>` vì ở đây mới đủ chỗ nói VÌ SAO những phòng kia
+                không dùng được — "hết chỗ" mà không nói lý do thì admin tưởng hệ thống lỗi.
+              */}
+              {selectedProperty && (() => {
+                const occ = occupancy.get(selectedProperty.id);
+                if (!occ?.loaded) return null;
+                return (
+                  <div className={`mt-2 rounded-lg border px-3 py-2.5 ${TONE_CARD[capacityTone(occ)]}`}>
+                    {/* Cùng bố cục với khối "Chỗ trống theo nhà" ở trang Hồ sơ đón khách —
+                        cùng một câu hỏi thì không nên mỗi màn một kiểu trình bày. */}
+                    <div className="flex items-start gap-3">
+                      <CapacityStat occ={occ} />
+                      <div className="min-w-0 flex-1">
+                        <RoomSquares occ={occ} />
+                        <CapacityBreakdown occ={occ} />
+                        {!!occ.availableRoomNumbers.length && (
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            Nhận được khách: {occ.availableRoomNumbers.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/*
+                      Hồ sơ nhà khai N phòng nhưng thực tế tạo M phòng. Nói ở đây vì đây là
+                      lúc admin đang chuẩn bị xếp khách vào — biết trước thì đi hỏi lại chủ
+                      nhà, thay vì soạn xong hợp đồng rồi mới phát hiện không có phòng đó.
+                    */}
+                    <RoomCountMismatchNote occ={occ} />
+                    {/* Không kèm nút mở phòng ở đây: form này đang dở việc soạn hợp đồng,
+                        đổi trạng thái phòng giữa chừng là trộn hai việc vào nhau. Chỉ nói
+                        vì sao ô "Phòng" không có gì để chọn. */}
+                    <RoomsNotOpenedNote occ={occ} />
+                  </div>
+                );
+              })()}
               {/* Quản lý phụ trách nhà = operationManagerId có sẵn — tự động gán khi
                   tạo thành công, không cho chọn tay (nhà đã hoạt động thì đã có manager). */}
               {selectedProperty && (
@@ -1035,11 +1180,19 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                   disabled={!selectedProperty || loadingRooms}
                 >
                   <option value="">{loadingRooms ? 'Đang tải phòng...' : 'Chọn phòng trống...'}</option>
-                  {rooms.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.roomNumber}
-                    </option>
-                  ))}
+                  {rooms.map((r) => {
+                    // Kèm giá + diện tích: chọn phòng xong là giá thuê tự điền và KHOÁ
+                    // lại (`rentLocked`), nên nếu chỉ hiện mỗi số phòng thì admin chọn
+                    // mù rồi mới thấy con số mình vừa chốt cho khách.
+                    const price = r.appliedPrice ?? r.listedPrice ?? r.price;
+                    return (
+                      <option key={r.id} value={r.id}>
+                        {r.roomNumber}
+                        {r.area ? ` · ${r.area}m²` : ''}
+                        {price ? ` · ${formatVndDisplay(String(price))}đ` : ''}
+                      </option>
+                    );
+                  })}
                 </select>
                 {selectedProperty && !loadingRooms && rooms.length === 0 && (
                   <p className="mt-1 text-xs text-rose-500">
