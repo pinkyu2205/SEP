@@ -73,8 +73,6 @@ export interface ZoneRequest {
   description?: string | null;
   level: number; // 1 = Tỉnh/TP, 2 = Quận/Huyện
   parentId?: string | null; // UUID
-  latitude?: number | null;
-  longitude?: number | null; // phải cùng null hoặc cùng có với latitude
 }
 
 export interface ZoneResponse {
@@ -85,12 +83,10 @@ export interface ZoneResponse {
   parentId?: string;
   parentName?: string;
   fullName: string;
-  latitude?: number | null;
-  longitude?: number | null;
 }
 
 // =============================================================================
-// ZONE — Import Excel + Geocode tâm khu vực (Goong)
+// ZONE — Import Excel
 // =============================================================================
 
 export interface ZoneImportResult {
@@ -109,39 +105,8 @@ export interface ZoneBulkImportResponse {
   districtsCreated: number;
   districtsSkipped: number;
   districtsUpdated: number;
-  districtsWithCoords: number;
-  districtsMissingCoords: number;
   results: ZoneImportResult[];
   errors: [];
-}
-
-export interface ZoneGeocodeCenterResponse {
-  id: string;
-  name: string;
-  parentName: string | null;
-  fullName: string;
-  level: 2;
-  latitude: number;
-  longitude: number;
-  geocodeQuery: string;
-  geocodeSource: 'GOONG';
-}
-
-export interface ZoneGeocodeResultItem {
-  zoneId: string;
-  zoneName: string;
-  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
-  latitude: number | null;
-  longitude: number | null;
-  message: string | null;
-}
-
-export interface ZoneGeocodeBatchResponse {
-  requested: number;
-  succeeded: number;
-  failed: number;
-  skipped: number;
-  results: ZoneGeocodeResultItem[];
 }
 
 // =============================================================================
@@ -213,7 +178,15 @@ export interface PropertyResponse {
   roomsPerFloor?: number;
   totalRooms: number;
   status: string;        // PropertyStatus
+  /** @deprecated Dùng `listedPrice` / `appliedPrice`. Giữ cho code cũ. */
   price?: number;
+  /** Nhà NGUYÊN CĂN: giá niêm yết Host duyệt. Nhà chia phòng thì giá nằm ở từng phòng. */
+  listedPrice?: number;
+  /** Nhà NGUYÊN CĂN: giá hợp đồng đang áp dụng. */
+  appliedPrice?: number;
+  /** true = đang có khách → khoá giá cho tới khi khách rời đi. */
+  priceLocked?: boolean;
+  currentTenant?: string | null;
   createdBy?: number;
   operationManagerId?: string;
   operationManagerName?: string;
@@ -497,7 +470,18 @@ export interface RoomResponse {
   propertyId: number;
   propertyName: string;
   roomNumber: string;
+  /** Tầng — BE có trả nhưng trước đây FE khai thiếu nên không hiện được. */
+  floor?: number | null;
+  /** @deprecated Giữ cho code cũ — dùng `listedPrice` / `appliedPrice` thay thế. */
   price?: number;
+  /** Giá niêm yết: giá Host duyệt, mốc quay về khi khách trả phòng. */
+  listedPrice?: number;
+  /** Giá đang áp dụng: giá hợp đồng hiện hành. Hoá đơn/doanh thu chạy theo số này. */
+  appliedPrice?: number;
+  /** true = đang có khách thuê → KHÔNG sửa được giá cho tới khi khách rời đi. */
+  priceLocked?: boolean;
+  /** Tên khách đang thuê (null khi trống). */
+  currentTenant?: string | null;
   deposit?: number;
   area: number;
   maxOccupants?: number;
@@ -507,6 +491,27 @@ export interface RoomResponse {
   status: RoomStatus;
   electricMeterCode?: string;
   waterMeterCode?: string;
+}
+
+/**
+ * Một dòng lịch sử đổi giá — `GET /properties/{id}/price-history`.
+ * BE trả sẵn `changeTypeLabel` tiếng Việt nên FE không phải tự map.
+ */
+export interface PriceHistoryItem {
+  id: number;
+  propertyId: number;
+  roomId?: number | null;
+  roomNumber?: string | null;
+  /** HOP_DONG · DIEU_KHOAN_HD · TU_DONG · HOST_DOI */
+  changeType: string;
+  changeTypeLabel: string;
+  oldPrice: number;
+  newPrice: number;
+  reason?: string | null;
+  contractId?: number | null;
+  changedBy: string;
+  changedByName?: string;
+  changedAt: string;
 }
 
 // =============================================================================
@@ -710,10 +715,21 @@ export interface HostConfirmResponse {
 // USER
 // =============================================================================
 
+/**
+ * Hồ sơ tài khoản. Verify trực tiếp với BE 15/08/2026 (`GET /api/v1/user`):
+ * BE CÓ trả `fullName` / `cccd` / `avatarUrl` / `createAt` / `isFirstLogin` — trước đây FE
+ * khai thiếu nên màn Người dùng phải tra tên vòng qua /user/managers + hợp đồng. Đã bỏ.
+ * Vẫn để optional vì VPS có thể còn chạy bản BE cũ chưa trả các field này.
+ */
 export interface UserResponse {
   id: string; // UUID
   username: string;
+  fullName?: string | null;
   phoneNumber?: string;
+  cccd?: string | null;
+  avatarUrl?: string | null;
+  createAt?: string | null;
+  isFirstLogin?: boolean | null;
   role: string;
   status: UserStatus;
 }
@@ -966,6 +982,29 @@ export interface TenantContractResponse {
   terminatedAt?: string;
   terminationReason?: string;
   terminationType?: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'NO_SHOW' | 'OTHER';
+
+  // --- Biên bản bàn giao lúc manager đón khách ---
+  // BE lưu đủ trong TenantContractResponse (không phải endpoint riêng): chỉ số công tơ
+  // chốt lúc nhận phòng, ảnh chụp mặt đồng hồ, và ảnh hiện trạng phòng.
+  // Ảnh nằm trên Cloudinary, mở thẳng URL được.
+  initialElectricReading?: number;
+  initialWaterReading?: number;
+  electricMeterImageUrl?: string;
+  waterMeterImageUrl?: string;
+  electricMeterCapturedAt?: string;
+  waterMeterCapturedAt?: string;
+  /** Ảnh hiện trạng phòng — bản có kèm thời điểm chụp. */
+  roomConditionPhotos?: { url: string; capturedAt?: string }[];
+  /** Bản chỉ có URL (đời cũ) — dùng khi `roomConditionPhotos` trống. */
+  roomConditionUrls?: string[];
+  roomConditionNote?: string;
+
+  /** NONE | PERCENT | SCHEDULE — điều khoản tăng giá theo năm. */
+  rentEscalationType?: string;
+  /** Giá niêm yết lúc host duyệt (đối chiếu với `rentAmount` đã chốt với khách). */
+  listedPrice?: number;
+  notes?: string;
+  signedAt?: string;
 }
 
 // =============================================================================

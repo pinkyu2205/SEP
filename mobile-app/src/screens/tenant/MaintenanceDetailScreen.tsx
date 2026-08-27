@@ -20,6 +20,7 @@ import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
+import { nowIso } from '@/utils/serverTime';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
@@ -30,7 +31,6 @@ const STATUS_META: Record<string, { label: string; color: string; emoji: string 
     ]),
   );
 
-const nowIso = () => new Date().toISOString();
 const mkTenantEntry = (status: MaintenanceStatus, note: string): MaintenanceTimeline =>
   ({ status, note, updatedBy: 'Khách thuê', updatedAt: nowIso() });
 

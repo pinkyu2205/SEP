@@ -69,6 +69,14 @@ export interface OpRoom {
   status: OpStatus;
   tenantName?: string;
   tenantPhone?: string;
+  // HĐ đang hiệu lực của phòng — `getRooms` vốn đã tải danh sách hợp đồng để lấy tên
+  // khách, chỉ là trước đây bỏ mất id nên màn phòng không mở được chi tiết khách thuê.
+  contractId?: number;
+  contractCode?: string;
+  contractEndDate?: string;
+  /** HĐ thô của khách đang thuê — để mở đúng sheet "chi tiết khách thuê" dùng chung.
+   *  `getRooms` vốn đã tải danh sách hợp đồng nên không phát sinh request nào. */
+  contract?: TenantContractResponse;
 }
 
 // ── Mapping trạng thái BE <-> UI ─────────────────────────────────────────────
@@ -169,6 +177,10 @@ const mapRoom = (
   status: toOpStatus(r.status),
   tenantName: tenant?.tenantFullName,
   tenantPhone: tenant?.tenantPhone,
+  contractId: tenant?.id,
+  contractCode: tenant?.contractCode,
+  contractEndDate: tenant?.endDate,
+  contract: tenant,
 });
 
 export const roomOperationService = {

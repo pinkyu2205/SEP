@@ -4,10 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import type { MaintenanceTicket } from '@/store/maintenanceStore';
-import { getPropertyById } from '@/data/managedProperties';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '@/constants/maintenance';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> =
   MAINTENANCE_STATUS_META;
 
-const TODAY = new Date().toISOString().split('T')[0];
+const TODAY = todayIso();
 
 const daysBetween = (from: string) => {
   const ms = new Date(TODAY).getTime() - new Date(from).getTime();
@@ -36,7 +36,7 @@ const isOverdue = (t: { status: string; priority?: string; createdAt: string }) 
   && daysBetween(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
 
 const monthLabel = () => {
-  const d = new Date();
+  const d = serverNow();
   return `Tháng ${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 };
 
@@ -87,7 +87,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
     const open = tickets.filter(t => !TERMINAL.includes(t.status));
     // Khớp dashboard BE: inProgress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED.
     const WORKING = ['approved', 'waiting_confirm', 'rejected'];
-    const now = new Date();
+    const now = serverNow();
     const isThisMonth = (iso: string) => {
       const d = new Date(iso);
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
@@ -133,11 +133,12 @@ export const MaintenanceManagerScreen: React.FC = () => {
     const map = new Map<string, { propertyId: string; propertyName: string; propertyType?: string; tickets: typeof tickets }>();
     tickets.forEach(t => {
       if (!map.has(t.propertyId)) {
-        const prop = getPropertyById(t.propertyId);
         map.set(t.propertyId, {
           propertyId: t.propertyId,
           propertyName: t.propertyName,
-          propertyType: prop?.propertyType || t.propertyType,
+          // Loại nhà lấy thẳng từ ticket. Trước đây còn tra thêm bảng mock
+          // MANAGED_PROPERTIES bằng id thật → luôn trượt, chỉ tốn một lượt tìm.
+          propertyType: t.propertyType,
           tickets: [],
         });
       }
@@ -180,7 +181,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
           <View style={[s.statCard, { borderTopColor: Colors.success }]}>
             <Text style={[s.statNum, { color: Colors.success }]}>{stats.resolvedMonth}</Text>
-            <Text style={s.statLabel}>Hoàn tất T{new Date().getMonth() + 1}</Text>
+            <Text style={s.statLabel}>Hoàn tất T{serverNow().getMonth() + 1}</Text>
           </View>
           {stats.slaAtRisk > 0 && (
             <View style={[s.statCard, { borderTopColor: Colors.error, backgroundColor: Colors.errorLight }]}>
@@ -368,6 +369,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
                 onPress={() => navigation.navigate('BuildingMaintenance', {
                   propertyId: group.propertyId,
                   propertyName: group.propertyName,
+                  propertyType: group.propertyType,
                 })}
                 activeOpacity={0.75}
               >

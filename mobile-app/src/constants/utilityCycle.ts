@@ -24,8 +24,10 @@
  * BE phải bỏ theo, xem doc/BE-HANDOFF-evn-bill-admin-2026-08-13.md mục "Mở khoá ngày 10".
  */
 
+import { serverNow } from '@/utils/serverTime';
+
 /** Kỳ hoá đơn hiện tại (tháng dương lịch) — đơn vị để đếm "đã gửi 1 lần chưa". */
-export const currentPeriod = (now: Date = new Date()) => ({
+export const currentPeriod = (now: Date = serverNow()) => ({
   month: now.getMonth() + 1,
   year: now.getFullYear(),
 });
@@ -37,7 +39,7 @@ export const currentPeriod = (now: Date = new Date()) => ({
  * "được gửi không" — nếu sau này có ràng buộc thời gian khác thì sửa ở đây.
  * Hiện tại: LUÔN mở, mọi ngày trong tháng.
  */
-export const isUtilityWindowOpen = (_now: Date = new Date()) => true;
+export const isUtilityWindowOpen = (_now: Date = serverNow()) => true;
 
 export const UTILITY_WINDOW_TEXT = 'Gửi được mọi ngày trong tháng · mỗi khách 1 hoá đơn/kỳ';
 
@@ -46,13 +48,13 @@ export const UTILITY_WINDOW_TEXT = 'Gửi được mọi ngày trong tháng · m
  * Sau 13/08/2026 không còn lý do nào theo ngày nữa → luôn null. Lý do duy nhất còn lại
  * là "kỳ này đã gửi rồi", và câu đó do `alreadySentReason` bên dưới lo.
  */
-export const utilityWindowReason = (_now: Date = new Date()): string | null => null;
+export const utilityWindowReason = (_now: Date = serverNow()): string | null => null;
 
 /** Câu chặn khi khách đã nhận hoá đơn loại này trong kỳ. */
 export const alreadySentReason = (
   type: 'ELECTRICITY' | 'WATER',
   target: string,
-  now: Date = new Date(),
+  now: Date = serverNow(),
 ): string => {
   const { month, year } = currentPeriod(now);
   const label = type === 'ELECTRICITY' ? 'điện' : 'nước';

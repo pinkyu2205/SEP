@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
@@ -46,7 +47,8 @@ const ZERO_FIN: Fin = { revenue: 0, leaseCost: 0, otherExpense: 0, totalExpense:
 /** Mốc leo thang của cron BE: quá hạn từ ngần này ngày thì quản lý & Host bị báo. */
 const ESCALATE_AFTER_DAYS = 3;
 
-// Nhà "đã duyệt giá" — mirror isHostApproved() ở PropertyList.
+// Nhà "đã duyệt giá" — mirror isHostApproved() ở propertyListState (xem chú thích ở đó
+// về việc vì sao vẫn giữ vế hasManager sau khi chuyển sang gán quản lý theo khu vực).
 const isApproved = (status: string, price: number, hasManager: boolean) => {
   if (status === 'ACTIVE' || status === 'RENTED' || status === 'PENDING_OPERATION_MANAGER') return true;
   if (status === 'UNDER_RENOVATION' || status === 'DISABLED') return price > 0 || hasManager;
@@ -181,6 +183,12 @@ export const Dashboard = () => {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Doanh thu / công nợ trên dashboard đổi ngay khi có hoá đơn được thanh toán.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   // ── Nhà chờ duyệt giá / đã duyệt giá ──
   const pending = useMemo(() => apiProps.filter(p => p.status === 'PENDING_HOST_REVIEW'), [apiProps]);

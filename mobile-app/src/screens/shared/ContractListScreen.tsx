@@ -7,16 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { DatePickerField } from '@/components/common/DatePickerField';
-import { ManagedProperty } from '@/data/managedProperties';
+import { ManagedProperty } from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { getContractTerminationTypeLabel, showAlert, isClosedContract } from '@/utils';
-import {
-  getInspectionsByContractId,
-  getInspectionStatusLabel,
-  getInspectionTypeLabel,
-  RoomInspection,
-} from '@/data/roomInspections';
+import { serverNow } from '@/utils/serverTime';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -344,7 +339,6 @@ const ContractDetailView: React.FC<{
 }> = ({ contract, onBack, onAction }) => {
   const navigation = useNavigation<any>();
   const cfg = STATUS_CONFIG[contract.status];
-  const inspections = getInspectionsByContractId(contract.id);
 
   const SectionHeader = ({ title }: { title: string }) => (
     <View style={detailStyles.sectionHeader}>
@@ -486,20 +480,19 @@ const ContractDetailView: React.FC<{
             </View>
           )}
 
+          {/* Biên bản hiện trạng (ảnh check-in/check-out theo hợp đồng): BE chưa có API.
+              Trước 15/08/2026 khối này đọc file mock `data/roomInspections.ts` — id trong đó
+              không bao giờ khớp id hợp đồng thật nên thực tế luôn ra ô trống này, chỉ khác là
+              nó vờ như tính năng đã chạy. Biên bản lúc TRẢ phòng đã có thật ở luồng
+              CheckoutInspection (/api/v1/checkout-requests/{id}/inspection). */}
           <View style={detailStyles.section}>
             <SectionHeader title="Biên bản hiện trạng" />
-            {inspections.length === 0 ? (
-              <View style={detailStyles.inspectionEmpty}>
-                <Text style={detailStyles.inspectionEmptyTitle}>Chưa có biên bản hiện trạng.</Text>
-                <Text style={detailStyles.inspectionEmptyText}>Ảnh check-in/check-out sẽ được lưu theo hợp đồng này.</Text>
-              </View>
-            ) : inspections.map(inspection => (
-              <ContractInspectionCard
-                key={inspection.id}
-                inspection={inspection}
-                onPress={() => navigation.navigate('InspectionDetail', { inspectionId: inspection.id })}
-              />
-            ))}
+            <View style={detailStyles.inspectionEmpty}>
+              <Text style={detailStyles.inspectionEmptyTitle}>Chưa có biên bản hiện trạng.</Text>
+              <Text style={detailStyles.inspectionEmptyText}>
+                Biên bản trả phòng nằm ở màn "Trả phòng". Biên bản lúc nhận phòng chưa được hệ thống lưu.
+              </Text>
+            </View>
           </View>
 
           {/* Approval History */}
@@ -603,99 +596,6 @@ const ContractDetailView: React.FC<{
   );
 };
 
-const ContractInspectionCard = ({
-  inspection,
-  onPress,
-}: {
-  inspection: RoomInspection;
-  onPress: () => void;
-}) => (
-  <TouchableOpacity style={detailStyles.inspectionCard} onPress={onPress} activeOpacity={0.82}>
-    <Text style={detailStyles.inspectionIcon}>📸</Text>
-    <View style={detailStyles.inspectionBody}>
-      <Text style={detailStyles.inspectionTitle}>{getInspectionTypeLabel(inspection.inspectionType)} Inspection</Text>
-      <Text style={detailStyles.inspectionMeta}>
-        {inspection.images.length} photos · {inspection.createdAt} · {inspection.createdBy}
-      </Text>
-      <Text style={detailStyles.inspectionMeta}>{getInspectionStatusLabel(inspection.status)}</Text>
-      {inspection.depositDeductionAmount ? (
-        <Text style={detailStyles.inspectionDeduction}>
-          Deposit deduction: {inspection.depositDeductionAmount.toLocaleString('vi-VN')}đ
-        </Text>
-      ) : null}
-    </View>
-  </TouchableOpacity>
-);
-
-// ===================== AVAILABLE PROPERTIES & ROOMS =====================
-interface HostEquipment { id: string; name: string; quantity: number; condition: string }
-
-const AVAILABLE_PROPERTIES: {
-  id: string; name: string;
-  rooms: { code: string; rentSuggested: number; equipment: HostEquipment[] }[]
-}[] = [
-  {
-    id: 'prop-1',
-    name: 'Nhà Nguyễn Trãi',
-    rooms: [
-      {
-        code: 'P301', rentSuggested: 3000000,
-        equipment: [
-          { id: 'eq-p301-1', name: 'Điều hòa Daikin 9000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p301-2', name: 'Giường đôi 1m6 + Nệm', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p301-3', name: 'Tủ quần áo 3 cánh', quantity: 1, condition: 'Mới' },
-        ],
-      },
-      {
-        code: 'P302', rentSuggested: 3200000,
-        equipment: [
-          { id: 'eq-p302-1', name: 'Điều hòa Panasonic 9000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p302-2', name: 'Máy giặt Toshiba 8kg', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p302-3', name: 'Bình nước nóng 30L', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p302-4', name: 'Tủ lạnh mini Aqua', quantity: 1, condition: 'Mới' },
-        ],
-      },
-      {
-        code: 'P303', rentSuggested: 3200000,
-        equipment: [
-          { id: 'eq-p303-1', name: 'Điều hòa Casper 9000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p303-2', name: 'Giường đôi 1m6', quantity: 1, condition: 'Mới' },
-          { id: 'eq-p303-3', name: 'Bàn học + ghế', quantity: 1, condition: 'Mới' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'prop-2',
-    name: 'Nhà Lê Văn Sỹ',
-    rooms: [
-      {
-        code: 'P101', rentSuggested: 3500000,
-        equipment: [
-          { id: 'eq-lv-p101-1', name: 'Điều hòa Daikin 12000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p101-2', name: 'Giường đôi 1m8', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p101-3', name: 'Bình nước nóng Ariston 30L', quantity: 1, condition: 'Mới' },
-        ],
-      },
-      {
-        code: 'P102', rentSuggested: 3500000,
-        equipment: [
-          { id: 'eq-lv-p102-1', name: 'Điều hòa Samsung 9000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p102-2', name: 'Máy giặt Electrolux 7kg', quantity: 1, condition: 'Mới' },
-        ],
-      },
-      {
-        code: 'P201', rentSuggested: 3800000,
-        equipment: [
-          { id: 'eq-lv-p201-1', name: 'Điều hòa Casper 9000BTU', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p201-2', name: 'Giường đôi 1m6 + Nệm', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p201-3', name: 'Tủ quần áo 2 cánh', quantity: 1, condition: 'Mới' },
-          { id: 'eq-lv-p201-4', name: 'Bàn học + ghế', quantity: 1, condition: 'Mới' },
-        ],
-      },
-    ],
-  },
-];
 
 // ===================== PROPS =====================
 interface Props {
@@ -707,7 +607,7 @@ interface Props {
 export const ContractListScreen: React.FC<Props> = () => {
   const navigation = useNavigation<any>();
   // Tạo/sửa hợp đồng đã bỏ khỏi app manager (03/08/2026) — hợp đồng sinh ra từ
-  // luồng tiếp nhận nhà (OnboardingScreenV2), màn này chỉ để xem & vận hành.
+  // luồng đón khách (ResumeContractScreen), màn này chỉ để xem & vận hành.
   type ViewMode = 'dashboard' | 'detail';
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
   const tab = 'tenant' as const; // Màn này chỉ quản lý HĐ giữa manager ↔ khách thuê.
@@ -780,7 +680,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Gửi duyệt',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -814,7 +714,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Kích hoạt',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -849,7 +749,7 @@ export const ContractListScreen: React.FC<Props> = () => {
             {
               text: 'Gia hạn',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {
@@ -884,7 +784,7 @@ export const ContractListScreen: React.FC<Props> = () => {
               text: 'Xác nhận thanh lý',
               style: 'destructive',
               onPress: () => {
-                const now = new Date().toLocaleDateString('vi-VN');
+                const now = serverNow().toLocaleDateString('vi-VN');
                 setContracts(prev => prev.map(c =>
                   c.id === contract.id
                     ? {

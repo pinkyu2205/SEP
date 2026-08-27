@@ -190,11 +190,10 @@ export interface TenantContractResponse {
   payosCheckoutUrl?: string;
   payosQrCode?: string;
   /**
-   * Số tiền khách phải chuyển khi đón khách — từ BE commit `92c87d8` (10/08/2026)
-   * là **CHỈ TIỀN CỌC**, không còn gộp tiền nhà tháng đầu như trước.
-   *
-   * Tiền nhà tháng vào ở giờ là một hoá đơn RENT riêng (`cycleType = FIRST`), tính
-   * theo số ngày ở thật, phát hành sau khi hợp đồng ACTIVE và khách tự trả trên app.
+   * Số tiền khách phải chuyển khi đón khách — từ BE `609de59`/`276b613` (12/08/2026)
+   * là khoản **GỘP**: tiền cọc + tiền nhà chu kỳ đầu (chia theo số ngày ở từ ngày nhận
+   * phòng đến hết tháng). Khách quét QR trả MỘT lần, không còn hoá đơn tiền nhà kỳ đầu
+   * trả sau như giai đoạn 10–12/08/2026.
    *
    * Vẫn PHẢI hiển thị field này chứ đừng tự cộng lại từ `rentAmount`/`deposit`: BE
    * dùng đúng số này để tạo link/QR PayOS, tự tính lại là có ngày lệch với số mà app
@@ -203,11 +202,11 @@ export interface TenantContractResponse {
    */
   initialPaymentAmount?: number;
 
-  /** Cách tính tiền cọc trên QR (BE 10/08/2026). Manager gọi thì BE trả null (ý 15). */
+  /** Cách tính phần tiền cọc trong QR (BE 10/08/2026). Manager gọi thì BE trả null (ý 15). */
   depositPaymentBreakdown?: PaymentBreakdown;
   /**
-   * XEM TRƯỚC tiền nhà chu kỳ đầu — chưa phải hoá đơn, chỉ để manager nói trước với
-   * khách sẽ phải trả thêm bao nhiêu sau khi nhận nhà.
+   * Cách tính phần tiền nhà chu kỳ đầu — nay là MỘT PHẦN của cùng mã QR đó, không phải
+   * khoản trả sau. Dùng để giải thích vì sao tổng tiền không phải "cọc chẵn".
    */
   firstRentPaymentBreakdown?: PaymentBreakdown;
 

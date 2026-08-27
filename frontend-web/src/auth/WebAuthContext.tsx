@@ -25,22 +25,16 @@ const STORAGE_KEY = 'urbannest_web_user';
 
 const storage = sessionStorage;
 
-const DEMO_ACCOUNTS: Array<WebAuthUser & { password: string }> = [
-  {
-    id: 'web-admin',
-    fullName: 'Admin',
-    username: 'admin',
-    password: '123456',
-    role: 'admin',
-  },
-  {
-    id: 'web-host',
-    fullName: 'Hoàng Bình Land',
-    username: 'hoangge',
-    password: 'mysecretpassword',
-    role: 'host',
-  },
-];
+/*
+ * Đã bỏ (15/08/2026) hai tài khoản DEMO viết cứng ở đây (`admin`/`123456` và
+ * `hoangge`/`mysecretpassword`). Chúng chạy ở nhánh fallback: backend lỗi hay không
+ * bật là vẫn đăng nhập được với quyền admin/host đầy đủ, kèm token giả
+ * 'mock-jwt-token-demo'. Hai vấn đề:
+ *   1. Mật khẩu quản trị nằm nguyên trong mã nguồn và đi thẳng vào bản build.
+ *   2. Token giả không qua được backend → vào trong app màn nào cũng 401, và
+ *      WebSocket bị chặn hẳn — trông như "đăng nhập thành công" nhưng hỏng toàn bộ.
+ * Backend lỗi thì phải hiện lỗi, không được lách vào trong.
+ */
 
 const WebAuthContext = createContext<WebAuthContextValue | null>(null);
 
@@ -109,36 +103,16 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
         }
         throw new Error('Không nhận được JWT Token từ máy chủ.');
       } catch (backendError: any) {
-        // Manager đăng nhập đúng nhưng bị chặn vào web → không thử demo, trả message rõ ràng.
+        // Manager đăng nhập đúng nhưng bị chặn vào web → giữ nguyên message rõ ràng.
         if (backendError instanceof Error && backendError.message === MANAGER_WEB_BLOCK_MSG) {
           throw backendError;
         }
-        console.warn('Đăng nhập qua Backend thất bại, thử kiểm tra tài khoản Demo...', backendError);
-
-        // 2. Fallback: Nếu backend lỗi hoặc không chạy, kiểm tra tài khoản DEMO để dev offline mượt mà
-        const account = DEMO_ACCOUNTS.find(item =>
-          item.username.toLowerCase() === username.trim().toLowerCase() && item.password === password
-        );
-
-        if (!account) {
-          // Nếu cả hai đều sai, ném lỗi thực tế
-          const errorMsg = backendError.response?.data?.message || 'Tên đăng nhập hoặc mật khẩu không đúng.';
-          throw new Error(errorMsg);
-        }
-
-        // Tạo JWT Token giả để pass các kiểm thử cục bộ nếu xài demo account
-        localStorage.setItem('access_token', 'mock-jwt-token-demo');
-
-        const nextUser: WebAuthUser = {
-          id: account.id,
-          fullName: account.fullName,
-          username: account.username,
-          role: account.role,
-        };
-
-        storage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
-        setUser(nextUser);
-        return nextUser;
+        // Không có đường vòng nào: backend từ chối hoặc không kết nối được thì báo lỗi.
+        const errorMsg = backendError?.response?.data?.message
+          || (backendError?.response
+            ? 'Tên đăng nhập hoặc mật khẩu không đúng.'
+            : 'Không kết nối được máy chủ. Kiểm tra lại backend rồi thử lại.');
+        throw new Error(errorMsg);
       }
     },
     logout: () => {

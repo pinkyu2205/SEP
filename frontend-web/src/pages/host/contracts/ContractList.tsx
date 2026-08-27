@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Search, FileText, User, DoorOpen, Calendar, ShieldAlert, BadgeCheck,
-  Building2, X, Package, Loader2, RefreshCw, CheckCircle2, XCircle,
+  Building2, X, Package, Loader2, RefreshCw, CheckCircle2, XCircle, Camera,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { hostService } from '@/services/host.service';
-import type { HostContractDto, MasterLease } from '@/services/host.service';
+import type { HostContractDto, MasterLease, DepositItem } from '@/services/host.service';
 import { propertyService } from '@/services/property.service';
+import { tenantService } from '@/services/tenant.service';
+import type { TenantContractResponse } from '@/types/api.types';
+import { MaskedField } from '@/components/MaskedField';
 import { formatCurrency } from '@/utils';
 
 /**
@@ -19,6 +22,40 @@ import { formatCurrency } from '@/utils';
  */
 
 type ActiveTab = 'master_lease' | 'tenant_contract';
+
+/** "2 năm" / "18 tháng" từ khoảng start→end; thiếu ngày thì "—". */
+const termOf = (c: { startDate?: string; moveInDate?: string; endDate?: string }): string => {
+  const from = c.startDate || c.moveInDate;
+  if (!from || !c.endDate) return '—';
+  const a = new Date(from);
+  const b = new Date(c.endDate);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return '—';
+  const months = Math.round((b.getTime() - a.getTime()) / (30.44 * 86_400_000));
+  if (months <= 0) return '—';
+  return months % 12 === 0 ? `${months / 12} năm` : `${months} tháng`;
+};
+
+/** "20:41 15/08/2026" — mốc chụp ảnh đồng hồ. */
+const fmtStamp = (iso?: string): string => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('vi-VN', {
+    hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+};
+
+const DEPOSIT_STATUS: Record<string, { label: string; pill: string; box: string }> = {
+  HELD: { label: 'Đang giữ', pill: 'bg-cyan-100 text-cyan-700', box: 'border-cyan-200 bg-cyan-50/50' },
+  REFUNDED: { label: 'Đã hoàn khách', pill: 'bg-emerald-100 text-emerald-700', box: 'border-emerald-200 bg-emerald-50/50' },
+  FORFEITED: { label: 'Đã khấu trừ', pill: 'bg-rose-100 text-rose-700', box: 'border-rose-200 bg-rose-50/50' },
+};
+
+/** "= 1 tháng tiền nhà" — giúp đọc ra số tháng cọc mà /host/contracts không trả. */
+const depositMonthsOf = (c: { rentAmount?: number; deposit?: number }): string => {
+  if (!c.deposit || !c.rentAmount) return '';
+  const m = c.deposit / c.rentAmount;
+  return Number.isInteger(m) && m > 0 ? `= ${m} tháng tiền nhà` : '';
+};
 
 const CONTRACT_TABS = [
   { key: 'tenant_contract' as const, label: 'Quản lý ↔ Khách thuê', icon: User },
@@ -82,6 +119,18 @@ export const ContractList = () => {
   const [contracts, setContracts] = useState<HostContractDto[]>([]);
   const [leases, setLeases] = useState<MasterLease[]>([]);
   const [propertyNames, setPropertyNames] = useState<Record<string, string>>({});
+  /** Tiền cọc đang giữ, ghép vào hợp đồng theo contractId khi mở chi tiết. */
+  const [deposits, setDeposits] = useState<DepositItem[]>([]);
+  /**
+   * Biên bản bàn giao lúc manager đón khách (chỉ số công tơ, ảnh đồng hồ, ảnh phòng…).
+   *
+   * Nằm trong `GET /api/v1/tenant-contracts/{id}` — endpoint hiện CHẶN ROLE_OWNER (403,
+   * xem doc/BE-NEED-host-xem-chi-tiet-hop-dong-2026-08-16.md). FE vẫn gọi và nuốt lỗi:
+   * hôm nay khối này lặng lẽ không hiện, ngày BE thêm OWNER vào @PreAuthorize là nó tự
+   * hiện ra, không phải sửa lại FE. Cùng cách làm với probeFullAccess ở trang Hoá đơn.
+   */
+  const [handover, setHandover] = useState<TenantContractResponse | null>(null);
+  const [handoverLoading, setHandoverLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -95,13 +144,15 @@ export const ContractList = () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const [contractPage, leaseList, propPage] = await Promise.all([
+      const [contractPage, leaseList, propPage, depositRes] = await Promise.all([
         hostService.listContracts({ page: 0, size: 200 }),
         hostService.listMasterLeases().catch(() => [] as MasterLease[]),
         propertyService.getProperties(0, 200).catch(() => null),
+        hostService.getDeposits().catch(() => null),
       ]);
       setContracts(contractPage.content ?? []);
       setLeases(leaseList);
+      setDeposits(depositRes?.items ?? []);
       if (propPage) {
         setPropertyNames(Object.fromEntries(propPage.content.map((p) => [String(p.id), p.propertyName])));
       }
@@ -112,6 +163,21 @@ export const ContractList = () => {
     }
   };
   useEffect(() => { load(); }, []);
+
+  // Mở chi tiết HĐ → thử nạp biên bản bàn giao. 403 (chưa mở quyền cho Host) thì bỏ qua.
+  useEffect(() => {
+    if (!selectedContract) { setHandover(null); return; }
+    const id = Number(selectedContract.id);
+    if (!Number.isFinite(id)) { setHandover(null); return; }
+    let alive = true;
+    setHandover(null);
+    setHandoverLoading(true);
+    tenantService.getById(id)
+      .then((res) => { if (alive) setHandover(res); })
+      .catch(() => { /* 403 — chưa mở quyền, khối biên bản không hiện */ })
+      .finally(() => { if (alive) setHandoverLoading(false); });
+    return () => { alive = false; };
+  }, [selectedContract]);
 
   const term = searchTerm.trim().toLowerCase();
   const filteredContracts = useMemo(
@@ -269,7 +335,7 @@ export const ContractList = () => {
                           <User className="w-4 h-4 text-slate-400" />
                           <span className="font-medium text-slate-900">{c.lesseeName}</span>
                         </div>
-                        {c.tenantPhone && <div className="text-xs text-slate-400 mt-0.5">{c.tenantPhone}</div>}
+                        {c.tenantPhone && <MaskedField value={c.tenantPhone} emptyText="" className="text-xs text-slate-400 mt-0.5" />}
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-medium text-slate-900">{c.propertyName}</div>
@@ -416,8 +482,20 @@ export const ContractList = () => {
                 <div className="bg-slate-50 rounded-xl p-4">
                   <p className="text-xs font-medium text-slate-500 uppercase mb-2">Khách thuê</p>
                   <p className="font-semibold text-slate-900">{selectedContract.lesseeName}</p>
-                  {selectedContract.tenantCccd && <p className="text-xs text-slate-500 mt-1">CCCD: {selectedContract.tenantCccd}</p>}
-                  {selectedContract.tenantPhone && <p className="text-xs text-slate-500">SĐT: {selectedContract.tenantPhone}</p>}
+                  {selectedContract.tenantCccd && (
+                    <MaskedField
+                      value={selectedContract.tenantCccd}
+                      prefix="CCCD:" emptyText="" head={3} tail={3}
+                      className="mt-1 text-xs text-slate-500"
+                    />
+                  )}
+                  {selectedContract.tenantPhone && (
+                    <MaskedField
+                      value={selectedContract.tenantPhone}
+                      prefix="SĐT:" emptyText="" head={3} tail={2}
+                      className="mt-0.5 text-xs text-slate-500"
+                    />
+                  )}
                 </div>
                 <div className="bg-slate-50 rounded-xl p-4">
                   <p className="text-xs font-medium text-slate-500 uppercase mb-2">Bất động sản</p>
@@ -426,19 +504,136 @@ export const ContractList = () => {
                   {selectedContract.lessorName && <p className="text-xs text-slate-500 mt-1">Quản lý: {selectedContract.lessorName}</p>}
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
                   { label: 'Giá thuê/tháng', value: formatCurrency(selectedContract.rentAmount) },
-                  { label: 'Tiền cọc', value: selectedContract.deposit != null ? formatCurrency(selectedContract.deposit) : '—' },
-                  { label: 'Bắt đầu', value: selectedContract.startDate || selectedContract.moveInDate || '—' },
+                  {
+                    label: 'Tiền cọc',
+                    value: selectedContract.deposit != null ? formatCurrency(selectedContract.deposit) : '—',
+                    hint: depositMonthsOf(selectedContract),
+                  },
+                  { label: 'Thời hạn', value: termOf(selectedContract) },
+                  // Ngày nhận phòng tách khỏi ngày bắt đầu HĐ: hai mốc này có thể lệch nhau
+                  // (khách dọn vào giữa tháng), trước đây moveInDate chỉ dùng làm giá trị
+                  // dự phòng cho "Bắt đầu" nên không bao giờ đọc được ngày nhận phòng thật.
+                  { label: 'Nhận phòng', value: selectedContract.moveInDate || '—' },
+                  { label: 'Bắt đầu', value: selectedContract.startDate || '—' },
                   { label: 'Kết thúc', value: selectedContract.endDate || '—' },
                 ].map((item) => (
                   <div key={item.label} className="bg-white border border-slate-200 rounded-xl p-3 text-center">
                     <p className="text-xs text-slate-500">{item.label}</p>
                     <p className="text-sm font-bold text-slate-900 mt-1">{item.value}</p>
+                    {item.hint && <p className="text-[11px] text-slate-400 mt-0.5">{item.hint}</p>}
                   </div>
                 ))}
               </div>
+
+              {/* ── Đón khách: tiền cọc đang giữ ────────────────────────────────
+                  Nguồn: /host/finance/deposits (host gọi được). Đây là khoản thu lúc
+                  manager đón khách và là tiền công ty ĐANG GIỮ HỘ, sẽ hoàn khi trả phòng. */}
+              {(() => {
+                const cid = Number(selectedContract.id);
+                const dep = deposits.find((d) => d.contractId === cid);
+                if (!dep) return null;
+                const meta = DEPOSIT_STATUS[dep.status] ?? DEPOSIT_STATUS.HELD;
+                return (
+                  <div className={`rounded-xl border p-4 ${meta.box}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase text-slate-500">Tiền cọc đã thu lúc đón khách</p>
+                        <p className="mt-1 text-lg font-black text-slate-900">{formatCurrency(dep.amount)}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">Giữ từ {dep.heldSince}</p>
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${meta.pill}`}>
+                        {meta.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* ── Biên bản bàn giao lúc manager đón khách ──────────────────────
+                  Chỉ số công tơ chốt lúc nhận phòng + ảnh mặt đồng hồ + ảnh hiện trạng
+                  phòng. Ẩn hoàn toàn khi BE chưa mở quyền cho Host (403). */}
+              {handoverLoading && (
+                <p className="text-xs text-slate-400 flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Đang tải biên bản bàn giao…
+                </p>
+              )}
+              {handover && (() => {
+                const photos = handover.roomConditionPhotos?.length
+                  ? handover.roomConditionPhotos
+                  : (handover.roomConditionUrls ?? []).map((url) => ({ url, capturedAt: undefined }));
+                const meters = [
+                  {
+                    label: 'Chỉ số điện', unit: 'kWh',
+                    value: handover.initialElectricReading,
+                    img: handover.electricMeterImageUrl, at: handover.electricMeterCapturedAt,
+                  },
+                  {
+                    label: 'Chỉ số nước', unit: 'm³',
+                    value: handover.initialWaterReading,
+                    img: handover.waterMeterImageUrl, at: handover.waterMeterCapturedAt,
+                  },
+                ].filter((m) => m.value != null || m.img);
+                if (meters.length === 0 && photos.length === 0 && !handover.roomConditionNote) return null;
+                return (
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-primary-600" />
+                      Biên bản bàn giao lúc đón khách
+                    </h3>
+
+                    {meters.length > 0 && (
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        {meters.map((m) => (
+                          <div key={m.label} className="rounded-xl border border-slate-200 p-3">
+                            <p className="text-xs text-slate-500">{m.label}</p>
+                            <p className="text-lg font-black text-slate-900 mt-0.5">
+                              {m.value != null ? `${m.value.toLocaleString('vi-VN')} ${m.unit}` : '—'}
+                            </p>
+                            {m.img ? (
+                              <a href={m.img} target="_blank" rel="noreferrer"
+                                className="mt-2 block overflow-hidden rounded-lg border border-slate-200">
+                                <img src={m.img} alt={`Ảnh ${m.label.toLowerCase()}`}
+                                  className="h-28 w-full object-cover transition hover:scale-105" />
+                              </a>
+                            ) : (
+                              <p className="mt-2 rounded-lg bg-slate-50 px-2 py-3 text-center text-xs text-slate-400">
+                                Không có ảnh đồng hồ
+                              </p>
+                            )}
+                            {m.at && <p className="mt-1 text-[11px] text-slate-400">Chụp {fmtStamp(m.at)}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {photos.length > 0 && (
+                      <>
+                        <p className="text-xs font-medium text-slate-500 mb-2">
+                          Ảnh hiện trạng phòng ({photos.length})
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {photos.map((p) => (
+                            <a key={p.url} href={p.url} target="_blank" rel="noreferrer"
+                              className="block overflow-hidden rounded-lg border border-slate-200">
+                              <img src={p.url} alt="Hiện trạng phòng lúc bàn giao"
+                                className="h-24 w-full object-cover transition hover:scale-105" />
+                            </a>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {handover.roomConditionNote && (
+                      <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                        <b>Ghi chú hiện trạng:</b> {handover.roomConditionNote}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {(() => {
                 const lines = snapshotToLines(selectedContract.equipmentSnapshot);
                 if (lines.length === 0) return null;

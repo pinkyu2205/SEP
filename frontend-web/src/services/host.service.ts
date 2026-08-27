@@ -1,6 +1,6 @@
 import api from './api';
 import type { Page } from '@/types/api.types';
-import type { Expense, ExpenseCategory } from '@/utils/expenseStore';
+import type { Expense, ExpenseCategory } from '@/types/expense';
 
 // =============================================================================
 // Host Portal service — nối API BE (/api/v1/host).
@@ -62,7 +62,15 @@ export interface ReceivablesAging {
 
 export interface DepositItem {
   tenantName: string; propertyName: string; roomCode: string;
-  amount: number; heldSince: string; status: 'HELD' | 'REFUNDED' | 'FORFEITED';
+  amount: number; heldSince: string;
+  /**
+   * Trạng thái cọc do BE xét (DepositLedgerStatusResolver, 17/08/2026):
+   * NOT_COLLECTED chưa thu · HELD đang giữ · REFUNDED đã hoàn · FORFEITED khấu trừ.
+   * NOT_COLLECTED KHÔNG nằm trong `totalHeld`.
+   */
+  status: 'NOT_COLLECTED' | 'HELD' | 'REFUNDED' | 'FORFEITED';
+  /** BE có trả — dùng để ghép khoản cọc vào đúng hợp đồng ở màn chi tiết HĐ. */
+  contractId?: number; contractCode?: string; endDate?: string;
 }
 export interface DepositsResponse { totalHeld: number; items: DepositItem[]; }
 

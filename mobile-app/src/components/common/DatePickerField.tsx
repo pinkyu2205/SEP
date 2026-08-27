@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, Modal, StyleSheet, ScrollView,
 } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { serverNow } from '@/utils/serverTime';
 
 interface Props {
   label?: string;
@@ -36,7 +37,7 @@ export const DatePickerField: React.FC<Props> = ({
   label, value, onChange, placeholder = 'DD/MM/YYYY', minDate, maxDate,
 }) => {
   const parsed = parseDate(value);
-  const today = new Date();
+  const today = serverNow();
   const initial = parsed || today;
 
   const [open, setOpen] = useState(false);

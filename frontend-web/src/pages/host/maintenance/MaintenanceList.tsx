@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Search, Wrench, CheckCircle, Clock, AlertTriangle,
@@ -124,7 +125,7 @@ const DetailModal = ({ request, onClose }: {
                 <FileText className="w-3.5 h-3.5" /> Người báo cáo
               </p>
               <p className="font-semibold text-slate-900 text-sm">{request.tenantName}</p>
-              {request.tenantPhone && <p className="text-xs text-slate-500 mt-0.5">{request.tenantPhone}</p>}
+              {request.tenantPhone && <MaskedField value={request.tenantPhone} emptyText="" className="text-xs text-slate-500 mt-0.5" />}
             </div>
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-4">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">

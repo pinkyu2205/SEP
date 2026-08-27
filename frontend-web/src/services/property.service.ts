@@ -26,6 +26,7 @@ import type {
   HostConfirmResponse,
   PropertyActivationResponse,
   PropertyPurgeResponse,
+  PriceHistoryItem,
   HandoverEquipmentResponse,
   OperationalEquipmentResponse,
 } from '@/types/api.types';
@@ -169,6 +170,32 @@ export const propertyService = {
     return api.put(`${BASE}/${id}/rooms/${roomId}`, data);
   },
 
+  // =========================================================================
+  // GIÁ THUÊ — niêm yết / đang áp dụng / lịch sử
+  //
+  // Mô hình: `listedPrice` là giá Host duyệt (giá bán), `appliedPrice` là giá hợp đồng
+  // đang chạy. Khách trả phòng xong thì applied quay về listed. Đơn vị nào ĐANG CÓ KHÁCH
+  // thì BE khoá giá (`priceLocked = true`) — gọi PATCH sẽ bị từ chối.
+  //
+  // Dùng endpoint RIÊNG cho giá, KHÔNG dùng `PUT rooms/{roomId}`: ràng buộc "chỉ sửa
+  // phòng lúc onboarding" của endpoint kia vẫn đúng cho các field cấu trúc.
+  // =========================================================================
+
+  /** PATCH /properties/{id}/rooms/{roomId}/price — đổi giá niêm yết của MỘT phòng. */
+  updateRoomPrice: (id: number, roomId: number, price: number, reason: string): Promise<RoomResponse> => {
+    return api.patch(`${BASE}/${id}/rooms/${roomId}/price`, { price, reason });
+  },
+
+  /** PATCH /properties/{id}/price — đổi giá niêm yết của nhà NGUYÊN CĂN. */
+  updatePropertyPrice: (id: number, price: number, reason: string): Promise<PropertyResponse> => {
+    return api.patch(`${BASE}/${id}/price`, { price, reason });
+  },
+
+  /** GET /properties/{id}/price-history — lịch sử đổi giá của nhà + mọi phòng bên trong. */
+  getPriceHistory: (id: number): Promise<PriceHistoryItem[]> => {
+    return api.get(`${BASE}/${id}/price-history`);
+  },
+
   /** DELETE /properties/{id}/rooms/{roomId} — xoá phòng (chờ BE, xem doc/NOTE-CHO-TEAM-BE.md mục 11) */
   deleteRoom: (id: number, roomId: number): Promise<void> => {
     return api.delete(`${BASE}/${id}/rooms/${roomId}`);
@@ -284,7 +311,14 @@ export const propertyService = {
   // Gán quản lý vận hành
   // =========================================================================
 
-  /** PATCH /properties/{id}/operation-manager */
+  /**
+   * PATCH /properties/{id}/operation-manager
+   *
+   * ⚠️ CHỈ gọi từ màn "Khu vực & Quản lý" (`pages/zones/ZoneOverview.tsx`), nơi nó chạy
+   * theo lô cho cả một quận. Quản lý vận hành được phân công theo KHU VỰC — một quận một
+   * người — nên đừng thêm lại nút gán/đổi cho từng nhà. (Khi BE làm xong API gán theo lô
+   * ở doc/BE-NEED-zone-manager-assignment-2026-08-14.md thì thay vòng lặp bằng API đó.)
+   */
   assignOperationManager: (id: number, operationManagerId: string): Promise<PropertyActivationResponse> => {
     return api.patch(`${BASE}/${id}/operation-manager`, { operationManagerId });
   },

@@ -9,8 +9,6 @@ interface Props {
   onClose: () => void;
   /** Gọi ngay sau khi import thật thành công — parent tự refresh danh sách zone. */
   onImported: (result: ZoneBulkImportResponse) => void;
-  /** Bấm "Bổ sung tọa độ ngay" ở bước kết quả — parent tự đóng wizard & mở modal geocode hàng loạt. */
-  onRequestGeocodeMissing: () => void;
 }
 
 const SAMPLE_FILE_URL = '/SLMS2026_import_zones.xlsx';
@@ -26,7 +24,7 @@ const actionColor: Record<string, string> = {
   UPDATED: 'bg-amber-50 text-amber-700',
 };
 
-export const ZoneImportWizard = ({ onClose, onImported, onRequestGeocodeMissing }: Props) => {
+export const ZoneImportWizard = ({ onClose, onImported }: Props) => {
   const [step, setStep] = useState<Step>('select');
   const [file, setFile] = useState<File | null>(null);
   const [dryRunResult, setDryRunResult] = useState<ZoneBulkImportResponse | null>(null);
@@ -229,15 +227,10 @@ export const ZoneImportWizard = ({ onClose, onImported, onRequestGeocodeMissing 
                 <div className="rounded-xl border border-slate-200 p-3">
                   <p className="font-bold text-slate-800">Quận/Huyện</p>
                   <p className="text-slate-500">
-                    Sẽ tạo {dryRunResult.districtsCreated} · bỏ qua {dryRunResult.districtsSkipped} · cập nhật toạ độ {dryRunResult.districtsUpdated}
+                    Sẽ tạo {dryRunResult.districtsCreated} · bỏ qua {dryRunResult.districtsSkipped}
                   </p>
                 </div>
               </div>
-              {dryRunResult.districtsMissingCoords > 0 && (
-                <p className="text-sm text-amber-600">
-                  ⚠ {dryRunResult.districtsMissingCoords} quận sẽ thiếu toạ độ (có thể Geocode sau).
-                </p>
-              )}
               <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-500">
@@ -286,26 +279,12 @@ export const ZoneImportWizard = ({ onClose, onImported, onRequestGeocodeMissing 
               </div>
               <p className="text-sm text-slate-600">
                 Tạo {finalResult.citiesCreated} tỉnh · {finalResult.districtsCreated} quận · Bỏ qua{' '}
-                {finalResult.citiesSkipped + finalResult.districtsSkipped} · Cập nhật toạ độ {finalResult.districtsUpdated}
+                {finalResult.citiesSkipped + finalResult.districtsSkipped}
               </p>
-              {finalResult.districtsMissingCoords > 0 && (
-                <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  <AlertTriangle className="h-5 w-5 flex-shrink-0" />
-                  <p>{finalResult.districtsMissingCoords} quận còn thiếu toạ độ tâm — nên bổ sung để gợi ý vị trí sau này.</p>
-                </div>
-              )}
               <div className="flex justify-end gap-3 pt-2">
-                <button onClick={onClose} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">
+                <button onClick={onClose} className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700">
                   Về danh sách khu vực
                 </button>
-                {finalResult.districtsMissingCoords > 0 && (
-                  <button
-                    onClick={onRequestGeocodeMissing}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-cyan-600 hover:bg-cyan-700"
-                  >
-                    Bổ sung toạ độ ngay
-                  </button>
-                )}
               </div>
             </div>
           )}

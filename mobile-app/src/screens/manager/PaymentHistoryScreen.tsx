@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, ScrollView,
@@ -5,15 +6,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
-import {
-  Colors, Spacing, BorderRadius, Shadow,
-  RENT_AMOUNT_HIDDEN_NOTE, DEPOSIT_AMOUNT_HIDDEN_NOTE,
-} from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatCurrency, showAlert } from '@/utils';
-import { realManagerInvoiceService, ManagerPayment } from '@/services/manager/invoiceService';
+import {
+  realManagerInvoiceService, ManagerPayment, ManagerInvoice, ManagerPaymentHistoryEntry,
+} from '@/services/manager/invoiceService';
 import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -21,8 +22,10 @@ import { realTenantService, TenantContractResponse } from '@/services/tenant/ten
  * Tách khỏi màn "Hoá đơn tiền nhà": màn kia chỉ lo KỲ THU HIỆN TẠI của tiền nhà
  * (hệ thống tự phát hành hằng tháng, ai đã/chưa đóng). Màn này là dòng thời gian đầy
  * đủ, gộp 2 nguồn mà BE để ở 2 chỗ khác nhau:
- *   • Giao dịch hoá đơn — `/api/v1/manager/payments` (TenantPaymentClaim): mọi loại
- *     hoá đơn, cả tiền nhà lẫn điện/nước/dịch vụ.
+ *   • Đã thu thật — `/api/v1/manager/payments/history` (bảng `tenant_payments`):
+ *     mọi lần thu đã vào sổ, kể cả khách trả PayOS (không sinh claim).
+ *   • Chờ đối soát — `/api/v1/manager/payments` (bảng `tenant_payment_claims`):
+ *     khách tự khai đã chuyển, manager cần xác nhận / từ chối.
  *   • Tiền cọc — nằm trên hợp đồng, không có trong bảng thanh toán (xem depositService).
  *
  * SỐ TIỀN (xem @/constants/managerVisibility):
@@ -70,27 +73,53 @@ const CONTRACT_STATUS_LABEL: Record<string, string> = {
 };
 
 /**
- * Loại hoá đơn suy từ mã — BE `ManagerPaymentResponse` không trả `invoiceType`, mà
- * quy tắc ẩn/hiện số tiền lại phụ thuộc loại. Hai bộ mã đang tồn tại trong DB:
+ * Loại hoá đơn suy từ mã — dùng cho DÒNG CLAIM: `ManagerPaymentResponse` không trả
+ * `invoiceType`, mà quy tắc ẩn/hiện số tiền lại phụ thuộc loại. (Dòng đã thu thì đọc
+ * `invoiceType` của BE — xem `invoiceKindOfType`.) Hai bộ mã đang tồn tại trong DB:
  *   • `HD-RENT-23-2026-08`, `HD-SVC-1-2026-08`
  *   • `INV00022-202608-R` / `-E` / `-W` / `-S`
  * Không khớp mẫu nào thì coi như tiền nhà (ẩn tiền) cho an toàn.
  */
-type InvoiceKind = 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'UNKNOWN';
+type InvoiceKind = 'ONBOARD' | 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'UNKNOWN';
 const invoiceKindOf = (code?: string): InvoiceKind => {
   const c = (code || '').toUpperCase();
+  // Khoản thu lúc đón khách: BE để `invoiceType = OTHER` nên phải nhận theo mã, không
+  // thì rơi vào UNKNOWN và hiện trơ là "Hoá đơn" — đúng dòng khách chuyển tiền đầu tiên
+  // mà đọc vào không biết là khoản gì.
+  if (c.startsWith('HD-ONBOARD')) return 'ONBOARD';
   if (c.includes('-RENT-') || /-R$/.test(c)) return 'RENT';
   if (c.includes('-ELEC') || /-E$/.test(c)) return 'ELECTRICITY';
   if (c.includes('-WATER') || /-W$/.test(c)) return 'WATER';
   if (c.includes('-SVC') || /-S$/.test(c)) return 'SERVICE';
   return 'UNKNOWN';
 };
+/**
+ * Ưu tiên `invoiceType` do BE trả (endpoint lịch sử thu có sẵn field này), chỉ suy
+ * theo mã khi thiếu. Suy theo mã là phương án chống cháy: hai bộ mã cùng tồn tại và
+ * mã mới nào không khớp mẫu sẽ rơi vào UNKNOWN → ẩn số tiền dù có thể là điện/nước.
+ */
+const invoiceKindOfType = (type?: string | null, code?: string): InvoiceKind => {
+  switch ((type || '').toUpperCase()) {
+    case 'RENT':        return 'RENT';
+    case 'ELECTRICITY': return 'ELECTRICITY';
+    case 'WATER':       return 'WATER';
+    case 'SERVICE':     return 'SERVICE';
+    default:            return invoiceKindOf(code);
+  }
+};
+
 const KIND_LABEL: Record<InvoiceKind, string> = {
+  ONBOARD: 'Thu lúc đón khách (cọc + kỳ đầu)',
   RENT: 'Hoá đơn tiền nhà', ELECTRICITY: 'Hoá đơn tiền điện', WATER: 'Hoá đơn tiền nước',
   SERVICE: 'Hoá đơn dịch vụ', UNKNOWN: 'Hoá đơn',
 };
-/** Chỉ tiền nhà mới bị ẩn; loại chưa nhận ra thì ẩn cho chắc. */
-const isAmountHidden = (k: InvoiceKind) => k === 'RENT' || k === 'UNKNOWN';
+/**
+ * Chỉ tiền nhà mới bị ẩn; loại chưa nhận ra thì ẩn cho chắc.
+ * ONBOARD cũng ẩn — khoản đó gộp tiền nhà kỳ đầu + tiền cọc, cả hai đều ngoài tầm
+ * manager (@/constants/managerVisibility). BE cũng đã mask về null.
+ */
+const isAmountHidden = (k: InvoiceKind) =>
+  k === 'RENT' || k === 'ONBOARD' || k === 'UNKNOWN';
 
 /** Bỏ dấu để gõ không dấu vẫn tìm ra ("trang" → "Đỗ Minh Trang"). */
 const norm = (s: string) =>
@@ -106,7 +135,7 @@ const dayLabel = (key: string) => {
   const [y, m, d] = key.split('-').map(Number);
   const that = new Date(y, m - 1, d);
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((startOf(new Date()) - startOf(that)) / 86_400_000);
+  const diff = Math.round((startOf(serverNow()) - startOf(that)) / 86_400_000);
   if (diff === 0) return 'Hôm nay';
   if (diff === 1) return 'Hôm qua';
   return `${pad(d)}/${pad(m)}/${y}`;
@@ -170,6 +199,63 @@ const fromPayment = (p: ManagerPayment): Entry => ({
   // Đã xác nhận thì mốc đúng là lúc xác nhận; chưa thì lúc khách báo.
   at: p.verifiedAt || p.createdAt,
   note: p.transferContent,
+});
+
+/**
+ * Một lần THU THẬT (bảng `tenant_payments`) → một dòng trong dòng thời gian.
+ *
+ * Trước 17/08/2026 màn này phải dựng dòng "đã thu" từ chính hoá đơn `PAID` vì manager
+ * không có endpoint nào đọc được bảng thu. Cách đó chỉ ra ĐƯỢC MỘT dòng cho mỗi hoá đơn
+ * (hoá đơn trả nhiều lần thì mất các lần trước) và lấy `paidAt` của hoá đơn thay cho mốc
+ * thu. Nay đọc thẳng sổ thu nên đủ và đúng mốc.
+ */
+const fromHistory = (h: ManagerPaymentHistoryEntry): Entry => ({
+  key: `pay-${h.id}`,
+  kind: 'INVOICE',
+  // KHÔNG set paymentId: đây là khoản ĐÃ vào sổ, không phải claim để xác nhận/từ chối.
+  contractId: h.contractId ?? undefined,
+  tenantName: h.tenantName || '—',
+  roomNumber: h.roomNumber ?? undefined,
+  propertyName: h.propertyName || '—',
+  ref: h.invoiceCode || '',
+  // BE trả sẵn `invoiceType` → khỏi suy theo mã hoá đơn như trước.
+  invoiceKind: invoiceKindOfType(h.invoiceType, h.invoiceCode),
+  amount: h.amount ?? undefined,
+  method: h.method ?? undefined,
+  status: 'VERIFIED',
+  at: h.paidAt ?? undefined,
+  note: h.transactionId ?? undefined,
+});
+
+/**
+ * Hoá đơn ĐÃ THU nhưng KHÔNG có bản ghi nào trong sổ thu → vẫn phải hiện.
+ *
+ * Lưới an toàn cho hai ca thật:
+ *  • Dữ liệu cũ: hoá đơn được đánh `PAID` trước khi BE bắt đầu ghi `tenant_payments`,
+ *    nên sổ thu không có dòng nào — bỏ qua là mất hẳn khoản khách đã trả.
+ *  • `/manager/payments/history` lỗi hoặc chưa có (BE chưa restart): request hỏng bị
+ *    `.catch(() => [])` nuốt, màn sẽ trống trơn mà không báo gì.
+ *
+ * Kém chính xác hơn sổ thu: mỗi hoá đơn chỉ ra ĐƯỢC MỘT dòng (hoá đơn trả nhiều lần
+ * thì mất các lần trước) và mốc là `paidAt` của hoá đơn. Vì vậy chỉ dùng cho hoá đơn
+ * mà sổ thu không có.
+ */
+const fromPaidInvoice = (i: ManagerInvoice): Entry => ({
+  key: `pinv-${i.id}`,
+  kind: 'INVOICE',
+  // KHÔNG set paymentId: không phải claim nên không có gì để xác nhận/từ chối.
+  contractId: i.contractId ?? undefined,
+  tenantName: i.tenantName || '—',
+  roomNumber: i.roomNumber ?? undefined,
+  propertyName: i.propertyName || '—',
+  ref: i.code || '',
+  invoiceKind: invoiceKindOfType(i.type, i.code),
+  // `amount` hoá đơn tiền nhà bị BE mask (null) — giữ null, đừng bù 0.
+  amount: i.amount ?? undefined,
+  method: i.paymentMethod ?? undefined,
+  status: 'VERIFIED',
+  at: i.paidAt ?? undefined,
+  note: i.transactionId ?? undefined,
 });
 
 const fromDeposit = (d: ManagerDeposit): Entry => ({
@@ -240,6 +326,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   // Vào từ link "Tất cả tiền cọc" thì mở thẳng tab Tiền cọc, khỏi bắt bấm thêm.
   const initialFilter = (route.params?.filter as Filter | undefined) ?? 'all';
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
+  /** Sổ thu thật — nguồn chính của dòng thời gian (xem fromHistory). */
+  const [history, setHistory] = useState<ManagerPaymentHistoryEntry[]>([]);
+  /** Hoá đơn PAID — lưới an toàn cho hoá đơn không có dòng nào trong sổ thu. */
+  const [paidInvoices, setPaidInvoices] = useState<ManagerInvoice[]>([]);
   const [deposits, setDeposits] = useState<ManagerDeposit[]>([]);
   /** id các HĐ còn hiệu lực — lọc cọc của khách đã rời đi. */
   const [activeContractIds, setActiveContractIds] = useState<Set<number>>(new Set());
@@ -255,10 +345,15 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
       managerDepositService.list().catch(() => [] as ManagerDeposit[]),
       managerPropertyService.getScopedProperties().catch(() => [] as { id: number }[]),
+      realManagerInvoiceService.listPaymentHistory()
+        .catch(() => [] as ManagerPaymentHistoryEntry[]),
+      realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
     ])
-      .then(async ([pay, dep, props]) => {
+      .then(async ([pay, dep, props, paid, invs]) => {
         setPayments(pay);
         setDeposits(dep);
+        setHistory(paid);
+        setPaidInvoices(invs.filter(i => (i.status || '').toUpperCase() === 'PAID'));
         /**
          * Cọc của khách ĐÃ trả phòng / chấm dứt HĐ thì không hiện ở đây nữa: khoản đó
          * đã được tất toán (hoàn lại hoặc trừ vào hư hỏng) ở luồng Trả phòng, để lại
@@ -275,6 +370,12 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Hoá đơn vừa PAID sinh giao dịch mới, và claim chờ duyệt có thể hết hiệu lực → nạp lại.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
 
   // Trước 13/08/2026 chỗ này có `ensureDepositAmount` — gọi
   // GET /api/v1/tenant-contracts/{id} cho từng dòng cọc chỉ để lấy field `deposit`
@@ -308,9 +409,33 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
 
   const timeline = useMemo(() => {
     const paidDeposits = liveDeposits.filter(d => !!d.paidAt);
-    return [...payments.map(fromPayment), ...paidDeposits.map(fromDeposit)]
-      .sort((a, b) => (b.at || '').localeCompare(a.at || ''));
-  }, [payments, liveDeposits]);
+    /**
+     * Bỏ hoá đơn đã có claim tương ứng: claim được manager duyệt sẽ đánh dấu hoá đơn
+     * PAID, nên cùng một lần thu sẽ ra hai dòng nếu không lọc. Giữ dòng CLAIM vì nó
+     * mang thêm ai duyệt / lúc nào.
+     */
+    const claimedCodes = new Set(payments.map(p => p.invoiceCode).filter(Boolean));
+    const historyRows = history
+      .filter(h => !!h.paidAt && !claimedCodes.has(h.invoiceCode))
+      .map(fromHistory);
+
+    /**
+     * Hoá đơn PAID mà sổ thu KHÔNG có dòng nào → thêm vào (xem fromPaidInvoice).
+     * Dedupe theo MÃ HOÁ ĐƠN, không theo từng dòng thu: một hoá đơn trả nhiều lần thì
+     * sổ thu ra nhiều dòng và phải giữ đủ, chỉ cần không chồng thêm dòng suy từ hoá đơn.
+     */
+    const ledgerCodes = new Set(history.map(h => h.invoiceCode).filter(Boolean));
+    const invoiceRows = paidInvoices
+      .filter(i => !!i.paidAt && !claimedCodes.has(i.code) && !ledgerCodes.has(i.code))
+      .map(fromPaidInvoice);
+
+    return [
+      ...payments.map(fromPayment),
+      ...historyRows,
+      ...invoiceRows,
+      ...paidDeposits.map(fromDeposit),
+    ].sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+  }, [payments, history, paidInvoices, liveDeposits]);
 
   /**
    * Riêng tab "Tiền cọc" thì hiện ĐỦ cả chưa thu — vào đây từ link "Tất cả tiền cọc"
@@ -578,18 +703,15 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                         ? (e.status.toUpperCase() === 'PAID' ? 'Tiền cọc đã chuyển' : 'Tiền cọc phải thu')
                         : 'Số tiền giao dịch'}
                     </Text>
+                    {/* Số tiền bị ẩn thì nói gọn MỘT dòng. Trước đây 3 dòng: "Không hiển
+                        thị" + câu giải thích dài + "Tương đương N tháng tiền nhà" — cả
+                        khối chỉ để nói một việc là số tiền không được xem. */}
                     {hidden ? (
-                      <>
-                        <Text style={s.amountHidden}>Không hiển thị</Text>
-                        <Text style={s.amountNote}>
-                          {isDeposit ? DEPOSIT_AMOUNT_HIDDEN_NOTE : RENT_AMOUNT_HIDDEN_NOTE}
-                        </Text>
-                      </>
+                      <Text style={s.amountHidden}>
+                        Ẩn với quản lý{isDeposit && !!e.depositMonths ? ` · ${e.depositMonths} tháng tiền nhà` : ''}
+                      </Text>
                     ) : (
                       <Text style={s.amountValue}>{formatCurrency(e.amount ?? 0)}</Text>
-                    )}
-                    {isDeposit && !!e.depositMonths && (
-                      <Text style={s.amountNote}>Tương đương {e.depositMonths} tháng tiền nhà</Text>
                     )}
                   </View>
 

@@ -1,10 +1,11 @@
+import { MaskedField } from '@/components/MaskedField';
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
   Zap, RefreshCw, Home, UserCog, X, CheckCircle2,
   Wrench, CircleCheck, Layers, BadgeDollarSign, Wallet, Phone, CalendarClock, UserRound,
-  Package, Image as ImageIcon, ChevronLeft, ChevronRight, Search,
+  Package, Image as ImageIcon, ChevronLeft, ChevronRight, Search, Lock, Pencil, History,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '@/services/property.service';
@@ -15,6 +16,9 @@ import type {
 } from '@/types/api.types';
 import { OperationalEquipmentPanel } from '@/pages/admin/onboarding/OperationalEquipmentPanel';
 import { PropertyMap } from '@/components/PropertyMap';
+import {
+  WholeHousePriceActions, AllRoomsPriceHistoryButton, RoomPriceModal, RoomPriceHistoryModal,
+} from './PriceManagerPanel';
 import { formatCurrency } from '@/utils';
 import { normalizeVi } from '@/utils/helpers';
 
@@ -148,101 +152,6 @@ function ImageLightbox({ urls, index, onIndexChange, onClose }: {
   );
 }
 
-type ManagerItem = { id: string; fullName: string; username: string };
-
-// ─── Assign Manager Modal ───────────────────────────────────────────────────
-interface AssignManagerModalProps {
-  managers: ManagerItem[];
-  loadingManagers: boolean;
-  managersError?: string;
-  currentManagerId?: string;
-  isChange?: boolean;
-  onClose: () => void;
-  onConfirm: (managerId: string) => Promise<void>;
-}
-
-function AssignManagerModal({ managers, loadingManagers, managersError, currentManagerId, isChange, onClose, onConfirm }: AssignManagerModalProps) {
-  const [selected, setSelected] = useState(() => currentManagerId || managers[0]?.id || '');
-  const [saving, setSaving] = useState(false);
-
-  const handleConfirm = async () => {
-    if (!selected) return;
-    setSaving(true);
-    await onConfirm(selected);
-    setSaving(false);
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-50 rounded-xl">
-              <UserCog className="w-5 h-5 text-indigo-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900">{isChange ? 'Đổi quản lý vận hành' : 'Gán quản lý vận hành'}</h2>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 transition">
-            <X className="w-5 h-5 text-slate-400" />
-          </button>
-        </div>
-
-        {loadingManagers ? (
-          <div className="py-8 text-center text-slate-400">
-            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-500 mb-3" />
-            <p className="text-sm">Đang tải danh sách quản lý...</p>
-          </div>
-        ) : managersError ? (
-          <div className="py-8 text-center">
-            <Users className="w-10 h-10 mx-auto mb-3 text-rose-300" />
-            <p className="text-sm font-semibold text-rose-600">{managersError}</p>
-          </div>
-        ) : managers.length === 0 ? (
-          <div className="py-8 text-center text-slate-400">
-            <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">Không có quản lý vận hành nào đang hoạt động.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-500">Chọn quản lý vận hành sẽ phụ trách bất động sản này.</p>
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {managers.map(mgr => {
-                const isActive = selected === mgr.id;
-                const isCurrent = mgr.id === currentManagerId;
-                return (
-                  <button key={mgr.id} onClick={() => setSelected(mgr.id)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 text-left transition ${
-                      isActive ? 'border-indigo-400 bg-indigo-50' : 'border-slate-100 hover:border-slate-200 bg-white'
-                    }`}>
-                    <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm shrink-0">
-                      {mgr.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={`font-semibold text-sm truncate ${isActive ? 'text-indigo-700' : 'text-slate-800'}`}>{mgr.username}</p>
-                      {mgr.fullName && <p className="text-xs text-slate-400">{mgr.fullName}</p>}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {isCurrent && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">Hiện tại</span>}
-                      {isActive && <CheckCircle2 className="w-5 h-5 text-indigo-500" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">Huỷ</button>
-              <button onClick={handleConfirm} disabled={!selected || saving}
-                className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition">
-                {saving ? 'Đang lưu...' : isChange ? 'Xác nhận đổi' : 'Xác nhận gán'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Room Status Modal ───────────────────────────────────────────────────────
 const STATUS_OPTIONS = [
   { value: 'AVAILABLE',   label: 'Phòng trống', desc: 'Sẵn sàng cho thuê',       icon: <CircleCheck className="w-5 h-5 text-emerald-500" />, activeCls: 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' },
@@ -337,7 +246,7 @@ function RoomDetailModal({
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold shrink-0">{tenant.tenantFullName.charAt(0).toUpperCase()}</div>
                 <div className="min-w-0">
                   <p className="font-bold text-slate-900 truncate">{tenant.tenantFullName}</p>
-                  <p className="text-sm text-slate-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 shrink-0" /> {tenant.tenantPhone}</p>
+                  <MaskedField value={tenant.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -409,15 +318,15 @@ export const PropertyDetail = () => {
   const [property, setProperty] = useState<PropertyResponse | null>(null);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
-  const [managers, setManagers] = useState<ManagerItem[]>([]);
-  const [loadingManagers, setLoadingManagers] = useState(false);
-  const [managersError, setManagersError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [roomSearch, setRoomSearch] = useState('');
   const [roomSort, setRoomSort] = useState<RoomSort>('number');
-  const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
+  /** Phòng đang mở hộp đổi giá (tab Phòng). */
+  const [priceRoom, setPriceRoom] = useState<RoomResponse | null>(null);
+  /** Phòng đang mở lịch sử giá riêng. */
+  const [historyRoom, setHistoryRoom] = useState<RoomResponse | null>(null);
   // Chia nội dung thành tab thay vì cuộn 1 trang rất dài.
   const [tab, setTab] = useState<DetailTab>('overview');
   // Index ảnh đang xem phóng to trong thư viện ảnh tòa nhà (null = đóng).
@@ -447,7 +356,6 @@ export const PropertyDetail = () => {
         const mgr = mgrs.find(m => m.id === prop.operationManagerId);
         if (mgr) prop.operationManagerName = mgr.fullName || mgr.username;
       }
-      setManagers(mgrs);
       setProperty(prop);
       setRooms(roomList);
       setContracts(contractList ?? []);
@@ -455,24 +363,6 @@ export const PropertyDetail = () => {
       console.error(e);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const openAssignModal = async () => {
-    setShowAssignModal(true);
-    setManagers([]);
-    setManagersError(undefined);
-    setLoadingManagers(true);
-    try {
-      const list = await propertyService.getManagers();
-      console.log('[getManagers] result:', list);
-      setManagers(list || []);
-    } catch (e: any) {
-      setManagersError(e?.response?.status === 403
-        ? 'Tài khoản không có quyền xem danh sách quản lý.'
-        : e?.response?.data?.message || 'Không tải được danh sách quản lý.');
-    } finally {
-      setLoadingManagers(false);
     }
   };
 
@@ -487,23 +377,6 @@ export const PropertyDetail = () => {
       setRooms(prev => prev.map(r => r.id === roomId ? { ...r, status: status as RoomResponse['status'] } : r));
     } catch (e: any) {
       toast.error(e?.response?.data?.error || e?.response?.data?.message || 'Cập nhật thất bại, vui lòng thử lại.');
-    }
-  };
-
-  const handleAssignManager = async (managerId: string) => {
-    if (!id) return;
-    try {
-      console.log('[assignManager] sending:', { propertyId: id, operationManagerId: managerId });
-      await propertyService.assignOperationManager(Number(id), managerId);
-      toast.success(property?.operationManagerId ? 'Đổi quản lý thành công!' : 'Gán quản lý thành công!');
-      setShowAssignModal(false);
-      fetchData();
-    } catch (e: any) {
-      const data = e?.response?.data;
-      const msg = data?.message || data?.error || (typeof data === 'string' ? data : null)
-        || `Lỗi ${e?.response?.status ?? ''}: Gán thất bại`;
-      console.error('[assignManager] error:', data);
-      toast.error(msg);
     }
   };
 
@@ -619,38 +492,33 @@ export const PropertyDetail = () => {
                 }`}>
                   {isWholeHouse ? 'Nhà nguyên căn' : 'Nhà chia phòng'}
                 </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${
-                  property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
-                }`}>
+                {/* Quản lý đến từ KHU VỰC của nhà, không gán riêng lẻ được nữa —
+                    chip dẫn thẳng sang màn Khu vực để xem/đổi cho cả vùng. */}
+                <Link
+                  to="/host/zones"
+                  title={`Quản lý được phân công theo khu vực${property.zoneName ? ` ${property.zoneName}` : ''} — bấm để xem hoặc đổi cho cả khu vực`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold transition hover:ring-1 hover:ring-indigo-300 ${
+                    property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
+                  }`}
+                >
                   <UserCog className="h-3 w-3" />
                   {property.operationManagerId
                     ? `Quản lý: ${property.operationManagerName || 'Đã gán'}`
-                    : 'Chưa có quản lý'}
-                </span>
+                    : 'Khu vực chưa có quản lý'}
+                </Link>
               </div>
             </div>
           </div>
 
-          {/* Hành động */}
+          {/* Hành động — KHÔNG còn gán quản lý cho từng nhà: quản lý theo khu vực. */}
           <div className="flex shrink-0 items-center gap-2">
-            {(['ACTIVE', 'PENDING_OPERATION_MANAGER', 'PENDING_HOST_REVIEW'].includes(property.status)) ? (
-              <button onClick={openAssignModal}
-                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/25 transition hover:bg-indigo-700">
-                <UserCog className="h-4 w-4" />
-                {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
-              </button>
-            ) : (
-              <div className="group relative">
-                <button disabled
-                  className="flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-400">
-                  <UserCog className="h-4 w-4" />
-                  {property.operationManagerId ? 'Đổi quản lý' : 'Gán quản lý'}
-                </button>
-                <div className="pointer-events-none absolute right-0 top-full z-10 mt-2 w-60 rounded-xl bg-slate-900 p-3 text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100">
-                  Không thể thay đổi quản lý ở trạng thái hiện tại.
-                </div>
-              </div>
-            )}
+            <Link
+              to="/host/zones"
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
+            >
+              <MapPin className="h-4 w-4" />
+              Quản lý theo khu vực
+            </Link>
             <button onClick={fetchData} title="Tải lại dữ liệu"
               className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-500 transition hover:bg-slate-50 hover:text-slate-800">
               <RefreshCw className="h-4 w-4" />
@@ -781,9 +649,30 @@ export const PropertyDetail = () => {
               <h2 className="text-lg font-bold text-slate-900">Thông tin cho thuê</h2>
             </div>
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-                <span className="flex items-center gap-2 text-sm text-slate-500"><BadgeDollarSign className="w-4 h-4" /> Giá thuê / tháng</span>
-                <span className="font-extrabold text-indigo-600 text-lg">{property.price != null ? formatCurrency(property.price) : '—'}</span>
+              {/* Giá thuê: đọc `appliedPrice` (số đang thu) chứ không phải `price` cũ,
+                  và có sẵn nút đổi giá / lịch sử ngay tại đây — cùng kiểu với thẻ phòng
+                  của nhà chia phòng, thay vì một thẻ giá riêng ở tab Tổng quan. */}
+              <div className="rounded-xl bg-slate-50 px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-sm text-slate-500"><BadgeDollarSign className="w-4 h-4" /> Giá thuê / tháng</span>
+                  <span className="font-extrabold text-indigo-600 text-lg">
+                    {(property.appliedPrice ?? property.price) != null
+                      ? formatCurrency((property.appliedPrice ?? property.price)!)
+                      : '—'}
+                  </span>
+                </div>
+                {(() => {
+                  const listed = property.listedPrice ?? property.price;
+                  const applied = property.appliedPrice ?? property.price;
+                  return listed != null && applied != null && listed !== applied ? (
+                    <p className="mt-1 text-right text-xs text-slate-400">
+                      niêm yết {formatCurrency(listed)} · quay lại khi khách trả phòng
+                    </p>
+                  ) : null;
+                })()}
+                <div className="mt-2">
+                  <WholeHousePriceActions property={property} onChanged={fetchData} />
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm text-slate-500"><Wallet className="w-4 h-4" /> Tiền cọc</span>
@@ -816,7 +705,7 @@ export const PropertyDetail = () => {
                   </div>
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 truncate">{activeContract.tenantFullName}</p>
-                    <p className="text-sm text-slate-500 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 shrink-0" /> {activeContract.tenantPhone}</p>
+                    <MaskedField value={activeContract.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
                   </div>
                   <span className="ml-auto shrink-0 text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">Đang thuê</span>
                 </div>
@@ -890,6 +779,10 @@ export const PropertyDetail = () => {
           <option value="price_asc">Giá thấp nhất</option>
           <option value="area_desc">Diện tích lớn nhất</option>
         </select>
+
+        {/* Lịch sử giá TOÀN NHÀ — từng phòng đã có nút riêng trên thẻ, nút này để xem
+            tổng hợp mọi phòng khi cần rà lại cả nhà. */}
+        <AllRoomsPriceHistoryButton property={property} />
       </div>
 
       {/* Room Grid */}
@@ -911,49 +804,114 @@ export const PropertyDetail = () => {
                 {/* Dải màu trạng thái */}
                 <span className={`absolute inset-x-0 top-0 h-1 ${st.dot}`} />
 
-                <div className="flex flex-1 flex-col p-4">
-                  {/* Header: số phòng + trạng thái */}
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-lg font-black leading-none text-slate-900">{room.roomNumber}</span>
+                <div className="flex flex-1 flex-col gap-3 p-4 pt-5">
+                  {/* ── Định danh: số phòng + tầng · trạng thái ── */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xl font-black leading-none text-slate-900">{room.roomNumber}</p>
+                      <p className="mt-1 text-xs font-medium text-slate-400">
+                        {room.floor != null ? `Tầng ${room.floor}` : 'Chưa rõ tầng'}
+                      </p>
+                    </div>
                     <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                       {st.label}
                     </span>
                   </div>
 
-                  {/* Diện tích · sức chứa */}
-                  <p className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
-                    <span className="inline-flex items-center gap-1"><Ruler className="h-3 w-3 text-slate-400" />{fmtArea(room.area)}</span>
-                    {room.maxOccupants != null && (
-                      <>
-                        <span className="text-slate-300">·</span>
-                        <span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-slate-400" />{room.maxOccupants} người</span>
-                      </>
-                    )}
-                  </p>
+                  {/* ── Thông số: mỗi ô một số, không nhồi một dòng chữ ── */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        <Ruler className="h-3 w-3" /> Diện tích
+                      </p>
+                      <p className="mt-0.5 text-sm font-bold text-slate-800">{fmtArea(room.area)}</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        <Users className="h-3 w-3" /> Sức chứa
+                      </p>
+                      <p className="mt-0.5 text-sm font-bold text-slate-800">
+                        {room.maxOccupants != null ? `${room.maxOccupants} người` : '—'}
+                      </p>
+                    </div>
+                  </div>
 
-                  {/* Khách thuê (nếu phòng đang thuê & lấy được hợp đồng) */}
+                  {/* ── Khách thuê (nếu có) hoặc mô tả cấu trúc ── */}
                   {tenant ? (
-                    <div className="mt-3 flex items-center gap-2 rounded-xl bg-blue-50 px-2.5 py-2">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+                    <div className="flex items-center gap-2 rounded-xl bg-blue-50 px-2.5 py-2">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
                         {tenant.tenantFullName.charAt(0).toUpperCase()}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-bold leading-tight text-slate-800">{tenant.tenantFullName}</p>
-                        <p className="truncate text-[11px] text-slate-500">{tenant.tenantPhone}</p>
+                        <MaskedField value={tenant.tenantPhone} emptyText="" className="text-[11px] text-slate-500" />
                       </div>
                     </div>
                   ) : room.structureDescription ? (
-                    <p className="mt-2 line-clamp-2 text-xs text-slate-400">{room.structureDescription}</p>
+                    <p className="line-clamp-2 text-xs text-slate-400">{room.structureDescription}</p>
                   ) : null}
 
-                  {/* Giá — luôn nằm đáy thẻ để các thẻ thẳng hàng */}
-                  <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Giá thuê</span>
-                    <span className="font-black text-indigo-600">
-                      {room.price != null ? formatCurrency(room.price) : <span className="text-sm text-slate-300">—</span>}
-                    </span>
-                  </div>
+                  {/*
+                    ── Giá: nhãn trên, số dưới ──
+                    Bản trước nhét nhãn "GIÁ THUÊ" và số tiền vào cùng một dòng, số dài
+                    (10.945.000 đ) chiếm gần hết chỗ nên nhìn chật. Tách hai dòng thì số
+                    tiền đứng riêng, đọc lướt cũng thấy ngay.
+                    `applied` là số đang thu; khác `listed` thì ghi thêm dòng niêm yết.
+                  */}
+                  {(() => {
+                    const listed = room.listedPrice ?? room.price;
+                    const applied = room.appliedPrice ?? room.price;
+                    const differs = listed != null && applied != null && listed !== applied;
+                    return (
+                      <div className="mt-auto border-t border-slate-100 pt-3">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Giá thuê / tháng</p>
+                        <p className="mt-0.5 text-lg font-black leading-none text-indigo-600">
+                          {applied != null ? formatCurrency(applied) : <span className="text-sm text-slate-300">Chưa định giá</span>}
+                        </p>
+                        {differs && (
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            niêm yết {formatCurrency(listed!)} · quay lại khi khách trả phòng
+                          </p>
+                        )}
+
+                        <div
+                          className="mt-2.5 flex items-center gap-1.5"
+                          // Thẻ phòng là <button> mở chi tiết — chặn nổi bọt để bấm nút giá
+                          // không mở luôn modal phòng.
+                          onClick={(e) => { e.stopPropagation(); }}
+                        >
+                          {room.priceLocked ? (
+                            <span
+                              title={room.currentTenant ? `Đang cho ${room.currentTenant} thuê` : 'Đang có khách thuê'}
+                              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-slate-100 py-2 text-[11px] font-bold text-slate-500"
+                            >
+                              <Lock className="h-3 w-3" /> Khoá giá
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setPriceRoom(room)}
+                              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-50 py-2 text-[11px] font-bold text-indigo-700 transition hover:bg-indigo-100"
+                            >
+                              <Pencil className="h-3 w-3" /> Đổi giá
+                            </button>
+                          )}
+
+                          {/* Lịch sử của RIÊNG phòng này — xem được cả khi đang khoá giá,
+                              vì lúc đó mới hay cần tra "giá này từ đâu ra". */}
+                          <button
+                            type="button"
+                            title={`Lịch sử giá phòng ${room.roomNumber}`}
+                            onClick={() => setHistoryRoom(room)}
+                            className="flex h-[30px] w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-indigo-300 hover:text-indigo-600"
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </button>
             );
@@ -996,15 +954,20 @@ export const PropertyDetail = () => {
         />
       )}
 
-      {showAssignModal && (
-        <AssignManagerModal
-          managers={managers}
-          loadingManagers={loadingManagers}
-          managersError={managersError}
-          currentManagerId={property.operationManagerId}
-          isChange={!!property.operationManagerId}
-          onClose={() => setShowAssignModal(false)}
-          onConfirm={handleAssignManager}
+      {priceRoom && (
+        <RoomPriceModal
+          propertyId={property.id}
+          room={priceRoom}
+          onClose={() => setPriceRoom(null)}
+          onChanged={fetchData}
+        />
+      )}
+
+      {historyRoom && (
+        <RoomPriceHistoryModal
+          propertyId={property.id}
+          room={historyRoom}
+          onClose={() => setHistoryRoom(null)}
         />
       )}
 

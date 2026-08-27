@@ -1,44 +1,28 @@
 import { Settings } from 'lucide-react';
-import { SYSTEM_SETTINGS } from '@/utils/adminMockData';
 import { BillingRulesCard } from './settings/BillingRulesCard';
-import { SectionShell, StatusPill } from './shared';
+import { SectionShell } from './shared';
 
 /**
- * Thẻ "Quy tắc tính tiền" trong `SYSTEM_SETTINGS` là mock, nút "Cấu hình" không làm gì.
- * Phần đó giờ đã có màn thật (`BillingRulesCard`) nên lọc bỏ khỏi lưới — để cả hai sẽ
- * có hai thẻ cùng chủ đề nằm cạnh nhau, một thật một giả.
+ * Cấu hình hệ thống — CHỈ còn phần chạy thật.
  *
- * Bốn thẻ còn lại vẫn là placeholder cho tính năng chưa làm; giữ nguyên để biết còn nợ gì.
+ * Trước 15/08/2026 màn này render thêm 4 thẻ từ `SYSTEM_SETTINGS` (mock trong
+ * utils/adminMockData.ts): mỗi thẻ có tiêu đề, mô tả, một nhãn trạng thái và nút
+ * "Cấu hình" — nhưng nút đó KHÔNG làm gì cả, và trạng thái là chữ bịa. Nhìn vào tưởng
+ * hệ thống có 5 nhóm cấu hình, thực tế chỉ 1 nhóm hoạt động.
+ *
+ * Các nhóm đã bỏ (chưa có API, ghi lại để không quên là còn nợ):
+ *   • Phí dịch vụ · Phương thức thanh toán · Mẫu hợp đồng
+ *   • Cấu hình thông báo · Chính sách tài khoản
+ * Làm nhóm nào thì thêm lại nhóm đó — kèm API thật, không dựng vỏ trước.
  */
-const PLACEHOLDER_SETTINGS = SYSTEM_SETTINGS.filter(s => s.id !== 'billing');
-
 export const SystemConfiguration = () => {
   return (
     <SectionShell
-      title="System Configuration"
-      subtitle="Quản lý billing rules, service fees, payment methods, contract templates, notification settings và account policies"
+      title="Cấu hình hệ thống"
+      subtitle="Quy tắc tính tiền dùng chung cho toàn bộ hoá đơn tiền nhà, điện và nước"
       icon={Settings}
     >
-      <div className="mb-5">
-        <BillingRulesCard />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        {PLACEHOLDER_SETTINGS.map(setting => (
-          <div key={setting.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-extrabold text-slate-950">{setting.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600">{setting.description}</p>
-              </div>
-              <StatusPill label={setting.status} color="bg-white text-slate-700 border border-slate-200" />
-            </div>
-            <button className="mt-4 rounded-xl bg-slate-950 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800">
-              Cấu hình
-            </button>
-          </div>
-        ))}
-      </div>
+      <BillingRulesCard />
     </SectionShell>
   );
 };

@@ -1,188 +1,63 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity,
-  TextInput, Modal, Alert, ScrollView, Dimensions, Linking, ActivityIndicator, Platform,
+  View, Text, StyleSheet, SectionList, TouchableOpacity,
+  TextInput, ScrollView, Linking, ActivityIndicator,
 } from 'react-native';
 import { showAlert, isClosedContract } from '@/utils';
+import { EXPIRING_SOON_DAYS } from '@/utils/contractStatus';
+import { maskTenantPhone } from '@/constants/managerVisibility';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
+import { Colors, Spacing, Shadow } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+// Model + sheet chi tiết dùng CHUNG với màn Quản lý nhà & phòng — xem
+// components/manager/TenantDetailSheet.tsx.
+import {
+  TenantDetailSheet, mapContractToTenant, getDaysRemaining, hasInspection,
+  getFinancialChip, getContractChip, getInspectionChip, fmtIsoDate, getAvatarColor,
+  StatusBadge, InfoChip,
+  type Tenant, type TenantStatus, type ChipInfo,
+} from '@/components/manager/TenantDetailSheet';
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
-const TODAY = new Date();
+type FilterKey =
+  | 'all' | TenantStatus
+  | 'deposit_unpaid' | 'whole_house' | 'expiring' | 'expired' | 'no_inspection';
 
-// ===================== TYPES =====================
-type TenantStatus = 'active' | 'pending_activation' | 'moved_out' | 'suspended';
-type TenantPropertyType = 'MULTI_ROOM' | 'WHOLE_HOUSE';
-type FilterKey = 'all' | TenantStatus | 'overdue' | 'whole_house' | 'expiring';
-
-interface HouseholdMember { name: string; relation: string }
-
-interface Tenant {
-  id: string;
-  fullName: string;
-  phone: string;
-  email?: string;
-  cccd: string;
-  propertyName: string;
-  propertyId: string;
-  roomId: string;
-  roomName: string;
-  propertyType?: TenantPropertyType;
-  householdMembers?: HouseholdMember[];
-  status: TenantStatus;
-  moveInDate: string;
-  moveOutDate?: string;
-  /** Đã thu đủ cọc chưa (không lưu số tiền — @/constants/managerVisibility). */
-  depositPaid: boolean;
-  contractId?: string;
-  unpaidAmount?: number;
-  unpaidBills?: number;
-  openTickets?: number;
-  contractEndDate?: string;
-  notes?: string;
-}
-
-// ===================== MAP API → UI =====================
-// Trạng thái HĐ từ BE (uppercase) → trạng thái khách thuê dùng trong UI.
-// Khách đã trả phòng xong không vào tới đây nữa (lọc bỏ ngay lúc tải — isClosedContract),
-// nên chỉ còn: đang ở · chờ kích hoạt · tạm ngưng. HĐ hết hạn mà chưa làm thủ tục trả
-// phòng vẫn là khách đang ở — bộ lọc "Sắp hết HĐ" sẽ nhặt ra để quản lý xử lý.
-const mapTenantStatus = (s?: string): TenantStatus => {
-  const u = (s || '').toUpperCase();
-  if (u.startsWith('PENDING')) return 'pending_activation';
-  if (u === 'SUSPENDED') return 'suspended';
-  return 'active';
-};
-
-const fmtIsoDate = (iso?: string): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? iso : d.toLocaleDateString('vi-VN');
-};
-
-// 1 hợp đồng (BE) + thông tin nhà → 1 khách thuê (UI).
-const mapContractToTenant = (
-  c: TenantContractResponse,
-  propertyName: string,
-  isWholeHouse: boolean,
-): Tenant => ({
-  id: String(c.id),
-  fullName: c.tenantFullName,
-  phone: c.tenantPhone,
-  cccd: c.tenantCccd ?? '',
-  propertyName,
-  propertyId: String(c.propertyId),
-  roomId: String(c.roomId ?? ''),
-  roomName: isWholeHouse || !c.roomNumber ? 'Nhà nguyên căn' : `Phòng ${c.roomNumber}`,
-  propertyType: isWholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
-  status: mapTenantStatus(c.status),
-  moveInDate: fmtIsoDate(c.moveInDate || c.startDate),
-  depositPaid: (c.paymentStatus || '').toUpperCase() === 'PAID',
-  contractId: c.contractCode,
-  contractEndDate: c.endDate,   // ISO (yyyy-MM-dd)
-  // BE chưa trả công nợ/ticket theo từng khách ở endpoint này → để 0 (không bịa số).
-  unpaidAmount: 0,
-  unpaidBills: 0,
-  openTickets: 0,
-});
-
-// ===================== HELPERS =====================
-const getDaysRemaining = (dateStr: string): number =>
-  Math.ceil((new Date(dateStr).getTime() - TODAY.getTime()) / 86400000);
-
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
-
-const AVATAR_PALETTE = [
-  { bg: '#EEF2FF', text: '#4F46E5' },
-  { bg: '#D1FAE5', text: '#065F46' },
-  { bg: '#E0F2FE', text: '#0369A1' },
-  { bg: '#F3E8FF', text: '#6D28D9' },
-  { bg: '#FFE4E6', text: '#9F1239' },
-  { bg: '#FEF9C3', text: '#713F12' },
-  { bg: '#ECFDF5', text: '#047857' },
-  { bg: '#FDF4FF', text: '#86198F' },
-];
-
-const getAvatarColor = (name: string) =>
-  AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length];
-
-interface ChipInfo { label: string; color: string; bg: string }
-
-const getFinancialChip = (t: Tenant): ChipInfo | null => {
-  if (t.status === 'moved_out') return null;
-  if (t.status === 'pending_activation')
-    return { label: 'Chưa kích hoạt', color: '#94A3B8', bg: '#F1F5F9' };
-  if ((t.unpaidBills || 0) > 0)
-    return { label: `⚠️ ${t.unpaidBills} HĐ · ${fmt(t.unpaidAmount || 0)}`, color: '#DC2626', bg: '#FEE2E2' };
-  return { label: '✓ Đã thanh toán', color: '#16A34A', bg: '#F0FDF4' };
-};
-
-const getContractChip = (t: Tenant): ChipInfo | null => {
-  if (!t.contractEndDate || t.status === 'moved_out') return null;
-  const days = getDaysRemaining(t.contractEndDate);
-  if (days < 0) return { label: '❌ Hết hạn HĐ', color: '#DC2626', bg: '#FEE2E2' };
-  if (days <= 30) return { label: `⏰ Còn ${days} ngày`, color: '#B45309', bg: '#FEF3C7' };
-  if (days <= 90) return { label: `📋 Còn ${days} ngày`, color: '#0369A1', bg: '#E0F2FE' };
-  return null;
-};
-
-const STATUS_CONFIG: Record<TenantStatus, { label: string; color: string; bg: string }> = {
-  active: { label: 'Đang ở', color: '#16A34A', bg: '#F0FDF4' },
-  pending_activation: { label: 'Chờ KH', color: '#D97706', bg: '#FFFBEB' },
-  moved_out: { label: 'Đã rời', color: '#6B7280', bg: '#F3F4F6' },
-  suspended: { label: 'Tạm ngưng', color: '#EF4444', bg: '#FEF2F2' },
-};
-
+/**
+ * Bỏ chip "Quá hạn TT" (17/08/2026): nó lọc theo `unpaidBills`, mà field đó luôn là 0 vì
+ * endpoint không trả công nợ theo khách — chip hiện (0) và bấm vào luôn ra danh sách rỗng.
+ * Thêm lại khi BE trả công nợ từng hợp đồng.
+ *
+ * Mỗi chip còn lại đều lọc trên dữ liệu THẬT, và đều là một việc quản lý phải làm:
+ * thu cọc · nhắc gia hạn · xử lý HĐ hết hạn chưa thanh lý · bù hiện trạng còn thiếu.
+ */
 const FILTER_DEFS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
   { key: 'active', label: 'Đang ở' },
-  { key: 'pending_activation', label: 'Chờ kích hoạt' },
-  { key: 'overdue', label: 'Quá hạn TT' },
-  { key: 'whole_house', label: 'Nguyên căn' },
+  { key: 'pending_activation', label: 'Chờ nhận phòng' },
+  { key: 'deposit_unpaid', label: 'Chưa thu cọc' },
   { key: 'expiring', label: 'Sắp hết HĐ' },
+  { key: 'expired', label: 'Hết hạn HĐ' },
+  { key: 'no_inspection', label: 'Thiếu hiện trạng' },
+  { key: 'whole_house', label: 'Nguyên căn' },
 ];
 
 const matchesFilter = (t: Tenant, filter: FilterKey): boolean => {
+  const daysLeft = t.contractEndDate ? getDaysRemaining(t.contractEndDate) : null;
   switch (filter) {
     case 'all': return true;
-    case 'overdue': return (t.unpaidBills || 0) > 0;
+    case 'deposit_unpaid': return !t.depositPaid && t.status !== 'moved_out';
     case 'whole_house': return t.propertyType === 'WHOLE_HOUSE';
-    case 'expiring': return !!t.contractEndDate && getDaysRemaining(t.contractEndDate) <= 30;
+    // "Sắp hết" KHÔNG bao gồm HĐ đã quá hạn — hai việc khác nhau: một cái là nhắc gia
+    // hạn trước, một cái là hợp đồng hết hiệu lực mà khách vẫn ở, phải xử lý ngay.
+    case 'expiring': return daysLeft != null && daysLeft >= 0 && daysLeft <= EXPIRING_SOON_DAYS;
+    case 'expired': return daysLeft != null && daysLeft < 0;
+    // Chỉ tính khách ĐÃ nhận phòng — khách chưa đón thì đương nhiên chưa có hiện trạng.
+    case 'no_inspection': return t.status === 'active' && !hasInspection(t);
     default: return t.status === filter;
   }
 };
-
-// ===================== STATUS CHIP =====================
-const StatusBadge: React.FC<{ status: TenantStatus }> = ({ status }) => {
-  const cfg = STATUS_CONFIG[status];
-  return (
-    <View style={[badgeStyles.badge, { backgroundColor: cfg.bg }]}>
-      <View style={[badgeStyles.dot, { backgroundColor: cfg.color }]} />
-      <Text style={[badgeStyles.label, { color: cfg.color }]}>{cfg.label}</Text>
-    </View>
-  );
-};
-
-const badgeStyles = StyleSheet.create({
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  label: { fontSize: 11, fontWeight: '700' },
-});
-
-// ===================== INFO CHIP =====================
-const InfoChip: React.FC<{ label: string; color: string; bg: string }> = ({ label, color, bg }) => (
-  <View style={[chipStyles.chip, { backgroundColor: bg, borderColor: color + '30' }]}>
-    <Text style={[chipStyles.text, { color }]}>{label}</Text>
-  </View>
-);
-
-const chipStyles = StyleSheet.create({
-  chip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
-  text: { fontSize: 11, fontWeight: '600' },
-});
 
 // ===================== FILTER CHIP =====================
 const FilterChip: React.FC<{
@@ -199,7 +74,10 @@ const FilterChip: React.FC<{
     onPress={onPress}
     activeOpacity={0.75}
   >
+    {/* Cắt 1 dòng + chặn co chữ: tên toà nhà dài ("MTX#14 THEO_PHONG giường+quạt") làm
+        chip phình quá bề ngang màn hình rồi bị cắt cụt ở rìa, kéo cả hàng lệch. */}
     <Text
+      numberOfLines={1}
       style={[
         filterChipStyles.label,
         selected ? filterChipStyles.labelSelected : filterChipStyles.labelUnselected,
@@ -234,11 +112,15 @@ const filterChipStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    minHeight: 38,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    minHeight: 34,
+    // 16 → 12: hai chip đầu ("Tất cả", "Đang ở") ngắn mà đệm dày làm hàng dài quá,
+    // chip thứ ba đã bị đẩy ra khỏi màn.
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 999,
     borderWidth: 1,
+    // Chặn chip phình theo tên toà nhà dài — quá thì chữ tự cắt (numberOfLines={1}).
+    maxWidth: 190,
   },
   chipSelected: {
     backgroundColor: '#4F46E5',
@@ -273,278 +155,6 @@ const filterChipStyles = StyleSheet.create({
   countTextUnselected: { color: '#4F46E5' },
 });
 
-// ===================== TENANT DETAIL MODAL =====================
-const TenantDetailModal: React.FC<{
-  tenant: Tenant;
-  onClose: () => void;
-  onAction: (action: string, tenant: Tenant) => void;
-}> = ({ tenant, onClose, onAction }) => {
-  const cfg = STATUS_CONFIG[tenant.status];
-  const isWholeHouse = tenant.propertyType === 'WHOLE_HOUSE';
-  const avatarColor = isWholeHouse
-    ? { bg: '#FEF3C7', text: '#B45309' }
-    : getAvatarColor(tenant.fullName);
-  const financialChip = getFinancialChip(tenant);
-  const contractChip = getContractChip(tenant);
-
-  return (
-    <Modal transparent animationType="slide">
-      <View style={mStyles.overlay}>
-        <View style={mStyles.sheet}>
-          <View style={mStyles.handle} />
-          <ScrollView bounces={false} showsVerticalScrollIndicator={false}
-            contentContainerStyle={mStyles.content}>
-
-            {/* Header */}
-            <View style={mStyles.header}>
-              <View style={[mStyles.avatarLarge, { backgroundColor: avatarColor.bg }]}>
-                <Text style={[mStyles.avatarText, { color: avatarColor.text }]}>
-                  {isWholeHouse ? '🏠' : tenant.fullName.charAt(0)}
-                </Text>
-              </View>
-              <View style={mStyles.headerInfo}>
-                <Text style={mStyles.tenantName}>{tenant.fullName}</Text>
-                <Text style={mStyles.tenantSub}>
-                  {tenant.propertyName} · {isWholeHouse ? 'Nhà nguyên căn' : tenant.roomName}
-                </Text>
-                <View style={mStyles.headerBadges}>
-                  <StatusBadge status={tenant.status} />
-                  {isWholeHouse && (
-                    <View style={[badgeStyles.badge, { backgroundColor: '#FEF3C7' }]}>
-                      <Text style={[badgeStyles.label, { color: '#B45309' }]}>🏘 Nguyên căn</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              <TouchableOpacity onPress={onClose} style={mStyles.closeBtn}>
-                <Text style={mStyles.closeBtnText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Alert banners */}
-            {(tenant.unpaidBills || 0) > 0 && (
-              <TouchableOpacity style={mStyles.alertBanner} onPress={() => onAction('billing_overdue', tenant)}>
-                <Text style={mStyles.alertText}>
-                  ⚠️ {tenant.unpaidBills} hóa đơn chưa thanh toán · {fmt(tenant.unpaidAmount || 0)}
-                </Text>
-                <Text style={mStyles.alertArrow}>›</Text>
-              </TouchableOpacity>
-            )}
-            {(tenant.openTickets || 0) > 0 && (
-              <TouchableOpacity
-                style={[mStyles.alertBanner, { backgroundColor: '#DBEAFE', borderColor: '#3B82F640' }]}
-                onPress={() => onAction('maintenance', tenant)}
-              >
-                <Text style={[mStyles.alertText, { color: '#1D4ED8' }]}>
-                  🔧 {tenant.openTickets} yêu cầu bảo trì đang xử lý
-                </Text>
-                <Text style={[mStyles.alertArrow, { color: '#1D4ED8' }]}>›</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Status chips */}
-            {(financialChip || contractChip) && (
-              <View style={mStyles.chipRow}>
-                {financialChip && <InfoChip {...financialChip} />}
-                {contractChip && <InfoChip {...contractChip} />}
-              </View>
-            )}
-
-            {/* Personal info */}
-            <View style={mStyles.section}>
-              <Text style={mStyles.sectionTitle}>Thông tin liên hệ</Text>
-              <InfoRow label="📱 Điện thoại" value={'•••'} />
-              {tenant.email && <InfoRow label="✉️ Email" value={tenant.email} />}
-              <InfoRow label="🪪 CCCD / MST" value={tenant.cccd} />
-            </View>
-
-            {/* Rental info */}
-            <View style={mStyles.section}>
-              <Text style={mStyles.sectionTitle}>{isWholeHouse ? 'Thuê nhà nguyên căn' : 'Thông tin thuê phòng'}</Text>
-              <InfoRow label={isWholeHouse ? '🏠 Tài sản' : '🚪 Phòng'} value={isWholeHouse ? 'Nhà nguyên căn' : tenant.roomName} />
-              <InfoRow label="📅 Ngày vào" value={tenant.moveInDate} />
-              {tenant.moveOutDate && <InfoRow label="📅 Ngày ra" value={tenant.moveOutDate} />}
-              {tenant.contractEndDate && (
-                <InfoRow
-                  label="📋 Hạn HĐ"
-                  value={tenant.contractEndDate}
-                  highlight={!!tenant.contractEndDate && getDaysRemaining(tenant.contractEndDate) <= 30}
-                />
-              )}
-              {/* Không hiện số tiền cọc — @/constants/managerVisibility. */}
-              <InfoRow
-                label="💰 Tiền cọc"
-                value={tenant.depositPaid ? 'Đã thu' : 'Chưa thu'}
-                accent
-              />
-            </View>
-
-            {/* Household members */}
-            {isWholeHouse && tenant.householdMembers && (
-              <View style={mStyles.section}>
-                <Text style={mStyles.sectionTitle}>Thành viên / người sử dụng</Text>
-                {tenant.householdMembers.map(m => (
-                  <InfoRow key={`${m.name}-${m.relation}`} label={m.relation} value={m.name} />
-                ))}
-              </View>
-            )}
-
-            {/* Stats */}
-            <View style={mStyles.section}>
-              <Text style={mStyles.sectionTitle}>Công nợ & Dịch vụ</Text>
-              <View style={mStyles.statsRow}>
-                <View style={[mStyles.statBox, { borderColor: (tenant.unpaidBills || 0) > 0 ? '#EF4444' : '#10B981' }]}>
-                  <Text style={[mStyles.statNum, { color: (tenant.unpaidBills || 0) > 0 ? '#EF4444' : '#10B981' }]}>
-                    {tenant.unpaidBills || 0}
-                  </Text>
-                  <Text style={mStyles.statLabel}>HĐ chưa TT</Text>
-                  {(tenant.unpaidAmount || 0) > 0 && (
-                    <Text style={[mStyles.statSub, { color: '#EF4444' }]}>{fmt(tenant.unpaidAmount || 0)}</Text>
-                  )}
-                </View>
-                <View style={[mStyles.statBox, { borderColor: (tenant.openTickets || 0) > 0 ? '#3B82F6' : '#E2E8F0' }]}>
-                  <Text style={[mStyles.statNum, { color: (tenant.openTickets || 0) > 0 ? '#3B82F6' : '#64748B' }]}>
-                    {tenant.openTickets || 0}
-                  </Text>
-                  <Text style={mStyles.statLabel}>Ticket mở</Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Actions */}
-            {tenant.status === 'active' && (
-              <View style={mStyles.section}>
-                <Text style={mStyles.sectionTitle}>Thao tác nhanh</Text>
-                <View style={mStyles.actionsGrid}>
-                  {[
-                    { key: 'billing', icon: '🧾', label: 'Hóa đơn', color: Colors.warning },
-                    { key: 'contract', icon: '📋', label: 'Hợp đồng', color: Colors.info },
-                    { key: 'maintenance', icon: '🔧', label: 'Bảo trì', color: Colors.primary },
-                    { key: 'checkout', icon: '🚪', label: isWholeHouse ? 'Trả nhà' : 'Trả phòng', color: Colors.error },
-                  ].map(({ key, icon, label, color }) => (
-                    <TouchableOpacity
-                      key={key}
-                      style={[mStyles.actionBtn, { borderColor: color + '40', backgroundColor: color + '10' }]}
-                      onPress={() => onAction(key, tenant)}
-                    >
-                      <Text style={mStyles.actionIcon}>{icon}</Text>
-                      <Text style={[mStyles.actionLabel, { color }]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {tenant.status === 'pending_activation' && (
-              <TouchableOpacity
-                style={mStyles.activateBtn}
-                onPress={() => onAction('activate', tenant)}
-              >
-                <Text style={mStyles.activateBtnText}>✅ Kích hoạt phòng</Text>
-              </TouchableOpacity>
-            )}
-
-            {tenant.notes && (
-              <View style={mStyles.notesBox}>
-                <Text style={mStyles.notesLabel}>GHI CHÚ</Text>
-                <Text style={mStyles.notesText}>{tenant.notes}</Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-};
-
-const InfoRow: React.FC<{ label: string; value: string; accent?: boolean; highlight?: boolean }> = ({
-  label, value, accent, highlight,
-}) => (
-  <View style={mStyles.infoRow}>
-    <Text style={mStyles.infoLabel}>{label}</Text>
-    <Text style={[
-      mStyles.infoVal,
-      accent && { color: Colors.primary, fontWeight: '700' },
-      highlight && { color: '#B45309' },
-    ]}>
-      {value}
-    </Text>
-  </View>
-);
-
-const mStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    maxHeight: SCREEN_HEIGHT * 0.93,
-  },
-  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E2E8F0', alignSelf: 'center', marginTop: 12, marginBottom: 4 },
-  content: { paddingHorizontal: Spacing.xl, paddingBottom: 44, paddingTop: Spacing.md },
-
-  header: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, marginBottom: Spacing.md },
-  avatarLarge: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 26, fontWeight: '800' },
-  headerInfo: { flex: 1 },
-  tenantName: { fontSize: 19, fontWeight: '800', color: '#0F172A', marginBottom: 2 },
-  tenantSub: { fontSize: 13, color: '#64748B', marginBottom: 6 },
-  headerBadges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  closeBtnText: { fontSize: 14, color: '#64748B', fontWeight: '700' },
-
-  alertBanner: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7',
-    borderRadius: 12, padding: Spacing.md, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: '#F59E0B40', gap: Spacing.sm,
-  },
-  alertText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#B45309' },
-  alertArrow: { fontSize: 20, color: '#B45309' },
-
-  chipRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: Spacing.md },
-
-  section: { marginBottom: Spacing.lg },
-  sectionTitle: {
-    fontSize: 11, fontWeight: '800', color: '#94A3B8',
-    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: Spacing.sm,
-  },
-  infoRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
-  },
-  infoLabel: { fontSize: 14, color: '#64748B' },
-  infoVal: { fontSize: 14, fontWeight: '600', color: '#0F172A', textAlign: 'right', flex: 1, marginLeft: Spacing.md },
-
-  statsRow: { flexDirection: 'row', gap: Spacing.md },
-  statBox: {
-    flex: 1, backgroundColor: '#F8FAFC', borderRadius: 12,
-    padding: Spacing.md, alignItems: 'center', borderWidth: 1.5,
-  },
-  statNum: { fontSize: 26, fontWeight: '800' },
-  statLabel: { fontSize: 11, color: '#64748B', marginTop: 2 },
-  statSub: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-
-  actionsGrid: { flexDirection: 'row', gap: Spacing.md, flexWrap: 'wrap' },
-  actionBtn: {
-    flex: 1, minWidth: '40%', borderRadius: 12,
-    paddingVertical: Spacing.md, alignItems: 'center', borderWidth: 1.5,
-  },
-  actionIcon: { fontSize: 22, marginBottom: 4 },
-  actionLabel: { fontSize: 11, fontWeight: '700' },
-
-  activateBtn: {
-    backgroundColor: Colors.success, borderRadius: 14,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md,
-    ...Shadow.md,
-  },
-  activateBtnText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-
-  notesBox: {
-    backgroundColor: '#F8FAFC', borderRadius: 10, padding: Spacing.md,
-    borderLeftWidth: 3, borderLeftColor: '#CBD5E1', marginBottom: Spacing.md,
-  },
-  notesLabel: { fontSize: 10, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.8, marginBottom: 4 },
-  notesText: { fontSize: 13, color: '#64748B', lineHeight: 20 },
-});
-
 // ===================== TENANT CARD =====================
 const TenantCard: React.FC<{
   tenant: Tenant;
@@ -555,13 +165,16 @@ const TenantCard: React.FC<{
   const avatarColor = isWholeHouse ? { bg: '#FEF3C7', text: '#B45309' } : getAvatarColor(tenant.fullName);
   const financialChip = getFinancialChip(tenant);
   const contractChip = getContractChip(tenant);
-  const hasAlerts = (tenant.unpaidBills || 0) > 0 || (tenant.openTickets || 0) > 0;
+  const inspectionChip = getInspectionChip(tenant);
+  // Viền đỏ dành cho việc CẦN LÀM thật: chưa thu cọc, hoặc HĐ đã quá hạn mà khách còn ở.
+  const daysLeft = tenant.contractEndDate ? getDaysRemaining(tenant.contractEndDate) : null;
+  const hasAlerts =
+    (tenant.status === 'active' && !tenant.depositPaid) || (daysLeft != null && daysLeft < 0);
 
   const chips: ChipInfo[] = [];
   if (financialChip) chips.push(financialChip);
   if (contractChip) chips.push(contractChip);
-  if ((tenant.openTickets || 0) > 0)
-    chips.push({ label: `🔧 ${tenant.openTickets} bảo trì`, color: '#1D4ED8', bg: '#DBEAFE' });
+  if (inspectionChip) chips.push(inspectionChip);
   if (isWholeHouse)
     chips.push({ label: '🏘 Nguyên căn', color: '#B45309', bg: '#FEF3C7' });
 
@@ -586,8 +199,17 @@ const TenantCard: React.FC<{
         </View>
         <View style={cStyles.nameBlock}>
           <Text style={cStyles.fullName} numberOfLines={1}>{tenant.fullName}</Text>
+          {/* PHÒNG đứng trước, TÊN NHÀ theo sau và được phép cắt.
+              Trước đây tên nhà đứng đầu nên trên màn hẹp luôn bị cắt đúng ở chỗ có số
+              phòng ("MTX#14 THEO_PHONG giường+..."), tức mất đúng thông tin phân biệt
+              các khách với nhau — trong khi cả danh sách thường cùng một nhà. */}
+          {/* CHỈ số phòng — tên nhà nằm ở header của nhóm (danh sách gom theo nhà từ
+              17/08/2026), in lại trên từng thẻ là vừa lặp vừa bị cắt cụt trên máy hẹp. */}
           <Text style={cStyles.locationText} numberOfLines={1}>
-            {tenant.propertyName} · {isWholeHouse ? 'Nhà nguyên căn' : tenant.roomName}
+            <Text style={cStyles.locationRoom}>
+              {isWholeHouse ? 'Nhà nguyên căn' : tenant.roomName}
+            </Text>
+            {!!tenant.contractCode && `  ·  ${tenant.contractCode}`}
           </Text>
         </View>
         <View style={cStyles.topRight}>
@@ -603,18 +225,22 @@ const TenantCard: React.FC<{
 
       {/* MIDDLE: Contact + Date */}
       <View style={cStyles.middleRow}>
-        <View style={cStyles.infoItem}>
-          <Text style={cStyles.infoIcon}>📱</Text>
-          <Text style={cStyles.infoText}>{'•••'}</Text>
-        </View>
+        {/* 3 số cuối SĐT — @/constants/managerVisibility. Đủ để đối chiếu người vừa gọi
+            và phân biệt hai khách trùng tên; muốn gọi thì bấm nút ••• (không hiện số). */}
+        {!!tenant.phone && (
+          <View style={cStyles.infoItem}>
+            <Text style={cStyles.infoIcon}>📱</Text>
+            <Text style={cStyles.infoText}>{maskTenantPhone(tenant.phone)}</Text>
+          </View>
+        )}
         <View style={cStyles.infoItem}>
           <Text style={cStyles.infoIcon}>📅</Text>
           <Text style={cStyles.infoText}>Vào {tenant.moveInDate}</Text>
         </View>
-        {isWholeHouse && (tenant.householdMembers?.length || 0) > 0 && (
+        {!!tenant.contractEndDate && (
           <View style={cStyles.infoItem}>
-            <Text style={cStyles.infoIcon}>👥</Text>
-            <Text style={cStyles.infoText}>{tenant.householdMembers!.length} thành viên</Text>
+            <Text style={cStyles.infoIcon}>📋</Text>
+            <Text style={cStyles.infoText}>HĐ đến {fmtIsoDate(tenant.contractEndDate)}</Text>
           </View>
         )}
       </View>
@@ -657,6 +283,7 @@ const cStyles = StyleSheet.create({
   nameBlock: { flex: 1, justifyContent: 'center' },
   fullName: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
   locationText: { fontSize: 12, color: '#64748B' },
+  locationRoom: { fontWeight: '700', color: '#334155' },
   topRight: { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
   moreBtn: { paddingHorizontal: 4, paddingVertical: 2 },
   moreBtnText: { fontSize: 11, color: '#94A3B8', fontWeight: '700', letterSpacing: 1 },
@@ -671,18 +298,83 @@ const cStyles = StyleSheet.create({
   chipsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
 });
 
-// ===================== SUMMARY STAT TILE =====================
-const StatTile: React.FC<{ value: number; label: string; color: string; bg: string }> = ({
-  value, label, color, bg,
+// ===================== PROPERTY SECTION HEADER =====================
+/**
+ * Đầu nhóm cho MỘT NHÀ. Danh sách khách gom theo nhà (17/08/2026) vì để phẳng thì tên
+ * nhà chỉ còn là dòng chữ bị cắt trên thẻ — quản lý nhiều nhà không biết khách nào ở đâu.
+ *
+ * Bấm vào header để thu/mở nhóm: nhà nào đang cần xử lý thì mở, còn lại xếp gọn lại.
+ */
+interface PropertySection {
+  propertyName: string;
+  isWholeHouse: boolean;
+  /** Tổng khách của nhà này SAU khi lọc — `data` rỗng khi nhóm đang thu. */
+  total: number;
+  /** Số việc cần làm trong nhà: chưa thu cọc hoặc HĐ đã quá hạn. */
+  todo: number;
+  collapsed: boolean;
+  data: Tenant[];
+}
+
+const PropertySectionHeader: React.FC<{ section: PropertySection; onToggle: () => void }> = ({
+  section, onToggle,
 }) => (
-  <View style={[stStyles.tile, { backgroundColor: bg }]}>
+  <TouchableOpacity style={secStyles.wrap} onPress={onToggle} activeOpacity={0.7}>
+    <Text style={secStyles.icon}>{section.isWholeHouse ? '🏠' : '🏢'}</Text>
+    <View style={secStyles.textBlock}>
+      <Text style={secStyles.name} numberOfLines={2}>{section.propertyName}</Text>
+      <Text style={secStyles.meta}>
+        {section.total} khách
+        {section.todo > 0 && <Text style={secStyles.metaTodo}>{`  ·  ${section.todo} cần xử lý`}</Text>}
+      </Text>
+    </View>
+    <Text style={secStyles.chevron}>{section.collapsed ? '▸' : '▾'}</Text>
+  </TouchableOpacity>
+);
+
+const secStyles = StyleSheet.create({
+  wrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F8FAFC',       // trùng màu nền màn — header dính không bị lẫn vào thẻ
+    paddingTop: Spacing.md, paddingBottom: 8,
+  },
+  icon: { fontSize: 16 },
+  textBlock: { flex: 1 },
+  name: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
+  meta: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
+  metaTodo: { color: '#D97706' },
+  chevron: { fontSize: 13, color: '#94A3B8', fontWeight: '700', paddingHorizontal: 4 },
+});
+
+// ===================== SUMMARY STAT TILE =====================
+/**
+ * Ô thống kê BẤM ĐƯỢC — bấm là lọc luôn danh sách theo đúng con số đó, bấm lại thì bỏ lọc.
+ * Trước đây 3 ô này chỉ để ngắm: quản lý thấy "4 chưa thu cọc" rồi phải tự đi tìm chip
+ * tương ứng ở hàng dưới. Số nào cũng là một việc cần làm thì phải bấm được vào việc đó.
+ */
+const StatTile: React.FC<{
+  value: number;
+  label: string;
+  color: string;
+  bg: string;
+  active: boolean;
+  onPress: () => void;
+}> = ({ value, label, color, bg, active, onPress }) => (
+  <TouchableOpacity
+    style={[stStyles.tile, { backgroundColor: bg }, active && { borderColor: color, borderWidth: 1.5 }]}
+    onPress={onPress}
+    activeOpacity={0.75}
+  >
     <Text style={[stStyles.value, { color }]}>{value}</Text>
-    <Text style={stStyles.label}>{label}</Text>
-  </View>
+    <Text style={stStyles.label} numberOfLines={1}>{label}</Text>
+  </TouchableOpacity>
 );
 
 const stStyles = StyleSheet.create({
-  tile: { flex: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center' },
+  tile: {
+    flex: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 8,
+    alignItems: 'center', borderWidth: 1.5, borderColor: 'transparent',
+  },
   value: { fontSize: 22, fontWeight: '800' },
   label: { fontSize: 10, color: '#64748B', marginTop: 2, textAlign: 'center', fontWeight: '500' },
 });
@@ -690,9 +382,18 @@ const stStyles = StyleSheet.create({
 // ===================== MAIN SCREEN =====================
 export const TenantListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [search, setSearch] = useState('');
+  const route = useRoute<any>();
+
+  /**
+   * Vào từ màn chi tiết một nhà thì mở sẵn ô tìm bằng tên nhà đó — danh sách gom theo
+   * nhà nên chỉ còn đúng nhóm của nhà vừa xem. Đặt vào ô tìm (chứ không phải một bộ lọc
+   * ẩn) để quản lý thấy vì sao danh sách đang bị thu hẹp và xoá được ngay.
+   * Chỉ lấy lúc khởi tạo — sau đó ô tìm thuộc quyền người dùng.
+   */
+  const [search, setSearch] = useState<string>(() => route?.params?.propertyName ?? '');
   const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
-  const [propertyFilter, setPropertyFilter] = useState('all');
+  /** Tên các nhà đang thu gọn — mặc định rỗng (mở hết). */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -707,10 +408,16 @@ export const TenantListScreen: React.FC = () => {
             .listByProperty(p.id)
             .catch(() => [] as TenantContractResponse[]);
           const isWhole = p.wholeHouse === true;
-          // Chỉ giữ khách ĐANG THUÊ: khách đã trả phòng xong (HĐ thanh lý) không hiện
-          // ở đây nữa, tránh danh sách phình ra toàn người đã đi.
+          // Chỉ giữ khách ĐANG THUÊ. Hai đầu bị loại:
+          //  • HĐ đã thanh lý (isClosedContract) — khách đã đi rồi.
+          //  • HĐ còn DRAFT — khách CHƯA ĐƯỢC ĐÓN, chưa nhận phòng, chưa phải khách thuê.
+          //    Trước 17/08/2026 nhóm này lọt vào đây và bị `mapTenantStatus` gắn nhãn
+          //    "Đang ở" (DRAFT rơi vào nhánh mặc định `return 'active'`), nên hồ sơ mới
+          //    import đã hiện thành khách đang ở — đếm trùng với màn "Hợp đồng chờ xử lý"
+          //    và làm ô "Đang ở" trên đầu màn sai số.
           return contracts
             .filter(c => !isClosedContract(c.status))
+            .filter(c => (c.status || '').toUpperCase() !== 'DRAFT')
             .map(c => mapContractToTenant(c, p.propertyName, isWhole));
         }),
       );
@@ -723,18 +430,28 @@ export const TenantListScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const properties = useMemo(() => [...new Set(tenants.map(t => t.propertyName))], [tenants]);
 
-  const filtered = useMemo(() => tenants.filter(t => {
-    const matchSearch = !search || (
-      t.fullName.toLowerCase().includes(search.toLowerCase()) ||
-      t.phone.includes(search) ||
-      t.roomName.toLowerCase().includes(search.toLowerCase()) ||
-      t.cccd.includes(search)
-    );
-    return matchSearch && matchesFilter(t, activeFilter) &&
-      (propertyFilter === 'all' || t.propertyName === propertyFilter);
-  }), [tenants, search, activeFilter, propertyFilter]);
+  /**
+   * Tìm theo: tên · phòng · nhà · mã HĐ · SĐT · CCCD.
+   *
+   * SĐT/CCCD vẫn tìm trên số ĐẦY ĐỦ dù màn chỉ hiện 3 số cuối — quản lý đọc số từ ngoài
+   * app (khách gọi tới, giấy tờ) rồi dán vào tìm, mà gõ 3 số cuối cũng ra vì `includes`.
+   * Bỏ dấu cách hai đầu: chuỗi dán từ Zalo/SMS gần như luôn dính khoảng trắng.
+   */
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return tenants.filter(t => {
+      const matchSearch = !q || (
+        t.fullName.toLowerCase().includes(q) ||
+        t.roomName.toLowerCase().includes(q) ||
+        t.propertyName.toLowerCase().includes(q) ||
+        (t.contractCode || '').toLowerCase().includes(q) ||
+        t.phone.includes(q) ||
+        t.cccd.includes(q)
+      );
+      return matchSearch && matchesFilter(t, activeFilter);
+    });
+  }, [tenants, search, activeFilter]);
 
   const filterCounts = useMemo(() => {
     const result: Record<string, number> = {};
@@ -744,23 +461,71 @@ export const TenantListScreen: React.FC = () => {
     return result;
   }, [tenants]);
 
-  const propertyCounts = useMemo(() => {
-    const result: Record<string, number> = {
-      all: tenants.filter(t => matchesFilter(t, activeFilter)).length,
-    };
-    properties.forEach(propertyName => {
-      result[propertyName] = tenants.filter(t =>
-        matchesFilter(t, activeFilter) && t.propertyName === propertyName
-      ).length;
-    });
-    return result;
-  }, [activeFilter, properties, tenants]);
-
+  /**
+   * 3 ô đầu màn = 3 chip lọc, đếm bằng CHÍNH `matchesFilter` chứ không viết lại điều
+   * kiện. Trước đây ô "Sắp HH HĐ" tự lặp lại luật `<= 30` nên khi chip đổi luật (tách
+   * "hết hạn" ra khỏi "sắp hết hạn") thì con số trên đầu màn và số trong chip lệch nhau.
+   */
   const stats = useMemo(() => ({
-    active: tenants.filter(t => t.status === 'active').length,
-    overdue: tenants.filter(t => (t.unpaidBills || 0) > 0).length,
-    expiring: tenants.filter(t => !!t.contractEndDate && getDaysRemaining(t.contractEndDate) <= 30).length,
+    active: tenants.filter(t => matchesFilter(t, 'active')).length,
+    // Không có công nợ theo khách nên ô "Có nợ" cũ luôn là 0 — đổi sang CHƯA THU CỌC.
+    depositUnpaid: tenants.filter(t => matchesFilter(t, 'deposit_unpaid')).length,
+    expiring: tenants.filter(t => matchesFilter(t, 'expiring')).length,
   }), [tenants]);
+
+  /** Bấm ô thống kê: đang lọc đúng nhóm đó thì bỏ lọc, ngược lại thì lọc. */
+  const toggleFilter = useCallback((key: FilterKey) => {
+    setActiveFilter(prev => (prev === key ? 'all' : key));
+  }, []);
+
+  const toggleSection = useCallback((propertyName: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (!next.delete(propertyName)) next.add(propertyName);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Gom khách theo NHÀ.
+   *
+   * Trong mỗi nhà xếp theo số phòng có hiểu số (`numeric: true`) — thiếu nó thì "Phòng 10"
+   * đứng trước "Phòng 9" vì so sánh từng ký tự. Nhà xếp theo tên, nhưng nhà nào còn việc
+   * (chưa thu cọc / HĐ quá hạn) thì đẩy lên đầu: mở màn là thấy chỗ cần làm trước.
+   */
+  const sections = useMemo<PropertySection[]>(() => {
+    const byProperty = new Map<string, Tenant[]>();
+    filtered.forEach(t => {
+      const arr = byProperty.get(t.propertyName);
+      if (arr) arr.push(t);
+      else byProperty.set(t.propertyName, [t]);
+    });
+
+    return [...byProperty.entries()]
+      .map(([propertyName, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          a.roomName.localeCompare(b.roomName, 'vi', { numeric: true }),
+        );
+        const isCollapsed = collapsed.has(propertyName);
+        return {
+          propertyName,
+          isWholeHouse: list.every(t => t.propertyType === 'WHOLE_HOUSE'),
+          total: list.length,
+          todo: list.filter(t =>
+            matchesFilter(t, 'deposit_unpaid') || matchesFilter(t, 'expired'),
+          ).length,
+          collapsed: isCollapsed,
+          data: isCollapsed ? [] : sorted,
+        };
+      })
+      .sort((a, b) =>
+        (b.todo > 0 ? 1 : 0) - (a.todo > 0 ? 1 : 0)
+        || a.propertyName.localeCompare(b.propertyName, 'vi', { numeric: true }),
+      );
+  }, [filtered, collapsed]);
+
+  /** "5 khách · 2 nhà" — số nhà là số nhóm ĐANG HIỆN, không phải tổng nhà phụ trách. */
+  const subtitle = `${filtered.length} khách · ${sections.length} nhà`;
 
   // Shared params passed to every tenant-scoped screen
   const tenantNavParams = (t: Tenant) => ({
@@ -817,28 +582,37 @@ export const TenantListScreen: React.FC = () => {
         ]);
         break;
       }
-      case 'activate':
-        setTenants(prev => prev.map(t =>
-          t.id === tenant.id ? { ...t, status: 'active' } : t
-        ));
+      // Kích hoạt HĐ là việc của màn Đón khách (thu cọc → OTP của khách). Ở đây chỉ
+      // dẫn đường sang đó, KHÔNG tự đổi trạng thái trong máy như bản trước.
+      case 'reception':
         setSelectedTenant(null);
-        showAlert('Kích hoạt thành công', `${isWH ? 'Nhà nguyên căn' : `Phòng ${tenant.roomName}`} đã kích hoạt cho ${tenant.fullName}.`);
+        // Tên param phải là `contractId` — ResumeContractScreen đọc đúng key đó rồi
+        // tự mở sẵn hợp đồng (route.params?.contractId, dòng ~162).
+        navigation.navigate('ResumeContract', { contractId: Number(tenant.id) });
         break;
     }
   }, [navigation, load]);
 
   const handleQuickAction = useCallback((tenant: Tenant) => {
     const isWH = tenant.propertyType === 'WHOLE_HOUSE';
+    // Khách chưa nhận phòng thì Hoá đơn/Bảo trì chưa có gì — chỉ đưa sang màn đón khách.
+    const pending = tenant.status === 'pending_activation';
     showAlert(
       tenant.fullName,
       `${tenant.propertyName} · ${isWH ? 'Nhà nguyên căn' : tenant.roomName}`,
       [
         { text: 'Xem chi tiết', onPress: () => setSelectedTenant(tenant) },
-        { text: '📞 Gọi điện', onPress: () => Linking.openURL(`tel:${tenant.phone}`) },
-        { text: '🧾 Hóa đơn', onPress: () => handleAction('billing', tenant) },
-        { text: '🔧 Yêu cầu bảo trì', onPress: () => handleAction('maintenance', tenant) },
+        ...(tenant.phone
+          ? [{ text: '📞 Gọi điện', onPress: () => Linking.openURL(`tel:${tenant.phone}`) }]
+          : []),
+        ...(pending
+          ? [{ text: '🚚 Đón khách', onPress: () => handleAction('reception', tenant) }]
+          : [
+            { text: '🧾 Hóa đơn', onPress: () => handleAction('billing', tenant) },
+            { text: '🔧 Yêu cầu bảo trì', onPress: () => handleAction('maintenance', tenant) },
+          ]),
         { text: '📋 Hợp đồng', onPress: () => handleAction('contract', tenant) },
-        { text: 'Hủy', style: 'cancel' },
+        { text: 'Hủy', style: 'cancel' as const },
       ]
     );
   }, [handleAction]);
@@ -855,7 +629,7 @@ export const TenantListScreen: React.FC = () => {
           )}
           <View>
             <Text style={styles.title}>Khách thuê</Text>
-            <Text style={styles.subtitle}>{filtered.length} kết quả · {stats.active} đang ở</Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('ResumeContract')}>
@@ -863,11 +637,20 @@ export const TenantListScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Summary stats */}
+      {/* Summary stats — bấm được, mỗi ô là một bộ lọc */}
       <View style={styles.statsRow}>
-        <StatTile value={stats.active} label="Đang ở" color="#16A34A" bg="#F0FDF4" />
-        <StatTile value={stats.overdue} label="Có nợ" color="#DC2626" bg="#FEF2F2" />
-        <StatTile value={stats.expiring} label="Sắp HH HĐ" color="#B45309" bg="#FFFBEB" />
+        <StatTile
+          value={stats.active} label="Đang ở" color="#16A34A" bg="#F0FDF4"
+          active={activeFilter === 'active'} onPress={() => toggleFilter('active')}
+        />
+        <StatTile
+          value={stats.depositUnpaid} label="Chưa thu cọc" color="#D97706" bg="#FFFBEB"
+          active={activeFilter === 'deposit_unpaid'} onPress={() => toggleFilter('deposit_unpaid')}
+        />
+        <StatTile
+          value={stats.expiring} label="Sắp hết HĐ" color="#B45309" bg="#FFF7ED"
+          active={activeFilter === 'expiring'} onPress={() => toggleFilter('expiring')}
+        />
       </View>
 
       {/* Search */}
@@ -910,36 +693,23 @@ export const TenantListScreen: React.FC = () => {
         })}
       </ScrollView>
 
-      {/* Property filter */}
-      {properties.length > 1 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.propScroll}
-          contentContainerStyle={styles.propContent}
-          decelerationRate="fast"
-        >
-          {['all', ...properties].map(p => {
-            const active = propertyFilter === p;
-            return (
-              <FilterChip
-                key={p}
-                label={p === 'all' ? 'Tất cả toà' : p}
-                count={propertyCounts[p]}
-                selected={active}
-                onPress={() => setPropertyFilter(p)}
-              />
-            );
-          })}
-        </ScrollView>
-      )}
-
-      {/* List */}
-      <FlatList
-        data={filtered}
+      {/* Danh sách — GOM THEO NHÀ, header dính lại khi cuộn.
+          Hàng chip "Tất cả nhà / <tên nhà>" cũ đã bỏ: header của nhóm đã mang cả tên nhà
+          lẫn số khách, giữ thêm một hàng chip nữa là lặp thông tin — mà chính hàng đó là
+          chỗ tên nhà dài bị cắt cụt. Cần xem riêng một nhà thì thu các nhóm khác lại,
+          hoặc gõ tên nhà vào ô tìm. */}
+      <SectionList
+        sections={sections}
         keyExtractor={i => i.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled
+        renderSectionHeader={({ section }) => (
+          <PropertySectionHeader
+            section={section}
+            onToggle={() => toggleSection(section.propertyName)}
+          />
+        )}
         renderItem={({ item }) => (
           <TenantCard
             tenant={item}
@@ -953,18 +723,36 @@ export const TenantListScreen: React.FC = () => {
               <ActivityIndicator size="large" color={Colors.primary} />
               <Text style={styles.emptyDesc}>Đang tải khách thuê...</Text>
             </View>
+          ) : tenants.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>🏠</Text>
+              <Text style={styles.emptyTitle}>Chưa có khách thuê</Text>
+              <Text style={styles.emptyDesc}>
+                Khách thuê sẽ hiển thị khi có hợp đồng trong các nhà bạn quản lý
+              </Text>
+            </View>
           ) : (
+            // Có khách nhưng bộ lọc/từ khoá loại hết — nói rõ và cho lối ra, đừng để
+            // quản lý tưởng mất dữ liệu rồi đi tải lại màn.
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>🔍</Text>
-              <Text style={styles.emptyTitle}>Chưa có khách thuê</Text>
-              <Text style={styles.emptyDesc}>Khách thuê sẽ hiển thị khi có hợp đồng trong các nhà bạn quản lý</Text>
+              <Text style={styles.emptyTitle}>Không có khách nào khớp</Text>
+              <Text style={styles.emptyDesc}>
+                {tenants.length} khách đang thuê, nhưng bộ lọc hoặc từ khoá hiện tại loại hết.
+              </Text>
+              <TouchableOpacity
+                style={styles.resetBtn}
+                onPress={() => { setSearch(''); setActiveFilter('all'); }}
+              >
+                <Text style={styles.resetBtnText}>Xoá bộ lọc</Text>
+              </TouchableOpacity>
             </View>
           )
         }
       />
 
       {selectedTenant && (
-        <TenantDetailModal
+        <TenantDetailSheet
           tenant={selectedTenant}
           onClose={() => setSelectedTenant(null)}
           onAction={handleAction}
@@ -1005,25 +793,22 @@ const styles = StyleSheet.create({
   filterScroll: { flexGrow: 0 },
   filterContent: {
     flexDirection: 'row',
-    paddingHorizontal: 24,
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.xl,
     paddingTop: 6,
-    paddingBottom: 12,
-    gap: 10,
-  },
-
-  propScroll: { flexGrow: 0 },
-  propContent: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    paddingTop: 0,
-    paddingBottom: 10,
-    gap: 10,
+    paddingBottom: 8,
+    gap: 8,
   },
 
   listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: 100 },
 
-  empty: { alignItems: 'center', paddingTop: 72, gap: 8 },
+  empty: { alignItems: 'center', paddingTop: 72, gap: 8, paddingHorizontal: Spacing.lg },
   emptyIcon: { fontSize: 44 },
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
   emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
+  resetBtn: {
+    marginTop: 6, paddingHorizontal: 18, paddingVertical: 9,
+    borderRadius: 999, backgroundColor: '#EEF2FF',
+  },
+  resetBtnText: { fontSize: 13, fontWeight: '700', color: '#4F46E5' },
 });

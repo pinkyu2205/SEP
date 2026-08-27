@@ -1,3 +1,4 @@
+import { MaskedField } from '@/components/MaskedField';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   CreditCard, Search, Loader2, AlertCircle, ChevronDown, Receipt, Wallet,
@@ -11,6 +12,8 @@ import {
 import toast from 'react-hot-toast';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
+import { serverNow } from '@/utils/serverTime';
+import { InvoiceUnlockPanel } from './InvoiceUnlockPanel';
 
 /**
  * Giám sát hoá đơn & thanh toán toàn hệ thống (admin).
@@ -81,7 +84,7 @@ const fmtDateTime = (iso?: string) => {
 
 // 12 kỳ gần nhất, dạng YYYY-MM.
 const buildPeriods = (): string[] => {
-  const now = new Date();
+  const now = serverNow();
   return Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -192,16 +195,29 @@ export const BillingPaymentMonitoring = () => {
     });
   }, [invoices, propertyFilter, search]);
 
+  /**
+   * Tổng tiền BỎ QUA vỏ bọc `HD-ONBOARD-*`.
+   *
+   * Lúc đón khách, khách chuyển MỘT lần 14.709.677 gồm hai thứ khác bản chất:
+   *   • tiền cọc         9.500.000 → GIỮ HỘ, hoàn lại khi trả phòng (công nợ, không phải doanh thu)
+   *   • tiền nhà kỳ đầu  5.209.677 → doanh thu thật, đã có hoá đơn HD-RENT-* riêng
+   *
+   * Cộng cả `HD-ONBOARD-1` lẫn `HD-RENT-1-2026-08` ra 19.919.354 — vừa tính trùng tiền
+   * nhà, vừa coi tiền cọc là doanh thu. Nên vỏ bọc không được cộng; tiền nhà đã nằm ở
+   * hoá đơn riêng, tiền cọc nằm ở tab "Tiền cọc".
+   */
+  const sumMoney = (rows: AdminInvoiceRow[]) =>
+    rows.reduce((s, i) => (i.isOnboardEnvelope ? s : s + i.amount), 0);
+
   const stats = useMemo(() => {
-    const sum = (rows: AdminInvoiceRow[]) => rows.reduce((s, i) => s + i.amount, 0);
     const paid = filtered.filter(i => i.status === 'PAID');
     const pending = filtered.filter(i => i.status === 'PENDING' || i.status === 'PARTIAL');
     const overdue = filtered.filter(i => i.status === 'OVERDUE');
     return {
-      total: filtered.length, totalAmt: sum(filtered),
-      paid: paid.length, paidAmt: sum(paid),
-      pending: pending.length, pendingAmt: sum(pending),
-      overdue: overdue.length, overdueAmt: sum(overdue),
+      total: filtered.length, totalAmt: sumMoney(filtered),
+      paid: paid.length, paidAmt: sumMoney(paid),
+      pending: pending.length, pendingAmt: sumMoney(pending),
+      overdue: overdue.length, overdueAmt: sumMoney(overdue),
     };
   }, [filtered]);
 
@@ -376,6 +392,16 @@ export const BillingPaymentMonitoring = () => {
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${type.color}`}>
                         {type.label}
                       </span>
+                      {inv.isOnboardEnvelope && (
+                        <span className="ml-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
+                          Khoản gộp — không tính vào tổng
+                        </span>
+                      )}
+                      {inv.collectedAtOnboard && (
+                        <span className="ml-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                          Thu cùng cọc lúc nhận phòng
+                        </span>
+                      )}
                       <p className="mt-1 text-xs text-slate-500">{inv.periodLabel}</p>
                     </td>
                     <td className="px-4 py-3">
@@ -386,7 +412,12 @@ export const BillingPaymentMonitoring = () => {
                       </p>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{inv.tenantName}</td>
-                    <td className="px-4 py-3 text-right font-bold text-slate-950">{formatVnd(inv.amount)}</td>
+                    {/* Vỏ bọc thanh toán: làm mờ để thấy ngay là KHÔNG nằm trong tổng phía
+                        trên — hai phần của nó đã được ghi ở hoá đơn tiền nhà và sổ cọc. */}
+                    <td className={`px-4 py-3 text-right font-bold ${
+                      inv.isOnboardEnvelope ? 'text-slate-400' : 'text-slate-950'}`}>
+                      {formatVnd(inv.amount)}
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(inv.createdAt)}</td>
                     <td className={`px-4 py-3 text-xs ${inv.status === 'OVERDUE' ? 'font-bold text-rose-600' : 'text-slate-500'}`}>
                       {fmtDate(inv.dueDate)}
@@ -430,6 +461,25 @@ export const BillingPaymentMonitoring = () => {
                                 <dd className="font-black text-slate-950">{formatVnd(inv.amount)}</dd>
                               </div>
                             </dl>
+
+                            {inv.collectedAtOnboard && (
+                              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-800">
+                                Tiền nhà chu kỳ đầu, khách trả <b>chung một lần với tiền cọc</b> lúc nhận
+                                phòng (mã gộp {inv.collectedInInvoiceCode}) nên hoá đơn này không có giao
+                                dịch riêng. Đây là <b>doanh thu thật</b> và đã được tính vào tổng phía trên.
+                              </p>
+                            )}
+                            {inv.isOnboardEnvelope && (
+                              <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+                                Đây là <b>khoản thu gộp</b> lúc nhận phòng, không phải một khoản thu riêng:
+                                <br />• <b>Tiền cọc</b> — giữ hộ, hoàn lại khi khách trả phòng, xem tab
+                                &quot;Tiền cọc&quot;. Không phải doanh thu.
+                                <br />• <b>Tiền nhà chu kỳ đầu</b> — đã có hoá đơn riêng
+                                <b> HD-RENT-…</b> cùng kỳ.
+                                <br />Hai phần đã được tính ở đúng chỗ của nó, nên dòng này
+                                <b> không cộng vào tổng</b> để khỏi tính trùng.
+                              </p>
+                            )}
                           </div>
 
                           <div>
@@ -465,6 +515,16 @@ export const BillingPaymentMonitoring = () => {
                             )}
                           </div>
                         </div>
+
+                        {/* Phát mã cho quản lý thu hộ (tiền mặt / trả hộ) — gắn theo
+                            đúng hoá đơn đang mở để không phát nhầm sang hoá đơn khác. */}
+                        <InvoiceUnlockPanel
+                          invoiceId={inv.id}
+                          invoiceCode={inv.code}
+                          canCollect={inv.status === 'PENDING'
+                            || inv.status === 'OVERDUE'
+                            || inv.status === 'PARTIAL'}
+                        />
                       </td>
                     </tr>
                   )}
@@ -516,7 +576,7 @@ export const BillingPaymentMonitoring = () => {
                   </td>
                   <td className="px-4 py-3">
                     <p className="text-slate-700">{d.tenantName}</p>
-                    {d.tenantPhone && <p className="text-xs text-slate-400">{d.tenantPhone}</p>}
+                    {d.tenantPhone && <MaskedField value={d.tenantPhone} emptyText="" className="text-xs text-slate-400" />}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <p className="font-bold text-slate-950">{formatVnd(d.amount)}</p>

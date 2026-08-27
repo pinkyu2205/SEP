@@ -13,12 +13,8 @@ import { MeterReadingPendingScreen } from '@/screens/manager/MeterReadingPending
 import { RentInvoiceScreen } from '@/screens/manager/RentInvoiceScreen';
 import { RoomManageScreen } from '@/screens/manager/RoomManageScreen';
 import { BuildingDetailScreen } from '@/screens/manager/BuildingDetailScreen';
-import { BuildingInvoiceScreen } from '@/screens/manager/BuildingInvoiceScreen';
-import { BuildingUtilityScreen } from '@/screens/manager/BuildingUtilityScreen';
 import { BuildingMaintenanceScreen } from '@/screens/manager/BuildingMaintenanceScreen';
-import { BuildingRoomScreen } from '@/screens/manager/BuildingRoomScreen';
 import { BuildingContractScreen } from '@/screens/manager/BuildingContractScreen';
-import { BuildingTenantScreen } from '@/screens/manager/BuildingTenantScreen';
 import { NotificationCenterScreen } from '@/screens/manager/NotificationCenterScreen';
 import { TenantListScreen } from '@/screens/manager/TenantListScreen';
 import { EquipmentScreen } from '@/screens/manager/EquipmentScreen';
@@ -31,7 +27,6 @@ import { WholeHouseDetailScreen } from '@/screens/manager/WholeHouseDetailScreen
 import { TenantInvoicesScreen } from '@/screens/manager/TenantInvoicesScreen';
 import { TenantContractDetailScreen } from '@/screens/manager/TenantContractDetailScreen';
 import { TenantMaintenanceScreen } from '@/screens/manager/TenantMaintenanceScreen';
-import { InspectionDetailScreen } from '@/screens/manager/InspectionDetailScreen';
 import { CheckoutInspectionScreen } from '@/screens/manager/CheckoutInspectionScreen';
 import { CheckoutSettlementScreen } from '@/screens/manager/CheckoutSettlementScreen';
 import { ResumeContractScreen } from '@/screens/manager/ResumeContractScreen';
@@ -118,12 +113,8 @@ export const RootNavigator: React.FC = () => {
               component={BuildingDetailScreen}
             />
             <Stack.Screen name="WholeHouseDetail" component={WholeHouseDetailScreen} />
-            <Stack.Screen name="BuildingInvoice" component={BuildingInvoiceScreen} />
-            <Stack.Screen name="BuildingUtility" component={BuildingUtilityScreen} />
             <Stack.Screen name="BuildingMaintenance" component={BuildingMaintenanceScreen} />
-            <Stack.Screen name="BuildingRoom" component={BuildingRoomScreen} />
             <Stack.Screen name="BuildingContract" component={BuildingContractScreen} />
-            <Stack.Screen name="BuildingTenant" component={BuildingTenantScreen} />
             <Stack.Screen name="NotificationCenter" component={NotificationCenterScreen} />
             <Stack.Screen name="TenantList" component={TenantListScreen} />
             <Stack.Screen name="Equipment" component={EquipmentScreen} />
@@ -136,7 +127,6 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="TenantInvoices" component={TenantInvoicesScreen} />
             <Stack.Screen name="TenantContractDetail" component={TenantContractDetailScreen} />
             <Stack.Screen name="TenantMaintenance" component={TenantMaintenanceScreen} />
-            <Stack.Screen name="InspectionDetail" component={InspectionDetailScreen} />
             <Stack.Screen name="ResumeContract" component={ResumeContractScreen} />
             <Stack.Screen name="CheckoutRequests" component={CheckoutRequestsScreen} />
             <Stack.Screen name="CheckoutInspection" component={CheckoutInspectionScreen} />

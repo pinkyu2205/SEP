@@ -16,7 +16,6 @@ import { NotificationCenter } from '@/pages/host/notifications/NotificationCente
 import { PropertyDetail } from '@/pages/host/properties/PropertyDetail';
 import { PropertyList } from '@/pages/host/properties/PropertyList';
 import { ReportsAnalytics } from '@/pages/host/reports/ReportsAnalytics';
-import { ActivityLogsSecurity } from '@/pages/admin/ActivityLogsSecurity';
 import { AdminNotificationCenter } from '@/pages/admin/notifications/AdminNotificationCenter';
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
@@ -24,13 +23,14 @@ import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
 import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
+import { WaterBillPublishing } from '@/pages/admin/WaterBillPublishing';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
 import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from '@/pages/admin/zones/ZoneManagement';
-import { ManagerZoneAssignment } from '@/pages/admin/zones/ManagerZoneAssignment';
+import { AdminZoneOverview, HostZoneOverview } from '@/pages/zones/ZoneOverview';
 import { TaoDraftPage } from '@/pages/admin/onboarding/CreateDraftPage';
 import { DraftOnboardingList } from '@/pages/onboarding/DraftOnboardingList';
 import { CauHinhKhaiThacPage } from '@/pages/admin/onboarding/OperationConfigPage';
@@ -119,13 +119,13 @@ function App() {
             <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/meter-override" element={<MeterOverridePasscodes />} />
             <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />
+            <Route path="/admin/water-bills" element={<WaterBillPublishing />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
-            <Route path="/admin/zones/managers" element={<ManagerZoneAssignment />} />
+            <Route path="/admin/zones/assignment" element={<AdminZoneOverview />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/notifications" element={<AdminNotificationCenter />} />
             <Route path="/admin/settings" element={<SystemConfiguration />} />
-            <Route path="/admin/security" element={<ActivityLogsSecurity />} />
           </Route>
         </Route>
 
@@ -138,6 +138,7 @@ function App() {
             <Route path="/host/properties/:id" element={<PropertyDetail />} />
             <Route path="/host/operations-managers" element={<ManagerList />} />
             <Route path="/host/managers" element={<ManagerList />} />
+            <Route path="/host/zones" element={<HostZoneOverview />} />
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />

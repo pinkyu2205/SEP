@@ -1,17 +1,21 @@
 import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Search, UserCog, Building2, Users, Wrench, RefreshCw, Phone, CheckCircle2,
   DoorOpen, TrendingUp, MapPin, AlertTriangle, ChevronDown,
 } from 'lucide-react';
+import { groupByZone } from '@/pages/zones/zoneAssignmentState';
+import { AssignmentHistoryButton } from '@/components/AssignmentHistoryPanel';
 import { propertyService } from '@/services/property.service';
 import { userService } from '@/services/user.service';
 import { hostService, type HostContractDto, type PropertyPerformanceRow } from '@/services/host.service';
 import type { PropertyResponse, UserResponse } from '@/types/api.types';
 import { formatCurrency } from '@/utils';
+import { currentMonthIso } from '@/utils/serverTime';
 
 type ManagerItem = { id: string; fullName: string; username: string };
 
-const MONTH = new Date().toISOString().slice(0, 7); // YYYY-MM
+const MONTH = currentMonthIso(); // YYYY-MM
 
 const statusCls: Record<string, { label: string; color: string; dot: string }> = {
   ACTIVE:   { label: 'Hoạt động',       color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
@@ -220,6 +224,9 @@ export const ManagerList = () => {
             const st            = statusCls[statusKey] ?? statusCls.ACTIVE;
             const phone         = user?.phoneNumber;
             const s             = summarize(assignedProps);
+            // Đơn vị phân công là KHU VỰC, nhà chỉ là nội dung bên trong — gom lại để
+            // màn này nói cùng ngôn ngữ với màn Khu vực & Quản lý.
+            const zones         = groupByZone(assignedProps);
             const isOpen        = openId === mgr.id;
 
             return (
@@ -250,6 +257,7 @@ export const ManagerList = () => {
 
                   {/* KPI gọn */}
                   <div className="hidden items-center gap-5 md:flex">
+                    <KpiChip icon={MapPin}     value={zones.length}         label="khu vực" tone="indigo" />
                     <KpiChip icon={Building2}  value={assignedProps.length} label="nhà"    tone="indigo" />
                     <KpiChip icon={Users}      value={s.tenants}            label="khách"  tone="blue" />
                     <KpiChip icon={TrendingUp} value={`${s.occRate}%`}      label="lấp đầy" tone="emerald" />
@@ -267,7 +275,16 @@ export const ManagerList = () => {
 
                 {/* Chi tiết (mở rộng) */}
                 {isOpen && (
-                  <div className="bg-slate-50/60 px-4 pb-4 pt-1">
+                  <div className="bg-slate-50/60 px-4 pb-4 pt-3">
+                    {/* Lịch sử phân công — để trên đầu, mở ra cửa sổ riêng */}
+                    <div className="mb-3">
+                      <AssignmentHistoryButton
+                        userId={mgr.id}
+                        subjectName={displayName}
+                        extraNote="Lưu ý khi đánh giá: người vừa nhận khu vực vài ngày vẫn bị chấm doanh thu cả tháng."
+                      />
+                    </div>
+
                     {/* Tổng quan + doanh thu */}
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-2.5 ring-1 ring-slate-100">
                       <div className="flex items-center gap-1.5 text-xs text-slate-500 md:hidden">
@@ -279,13 +296,32 @@ export const ManagerList = () => {
                       <span className="text-sm font-bold text-emerald-600">{formatCurrency(s.revenue)}</span>
                     </div>
 
-                    <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      Bất động sản phụ trách ({assignedProps.length})
-                    </p>
+                    <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        Khu vực phụ trách ({zones.length})
+                      </p>
+                      <Link to="/host/zones" className="text-xs font-bold text-indigo-600 hover:underline">
+                        Đổi phân công →
+                      </Link>
+                    </div>
 
-                    {assignedProps.length > 0 ? (
-                      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
-                        {assignedProps.map(p => {
+                    {zones.length > 0 ? (
+                      <div className="space-y-3">
+                        {zones.map(z => (
+                          <div key={z.zoneId}>
+                            {/* Đầu mục khu vực — đơn vị phân công thật sự, nhà chỉ là nội dung bên trong */}
+                            <div className="mb-1.5 flex flex-wrap items-center gap-2 px-1">
+                              <p className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
+                                <MapPin className="h-3.5 w-3.5 text-indigo-500" />
+                                {z.zoneName}
+                              </p>
+                              <span className="text-xs font-medium text-slate-400">
+                                {z.properties.length} nhà · {z.units} đơn vị
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                              {z.properties.map(p => {
                           const r        = perfByProp.get(p.id);
                           const occ      = propOccupancy(p);
                           const occRate  = occ.rate;
@@ -330,16 +366,22 @@ export const ManagerList = () => {
                                   Doanh thu: <span className="font-semibold text-slate-600">{formatCurrency(r.monthlyRevenue)}</span>
                                 </p>
                               )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center">
-                        <Building2 className="mx-auto mb-1.5 h-6 w-6 text-slate-300" />
-                        <p className="text-xs italic text-slate-400">Chưa phân công bất động sản nào</p>
+                        <MapPin className="mx-auto mb-1.5 h-6 w-6 text-slate-300" />
+                        <p className="text-xs italic text-slate-400">
+                          Chưa phụ trách khu vực nào — gán tại màn Khu vực &amp; Quản lý.
+                        </p>
                       </div>
                     )}
+
                   </div>
                 )}
               </div>

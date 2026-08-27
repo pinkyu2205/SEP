@@ -52,8 +52,9 @@ const TYPE_LABEL: Record<string, string> = {
   BILLING_OVERDUE: 'Quá hạn thanh toán',
   RENT_OVERDUE_MANAGER: 'Tiền nhà quá hạn',
   RENT_OVERDUE_HOST: 'Tiền nhà quá hạn',
-  RENT_FIRST_CYCLE_REMINDER: 'Nhắc tiền nhà kỳ đầu',
-  RENT_FIRST_CYCLE_OVERDUE: 'Tiền nhà kỳ đầu quá hạn',
+  // RENT_FIRST_CYCLE_* đã bỏ (13/08/2026): tiền kỳ đầu thu chung với tiền cọc ở mã QR
+  // lúc đón khách nên không còn kỳ đầu nào để nhắc/quá hạn. Bản ghi cũ trong DB rơi vào
+  // nhánh "type lạ" bên dưới và hiện nguyên mã — đúng ý, đừng dựng lại nhãn cho chúng.
   UTILITY_INVOICE_CREATED: 'Hoá đơn điện/nước mới',
   MAINTENANCE_CREATED: 'Yêu cầu bảo trì mới',
   MAINTENANCE_COMPLETED: 'Bảo trì chờ xác nhận',

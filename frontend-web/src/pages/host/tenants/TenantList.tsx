@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Building2, UserPlus, User, Loader2, Home, DoorOpen, LayoutGrid } from 'lucide-react';
+import { Search, Building2, User, Loader2, Home, DoorOpen, LayoutGrid } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '@/services/property.service';
 import { hostService, type HostContractDto } from '@/services/host.service';
-import type { PropertyResponse, RoomResponse, ContractStatus } from '@/types/api.types';
-import { TenantFormModal } from './TenantFormModal';
+import type { PropertyResponse, ContractStatus } from '@/types/api.types';
+import { TenantTimelineDrawer, type TenantIdentity } from '@/components/TenantContractTimeline';
+import { MaskedField } from '@/components/MaskedField';
 import { isHostApproved } from '@/pages/host/properties/propertyListState';
 
 const statusMap: Record<ContractStatus, { label: string; color: string; dot: string }> = {
@@ -27,11 +28,11 @@ export const TenantList = () => {
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null); // null = Tất cả
   const [contracts, setContracts] = useState<HostContractDto[]>([]);
-  const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [propSearch, setPropSearch] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  // Khách đang mở xem lịch sử thuê (null = đóng).
+  const [timelineOf, setTimelineOf] = useState<TenantIdentity | null>(null);
 
   const selectedProperty = properties.find((p) => p.id === selectedId) || null;
 
@@ -55,14 +56,6 @@ export const TenantList = () => {
   }, []);
 
   useEffect(() => { loadContracts(); }, [loadContracts]);
-
-  // Phòng của BĐS đang chọn (cho modal "Thêm khách thuê")
-  useEffect(() => {
-    if (selectedId == null) { setRooms([]); return; }
-    propertyService.getRooms(selectedId).then(setRooms).catch(() => setRooms([]));
-  }, [selectedId]);
-
-  const availableRooms = rooms.filter((r) => r.status === 'AVAILABLE');
 
   // Số HĐ theo từng BĐS (đếm 1 lần, hiển thị badge ở danh sách nhà bên trái)
   const countByProp = useMemo(() => {
@@ -104,14 +97,6 @@ export const TenantList = () => {
             {' · '}{propContracts.length} hợp đồng · {activeCount} đang hiệu lực
           </p>
         </div>
-        <button
-          className="btn-primary flex items-center gap-2 disabled:opacity-50"
-          disabled={!selectedProperty}
-          title={selectedProperty ? '' : 'Chọn một bất động sản để thêm khách thuê'}
-          onClick={() => setShowModal(true)}
-        >
-          <UserPlus className="w-4 h-4" /> Thêm khách thuê
-        </button>
       </div>
 
       {/* 2 cột: danh sách nhà (trái) + bảng hợp đồng (phải) */}
@@ -215,8 +200,18 @@ export const TenantList = () => {
                   <tbody className="divide-y divide-slate-100">
                     {filtered.map((c) => {
                       const st = statusMap[c.status] ?? statusMap.DRAFT;
+                      // Chỉ mở được lịch sử khi còn khoá ghép (SĐT hoặc tên) — HĐ đã chấm
+                      // dứt bị BE gỡ liên kết khách thì không truy ngược về người nào được.
+                      const linked = !!(c.tenantPhone || c.lesseeName);
                       return (
-                        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                        <tr
+                          key={c.id}
+                          onClick={() => linked && setTimelineOf({ phone: c.tenantPhone, name: c.lesseeName })}
+                          title={linked ? 'Xem lịch sử thuê của khách này' : 'Hợp đồng không còn liên kết khách'}
+                          className={`transition-colors ${
+                            linked ? 'cursor-pointer hover:bg-indigo-50/60' : 'hover:bg-slate-50'
+                          }`}
+                        >
                           <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.code || '—'}</td>
                           <td className="px-4 py-3">
                             {c.lesseeName ? (
@@ -225,7 +220,15 @@ export const TenantList = () => {
                               // HĐ chấm dứt xong thì BE không còn trả tên khách nữa.
                               <p className="font-medium text-slate-400 italic">Không còn liên kết khách</p>
                             )}
-                            {c.tenantPhone && <p className="text-xs text-slate-400 mt-0.5">{c.tenantPhone}</p>}
+                            {c.tenantPhone && (
+                              <MaskedField
+                                value={c.tenantPhone}
+                                emptyText=""
+                                head={3}
+                                tail={2}
+                                className="mt-0.5 text-xs text-slate-400"
+                              />
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <span className="inline-flex items-center gap-1 text-slate-600">
@@ -255,14 +258,12 @@ export const TenantList = () => {
         </div>
       </div>
 
-      {showModal && selectedProperty && (
-        <TenantFormModal
-          propertyId={selectedProperty.id}
-          propertyName={selectedProperty.propertyName}
-          wholeHouse={selectedProperty.wholeHouse === true}
-          rooms={availableRooms}
-          onSuccess={() => loadContracts()}
-          onClose={() => setShowModal(false)}
+      {/* Lịch sử thuê — gom hợp đồng của khách trên TẤT CẢ bất động sản, không chỉ căn đang chọn */}
+      {timelineOf && (
+        <TenantTimelineDrawer
+          who={timelineOf}
+          contracts={contracts}
+          onClose={() => setTimelineOf(null)}
         />
       )}
     </div>

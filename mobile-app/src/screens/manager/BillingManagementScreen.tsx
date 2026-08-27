@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
@@ -7,12 +8,13 @@ import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
-  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_AMOUNT_HIDDEN_NOTE, FIRST_RENT_CYCLE,
+  Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_AMOUNT_HIDDEN_NOTE,
 } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * HOÁ ĐƠN TIỀN NHÀ — màn theo dõi kỳ thu HIỆN TẠI.
@@ -57,7 +59,7 @@ const fmtWhen = (iso: string) => {
   if (isNaN(d.getTime())) return iso;
   const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((startOf(new Date()) - startOf(d)) / 86_400_000);
+  const diffDays = Math.round((startOf(serverNow()) - startOf(d)) / 86_400_000);
   if (diffDays === 0) return `Hôm nay ${hhmm}`;
   if (diffDays === 1) return `Hôm qua ${hhmm}`;
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hhmm}`;
@@ -143,6 +145,12 @@ export const BillingManagementScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // Danh sách hoá đơn của quản lý — khách trả xong là đổi trạng thái ngay.
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    load();
+  });
+
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.navigate('ManagerHome');
@@ -167,7 +175,7 @@ export const BillingManagementScreen: React.FC = () => {
    * (màn đó luôn tính theo đúng một kỳ).
    */
   const period = useMemo(() => {
-    const d = new Date();
+    const d = serverNow();
     return { month: d.getMonth() + 1, year: d.getFullYear() };
   }, []);
   const shownInvoices = useMemo(
@@ -259,34 +267,25 @@ export const BillingManagementScreen: React.FC = () => {
     );
   };
 
-  const now = new Date();
+  const now = serverNow();
   const monthLabel = `Tháng ${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
   const inCollectWindow = now.getDate() >= RENT_CYCLE.issueDay && now.getDate() <= RENT_CYCLE.dueDay;
   const rateColor = stats.rate >= 80 ? Colors.success : stats.rate >= 50 ? Colors.warning : Colors.error;
   /**
-   * Số ngày trễ so với hạn nộp THẬT; âm = còn hạn.
+   * Số ngày trễ so với hạn nộp; âm = còn hạn.
    *
-   * Kỳ đầu (khách vừa nhận phòng) có {FIRST_RENT_CYCLE.graceDays} ngày ân hạn kể từ
-   * ngày nhận phòng, nhưng BE đặt `dueDate` = ĐÚNG ngày nhận phòng (verify trên DB
-   * 10/08/2026: HD-RENT-28 move_in 07/08, due_date cũng 07/08). Lấy thẳng `dueDate`
-   * là hôm sau đã báo "trễ 1 ngày" trong khi khách vẫn còn hạn.
-   *
-   * Nhận biết kỳ đầu: hoá đơn phát hành CÙNG NGÀY với hạn nộp — BE phát hành ngay
-   * lúc đón khách. Hoá đơn hằng tháng thì phát hành ngày {RENT_CYCLE.issueDay}, hạn
-   * ngày {RENT_CYCLE.dueDay} nên hai mốc luôn khác nhau.
+   * Trước 13/08/2026 chỗ này có nhánh "kỳ đầu": nhận diện bằng hoá đơn phát hành cùng
+   * ngày với hạn nộp rồi cộng thêm 3 ngày ân hạn. Bỏ hẳn — tiền kỳ đầu nay thu chung
+   * với tiền cọc ở mã QR lúc đón khách nên không còn hoá đơn kỳ đầu nào chờ thu, mà
+   * cách nhận diện đó lại quét trúng cả hoá đơn khác có ngày phát hành trùng hạn nộp.
    */
-  const isFirstCycle = useCallback((inv: ManagerInvoice) =>
-    !!inv.dueDate && !!inv.createdAt && inv.createdAt.slice(0, 10) === inv.dueDate.slice(0, 10),
-    []);
-
   const daysLate = useCallback((inv: ManagerInvoice) => {
     if (!inv.dueDate) return 0;
     const d = new Date(`${inv.dueDate.slice(0, 10)}T00:00:00`);
     if (isNaN(d.getTime())) return 0;
-    if (isFirstCycle(inv)) d.setDate(d.getDate() + FIRST_RENT_CYCLE.graceDays);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = serverNow(); today.setHours(0, 0, 0, 0);
     return Math.round((today.getTime() - d.getTime()) / 86_400_000);
-  }, [isFirstCycle]);
+  }, []);
 
   /**
    * Việc cần xử lý, xếp theo mức gấp: quá hạn lâu nhất → quá hạn ít → chưa thu.
@@ -429,12 +428,8 @@ export const BillingManagementScreen: React.FC = () => {
                     </View>
                     {(expandOverdue ? overdueList : overdueList.slice(0, LIST_PREVIEW)).map((inv, i) => {
                       const late = daysLate(inv);
-                      // Kỳ đầu: nhận phòng 07/08 → 3 ngày là 07/08/09, sang 10/08 được chấm dứt.
-                      // Kỳ thường: hạn ngày 5, ngày 8 mới được — tức trễ 3 ngày.
-                      // `late` đã cộng sẵn ân hạn kỳ đầu nên chỉ còn so ngưỡng.
-                      const canTerminate = late >= (isFirstCycle(inv)
-                        ? 0
-                        : RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay);
+                      // Hạn ngày 5, ngày 8 mới được chấm dứt — tức trễ 3 ngày.
+                      const canTerminate = late >= RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay;
                       return (
                         <TouchableOpacity
                           key={inv.id}

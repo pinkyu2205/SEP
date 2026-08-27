@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { todayIso } from '@/utils/serverTime';
 
 export interface SheetSpec {
   name: string;
@@ -22,6 +23,6 @@ export function exportToExcel(fileName: string, sheets: SheetSpec[]) {
     });
     XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
   }
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayIso();
   XLSX.writeFile(wb, `${fileName}_${stamp}.xlsx`);
 }

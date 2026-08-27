@@ -1,19 +1,22 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, RefreshControl, TextInput,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { showAlert } from '@/utils';
+import { maskTenantPhone } from '@/constants/managerVisibility';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import {
   roomOperationService, OpStatus, OpRoom, OpProperty,
 } from '@/services/manager/roomService';
+// Sheet chi tiết khách thuê dùng CHUNG với màn Khách thuê — mở ngay tại đây thay vì
+// điều hướng sang một màn khác có bố cục khác.
+import {
+  TenantDetailSheet, mapContractToTenant, type Tenant as TenantDetail,
+} from '@/components/manager/TenantDetailSheet';
 
 // ======================== TYPES ========================
-/** Bộ lọc loại nhà ở màn chọn bất động sản. */
-type PropKind = 'all' | 'multi' | 'whole';
-
 type ActionView = 'menu' | 'status' | 'detail';
 type Room = OpRoom;
 type Property = OpProperty;
@@ -72,7 +75,12 @@ const sumSt = StyleSheet.create({
 });
 
 // ======================== ROOM CARD ========================
-const RoomCard: React.FC<{ room: Room; onAction: () => void }> = ({ room, onAction }) => {
+const RoomCard: React.FC<{
+  room: Room;
+  onAction: () => void;
+  /** Bấm thẳng vào tên khách để xem chi tiết — khỏi phải qua menu •••. */
+  onTenantPress: () => void;
+}> = ({ room, onAction, onTenantPress }) => {
   const st = STATUS_META[room.status];
   const isDisabled = room.status === 'disabled';
   return (
@@ -97,7 +105,15 @@ const RoomCard: React.FC<{ room: Room; onAction: () => void }> = ({ room, onActi
       </Text>
 
       {room.tenantName ? (
-        <Text style={cardSt.tenant}>👤 {room.tenantName}</Text>
+        <TouchableOpacity
+          onPress={onTenantPress}
+          disabled={!room.contract}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <Text style={cardSt.tenant}>
+            👤 {room.tenantName}{!!room.contract && <Text style={cardSt.tenantLink}>  Xem ›</Text>}
+          </Text>
+        </TouchableOpacity>
       ) : room.status === 'available' ? (
         <Text style={cardSt.vacantHint}>Chưa có khách thuê</Text>
       ) : null}
@@ -136,6 +152,7 @@ const cardSt = StyleSheet.create({
   menuDots:     { fontSize: 15, color: Colors.textMuted, letterSpacing: 1, fontWeight: '800' },
   meta:         { fontSize: 12, color: Colors.textSecondary, marginBottom: 4 },
   tenant:       { fontSize: 13, fontWeight: '600', color: Colors.primary, marginBottom: 4 },
+  tenantLink:   { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
   vacantHint:   { fontSize: 12, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
   maintNote:    { fontSize: 12, color: '#D97706', fontWeight: '600', marginBottom: 4 },
   disabledNote: { fontSize: 12, color: '#6B7280', marginBottom: 4 },
@@ -191,31 +208,37 @@ const infoSt = StyleSheet.create({
 });
 
 // ======================== MAIN SCREEN ========================
-export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
-  // Danh sách nhà (màn chọn nhà)
+export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
+  /**
+   * Vào màn này từ một chỗ đã biết nhà/phòng (vd bấm một phòng ở "Tổng quan phòng" của
+   * màn chi tiết nhà) thì mở thẳng nhà đó — và mở luôn phòng đó nếu có `roomCode`.
+   *
+   * Trước 17/08/2026 màn này KHÔNG đọc route params: chỗ gọi vẫn truyền `propertyId`
+   * đầy đủ nhưng bị bỏ qua, nên bấm phòng nào — có khách hay đang trống — cũng rơi về
+   * bước "Chọn bất động sản", phải chọn lại nhà rồi tự tìm lại phòng vừa bấm.
+   */
+  const paramPropertyId: string | undefined =
+    route?.params?.propertyId != null ? String(route.params.propertyId) : undefined;
+  const paramRoomCode: string | undefined =
+    route?.params?.roomCode != null ? String(route.params.roomCode) : undefined;
+  /** Tên nhà từ route — hiện ngay ở header khi còn đang tải danh sách nhà. */
+  const paramPropertyName: string = route?.params?.propertyName ?? '';
+
+  /**
+   * Nhà đang vận hành LẤY TỪ ROUTE — màn này không còn bước chọn nhà.
+   *
+   * Bước "Chọn bất động sản" đã bỏ (17/08/2026): nó lặp lại đúng việc của luồng Bất động
+   * sản → chi tiết nhà, mà lối vào duy nhất tới màn này là từ chi tiết nhà (4 chỗ, đều
+   * truyền `propertyId`) nên bước đó vừa dư vừa gây lạc — bấm "Quay lại" ở danh sách
+   * phòng thì rơi về bước chọn nhà chứ không về được nhà vừa xem.
+   */
+  const selectedPropId = paramPropertyId ?? null;
+
   const [properties, setProperties] = useState<Property[]>([]);
   const [loadingProps, setLoadingProps] = useState(true);
   const [errorProps, setErrorProps] = useState<string | null>(null);
-  const [refreshingProps, setRefreshingProps] = useState(false);
-  /** Tìm + lọc loại nhà ở màn chọn bất động sản. */
-  const [propSearch, setPropSearch] = useState('');
-  const [propKind, setPropKind] = useState<PropKind>('all');
-
-  /** Nhà sau khi lọc — gõ không dấu vẫn tìm được (bỏ dấu cả hai phía). */
-  const visibleProps = useMemo(() => {
-    const strip = (t: string) =>
-      (t || '').normalize('NFD').replace(new RegExp('[\u0300-\u036f]', 'g'), '').replace(/[đĐ]/g, 'd').toLowerCase();
-    const q = strip(propSearch.trim());
-    return properties.filter(p => {
-      if (propKind === 'multi' && p.wholeHouse) return false;
-      if (propKind === 'whole' && !p.wholeHouse) return false;
-      if (!q) return true;
-      return strip(`${p.name} ${p.address ?? ''}`).includes(q);
-    });
-  }, [properties, propSearch, propKind]);
 
   // Phòng của nhà đang chọn
-  const [selectedPropId, setSelectedPropId] = useState<string | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
   const [errorRooms, setErrorRooms] = useState<string | null>(null);
@@ -225,6 +248,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   const [filter, setFilter] = useState<'all' | OpStatus>('all');
   const [actionRoom, setActionRoom] = useState<Room | null>(null);
   const [actionView, setActionView] = useState<ActionView>('menu');
+  /** Khách thuê đang xem chi tiết (sheet dùng chung) — null là đang đóng. */
+  const [tenantDetail, setTenantDetail] = useState<TenantDetail | null>(null);
 
   const property = properties.find(p => p.id === selectedPropId);
 
@@ -240,7 +265,6 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
       setErrorProps(msgOf(e, 'Không tải được danh sách tòa nhà'));
     } finally {
       setLoadingProps(false);
-      setRefreshingProps(false);
     }
   }, []);
 
@@ -269,33 +293,77 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     disabled:    rooms.filter(r => r.status === 'disabled').length,
   }), [rooms]);
 
-  const filtered = filter === 'all' ? rooms : rooms.filter(r => r.status === filter);
+  /**
+   * Phòng sau khi lọc, XẾP THEO SỐ PHÒNG.
+   *
+   * BE trả theo thứ tự của bảng (phòng nào vừa đổi trạng thái thì nhảy xuống cuối), nên
+   * danh sách ra kiểu 102 · 103 · 104 · 101 — đúng cái phòng có khách lại nằm cuối. Xếp
+   * bằng `localeCompare(numeric: true)` để "101" trước "102" và "9" trước "10"
+   * (so sánh chuỗi thường thì "10" đứng trước "9").
+   */
+  const filtered = useMemo(() => {
+    const base = filter === 'all' ? rooms : rooms.filter(r => r.status === filter);
+    return [...base].sort((a, b) =>
+      a.floor - b.floor || a.code.localeCompare(b.code, 'vi', { numeric: true }),
+    );
+  }, [rooms, filter]);
+
   const floors = useMemo(
     () => [...new Set(filtered.map(r => r.floor))].sort((a, b) => a - b),
     [filtered],
   );
 
-  const selectProperty = (p: Property) => {
-    setSelectedPropId(p.id);
-    setFilter('all');
-    setRooms([]);
-    setLoadingRooms(true);
-    loadRooms(p.id);
-  };
-
-  // Quay về màn chọn nhà: cập nhật lại số liệu phòng của nhà vừa xem cho khớp.
-  const backToProperties = () => {
-    // Chỉ đồng bộ lại số liệu khi phòng đã tải xong (tránh ghi đè bằng 0 lúc đang tải/lỗi).
-    if (selectedPropId && !loadingRooms && !errorRooms) {
-      setProperties(prev => prev.map(p => p.id === selectedPropId ? { ...p, counts } : p));
-    }
-    setSelectedPropId(null);
-    setRooms([]);
-    setErrorRooms(null);
-  };
-
-  const openAction = (room: Room) => { setActionRoom(room); setActionView('menu'); };
+  const openAction = useCallback((room: Room) => { setActionRoom(room); setActionView('menu'); }, []);
   const closeAction = () => { setActionRoom(null); setActionView('menu'); };
+
+  /**
+   * Mở sheet chi tiết khách thuê của phòng — CÙNG sheet với màn Khách thuê.
+   * `room.contract` là HĐ thô mà `getRooms` đã tải sẵn, nên không gọi thêm API.
+   */
+  const openTenantSheet = (room: Room) => {
+    if (!room.contract || !property) return;
+    closeAction();
+    setTenantDetail(mapContractToTenant(room.contract, property.name, !!property.wholeHouse));
+  };
+
+  /** Thao tác từ trong sheet. Cùng bộ tên hành động với màn Khách thuê. */
+  const handleTenantSheetAction = (action: string, t: TenantDetail) => {
+    const navParams = {
+      tenantId: t.id, tenantName: t.fullName,
+      roomId: t.roomId, roomName: t.roomName,
+      propertyId: t.propertyId, propertyName: t.propertyName,
+    };
+    setTenantDetail(null);
+    switch (action) {
+      case 'billing':     navigation.navigate('TenantInvoices', navParams); break;
+      case 'contract':    navigation.navigate('TenantContractDetail', navParams); break;
+      case 'maintenance': navigation.navigate('TenantMaintenance', navParams); break;
+      // Trả phòng ở màn này đi qua danh sách yêu cầu trả phòng (giống nút của thẻ
+      // phòng), KHÔNG thanh lý thẳng như màn Khách thuê.
+      case 'checkout':    navigation.navigate('CheckoutRequests'); break;
+      case 'reception':   navigation.navigate('ResumeContract', { contractId: Number(t.id) }); break;
+    }
+  };
+
+  // Nạp phòng của nhà trong route. Chạy lại mỗi lần màn được focus để số liệu khớp sau
+  // khi đi làm việc khác rồi quay về (đổi trạng thái phòng, đón khách...).
+  useFocusEffect(useCallback(() => {
+    if (!selectedPropId) return;
+    setLoadingRooms(true);
+    loadRooms(selectedPropId);
+  }, [selectedPropId, loadRooms]));
+
+  /** Mở sẵn bảng thao tác của đúng phòng vừa bấm, sau khi phòng của nhà đó tải xong. */
+  const appliedRoomParam = useRef<string | null>(null);
+  useEffect(() => {
+    if (!paramRoomCode || !selectedPropId || rooms.length === 0) return;
+    const key = `${selectedPropId}|${paramRoomCode}`;
+    if (appliedRoomParam.current === key) return;
+    const target = rooms.find(r => r.code === paramRoomCode);
+    if (!target) return;
+    appliedRoomParam.current = key;
+    openAction(target);
+  }, [paramRoomCode, selectedPropId, rooms, openAction]);
 
   const applyStatus = async (room: Room, newStatus: OpStatus) => {
     if (!selectedPropId || updating) return;
@@ -311,19 +379,19 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     }
   };
 
+  /**
+   * Trả phòng đi theo yêu cầu checkout của khách (PENDING → APPROVED → INSPECTING → ...),
+   * xử lý ở màn "Trả phòng". Trước 15/08/2026 nút này mở thẳng InspectionDetail —
+   * màn biên bản MOCK, bấm "Lưu" chỉ hiện alert "Mock: ..." và không ghi gì xuống BE.
+   */
   const handleCheckOut = (room: Room) => {
     closeAction();
     showAlert(
       'Trả phòng',
-      `Tạo biên bản trả phòng cho ${room.tenantName ?? 'khách'} — phòng ${room.code}?`,
+      `Mở danh sách yêu cầu trả phòng để xử lý cho ${room.tenantName ?? 'khách'} — phòng ${room.code}?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Tiến hành check-out',
-          onPress: () => navigation.navigate('InspectionDetail', {
-            mode: 'create_check_out', tenantName: room.tenantName, roomCode: room.code,
-          }),
-        },
+        { text: 'Mở danh sách', onPress: () => navigation.navigate('CheckoutRequests') },
       ],
     );
   };
@@ -369,148 +437,52 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   };
 
   // ──────────────────────────────────────────────────────────
-  // PROPERTY SELECTION VIEW
+  // GUARD — nhà lấy từ route, nên chỉ còn 3 ca: đang tải · không mở được · mở được
   // ──────────────────────────────────────────────────────────
-  if (!selectedPropId) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-            <Text style={styles.headerBackText}>← Quay lại</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Quản lý nhà & phòng</Text>
-          <View style={styles.headerSide} />
+  /** Khung có header + nút quay lại, dùng cho ca chờ và ca lỗi. */
+  const shell = (body: React.ReactNode) => (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
+          <Text style={styles.headerBackText}>← Quay lại</Text>
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {paramPropertyName || 'Quản lý phòng'}
+          </Text>
         </View>
+        <View style={styles.headerSide} />
+      </View>
+      <View style={styles.emptyState}>{body}</View>
+    </SafeAreaView>
+  );
 
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshingProps}
-              onRefresh={() => { setRefreshingProps(true); loadProperties(); }}
-              colors={[Colors.primary]}
-              tintColor={Colors.primary}
-            />
-          }
-        >
-          <Text style={styles.pageTitle}>Chọn bất động sản</Text>
-          <Text style={styles.pageSubtitle}>Vận hành phòng (nhà nhiều phòng) hoặc cả căn (nhà nguyên căn)</Text>
+  if (loadingProps && !property) {
+    return shell(<ActivityIndicator size="large" color={Colors.primary} />);
+  }
 
-          {/* Tìm + lọc loại nhà (13/08/2026). Manager có thể được giao hàng chục nhà,
-              trước đây phải cuộn tay tìm. Chỉ hiện khi có từ 2 nhà trở lên. */}
-          {properties.length > 1 && (
-            <>
-              <TextInput
-                style={styles.searchBox}
-                placeholder="🔍  Tìm theo tên nhà, địa chỉ..."
-                placeholderTextColor={Colors.textMuted}
-                value={propSearch}
-                onChangeText={setPropSearch}
-              />
-              <View style={styles.propFilterRow}>
-                {([
-                  { key: 'all',   label: `Tất cả ${properties.length}` },
-                  { key: 'multi', label: `🏢 Nhiều phòng ${properties.filter(p => !p.wholeHouse).length}` },
-                  { key: 'whole', label: `🏠 Nguyên căn ${properties.filter(p => p.wholeHouse).length}` },
-                ] as { key: PropKind; label: string }[]).map(f => (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[styles.chip, propKind === f.key && styles.chipActive]}
-                    onPress={() => setPropKind(f.key)}
-                  >
-                    <Text style={[styles.chipText, propKind === f.key && styles.chipTextActive]}>
-                      {f.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </>
-          )}
+  if (errorProps) {
+    return shell(
+      <>
+        <Text style={styles.emptyIcon}>⚠️</Text>
+        <Text style={styles.emptyText}>{errorProps}</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoadingProps(true); loadProperties(); }}>
+          <Text style={styles.retryBtnText}>Thử lại</Text>
+        </TouchableOpacity>
+      </>,
+    );
+  }
 
-          {loadingProps && !refreshingProps ? (
-            <View style={styles.emptyState}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={[styles.emptyText, { marginTop: Spacing.md }]}>Đang tải dữ liệu...</Text>
-            </View>
-          ) : errorProps ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>⚠️</Text>
-              <Text style={styles.emptyText}>{errorProps}</Text>
-              <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoadingProps(true); loadProperties(); }}>
-                <Text style={styles.retryBtnText}>Thử lại</Text>
-              </TouchableOpacity>
-            </View>
-          ) : properties.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🏢</Text>
-              <Text style={styles.emptyText}>Chưa có tòa nhà nào được giao</Text>
-            </View>
-          ) : visibleProps.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>🔍</Text>
-              <Text style={styles.emptyText}>Không có nhà nào khớp bộ lọc</Text>
-            </View>
-          ) : visibleProps.map(p => {
-            const pc = p.counts;
-            return (
-              <TouchableOpacity
-                key={p.id}
-                style={styles.propCard}
-                onPress={() => selectProperty(p)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.propIcon}>
-                  <Text style={{ fontSize: 26 }}>{p.wholeHouse ? '🏠' : '🏢'}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.propNameRow}>
-                    <Text style={styles.propName} numberOfLines={1}>{p.name}</Text>
-                    <View style={[styles.typeTag, p.wholeHouse && styles.typeTagWhole]}>
-                      <Text style={[styles.typeTagText, p.wholeHouse && styles.typeTagTextWhole]}>
-                        {p.wholeHouse ? 'Nguyên căn' : 'Nhiều phòng'}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={styles.propAddress} numberOfLines={1}>📍 {p.address}</Text>
-                  {/* Nguyên căn không có phòng → hiện trạng thái căn nhà thay vì "0 phòng 🔵0 🟢0" */}
-                  {p.wholeHouse ? (
-                    <View style={styles.propStats}>
-                      <Text style={[styles.propStat, { color: WHOLE_META[p.whole?.status ?? 'vacant'].color }]}>
-                        {WHOLE_META[p.whole?.status ?? 'vacant'].dot} {WHOLE_META[p.whole?.status ?? 'vacant'].label}
-                      </Text>
-                      {!!p.whole?.tenantName && (
-                        <Text style={styles.propStat} numberOfLines={1}>👤 {p.whole.tenantName}</Text>
-                      )}
-                    </View>
-                  ) : (
-                    <View style={styles.propStats}>
-                      <Text style={styles.propStat}>🚪 {pc.total} phòng</Text>
-                      <Text style={[styles.propStat, { color: '#2563EB' }]}>🔵 {pc.occupied}</Text>
-                      <Text style={[styles.propStat, { color: '#16A34A' }]}>🟢 {pc.available}</Text>
-                      {pc.maintenance > 0 && (
-                        <Text style={[styles.propStat, { color: '#D97706' }]}>🟡 {pc.maintenance}</Text>
-                      )}
-                      {pc.disabled > 0 && (
-                        <Text style={[styles.propStat, { color: '#6B7280' }]}>⚫ {pc.disabled}</Text>
-                      )}
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.propChevron}>›</Text>
-              </TouchableOpacity>
-            );
-          })}
-
-          <View style={styles.adminNote}>
-            <Text style={styles.adminNoteIcon}>ℹ️</Text>
-            <Text style={styles.adminNoteText}>
-              Cấu trúc phòng và giá thuê được quản lý bởi Admin Web. Manager chỉ thực hiện vận hành.
-            </Text>
-          </View>
-          <View style={{ height: 40 }} />
-        </ScrollView>
-      </SafeAreaView>
+  // Vào bằng id nhà không thuộc phạm vi phụ trách (hoặc thiếu hẳn id) — nói rõ thay vì
+  // đưa ra một danh sách nhà khác để chọn.
+  if (!property) {
+    return shell(
+      <>
+        <Text style={styles.emptyIcon}>🏢</Text>
+        <Text style={styles.emptyText}>
+          Không mở được nhà này. Hãy chọn nhà từ mục Bất động sản.
+        </Text>
+      </>,
     );
   }
 
@@ -519,7 +491,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
   // Không dùng lưới phòng / bộ lọc trạng thái phòng ở đây (trước đây hiện
   // "0 phòng · Không có phòng nào", vô nghĩa với loại hình này).
   // ──────────────────────────────────────────────────────────
-  if (property?.wholeHouse) {
+  if (property.wholeHouse) {
     const w = property.whole ?? { status: 'vacant' as const };
     const meta = WHOLE_META[w.status];
     const rented = w.status === 'rented';
@@ -527,7 +499,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={backToProperties} style={styles.headerSide}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
             <Text style={styles.headerBackText}>← Quay lại</Text>
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -542,8 +514,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={refreshingProps}
-              onRefresh={() => { setRefreshingProps(true); loadProperties(); }}
+              refreshing={loadingProps}
+              onRefresh={() => { setLoadingProps(true); loadProperties(); }}
               colors={[Colors.primary]}
               tintColor={Colors.primary}
             />
@@ -564,7 +536,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
             {rented ? (
               <View style={styles.houseInfo}>
                 <InfoLine label="Khách thuê" value={w.tenantName ?? '—'} strong />
-                {!!w.tenantPhone && <InfoLine label="Điện thoại" value={w.tenantPhone} />}
+                {!!w.tenantPhone && <InfoLine label="Điện thoại" value={maskTenantPhone(w.tenantPhone)} />}
                 {!!w.contractCode && <InfoLine label="Hợp đồng" value={w.contractCode} />}
                 <InfoLine label="Đến ngày" value={fmtDate(w.contractEndDate)} />
                 <InfoLine label="Tiền thuê" value={HIDDEN_AMOUNT_TEXT} />
@@ -609,6 +581,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
               sublabel="Xem và xử lý yêu cầu sửa chữa của căn nhà"
               onPress={() => navigation.navigate('BuildingMaintenance', {
                 propertyId: property.propertyId, propertyName: property.name,
+                propertyType: property.wholeHouse ? 'WHOLE_HOUSE' : 'MULTI_ROOM',
               })}
             />
             <ActionItem
@@ -637,12 +610,12 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
     <SafeAreaView style={styles.safe}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={backToProperties} style={styles.headerSide}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
           <Text style={styles.headerBackText}>← Quay lại</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{property?.name}</Text>
-          <Text style={styles.headerSub} numberOfLines={1}>{property?.address}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
+          <Text style={styles.headerSub} numberOfLines={1}>{property.address}</Text>
         </View>
         <View style={styles.headerSide} />
       </View>
@@ -721,7 +694,12 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
             <View key={floor} style={styles.floorGroup}>
               <Text style={styles.floorLabel}>Tầng {floor}</Text>
               {filtered.filter(r => r.floor === floor).map(room => (
-                <RoomCard key={room.id} room={room} onAction={() => openAction(room)} />
+                <RoomCard
+                  key={room.id}
+                  room={room}
+                  onAction={() => openAction(room)}
+                  onTenantPress={() => openTenantSheet(room)}
+                />
               ))}
             </View>
           ))
@@ -767,8 +745,21 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                 {/* Always-available ops */}
                 <ActionItem icon="📋" label="Xem chi tiết phòng"       onPress={() => setActionView('detail')} />
                 <ActionItem icon="🔄" label="Cập nhật trạng thái"      onPress={() => setActionView('status')} />
-                <ActionItem icon="📦" label="Xem thiết bị trong phòng" onPress={() => { closeAction(); navigation.navigate('Equipment'); }} />
+                <ActionItem icon="📦" label="Xem thiết bị trong phòng" onPress={() => { closeAction(); navigation.navigate('Equipment', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
                 <ActionItem icon="📜" label="Xem lịch sử thuê"         onPress={() => { closeAction(); navigation.navigate('BuildingContract', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
+
+                {/* Phòng đang có khách: mở ĐÚNG sheet chi tiết khách thuê của màn Khách
+                    thuê (components/manager/TenantDetailSheet) — không điều hướng sang màn
+                    khác nữa, để cùng một thứ chỉ có một hình dạng. */}
+                {actionRoom.status === 'occupied' && !!actionRoom.contract && (
+                  <ActionItem
+                    icon="👤"
+                    label="Xem chi tiết khách thuê"
+                    sublabel={actionRoom.tenantName}
+                    primary
+                    onPress={() => openTenantSheet(actionRoom)}
+                  />
+                )}
 
                 {/* Status-conditional ops */}
                 {actionRoom.status === 'available' && (
@@ -891,7 +882,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
                     <Text style={styles.detailTenantHeading}>👤 Khách thuê hiện tại</Text>
                     <Text style={styles.detailTenantName}>{actionRoom.tenantName}</Text>
                     {actionRoom.tenantPhone && (
-                      <Text style={styles.detailTenantPhone}>{actionRoom.tenantPhone}</Text>
+                      <Text style={styles.detailTenantPhone}>{maskTenantPhone(actionRoom.tenantPhone)}</Text>
                     )}
                   </View>
                 )}
@@ -928,6 +919,15 @@ export const RoomManageScreen: React.FC<any> = ({ navigation }) => {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Chi tiết khách thuê — dùng chung với màn Khách thuê */}
+      {tenantDetail && (
+        <TenantDetailSheet
+          tenant={tenantDetail}
+          onClose={() => setTenantDetail(null)}
+          onAction={handleTenantSheetAction}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -951,34 +951,8 @@ const styles = StyleSheet.create({
   headerSub:      { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
 
   // Property selection
-  pageTitle:    { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
-  pageSubtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.lg },
   // Ô tìm + hàng chip lọc loại nhà ở màn chọn bất động sản (13/08/2026).
-  searchBox: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: Spacing.md, paddingVertical: 10,
-    fontSize: 14, color: Colors.textPrimary, marginBottom: Spacing.sm,
-  },
-  propFilterRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.lg, flexWrap: 'wrap' },
 
-  propCard: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.md, ...Shadow.sm,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  propIcon:    { width: 52, height: 52, borderRadius: BorderRadius.lg, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center', marginRight: Spacing.md },
-  propNameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 2 },
-  propName:    { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1 },
-  typeTag:     { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full, backgroundColor: '#EFF6FF' },
-  typeTagWhole:{ backgroundColor: '#FEF3C7' },
-  typeTagText: { fontSize: 10, fontWeight: '800', color: '#2563EB' },
-  typeTagTextWhole: { color: '#B45309' },
-  propAddress: { fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.sm },
-  propStats:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  propStat:    { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
-  propChevron: { fontSize: 22, color: Colors.textMuted, paddingLeft: 4 },
 
   // Summary row
   summaryRow: { flexDirection: 'row', gap: Spacing.xs, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },

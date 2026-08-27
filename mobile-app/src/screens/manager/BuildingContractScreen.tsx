@@ -20,10 +20,10 @@ import { managerPropertyService } from '@/services/manager/propertyService';
  *
  * Dữ liệu THẬT: GET /api/v1/properties/{id}/tenant-contracts (realTenantService.
  * listByProperty) + thông tin nhà từ danh sách bất động sản manager phụ trách.
- * Trước đây màn này đọc mock `@/data/managedProperties` nên propertyId thật không
+ * Trước đây màn này đọc mock `data/managedProperties` nên propertyId thật không
  * khớp gì cả → luôn hiện 0/0 "Không có hợp đồng phù hợp".
  *
- * Chỉ XEM, không sửa: hợp đồng sinh ra từ luồng tiếp nhận khách (OnboardingScreenV2),
+ * Chỉ XEM, không sửa: hợp đồng sinh ra từ luồng đón khách (ResumeContractScreen),
  * kết thúc bằng luồng trả phòng — nên ở đây không có nút tạo/duyệt/gia hạn giả.
  */
 

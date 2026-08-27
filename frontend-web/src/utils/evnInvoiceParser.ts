@@ -11,6 +11,7 @@
  * Kết quả LUÔN cần người xác nhận lại — BE chưa có parser hoá đơn riêng, `/ocr/evn-bill`
  * chỉ trả rawText + danh sách số.
  */
+import { serverNow } from '@/utils/serverTime';
 
 /** Kết quả OCR thô mà parser nhận vào. */
 export interface EvnOcrInput {
@@ -94,7 +95,7 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
  * Kỳ thanh toán trọn tháng: "01/08 – 31/08/2026".
  * offset: 0 = tháng này, -1 = tháng trước (hoá đơn EVN thường về vào đầu tháng sau).
  */
-export const monthPeriod = (offset = 0, base = new Date()) => {
+export const monthPeriod = (offset = 0, base = serverNow()) => {
   const d = new Date(base.getFullYear(), base.getMonth() + offset, 1);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();

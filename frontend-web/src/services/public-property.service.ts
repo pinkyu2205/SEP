@@ -6,6 +6,7 @@ import type { Paginated } from '@/types/common';
 import type { PropertyFilter, PublicProperty } from '@/types/property';
 import type { GuestPropertyResponse, RoomResponse } from '@/types/api.types';
 import { PROPERTIES_PER_PAGE } from '@/utils/constants';
+import { todayIso } from '@/utils/serverTime';
 
 // BE (20/06/2026) mở endpoint public GET-only cho guest — không cần token.
 const PUBLIC_BASE = '/api/v1/public/properties';
@@ -41,7 +42,7 @@ function mapToPublicProperty(p: GuestPropertyResponse, pricing: { price: number;
     depositMonths: p.depositMonths ?? null,
     serviceFee: p.serviceFee ?? null,
     featured: false,
-    createdAt: new Date().toISOString().slice(0, 10),
+    createdAt: todayIso(),
   };
 }
 

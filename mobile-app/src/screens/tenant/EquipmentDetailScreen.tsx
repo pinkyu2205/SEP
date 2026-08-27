@@ -11,6 +11,7 @@ import {
   getHouseAreaLabel, guessEquipmentCategory,
 } from '@/utils';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
+import { serverNow } from '@/utils/serverTime';
 
 type Tab = 'info' | 'warranty' | 'history';
 
@@ -60,7 +61,7 @@ export const EquipmentDetailScreen: React.FC = () => {
   const categoryIcon = CATEGORY_ICON[guessEquipmentCategory(name)] ?? '🔧';
 
   const warrantyEnd = equipment.warrantyEndDate ?? equipment.warrantyExpiredDate;
-  const isWarrantyValid = warrantyEnd ? new Date(warrantyEnd) > new Date() : false;
+  const isWarrantyValid = warrantyEnd ? new Date(warrantyEnd) > serverNow() : false;
   const warrantyDaysLeft = warrantyEnd
     ? Math.ceil((new Date(warrantyEnd).getTime() - Date.now()) / 86400000)
     : 0;

@@ -1,6 +1,7 @@
 /**
  * Utility functions cho ứng dụng.
  */
+import { serverNow } from './serverTime';
 
 /**
  * Format số tiền VND.
@@ -23,11 +24,23 @@ export const formatCurrency = (amount: number | null | undefined): string => {
 };
 
 /**
- * Format ngày tháng Việt Nam
+ * Ngày rỗng/hỏng → null. Chặn cái bẫy `new Date(null)` = **01/01/1970**: BE để trống
+ * `dueDate` cho hoá đơn thu ngay lúc nhận phòng (đã PAID, không có hạn), ghép thẳng vào
+ * `new Date()` là màn hình hiện ngày 1970 như thật.
+ */
+const safeDate = (value?: string | null): Date | null => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/**
+ * Format ngày tháng Việt Nam. Không có ngày thì trả "—" chứ không bịa ra 1970.
  * @example formatDate('2026-04-29T10:00:00Z') => "29/04/2026"
  */
-export const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
+export const formatDate = (dateStr?: string | null): string => {
+  const date = safeDate(dateStr);
+  if (!date) return '—';
   return date.toLocaleDateString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
@@ -39,8 +52,9 @@ export const formatDate = (dateStr: string): string => {
  * Format ngày tháng đầy đủ với giờ
  * @example formatDateTime('2026-04-29T10:00:00Z') => "29/04/2026, 17:00"
  */
-export const formatDateTime = (dateStr: string): string => {
-  const date = new Date(dateStr);
+export const formatDateTime = (dateStr?: string | null): string => {
+  const date = safeDate(dateStr);
+  if (!date) return '—';
   return date.toLocaleDateString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
@@ -100,11 +114,44 @@ export const truncateText = (text: string, maxLength: number): string => {
 };
 
 /**
+ * Mốc thời gian `iso` có rơi vào ĐÚNG hôm nay không (theo giờ server).
+ *
+ * So theo NGÀY LOCAL chứ không cắt chuỗi ISO: `paidAt` của BE thường kèm múi giờ, cắt
+ * 10 ký tự đầu là so nhầm sang ngày UTC — ở VN mọi mốc trước 07:00 sáng sẽ bị tính là
+ * hôm qua. Thiếu/hỏng `iso` thì trả false, chỗ gọi tự ẩn đi thay vì hiện nhầm.
+ */
+export const isToday = (iso?: string | null, now: Date = serverNow()): boolean => {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate();
+};
+
+/**
+ * Nhãn kỳ ngắn của một hoá đơn: "T08/2026", hoặc null nếu hoá đơn không thuộc kỳ nào.
+ *
+ * Hoá đơn thu lúc nhận phòng (`HD-ONBOARD-*`) không nằm trong kỳ tháng nào nên BE để
+ * `month`/`year` null. Ghép chuỗi thẳng tay sẽ cho ra "Tnull/undefined" đập vào mặt
+ * khách — chỗ gọi phải chịu được `null` và ẩn dòng đó đi.
+ */
+export const billMonthLabel = (
+  bill: { month?: number | null; year?: number | null },
+): string | null => {
+  const m = Number(bill.month);
+  const y = Number(bill.year);
+  if (!Number.isFinite(m) || m < 1 || m > 12) return null;
+  if (!Number.isFinite(y) || y <= 0) return null;
+  return `T${String(m).padStart(2, '0')}/${y}`;
+};
+
+/**
  * Lấy tháng/năm hiện tại theo chuỗi
  * @example getCurrentMonthYear() => "Tháng 04/2026"
  */
 export const getCurrentMonthYear = (): string => {
-  const now = new Date();
+  const now = serverNow();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   return `Tháng ${month}/${now.getFullYear()}`;
 };
@@ -325,14 +372,14 @@ export const getNotificationTypeEmoji = (type: string): string => {
 
 export const getDaysUntil = (dateStr: string): number => {
   const target = new Date(dateStr);
-  const now = new Date();
+  const now = serverNow();
   const diff = target.getTime() - now.getTime();
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
 export const formatRelativeTime = (dateStr: string): string => {
   const date = new Date(dateStr);
-  const now = new Date();
+  const now = serverNow();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
@@ -344,3 +391,11 @@ export const formatRelativeTime = (dateStr: string): string => {
   if (diffDays < 7) return `${diffDays} ngày trước`;
   return formatDate(dateStr);
 };
+
+/**
+ * Bỏ dấu tiếng Việt + hạ chữ thường để tìm kiếm gõ không dấu:
+ * "thu duc" khớp "Thủ Đức", "nguyen can" khớp "NGUYEN_CAN".
+ * (Bản song sinh của `normalizeVi` bên frontend-web/src/utils/helpers.ts.)
+ */
+export const normalizeVi = (s: string): string =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();

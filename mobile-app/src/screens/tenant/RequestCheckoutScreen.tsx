@@ -10,6 +10,7 @@ import { Contract } from '@/types';
 import { DatePickerField } from '@/components/common';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * Tenant gửi YÊU CẦU TRẢ PHÒNG — nối API thật POST /tenant/me/checkout-requests
@@ -107,7 +108,7 @@ export const RequestCheckoutScreen: React.FC = () => {
 
   // Ngày sớm nhất được chọn — khoá luôn trên lịch, không để khách chọn rồi mới báo lỗi.
   const minMoveOutDate = useMemo(() => {
-    const d = new Date();
+    const d = serverNow();
     d.setDate(d.getDate() + MIN_NOTICE_DAYS);
     return startOfDay(d);
   }, []);
@@ -118,7 +119,7 @@ export const RequestCheckoutScreen: React.FC = () => {
     if (!moveOutIso) return null;
     const d = startOfDay(new Date(moveOutIso));
     if (isNaN(d.getTime())) return null;
-    const days = Math.round((d.getTime() - startOfDay(new Date()).getTime()) / 86_400_000);
+    const days = Math.round((d.getTime() - startOfDay(serverNow()).getTime()) / 86_400_000);
     return `${WEEKDAYS[d.getDay()]}, ${moveOutDate} · còn ${days} ngày nữa`;
   }, [moveOutIso, moveOutDate]);
 

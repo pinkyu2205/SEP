@@ -27,7 +27,8 @@ import type {
  * Danh sách thiết bị lấy từ hợp đồng (`equipmentList`); nếu không tải được vẫn cho
  * ghi khoản trừ thủ công để không chặn việc vận hành.
  *
- * Màn mock cũ `InspectionDetailScreen` giữ nguyên — vẫn còn 4 màn khác dùng nó.
+ * (Màn biên bản mock `InspectionDetailScreen` đã bị xoá 15/08/2026 — đây là màn
+ * biên bản trả phòng DUY NHẤT, và là màn có API thật.)
  */
 
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';

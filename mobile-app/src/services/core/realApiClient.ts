@@ -2,6 +2,7 @@ import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/constants/api';
 import { clearSession, notifySessionExpired } from '@/services/core/session';
+import { syncServerTimeFromHeader } from '@/utils/serverTime';
 
 /**
  * Axios client trỏ tới backend Spring THẬT (REAL_BASE_URL).
@@ -39,9 +40,22 @@ realApiClient.interceptors.request.use(
  *   • Máy chưa có accessToken — tài khoản demo (mock) không gọi BE được, 401 là bình thường.
  * Lưu ý 403 KHÔNG tính: đó là "đăng nhập rồi nhưng không đủ quyền", màn hình tự xử lý.
  */
+/** Header `Date` của mọi response = giờ VPS — xem @/utils/serverTime. */
+const pickDateHeader = (headers: unknown): unknown => {
+  const h = headers as { date?: unknown; get?: (k: string) => unknown } | undefined;
+  // axios v1 trả AxiosHeaders (có .get) ở native, object thường ở một số adapter khác.
+  return h?.date ?? h?.get?.('date');
+};
+
 realApiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    syncServerTimeFromHeader(pickDateHeader(response.headers));
+    return response;
+  },
   async (error) => {
+    // Cả response lỗi (4xx/5xx) cũng mang header `Date` — vẫn đồng bộ được, và đây
+    // đúng là lúc cần nhất: máy sai giờ nặng thì request đầu tiên hay rớt 401.
+    syncServerTimeFromHeader(pickDateHeader(error?.response?.headers));
     const status = error?.response?.status;
     const url: string = error?.config?.url ?? '';
     const isAuthCall = url.includes('/auth/login') || url.includes('/auth/tenant-activate');

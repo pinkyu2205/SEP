@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -6,11 +7,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
-  FIRST_RENT_CYCLE, isFirstRentCycleInvoice, firstCycleStage, firstCycleDeadline,
-  firstCycleDaysLeft, firstCycleTenantWarning,
 } from '@/constants';
-import { formatCurrency, formatDate, getDaysUntil } from '@/utils';
-import { SharedBill, BillStatus, InvoiceType } from '@/store/billsStore';
+import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines } from '@/utils';
+import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 
 // ── Config maps ─────────────────────────────────────────────
@@ -19,7 +18,9 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
   electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3', gradientTop: '#D97706' },
   water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE', gradientTop: '#2563EB' },
   maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2', gradientTop: '#DC2626' },
-  deposit:     { label: 'Tiền cọc',   icon: '🔐', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
+  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts),
+  // nên nhãn không được để mỗi chữ "Tiền cọc".
+  deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5', gradientTop: '#059669' },
 };
 
 const STATUS_CFG: Record<BillStatus, { label: string; color: string; bg: string; emoji: string }> = {
@@ -70,21 +71,77 @@ export const InvoiceDetailScreen: React.FC = () => {
   const [invoice, setInvoice] = useState<SharedBill>(initialInvoice);
   const [paying, setPaying]   = useState(false);
 
+  /**
+   * Đây là màn khách đang mở mã QR ngồi chờ, nên realtime đáng giá nhất ở đây: BE ghi
+   * nhận PAID (PayOS webhook / quản lý xác nhận) là đóng QR và đổi trạng thái ngay,
+   * khách không phải thoát ra vào lại để biết đã trả xong.
+   *
+   * `invoiceId` của event là number, `SharedBill.id` là string → so sánh dạng chuỗi.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    if (String(event.invoiceId) !== String(invoice.id)) return;
+    setInvoice(prev => ({
+      ...prev,
+      status: 'paid',
+      paidAt: event.paidAt ?? prev.paidAt,
+      transactionId: event.transactionId ?? prev.transactionId,
+    }));
+    setPaying(false); // đóng modal QR nếu đang mở
+  });
+
   const tc  = TYPE_CFG[invoice.invoiceType];
   // Cách tính do BE dựng sẵn (10/08/2026). Hoá đơn cũ/seed không có → khối "Cách tính" ẩn.
   const breakdown = invoice.paymentBreakdown;
   const isPaid    = invoice.status === 'paid';
-  // Hoá đơn tiền phòng KỲ ĐẦU: hạn thật = ngày nhận phòng + FIRST_RENT_CYCLE.graceDays,
-  // không phải dueDate của BE (BE đặt dueDate = đúng ngày nhận phòng rồi hôm sau gắn
-  // OVERDUE). Trong 3 ngày đó vẫn hiển thị "chờ thanh toán".
-  const isFirstCycle      = isFirstRentCycleInvoice(invoice);
-  const firstCycleExpired = isFirstCycle && firstCycleStage(invoice) === 'expired';
-  const isOverdue = isFirstCycle ? firstCycleExpired && !isPaid : invoice.status === 'overdue';
-  const sc  = STATUS_CFG[isFirstCycle && !isPaid && !isOverdue ? 'pending' : invoice.status];
-  const canPay    = invoice.status === 'pending' || isOverdue
-    || (isFirstCycle && !isPaid && invoice.status !== 'cancelled');
-  const dueDate   = isFirstCycle ? firstCycleDeadline(invoice) : invoice.dueDate;
+  // Trước 13/08/2026 chỗ này có nhánh riêng cho hoá đơn tiền phòng KỲ ĐẦU: tự dời hạn
+  // thành "ngày nhận phòng + 3" và ép trạng thái về "chờ thanh toán". Bỏ hẳn — tiền kỳ
+  // đầu giờ thu chung với tiền cọc trong mã QR lúc đón khách, không còn hoá đơn kỳ đầu
+  // nào chờ thanh toán, nên cứ đi thẳng theo dueDate/status của BE như mọi hoá đơn khác.
+  const isOverdue = invoice.status === 'overdue';
+  const sc  = STATUS_CFG[invoice.status];
+  const canPay    = invoice.status === 'pending' || isOverdue;
+  const dueDate   = invoice.dueDate;
   const daysOver  = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
+
+  /**
+   * Dòng kỳ hoá đơn dưới tiêu đề.
+   *
+   * Hoá đơn thu lúc nhận phòng (`HD-ONBOARD-*`) KHÔNG thuộc kỳ tháng nào nên BE để
+   * `month`/`year` null — `String(null).padStart(2,'0')` cho ra chữ "null" đập thẳng vào
+   * mặt khách ("Tháng null/"). Có 3 đường, lấy cái nào có trước:
+   *   1. month/year hợp lệ  → "Tháng 08/2026" (hoá đơn tháng bình thường)
+   *   2. khoảng ngày BE dựng sẵn trong `paymentBreakdown` → "13/08/2026 → 31/08/2026"
+   *   3. `billingPeriod` BE trả (vd "Thu lúc nhận phòng")
+   * Không có gì thì ẨN hẳn dòng này, đừng bịa.
+   */
+  const periodLabel = ((): string | null => {
+    const m = Number(invoice.month);
+    const y = Number(invoice.year);
+    if (Number.isFinite(m) && m >= 1 && m <= 12 && Number.isFinite(y) && y > 0) {
+      return `Tháng ${String(m).padStart(2, '0')}/${y}`;
+    }
+    if (breakdown?.periodStart && breakdown?.periodEnd) {
+      return `${formatDate(breakdown.periodStart)} → ${formatDate(breakdown.periodEnd)}`;
+    }
+    return invoice.billingPeriod?.trim() || null;
+  })();
+
+  /**
+   * Các dòng trong `items` có cộng lại ĐÚNG bằng tổng không.
+   *
+   * Với hoá đơn onboard, BE đang trả dòng tiền nhà là NGUYÊN THÁNG (5.000.000) trong khi
+   * tổng thu là cọc + tiền nhà chia theo số ngày ở (8.064.516). Bày cả hai lên màn thì
+   * khách cộng nhẩm ra 10.000.000 rồi tưởng hệ thống tính sai — thà không hiện còn hơn.
+   * Phần cấu thành ĐÚNG đã có ở khối "Cách tính" ngay phía trên (BE dựng sẵn).
+   * Sai lệch ±1đ là do làm tròn, vẫn coi là khớp.
+   */
+  const itemsSum = invoice.items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+  const itemsConsistent = invoice.items.length > 0
+    && Math.abs(itemsSum - invoice.totalAmount) <= 1;
+
+  /** Đường lui cho hoá đơn onboard: 2 khoản thật sự thu — xem @/utils/onboardBill. */
+  const onboardLines = onboardChargeLines(invoice);
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -98,9 +155,7 @@ export const InvoiceDetailScreen: React.FC = () => {
         <View style={s.heroBody}>
           <Text style={s.heroIcon}>{tc.icon}</Text>
           <Text style={s.heroLabel}>{tc.label}</Text>
-          <Text style={s.heroMonth}>
-            Tháng {String(invoice.month).padStart(2, '0')}/{invoice.year}
-          </Text>
+          {!!periodLabel && <Text style={s.heroMonth}>{periodLabel}</Text>}
           <Text style={s.heroAmount}>{formatCurrency(invoice.grandTotal)}</Text>
 
           <View style={[s.statusBadge, { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
@@ -118,23 +173,8 @@ export const InvoiceDetailScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* ── Cảnh báo kỳ đầu: có mốc riêng nên hiện cả khi chưa quá hạn ── */}
-        {isFirstCycle && !isPaid && (
-          <View style={s.overdueAlert}>
-            <Text style={s.overdueIcon}>{firstCycleExpired ? '🚨' : '🧾'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.overdueText}>
-                {firstCycleExpired
-                  ? `Hoá đơn đầu tiên đã quá hạn ${daysOver} ngày`
-                  : `Hoá đơn đầu tiên — còn ${firstCycleDaysLeft(invoice)} ngày để thanh toán`}
-              </Text>
-              <Text style={s.overdueSub}>{firstCycleTenantWarning(invoice)}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* ── Overdue alert (các kỳ thường) ── */}
-        {isOverdue && !isFirstCycle && (
+        {/* ── Overdue alert ── */}
+        {isOverdue && (
           <View style={s.overdueAlert}>
             <Text style={s.overdueIcon}>🚨</Text>
             <View style={{ flex: 1 }}>
@@ -159,13 +199,19 @@ export const InvoiceDetailScreen: React.FC = () => {
           <View style={s.card}>
             <InfoRow label="Phòng"        value={invoice.roomName} />
             <InfoRow label="Tòa nhà"      value={invoice.propertyName} />
-            <InfoRow label="Kỳ hóa đơn"  value={`Tháng ${String(invoice.month).padStart(2, '0')}/${invoice.year}`} />
-            <InfoRow
-              label={isFirstCycle ? `Hạn thanh toán (kỳ đầu · ${FIRST_RENT_CYCLE.graceDays} ngày)` : 'Hạn thanh toán'}
-              value={formatDate(dueDate)}
-              valueStyle={isOverdue ? { color: Colors.error, fontWeight: '700' } : {}}
-              last
-            />
+            {/* Dùng lại `periodLabel` như ở hero — hoá đơn onboard cũ không có
+                month/year, ghép chuỗi thẳng ra "Tháng null/undefined". */}
+            {!!periodLabel && <InfoRow label="Kỳ hóa đơn" value={periodLabel} />}
+            {/* Khoản thu ngay lúc nhận phòng đã trả xong, BE không đặt `dueDate` — hiện
+                dòng "Hạn thanh toán" cho nó là vô nghĩa (và trước đây ra 01/01/1970). */}
+            {!!dueDate && (
+              <InfoRow
+                label="Hạn thanh toán"
+                value={formatDate(dueDate)}
+                valueStyle={isOverdue ? { color: Colors.error, fontWeight: '700' } : {}}
+                last
+              />
+            )}
           </View>
         </View>
 
@@ -205,9 +251,9 @@ export const InvoiceDetailScreen: React.FC = () => {
         )}
 
         {/* ── Cách tính (BE dựng sẵn) ──
-            Đặt TRƯỚC "Chi tiết khoản thu": với hoá đơn tiền nhà chu kỳ đầu, số tiền là
-            một con số lẻ chia theo ngày ở — khách nhìn thấy nó trước tiên sẽ hỏi "sao
-            không phải nguyên tháng", nên công thức phải nằm ngay trên đầu.
+            Đặt TRƯỚC "Chi tiết khoản thu": khoản thu lúc nhận phòng gồm tiền cọc + tiền
+            nhà chia theo số ngày ở, ra một con số lẻ — khách nhìn thấy nó trước tiên sẽ
+            hỏi "sao không phải nguyên tháng", nên công thức phải nằm ngay trên đầu.
             Hoá đơn cũ không có `paymentBreakdown` thì khối này tự ẩn. */}
         {!!breakdown && (
           <View style={s.section}>
@@ -215,7 +261,6 @@ export const InvoiceDetailScreen: React.FC = () => {
             <View style={s.card}>
               <View style={s.breakdownHead}>
                 <Text style={s.breakdownTitle}>{breakdown.title}</Text>
-                {isFirstCycle && <Text style={s.cycleBadge}>Chu kỳ đầu</Text>}
               </View>
 
               {!!breakdown.formula && (
@@ -243,14 +288,28 @@ export const InvoiceDetailScreen: React.FC = () => {
         <View style={s.section}>
           <Text style={s.sectionTitle}>🧾 Chi tiết khoản thu</Text>
           <View style={s.card}>
-            {invoice.items.map((item, i) => (
-              <InfoRow
-                key={i}
-                label={item.label}
-                value={formatCurrency(item.amount)}
-                valueStyle={item.amount < 0 ? { color: Colors.success } : {}}
-              />
-            ))}
+            {itemsConsistent ? (
+              invoice.items.map((item, i) => (
+                <InfoRow
+                  key={i}
+                  label={item.label}
+                  value={formatCurrency(item.amount)}
+                  valueStyle={item.amount < 0 ? { color: Colors.success } : {}}
+                />
+              ))
+            ) : onboardLines ? (
+              // Khoản thu lúc nhận phòng: dựng lại đúng 2 khoản thật sự thu, vì `items`
+              // của BE ghi tiền nhà nguyên tháng nên cộng không ra tổng.
+              onboardLines.map((l, i) => (
+                <InfoRow key={i} label={l.label} value={formatCurrency(l.amount)} />
+              ))
+            ) : (
+              <Text style={s.itemsFallback}>
+                {breakdown
+                  ? 'Cấu thành của khoản thu này xem ở mục “Cách tính” phía trên.'
+                  : 'Chi tiết từng khoản chưa có cho hoá đơn này.'}
+              </Text>
+            )}
             {(invoice.lateFee ?? 0) > 0 && (
               <InfoRow
                 label="⚠️ Phí trả chậm"
@@ -473,10 +532,6 @@ const s = StyleSheet.create({
     marginBottom: 6,
   },
   breakdownTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  cycleBadge: {
-    fontSize: 11, fontWeight: '700', color: '#9A3412', backgroundColor: '#FFEDD5',
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.sm, overflow: 'hidden',
-  },
   // Công thức để khách tự kiểm lại — chữ đều bề ngang cho các chữ số thẳng cột.
   breakdownFormula: {
     fontSize: 13, color: Colors.textPrimary, fontVariant: ['tabular-nums'],
@@ -485,5 +540,8 @@ const s = StyleSheet.create({
   },
   breakdownNote: {
     marginTop: 8, fontSize: 12, lineHeight: 18, color: Colors.textSecondary,
+  },
+  itemsFallback: {
+    fontSize: 12, lineHeight: 18, color: Colors.textMuted, paddingVertical: 6,
   },
 });

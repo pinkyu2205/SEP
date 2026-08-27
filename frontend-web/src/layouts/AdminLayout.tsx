@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import {
-  Activity,
+
   BarChart3,
   CreditCard,
   FileText,
@@ -15,12 +15,13 @@ import {
   Settings,
   Settings2,
   ShieldCheck,
+  UserCog,
   UserPlus,
   Users,
-  UserRound,
   Wrench,
   X,
   Zap,
+  Droplets,
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -60,7 +61,7 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
   },
   {
     label: 'Đón khách',
-    items: [{ label: 'Hợp đồng nháp', path: '/admin/onboarding', icon: UserPlus }],
+    items: [{ label: 'Hồ sơ đón khách', path: '/admin/onboarding', icon: UserPlus }],
   },
   {
     label: 'Tài chính & Hợp đồng',
@@ -69,6 +70,9 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
       { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
+      // Nước đi cùng mô hình với điện từ 14/08/2026 — trước đó manager tự khai đơn giá
+      // nước trong app, không ai đối chiếu được với hoá đơn giấy.
+      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets },
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
     ],
   },
@@ -79,8 +83,8 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
       { label: 'Tiến độ bàn giao', path: '/admin/handover', icon: PackageCheck },
       // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
       { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
-      { label: 'Quản lý khu vực', path: '/admin/zones', icon: MapPin },
-      { label: 'Khu vực Manager', path: '/admin/zones/managers', icon: UserRound },
+      { label: 'Danh mục khu vực', path: '/admin/zones', icon: MapPin },
+      { label: 'Khu vực & Quản lý', path: '/admin/zones/assignment', icon: UserCog },
       { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
       { label: 'Danh mục thiết bị', path: '/admin/equipments', icon: Package },
     ],
@@ -89,7 +93,12 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Hệ thống',
     items: [
       { label: 'Cấu hình hệ thống', path: '/admin/settings', icon: Settings },
-      { label: 'Nhật ký & bảo mật', path: '/admin/security', icon: Activity },
+      // ẨN — màn "Nhật ký & bảo mật" chạy 100% trên AUDIT_LOGS (dữ liệu giả trong
+      // utils/adminMockData.ts): BE chưa có audit log nên không có gì thật để hiện.
+      // Để lại một mục menu hứa hẹn giám sát bảo mật mà mở ra toàn dữ liệu bịa thì
+      // nguy hiểm hơn là không có. Bỏ comment dòng này khi BE làm xong audit log —
+      // xem doc/BE-NEED-audit-log-va-thiet-bi-2026-08-15.md
+      // { label: 'Nhật ký & bảo mật', path: '/admin/security', icon: Activity },
     ],
   },
 ];

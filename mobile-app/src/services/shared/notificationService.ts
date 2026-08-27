@@ -102,6 +102,13 @@ const normalizeType = (row: BeNotificationRow): string => {
   }
   // Trả phòng (checkout-request) — nhận diện rộng vì chưa chốt chuỗi type BE.
   if (raw.includes('CHECKOUT') || /trả phòng/i.test(row.title)) return 'checkout_request';
+  /**
+   * Cron nhắc lịch đón khách (BE — xem doc/BE-NEED-nhac-lich-don-khach).
+   * Khai báo TƯỜNG MINH thay vì dựa vào nhánh dưới: chuỗi `RECEPTION_*` không chứa
+   * CONTRACT/ASSIGN/ONBOARD nên chỉ khớp được nhờ regex tiếng Việt trên `title` —
+   * BE sửa lại câu chữ một lần là thông báo rơi xuống nhóm "Hệ thống".
+   */
+  if (raw.startsWith('RECEPTION_')) return 'contract_assigned';
   // Gán đón khách / hợp đồng (assign-manager, duyệt giá...) → mở ResumeContract.
   if (raw.includes('CONTRACT') || raw.includes('ASSIGN') || raw.includes('ONBOARD') ||
       /đón khách|hợp đồng/i.test(row.title)) {

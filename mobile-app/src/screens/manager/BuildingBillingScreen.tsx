@@ -2,18 +2,19 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, SectionList, TouchableOpacity, Modal, TextInput, ScrollView, Dimensions, ActivityIndicator,
 } from 'react-native';
-import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
+import { showAlert, activeRentingKeys, belongsToActiveTenant, billMonthLabel } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_AMOUNT_HIDDEN_NOTE,
-  FIRST_RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -44,35 +45,28 @@ const FILTERS: { id: FilterType; label: string }[] = [
 const STATUS_ORDER: Record<BillStatus, number> = { overdue: 0, pending: 1, partial: 2, paid: 3, cancelled: 4 };
 
 /**
- * Số ngày trễ THẬT. Kỳ đầu (hoá đơn phát hành cùng ngày với hạn nộp — BE đặt
- * dueDate = ngày nhận phòng) có {FIRST_RENT_CYCLE.graceDays} ngày ân hạn, phải cộng
- * vào rồi mới tính trễ. Cùng công thức với màn Hoá đơn tiền nhà.
+ * Số ngày trễ so với hạn nộp. Cùng công thức với màn Hoá đơn tiền nhà.
+ *
+ * Trước 13/08/2026 còn cộng thêm 3 ngày ân hạn cho "kỳ đầu" (nhận diện bằng hoá đơn
+ * phát hành cùng ngày hạn nộp). Bỏ hẳn: tiền kỳ đầu nay thu chung với tiền cọc ở mã QR
+ * lúc đón khách nên không còn hoá đơn kỳ đầu chờ thu.
  */
-const isFirstCycle = (inv: ManagerInvoice) =>
-  !!inv.createdAt && !!inv.dueDate && inv.createdAt.slice(0, 10) === inv.dueDate.slice(0, 10);
-
 const lateDays = (inv: ManagerInvoice): number => {
   if (!inv.dueDate) return 0;
   const d = new Date(`${inv.dueDate.slice(0, 10)}T00:00:00`);
   if (isNaN(d.getTime())) return 0;
-  if (isFirstCycle(inv)) d.setDate(d.getDate() + FIRST_RENT_CYCLE.graceDays);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = serverNow(); today.setHours(0, 0, 0, 0);
   return Math.round((today.getTime() - d.getTime()) / 86_400_000);
 };
 
 /**
  * Được quyền chấm dứt hợp đồng vì không trả tiền phòng chưa?
- *
- * Hai kỳ có mốc khác nhau:
- *  • Kỳ đầu: nhận phòng 07/08 → khách có 3 ngày là 07, 08, 09 → hết ngày 09 là hết
- *    hạn, sang 10/08 được chấm dứt. `lateDays` đã cộng 3 ngày ân hạn nên mốc 10/08
- *    ứng với late = 0 → ngưỡng là `>= 0`.
- *  • Kỳ thường: hạn ngày 5 → ngày 8 mới được chấm dứt, tức trễ 3 ngày.
+ * Hạn ngày 5 → ngày 8 mới được chấm dứt, tức trễ 3 ngày.
  */
 const canTerminateInvoice = (inv: ManagerInvoice): boolean => {
   const st = (inv.status || '').toUpperCase();
   if (st === 'PAID' || st === 'CANCELLED') return false;
-  return lateDays(inv) >= (isFirstCycle(inv) ? 0 : RENT_TERMINATION_AFTER_DAYS);
+  return lateDays(inv) >= RENT_TERMINATION_AFTER_DAYS;
 };
 
 const toLocalStatus = (s: ManagerInvoiceStatus): BillStatus => {
@@ -248,7 +242,7 @@ export const BuildingBillingScreen: React.FC = () => {
               try {
                 await checkoutService.createForTenant({
                   contractId: contract.id,
-                  expectedMoveOutDate: new Date().toISOString().slice(0, 10),
+                  expectedMoveOutDate: todayIso(),
                   reason: `Chấm dứt hợp đồng do không thanh toán tiền phòng T${String(inv.month).padStart(2, '0')}/${inv.year}.`,
                 });
                 ok = true;
@@ -469,7 +463,7 @@ export const BuildingBillingScreen: React.FC = () => {
                 </View>
                 <View style={s.billTenantRow}>
                   <Text style={s.billTenant}>👤 {item.tenantName || '—'}</Text>
-                  <Text style={s.billMonth}>T{String(item.month).padStart(2, '0')}/{item.year}</Text>
+                  <Text style={s.billMonth}>{billMonthLabel(item) ?? '—'}</Text>
                 </View>
                 <View style={s.billAmountRow}>
                   <Text style={s.billDue}>Hạn: {item.dueDate}</Text>
@@ -519,7 +513,7 @@ export const BuildingBillingScreen: React.FC = () => {
                     {[
                       { label: isWholeHouse(selectedBill) ? 'Người đại diện' : 'Khách thuê', val: selectedBill.tenantName || '—' },
                       { label: isWholeHouse(selectedBill) ? 'Tài sản thuê' : 'Phòng', val: isWholeHouse(selectedBill) ? selectedBill.propertyName : `Phòng ${selectedBill.roomNumber}` },
-                      { label: 'Tháng', val: `T${String(selectedBill.month).padStart(2,'0')}/${selectedBill.year}` },
+                      { label: 'Tháng', val: billMonthLabel(selectedBill) ?? '—' },
                       { label: 'Hạn thanh toán', val: selectedBill.dueDate, overdue: st === 'overdue' },
                     ].map((row, i) => (
                       <View key={i} style={s.detailRow}>
@@ -572,21 +566,19 @@ export const BuildingBillingScreen: React.FC = () => {
 
                   {/* Hoá đơn quá hạn → mở đường sang chỗ chấm dứt hợp đồng.
                       KHÔNG gọi terminateContract ngay tại đây: ManagerInvoice không
-                      mang `contractId`, mà quyết định chấm dứt còn phải xem mốc leo
-                      thang của kỳ (kỳ đầu có 3 ngày ân hạn riêng) — màn "Tiền phòng
-                      tự động" mới có đủ dữ liệu hợp đồng để chốt đúng. */}
+                      mang `contractId` — màn "Tiền phòng tự động" mới có đủ dữ liệu
+                      hợp đồng để chốt đúng. */}
                   {st === 'overdue' && (() => {
                     const late = lateDays(selectedBill);
                     // Chỉ MỜI chấm dứt khi thật sự đã đủ điều kiện — dùng cùng luật với
-                    // màn "Tiền phòng tự động" (kỳ đầu có 3 ngày ân hạn kể từ ngày nhận
-                    // phòng, BE lại gắn OVERDUE ngay hôm sau). Trước đây chỉ xét nhãn
-                    // OVERDUE nên bấm sang bên kia thì không có nút nào để bấm tiếp.
+                    // màn "Tiền phòng tự động". Trước đây chỉ xét nhãn OVERDUE nên bấm
+                    // sang bên kia thì không có nút nào để bấm tiếp.
                     // Hợp đồng đã thanh lý rồi thì không còn gì để chấm dứt nữa — BE
                     // vẫn giữ hoá đơn ở trạng thái OVERDUE nên phải tự kiểm tra, không
                     // thì nút vẫn hiện và bấm vào chỉ báo "không tìm được hợp đồng".
                     const contract = contractOf(selectedBill);
                     const canTerminate = !!contract && canTerminateInvoice(selectedBill);
-                    const graceLeft = (isFirstCycle(selectedBill) ? 0 : RENT_TERMINATION_AFTER_DAYS) - late;
+                    const graceLeft = RENT_TERMINATION_AFTER_DAYS - late;
                     return (
                       <View style={[s.terminateBox, !canTerminate && s.terminateBoxSoft]}>
                         <Text style={[s.terminateTitle, !canTerminate && s.terminateTitleSoft]}>

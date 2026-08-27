@@ -3,7 +3,6 @@ import {
   Bell, CheckCheck, X, FileText, DollarSign, Wrench, Home, ClipboardCheck,
 } from 'lucide-react';
 import type { PortalNotification, NotificationType } from '@/types';
-import { MOCK_NOTIFICATIONS } from '@/utils/mockData';
 import { hostService, type HostNotificationDto } from '@/services/host.service';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 
@@ -62,20 +61,22 @@ const formatTime = (iso: string) => {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export const NotificationCenter = () => {
-  const [notifications, setNotifications] = useState<PortalNotification[]>(MOCK_NOTIFICATIONS);
+  // Khởi tạo RỖNG, không phải MOCK_NOTIFICATIONS: `load()` chạy ngay ở useEffect nên mock
+  // chỉ kịp chớp một nhịp rồi bị thay — nhưng trong nhịp đó người dùng thấy thông báo giả
+  // của người khác, và nếu API hỏng thì mock ở lại luôn.
+  const [notifications, setNotifications] = useState<PortalNotification[]>([]);
   const [filterType, setFilterType] = useState<'all' | NotificationType>('all');
   const [filterRead, setFilterRead] = useState<'all' | 'unread' | 'read'>('all');
   const { refresh: refreshUnreadBadge } = useUnreadNotifications();
 
-  // Nạp thông báo thật từ BE; lỗi/offline → giữ mock.
+  // Nạp thông báo thật từ BE; lỗi/offline → danh sách rỗng, KHÔNG bịa dữ liệu thay thế.
   useEffect(() => {
     let active = true;
     hostService.listNotifications({ page: 0, size: 50 })
       .then(page => {
-        const list = (page?.content ?? []).map(dtoToNotification);
-        if (active && list.length > 0) setNotifications(list);
+        if (active) setNotifications((page?.content ?? []).map(dtoToNotification));
       })
-      .catch(() => { /* offline: dùng mock */ });
+      .catch(() => { /* offline: để rỗng */ });
     return () => { active = false; };
   }, []);
 

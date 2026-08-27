@@ -7,6 +7,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { navigateFromNotification } from '@/navigation/navigationRef';
+import { serverNow } from '@/utils/serverTime';
 
 // ===================== TYPES =====================
 type NotifType =
@@ -74,7 +75,7 @@ const FILTER_TABS = [
 ];
 
 function timeAgo(dateStr: string): string {
-  const now = new Date();
+  const now = serverNow();
   const date = new Date(dateStr);
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -205,10 +206,17 @@ export const NotificationCenterScreen: React.FC = () => {
       navigation.navigate('ManagerTabs', { screen: 'ManagerBilling' });
       return;
     }
-    // Gán đón khách / hợp đồng: có "#<id>" thì mở thẳng HĐ trong ResumeContract.
+    // Gán đón khách / hợp đồng / nhắc lịch đón → mở thẳng HĐ trong ResumeContract.
+    // Ưu tiên `params.contractId` BE gửi kèm (từ 05/08/2026); regex "#<id>" trong
+    // tiêu đề chỉ còn là đường lui cho thông báo cũ, và nó vốn không đáng tin —
+    // câu chữ đổi một chữ là hết khớp.
     if (notif.type === 'contract_assigned' || notif.type === 'tenant_onboarded') {
+      const fromParams = Number(notif.actionParams?.contractId);
       const m = notif.body?.match(/#(\d+)/) ?? notif.title?.match(/#(\d+)/);
-      navigation.navigate('ResumeContract', m ? { contractId: Number(m[1]) } : undefined);
+      const contractId = Number.isFinite(fromParams) && fromParams > 0
+        ? fromParams
+        : m ? Number(m[1]) : undefined;
+      navigation.navigate('ResumeContract', contractId ? { contractId } : undefined);
       return;
     }
     // Yêu cầu trả phòng → màn duyệt checkout-request.
@@ -220,7 +228,11 @@ export const NotificationCenterScreen: React.FC = () => {
       if (TAB_ROUTES.includes(notif.actionRoute)) {
         navigation.navigate('ManagerTabs', { screen: notif.actionRoute });
       } else {
-        navigation.navigate(notif.actionRoute);
+        // TRUYỀN KÈM `params`. BE gửi `screen` + `params` từ 05/08/2026 nhưng nhánh này
+        // gọi navigate() không tham số, nên mọi thông báo đi đường fallback đều mở màn
+        // ở trạng thái trống — bấm vào thông báo về một hợp đồng/hoá đơn cụ thể mà tới
+        // nơi lại phải tự tìm lại.
+        navigation.navigate(notif.actionRoute, notif.actionParams ?? undefined);
       }
     }
   };

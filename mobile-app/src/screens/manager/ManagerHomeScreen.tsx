@@ -11,7 +11,7 @@ import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
 import {
   ManagedProperty, getPropPriority, getPriorityMeta, getIssueCount,
-} from '@/data/managedProperties';
+} from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
@@ -19,6 +19,7 @@ import {
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 const QUICK_ACTIONS = [
   // Từ 13/08/2026 "Đón khách" và "Khách chờ đón" là MỘT luồng — cả hai vào
@@ -138,12 +139,29 @@ export const ManagerHomeScreen: React.FC = () => {
   const unpaidCount   = actionableInvoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
-  // Lịch đón khách hôm nay — hợp đồng nháp đã gán cho manager này, có ngày dự
-  // kiến đón = hôm nay (dữ liệu thật từ /tenant-contracts/managed?status=DRAFT,
-  // không cần API riêng — feedback thầy yêu cầu hiện ngay ở màn đầu, không phải
-  // bấm vào mới thấy).
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const receptionToday = draftContracts.filter(c => c.expectedReceptionDate === todayIso);
+  /**
+   * Lịch đón khách — hợp đồng nháp đã gán cho manager này, đến hạn đón hôm nay
+   * (hoặc đã quá hạn mà chưa đón). Dữ liệu thật từ /tenant-contracts/managed?status=DRAFT.
+   *
+   * Ngày đối chiếu lấy theo thứ tự `moveInDate → expectedReceptionDate → startDate`,
+   * GIỐNG ResumeContractScreen. Trước 15/08/2026 chỗ này chỉ so `expectedReceptionDate`
+   * — mà trường đó chỉ có giá trị khi manager tự đặt lịch hẹn; hợp đồng import từ Excel
+   * luôn để null (BE trả `expectedReceptionDate: null`, ngày trong file rơi vào
+   * `moveInDate`/`startDate`). Kết quả: đúng ngày đón khách mà My Task vẫn báo
+   * "Mọi thứ ổn định hôm nay" dù thông báo "Được gán tiếp nhận khách mới" đã tới.
+   *
+   * Đếm cả ngày đã qua: hợp đồng nháp quá hạn đón còn gấp hơn, mà nếu chỉ so bằng
+   * đúng hôm nay thì sang ngày hôm sau nó biến mất khỏi danh sách việc.
+   */
+  const today = todayIso();
+  const receptionDateOf = (c: TenantContractResponse): string | null => {
+    const raw = c.moveInDate || c.expectedReceptionDate || c.startDate;
+    return raw ? String(raw).slice(0, 10) : null;
+  };
+  const receptionToday = draftContracts.filter(c => {
+    const d = receptionDateOf(c);
+    return !!d && d <= today;
+  });
 
   // Trả phòng: hồ sơ đang chờ CHÍNH MANAGER làm gì đó. Khách gửi yêu cầu / đồng ý
   // quyết toán / phản đối đều rơi vào đây, nên việc mới hiện ngay ở màn đầu chứ không
@@ -154,7 +172,7 @@ export const ManagerHomeScreen: React.FC = () => {
   ).length;
 
   const priorityItems = [
-    { id: 'p0', icon: '🤝', label: 'Đón khách hôm nay',         count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
+    { id: 'p0', icon: '🤝', label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
     { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
     { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
     { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
@@ -184,7 +202,7 @@ export const ManagerHomeScreen: React.FC = () => {
   const heroStatusColor = urgentTotal > 0 ? '#FCD34D' : '#6EE7B7';
 
   const firstName = user?.fullName?.split(' ').pop() ?? 'Quản lý';
-  const todayStr  = new Date().toLocaleDateString('vi-VN', {
+  const todayStr  = serverNow().toLocaleDateString('vi-VN', {
     weekday: 'short', day: 'numeric', month: 'numeric',
   });
 
@@ -199,21 +217,28 @@ export const ManagerHomeScreen: React.FC = () => {
       >
 
         {/* ── Header ─────────────────────────────────────────────────── */}
+        {/*
+          Ngày đứng CÙNG HÀNG với lời chào, nằm sát cái chuông — trước đây nó xếp chồng
+          phía trên lời chào ở cỡ 11px nên vừa lọt thỏm vừa đẩy khối chữ cao lên.
+          Không thêm đồng hồ giờ:phút ở đây: thanh trạng thái của điện thoại đã có sẵn,
+          bày thêm một cái nữa trong app là thừa.
+        */}
         <View style={s.header}>
-          <View>
+          <Text style={s.headerName} numberOfLines={1}>Chào, {firstName} 👋</Text>
+
+          <View style={s.headerRight}>
             <Text style={s.headerDate}>{todayStr}</Text>
-            <Text style={s.headerName}>Chào, {firstName} 👋</Text>
+            <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
+              <Text style={s.notifIcon}>🔔</Text>
+              {(realUnread ?? 0) > 0 && (
+                <View style={s.notifBadge}>
+                  <Text style={s.notifBadgeText}>
+                    {(realUnread ?? 0) > 9 ? '9+' : (realUnread ?? 0)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
-            <Text style={s.notifIcon}>🔔</Text>
-            {(realUnread ?? 0) > 0 && (
-              <View style={s.notifBadge}>
-                <Text style={s.notifBadgeText}>
-                  {(realUnread ?? 0) > 9 ? '9+' : (realUnread ?? 0)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </View>
 
         {/* ── My Task hôm nay — luôn hiện đầu trang, không cần bấm vào ── */}
@@ -507,8 +532,12 @@ const s = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingTop: Spacing.base, paddingBottom: Spacing.md,
   },
-  headerDate: { fontSize: 11, fontWeight: '400', color: Colors.textMuted, marginBottom: 3, letterSpacing: 0.1 },
-  headerName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.3 },
+  // Cụm bên phải: ngày + chuông, cách nhau vừa đủ để đọc ra một cụm chứ không dính nhau.
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  // 11 → 14px, đậm hơn: cùng hàng với lời chào 20px nên nhỏ quá sẽ chìm hẳn.
+  headerDate: { fontSize: 14, fontWeight: '600', color: Colors.textSecondary, letterSpacing: 0.1 },
+  // flexShrink để tên dài thì lời chào tự cắt, không đẩy ngày & chuông ra khỏi màn.
+  headerName: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.3, flexShrink: 1 },
   notifBtn: {
     width: 36, height: 36, borderRadius: 18,
     alignItems: 'center', justifyContent: 'center',

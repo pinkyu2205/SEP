@@ -4,6 +4,7 @@ import {
   Modal, TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 // Alert.alert của react-native-web là no-op → dùng showAlert, không thì nút
@@ -11,14 +12,32 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { showAlert } from '@/utils';
 import { ConfirmDialog } from '@/components/common';
 import { useAuth } from '@/hooks';
+import { isClosedContract } from '@/utils';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
+import { managerPropertyService } from '@/services/manager/propertyService';
+import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
+import { registerPushToken, unregisterPushToken } from '@/services/core/pushToken';
 
 const ROLE_CONFIG = {
   manager: { label: 'Quản lý vận hành', color: Colors.primary,   bg: Colors.primaryBg   },
   tenant:  { label: 'Khách thuê',        color: Colors.success,   bg: Colors.successLight },
 };
 
-const MOCK_MANAGER_STATS = { properties: 2, tenants: 10, activeContracts: 3 };
+/**
+ * Số liệu của quản lý vận hành — TÍNH THẬT, không mock.
+ *
+ * Trước đây chỗ này là `MOCK_MANAGER_STATS = { properties: 2, tenants: 10, activeContracts: 3 }`
+ * viết cứng trong code: manager nào đăng nhập cũng thấy 2/10/3, trong khi màn Khách thuê
+ * (đọc API thật) hiện 0 — hai màn cãi nhau và người dùng không biết tin cái nào.
+ *
+ * Dùng ĐÚNG nguồn và ĐÚNG bộ lọc của `TenantListScreen` (nhà mình phụ trách → hợp đồng
+ * chưa kết thúc) để hai màn không thể lệch nhau lần nữa.
+ */
+interface ManagerStats { properties: number; tenants: number; activeContracts: number }
+const EMPTY_MANAGER_STATS: ManagerStats = { properties: 0, tenants: 0, activeContracts: 0 };
+
+/** Bật/tắt thông báo là lựa chọn của MÁY này, không phải của tài khoản — lưu tại máy. */
+const NOTIF_PREF_KEY = 'notifEnabled';
 
 // ── Row item ──────────────────────────────────────────────
 const MenuItem: React.FC<{
@@ -64,7 +83,38 @@ const SectionHeader: React.FC<{ title: string }> = ({ title }) => (
 export const ProfileScreen: React.FC = () => {
   const { user, logout, updateUser } = useAuth();
   const navigation = useNavigation<any>();
+  /**
+   * Công tắc thông báo — CÓ TÁC DỤNG THẬT: bật thì đăng ký Expo push token với BE,
+   * tắt thì gỡ. Trước đây nó chỉ là state trong màn, gạt xong thoát ra là mất, mà thông
+   * báo thì vẫn về như thường — người dùng tưởng đã tắt.
+   */
   const [notifEnabled, setNotifEnabled] = useState(true);
+  const [notifBusy, setNotifBusy] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      AsyncStorage.getItem(NOTIF_PREF_KEY)
+        .then(v => { if (active && v !== null) setNotifEnabled(v === '1'); })
+        .catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
+
+  const toggleNotif = async (next: boolean) => {
+    setNotifBusy(true);
+    setNotifEnabled(next); // phản hồi ngay, hoàn lại nếu hỏng
+    try {
+      if (next) await registerPushToken();
+      else await unregisterPushToken();
+      await AsyncStorage.setItem(NOTIF_PREF_KEY, next ? '1' : '0');
+    } catch {
+      setNotifEnabled(!next);
+      showAlert('Không đổi được cài đặt', 'Vui lòng kiểm tra mạng và thử lại.');
+    } finally {
+      setNotifBusy(false);
+    }
+  };
   const roleCfg = ROLE_CONFIG[user?.role ?? 'tenant'];
 
   // Thông tin phòng/hợp đồng thật cho tenant (GET /tenant/me/dashboard)
@@ -76,6 +126,36 @@ export const ProfileScreen: React.FC = () => {
       realTenantSelfService.getDashboard()
         .then(d => { if (active) setDash(d); })
         .catch(() => { if (active) setDash(null); });
+      return () => { active = false; };
+    }, [user?.role]),
+  );
+
+  // Số liệu thật của quản lý vận hành (xem chú thích ở EMPTY_MANAGER_STATS).
+  const [mgrStats, setMgrStats] = useState<ManagerStats>(EMPTY_MANAGER_STATS);
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.role !== 'manager') return;
+      let active = true;
+      (async () => {
+        try {
+          const scoped = await managerPropertyService.getScopedProperties();
+          const lists = await Promise.all(
+            scoped.map(p =>
+              realTenantService.listByProperty(p.id).catch(() => [] as TenantContractResponse[]),
+            ),
+          );
+          const contracts = lists.flat().filter(c => !isClosedContract(c.status));
+          if (!active) return;
+          setMgrStats({
+            properties: scoped.length,
+            // Mỗi hợp đồng chưa kết thúc = một khách đang ở — khớp cách đếm của TenantListScreen.
+            tenants: contracts.length,
+            activeContracts: contracts.filter(c => (c.status || '').toUpperCase() === 'ACTIVE').length,
+          });
+        } catch {
+          if (active) setMgrStats(EMPTY_MANAGER_STATS);
+        }
+      })();
       return () => { active = false; };
     }, [user?.role]),
   );
@@ -193,17 +273,17 @@ export const ProfileScreen: React.FC = () => {
         {user?.role === 'manager' && (
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Text style={styles.statNum}>{MOCK_MANAGER_STATS.properties}</Text>
+              <Text style={styles.statNum}>{mgrStats.properties}</Text>
               <Text style={styles.statLabel}>Bất động sản</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNum}>{MOCK_MANAGER_STATS.tenants}</Text>
+              <Text style={styles.statNum}>{mgrStats.tenants}</Text>
               <Text style={styles.statLabel}>Khách thuê</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNum}>{MOCK_MANAGER_STATS.activeContracts}</Text>
+              <Text style={styles.statNum}>{mgrStats.activeContracts}</Text>
               <Text style={styles.statLabel}>Hợp đồng</Text>
             </View>
           </View>
@@ -236,8 +316,10 @@ export const ProfileScreen: React.FC = () => {
           <View style={styles.itemDivider} />
           <MenuItem icon="📞" label="Điện thoại" value={user?.phone ?? '—'} />
           <View style={styles.itemDivider} />
-          <MenuItem icon="🗓️" label="Tham gia"   value={user?.createdAt ?? '—'} />
-          <View style={styles.itemDivider} />
+          {/* Đã bỏ dòng "Tham gia": `user.createdAt` được gán bằng nowIso() lúc đăng nhập
+              (xem useAuth.applyRealAuthResponse) nên nó là GIỜ ĐĂNG NHẬP chứ không phải
+              ngày tạo tài khoản — hiện lên là nói dối. `/auth/me` không trả ngày tạo;
+              BE có `createAt` ở /api/v1/user, cần expose thêm thì mới hiện lại được. */}
           <MenuItem icon="✏️" label="Chỉnh sửa hồ sơ" onPress={handleEditProfile} />
         </View>
 
@@ -246,7 +328,7 @@ export const ProfileScreen: React.FC = () => {
         <View style={styles.card}>
           <MenuItem
             icon="🔔" label="Thông báo"
-            toggle toggleValue={notifEnabled} onToggle={setNotifEnabled}
+            toggle toggleValue={notifEnabled} onToggle={notifBusy ? () => {} : toggleNotif}
           />
           <View style={styles.itemDivider} />
           <MenuItem icon="🔒" label="Đổi mật khẩu" onPress={handleChangePassword} />

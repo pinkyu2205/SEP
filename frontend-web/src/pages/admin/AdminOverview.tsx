@@ -241,11 +241,27 @@ export const SuperAdminOverview = () => {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Danh sách dùng để CỘNG TIỀN — bỏ vỏ bọc `HD-ONBOARD-*`.
+   *
+   * Lúc nhận phòng khách chuyển MỘT lần gồm hai thứ khác bản chất:
+   *   • tiền cọc         → GIỮ HỘ, hoàn lại khi trả phòng. Là công nợ, KHÔNG phải doanh thu
+   *   • tiền nhà kỳ đầu  → doanh thu thật, đã có hoá đơn `HD-RENT-*` riêng
+   *
+   * Ví dụ thật: HD-ONBOARD-1 = 14.709.677 (cọc 9.500.000 + tiền nhà 5.209.677), còn
+   * HD-RENT-1-2026-08 = 5.209.677. Cộng cả hai ra 19.919.354 — vừa tính trùng tiền nhà,
+   * vừa coi tiền cọc là doanh thu. Doanh thu đúng của kỳ này là 5.209.677.
+   *
+   * Mọi số tiền trên trang này (KPI, xu hướng, cơ cấu, top toà nhà) phải đi qua đây.
+   * `invoices` gốc vẫn giữ nguyên cho các danh sách đếm/hiển thị dòng.
+   */
+  const moneyInvoices = useMemo(() => invoices.filter(i => !i.isOnboardEnvelope), [invoices]);
+
   // ── Tài chính ──
   const money = useMemo(() => {
-    const paid = invoices.filter(i => i.status === 'PAID');
-    const overdue = invoices.filter(i => i.status === 'OVERDUE');
-    const pending = invoices.filter(i => i.status === 'PENDING' || i.status === 'PARTIAL');
+    const paid = moneyInvoices.filter(i => i.status === 'PAID');
+    const overdue = moneyInvoices.filter(i => i.status === 'OVERDUE');
+    const pending = moneyInvoices.filter(i => i.status === 'PENDING' || i.status === 'PARTIAL');
     const sum = (rows: AdminInvoiceRow[]) => rows.reduce((s, i) => s + i.amount, 0);
     const paidAmt = sum(paid);
     const openAmt = sum(pending) + sum(overdue);
@@ -257,13 +273,13 @@ export const SuperAdminOverview = () => {
       billed: paidAmt + openAmt,
       collectRate: safePct(paidAmt, paidAmt + openAmt),
     };
-  }, [invoices]);
+  }, [moneyInvoices]);
 
   /** Xu hướng 12 kỳ gần nhất — gom hoá đơn theo kỳ, kỳ trống vẫn giữ cột. */
   const trend = useMemo(() => {
     const buckets = new Map<string, { paid: number; open: number }>();
     for (let i = TREND_MONTHS - 1; i >= 0; i--) buckets.set(shiftMonth(CURRENT_MONTH, -i), { paid: 0, open: 0 });
-    for (const inv of invoices) {
+    for (const inv of moneyInvoices) {
       const ym = periodOf(inv);
       const b = ym ? buckets.get(ym) : undefined;
       if (!b) continue;
@@ -276,30 +292,30 @@ export const SuperAdminOverview = () => {
       // thay vì kéo đường bám đáy 0% rồi vọt lên trông như tụt dốc thật.
       rate: v.paid + v.open > 0 ? Math.round((v.paid / (v.paid + v.open)) * 100) : null,
     }));
-  }, [invoices]);
+  }, [moneyInvoices]);
 
   const byStatus = useMemo(() => {
     const m = new Map<string, number>();
-    for (const i of invoices) m.set(i.status, (m.get(i.status) ?? 0) + i.amount);
+    for (const i of moneyInvoices) m.set(i.status, (m.get(i.status) ?? 0) + i.amount);
     return [...m.entries()]
       .map(([status, value]) => ({ name: STATUS_LABEL[status] ?? status, value, color: STATUS_COLOR[status] ?? '#94a3b8' }))
       .filter(x => x.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [invoices]);
+  }, [moneyInvoices]);
 
   const byType = useMemo(() => {
     const m = new Map<AdminInvoiceType, number>();
-    for (const i of invoices) m.set(i.type, (m.get(i.type) ?? 0) + i.amount);
+    for (const i of moneyInvoices) m.set(i.type, (m.get(i.type) ?? 0) + i.amount);
     return [...m.entries()]
       .map(([type, value]) => ({ name: TYPE_META[type].label, value, color: TYPE_META[type].color }))
       .filter(x => x.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [invoices]);
+  }, [moneyInvoices]);
 
   /** Top toà nhà: tách đã thu / còn phải thu để nhìn ra nhà nào thu kém. */
   const byProperty = useMemo(() => {
     const m = new Map<string, { paid: number; open: number }>();
-    for (const i of invoices) {
+    for (const i of moneyInvoices) {
       const cur = m.get(i.propertyName) ?? { paid: 0, open: 0 };
       if (i.status === 'PAID') cur.paid += i.amount;
       else if (i.status !== 'CANCELLED') cur.open += i.amount;
@@ -319,7 +335,7 @@ export const SuperAdminOverview = () => {
       }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 7);
-  }, [invoices]);
+  }, [moneyInvoices]);
 
   // ── Người dùng / quy mô ──
   const userComp = useMemo(() => {

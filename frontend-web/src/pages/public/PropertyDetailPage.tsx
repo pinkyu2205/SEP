@@ -286,7 +286,7 @@ export const PropertyDetailPage = () => {
               </div>
             </div>
 
-            <ContactSection compact propertyId={property.id} propertyTitle={property.title} />
+            <ContactSection compact />
           </aside>
         </div>
 

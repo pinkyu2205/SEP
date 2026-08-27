@@ -15,6 +15,7 @@ import {
   touchSession, isSessionIdleExpired,
 } from '@/services/core/session';
 import { showAlert } from '@/utils';
+import { nowIso } from '@/utils/serverTime';
 
 /**
  * Auth Context - Quản lý trạng thái đăng nhập toàn ứng dụng.
@@ -24,8 +25,6 @@ import { showAlert } from '@/utils';
  * hạn) mới xoá phiên. Xem services/core/session.ts.
  */
 
-/** Tài khoản demo không có token thật, nhận biết qua id để vẫn giữ được phiên. */
-const isMockUser = (u?: User | null) => !!u?.id?.startsWith('mock-');
 
 interface AuthContextType {
   user: User | null;
@@ -70,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * trường hợp quản lý bấm "Hoàn tất" trong khi khách đang mở app.
    */
   const enforceTenantAccess = async (u: User | null) => {
-    if (!u || u.role !== 'tenant' || isMockUser(u)) return false;
+    if (!u || u.role !== 'tenant') return false;
     if (!(await isTenantAccountEnded())) return false;
     // Gỡ push token trước khi mất token, kẻo máy này còn nhận thông báo của phòng cũ.
     await unregisterPushToken();
@@ -100,17 +99,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Có hồ sơ + còn token (hoặc là tài khoản demo) → vào thẳng app.
-        if (token || isMockUser(storedUser)) {
+        // Có hồ sơ + còn token → vào thẳng app.
+        if (token) {
           setUser(storedUser);
           await touchSession();
           // Token có thể đã đổi/hết hạn sau nhiều ngày; đăng ký lại push token cho
           // chắc chắn máy này vẫn nhận được thông báo.
-          if (token) {
-            registerPushToken();
-            // Kiểm tra nền (không chặn màn hình): khách đã trả phòng xong thì đá ra ngay.
-            enforceTenantAccess(storedUser);
-          }
+          registerPushToken();
+          // Kiểm tra nền (không chặn màn hình): khách đã trả phòng xong thì đá ra ngay.
+          enforceTenantAccess(storedUser);
         } else {
           // Mất token (bị xoá / cài lại) → phiên không dùng được nữa, dọn cho sạch.
           await clearSession();
@@ -153,40 +150,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showAlert('Phiên đăng nhập đã hết hạn', 'Vui lòng đăng nhập lại để tiếp tục.');
   }), []);
 
-  // ======== MOCK MODE ========
-  const USE_MOCK = true;
-
-  const MOCK_USERS: Record<string, User> = {
-    '0909876543': {
-      id: 'mock-manager',
-      email: 'manager@test.com',
-      fullName: 'Trần Thị B',
-      phone: '0909876543',
-      role: 'manager',
-      createdAt: '2026-01-01',
-    },
-    '0901234567': {
-      id: 'mock-tenant-old',
-      email: 'tenant@test.com',
-      fullName: 'Nguyễn Văn A',
-      phone: '0901234567',
-      role: 'tenant',
-      roomId: 'r1',
-      createdAt: '2026-01-01',
-    },
-    '0888888888': {
-      id: 'mock-tenant-new',
-      email: 'newtenant@test.com',
-      fullName: 'Lê Văn C',
-      phone: '0888888888',
-      role: 'tenant',
-      roomId: 'r2',
-      isFirstLogin: true,
-      createdAt: '2026-05-11',
-    }
-  };
-  // ============================
-
   // Dùng chung cho cả login() lẫn activateTenant() — cả 2 endpoint BE đều trả cùng
   // shape AuthResponse (token/username/role/firstLogin), nên set user y hệt nhau.
   const applyRealAuthResponse = async (res: { username: string; role: string; firstLogin?: boolean }, phoneFallback: string) => {
@@ -226,7 +189,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       phone: profile.phone ?? '',
       role,
       isFirstLogin: res.firstLogin ?? false,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso(),
     };
     setUser(nextUser);
     // Lưu xuống máy: tắt app mở lại là vào thẳng, khỏi đăng nhập lại.
@@ -239,18 +202,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (identifier: string, password: string) => {
     const id = identifier.trim();
 
-    // Tài khoản demo MOCK (tenant/guest) — giữ nguyên để test nhanh, không cần backend
-    if (USE_MOCK && MOCK_USERS[id]) {
-      if (id === '0909876543' && password !== 'manager123') throw new Error('Sai mật khẩu!');
-      if (id === '0901234567' && password !== 'tenant123') throw new Error('Sai mật khẩu!');
-      if (id === '0888888888' && password !== '123456') throw new Error('Sai mật khẩu!');
-      setUser(MOCK_USERS[id]);
-      await persistUser(MOCK_USERS[id]);   // tài khoản demo cũng giữ đăng nhập
-      await touchSession();
-      return;
-    }
+    // Đã bỏ (15/08/2026) 3 tài khoản demo viết cứng tại đây (0909876543/manager123,
+    // 0901234567/tenant123, 0888888888/123456). Chúng vào thẳng app với role
+    // manager/tenant mà KHÔNG gọi backend, nên không có token — mọi màn gọi API đều
+    // 401, và bản release vẫn đăng nhập được bằng mật khẩu nằm trong mã nguồn.
+    // Muốn test nhanh thì tạo tài khoản thật trên BE.
 
-    // Các tài khoản còn lại -> đăng nhập backend Spring THẬT (vd manager "long2")
     try {
       const res = await realAuthService.login(id, password);
       await applyRealAuthResponse(res, id);
@@ -293,8 +250,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Gỡ push token TRƯỚC khi xoá accessToken (cần còn auth để gọi BE) — best-effort
     await unregisterPushToken();
     // Xoá SẠCH phiên: token + hồ sơ + lựa chọn "nhà đang thuê" (tránh dính sang tài
-    // khoản khác đăng nhập sau trên cùng máy). Trước đây nhánh mock bỏ qua bước xoá
-    // `user` nên đăng xuất xong mở lại app vẫn thấy tài khoản cũ.
+    // khoản khác đăng nhập sau trên cùng máy).
     await clearSession();
     setUser(null);
   };

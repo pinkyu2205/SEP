@@ -58,12 +58,26 @@ export interface ManagerInvoice {
   propertyName: string;
   roomNumber?: string | null;
   tenantName?: string;
+  /** BE trả sẵn — dùng để ghép hoá đơn về đúng hợp đồng (một phòng qua nhiều đời khách). */
+  contractId?: number | null;
   month: number;
   year: number;
-  amount: number;          // tổng phải thu
+  /**
+   * Tổng phải thu. BE MASK về `null` cho tài khoản MANAGER với hoá đơn tiền nhà
+   * (`ManagerBillingServiceImpl`: `if (!isAdmin && type == RENT) setAmount(null)`).
+   * Kiểu để `number` cho tương thích code cũ — nơi hiển thị phải tự chặn null, đừng
+   * `fmt(amount)` thẳng vì `formatCurrency(null)` ra "0 đ", đọc thành thu 0 đồng.
+   */
+  amount: number;
   status: ManagerInvoiceStatus;
   dueDate: string;
   createdAt: string;
+  // BE trả sẵn 3 field này khi hoá đơn đã thu. Từ 17/08/2026 sổ thu thật đã có endpoint
+  // riêng (`listPaymentHistory`) nên đây chỉ còn là lưới an toàn cho hoá đơn không có
+  // dòng nào trong `tenant_payments` — xem `fromPaidInvoice` ở PaymentHistoryScreen.
+  paidAt?: string | null;
+  paymentMethod?: string | null;
+  transactionId?: string | null;
 }
 
 /**
@@ -99,6 +113,45 @@ export interface ManagerPayment {
   transferContent?: string;
   createdAt: string;
   verifiedAt?: string;
+}
+
+/**
+ * LỊCH SỬ THU THẬT — `tenant_payments`, không phải hàng chờ đối soát.
+ *
+ * BE mở endpoint này 17/08/2026 (doc/BE-NEED-manager-xem-lich-su-thu-tien). Khác
+ * `/manager/payments` ở chỗ đó là bảng `tenant_payment_claims` — khách TỰ KHAI đã
+ * chuyển, chờ manager duyệt; khách trả PayOS thành công thì webhook ghi thẳng
+ * `tenant_payments` và KHÔNG sinh claim nào, nên càng trôi chảy màn đối soát càng trống.
+ *
+ * ⚠️ `amount` = null với hoá đơn tiền nhà / onboard (BE mask cho MANAGER, xem
+ * @/constants/managerVisibility). Đừng bù 0 — "0 đ" đọc thành thu không đồng nào.
+ */
+export interface ManagerPaymentHistoryEntry {
+  id: number;
+  invoiceId: number;
+  invoiceCode: string;
+  /** RENT | ELECTRICITY | WATER | SERVICE | OTHER — BE trả sẵn, khỏi đoán theo mã. */
+  invoiceType?: string | null;
+  contractId?: number | null;
+  tenantName?: string | null;
+  propertyName?: string | null;
+  roomNumber?: string | null;
+  amount?: number | null;
+  method?: string | null;
+  paidAt?: string | null;
+  transactionId?: string | null;
+}
+
+/** Mã QR do quản lý xin để nộp thay khách (tiền mặt / trả hộ). */
+export interface ManagerPaymentQr {
+  /** Số tiền phải chuyển — KHÔNG mask, xem chú thích ở `createPaymentQr`. */
+  amount: number;
+  /** Chuỗi EMVCo để vẽ QR (react-native-qrcode-svg). */
+  qrCode: string;
+  checkoutUrl?: string | null;
+  orderCode?: number | null;
+  /** Hạn của QR (BE: billing.manager-payment-qr.ttl-minutes, mặc định 15 phút). */
+  expiresAt: string;
 }
 
 interface SpringPage<T> { content: T[]; }
@@ -178,6 +231,20 @@ export const realManagerInvoiceService = {
     return unwrap(data);
   },
 
+  /**
+   * GET /api/v1/manager/payments/history — dòng tiền đã thu, mới nhất trước.
+   * `size` để rộng vì màn Thu & Đối soát dựng dòng thời gian, không phân trang.
+   */
+  listPaymentHistory: async (params?: {
+    propertyId?: number; contractId?: number;
+    from?: string; to?: string; page?: number; size?: number;
+  }): Promise<ManagerPaymentHistoryEntry[]> => {
+    const { data } = await realApiClient.get<
+      SpringPage<ManagerPaymentHistoryEntry> | ManagerPaymentHistoryEntry[]
+    >('/api/v1/manager/payments/history', { params: { size: 200, ...params } });
+    return unwrap(data);
+  },
+
   // POST /api/v1/manager/payments/{id}/verify  — xác nhận đã nhận tiền
   verifyPayment: async (id: number | string): Promise<void> => {
     await realApiClient.post(`/api/v1/manager/payments/${id}/verify`);
@@ -186,6 +253,30 @@ export const realManagerInvoiceService = {
   // POST /api/v1/manager/payments/{id}/reject  — từ chối giao dịch
   rejectPayment: async (id: number | string, reason?: string): Promise<void> => {
     await realApiClient.post(`/api/v1/manager/payments/${id}/reject`, { reason });
+  },
+
+  /**
+   * POST /api/v1/manager/invoices/{id}/payment-qr — xin mã QR để NỘP THAY khách.
+   *
+   * Cần `unlockToken` lấy từ `managerInvoiceUnlockService.verifyPasscode` (mã của admin).
+   * `payerName` BẮT BUỘC khi `purpose = PROXY_PAY`: người trả hộ phải có tên trong sổ,
+   * không thì sau này không ai biết tiền vào từ đâu.
+   *
+   * ⚠️ `amount` trả về là số tiền THẬT của hoá đơn, KHÔNG mask — khác quy tắc ẩn tiền
+   * ở @/constants/managerVisibility. Cố ý: quản lý là người bấm chuyển đúng số đó
+   * (tiền mặt) hoặc đọc số cho người trả hộ. Không thấy số thì không làm được việc.
+   */
+  createPaymentQr: async (
+    invoiceId: number | string,
+    body: {
+      unlockToken: string; purpose: 'CASH_COLLECT' | 'PROXY_PAY';
+      payerName?: string; payerPhone?: string;
+    },
+  ): Promise<ManagerPaymentQr> => {
+    const { data } = await realApiClient.post<ManagerPaymentQr>(
+      `/api/v1/manager/invoices/${invoiceId}/payment-qr`, body,
+    );
+    return data;
   },
 
   // POST /api/v1/manager/invoices/{id}/mark-paid  — manager tự ghi nhận đã thu (tiền mặt/CK tay)

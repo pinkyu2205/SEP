@@ -1,3 +1,4 @@
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
@@ -18,8 +19,10 @@ import { realPropertyService } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 import { managerEvnBillService, evnUnitPrice, type EvnBill } from '@/services/manager/evnBillService';
+import { managerWaterBillService, waterUnitPrice, type WaterBill } from '@/services/manager/waterBillService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '@/components/common';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 // ===================== TYPES =====================
 type MainTab  = 'electricity' | 'water' | 'history';
@@ -58,6 +61,8 @@ interface RoomMeterReading {
 }
 
 interface WaterBillData {
+  /** Tổng m³ trên hoá đơn admin — nhà nguyên căn thu theo số này, không theo đồng hồ. */
+  totalQuantity: number;
   totalAmount: number;
   billingPeriod: string;
   pricePerM3: number;
@@ -139,7 +144,7 @@ const groupThousands = (s: string) => {
  * hard-code "01/05 – 31/05/2026" nên mở app tháng nào cũng thấy kỳ tháng 5/2026.
  * offset: 0 = tháng này, -1 = tháng trước.
  */
-const monthPeriod = (offset = 0, base = new Date()) => {
+const monthPeriod = (offset = 0, base = serverNow()) => {
   const d = new Date(base.getFullYear(), base.getMonth() + offset, 1);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
@@ -251,6 +256,21 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * trước lúc khách trả thì manager vẫn bấm gửi lại được bao nhiêu lần cũng được. Giờ
    * cứ ĐÃ GỬI là khoá, không quan tâm đã thu tiền hay chưa.
    */
+  /**
+   * Lỗi BE trả về có phải "kỳ này đã gửi hoá đơn rồi" không.
+   *
+   * FE đã tự dò trước bằng `fetchRoomHistory` (so `billingPeriod` của hoá đơn cũ với kỳ
+   * đang chốt), nhưng chuỗi kỳ do người nhập nên chỉ cần lệch một khoảng trắng hay dấu
+   * gạch (– so với -) là dò trượt, nút vẫn xanh và manager bấm vào mới biết. Bắt thêm
+   * lỗi của BE để khoá nút ngay tại chỗ — BE mới là bên chốt.
+   */
+  const isAlreadySentError = (e: any): boolean => {
+    const code = e?.response?.data?.code;
+    if (code === 'INVOICE_ALREADY_EXISTS') return true;
+    const msg = String(e?.response?.data?.message ?? e?.message ?? '');
+    return /đã nhận hoá đơn|đã nhận hóa đơn/i.test(msg);
+  };
+
   const blockedFromSending = (
     type: 'ELECTRICITY' | 'WATER',
     roomKey: string,
@@ -297,12 +317,18 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * Nạp từ BE mỗi lần vào bước ghi chỉ số nên khoá còn hiệu lực qua cả lần mở app khác.
    */
   const [elecSentKeys,  setElecSentKeys]  = useState<Set<string>>(new Set());
+  /** Nhà nguyên căn đã gửi hoá đơn điện kỳ này — xem chú thích chỗ setElecHouseSent. */
+  const [elecHouseSent, setElecHouseSent] = useState(false);
   const [waterSentKeys, setWaterSentKeys] = useState<Set<string>>(new Set());
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
   const [waterBillData,    setWaterBillData]    = useState<WaterBillData | null>(null);
   const [waterStep,        setWaterStep]        = useState<WaterStep>('bill_entry');
+  /** Hoá đơn nước admin đã chốt cho kỳ này — manager CHỈ ĐỌC (14/08/2026). */
+  const [waterBill,        setWaterBill]        = useState<WaterBill | null>(null);
+  const [waterBillLoading, setWaterBillLoading] = useState(false);
+  const [waterBillError,   setWaterBillError]   = useState<string | null>(null);
   const [roomWaterReadings,setRoomWaterReadings]= useState<RoomWaterReading[]>([]);
   const [waterBillForm,    setWaterBillForm]    = useState({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
 
@@ -350,6 +376,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   useFocusEffect(useCallback(() => { loadProperties(); loadHistory(); }, [loadProperties, loadHistory]));
 
   /**
+   * Hoá đơn điện/nước khách trả xong → nạp lại lịch sử. BE gửi kèm `utilityInvoiceId`
+   * cho loại này, nhưng ở đây cứ nạp lại cả danh sách: `loadHistory` rẻ hơn nhiều so với
+   * việc dò đúng dòng rồi vá tay, mà lại không sợ lệch bộ lọc kỳ đang chọn.
+   */
+  useBillingRealtime((event) => {
+    if (event.event !== 'INVOICE_PAID') return;
+    loadHistory();
+  });
+
+  /**
    * MỞ THẲNG NHÀ ĐƯỢC CHỈ ĐỊNH khi vào từ màn "Cần chụp số"
    * (`MeterReadingPendingScreen` điều hướng kèm `{ propertyId, roomId, period }`).
    *
@@ -388,16 +424,36 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    *
    * Khoá phòng: roomId dạng chuỗi, nhà nguyên căn dùng `house-<propId>-unit`.
    */
+  /**
+   * Chuẩn hoá chuỗi kỳ trước khi so.
+   *
+   * Chuỗi kỳ do NGƯỜI gõ ở trang admin ("01/09 – 30/09/2026") rồi được chép nguyên văn
+   * sang hoá đơn. Chỉ cần dư một khoảng trắng, hay gạch ngang dài `–` đổi thành `-`, là
+   * so bằng `===` trượt → FE tưởng chưa gửi, để nút xanh, manager bấm vào mới ăn lỗi của
+   * BE. Gom mọi kiểu gạch về `-` và ép khoảng trắng về một dấu cách.
+   */
+  const normPeriod = (raw?: string | null): string =>
+    (raw ?? '').replace(/[–—-]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+
   const fetchRoomHistory = async (
     propId: string,
     type: 'ELECTRICITY' | 'WATER',
     period?: string,
-  ): Promise<{ lastReadings: Map<string, number>; sentKeys: Set<string> }> => {
+  ): Promise<{ lastReadings: Map<string, number>; sentKeys: Set<string>; houseSent: boolean }> => {
     const lastReadings = new Map<string, number>();
     const sentKeys = new Set<string>();
-    const wanted = (period || '').trim();
+    /** Nhà nguyên căn đã có hoá đơn kỳ này chưa — cờ riêng, không phụ thuộc khoá chuỗi. */
+    let houseSent = false;
+    const wanted = normPeriod(period);
     try {
-      const invoices = await realManagerInvoiceService.listUtilityInvoices(Number(propId), { type });
+      // GỬI CẢ `period` để BE lọc. Đây chính là truy vấn BE dùng trong
+      // `validateBillingPeriodLock` (findByFilters(propertyId, period, type)) — hỏi đúng
+      // câu BE hỏi thì câu trả lời không thể lệch. Trước đây FE lấy hết mọi kỳ rồi tự so
+      // chuỗi `billingPeriod`, mà chuỗi đó do admin gõ tay nên chỉ cần lệch một khoảng
+      // trắng là dò trượt: nút vẫn xanh, bấm vào mới nhận "đã nhận hoá đơn của kỳ ...".
+      const invoices = await realManagerInvoiceService.listUtilityInvoices(
+        Number(propId), { type, period: period?.trim() || undefined },
+      );
       // Mới nhất trước, để phần tử đầu tiên của mỗi phòng là kỳ gần nhất.
       const sorted = [...invoices].sort((a, b) => {
         const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
@@ -406,19 +462,27 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       });
       for (const inv of sorted) {
         // Nhà nguyên căn không có roomId → khớp theo phần tử phòng duy nhất của nhà đó.
-        const key = inv.roomId != null ? String(inv.roomId) : `house-${propId}-unit`;
+        const isHouse = inv.roomId == null;
+        const key = isHouse ? `house-${propId}-unit` : String(inv.roomId);
         if (inv.newReading != null && !lastReadings.has(key)) {
           lastReadings.set(key, Number(inv.newReading));
         }
         // Hoá đơn đã huỷ không tính là "đã gửi" — huỷ xong phải gửi lại được.
         const cancelled = (inv.status || '').toUpperCase() === 'CANCELLED';
-        if (wanted && !cancelled && (inv.billingPeriod || '').trim() === wanted) sentKeys.add(key);
+        if (cancelled) continue;
+        // BE đã lọc theo `period` rồi nên mọi dòng về đây đều thuộc kỳ đang chốt. Chỉ so
+        // lại khi BE trả kèm chuỗi kỳ khác hẳn (phòng hờ BE bỏ qua tham số lọc).
+        const samePeriod = !wanted || !inv.billingPeriod
+          || normPeriod(inv.billingPeriod) === wanted;
+        if (!samePeriod) continue;
+        sentKeys.add(key);
+        if (isHouse) houseSent = true;
       }
     } catch {
       // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
       // Cố tình KHÔNG chặn gửi khi lỗi mạng: chặn nhầm còn tệ hơn, vì BE vẫn chặn trùng.
     }
-    return { lastReadings, sentKeys };
+    return { lastReadings, sentKeys, houseSent };
   };
 
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
@@ -485,9 +549,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
 
     const prop = properties.find(p => p.id === propId);
-    const { lastReadings, sentKeys } = await fetchRoomHistory(
+    const { lastReadings, sentKeys, houseSent } = await fetchRoomHistory(
       propId, 'ELECTRICITY', bill?.billingPeriod,
     );
+    // Nhà nguyên căn: hoá đơn của BE không mang roomId nên khoá chuỗi có thể lệch với id
+    // phòng ảo FE tự dựng. Dùng thẳng cờ `houseSent` để nút "đã gửi" không phụ thuộc vào
+    // việc hai bên đặt tên khoá giống nhau.
+    setElecHouseSent(houseSent);
     setElecSentKeys(sentKeys);
     if (prop) {
       setRoomElecReadings(prop.rooms.map(r => ({
@@ -632,7 +700,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       && r.newReading && Number(r.newReading) > r.prevReading);
     if (!unsent.length) { showAlert('Thông báo', 'Tất cả phòng đã được gửi hoặc chưa nhập chỉ số hợp lệ.'); return; }
 
-    const now = new Date().toISOString().split('T')[0];
+    const now = todayIso();
 
     try {
       await Promise.all(unsent.map(r => {
@@ -694,7 +762,21 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const consumption = evnBill.totalKwh;
     const fee         = Math.round(evnBill.totalAmount); // nguyên căn trả toàn bộ tiền EVN
     const newVal      = unit.prevReading + consumption;
-    const now = new Date().toISOString().split('T')[0];
+    /**
+     * Đơn giá gửi lên BE phải là số CHƯA làm tròn.
+     *
+     * BE ép `tiêu thụ × đơn giá == thành tiền` (UtilityInvoiceServiceImpl
+     * .validateInvoiceAmounts). Trong khi `elecUnitPrice` là số đã làm tròn để HIỂN THỊ
+     * (399.585 ÷ 199 = 2007,96 → hiện "2.008đ/kWh"). Gửi 2008 lên thì BE tính
+     * 199 × 2008 = 399.592, lệch 7đ so với 399.585 → chặn "Thành tiền không khớp".
+     *
+     * Gốc rễ: EVN tính bậc thang nên tổng tiền KHÔNG bao giờ bằng kWh × một đơn giá
+     * phẳng — "đơn giá" ở đây chỉ là số bình quân suy ngược ra. Giữa hai cái sai lệch,
+     * phải giữ TỔNG TIỀN đúng bằng hoá đơn EVN (khách nguyên căn trả đúng số đó), nên
+     * hy sinh độ tròn của đơn giá.
+     */
+    const exactUnitPrice = consumption > 0 ? fee / consumption : 0;
+    const now = todayIso();
 
     setSendingWholeHouse(true);
     try {
@@ -703,12 +785,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         {
           type: 'ELECTRICITY', billingPeriod: evnBill.billingPeriod,
           prevReading: unit.prevReading, newReading: newVal, consumption,
-          unitPrice: elecUnitPrice, amount: fee,
+          unitPrice: exactUnitPrice, amount: fee,
           // Ảnh gửi kèm là ẢNH HOÁ ĐƠN EVN của admin, không phải ảnh đồng hồ —
           // đó mới là căn cứ khách đối chiếu được với bên điện lực.
           meterImageUrl: evnBill.imageUrl ?? undefined,
         },
       );
+      setElecHouseSent(true);
       setElecSentKeys(prev => new Set(prev).add(unit.roomId));
       setRoomElecReadings(prev => prev.map(r =>
         r.roomId === unit.roomId ? { ...r, consumption, fee, sent: true } : r));
@@ -720,6 +803,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setUtilReloadKey(k => k + 1);
       setElecStep('done');
     } catch (e: any) {
+      // BE báo "kỳ này đã có hoá đơn" → KHOÁ nút luôn thay vì chỉ hiện alert rồi để
+      // nguyên nút xanh: manager bấm lại lần nữa cũng chỉ nhận đúng câu đó.
+      // Xem isAlreadySentError.
+      if (isAlreadySentError(e)) {
+        setElecHouseSent(true);
+        setElecSentKeys(prev => new Set(prev).add(unit.roomId));
+        setRoomElecReadings(prev => prev.map(r =>
+          r.roomId === unit.roomId ? { ...r, sent: true } : r));
+      }
       showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
     } finally {
       setSendingWholeHouse(false);
@@ -734,31 +826,97 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     if (!prop) return;
     const { lastReadings, sentKeys } = await fetchRoomHistory(propId, 'WATER', period);
     setWaterSentKeys(sentKeys);
-    setRoomWaterReadings(prop.rooms.map(r => ({
+    const rows: RoomWaterReading[] = prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
       prevReading: lastReadings.get(r.id) ?? r.prevWater,
       prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
       newReading: '',
-    })));
+    }));
+
+    /**
+     * NHÀ NGUYÊN CĂN: BỎ QUA bước ghi chỉ số, đi thẳng tới Xem trước — giống hệt bên điện.
+     *
+     * Cả căn một khách, số phải thu đã nằm sẵn trên hoá đơn admin (tổng m³ + tổng tiền).
+     * Bắt manager leo lên đọc đồng hồ chỉ để chép một con số KHÔNG được dùng vào tính tiền
+     * là việc thừa — mà còn gây hiểu nhầm: số đọc được (5 m³) khác số trên hoá đơn (4 m³)
+     * thì manager tưởng mình nhập sai.
+     *
+     * Chỉ số vẫn được ghi để kỳ sau còn mốc, nhưng suy ra từ hoá đơn:
+     * `newReading = prevReading + tổng m³` (xem chỗ gửi hoá đơn nguyên căn).
+     */
+    if (prop.type === 'whole_house' && waterBill) {
+      setRoomWaterReadings(rows.map((r, i) => (i === 0 ? {
+        ...r,
+        newReading: String(r.prevReading + waterBill.totalQuantity),
+        consumption: waterBill.totalQuantity,
+        fee: Math.round(waterBill.totalAmount),
+      } : r)));
+      setWaterStep('review');
+      return;
+    }
+
+    setRoomWaterReadings(rows);
     setWaterStep('room_readings');
   };
 
-  const handleWaterBillSubmit = () => {
-    const amt   = Number(waterBillForm.totalAmount);
-    const price = Number(waterBillForm.pricePerM3);
-    if (!amt || !price || !waterBillForm.billingPeriod.trim()) {
-      showAlert('Thiếu dữ liệu', 'Vui lòng điền đầy đủ thông tin hóa đơn nước.');
-      return;
+  /**
+   * Nạp hoá đơn nước ADMIN đã chốt cho kỳ hiện tại.
+   * `null` = admin chưa đẩy → màn hiện trạng thái CHỜ, KHÔNG mở form nhập tay. Cho
+   * manager tự khai lại đơn giá chính là thứ thay đổi 14/08/2026 loại bỏ.
+   */
+  const loadWaterBill = async (propId: string) => {
+    setWaterBillLoading(true);
+    setWaterBillError(null);
+    setWaterBill(null);
+    try {
+      const { month, year } = currentPeriod();
+      setWaterBill(await managerWaterBillService.getForPeriod(Number(propId), month, year));
+    } catch (e: any) {
+      setWaterBillError(
+        e?.response?.data?.message || e?.message || 'Không tải được hoá đơn nước của kỳ này.',
+      );
+    } finally {
+      setWaterBillLoading(false);
     }
-    setWaterBillData({ totalAmount: amt, billingPeriod: waterBillForm.billingPeriod, pricePerM3: price });
-    if (waterPropertyId) initRoomWaterReadings(waterPropertyId, waterBillForm.billingPeriod);
+  };
+
+  const handleWaterBillSubmit = () => {
+    if (!waterBill || !waterPropertyId) return;
+    // Đơn giá GIỮ NGUYÊN phần thập phân: BE ép `tiêu thụ × đơn giá == thành tiền`, đưa số
+    // đã làm tròn vào là lệch vài đồng rồi bị chặn — đúng lỗi đã dính bên điện.
+    setWaterBillData({
+      totalAmount: waterBill.totalAmount,
+      billingPeriod: waterBill.billingPeriod,
+      totalQuantity: waterBill.totalQuantity,
+      pricePerM3: waterUnitPrice(waterBill),
+    });
+    initRoomWaterReadings(waterPropertyId, waterBill.billingPeriod);
   };
 
   const calculateWaterFees = () => {
     if (!waterBillData) return false;
     const anyMissing = roomWaterReadings.some(r => !r.newReading || Number(r.newReading) <= r.prevReading);
     if (anyMissing) { showAlert('Thiếu chỉ số', 'Vui lòng nhập chỉ số mới cho tất cả phòng.'); return false; }
-    setRoomWaterReadings(prev => prev.map(r => {
+
+    /**
+     * NHÀ NGUYÊN CĂN: khách trả ĐÚNG tổng hoá đơn nước, giống hệt bên điện.
+     *
+     * Cả căn chỉ có một khách và hoá đơn admin đẩy xuống chính là hoá đơn của căn đó,
+     * nên số phải thu = tổng tiền trên hoá đơn, số m³ = tổng m³ trên hoá đơn. Tính lại
+     * bằng `hiệu chỉ số × đơn giá` là ra số KHÁC (đồng hồ nhà lệch với đồng hồ công ty
+     * nước, hoặc đọc lệch kỳ) — đúng ca vừa gặp: hoá đơn 133.400đ mà hệ thống đòi
+     * 166.750đ vì lấy 5 m³ đọc được thay cho 4 m³ trên giấy.
+     */
+    const isWholeHouse = waterProperty?.type === 'whole_house';
+
+    setRoomWaterReadings(prev => prev.map((r, i) => {
+      if (isWholeHouse && i === 0) {
+        return {
+          ...r,
+          consumption: waterBillData.totalQuantity,
+          fee: Math.round(waterBillData.totalAmount),
+        };
+      }
       const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
       return { ...r, consumption, fee: Math.round(consumption * waterBillData.pricePerM3) };
     }));
@@ -768,7 +926,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   const sendWaterInvoices = async () => {
     if (!waterBillData || !waterProperty) return;
-    const now = new Date().toISOString().split('T')[0];
+    const now = todayIso();
     const period = waterBillData.billingPeriod;
     const price  = waterBillData.pricePerM3;
 
@@ -792,8 +950,31 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           Number(waterProperty.id),
           {
             type: 'WATER', billingPeriod: period,
-            prevReading: r.prevReading, newReading: Number(r.newReading),
-            consumption: r.consumption ?? 0, unitPrice: price, amount: r.fee ?? 0,
+            prevReading: r.prevReading,
+            /**
+             * Chỉ số mới = chỉ số cũ + số m³ TRÊN HOÁ ĐƠN, không phải số manager đọc
+             * được ở đồng hồ.
+             *
+             * BE ép `newReading − prevReading == consumption`. Nhà nguyên căn thu theo
+             * tổng m³ của hoá đơn (4 m³) trong khi đồng hồ nhà đọc ra 5 m³ — gửi thẳng
+             * số đọc là BE chặn "Tiêu thụ không khớp". Ghi theo hoá đơn thì mốc chỉ số
+             * các kỳ sau cũng liên tục với cái đã thu tiền, không lệch dần.
+             */
+            newReading: r.prevReading + (r.consumption ?? 0),
+            consumption: r.consumption ?? 0,
+            // Đơn giá suy ngược từ chính 2 số sắp gửi, KHÔNG dùng `price` đã làm tròn:
+            // BE ép `tiêu thụ × đơn giá == thành tiền`. Cùng cách đã xử lý bên điện.
+            unitPrice: (r.consumption ?? 0) > 0 ? (r.fee ?? 0) / (r.consumption ?? 1) : price,
+            amount: r.fee ?? 0,
+            /**
+             * Ảnh gửi kèm là ẢNH HOÁ ĐƠN NƯỚC của admin, không phải ảnh đồng hồ.
+             *
+             * BE bắt buộc có bằng chứng (`ensureMeterPhotoOrOverride`) cho cả điện lẫn
+             * nước. Nhà nguyên căn không đọc đồng hồ nữa nên không có ảnh công tơ — nhưng
+             * hoá đơn của công ty nước MỚI là thứ khách đối chiếu được, đúng như bên điện
+             * đang gửi ảnh hoá đơn EVN. Thiếu dòng này là dính "Chưa có ảnh công tơ kỳ này".
+             */
+            meterImageUrl: waterBill?.imageUrl ?? undefined,
           },
         );
       } else {
@@ -818,6 +999,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       setUtilReloadKey(k => k + 1);
       setWaterStep('done');
     } catch (e: any) {
+      // Cùng lý do với bên điện: BE nói đã có hoá đơn kỳ này thì khoá luôn.
+      if (isAlreadySentError(e)) {
+        setWaterSentKeys(prev => new Set([...prev, ...pending.map(r => r.roomId)]));
+      }
       showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
     }
   };
@@ -825,10 +1010,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const resetElec = () => {
     setSelectedPropertyId(null); setEvnBill(null); setEvnBillError(null);
     setElecStep('select_property'); setRoomElecReadings([]); setElecSentKeys(new Set());
+    setElecHouseSent(false);
   };
 
   const resetWater = () => {
-    setWaterPropertyId(null); setWaterBillData(null);
+    setWaterPropertyId(null); setWaterBillData(null); setWaterBill(null); setWaterBillError(null);
     setWaterStep('bill_entry'); setRoomWaterReadings([]);
     setWaterBillForm({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
   };
@@ -925,7 +1111,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         {/* ── STEP 2: Hóa đơn EVN do admin phát hành (chỉ đọc) ───── */}
         {elecStep === 'evn_bill' && (() => {
           const unit = roomElecReadings[0];
-          const houseSent = !!unit && elecSentKeys.has(unit.roomId);
+          const houseSent = elecHouseSent || (!!unit && elecSentKeys.has(unit.roomId));
           return (
             <View>
               <SectionHeader title={isWholeHouse ? 'Bước 2: Hóa đơn EVN & Gửi' : 'Bước 2: Hóa đơn EVN'} />
@@ -1019,7 +1205,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   <TouchableOpacity
                     style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, (houseSent || sendingWholeHouse) && styles.btnLocked]}
                     onPress={sendWholeHouseElec}
-                    disabled={sendingWholeHouse}
+                    // Đã gửi thì khoá hẳn, đừng để bấm được rồi mới báo lỗi.
+                    disabled={sendingWholeHouse || houseSent}
                   >
                     {sendingWholeHouse
                       ? <ActivityIndicator color={Colors.white} />
@@ -1174,17 +1361,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     );
   };
 
-  // Ước lượng số m³ toàn nhà từ tổng tiền ÷ đơn giá — để manager tự soi lệch số 0.
-  const waterEstimate = useMemo(() => {
-    const total = Number(waterBillForm.totalAmount);
-    const price = Number(waterBillForm.pricePerM3);
-    if (!total || !price) return null;
-    return Math.round((total / price) * 10) / 10;
-  }, [waterBillForm.totalAmount, waterBillForm.pricePerM3]);
-
-  const waterReady =
-    !!waterBillForm.totalAmount && !!waterBillForm.pricePerM3
-    && !!waterBillForm.billingPeriod.trim() && !!waterPropertyId;
+  /**
+   * Đủ điều kiện sang bước ghi chỉ số: đã chọn nhà VÀ admin đã chốt hoá đơn nước kỳ này.
+   *
+   * Trước 14/08/2026 điều kiện là "manager đã gõ đủ tổng tiền + đơn giá + kỳ" — cùng với
+   * `waterEstimate` (ước lượng m³ để manager tự soi lệch số 0). Cả hai bỏ đi theo form
+   * nhập tay: số giờ lấy từ hoá đơn admin phát hành, không còn gì để gõ sai.
+   */
+  const waterReady = !!waterPropertyId && !!waterBill;
 
   const renderWaterTab = () => {
     if (waterStep === 'done') {
@@ -1213,74 +1397,6 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
         {waterStep === 'bill_entry' && (
           <View>
-            {/* ── Hoá đơn nước của cả nhà ── */}
-            <View style={styles.formCard}>
-              <View style={styles.formCardHead}>
-                <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>💧</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.formCardTitle}>Hóa đơn nước của cả nhà</Text>
-                  <Text style={styles.formCardSub}>Nhập theo hóa đơn nước chính thức, hệ thống chia lại cho từng phòng.</Text>
-                </View>
-              </View>
-
-              <View style={styles.fieldRow}>
-                <View style={{ flex: 1.4 }}>
-                  <Text style={styles.formLabel}>Tổng tiền hóa đơn <Text style={styles.req}>*</Text></Text>
-                  <View style={styles.inputWrap}>
-                    <TextInput
-                      style={styles.inputFlex} keyboardType="numeric" placeholder="2.500.000"
-                      placeholderTextColor={Colors.textMuted}
-                      value={groupThousands(waterBillForm.totalAmount)}
-                      onChangeText={t => setWaterBillForm(f => ({ ...f, totalAmount: onlyDigits(t) }))}
-                    />
-                    <Text style={styles.inputSuffix}>đ</Text>
-                  </View>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.formLabel}>Đơn giá <Text style={styles.req}>*</Text></Text>
-                  <View style={styles.inputWrap}>
-                    <TextInput
-                      style={styles.inputFlex} keyboardType="numeric"
-                      placeholderTextColor={Colors.textMuted}
-                      value={groupThousands(waterBillForm.pricePerM3)}
-                      onChangeText={t => setWaterBillForm(f => ({ ...f, pricePerM3: onlyDigits(t) }))}
-                    />
-                    <Text style={styles.inputSuffix}>đ/m³</Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Kiểm tra chéo ngay khi nhập — sai số 0 ở đâu là thấy liền */}
-              {waterEstimate != null && (
-                <View style={styles.estimateBox}>
-                  <Text style={styles.estimateText}>
-                    ≈ <Text style={styles.estimateStrong}>{waterEstimate.toLocaleString('vi-VN')} m³</Text> toàn nhà trong kỳ này
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.formLabel}>Kỳ thanh toán <Text style={styles.req}>*</Text></Text>
-              <View style={styles.periodChips}>
-                {(() => {
-                  const thisMonth = monthPeriod(0);
-                  const active = waterBillForm.billingPeriod === thisMonth;
-                  return (
-                    <TouchableOpacity
-                      style={[styles.periodChip, active && styles.periodChipActive]}
-                      onPress={() => setWaterBillForm(f => ({ ...f, billingPeriod: thisMonth }))}
-                    >
-                      <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>Tháng này</Text>
-                    </TouchableOpacity>
-                  );
-                })()}
-              </View>
-              <TextInput
-                style={styles.input}
-                value={waterBillForm.billingPeriod}
-                onChangeText={t => setWaterBillForm(f => ({ ...f, billingPeriod: t }))}
-              />
-            </View>
-
             {/* ── Chọn nhà ── */}
             <View style={styles.formCard}>
               <View style={styles.formCardHead}>
@@ -1295,10 +1411,69 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 loading={loadingProps}
                 error={errorProps}
                 selectedId={waterPropertyId}
-                onSelect={setWaterPropertyId}
+                onSelect={(id) => { setWaterPropertyId(id); if (id) loadWaterBill(id); }}
                 onRetry={() => { setLoadingProps(true); loadProperties(); }}
               />
             </View>
+
+            {/* Thẻ hoá đơn nằm SAU thẻ chọn nhà và chỉ hiện khi đã chọn: hoá đơn là của
+                một căn cụ thể, bày thẻ rỗng lên trước rồi mới cho chọn nhà là ngược với
+                thao tác thật, mà thẻ chờ lại cao nên đẩy luôn ô chọn nhà khỏi màn hình. */}
+            {!!waterPropertyId && (
+            <View style={styles.formCard}>
+              <View style={styles.formCardHead}>
+                <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>💧</Text></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formCardTitle}>Hóa đơn nước của cả nhà</Text>
+                  <Text style={styles.formCardSub}>Admin chốt hoá đơn nước của cả nhà, hệ thống chia lại cho từng phòng.</Text>
+                </View>
+              </View>
+
+              {/* CHỈ ĐỌC từ 14/08/2026 — giống hệt tab Điện. Trước đây manager tự gõ tổng
+                  tiền + đơn giá m³ ngay tại đây, không ai đối chiếu được với hoá đơn giấy.
+                  Giờ admin phát hành trên web (/admin/water-bills), manager chỉ đọc. */}
+              {!waterPropertyId ? (
+                <Text style={styles.helperText}>
+                  Chọn nhà bên dưới để xem hoá đơn nước admin đã chốt cho kỳ này.
+                </Text>
+              ) : waterBillLoading ? (
+                <View style={styles.scanningRow}>
+                  <ActivityIndicator color={Colors.primary} />
+                  <Text style={styles.scanningText}>Đang tải hoá đơn nước của kỳ này...</Text>
+                </View>
+              ) : !waterBill ? (
+                /* Admin chưa đẩy — KHÔNG mở form nhập tay, đó là cả điểm của thay đổi này. */
+                <View style={styles.evnWaitBox}>
+                  <Text style={styles.evnWaitEmoji}>⏳</Text>
+                  <Text style={styles.evnWaitTitle}>Chờ admin gửi hoá đơn nước</Text>
+                  <Text style={styles.evnWaitText}>
+                    {waterBillError
+                      || `Admin chưa tải hoá đơn nước kỳ ${currentPeriod().month}/${currentPeriod().year} của nhà này lên hệ thống.`}
+                    {'\n\n'}Khi admin gửi xong, số liệu sẽ hiện ở đây và bạn ghi chỉ số như bình thường.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.primaryBtn, { marginTop: Spacing.md }]}
+                    onPress={() => waterPropertyId && loadWaterBill(waterPropertyId)}
+                  >
+                    <Text style={styles.primaryBtnText}>🔄 Kiểm tra lại</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.evnResult}>
+                  <View style={styles.evnResultHeader}>
+                    <Text style={styles.evnResultTitle}>Admin đã chốt cho kỳ này</Text>
+                    <View style={[styles.badge, styles.badgeDone]}>
+                      <Text style={[styles.badgeText, { color: Colors.success }]}>Chỉ đọc</Text>
+                    </View>
+                  </View>
+                  <EVNDataRow label="Tổng nước"     value={`${waterBill.totalQuantity.toLocaleString('vi-VN')} m³`} />
+                  <EVNDataRow label="Tổng tiền"     value={fmt(waterBill.totalAmount)} />
+                  <EVNDataRow label="Đơn giá nước"  value={`${fmt(Math.round(waterUnitPrice(waterBill)))}/m³`} highlight />
+                  <EVNDataRow label="Kỳ thanh toán" value={waterBill.billingPeriod} />
+                </View>
+              )}
+            </View>
+            )}
 
             <TouchableOpacity
               style={[styles.primaryBtn, !waterReady && styles.primaryBtnDisabled]}
@@ -1306,15 +1481,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               disabled={!waterReady}
             >
               <Text style={[styles.primaryBtnText, !waterReady && styles.primaryBtnTextDisabled]}>
-                Tiếp theo → Nhập chỉ số phòng
+                {waterProperty?.type === 'whole_house' ? 'Tiếp theo → Xem trước & gửi' : 'Tiếp theo → Nhập chỉ số phòng'}
               </Text>
             </TouchableOpacity>
             {!waterReady && (
               <Text style={styles.helperText}>
-                {!waterBillForm.totalAmount ? 'Nhập tổng tiền hóa đơn nước để tiếp tục.'
-                  : !waterBillForm.pricePerM3 ? 'Nhập đơn giá m³ để tiếp tục.'
-                  : !waterBillForm.billingPeriod.trim() ? 'Nhập kỳ thanh toán để tiếp tục.'
-                  : 'Chọn nhà cần chốt sổ để tiếp tục.'}
+                {!waterPropertyId ? 'Chọn nhà cần chốt sổ để tiếp tục.' : 'Chờ admin phát hành hoá đơn nước của kỳ này.'}
               </Text>
             )}
           </View>
@@ -1786,16 +1958,28 @@ const PropertyPicker: React.FC<{
   // ── Đã chọn: thu gọn còn 1 thẻ, giấu cả danh sách đi ──
   if (selected && !expanded) {
     return (
-      <View style={styles.selectedCard}>
+      /**
+       * CẢ THẺ bấm được để mở lại danh sách, không chỉ mỗi chữ "Đổi".
+       *
+       * Chọn nhầm nhà là chuyện thường, mà nút "Đổi" là một chip nhỏ nằm sát mép phải —
+       * bấm trượt vài lần là người dùng tưởng khoá luôn rồi thoát ra vào lại màn hình
+       * (đúng thứ đã xảy ra khi test). Vùng bấm giờ là toàn bộ thẻ, chip "Đổi" giữ lại
+       * làm dấu hiệu nhìn thấy được là "cái này đổi được".
+       */
+      <TouchableOpacity
+        style={styles.selectedCard}
+        activeOpacity={0.7}
+        onPress={() => setExpanded(true)}
+      >
         <Text style={styles.selectedIcon}>{selected.type === 'whole_house' ? '🏠' : '🏢'}</Text>
         <View style={{ flex: 1 }}>
           <Text style={styles.selectedName} numberOfLines={1}>{selected.name}</Text>
           <Text style={styles.selectedMeta} numberOfLines={1}>{metaOf(selected)}</Text>
         </View>
-        <TouchableOpacity style={styles.changeBtn} onPress={() => setExpanded(true)}>
+        <View style={styles.changeBtn} pointerEvents="none">
           <Text style={styles.changeBtnText}>Đổi</Text>
-        </TouchableOpacity>
-      </View>
+        </View>
+      </TouchableOpacity>
     );
   }
 
