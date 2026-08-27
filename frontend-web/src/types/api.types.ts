@@ -610,6 +610,14 @@ export interface CalculatePricingRequest {
   roiExpected?: number;       // REVERSE: ROI %/năm trên CAPEX
   oOperation?: number;        // Chi phí vận hành cố định/tháng (mặc định 0)
   vRate?: number;             // Buffer trống phòng dạng thập phân (0.10 = 10%)
+  /**
+   * Số tháng cuối kỳ master lease không tính doanh thu.
+   *
+   * ⚠️ BE CHƯA nhận field này (26/08/2026) — đang chốt cứng
+   * `InboundLeaseRules.HANDOVER_BUFFER_MONTHS = 1`. FE gửi sẵn theo hợp đồng kỳ vọng, BE bỏ
+   * qua field lạ nên không gây lỗi. Xem doc-be/BE-NEED-cau-hinh-duyet-gia-2026-08-26.md.
+   */
+  handoverBufferMonths?: number;
   roomQualityFactors?: Record<string, number>; // key = roomId (string), hệ số chất lượng
 }
 
@@ -1050,8 +1058,20 @@ export interface TenantContractResponse {
   roomConditionUrls?: string[];
   roomConditionNote?: string;
 
-  /** NONE | PERCENT | SCHEDULE — điều khoản tăng giá theo năm. */
+  /** NONE | PERCENT | SCHEDULE | ANNUAL_CALENDAR — điều khoản tăng giá theo năm. */
   rentEscalationType?: string;
+  /** % tăng mỗi năm ghi trong hợp đồng. 0/null = hợp đồng này không tăng giá. */
+  rentEscalationPercent?: number;
+  /**
+   * Mốc tăng kế tiếp và số tiền sau khi tăng — BE tính sẵn (26/08/2026), đã trừ ân hạn và
+   * kỳ đã áp. `null` = hợp đồng không có điều khoản tăng.
+   *
+   * FE KHÔNG tự suy hai số này: quy tắc ân hạn + chống áp trùng nằm ở BE
+   * (`AnnualCalendarEscalation`), tự tính lại là chắc chắn có ngày lệch với số máy chủ
+   * dùng để thu tiền.
+   */
+  nextEscalationDate?: string;
+  nextEscalationAmount?: number;
   /** Giá niêm yết lúc host duyệt (đối chiếu với `rentAmount` đã chốt với khách). */
   listedPrice?: number;
   notes?: string;

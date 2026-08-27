@@ -208,7 +208,7 @@ const ManagerCard = ({ managerId, managerName, user, load }: {
 
 // ── Hộp chọn quản lý cho một khu vực ─────────────────────────────────────────
 const AssignModal = ({
-  group, allGroups, managers, userMap, loads, mgrNames, onClose, onDone,
+  group, allGroups, managers, userMap, loads, mgrNames, registeredManagerId, onClose, onDone,
 }: {
   group: ZoneGroup;
   /** Mọi khu vực — cần để biết người được chọn đang giữ những khu vực nào khác. */
@@ -217,6 +217,15 @@ const AssignModal = ({
   userMap: Map<string, UserResponse>;
   loads: Map<string, ManagerLoad>;
   mgrNames: Map<string, string>;
+  /**
+   * Quản lý đang đăng ký cho khu vực này theo bảng phân công (`zone_managers`) — KHÁC
+   * `group.managerId`, cái đó suy từ `property.operationManagerId`.
+   *
+   * Cần riêng vì hai thứ lệch nhau là chuyện bình thường: nhà chờ Host duyệt giá thì chưa
+   * mang id quản lý nào, nên `group.managerId` trống trong khi khu vực đã có người phụ
+   * trách. Không có con số này thì không biết bấm Gán có tạo ra thay đổi gì không.
+   */
+  registeredManagerId?: string;
   onClose: () => void;
   onDone: () => void;
 }) => {
@@ -252,6 +261,20 @@ const AssignModal = ({
   const changeCount = preview ? preview.fresh.length + preview.handover.length : 0;
   const busy = progress !== null;
 
+  /**
+   * Gán được hay không KHÔNG chỉ phụ thuộc số nhà đổi được.
+   *
+   * Máy chủ ghi bảng phân công (`zone_managers`) TRƯỚC rồi mới áp lên từng nhà
+   * (`ZoneAssignmentServiceImpl.assignManager` dòng 96-105), nên gán một khu vực chưa có
+   * nhà nào đổi được vẫn có tác dụng thật: đăng ký người phụ trách để nhà tự nhận khi Host
+   * duyệt giá xong.
+   *
+   * Trước đây nút khoá cứng theo `changeCount === 0`, nên khu vực toàn nhà chờ duyệt là
+   * bấm Gán ra hộp thoại rồi kẹt luôn ở đó — không làm gì được, cũng không hiểu vì sao.
+   */
+  const registryChanges = !!picked && picked !== registeredManagerId;
+  const canApply = !!picked && (changeCount > 0 || registryChanges);
+
   /** Các khu vực KHÁC mà người được chọn đang giữ — nền cho tick "chuyển hẳn". */
   const otherZonesOfPicked = useMemo(
     () => (picked ? allGroups.filter((g) => g.zoneId !== group.zoneId && g.managerId === picked) : []),
@@ -277,9 +300,12 @@ const AssignModal = ({
    * một transaction, và trả về số nhà/hợp đồng đã ảnh hưởng.
    */
   const handleApply = async () => {
-    if (!preview || !pickedManager || changeCount === 0) return;
+    // Chốt theo `canApply`, KHÔNG theo `changeCount`: gán một khu vực chưa nhà nào đổi được
+    // vẫn là việc có thật (ghi bảng phân công) — xem `canApply`. Chặn theo `changeCount` thì
+    // bật nút cũng vô ích, bấm vào không có gì xảy ra.
+    if (!preview || !pickedManager || !canApply) return;
     const toRelease = alsoReleaseOldZones ? otherZonesOfPicked : [];
-    setProgress({ done: 0, total: changeCount });
+    setProgress({ done: 0, total: Math.max(1, changeCount) });
     try {
       // MỘT lệnh cho cả hai việc: gán sang khu vực này + gỡ khỏi các khu vực cũ.
       // BE chạy trong một transaction (POST /zones/manager-transfer, 19/08/2026) nên không
@@ -289,9 +315,18 @@ const AssignModal = ({
           pickedManager.id, group.zoneId, toRelease.map((z) => z.zoneId))
         : await zoneAssignmentService.assign(group.zoneId, pickedManager.id);
 
-      const parts = [`${res.affectedProperties} nhà`];
-      if (res.affectedContracts > 0) parts.push(`${res.affectedContracts} hợp đồng`);
-      toast.success(`Đã gán ${nameOf(pickedManager)} cho ${group.zoneName} — ${parts.join(' · ')}.`);
+      // 0 nhà đổi được là kết quả HỢP LỆ (khu vực toàn nhà chờ duyệt giá) — đừng báo
+      // "— 0 nhà" nghe như thất bại, mà nói rõ điều gì sẽ xảy ra tiếp theo.
+      if (res.affectedProperties === 0) {
+        toast.success(
+          `${group.zoneName} giờ do ${nameOf(pickedManager)} phụ trách. Nhà trong khu vực sẽ tự về tay người này khi bạn duyệt giá.`,
+          { duration: 6000 },
+        );
+      } else {
+        const parts = [`${res.affectedProperties} nhà`];
+        if (res.affectedContracts > 0) parts.push(`${res.affectedContracts} hợp đồng`);
+        toast.success(`Đã gán ${nameOf(pickedManager)} cho ${group.zoneName} — ${parts.join(' · ')}.`);
+      }
       if (toRelease.length > 0) {
         toast.success(
           `Đã gỡ khỏi ${toRelease.map((z) => z.zoneName).join(', ')} — các khu vực này giờ chưa có quản lý.`,
@@ -480,9 +515,19 @@ const AssignModal = ({
               ) : (
                 <div className="space-y-3">
                   {changeCount === 0 && (
-                    <p className="text-sm text-slate-500">
-                      Không có nhà nào đổi được lúc này.
-                    </p>
+                    registryChanges ? (
+                      /* Trấn an: bấm Gán VẪN có tác dụng dù chưa nhà nào đổi được ngay.
+                         Không nói ra thì Host tưởng bấm cho vui. */
+                      <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-900">
+                        Chưa nhà nào đổi được ngay, nhưng <b>vẫn nên gán</b>: khu vực sẽ được ghi nhận
+                        do người này phụ trách, và <b>mọi nhà tự nhận quản lý ngay khi Host duyệt giá</b>.
+                        Lương của họ cũng bắt đầu được tính vào giá thuê các căn trong khu vực.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        Không có nhà nào đổi được lúc này.
+                      </p>
+                    )
                   )}
 
                   {preview.unchanged.length > 0 && (
@@ -585,11 +630,13 @@ const AssignModal = ({
             </button>
             <button
               onClick={handleApply}
-              disabled={busy || !picked || changeCount === 0}
+              disabled={busy || !canApply}
               className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {changeCount > 0 ? `Áp dụng cho ${changeCount} nhà` : 'Không có thay đổi'}
+              {changeCount > 0
+                ? `Áp dụng cho ${changeCount} nhà`
+                : registryChanges ? 'Gán phụ trách khu vực' : 'Không có thay đổi'}
             </button>
           </div>
         </div>
@@ -1087,6 +1134,8 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
    * không chạy (xem `registryGap` bên dưới).
    */
   const [registeredZones, setRegisteredZones] = useState<Set<string>>(new Set());
+  /** zoneId → quản lý đang ĐĂNG KÝ phụ trách. Khác `group.managerId` (suy từ nhà đã duyệt). */
+  const [registryManagerOf, setRegistryManagerOf] = useState<Map<string, string>>(new Map());
   /** false = chưa đọc được bảng phân công → không kết luận khu vực nào thiếu đăng ký. */
   const [registryKnown, setRegistryKnown] = useState(false);
 
@@ -1107,9 +1156,11 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       try {
         const assignments = await zoneAssignmentService.list();
         setRegisteredZones(new Set(assignments.map((a) => a.zoneId)));
+        setRegistryManagerOf(new Map(assignments.map((a) => [a.zoneId, a.managerId])));
         setRegistryKnown(true);
       } catch {
         setRegisteredZones(new Set());
+        setRegistryManagerOf(new Map());
         setRegistryKnown(false);
       }
 
@@ -1151,12 +1202,39 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const groups = useMemo(() => groupByZone(properties), [properties]);
-  const loads = useMemo(() => loadByManager(groups), [groups]);
   const mgrNames = useMemo(
     () => new Map(managers.map((m) => [m.id, nameOf(m)])),
     [managers],
   );
+
+  /**
+   * Khu vực, có bù thêm BẢNG PHÂN CÔNG cho trường hợp chưa nhà nào mang quản lý.
+   *
+   * `groupByZone` suy quản lý từ `property.operationManagerId`, mà nhà chỉ nhận id đó SAU
+   * khi Host duyệt giá. Nên ở đúng bước đầu của quy trình — admin vừa gửi nhà, Host gán
+   * quản lý khu vực rồi mới đi duyệt — khu vực vẫn hiện "Chưa gán" dù vừa gán xong. Host
+   * bấm gán, thấy không có gì đổi, tưởng hỏng.
+   *
+   * Chỉ bù khi **không có nhà nào đổi được** (`assignableCount === 0`): lúc đó bảng phân
+   * công là nguồn tin duy nhất. Còn nếu có nhà đổi được mà chúng vẫn trống quản lý thì đó
+   * là lệch thật giữa hai nơi — giữ nguyên để `registryGap` cảnh báo, đừng che đi.
+   */
+  const groups = useMemo(() => {
+    const raw = groupByZone(properties);
+    if (!registryKnown) return raw;
+    return raw.map((g) => {
+      const regId = registryManagerOf.get(g.zoneId);
+      if (!regId || g.managerId || g.assignableCount > 0) return g;
+      return {
+        ...g,
+        managerId: regId,
+        managerName: mgrNames.get(regId) ?? '',
+        managerBreakdown: [{ managerId: regId, managerName: mgrNames.get(regId) ?? '', count: 0 }],
+        state: 'ASSIGNED' as const,
+      };
+    });
+  }, [properties, registryKnown, registryManagerOf, mgrNames]);
+  const loads = useMemo(() => loadByManager(groups), [groups]);
 
   /**
    * Quản lý có tài khoản nhưng KHÔNG phụ trách khu vực nào.
@@ -1401,7 +1479,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           <p className="text-sm">
             {search
               ? `Không tìm thấy khu vực khớp "${search}"`
-              : 'Chưa có nhà nào được duyệt giá — khu vực sẽ hiện ở đây sau khi Host duyệt giá.'}
+              : 'Chưa có nhà nào — khu vực sẽ hiện ở đây ngay khi admin gửi nhà cho Host duyệt giá.'}
           </p>
         </div>
       ) : (
@@ -1433,6 +1511,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           userMap={userMap}
           loads={loads}
           mgrNames={mgrNames}
+          registeredManagerId={registryManagerOf.get(assigningGroup.zoneId)}
           onClose={() => setAssigning(null)}
           onDone={() => { setAssigning(null); fetchData(); }}
         />

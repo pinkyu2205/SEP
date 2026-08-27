@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
   DollarSign, BarChart3, Bell, Settings,
-  Coins, PiggyBank, CreditCard, MapPin,
+  Coins, PiggyBank, CreditCard, MapPin, SlidersHorizontal, Banknote,
 } from 'lucide-react';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { useWebAuth } from '@/auth/WebAuthContext';
@@ -24,8 +24,10 @@ const SECTIONS: SidebarSection[] = [
     label: 'Vận hành',
     items: [
       { label: 'Bất động sản', path: '/host/properties', icon: Building2 },
+      { label: 'Cấu hình duyệt giá', path: '/host/pricing-config', icon: SlidersHorizontal },
       { label: 'Khu vực & Quản lý', path: '/host/zones', icon: MapPin },
       { label: 'Quản lý vận hành', path: '/host/operations-managers', icon: UserCog },
+      { label: 'Lương quản lý', path: '/host/manager-salaries', icon: Banknote },
       { label: 'Khách thuê', path: '/host/tenants', icon: Users },
     ],
   },

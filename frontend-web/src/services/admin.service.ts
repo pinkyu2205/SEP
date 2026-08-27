@@ -269,6 +269,9 @@ export interface AdminDepositRow {
 
 const DEPOSIT_STATUSES: AdminDepositStatus[] = ['PENDING', 'PAID', 'FAILED', 'CANCELLED'];
 
+/** Hợp đồng đã kết thúc — không còn thu cọc được nữa. Xem `listDeposits`. */
+const DEAD_CONTRACT_STATUSES = new Set(['TERMINATED', 'EXPIRED', 'CANCELLED']);
+
 const depositToRow = (d: AdminDepositDto): AdminDepositRow => {
   const status = (d.paymentStatus || '').toUpperCase() as AdminDepositStatus;
   return {
@@ -400,7 +403,19 @@ export const adminService = {
 
   /**
    * Tiền cọc của mọi hợp đồng, mới thu trước (BE sort sẵn).
-   * Bỏ hợp đồng nháp (DRAFT) vì chưa phát sinh nghĩa vụ thu cọc.
+   *
+   * BE `findAdminDeposits` trả về MỌI hợp đồng, chỉ lọc theo `paymentStatus` — không hề
+   * lọc theo trạng thái hợp đồng. Nên phải chặn 2 nhóm ở đây:
+   *
+   *  • **DRAFT** — hồ sơ chưa thành hợp đồng, chưa phát sinh nghĩa vụ thu cọc.
+   *  • **Hợp đồng đã chết mà cọc CHƯA từng thu** — hợp đồng thanh lý / hết hạn / bị huỷ
+   *    thì không còn ai để thu cọc nữa, nhưng BE vẫn trả `paymentStatus = PENDING` nên
+   *    nó nằm mãi trong hàng "Chưa thu cọc" và cộng vào tổng tiền phải thu. Với dữ liệu
+   *    import/test thì toàn bộ danh sách là loại này — admin đọc ra con số nợ hoàn toàn
+   *    sai (xem doc-be/BE-BUG-coc-hop-dong-da-thanh-ly-2026-08-26.md).
+   *
+   * Hợp đồng đã chết nhưng ĐÃ thu cọc thì GIỮ LẠI: đó là lịch sử, và là khoản còn phải
+   * hoàn cho khách — bỏ đi là mất dấu tiền thật.
    */
   listDeposits: async (status?: AdminDepositStatus): Promise<AdminDepositRow[]> => {
     const res = await api.get<unknown, Page<AdminDepositDto> | AdminDepositDto[]>(
@@ -408,7 +423,10 @@ export const adminService = {
       { params: { status, size: 500 }, skipErrorToast: true } as object,
     );
     const list = Array.isArray(res) ? res : res?.content ?? [];
-    return list.map(depositToRow).filter(r => r.contractStatus !== 'DRAFT');
+    return list
+      .map(depositToRow)
+      .filter(r => r.contractStatus !== 'DRAFT')
+      .filter(r => !(DEAD_CONTRACT_STATUSES.has(r.contractStatus) && r.status !== 'PAID'));
   },
 
   /** Danh sách host (user role OWNER) — chỉ để đếm ở Bảng điều hành. */
