@@ -43,17 +43,75 @@ export class TenantAccountEndedError extends Error {
 export const isAccountEndedError = (e: any): boolean => !!e?.accountEnded;
 
 /**
- * true = mọi hợp đồng của khách đều đã thanh lý → không cho vào app nữa.
+ * Số ngày khách còn xem được app sau khi xác nhận đã nhận đủ tiền cọc.
  *
- * Luôn "mở cửa" khi không chắc (lỗi mạng, BE trả rỗng, chưa có hợp đồng nào): thà cho
- * vào nhầm còn hơn nhốt khách đang thuê ở ngoài chỉ vì rớt mạng.
+ * Vì sao KHÔNG khoá ngay lúc bấm xác nhận: nếu bấm nút = mất quyền vào app thì ta tạo ra một
+ * cái bẫy — người đã nhận đủ tiền vẫn cố tình không bấm để giữ quyền xem, hồ sơ treo mãi;
+ * còn người bấm rồi thì mất luôn bảng quyết toán và ảnh biên lai. Bỏ hình phạt đi thì nút
+ * mới được bấm thật lòng.
  */
-export async function isTenantAccountEnded(): Promise<boolean> {
+export const TENANT_READ_ONLY_DAYS = 15;
+
+/** Ba mức quyền, tăng dần độ hạn chế. */
+export type TenantAccessMode =
+  /** Đang thuê, hoặc đã trả phòng nhưng chưa nhận xong tiền cọc — dùng bình thường. */
+  | 'FULL'
+  /** Đã nhận đủ cọc, còn trong hạn xem lại chứng từ — ẩn mọi nút thao tác. */
+  | 'READ_ONLY'
+  /** Hết hạn xem lại — chặn từ cổng đăng nhập. */
+  | 'ENDED';
+
+export interface TenantAccess {
+  mode: TenantAccessMode;
+  /** Còn bao nhiêu ngày nữa hết quyền xem — chỉ có nghĩa khi mode = READ_ONLY. */
+  daysLeft?: number;
+}
+
+const daysSince = (iso?: string): number | null => {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86_400_000);
+};
+
+/**
+ * Quyết định quyền vào app.
+ *
+ * ĐỔI MỐC KHOÁ (20/08/2026). Trước đây chỉ xét trạng thái hợp đồng: hết hợp đồng là chặn
+ * ngay. Nhưng quyền vào app chính là đòn bẩy duy nhất của khách — cắt đúng lúc khách cần
+ * xác nhận hoặc khiếu nại tiền cọc là cắt sai thời điểm, và làm vô hiệu luôn cả cơ chế đối
+ * chứng (nút "đã nhận đủ" / "chưa nhận được tiền").
+ *
+ * Nguyên tắc: TÁCH quyền vào app khỏi trạng thái tiền. Mốc khoá là khách đã xác nhận nhận
+ * đủ cọc, không phải hợp đồng đã thanh lý.
+ *
+ * Luôn "mở cửa" khi không chắc (lỗi mạng, BE trả rỗng, chưa có hợp đồng nào, hoặc BE chưa
+ * trả `refundConfirmedAt`): thà cho vào nhầm còn hơn nhốt khách đang thuê ở ngoài.
+ */
+export async function getTenantAccess(): Promise<TenantAccess> {
   try {
     const contracts = await realTenantSelfService.getMyContracts();
-    if (!contracts.length) return false;
-    return contracts.every((c) => isEnded(c.status));
+    if (!contracts.length) return { mode: 'FULL' };
+    if (!contracts.every((c) => isEnded(c.status))) return { mode: 'FULL' };
+
+    // Mọi hợp đồng đã thanh lý. Giờ mới xét tới tiền cọc.
+    // Lấy mốc xác nhận MUỘN NHẤT: khách từng thuê nhiều nơi thì tính theo lần gần nhất.
+    const confirmedDays = contracts
+      .map((c) => daysSince(c.refundConfirmedAt))
+      .filter((d): d is number => d !== null);
+
+    // Chưa xác nhận nhận cọc (hoặc BE chưa trả field) → còn việc phải làm, giữ nguyên quyền.
+    if (!confirmedDays.length) return { mode: 'FULL' };
+
+    const since = Math.min(...confirmedDays);
+    if (since >= TENANT_READ_ONLY_DAYS) return { mode: 'ENDED' };
+    return { mode: 'READ_ONLY', daysLeft: TENANT_READ_ONLY_DAYS - since };
   } catch {
-    return false;
+    return { mode: 'FULL' };
   }
+}
+
+/** Chặn ngay tại cổng đăng nhập — chỉ chặn khi đã hết cả hạn xem lại. */
+export async function isTenantAccountEnded(): Promise<boolean> {
+  return (await getTenantAccess()).mode === 'ENDED';
 }

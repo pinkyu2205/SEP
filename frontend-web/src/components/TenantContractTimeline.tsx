@@ -27,7 +27,7 @@ export interface TenantIdentity {
 const STATUS: Record<string, { label: string; chip: string; dot: string }> = {
   ACTIVE:     { label: 'Đang thuê',   chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   PENDING:    { label: 'Chờ xử lý',   chip: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500' },
-  DRAFT:      { label: 'Nháp',        chip: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-300' },
+  DRAFT:      { label: 'Chờ đón khách', chip: 'bg-sky-100 text-sky-700',      dot: 'bg-sky-400' },
   EXPIRED:    { label: 'Hết hạn',     chip: 'bg-slate-100 text-slate-500',     dot: 'bg-slate-400' },
   TERMINATED: { label: 'Đã chấm dứt', chip: 'bg-rose-100 text-rose-600',       dot: 'bg-rose-400' },
 };

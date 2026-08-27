@@ -32,6 +32,24 @@ export interface WaterBill {
   imageUrl?: string | null;
   status?: 'PUBLISHED' | 'REVOKED';
   createdAt?: string;
+  /**
+   * ─── NHIỆM VỤ GHI CHỈ SỐ TRONG NGÀY (BE 17/08/2026) ────────────────────────
+   *
+   * Admin phát hành hoá đơn tổng là giao việc cho quản lý: đi chụp đồng hồ và ghi số
+   * TỪNG PHÒNG **ngay trong ngày**, không để sang hôm sau — số đọc muộn thì lệch với kỳ
+   * của hoá đơn nhà nước, tính cho khách không còn khớp.
+   *
+   * BE tính sẵn 4 field này nên app không phải gọi thêm API rồi tự trừ để biết còn thiếu
+   * bao nhiêu phòng (và tự đoán mốc hạn — thứ không suy ra được từ dữ liệu phòng).
+   */
+  /** Số phòng có HĐ ACTIVE cần ghi chỉ số. Nhà nguyên căn = 0 (khách nhận hoá đơn trực tiếp). */
+  roomsTotal?: number;
+  /** Số phòng đã ghi xong trong kỳ này. */
+  roomsDone?: number;
+  /** Hạn chụp — luôn là NGÀY PHÁT HÀNH. null với nhà nguyên căn (không có việc gì để làm). */
+  readingDeadline?: string | null;
+  /** BE chốt: đã qua hạn mà chưa ghi đủ phòng. */
+  overdue?: boolean;
 }
 
 /**

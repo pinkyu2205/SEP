@@ -41,7 +41,14 @@ export const CheckoutRequestsScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [filter, setFilter] = useState<string | null>('PENDING');
+  /**
+   * Mặc định "Tất cả", không phải "Chờ duyệt".
+   *
+   * Mở màn bằng một bộ lọc thì lúc không có hồ sơ chờ, manager thấy màn trắng kèm câu
+   * "Không có yêu cầu nào chờ duyệt" — không biết là thật sự rỗng hay đang bị lọc mất.
+   * Vào "Tất cả" thì con số trên từng chip nói hết, và chip "Chờ duyệt" vẫn cách một chạm.
+   */
+  const [filter, setFilter] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   // Modal nhập liệu: approve (note tuỳ chọn) / reject (lý do bắt buộc).
@@ -124,7 +131,12 @@ export const CheckoutRequestsScreen: React.FC = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
           <Text style={s.backArrow}>←</Text>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Yêu cầu trả phòng{pendingCount > 0 ? ` (${pendingCount} chờ)` : ''}</Text>
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text style={s.headerTitle}>Tiễn khách</Text>
+          <Text style={s.headerSub}>
+            {pendingCount > 0 ? `${pendingCount} yêu cầu chờ duyệt` : 'Yêu cầu trả phòng của khách'}
+          </Text>
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
@@ -165,12 +177,23 @@ export const CheckoutRequestsScreen: React.FC = () => {
           {filtered.length === 0 && (
             <View style={s.emptyBox}>
               <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🚪</Text>
+              {/*
+                Phân biệt "chưa có hồ sơ nào" với "bộ lọc này rỗng".
+                Bản cũ khi list rỗng hoàn toàn mà đang lọc PENDING vẫn nói "Không có yêu cầu
+                nào chờ duyệt" — nghe như còn hồ sơ ở chỗ khác, manager đi bấm từng chip.
+              */}
               <Text style={s.emptyTitle}>
-                {filter === 'PENDING' ? 'Không có yêu cầu nào chờ duyệt.'
+                {list.length === 0 ? 'Chưa có khách nào xin trả phòng.'
+                  : filter === 'PENDING' ? 'Không có yêu cầu nào chờ duyệt.'
                   : filter === 'ACTIVE' ? 'Không có hồ sơ nào đang xử lý.'
                   : filter === 'COMPLETED' ? 'Chưa có hồ sơ nào hoàn tất.'
                   : 'Không có yêu cầu trả phòng nào.'}
               </Text>
+              {list.length === 0 && (
+                <Text style={s.emptyHint}>
+                  Khách gửi yêu cầu từ app của họ, hồ sơ sẽ hiện ở đây để bạn duyệt.
+                </Text>
+              )}
               {/* Lọc này rỗng nhưng chỗ khác có hồ sơ → chỉ đường, đừng để manager
                   tưởng dữ liệu bị mất sau khi duyệt. */}
               {list.length > 0 && (
@@ -269,7 +292,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                       onPress={() => goSettlement(r)}
                     >
                       <Text style={status === 'SETTLING' ? s.actionApproveText : s.actionGhostText}>
-                        {status === 'SETTLING' ? '💰 Hoàn cọc & hoàn tất' : 'Xem bảng quyết toán'}
+                        {status === 'SETTLING' ? '🏁 Hoàn tất trả phòng' : 'Xem bảng quyết toán'}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -355,6 +378,8 @@ const s = StyleSheet.create({
   backBtn: { padding: Spacing.sm },
   backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  /** Dòng phụ thay cho "(N chờ)" nhét trong tiêu đề — nói rõ N là số gì. */
+  headerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
 
   filterRow: {
     flexDirection: 'row', gap: Spacing.sm, paddingHorizontal: Spacing.lg,
@@ -372,7 +397,11 @@ const s = StyleSheet.create({
 
   body: { padding: Spacing.lg, gap: Spacing.md },
 
-  emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2 },
+  emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2, paddingHorizontal: Spacing.lg },
+  emptyHint: {
+    fontSize: 12, color: Colors.textMuted, textAlign: 'center',
+    marginTop: 6, lineHeight: 17,
+  },
   emptyHints: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginTop: Spacing.md, justifyContent: 'center' },
   emptyHintBtn: {
     paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,

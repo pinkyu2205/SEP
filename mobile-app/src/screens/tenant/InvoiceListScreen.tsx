@@ -13,6 +13,7 @@ import { billMonthLabel, formatCurrency, formatDate, getDaysUntil } from '@/util
 import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
+import { isDisputeOpen } from '@/types/invoiceDispute';
 
 type Invoice = SharedBill;
 type InvoiceStatus = BillStatus;
@@ -142,9 +143,9 @@ export const InvoiceListScreen: React.FC = () => {
    * Refetch chứ không vá dòng: hoá đơn vừa trả có thể đang bị bộ lọc "Chưa thanh toán"
    * loại ra, phải để danh sách tự dựng lại theo bộ lọc hiện tại.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    reload();
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: reload,
   });
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
@@ -238,6 +239,14 @@ export const InvoiceListScreen: React.FC = () => {
     const isOverdue = item.status === 'overdue';
     const dueDate = item.dueDate;
     const daysOverdue = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
+    /**
+     * Hoá đơn đang được tra soát theo khiếu nại của khách.
+     *
+     * Phải hiện Ở ĐÂY chứ không chỉ trong màn chi tiết: danh sách là chỗ khách nhìn để
+     * biết "mình còn nợ gì" — thấy một hoá đơn đỏ quá hạn mà không biết nó đang bị treo
+     * vì chính yêu cầu của mình thì rất dễ hoảng và trả bừa cho xong.
+     */
+    const disputePending = isDisputeOpen(item.dispute);
 
     return (
       <TouchableOpacity
@@ -270,6 +279,10 @@ export const InvoiceListScreen: React.FC = () => {
         {/* Room info */}
         <Text style={styles.invoiceRoom}>{item.roomName} · {item.propertyName}</Text>
 
+        {disputePending && (
+          <Text style={styles.disputeChip}>⏳ Đang tra soát — tạm dừng hạn thanh toán</Text>
+        )}
+
         {/* Utility detail line */}
         {item.invoiceType === 'electricity' && item.kwhUsed !== undefined && (
           <Text style={styles.utilityDetail}>⚡ {item.kwhUsed} kWh · {item.billingPeriod ?? '—'}</Text>
@@ -286,10 +299,12 @@ export const InvoiceListScreen: React.FC = () => {
           {isPaid ? (
             <Text style={styles.paidDateText}>✅ {item.paidAt ? formatDate(item.paidAt) : 'Đã TT'}</Text>
           ) : (
-            <Text style={[styles.dueDateText, isOverdue && { color: Colors.error }]}>
-              {isOverdue
-                ? `Quá hạn ${daysOverdue} ngày`
-                : `Hạn: ${formatDate(dueDate)}`}
+            <Text style={[styles.dueDateText, isOverdue && !disputePending && { color: Colors.error }]}>
+              {disputePending
+                ? 'Chờ kết luận'
+                : isOverdue
+                  ? `Quá hạn ${daysOverdue} ngày`
+                  : `Hạn: ${formatDate(dueDate)}`}
             </Text>
           )}
         </View>
@@ -636,6 +651,12 @@ const styles = StyleSheet.create({
   dueDateText: { fontSize: 12, color: Colors.textSecondary },
   paidDateText: { fontSize: 12, color: Colors.success, fontWeight: '600' },
   lateFeeText: { fontSize: 12, color: Colors.error, fontWeight: '600', marginTop: 3 },
+  disputeChip: {
+    fontSize: 11, fontWeight: '700', color: '#92400E',
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.sm,
+    paddingHorizontal: 8, paddingVertical: 4,
+    alignSelf: 'flex-start', marginTop: 6, overflow: 'hidden',
+  },
   riskText: { fontSize: 11, color: Colors.error, fontWeight: '700', marginTop: 4, lineHeight: 16 },
 
   payBtn: {

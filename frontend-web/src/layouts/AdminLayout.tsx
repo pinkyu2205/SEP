@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import {
 
   BarChart3,
-  CreditCard,
+  CreditCard, ShieldAlert,
   FileText,
   FilePlus,
   MapPin,
@@ -22,6 +22,7 @@ import {
   X,
   Zap,
   Droplets,
+  ReceiptText,
 } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
@@ -67,6 +68,12 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     label: 'Tài chính & Hợp đồng',
     items: [
       { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      // Khiếu nại hoàn cọc: chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
+      { label: 'Khiếu nại hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
+      // Khiếu nại hoá đơn điện/nước (24/08/2026) — cùng lý do: là lời tố nhắm vào chính
+      // người phát hành hoá đơn (admin) hoặc người đọc đồng hồ (quản lý), nên không để
+      // hai vai đó tự phân xử. Admin cũng là vai duy nhất huỷ được hoá đơn đã phát hành.
+      { label: 'Khiếu nại hoá đơn', path: '/admin/utility-disputes', icon: ReceiptText },
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
       { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
@@ -79,8 +86,11 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
   {
     label: 'Vận hành',
     items: [
-      // Mục mới từ nhánh dev (trang HandoverMonitoring + route /admin/handover).
-      { label: 'Tiến độ bàn giao', path: '/admin/handover', icon: PackageCheck },
+      // Trang HandoverMonitoring (route /admin/handover — giữ nguyên URL).
+      // Đổi tên 24/08/2026: trang này giờ trả lời cả "nhà nào còn phòng trống", không
+      // còn chỉ nói về tiến độ bàn giao nữa. Đây là màn "1 dòng = 1 nhà" duy nhất —
+      // trang Hồ sơ đón khách là "1 dòng = 1 hợp đồng", không gộp được vào nhau.
+      { label: 'Tình trạng nhà & phòng', path: '/admin/handover', icon: PackageCheck },
       // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
       { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
       { label: 'Danh mục khu vực', path: '/admin/zones', icon: MapPin },
@@ -133,7 +143,7 @@ export const AdminLayout = () => {
     <div className="min-h-screen bg-slate-100 text-slate-900 lg:flex">
       <aside className="sticky top-0 hidden h-screen flex-shrink-0 select-none lg:block">
         <AppSidebar
-          accent="cyan"
+          accent="red"
           storageKey="hbl_sidebar_admin"
           brand={brand}
           sections={sections}
@@ -159,7 +169,7 @@ export const AdminLayout = () => {
             </button>
             {/* Drawer mobile: luôn mở rộng, không cho thu gọn. */}
             <AppSidebar
-              accent="cyan"
+              accent="red"
               brand={brand}
               sections={sections}
               user={sidebarUser}
@@ -206,9 +216,9 @@ export const AdminLayout = () => {
                 khay này chỉ liệt kê bảng `notifications`, còn trang kia gộp thêm
                 `host_notifications` (nhắc việc: căn chờ duyệt giá, HĐ chờ duyệt…),
                 nên nó mới là chỗ xem đủ. Nhật ký bảo mật là việc khác. */}
-            <NotificationBell seeAllTo="/admin/notifications" accent="cyan" />
+            <NotificationBell seeAllTo="/admin/notifications" accent="red" />
             <UserMenu
-              accent="cyan"
+              accent="red"
               name={sidebarUser.name}
               subtitle={sidebarUser.subtitle}
               initials={sidebarUser.initials}

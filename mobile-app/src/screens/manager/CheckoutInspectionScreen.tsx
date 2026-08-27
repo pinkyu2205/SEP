@@ -8,7 +8,7 @@ import {
 } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants';
 import { CameraCaptureModal } from '@/components/common';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { checkoutService } from '@/services/manager/checkoutService';
@@ -31,8 +31,23 @@ import type {
  * biên bản trả phòng DUY NHẤT, và là màn có API thật.)
  */
 
+/**
+ * Trần ảnh hiện trạng cho một biên bản.
+ * Có trần thì `selectionLimit` chặn ngay trong thư viện ảnh, không để chọn 40 tấm rồi mới
+ * biết là quá nhiều — mà mỗi tấm là một lượt upload thật.
+ */
+const MAX_ROOM_PHOTOS = 12;
+
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const readErr = readApiError;
+/**
+ * Mọi ô số ở màn này dùng `keyboardType="number-pad"`, KHÔNG phải `"numeric"`.
+ *
+ * Trên Android, `"numeric"` map sang `TYPE_CLASS_NUMBER | TYPE_NUMBER_FLAG_DECIMAL` — Gboard
+ * có lúc dựng thanh công cụ rút gọn (mic / xoá / emoji) thay vì bàn phím số, gõ không được.
+ * `"number-pad"` là bàn phím số thuần. Không mất gì: `onlyDigits`/`toNum` vốn đã loại mọi ký
+ * tự không phải chữ số, nên dấu thập phân và dấu âm chưa bao giờ dùng tới.
+ */
 const toNum = (v: string) => Number((v || '').replace(/[^\d]/g, '')) || 0;
 const onlyDigits = (v: string) => (v || '').replace(/[^\d]/g, '');
 /** Hiện số có dấu chấm ngăn nghìn khi gõ: "3412" -> "3.412" (giá trị lưu vẫn là số trần). */
@@ -98,6 +113,16 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
   const [meterStatus, setMeterStatus] = useState<Partial<Record<MeterKind, MeterStatus>>>({});
   const [handover, setHandover] = useState<HandoverMeters>({});
   const [note, setNote] = useState('');
+  /**
+   * Cam kết của quản lý về chỉ số điện/nước (mục 2).
+   *
+   * Hai con số này quyết định tiền điện nước kỳ cuối trừ vào cọc của khách, và khách không
+   * có mặt lúc đọc đồng hồ. Bắt tick một lần buộc người ghi phải nhìn lại số mình vừa gõ,
+   * và biến nó thành một hành động có chủ ý thay vì gõ xong bấm cho xong.
+   */
+  const [meterConfirmed, setMeterConfirmed] = useState(false);
+  /** Tiến độ tải nhiều ảnh — để quản lý biết còn bao nhiêu tấm nữa. */
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
   /** key = id thiết bị bị đánh dấu hư hỏng. Không có key = nguyên vẹn. */
   const [damages, setDamages] = useState<Record<string, DamageDraft>>({});
   /**
@@ -243,10 +268,68 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
     return result.assets[0].uri;
   };
 
-  /** Chọn ảnh hiện trạng phòng có sẵn trong máy. */
+  /**
+   * Mở thư viện và cho chọn NHIỀU ảnh một lượt.
+   *
+   * `launchImageLibraryAsync` mặc định chỉ trả 1 ảnh, nên bản cũ bắt quản lý lặp lại
+   * chọn-xác nhận-chờ upload cho từng tấm. Chụp hiện trạng một phòng thường 5–10 tấm.
+   */
+  const pickImageUris = async (limit: number): Promise<string[]> => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== 'granted') {
+      showAlert('Thiếu quyền', 'Cần quyền truy cập thư viện ảnh.');
+      return [];
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      quality: 0.6,
+      allowsMultipleSelection: true,
+      selectionLimit: limit,
+    });
+    if (result.canceled) return [];
+    return (result.assets ?? []).map(a => a.uri).filter(Boolean);
+  };
+
+  /**
+   * Tải lần lượt từng ảnh, KHÔNG `Promise.all`.
+   *
+   * Chạy song song 10 ảnh thì mạng yếu là hỏng cả loạt, mà hỏng rồi cũng không biết tấm nào
+   * đã lên. Tuần tự thì giữ được phần đã lên và báo đúng số tấm còn thiếu.
+   */
+  const uploadPhotos = async (uris: string[]) => {
+    if (uris.length === 0) return;
+    setUploading(true);
+    setUploadProgress({ done: 0, total: uris.length });
+    const uploaded: string[] = [];
+    try {
+      for (const uri of uris) {
+        try {
+          uploaded.push(await uploadImageToCloudinary(uri));
+        } catch {
+          /* giữ lại phần đã lên, báo số hỏng ở dưới */
+        }
+        setUploadProgress(p => ({ ...p, done: p.done + 1 }));
+      }
+      if (uploaded.length > 0) setPhotos(p => [...p, ...uploaded]);
+      const failed = uris.length - uploaded.length;
+      if (failed > 0) {
+        showAlert(
+          'Một số ảnh chưa tải lên được',
+          `${uploaded.length}/${uris.length} ảnh đã lên. Còn ${failed} ảnh hỏng — chọn lại những tấm đó.`,
+        );
+      }
+    } finally {
+      setUploading(false);
+      setUploadProgress({ done: 0, total: 0 });
+    }
+  };
+
+  /** Chọn ảnh hiện trạng phòng có sẵn trong máy — nhiều tấm một lượt. */
   const pickFromGallery = async () => {
-    const uri = await pickImageUri();
-    if (uri) await uploadPhoto(uri);
+    const remaining = MAX_ROOM_PHOTOS - photos.length;
+    if (remaining <= 0) {
+      return showAlert('Đủ ảnh rồi', `Biên bản đã có ${MAX_ROOM_PHOTOS} ảnh hiện trạng — xoá bớt nếu muốn thêm ảnh khác.`);
+    }
+    await uploadPhotos(await pickImageUris(remaining));
   };
 
   /**
@@ -493,11 +576,93 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       note: d.note.trim() || undefined,
       photos: damagePhotos[id]?.length ? damagePhotos[id] : undefined,
     })),
-    ...utilityDamages(),
+    // KHÔNG gửi tiền điện/nước vào đây nữa (bỏ 20/08/2026).
+    //
+    // BE giờ tự phát hành hoá đơn ELECTRICITY/WATER riêng từ chỉ số + đơn giá gửi kèm
+    // (`createFinalUtilityInvoice`), rồi gộp TOÀN BỘ `damages` thành một hoá đơn
+    // COMPENSATION. Gửi tiếp dòng "Tiền điện kỳ cuối" vào đây là khách nhận hai hoá đơn
+    // cho cùng một khoản — xem doc-be/BE-BUG-tien-dien-nuoc-cuoi-ky-bi-tru-hai-lan.
+    //
+    // Phần hiển thị "Thành tiền" trên màn vẫn giữ, nhưng chỉ là số TẠM TÍNH cho quản lý
+    // ước lượng; số chốt do BE tính ở bước quyết toán.
     ...extras
       .filter(x => x.label.trim())
       .map(x => ({ label: x.label.trim(), amount: toNum(x.amount) })),
   ];
+
+  /**
+   * Những gì còn thiếu để chốt sang quyết toán.
+   *
+   * Trước đây mọi điều kiện chỉ kiểm lúc BẤM, mỗi lần một `showAlert`: quản lý sửa một chỗ,
+   * bấm lại, lại bị chặn vì chỗ khác — không biết còn bao nhiêu việc nữa. Nay tính sẵn cả
+   * danh sách, hiện ngay trên nút và khoá nút cho tới khi rỗng.
+   *
+   * "Chỉ lưu biên bản" KHÔNG dùng danh sách này — lưu dở là đúng nghiệp vụ, quản lý còn phải
+   * ra chỗ đồng hồ chụp tiếp rồi quay lại.
+   */
+  /**
+   * Mục 2 đã đủ dữ liệu để cam kết được chưa: cả hai đồng hồ có chỉ số hợp lệ VÀ có ảnh.
+   *
+   * Chưa đủ thì không hiện ô tick — nội dung cam kết nói "ảnh kèm theo là chụp tại phòng
+   * này hôm nay", tick khi chưa có ảnh nào là xác nhận một thứ không tồn tại.
+   */
+  const meterReady = useMemo(
+    () => (['elec', 'water'] as MeterKind[]).every((k) => {
+      const reading = k === 'elec' ? elecReading : waterReading;
+      const url = k === 'elec' ? elecMeterUrl : waterMeterUrl;
+      return !!reading && !!url && !meterInfo(k).invalid;
+    }),
+    [elecReading, waterReading, elecMeterUrl, waterMeterUrl],
+  );
+
+  /**
+   * Sửa số hoặc đổi ảnh SAU KHI đã tick → bỏ tick, bắt xác nhận lại.
+   * Không có cái này thì cam kết dính vào dữ liệu cũ: tick lúc số đúng, sửa thành số khác,
+   * dấu xác nhận vẫn còn nguyên và đi thẳng vào quyết toán.
+   */
+  useEffect(() => {
+    setMeterConfirmed(false);
+  }, [elecReading, waterReading, elecMeterUrl, waterMeterUrl]);
+
+  const blockers = useMemo(() => {
+    const out: string[] = [];
+    if (photos.length === 0) out.push('Chụp ít nhất 1 ảnh hiện trạng phòng (mục 1)');
+
+    (['elec', 'water'] as MeterKind[]).forEach((k) => {
+      const name = k === 'elec' ? 'điện' : 'nước';
+      const reading = k === 'elec' ? elecReading : waterReading;
+      const url = k === 'elec' ? elecMeterUrl : waterMeterUrl;
+      if (!reading) out.push(`Nhập chỉ số ${name} cuối kỳ (mục 2)`);
+      else if (meterInfo(k).invalid) out.push(`Chỉ số ${name} đang nhỏ hơn lúc đón khách (mục 2)`);
+      if (!url) out.push(`Chụp ảnh mặt đồng hồ ${name} (mục 2)`);
+      /**
+       * Có chỉ số mà chưa có đơn giá thì không tính được tiền.
+       * Khách trả phòng ngay tháng đầu thì hệ thống không tự điền được (chưa có hoá đơn kỳ
+       * trước), quản lý phải gõ tay. Chặn ở đây để không bấm lưu rồi mới nhận lỗi từ máy chủ.
+       */
+      if (reading && toNum(unitPrice[k]) <= 0) {
+        out.push(`Nhập đơn giá ${name} (mục 2)`);
+      }
+    });
+
+    // Chỉ nhắc tick khi ô tick đã hiện ra. Chưa đủ số/ảnh thì các dòng trên đã nói rồi,
+    // thêm dòng này nữa là bảo người ta bấm một thứ chưa tồn tại trên màn hình.
+    if (meterReady && !meterConfirmed) out.push('Xác nhận cam kết chỉ số điện/nước (mục 2)');
+
+    buildDamages().forEach((d) => {
+      if (d.amount <= 0) out.push(`Nhập số tiền cho khoản trừ "${d.label}"`);
+    });
+    Object.keys(damages).forEach((id) => {
+      if (!damagePhotos[id]?.length) {
+        const name = equipment.find(e => String(e.id) === id)?.name ?? 'thiết bị';
+        out.push(`Chụp ảnh hư hỏng của "${name}" (mục 3)`);
+      }
+    });
+    return out;
+  }, [
+    photos, elecReading, waterReading, elecMeterUrl, waterMeterUrl,
+    unitPrice, meterConfirmed, damages, damagePhotos, equipment,
+  ]);
 
   const save = async (goSettlement: boolean) => {
     if (photos.length === 0) {
@@ -569,6 +734,10 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         waterFinalReading: waterReading ? toNum(waterReading) : undefined,
         electricMeterImageUrl: elecMeterUrl || undefined,
         waterMeterImageUrl: waterMeterUrl || undefined,
+        // Đơn giá quản lý gõ trên màn — với khách trả phòng ngay tháng đầu, đây là nguồn
+        // DUY NHẤT để BE tính tiền điện/nước (chưa có hoá đơn kỳ trước để suy).
+        electricityUnitPrice: toNum(unitPrice.elec) || undefined,
+        waterUnitPrice: toNum(unitPrice.water) || undefined,
         damages: list,
       });
       if (goSettlement) navigation.replace('CheckoutSettlement', { checkoutId });
@@ -585,6 +754,35 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           'Chức năng lưu biên bản kiểm phòng chưa có trên máy chủ đang chạy. '
           + 'Báo đội backend triển khai bản có luồng trả phòng rồi thử lại.',
           undefined, '🛠️',
+        );
+        return;
+      }
+      /**
+       * BE chặn ghi biên bản ở một số trạng thái và chỉ trả đúng chuỗi tiếng Anh
+       * `Invalid status for inspection` — người dùng đọc ra không biết mình vừa làm sai
+       * gì hay phải làm gì tiếp.
+       *
+       * Gặp thật 18/08/2026: khách phản đối bảng quyết toán → hồ sơ sang DISPUTED, mà
+       * `POST /checkout-requests/{id}/inspection` chỉ nhận APPROVED/INSPECTING. Tức là
+       * quản lý vào sửa ĐÚNG THỨ khách đang khiếu nại (khoản trừ) thì không lưu được —
+       * luồng tranh chấp không có đường quay lại. Xem BE-BUG-checkout-disputed-*.
+       *
+       * Bắt theo NỘI DUNG lỗi chứ không theo trạng thái: BE mở thêm trạng thái nào thì
+       * nhánh này tự hết chạy, không phải sửa lại danh sách ở đây.
+       */
+      const rawMsg = String(e?.response?.data?.message ?? e?.message ?? '');
+      if (/invalid status for inspection/i.test(rawMsg)) {
+        const st = req?.status;
+        showAlert(
+          'Chưa lưu được biên bản',
+          st === 'DISPUTED'
+            ? 'Khách đã phản đối nên hồ sơ đang ở trạng thái "Khách không đồng ý". Máy chủ hiện '
+              + 'CHƯA cho sửa biên bản ở trạng thái này, nên các khoản trừ vừa nhập chưa được lưu.\n\n'
+              + 'Hiện chỉ gửi lại được bảng quyết toán cũ cho khách. Muốn đổi khoản trừ thì cần '
+              + 'đội backend cho phép ghi biên bản khi hồ sơ bị phản đối.'
+            : `Máy chủ không cho ghi biên bản khi hồ sơ đang ở trạng thái `
+              + `"${checkoutMeta(st).label}". Biên bản chỉ sửa được ở bước kiểm tra phòng.`,
+          undefined, '🔒',
         );
         return;
       }
@@ -612,7 +810,21 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+      {/*
+        `keyboardShouldPersistTaps="handled"` là BẮT BUỘC ở màn nhiều ô nhập.
+
+        Mặc định của ScrollView là `"never"`: khi bàn phím đang mở, cú chạm đầu tiên vào bất
+        cứ đâu chỉ để ĐÓNG bàn phím và **bị nuốt luôn** — không tới được ô bên dưới. Nên gõ
+        xong chỉ số điện rồi chạm sang ô "Đơn giá" thì chỉ thấy bàn phím tắt, phải chạm lần
+        hai mới vào được ô. Đúng cảm giác "không nhập tay được".
+
+        `"handled"` cho cú chạm đi tiếp tới ô/nút, chỉ nuốt khi không có gì nhận.
+      */}
+      <ScrollView
+        contentContainerStyle={s.body}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Bối cảnh */}
         <View style={s.card}>
           <Text style={s.tenantName}>{req?.tenantFullName || 'Khách thuê'}</Text>
@@ -623,7 +835,12 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
         </View>
 
         {/* 1. Ảnh hiện trạng */}
-        <Text style={s.sectionTitle}>1. Ảnh hiện trạng <Text style={s.required}>*</Text></Text>
+        <Text style={s.sectionTitle}>
+          1. Ảnh hiện trạng <Text style={s.required}>*</Text>
+          {photos.length > 0 && (
+            <Text style={s.sectionCount}>  {photos.length}/{MAX_ROOM_PHOTOS}</Text>
+          )}
+        </Text>
         <View style={s.card}>
           {photos.length === 0 ? (
             <Text style={s.empty}>Chưa có ảnh nào.</Text>
@@ -647,13 +864,17 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
               <Text style={s.photoBtnText}>📷 Chụp ảnh</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.photoBtn} onPress={pickFromGallery} disabled={uploading}>
-              <Text style={s.photoBtnText}>🖼️ Chọn từ máy</Text>
+              <Text style={s.photoBtnText}>🖼️ Chọn nhiều ảnh</Text>
             </TouchableOpacity>
           </View>
           {uploading && (
             <View style={s.uploadingRow}>
               <ActivityIndicator size="small" color={Colors.primary} />
-              <Text style={s.uploadingText}>Đang tải ảnh lên...</Text>
+              <Text style={s.uploadingText}>
+                {uploadProgress.total > 1
+                  ? `Đang tải ảnh ${uploadProgress.done + 1}/${uploadProgress.total}...`
+                  : 'Đang tải ảnh lên...'}
+              </Text>
             </View>
           )}
         </View>
@@ -703,7 +924,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                         // Sửa tay thì ghi chú "số đọc từ ảnh" hết đúng; cảnh báo về ẢNH thì giữ.
                         setMeterStatus(p => (p[kind]?.tone === 'ok' ? { ...p, [kind]: undefined } : p));
                       }}
-                      keyboardType="numeric"
+                      keyboardType="number-pad"
                       placeholder={isElec ? '1.250' : '320'}
                       placeholderTextColor={Colors.textMuted}
                     />
@@ -732,7 +953,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                             style={s.priceInput}
                             value={groupThousands(unitPrice[kind])}
                             onChangeText={v => setUnitPrice(p => ({ ...p, [kind]: onlyDigits(v) }))}
-                            keyboardType="numeric"
+                            keyboardType="number-pad"
                             placeholder="0"
                             placeholderTextColor={Colors.textMuted}
                           />
@@ -774,20 +995,26 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                     </View>
                   ) : null}
 
+                  {/*
+                    Đã có ảnh thì nhãn phải nói việc THAY THẾ, không phải việc thêm mới.
+                    Để nguyên "Chụp / Chọn" khi ảnh đã nằm ngay trên đầu nút thì người dùng
+                    không biết bấm nữa sẽ ra ảnh thứ hai hay đè lên ảnh cũ — mà mỗi đồng hồ
+                    chỉ giữ đúng một ảnh, bấm là đè.
+                  */}
                   <View style={s.meterBtnRow}>
                     <TouchableOpacity
                       style={[s.meterBtn, busy && s.btnDisabled]}
                       onPress={() => setCameraTarget(kind)}
                       disabled={busy}
                     >
-                      <Text style={s.meterBtnText}>📷 Chụp</Text>
+                      <Text style={s.meterBtnText}>📷 {photo ? 'Chụp lại' : 'Chụp'}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[s.meterBtn, busy && s.btnDisabled]}
                       onPress={() => pickMeterFromGallery(kind)}
                       disabled={busy}
                     >
-                      <Text style={s.meterBtnText}>🖼️ Chọn</Text>
+                      <Text style={s.meterBtnText}>🖼️ {photo ? 'Chọn ảnh khác' : 'Chọn'}</Text>
                     </TouchableOpacity>
                   </View>
                   {busy && (
@@ -808,6 +1035,33 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
               );
             })}
           </View>
+
+          {/*
+            Cam kết về chỉ số. Hai con số này quyết định tiền điện/nước kỳ cuối trừ vào cọc,
+            mà khách không có mặt lúc đọc đồng hồ — nên phải là một hành động có chủ ý, kèm
+            tên người chịu trách nhiệm, chứ không phải gõ xong bấm cho xong.
+          */}
+          {meterReady ? (
+            <TouchableOpacity
+              style={[s.confirmRow, meterConfirmed && s.confirmRowOn]}
+              onPress={() => setMeterConfirmed(v => !v)}
+              activeOpacity={0.7}
+            >
+              <View style={[s.confirmBox, meterConfirmed && s.confirmBoxOn]}>
+                {meterConfirmed && <Text style={s.confirmTick}>✓</Text>}
+              </View>
+              <Text style={[s.confirmText, meterConfirmed && s.confirmTextOn]}>
+                Tôi xác nhận đã đọc đúng chỉ số trên mặt đồng hồ và ảnh kèm theo là chụp tại
+                phòng này hôm nay.
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={s.confirmLocked}>
+              <Text style={s.confirmLockedText}>
+                Nhập đủ chỉ số điện và nước kèm ảnh mặt đồng hồ, ô xác nhận sẽ hiện ở đây.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* 3. Đối chiếu thiết bị */}
@@ -847,7 +1101,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                         style={[s.input, { marginBottom: 6 }]}
                         value={damages[id].amount}
                         onChangeText={v => setDamageField(id, 'amount', v)}
-                        keyboardType="numeric"
+                        keyboardType="number-pad"
                         placeholder="Số tiền trừ (đ)"
                         placeholderTextColor={Colors.textMuted}
                       />
@@ -935,7 +1189,7 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
                 style={[s.input, { flex: 1 }]}
                 value={x.amount}
                 onChangeText={v => setExtras(list => list.map((it, idx) => idx === i ? { ...it, amount: v } : it))}
-                keyboardType="numeric"
+                keyboardType="number-pad"
                 placeholder="Số tiền"
                 placeholderTextColor={Colors.textMuted}
               />
@@ -970,10 +1224,22 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
           (cộng thêm hoá đơn khách còn nợ, trừ tiền phòng những ngày không ở).
         </Text>
 
+        {/* Nói TRƯỚC còn thiếu gì, thay vì để bấm rồi mới báo từng lỗi một. */}
+        {blockers.length > 0 && (
+          <View style={s.blockerBox}>
+            <Text style={s.blockerTitle}>
+              Còn {blockers.length} việc chưa xong để chốt quyết toán
+            </Text>
+            {blockers.map((b, i) => (
+              <Text key={i} style={s.blockerItem}>• {b}</Text>
+            ))}
+          </View>
+        )}
+
         <TouchableOpacity
-          style={[s.primaryBtn, saving && s.btnDisabled]}
+          style={[s.primaryBtn, (saving || blockers.length > 0) && s.btnDisabled]}
           onPress={() => save(true)}
-          disabled={saving || uploading}
+          disabled={saving || uploading || blockers.length > 0}
         >
           <Text style={s.primaryBtnText}>{saving ? 'Đang lưu...' : 'Lưu & sang quyết toán →'}</Text>
         </TouchableOpacity>
@@ -1023,6 +1289,7 @@ const s = StyleSheet.create({
 
   sectionTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
   required: { color: Colors.error },
+  sectionCount: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
   helper: { fontSize: 12, color: Colors.textSecondary, lineHeight: 17, marginBottom: Spacing.sm },
   label: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4 },
   empty: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', paddingVertical: Spacing.sm },
@@ -1153,5 +1420,39 @@ const s = StyleSheet.create({
   primaryBtnText: { fontSize: 14, fontWeight: '800', color: Colors.white },
   ghostBtn: { paddingVertical: Spacing.md, alignItems: 'center', marginTop: 4 },
   ghostBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
-  btnDisabled: { opacity: 0.6 },
+  btnDisabled: { opacity: 0.45 },
+
+  // ── Cam kết chỉ số (mục 2) ──────────────────────────────────────────────
+  confirmRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
+    marginTop: Spacing.md, padding: Spacing.md,
+    backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  confirmRowOn: { backgroundColor: Colors.successLight, borderColor: Colors.success },
+  confirmBox: {
+    width: 20, height: 20, borderRadius: 5, marginTop: 1,
+    borderWidth: 2, borderColor: Colors.border, backgroundColor: Colors.white,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  confirmBoxOn: { backgroundColor: Colors.success, borderColor: Colors.success },
+  confirmTick: { fontSize: 12, fontWeight: '900', color: Colors.white },
+  confirmText: { flex: 1, fontSize: 12, lineHeight: 17, color: Colors.textSecondary },
+  confirmTextOn: { color: '#065F46', fontWeight: '600' },
+  /** Chỗ giữ sẵn cho ô tick — nói rõ cần gì để nó hiện, thay vì im lặng không có gì. */
+  confirmLocked: {
+    marginTop: Spacing.md, padding: Spacing.md,
+    backgroundColor: Colors.background, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border, borderStyle: 'dashed',
+  },
+  confirmLockedText: { fontSize: 12, lineHeight: 17, color: Colors.textMuted },
+
+  // ── Việc còn thiếu trước khi chốt quyết toán ────────────────────────────
+  blockerBox: {
+    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: '#FCD34D',
+  },
+  blockerTitle: { fontSize: 13, fontWeight: '800', color: '#92400E', marginBottom: 6 },
+  blockerItem: { fontSize: 12, color: '#92400E', lineHeight: 18 },
 });

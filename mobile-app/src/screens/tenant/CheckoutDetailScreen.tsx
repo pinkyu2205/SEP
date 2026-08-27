@@ -21,12 +21,37 @@ import { useAuth } from '@/hooks';
  * đây là đối trọng duy nhất của khách trước khi bị trừ tiền cọc.
  */
 
+/**
+ * Bước cuối TÁCH LÀM HAI (20/08/2026).
+ *
+ * Bản cũ gộp "Hoàn cọc & kết thúc" thành một, mô tả là *"Nhận lại cọc (hoặc đóng thêm)"* —
+ * câu đó thuộc mô hình **cấn trừ** đã bỏ. Theo mô hình mới, khách **thanh toán khoản cuối
+ * kỳ trước**, trả đủ rồi chủ nhà mới hoàn **nguyên** cọc.
+ *
+ * Tách ra còn vì bên trong đó khách CÓ VIỆC PHẢI LÀM (thanh toán, rồi bấm "đã nhận đủ").
+ * Gộp một chấm đứng im thì khách không biết đang chờ mình hay chờ người khác.
+ */
+/**
+ * Mô tả THAY THẾ cho bước cuối khi khách đã xác nhận nhận đủ cọc.
+ *
+ * Lúc đó khách KHÔNG còn việc gì, nhưng bước vẫn chưa xong: `confirmRefund` bên BE chỉ ghi
+ * `refundConfirmedAt`, không đổi status cũng không thanh lý hợp đồng — quản lý còn phải bấm
+ * "Hoàn tất trả phòng" nữa.
+ *
+ * Nên KHÔNG tick sẵn (tick là nói dối: hợp đồng vẫn còn hiệu lực trên giấy tờ), nhưng phải
+ * đổi lời để chấm xanh không bị đọc thành "đến lượt bạn làm gì đó".
+ */
+const LAST_STEP_WAITING_DESC =
+  'Bạn đã hoàn tất phần của mình. Quản lý đang làm thủ tục thanh lý hợp đồng.';
+
 const TIMELINE_STEPS = [
   { label: 'Gửi yêu cầu', desc: 'Yêu cầu trả phòng đã được ghi nhận' },
   { label: 'Quản lý duyệt', desc: 'Quản lý xem xét và hẹn ngày kiểm tra phòng' },
   { label: 'Kiểm tra phòng', desc: 'Quản lý chụp ảnh hiện trạng, đối chiếu thiết bị, chốt điện/nước' },
-  { label: 'Bạn xác nhận quyết toán', desc: 'Xem bảng tiền cọc và xác nhận hoặc phản hồi nếu chưa đúng' },
-  { label: 'Hoàn cọc & kết thúc', desc: 'Nhận lại cọc (hoặc đóng thêm), hợp đồng kết thúc' },
+  { label: 'Bạn xác nhận quyết toán', desc: 'Xem bảng tiền và xác nhận, hoặc phản hồi nếu chưa đúng' },
+  { label: 'Bạn thanh toán khoản cuối kỳ', desc: 'Tiền điện, nước và bồi thường (nếu có) — trả đủ mới được hoàn cọc' },
+  { label: 'Nhận lại tiền cọc', desc: 'Chủ nhà chuyển nguyên tiền cọc trong 1–3 ngày làm việc' },
+  { label: 'Kết thúc', desc: 'Hợp đồng thanh lý, thủ tục trả phòng hoàn tất' },
 ];
 
 // Map status BE -> bước ĐANG diễn ra (index của TIMELINE_STEPS).
@@ -36,8 +61,27 @@ const STATUS_TO_STEP: Record<string, number> = {
   INSPECTING: 2,
   WAITING_TENANT: 3,
   DISPUTED: 3,
+  // SETTLING gồm 3 việc nối nhau; bước chính xác suy thêm từ bảng quyết toán
+  // (`settlementStep` bên dưới) vì BE dùng chung một status cho cả ba.
   SETTLING: 4,
-  COMPLETED: 5, // vượt quá bước cuối = tất cả done
+  COMPLETED: 7, // vượt quá bước cuối = tất cả done
+};
+
+/**
+ * Trong SETTLING, xác định đang ở việc nào — BE không tách status nên phải suy từ dữ liệu:
+ * chưa trả đủ → bước thanh toán · đã trả, chưa nhận cọc → bước nhận cọc · đã nhận → bước cuối.
+ */
+/**
+ * Mốc host đã chuyển cọc. BE trả `refundPaidAt`, FE từng dùng tên `refundedAt` — đọc cả hai
+ * để không phụ thuộc bên nào đổi tên trước.
+ */
+const paidAtOf = (s?: { refundPaidAt?: string; refundedAt?: string }): string | undefined =>
+  s?.refundPaidAt ?? s?.refundedAt;
+
+const settlementStep = (s?: { chargesSettled?: boolean; refundConfirmedAt?: string }): number => {
+  if (!s) return 4;
+  if (s.chargesSettled === false) return 4;
+  return s.refundConfirmedAt ? 6 : 5;
 };
 
 /** Vài trạng thái cần đổi cách xưng hô khi hiển thị cho chính khách. */
@@ -53,6 +97,41 @@ const tenantMeta = (status?: string) => {
 };
 
 const money = (n: number) => (n || 0).toLocaleString('vi-VN') + 'đ';
+
+/**
+ * Tách chuỗi `note` trở lại đúng HAI thứ khách đã nhập RIÊNG ở màn gửi yêu cầu.
+ *
+ * Ở RequestCheckoutScreen khách điền tài khoản vào 3 ô dưới mục "Tài khoản nhận hoàn cọc",
+ * còn ghi chú là ô khác hẳn. FE mới gộp chúng vào một chuỗi `note` lúc gửi, vì
+ * `CreateCheckoutRequest` bên BE chưa nhận field riêng
+ * (xem doc-be/BE-NEED-tai-khoan-hoan-coc-cho-host-thay-2026-08-20.md).
+ *
+ * Khuôn FE ghi ra là cố định — `TK hoàn cọc: {ngân hàng} — {số TK} — {chủ TK}` — nên tách
+ * ngược lại an toàn. Dòng không khớp khuôn thì để nguyên ở phần ghi chú: thà hiện thô còn
+ * hơn gắn nhãn "tài khoản" cho một dòng không phải tài khoản.
+ */
+const splitNote = (note?: string): { bank: string; rest: string } => {
+  if (!note) return { bank: '', rest: '' };
+  const bank: string[] = [];
+  const rest: string[] = [];
+  note.split(/\r?\n/).forEach((line) => {
+    const m = line.match(/^\s*TK hoàn cọc\s*:\s*(.+)$/i);
+    if (m) bank.push(m[1].trim());
+    else if (line.trim()) rest.push(line.trim());
+  });
+  return { bank: bank.join('\n'), rest: rest.join('\n') };
+};
+
+/** Nhãn tiếng Việt cho `TenantInvoiceType` BE trả trong `finalCharges`. */
+const CHARGE_LABEL: Record<string, string> = {
+  ELECTRICITY: 'Tiền điện kỳ cuối',
+  WATER: 'Tiền nước kỳ cuối',
+  COMPENSATION: 'Bồi thường hư hỏng',
+  RENT: 'Tiền nhà',
+  SERVICE: 'Phí dịch vụ',
+  MAINTENANCE: 'Phí bảo trì',
+  OTHER: 'Khoản khác',
+};
 
 const SectionCard: React.FC<{ title: string; children: React.ReactNode; noPad?: boolean }> = ({ title, children, noPad }) => (
   <View style={styles.sectionCard}>
@@ -84,6 +163,10 @@ export const CheckoutDetailScreen: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
+  // Khiếu nại CHƯA NHẬN ĐƯỢC TIỀN — khác hẳn khiếu nại bảng quyết toán ở trên:
+  // cái kia cãi con số, cái này nói tiền chưa về tài khoản.
+  const [noRefundOpen, setNoRefundOpen] = useState(false);
+  const [noRefundReason, setNoRefundReason] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +186,7 @@ export const CheckoutDetailScreen: React.FC = () => {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const checkout = requests.find((r) => r.id === selectedId) ?? requests[0] ?? null;
+  const noteParts = splitNote(checkout?.note);
 
   // Trả phòng xong = hợp đồng kết thúc = tài khoản ngừng hoạt động. Chào khách một câu
   // rồi đưa về màn đăng nhập (lần sau đăng nhập sẽ bị chặn ngay từ cổng — accountAccess).
@@ -190,6 +274,57 @@ export const CheckoutDetailScreen: React.FC = () => {
     }
   };
 
+  /** Khách xác nhận đã nhận đủ cọc — bước cuối khép phần tiền nong. */
+  const confirmRefund = () => {
+    if (!checkout) return;
+    showAlert(
+      'Xác nhận đã nhận đủ tiền cọc?',
+      'Chỉ bấm khi bạn đã kiểm tra tài khoản và thấy tiền về đủ. Xác nhận rồi không đổi lại được.',
+      [
+        { text: 'Để kiểm tra lại', style: 'cancel' },
+        {
+          text: 'Đã nhận đủ',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await realTenantSelfService.confirmRefundReceived(checkout.id);
+              showAlert('Cảm ơn bạn', 'Đã ghi nhận. Thủ tục trả phòng của bạn hoàn tất về phần tiền.');
+              load();
+            } catch (err: any) {
+              showAlert('Lỗi', err?.response?.data?.message || 'Không ghi nhận được.');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  /**
+   * Báo chưa nhận được tiền. BE bắt lý do 10–500 ký tự nên chặn ngay tại đây,
+   * đừng để khách gõ xong bấm gửi mới báo lỗi.
+   */
+  const submitNoRefund = async () => {
+    if (!checkout) return;
+    const reason = noRefundReason.trim();
+    if (reason.length < 10) {
+      return showAlert('Thiếu thông tin', 'Mô tả rõ hơn một chút (ít nhất 10 ký tự) để bên quản lý tra soát được.');
+    }
+    setBusy(true);
+    try {
+      await realTenantSelfService.disputeRefundReceived(checkout.id, reason);
+      setNoRefundOpen(false);
+      setNoRefundReason('');
+      showAlert('Đã gửi phản ánh', 'Chủ nhà và quản trị viên sẽ tra soát và liên hệ lại với bạn.');
+      load();
+    } catch (err: any) {
+      showAlert('Lỗi', err?.response?.data?.message || 'Không gửi được phản ánh.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -230,9 +365,12 @@ export const CheckoutDetailScreen: React.FC = () => {
   const isRejected = status === 'REJECTED';
   const isCancelled = status === 'CANCELLED';
   const isCompleted = status === 'COMPLETED';
-  const currentStep = STATUS_TO_STEP[status] ?? 1;
   const inspection = checkout.inspection;
   const settlement = checkout.settlement;
+  // SETTLING gồm 3 việc nối nhau nên phải suy thêm từ bảng quyết toán, xem `settlementStep`.
+  const currentStep = status === 'SETTLING'
+    ? settlementStep(settlement)
+    : STATUS_TO_STEP[status] ?? 1;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -315,7 +453,16 @@ export const CheckoutDetailScreen: React.FC = () => {
           <InfoRow label="Mã hợp đồng" value={checkout.contractCode || `#${checkout.contractId}`} />
           <InfoRow label="Ngày muốn trả" value={checkout.expectedMoveOutDate ? formatDate(checkout.expectedMoveOutDate) : '—'} />
           <InfoRow label="Lý do" value={checkout.reason || '—'} />
-          {!!checkout.note && <InfoRow label="Ghi chú" value={checkout.note} />}
+          {/*
+            Tách `note` trở lại đúng hai thứ khách đã nhập RIÊNG ở màn gửi yêu cầu.
+
+            Khách điền tài khoản vào 3 ô dưới mục "Tài khoản nhận hoàn cọc", còn ghi chú là ô
+            khác hẳn — FE mới gộp chúng vào một chuỗi `note` lúc gửi (vì BE chưa nhận field
+            riêng, xem doc-be/BE-NEED-tai-khoan-hoan-coc-cho-host-thay). Hiện ngược lại dưới
+            nhãn "Ghi chú" là gán cho khách thứ họ không hề gõ vào ô đó.
+          */}
+          {!!noteParts.bank && <InfoRow label="Tài khoản nhận hoàn cọc" value={noteParts.bank} />}
+          {!!noteParts.rest && <InfoRow label="Ghi chú" value={noteParts.rest} />}
         </SectionCard>
 
         {/* Timeline */}
@@ -349,7 +496,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                         {step.label}
                       </Text>
                       <Text style={[styles.timelineDesc, !isDone && !isActive && styles.timelineDescFuture]}>
-                        {step.desc}
+                        {i === TIMELINE_STEPS.length - 1 && isActive ? LAST_STEP_WAITING_DESC : step.desc}
                       </Text>
                       {i === 2 && status === 'APPROVED' && checkout.expectedMoveOutDate && (
                         <View style={styles.timelineTag}>
@@ -434,60 +581,197 @@ export const CheckoutDetailScreen: React.FC = () => {
           </SectionCard>
         )}
 
-        {/* Bảng quyết toán cọc */}
+        {/*
+          Bảng quyết toán — HAI KHỐI TÁCH RỜI (mô hình chốt 20/08/2026).
+
+          Bản cũ bù trừ: cọc − nợ − hư hỏng = số nhận lại. Nay cọc KHÔNG bị trừ gì; khách
+          thanh toán các khoản cuối kỳ như hoá đơn thường, trả đủ thì chủ nhà hoàn NGUYÊN cọc.
+          Cọc đóng vai trò ràng buộc, không phải nguồn khấu trừ.
+        */}
         {!!settlement && (
-          <SectionCard title="💰 Quyết toán tiền cọc">
-            <View style={styles.settleRow}>
-              <Text style={styles.settleLabel}>Tiền cọc</Text>
-              <Text style={styles.settleValueBold}>{money(settlement.depositAmount)}</Text>
-            </View>
-            {(settlement.unpaidInvoices ?? []).map(inv => (
-              <View key={inv.id} style={styles.settleRow}>
-                <Text style={styles.settleLabel}>− Hoá đơn {inv.code || `#${inv.id}`}</Text>
-                <Text style={styles.settleValueNeg}>−{money(inv.amount)}</Text>
-              </View>
-            ))}
-            {!settlement.unpaidInvoices?.length && settlement.unpaidTotal > 0 && (
+          <>
+            <SectionCard title="🧾 Khoản bạn cần thanh toán">
+              {(settlement.finalCharges ?? []).map(inv => (
+                <View key={inv.id} style={styles.settleRow}>
+                  <Text style={styles.settleLabel}>
+                    {CHARGE_LABEL[inv.type ?? ''] ?? 'Hoá đơn'} {inv.code || `#${inv.id}`}
+                  </Text>
+                  <Text style={styles.settleValueNeg}>{money(inv.amount)}</Text>
+                </View>
+              ))}
+              {!settlement.finalCharges?.length && settlement.chargesTotal > 0 && (
+                <View style={styles.settleRow}>
+                  <Text style={styles.settleLabel}>Khoản cuối kỳ</Text>
+                  <Text style={styles.settleValueNeg}>{money(settlement.chargesTotal)}</Text>
+                </View>
+              )}
+
+              <View style={styles.settleDivider} />
+              {/*
+                Trả đủ rồi thì hiện SỐ ĐÃ TRẢ, không hiện số còn nợ.
+                Bản cũ luôn hiện phần còn thiếu, nên khi trả xong thành ra dòng
+                "ĐÃ THANH TOÁN ĐỦ — 0đ" — đọc lên như thể khách mới trả 0 đồng.
+              */}
               <View style={styles.settleRow}>
-                <Text style={styles.settleLabel}>− Hoá đơn chưa thanh toán</Text>
-                <Text style={styles.settleValueNeg}>−{money(settlement.unpaidTotal)}</Text>
-              </View>
-            )}
-            {settlement.damageTotal > 0 && (
-              <View style={styles.settleRow}>
-                <Text style={styles.settleLabel}>− Hư hỏng</Text>
-                <Text style={styles.settleValueNeg}>−{money(settlement.damageTotal)}</Text>
-              </View>
-            )}
-            {(settlement.adjustments ?? []).map((a, i) => (
-              <View key={`adj-${i}`} style={styles.settleRow}>
-                <Text style={styles.settleLabel}>{a.amount < 0 ? '− ' : '+ '}{a.label}</Text>
-                <Text style={a.amount < 0 ? styles.settleValueNeg : styles.settleValue}>
-                  {a.amount < 0 ? '−' : '+'}{money(Math.abs(a.amount))}
+                <Text style={styles.settleTotalLabel}>
+                  {settlement.chargesSettled ? 'ĐÃ THANH TOÁN ĐỦ' : 'CÒN PHẢI TRẢ'}
+                </Text>
+                <Text style={[
+                  styles.settleTotalValue,
+                  { color: settlement.chargesSettled ? Colors.success : Colors.error },
+                ]}>
+                  {settlement.chargesSettled
+                    ? `✓ ${money(settlement.chargesPaid || settlement.chargesTotal)}`
+                    : money(Math.max(0, (settlement.chargesTotal ?? 0) - (settlement.chargesPaid ?? 0)))}
                 </Text>
               </View>
-            ))}
 
-            <View style={styles.settleDivider} />
-            <View style={styles.settleRow}>
-              <Text style={styles.settleTotalLabel}>
-                {settlement.refundAmount > 0 ? 'BẠN ĐƯỢC NHẬN LẠI'
-                  : settlement.extraChargeAmount > 0 ? 'BẠN CẦN ĐÓNG THÊM' : 'KHÔNG PHÁT SINH'}
-              </Text>
-              <Text style={[
-                styles.settleTotalValue,
-                { color: settlement.extraChargeAmount > 0 ? Colors.error : Colors.success },
-              ]}>
-                {money(settlement.refundAmount > 0 ? settlement.refundAmount : settlement.extraChargeAmount)}
-              </Text>
-            </View>
+              {!settlement.chargesSettled && (
+                <Text style={styles.refundEtaNote}>
+                  Thanh toán các khoản trên trong mục Hoá đơn. Trả đủ rồi chủ nhà mới chuyển
+                  lại tiền cọc cho bạn.
+                </Text>
+              )}
+            </SectionCard>
 
-            {!!settlement.refundedAt && (
-              <Text style={styles.refundedNote}>
-                ✓ Quản lý đã hoàn cọc ngày {formatDate(settlement.refundedAt)}
-              </Text>
-            )}
-          </SectionCard>
+            <SectionCard title="💰 Tiền cọc được hoàn">
+              <View style={styles.settleRow}>
+                <Text style={styles.settleLabel}>Tiền cọc đã đóng</Text>
+                <Text style={styles.settleValueBold}>{money(settlement.depositAmount)}</Text>
+              </View>
+              {(settlement.adjustments ?? []).map((a, i) => (
+                <View key={`adj-${i}`} style={styles.settleRow}>
+                  <Text style={styles.settleLabel}>{a.amount < 0 ? '− ' : '+ '}{a.label}</Text>
+                  <Text style={a.amount < 0 ? styles.settleValueNeg : styles.settleValue}>
+                    {a.amount < 0 ? '−' : '+'}{money(Math.abs(a.amount))}
+                  </Text>
+                </View>
+              ))}
+
+              <View style={styles.settleDivider} />
+              <View style={styles.settleRow}>
+                <Text style={styles.settleTotalLabel}>BẠN ĐƯỢC NHẬN LẠI</Text>
+                <Text style={[styles.settleTotalValue, { color: Colors.success }]}>
+                  {money((settlement.depositAmount ?? 0) + (settlement.adjustmentTotal ?? 0))}
+                </Text>
+              </View>
+
+              {/**
+                * Nói rõ khi nào tiền về và về đâu.
+                * Bảng bên quản lý KHÔNG hiện tiền cọc (chính sách managerVisibility), nên
+                * app của khách là nơi DUY NHẤT nói đủ khoản này — thiếu câu này thì khách
+                * xem xong không biết bao giờ nhận được tiền.
+                */}
+              {!paidAtOf(settlement) && (
+                <Text style={styles.refundEtaNote}>
+                  💸 Sau khi bạn thanh toán đủ các khoản cuối kỳ, chủ nhà chuyển tiền cọc trong
+                  {' '}<Text style={{ fontWeight: '800' }}>1–3 ngày làm việc</Text>, về tài khoản
+                  bạn đã điền khi gửi yêu cầu trả phòng.
+                </Text>
+              )}
+
+              {!!paidAtOf(settlement) && (
+                <Text style={styles.refundedNote}>
+                  ✓ Chủ nhà đã chuyển cọc ngày {formatDate(paidAtOf(settlement))}
+                </Text>
+              )}
+
+              {/*
+                Khách xác nhận ĐÃ NHẬN ĐỦ.
+                Ảnh biên lai chỉ chứng minh host đã chuyển đi, không chứng minh tiền tới đúng
+                người. Thiếu bước này thì "đã hoàn cọc" là lời của một bên, khách kêu chưa
+                nhận thì không có gì đối chiếu.
+              */}
+              {!!paidAtOf(settlement) && !settlement.refundConfirmedAt
+                && !(settlement.refundDisputedAt && !settlement.refundDisputeResolvedAt) && (
+                <View style={styles.confirmRefundBox}>
+                  <Text style={styles.confirmRefundText}>
+                    Kiểm tra tài khoản của bạn. Đã nhận đủ tiền thì bấm xác nhận để khép hồ sơ.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.confirmRefundBtn, busy && { opacity: 0.6 }]}
+                    disabled={busy}
+                    onPress={confirmRefund}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.confirmRefundBtnText}>✓ Tôi đã nhận đủ tiền cọc</Text>
+                  </TouchableOpacity>
+
+                  {/*
+                    Lối ra cho trường hợp ngược lại. Để dạng chữ nhấn chứ không phải nút to
+                    ngang hàng: đa số khách sẽ nhận được tiền bình thường, đặt hai nút to
+                    cạnh nhau là mời bấm nhầm vào cái nặng hơn.
+                  */}
+                  <TouchableOpacity
+                    style={styles.noRefundLink}
+                    disabled={busy}
+                    onPress={() => setNoRefundOpen(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.noRefundLinkText}>Tôi chưa nhận được tiền</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/*
+                Đang tra soát — CHƯA có kết luận. Không hiện nút xác nhận trong lúc này,
+                tránh khách lỡ tay khép hồ sơ khi khiếu nại còn treo.
+              */}
+              {!!settlement.refundDisputedAt && !settlement.refundDisputeResolvedAt
+                && !settlement.refundConfirmedAt && (
+                <View style={styles.disputeRefundBox}>
+                  <Text style={styles.disputeRefundTitle}>
+                    ⏳ Đang tra soát phản ánh của bạn
+                  </Text>
+                  <Text style={styles.disputeRefundText}>
+                    Bạn đã báo chưa nhận được tiền ngày {formatDate(settlement.refundDisputedAt)}.
+                    Chủ nhà và quản trị viên đang kiểm tra và sẽ liên hệ lại.
+                  </Text>
+                  {!!settlement.refundDisputeReason && (
+                    <Text style={styles.disputeRefundReason}>
+                      Nội dung bạn gửi: {settlement.refundDisputeReason}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/*
+                ĐÃ CÓ KẾT LUẬN. Hai kết quả rất khác nhau nên tách hẳn lời văn:
+                  · RETRANSFERRED — tiền đã chuyển lại, khách phải kiểm tra và xác nhận lần nữa
+                  · REJECTED      — hệ thống xác minh tiền đã tới, khách cần soát lại tài khoản
+                Không tự đánh dấu khách đã nhận trong cả hai trường hợp — đó vẫn là việc của khách.
+              */}
+              {!!settlement.refundDisputeResolvedAt && !settlement.refundConfirmedAt && (
+                <View style={[
+                  styles.disputeRefundBox,
+                  settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOk,
+                ]}>
+                  <Text style={[
+                    styles.disputeRefundTitle,
+                    settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOkText,
+                  ]}>
+                    {settlement.refundDisputeOutcome === 'RETRANSFERRED'
+                      ? '✓ Đã chuyển lại tiền cọc cho bạn'
+                      : 'ℹ️ Đã tra soát xong phản ánh của bạn'}
+                  </Text>
+                  <Text style={[
+                    styles.disputeRefundText,
+                    settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOkText,
+                  ]}>
+                    {settlement.refundDisputeOutcome === 'RETRANSFERRED'
+                      ? `Xử lý ngày ${formatDate(settlement.refundDisputeResolvedAt)}. Kiểm tra lại tài khoản, nhận đủ rồi bấm xác nhận bên dưới.`
+                      : `Xử lý ngày ${formatDate(settlement.refundDisputeResolvedAt)}. Hệ thống đối chiếu được giao dịch đã chuyển tới tài khoản bạn đăng ký. Vui lòng kiểm tra lại sao kê, nếu vẫn chưa thấy hãy liên hệ quản lý.`}
+                  </Text>
+                </View>
+              )}
+
+              {!!settlement.refundConfirmedAt && (
+                <Text style={styles.refundedNote}>
+                  ✓ Bạn đã xác nhận nhận đủ ngày {formatDate(settlement.refundConfirmedAt)}
+                </Text>
+              )}
+            </SectionCard>
+          </>
         )}
 
         {/* Khách xác nhận bảng quyết toán */}
@@ -577,6 +861,50 @@ export const CheckoutDetailScreen: React.FC = () => {
                 disabled={busy}
               >
                 <Text style={styles.modalSubmitText}>{busy ? 'Đang gửi...' : 'Gửi phản hồi'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/*
+        Phản ánh CHƯA NHẬN ĐƯỢC TIỀN — tách hẳn modal khiếu nại quyết toán ở trên.
+        Hai việc rất khác nhau: cái kia cãi con số trong bảng, cái này nói tiền chưa về
+        tài khoản. Dùng chung một modal thì lời khách viết ra sẽ mơ hồ, người tra soát
+        không biết đang phải kiểm cái gì.
+      */}
+      <Modal visible={noRefundOpen} transparent animationType="fade" onRequestClose={() => setNoRefundOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Bạn chưa nhận được tiền cọc?</Text>
+            <Text style={styles.modalDesc}>
+              Kiểm tra kỹ tài khoản trước khi gửi — chuyển khoản liên ngân hàng có thể chậm
+              vài giờ. Nếu chắc chắn chưa nhận, mô tả giúp để bên quản lý tra soát.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={noRefundReason}
+              onChangeText={setNoRefundReason}
+              multiline
+              placeholder="VD: Đã kiểm tra tài khoản Vietcombank ...831 tới hôm nay vẫn chưa thấy tiền về."
+              placeholderTextColor={Colors.textMuted}
+            />
+            {/* Đếm ký tự vì BE bắt tối thiểu 10 — cho khách thấy trước khi bấm gửi. */}
+            <Text style={styles.modalHint}>
+              {noRefundReason.trim().length < 10
+                ? `Cần thêm ${10 - noRefundReason.trim().length} ký tự nữa`
+                : `${noRefundReason.trim().length}/500 ký tự`}
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setNoRefundOpen(false)} disabled={busy}>
+                <Text style={styles.modalCancelText}>Để kiểm tra lại</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmit, busy && { opacity: 0.6 }]}
+                onPress={submitNoRefund}
+                disabled={busy}
+              >
+                <Text style={styles.modalSubmitText}>{busy ? 'Đang gửi...' : 'Gửi phản ánh'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -711,6 +1039,43 @@ const styles = StyleSheet.create({
   settleTotalLabel: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, letterSpacing: 0.4 },
   settleTotalValue: { fontSize: 19, fontWeight: '800' },
   refundedNote: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: Spacing.sm },
+  refundEtaNote: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18, marginTop: Spacing.sm, backgroundColor: Colors.background, padding: Spacing.sm, borderRadius: BorderRadius.md },
+
+  // ── Khách xác nhận đã nhận đủ cọc ──
+  confirmRefundBox: {
+    marginTop: Spacing.md, padding: Spacing.md,
+    backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.success + '55',
+  },
+  confirmRefundText: { fontSize: 12, lineHeight: 18, color: '#065F46' },
+  confirmRefundBtn: {
+    marginTop: Spacing.sm, paddingVertical: 11,
+    borderRadius: BorderRadius.lg, backgroundColor: Colors.success,
+    alignItems: 'center',
+  },
+  confirmRefundBtnText: { fontSize: 14, fontWeight: '800', color: Colors.white },
+
+  // Lối ra ngược lại — chữ nhấn, KHÔNG phải nút to ngang hàng với nút xác nhận.
+  noRefundLink: { marginTop: Spacing.sm, alignSelf: 'center', paddingVertical: Spacing.xs, paddingHorizontal: Spacing.sm },
+  noRefundLinkText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, textDecorationLine: 'underline' },
+
+  // ── Đang tra soát phản ánh chưa nhận tiền ──
+  disputeRefundBox: {
+    backgroundColor: '#FFF7ED', borderRadius: BorderRadius.lg, padding: Spacing.base,
+    borderWidth: 1, borderColor: '#FDBA74', marginTop: Spacing.sm,
+  },
+  disputeRefundTitle: { fontSize: 14, fontWeight: '800', color: '#9A3412' },
+  disputeRefundText: { marginTop: 4, fontSize: 13, lineHeight: 19, color: '#9A3412' },
+  disputeRefundReason: {
+    marginTop: Spacing.sm, fontSize: 12, lineHeight: 18, color: '#9A3412',
+    fontStyle: 'italic', opacity: 0.85,
+  },
+
+  // Kết luận CÓ LỢI cho khách (đã chuyển lại) → xanh lá, không dùng hổ phách như lúc đang tra soát.
+  disputeResolvedOk: { backgroundColor: '#ECFDF5', borderColor: '#6EE7B7' },
+  disputeResolvedOkText: { color: '#065F46' },
+
+  modalHint: { marginTop: 6, fontSize: 11, color: Colors.textMuted, textAlign: 'right' },
 
   // ── Khối xác nhận của khách ──
   confirmBox: {

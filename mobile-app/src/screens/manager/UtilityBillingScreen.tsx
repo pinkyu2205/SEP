@@ -20,6 +20,7 @@ import { realTenantService, TenantContractResponse } from '@/services/tenant/ten
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
 import { managerEvnBillService, evnUnitPrice, type EvnBill } from '@/services/manager/evnBillService';
 import { managerWaterBillService, waterUnitPrice, type WaterBill } from '@/services/manager/waterBillService';
+import { MeterTaskBanner } from '@/components/manager/MeterTaskBanner';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '@/components/common';
 import { serverNow, todayIso } from '@/utils/serverTime';
@@ -34,10 +35,15 @@ type ElecStep = 'select_property' | 'evn_bill' | 'room_readings' | 'review' | 'd
 type WaterStep = 'bill_entry' | 'room_readings' | 'review' | 'done';
 
 /**
- * Ảnh sắp chụp: chỉ còn mặt đồng hồ điện của 1 phòng.
- * Ảnh hoá đơn EVN đã chuyển sang admin tải trên web (`/admin/evn-bills`).
+ * Ảnh sắp chụp: mặt đồng hồ ĐIỆN hoặc NƯỚC của 1 phòng.
+ *
+ * `utility` là bắt buộc vì cùng một bộ máy chụp/OCR phục vụ cả hai loại: nó quyết định
+ * kiểm ảnh bằng `validateMeterPhoto('elec'|'water')` (đồng hồ nước chụp nhầm ô điện sẽ
+ * bị đuổi), số chữ số thập phân khi tách chỉ số (điện 1 số lẻ · nước 3 số lẻ), và ghi
+ * kết quả vào đúng danh sách phòng.
  */
-type CameraTarget = { kind: 'meter'; roomId: string };
+type MeterUtility = 'elec' | 'water';
+type CameraTarget = { kind: 'meter'; utility: MeterUtility; roomId: string };
 
 /** Chỉ số cũ lấy từ đâu: hoá đơn kỳ trước (kỳ 2+) hay lúc đón khách (kỳ 1). */
 type PrevReadingSource = 'last_invoice' | 'handover';
@@ -68,16 +74,12 @@ interface WaterBillData {
   pricePerM3: number;
 }
 
-interface RoomWaterReading {
-  roomId: string;
-  roomCode: string;
-  tenantName: string;
-  prevReading: number;
-  prevSource?: PrevReadingSource;
-  newReading: string;
-  consumption?: number;
-  fee?: number;
-}
+/**
+ * Nước dùng CHUNG model với điện từ 18/08/2026 — trước đó thiếu `hasPhoto`,
+ * `meterImageUrl`, `sent` nên màn nước không có ảnh đồng hồ và phải gửi cả loạt.
+ * Chỉ số nước cũng là tiền, cũng cần bằng chứng ảnh y như điện.
+ */
+type RoomWaterReading = RoomMeterReading;
 
 interface HistoryEntry {
   id: string;
@@ -244,7 +246,14 @@ const mapBillingProperty = (
 // ===================== SCREEN =====================
 export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const route = useRoute<any>();
-  const [activeTab, setActiveTab] = useState<MainTab>('electricity');
+  /**
+   * Mặc định vào tab Điện (việc chính ở đây là ghi chỉ số). Nhưng khi được gọi từ ô
+   * "Điện/nước quá hạn" ngoài Trang chủ thì việc cần làm là XEM danh sách hoá đơn, nên
+   * bên đó truyền `tab: 'history'` — vào thẳng chỗ đang cần, không bắt mò lại.
+   */
+  const [activeTab, setActiveTab] = useState<MainTab>(
+    (route?.params?.tab as MainTab) ?? 'electricity',
+  );
   /**
    * Chặn gửi hoá đơn khi KHÁCH ĐÓ đã nhận hoá đơn loại này trong kỳ.
    * Trả true = bị chặn. Luôn nói rõ lý do thay vì để nút im lặng.
@@ -309,7 +318,6 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [evnBillLoading, setEvnBillLoading] = useState(false);
   const [evnBillError,   setEvnBillError]   = useState<string | null>(null);
   /** Đang gửi hoá đơn nhà nguyên căn (nút gửi thẳng ở bước 2). */
-  const [sendingWholeHouse, setSendingWholeHouse] = useState(false);
 
   /**
    * Khoá "1 khách 1 hoá đơn/kỳ": tập khoá phòng ĐÃ nhận hoá đơn của kỳ đang chốt.
@@ -363,8 +371,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
   }, []);
 
-  const loadHistory = useCallback(() => {
-    setLoadingHist(true);
+  /** `silent` = nạp ngầm (realtime / poll): giữ danh sách đang hiện, không nháy spinner. */
+  const loadHistory = useCallback((silent = false) => {
+    if (!silent) setLoadingHist(true);
     Promise.all([
       realManagerInvoiceService.listInvoices({ type: 'ELECTRICITY' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listInvoices({ type: 'WATER' }).catch(() => [] as ManagerInvoice[]),
@@ -380,9 +389,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * cho loại này, nhưng ở đây cứ nạp lại cả danh sách: `loadHistory` rẻ hơn nhiều so với
    * việc dò đúng dòng rồi vá tay, mà lại không sợ lệch bộ lọc kỳ đang chọn.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    loadHistory();
+  useBillingRealtime({
+    filter: (e) => e.event === 'INVOICE_PAID',
+    onRefresh: () => loadHistory(true),
   });
 
   /**
@@ -396,6 +405,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * không chặn thì manager bấm "Quay lại" là bị đá về bước 2 vô hạn, không thoát ra
    * bước chọn nhà được.
    */
+  /**
+   * `navigate()` vào màn ĐANG nằm sẵn trong stack thì chỉ đổi `params`, `useState` ở
+   * trên không chạy lại — thiếu effect này thì bấm "Điện/nước quá hạn" lần thứ hai là
+   * tab không đổi, người dùng tưởng nút hỏng.
+   */
+  useEffect(() => {
+    const t = route?.params?.tab as MainTab | undefined;
+    if (t) setActiveTab(t);
+  }, [route?.params]);
+
   const jumpedRef = useRef(false);
   useEffect(() => {
     const pid = route?.params?.propertyId;
@@ -514,7 +533,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   /** Ảnh đã chọn/đã chụp xong thì đưa về đúng chỗ xử lý. */
   const handlePhoto = async (target: CameraTarget, uri: string) => {
-    await captureRoomMeter(target.roomId, uri);
+    await captureRoomMeter(target.utility, target.roomId, uri);
   };
 
   // ── Hoá đơn EVN (admin phát hành) ──────────────────────────────────────────
@@ -573,9 +592,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   // Xoá ảnh đồng hồ của 1 phòng. Giữ nguyên chỉ số đã nhập vì manager có thể nhập tay
   // — chỉ gỡ ảnh để không gửi ảnh sai lên hoá đơn.
-  const clearRoomMeterPhoto = (roomId: string) => {
+  const clearRoomMeterPhoto = (roomId: string, utility: MeterUtility = 'elec') => {
+    const setList = utility === 'water' ? setRoomWaterReadings : setRoomElecReadings;
     const doClear = () =>
-      setRoomElecReadings(prev => prev.map(r =>
+      setList(prev => prev.map(r =>
         r.roomId === roomId ? { ...r, hasPhoto: false, meterImageUrl: undefined } : r,
       ));
     if (Platform.OS === 'web') { doClear(); return; }
@@ -599,7 +619,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * OCR đọc được (kWh, tên hãng, serial...). Ảnh chỉ có mấy con số (ghi ra giấy, chụp
    * màn hình) hoặc chụp nhầm đồng hồ nước đều bị TỪ CHỐI — không lưu ảnh, không điền số.
    */
-  const captureRoomMeter = async (roomId: string, uri: string) => {
+  const captureRoomMeter = async (utility: MeterUtility, roomId: string, uri: string) => {
+    const isWater = utility === 'water';
+    const setList = isWater ? setRoomWaterReadings : setRoomElecReadings;
+    const label = isWater ? 'nước' : 'điện';
     try {
       setOcrRoomId(roomId);
       const url = await uploadImageToCloudinary(uri);
@@ -609,7 +632,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         ocr = await realTenantService.ocrMeter(url);
       } catch {
         // Không kiểm chứng được ảnh → vẫn giữ để không chặn việc chốt số, nhưng nói rõ.
-        setRoomElecReadings(prev => prev.map(r =>
+        setList(prev => prev.map(r =>
           r.roomId === roomId ? { ...r, hasPhoto: true, meterImageUrl: url } : r));
         showAlert(
           'Chưa kiểm được ảnh',
@@ -618,32 +641,33 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         return;
       }
 
-      const check = validateMeterPhoto('elec', ocr);
+      const check = validateMeterPhoto(utility, ocr);
       if (!check.ok) {
-        showAlert('Ảnh không phải đồng hồ điện', check.reason, undefined, '🚫');
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫');
         return;
       }
 
       // Tách phần lẻ (chữ số đỏ) khỏi dãy OCR đọc được. `onlyDigits` cũ nuốt luôn phần
       // lẻ nên "030815" thành 30815 — chỉ số to gấp 10 lần, và từ 08/08/2026 còn lệch
       // đơn vị với `prevReading` (lấy từ chỉ số lúc đón khách, nay đã có phần lẻ).
-      const split = splitMeterReading(check.reading || '', 'elec');
+      // Số chữ số lẻ khác nhau theo loại (điện 1 · nước 3) — xem DEFAULT_DIGIT_CONFIG.
+      const split = splitMeterReading(check.reading || '', utility);
       const reading = split.integerPart
         ? (split.decimalPart
             ? `${Number(split.integerPart)}.${split.decimalPart}`
             : String(Number(split.integerPart)))
         : '';
-      setRoomElecReadings(prev => prev.map(r =>
+      setList(prev => prev.map(r =>
         r.roomId === roomId
           ? { ...r, newReading: reading || r.newReading, hasPhoto: true, meterImageUrl: url }
           : r,
       ));
       if (!reading) showAlert('Đã nhận ảnh đồng hồ', 'Chưa đọc được chỉ số từ ảnh — vui lòng nhập tay.');
       else if (check.confidence === 'low') {
-        showAlert('Ảnh hơi mờ', 'Chưa chắc chắn đây là mặt đồng hồ điện — kiểm tra lại ảnh và chỉ số trước khi gửi hoá đơn.');
+        showAlert('Ảnh hơi mờ', `Chưa chắc chắn đây là mặt đồng hồ ${label} — kiểm tra lại ảnh và chỉ số trước khi gửi hoá đơn.`);
       }
     } catch {
-      showAlert('Lỗi', 'Không tải/đọc được ảnh đồng hồ. Vui lòng nhập tay.');
+      showAlert('Lỗi', `Không tải/đọc được ảnh đồng hồ ${label}. Vui lòng nhập tay.`);
     } finally {
       setOcrRoomId(null);
     }
@@ -753,70 +777,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * kWh của kỳ. (Nhà theo phòng thì ngược lại — vẫn phải chụp từng đồng hồ, vì đơn giá
    * dùng chung nhưng mỗi phòng tiêu thụ khác nhau.)
    */
-  const sendWholeHouseElec = async () => {
-    if (!evnBill || !selectedProperty) return;
-    const unit = roomElecReadings[0];
-    if (!unit) return;
-    if (blockedFromSending('ELECTRICITY', unit.roomId, unit.tenantName)) return;
+  /**
+   * `sendWholeHouseElec` đã XOÁ 18/08/2026 cùng nút "⚡ Gửi hóa đơn" của luồng nguyên căn.
+   *
+   * BE nay tự phát hành hoá đơn nguyên căn cho khách ngay khi admin tải hoá đơn lên
+   * (`createFromWholeHouseBill`, cùng transaction). Giữ hàm này lại thì nó chỉ còn một
+   * kết cục: gọi API rồi nhận `INVOICE_ALREADY_EXISTS`. Nhà chia phòng vẫn dùng
+   * `sendRoomInvoices` như cũ.
+   */
 
-    const consumption = evnBill.totalKwh;
-    const fee         = Math.round(evnBill.totalAmount); // nguyên căn trả toàn bộ tiền EVN
-    const newVal      = unit.prevReading + consumption;
-    /**
-     * Đơn giá gửi lên BE phải là số CHƯA làm tròn.
-     *
-     * BE ép `tiêu thụ × đơn giá == thành tiền` (UtilityInvoiceServiceImpl
-     * .validateInvoiceAmounts). Trong khi `elecUnitPrice` là số đã làm tròn để HIỂN THỊ
-     * (399.585 ÷ 199 = 2007,96 → hiện "2.008đ/kWh"). Gửi 2008 lên thì BE tính
-     * 199 × 2008 = 399.592, lệch 7đ so với 399.585 → chặn "Thành tiền không khớp".
-     *
-     * Gốc rễ: EVN tính bậc thang nên tổng tiền KHÔNG bao giờ bằng kWh × một đơn giá
-     * phẳng — "đơn giá" ở đây chỉ là số bình quân suy ngược ra. Giữa hai cái sai lệch,
-     * phải giữ TỔNG TIỀN đúng bằng hoá đơn EVN (khách nguyên căn trả đúng số đó), nên
-     * hy sinh độ tròn của đơn giá.
-     */
-    const exactUnitPrice = consumption > 0 ? fee / consumption : 0;
-    const now = todayIso();
-
-    setSendingWholeHouse(true);
-    try {
-      await realManagerInvoiceService.createPropertyUtilityInvoice(
-        Number(selectedProperty.id),
-        {
-          type: 'ELECTRICITY', billingPeriod: evnBill.billingPeriod,
-          prevReading: unit.prevReading, newReading: newVal, consumption,
-          unitPrice: exactUnitPrice, amount: fee,
-          // Ảnh gửi kèm là ẢNH HOÁ ĐƠN EVN của admin, không phải ảnh đồng hồ —
-          // đó mới là căn cứ khách đối chiếu được với bên điện lực.
-          meterImageUrl: evnBill.imageUrl ?? undefined,
-        },
-      );
-      setElecHouseSent(true);
-      setElecSentKeys(prev => new Set(prev).add(unit.roomId));
-      setRoomElecReadings(prev => prev.map(r =>
-        r.roomId === unit.roomId ? { ...r, consumption, fee, sent: true } : r));
-      setHistoryEntries(prev => [{
-        id: `he-${Date.now()}`, type: 'electricity',
-        propertyName: selectedProperty.name, billingPeriod: evnBill.billingPeriod,
-        totalAmount: fee, roomCount: 1, sentAt: now,
-      }, ...prev]);
-      setUtilReloadKey(k => k + 1);
-      setElecStep('done');
-    } catch (e: any) {
-      // BE báo "kỳ này đã có hoá đơn" → KHOÁ nút luôn thay vì chỉ hiện alert rồi để
-      // nguyên nút xanh: manager bấm lại lần nữa cũng chỉ nhận đúng câu đó.
-      // Xem isAlreadySentError.
-      if (isAlreadySentError(e)) {
-        setElecHouseSent(true);
-        setElecSentKeys(prev => new Set(prev).add(unit.roomId));
-        setRoomElecReadings(prev => prev.map(r =>
-          r.roomId === unit.roomId ? { ...r, sent: true } : r));
-      }
-      showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn điện.');
-    } finally {
-      setSendingWholeHouse(false);
-    }
-  };
 
   // ── Water helpers ──────────────────────────────────────────────────────────
   // Nước KHÔNG đổi luồng (13/08/2026): manager vẫn tự nhập hoá đơn nước của cả nhà rồi
@@ -831,6 +800,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       prevReading: lastReadings.get(r.id) ?? r.prevWater,
       prevSource: lastReadings.has(r.id) ? 'last_invoice' : 'handover',
       newReading: '',
+      // Dùng chung model với điện: có ảnh đồng hồ và cờ đã gửi từng phòng.
+      hasPhoto: false,
+      sent: sentKeys.has(r.id),
     }));
 
     /**
@@ -844,16 +816,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
      * Chỉ số vẫn được ghi để kỳ sau còn mốc, nhưng suy ra từ hoá đơn:
      * `newReading = prevReading + tổng m³` (xem chỗ gửi hoá đơn nguyên căn).
      */
-    if (prop.type === 'whole_house' && waterBill) {
-      setRoomWaterReadings(rows.map((r, i) => (i === 0 ? {
-        ...r,
-        newReading: String(r.prevReading + waterBill.totalQuantity),
-        consumption: waterBill.totalQuantity,
-        fee: Math.round(waterBill.totalAmount),
-      } : r)));
-      setWaterStep('review');
-      return;
-    }
+    /*
+      Nhánh NHÀ NGUYÊN CĂN đã bỏ 18/08/2026: admin phát hành là hệ thống gửi thẳng cho
+      khách, quản lý không còn bước nào ở tab nước. Trước đây nhánh này dựng sẵn số rồi
+      nhảy tới "Xem trước & gửi" — bấm gửi bây giờ chỉ nhận `INVOICE_ALREADY_EXISTS`.
+    */
 
     setRoomWaterReadings(rows);
     setWaterStep('room_readings');
@@ -893,119 +860,86 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     initRoomWaterReadings(waterPropertyId, waterBill.billingPeriod);
   };
 
-  const calculateWaterFees = () => {
-    if (!waterBillData) return false;
-    const anyMissing = roomWaterReadings.some(r => !r.newReading || Number(r.newReading) <= r.prevReading);
-    if (anyMissing) { showAlert('Thiếu chỉ số', 'Vui lòng nhập chỉ số mới cho tất cả phòng.'); return false; }
+  /**
+   * `calculateWaterFees` đã xoá 18/08/2026 cùng bước "Xem trước": tiền của từng phòng nay
+   * tính ngay trên thẻ phòng (xem khối `waterStep === 'room_readings'`) rồi gửi lẻ, nên
+   * không còn lúc nào phải tính sẵn cho cả nhà.
+   */
 
-    /**
-     * NHÀ NGUYÊN CĂN: khách trả ĐÚNG tổng hoá đơn nước, giống hệt bên điện.
-     *
-     * Cả căn chỉ có một khách và hoá đơn admin đẩy xuống chính là hoá đơn của căn đó,
-     * nên số phải thu = tổng tiền trên hoá đơn, số m³ = tổng m³ trên hoá đơn. Tính lại
-     * bằng `hiệu chỉ số × đơn giá` là ra số KHÁC (đồng hồ nhà lệch với đồng hồ công ty
-     * nước, hoặc đọc lệch kỳ) — đúng ca vừa gặp: hoá đơn 133.400đ mà hệ thống đòi
-     * 166.750đ vì lấy 5 m³ đọc được thay cho 4 m³ trên giấy.
-     */
-    const isWholeHouse = waterProperty?.type === 'whole_house';
 
-    setRoomWaterReadings(prev => prev.map((r, i) => {
-      if (isWholeHouse && i === 0) {
-        return {
-          ...r,
-          consumption: waterBillData.totalQuantity,
-          fee: Math.round(waterBillData.totalAmount),
-        };
-      }
-      const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
-      return { ...r, consumption, fee: Math.round(consumption * waterBillData.pricePerM3) };
-    }));
-    setWaterStep('review');
-    return true;
-  };
+  /** Đơn giá 1 m³ admin đã chốt cho kỳ này. 0 khi chưa có hoá đơn nước. */
+  const waterUnitPriceExact = waterBill ? waterUnitPrice(waterBill) : 0;
 
-  const sendWaterInvoices = async () => {
-    if (!waterBillData || !waterProperty) return;
-    const now = todayIso();
-    const period = waterBillData.billingPeriod;
-    const price  = waterBillData.pricePerM3;
+  // Cập nhật 1 phòng trong danh sách chỉ số nước (nhập tay chỉ số cũ / mới).
+  const updateRoomWater = (roomId: string, patch: Partial<RoomMeterReading>) =>
+    setRoomWaterReadings(prev => prev.map(r => (r.roomId === roomId ? { ...r, ...patch } : r)));
 
-    // Bỏ qua phòng đã nhận hoá đơn nước của kỳ này; hết sạch thì báo rõ chứ đừng gọi API
-    // rỗng rồi hiện màn "đã gửi" như chưa có chuyện gì.
-    const pending = roomWaterReadings.filter(r => !waterSentKeys.has(r.roomId));
-    if (!pending.length) {
-      showAlert(
-        'Kỳ này đã gửi rồi',
-        alreadySentReason('WATER', 'Tất cả phòng của nhà này'),
-        undefined,
-        '🔒',
-      );
+  /**
+   * Gửi hoá đơn NƯỚC cho 1 phòng — bản song sinh của `sendSingleRoomElec`.
+   *
+   * Từ 18/08/2026 nước đi đúng luồng của điện: gửi từng phòng ngay tại chỗ thay vì gom
+   * hết rồi bấm "Gửi hoá đơn nước" một lượt. Lý do đổi: gửi cả loạt thì một phòng lỗi
+   * (khách đã nhận kỳ này, chỉ số không hợp lệ) làm cả mẻ dừng giữa chừng, mà manager
+   * không biết phòng nào đã đi phòng nào chưa. Gửi lẻ thì mỗi phòng tự chịu trách nhiệm
+   * và trạng thái hiện ngay trên thẻ phòng đó.
+   */
+  const sendSingleRoomWater = async (roomId: string) => {
+    if (!waterBill || !waterProperty) return;
+    const room = roomWaterReadings.find(r => r.roomId === roomId);
+    if (!room) return;
+    if (blockedFromSending('WATER', room.roomId, `Phòng ${room.roomCode} (${room.tenantName})`)) return;
+    const newVal = Number(room.newReading);
+    if (!newVal || newVal <= room.prevReading) {
+      showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
+    const consumption = roundConsumptionByMentorRule(Math.max(newVal - room.prevReading, 0));
+    const fee         = Math.round(consumption * waterUnitPriceExact);
 
     try {
-      if (waterProperty.type === 'whole_house') {
-        const r = pending[0];
-        await realManagerInvoiceService.createPropertyUtilityInvoice(
-          Number(waterProperty.id),
-          {
-            type: 'WATER', billingPeriod: period,
-            prevReading: r.prevReading,
-            /**
-             * Chỉ số mới = chỉ số cũ + số m³ TRÊN HOÁ ĐƠN, không phải số manager đọc
-             * được ở đồng hồ.
-             *
-             * BE ép `newReading − prevReading == consumption`. Nhà nguyên căn thu theo
-             * tổng m³ của hoá đơn (4 m³) trong khi đồng hồ nhà đọc ra 5 m³ — gửi thẳng
-             * số đọc là BE chặn "Tiêu thụ không khớp". Ghi theo hoá đơn thì mốc chỉ số
-             * các kỳ sau cũng liên tục với cái đã thu tiền, không lệch dần.
-             */
-            newReading: r.prevReading + (r.consumption ?? 0),
-            consumption: r.consumption ?? 0,
-            // Đơn giá suy ngược từ chính 2 số sắp gửi, KHÔNG dùng `price` đã làm tròn:
-            // BE ép `tiêu thụ × đơn giá == thành tiền`. Cùng cách đã xử lý bên điện.
-            unitPrice: (r.consumption ?? 0) > 0 ? (r.fee ?? 0) / (r.consumption ?? 1) : price,
-            amount: r.fee ?? 0,
-            /**
-             * Ảnh gửi kèm là ẢNH HOÁ ĐƠN NƯỚC của admin, không phải ảnh đồng hồ.
-             *
-             * BE bắt buộc có bằng chứng (`ensureMeterPhotoOrOverride`) cho cả điện lẫn
-             * nước. Nhà nguyên căn không đọc đồng hồ nữa nên không có ảnh công tơ — nhưng
-             * hoá đơn của công ty nước MỚI là thứ khách đối chiếu được, đúng như bên điện
-             * đang gửi ảnh hoá đơn EVN. Thiếu dòng này là dính "Chưa có ảnh công tơ kỳ này".
-             */
-            meterImageUrl: waterBill?.imageUrl ?? undefined,
-          },
-        );
-      } else {
-        await Promise.all(pending.map(r =>
-          realManagerInvoiceService.createRoomUtilityInvoice(
-            Number(waterProperty.id), Number(r.roomId),
-            {
-              type: 'WATER', billingPeriod: period,
-              prevReading: r.prevReading, newReading: Number(r.newReading),
-              consumption: r.consumption ?? 0, unitPrice: price, amount: r.fee ?? 0,
-            },
-          ),
-        ));
-      }
-      setWaterSentKeys(prev => new Set([...prev, ...pending.map(r => r.roomId)]));
-      const totalSent = pending.reduce((s, r) => s + (r.fee ?? 0), 0);
-      setHistoryEntries(prev => [{
-        id: `hw-${Date.now()}`, type: 'water',
-        propertyName: waterProperty.name, billingPeriod: period,
-        totalAmount: totalSent, roomCount: pending.length, sentAt: now,
-      }, ...prev]);
+      await realManagerInvoiceService.createRoomUtilityInvoice(
+        Number(waterProperty.id), Number(room.roomId),
+        {
+          type: 'WATER', billingPeriod: waterBill.billingPeriod,
+          prevReading: room.prevReading, newReading: newVal, consumption,
+          // Đơn giá giữ NGUYÊN phần thập phân: BE ép `tiêu thụ × đơn giá == thành tiền`,
+          // đưa số đã làm tròn vào là lệch vài đồng và bị chặn AMOUNT_MISMATCH.
+          unitPrice: waterUnitPriceExact, amount: fee, meterImageUrl: room.meterImageUrl,
+        },
+      );
+      setRoomWaterReadings(prev => prev.map(r =>
+        r.roomId === roomId ? { ...r, consumption, fee, sent: true } : r,
+      ));
+      setWaterSentKeys(prev => new Set(prev).add(room.roomId));
       setUtilReloadKey(k => k + 1);
-      setWaterStep('done');
+      showAlert('Đã gửi', `Hóa đơn nước phòng ${room.roomCode} · ${fmt(fee)} đã gửi cho ${room.tenantName}.`);
     } catch (e: any) {
-      // Cùng lý do với bên điện: BE nói đã có hoá đơn kỳ này thì khoá luôn.
-      if (isAlreadySentError(e)) {
-        setWaterSentKeys(prev => new Set([...prev, ...pending.map(r => r.roomId)]));
-      }
       showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không gửi được hóa đơn nước.');
     }
   };
+
+  /** Gửi nước cho MỌI phòng còn thiếu — bản song sinh của `sendAllUnsent` bên điện. */
+  const sendAllUnsentWater = async () => {
+    if (!waterBill || !waterProperty) return;
+    const targets = roomWaterReadings.filter(
+      r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading,
+    );
+    if (targets.length === 0) {
+      showAlert('Chưa có phòng nào để gửi', 'Nhập chỉ số mới lớn hơn chỉ số cũ trước đã.');
+      return;
+    }
+    for (const room of targets) {
+      // Gửi tuần tự: BE khoá theo (phòng, kỳ) nên bắn song song dễ dính khoá lẫn nhau,
+      // và gửi tuần tự thì lỗi ở phòng nào cũng không ảnh hưởng phòng đã gửi trước đó.
+      await sendSingleRoomWater(room.roomId);
+    }
+  };
+
+  /**
+   * `sendWaterInvoices` (gửi cả loạt) đã xoá 18/08/2026 — thay bằng `sendSingleRoomWater`
+   * + `sendAllUnsentWater`, đúng cách bên điện đang làm.
+   */
+
 
   const resetElec = () => {
     setSelectedPropertyId(null); setEvnBill(null); setEvnBillError(null);
@@ -1022,7 +956,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   // ───────────────────────────── RENDER ──────────────────────────────────────
 
   // Ảnh đồng hồ đã chụp của 1 phòng + nút xoá (ảnh này được gửi kèm hoá đơn nên phải sửa được).
-  const renderMeterPhoto = (r: RoomMeterReading) => {
+  // `utility` để xoá đúng danh sách — điện và nước dùng chung component này.
+  const renderMeterPhoto = (r: RoomMeterReading, utility: MeterUtility = 'elec') => {
     if (!r.meterImageUrl) return null;
     return (
       <View style={styles.meterThumbRow}>
@@ -1035,7 +970,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         </View>
         <TouchableOpacity
           style={styles.meterThumbRemove}
-          onPress={() => clearRoomMeterPhoto(r.roomId)}
+          onPress={() => clearRoomMeterPhoto(r.roomId, utility)}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Text style={styles.meterThumbRemoveText}>🗑 Xoá</Text>
@@ -1070,10 +1005,17 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
     return (
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
-        {/* Nhà nguyên căn chỉ còn 2 bước: hoá đơn EVN của admin đã đủ để gửi cho khách. */}
+        {/*
+          Nguyên căn chỉ còn 2 bước và bước 2 là CHỈ XEM.
+
+          Từ 17/08/2026 admin phát hành hoá đơn nguyên căn là hệ thống gửi thẳng cho khách
+          ngay trong cùng transaction (BE `createFromWholeHouseBill`). Quản lý không còn
+          động tác nào — nhãn cũ "Hóa đơn EVN & Gửi" và nút "⚡ Gửi hóa đơn" là hứa một
+          việc đã có người làm; bấm vào chỉ nhận `INVOICE_ALREADY_EXISTS`.
+        */}
         <StepIndicator
           steps={isWholeHouse
-            ? ['Chọn tòa nhà', 'Hóa đơn EVN & Gửi']
+            ? ['Chọn tòa nhà', 'Hóa đơn đã gửi khách']
             : ['Chọn tòa nhà', 'Hóa đơn EVN', 'Chỉ số phòng', 'Xem trước']}
           current={stepIndex}
         />
@@ -1114,7 +1056,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           const houseSent = elecHouseSent || (!!unit && elecSentKeys.has(unit.roomId));
           return (
             <View>
-              <SectionHeader title={isWholeHouse ? 'Bước 2: Hóa đơn EVN & Gửi' : 'Bước 2: Hóa đơn EVN'} />
+              <SectionHeader title={isWholeHouse ? 'Hóa đơn điện của căn nhà' : 'Bước 2: Hóa đơn EVN'} />
               {selectedProperty && (
                 <View style={styles.infoBanner}>
                   <Text style={styles.infoBannerText}>
@@ -1162,6 +1104,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   </View>
                 ) : (
                   <>
+                    {/* Việc phải làm đứng TRƯỚC số liệu để đọc: quản lý mở màn này là để
+                        biết mình cần làm gì, không phải để ngắm tổng kWh. */}
+                    <MeterTaskBanner bill={evnBill} kind="elec" />
+
                     <View style={styles.evnResult}>
                       <View style={styles.evnResultHeader}>
                         <Text style={styles.evnResultTitle}>Admin đã chốt cho kỳ này</Text>
@@ -1188,7 +1134,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
                     <Text style={styles.cardDesc}>
                       {isWholeHouse
-                        ? 'Nhà nguyên căn: khách trả đúng tổng tiền hóa đơn EVN ở trên, không cần chụp đồng hồ.'
+                        ? 'Hoá đơn này đã được phát hành cho khách thuê ngay khi admin tải lên — '
+                          + 'khách xem và thanh toán trong app của họ. Bạn không cần chụp đồng hồ hay gửi gì; '
+                          + 'mục này để đối chiếu khi khách thắc mắc.'
                         : `Mỗi phòng sẽ tính theo đơn giá ${fmt(elecUnitPrice)}/kWh ở trên. Bước sau bạn chụp đồng hồ từng phòng.`}
                     </Text>
                   </>
@@ -1200,22 +1148,17 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   <Text style={styles.secondaryBtnText}>← Quay lại</Text>
                 </TouchableOpacity>
 
-                {/* Nhà nguyên căn: gửi thẳng ngay tại bước này. Nhà nhiều phòng: sang bước chỉ số. */}
+                {/*
+                  Nguyên căn: KHÔNG có nút gửi nữa. Hệ thống đã gửi cho khách lúc admin phát
+                  hành, nên chỗ này chỉ xác nhận điều đó. Giữ nút gửi lại thì quản lý bấm và
+                  nhận lỗi "hoá đơn đã tồn tại" — trông như app hỏng, trong khi việc đã xong.
+                */}
                 {evnBill && (isWholeHouse ? (
-                  <TouchableOpacity
-                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, (houseSent || sendingWholeHouse) && styles.btnLocked]}
-                    onPress={sendWholeHouseElec}
-                    // Đã gửi thì khoá hẳn, đừng để bấm được rồi mới báo lỗi.
-                    disabled={sendingWholeHouse || houseSent}
-                  >
-                    {sendingWholeHouse
-                      ? <ActivityIndicator color={Colors.white} />
-                      : (
-                        <Text style={styles.sendBtnText}>
-                          {houseSent ? '🔒 Kỳ này đã gửi' : `⚡ Gửi hóa đơn · ${fmt(evnBill.totalAmount)}`}
-                        </Text>
-                      )}
-                  </TouchableOpacity>
+                  <View style={[styles.readonlyNote, { flex: 1, marginLeft: Spacing.sm }]}>
+                    <Text style={styles.readonlyNoteText}>
+                      ✓ Khách đã nhận hoá đơn · {fmt(evnBill.totalAmount)}
+                    </Text>
+                  </View>
                 ) : (
                   <TouchableOpacity
                     style={[styles.primaryBtn, { flex: 1, marginLeft: Spacing.sm }]}
@@ -1306,7 +1249,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                       />
                       <TouchableOpacity
                         style={styles.ocrBtn}
-                        onPress={() => askPhotoSource({ kind: 'meter', roomId: r.roomId })}
+                        onPress={() => askPhotoSource({ kind: 'meter', utility: 'elec', roomId: r.roomId })}
                         disabled={ocrRoomId === r.roomId}
                       >
                         {ocrRoomId === r.roomId
@@ -1386,9 +1329,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
     return (
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
+        {/* Nước đi đúng luồng điện: gửi từng phòng ngay ở bước chỉ số, không còn
+            bước "Xem trước & gửi" gộp cả nhà. */}
         <StepIndicator
-          steps={['Hóa đơn nước', 'Chỉ số phòng', 'Xem trước', 'Gửi']}
-          current={waterStep === 'bill_entry' ? 0 : waterStep === 'room_readings' ? 1 : waterStep === 'review' ? 2 : 3}
+          steps={['Hóa đơn nước', 'Chỉ số phòng']}
+          current={waterStep === 'bill_entry' ? 0 : 1}
         />
 
         {waterPropertyId && (
@@ -1459,6 +1404,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   </TouchableOpacity>
                 </View>
               ) : (
+                <>
+                <MeterTaskBanner bill={waterBill} kind="water" />
                 <View style={styles.evnResult}>
                   <View style={styles.evnResultHeader}>
                     <Text style={styles.evnResultTitle}>Admin đã chốt cho kỳ này</Text>
@@ -1471,19 +1418,38 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   <EVNDataRow label="Đơn giá nước"  value={`${fmt(Math.round(waterUnitPrice(waterBill)))}/m³`} highlight />
                   <EVNDataRow label="Kỳ thanh toán" value={waterBill.billingPeriod} />
                 </View>
+                </>
               )}
             </View>
             )}
 
-            <TouchableOpacity
-              style={[styles.primaryBtn, !waterReady && styles.primaryBtnDisabled]}
-              onPress={handleWaterBillSubmit}
-              disabled={!waterReady}
-            >
-              <Text style={[styles.primaryBtnText, !waterReady && styles.primaryBtnTextDisabled]}>
-                {waterProperty?.type === 'whole_house' ? 'Tiếp theo → Xem trước & gửi' : 'Tiếp theo → Nhập chỉ số phòng'}
-              </Text>
-            </TouchableOpacity>
+            {/*
+              NGUYÊN CĂN: không còn bước nào cho quản lý.
+
+              Từ 17/08/2026 admin phát hành hoá đơn nước nguyên căn là hệ thống gửi thẳng cho
+              khách trong cùng transaction. Nút "Tiếp theo → Xem trước & gửi" cũ dẫn quản lý
+              qua bước ghi chỉ số rồi gửi, mà gửi thì BE trả `INVOICE_ALREADY_EXISTS` —
+              trông như app hỏng dù việc đã xong. Nhà chia phòng giữ nguyên luồng cũ.
+            */}
+            {waterProperty?.type === 'whole_house' ? (
+              waterBill ? (
+                <View style={styles.readonlyNote}>
+                  <Text style={styles.readonlyNoteText}>
+                    ✓ Khách đã nhận hoá đơn nước · {fmt(waterBill.totalAmount)}
+                  </Text>
+                </View>
+              ) : null
+            ) : (
+              <TouchableOpacity
+                style={[styles.primaryBtn, !waterReady && styles.primaryBtnDisabled]}
+                onPress={handleWaterBillSubmit}
+                disabled={!waterReady}
+              >
+                <Text style={[styles.primaryBtnText, !waterReady && styles.primaryBtnTextDisabled]}>
+                  Tiếp theo → Nhập chỉ số phòng
+                </Text>
+              </TouchableOpacity>
+            )}
             {!waterReady && (
               <Text style={styles.helperText}>
                 {!waterPropertyId ? 'Chọn nhà cần chốt sổ để tiếp tục.' : 'Chờ admin phát hành hoá đơn nước của kỳ này.'}
@@ -1492,81 +1458,134 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           </View>
         )}
 
-        {waterStep === 'room_readings' && waterBillData && (
+        {waterStep === 'room_readings' && waterBill && (
           <View>
             <SectionHeader title="Bước 2: Chỉ số nước từng phòng" />
             <View style={styles.infoBanner}>
               <Text style={styles.infoBannerText}>
-                Hóa đơn nước: {fmt(waterBillData.totalAmount)} · {waterBillData.pricePerM3.toLocaleString('vi-VN')}đ/m³ · {waterBillData.billingPeriod}
+                Hóa đơn nước: {waterBill.totalQuantity.toLocaleString('vi-VN')} m³ · {fmt(waterBill.totalAmount)}
+                {' '}· {fmt(Math.round(waterUnitPriceExact))}/m³ · {waterBill.billingPeriod}
               </Text>
             </View>
-            {roomWaterReadings.map((r, idx) => (
-              <View key={r.roomId} style={styles.roomCard}>
-                <Text style={styles.roomCode}>{r.roomCode}</Text>
-                <Text style={styles.roomTenant}>{r.tenantName}</Text>
-                <Text style={styles.prevReading}>Chỉ số cũ ({prevSourceLabel(r.prevSource)}): {r.prevReading} m³</Text>
-                <TextInput style={styles.input} keyboardType="numeric"
-                  placeholder={`Chỉ số mới (> ${r.prevReading})`}
-                  value={r.newReading}
-                  onChangeText={t => setRoomWaterReadings(prev => prev.map((x, i) => i === idx ? { ...x, newReading: decimalDigits(t) } : x))} />
+
+            {/* Tóm tắt tiến trình — giống hệt bên điện */}
+            <View style={styles.progressRow}>
+              <Text style={styles.progressText}>
+                Đã gửi: {roomWaterReadings.filter(r => r.sent).length}/{roomWaterReadings.length} phòng
+              </Text>
+              {roomWaterReadings.some(r => !r.sent && r.newReading && Number(r.newReading) > r.prevReading) && (
+                <TouchableOpacity style={styles.sendAllBtn} onPress={sendAllUnsentWater}>
+                  <Text style={styles.sendAllBtnText}>Gửi tất cả →</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {roomWaterReadings.map(r => (
+              <View key={r.roomId} style={[styles.roomCard, r.sent && styles.roomCardSent]}>
+                <View style={styles.roomCardHeader}>
+                  <View>
+                    <Text style={styles.roomCode}>{r.roomCode}</Text>
+                    <Text style={styles.roomTenant}>{r.tenantName}</Text>
+                  </View>
+                  <View style={[
+                    styles.badge,
+                    r.sent ? styles.badgeSent : r.hasPhoto ? styles.badgeDone : styles.badgePending,
+                  ]}>
+                    <Text style={[styles.badgeText, {
+                      color: r.sent ? Colors.white : r.hasPhoto ? Colors.success : Colors.textMuted,
+                    }]}>
+                      {r.sent ? '✓ Đã gửi' : r.hasPhoto ? 'Có ảnh' : 'Chưa chụp'}
+                    </Text>
+                  </View>
+                </View>
+
+                {r.sent && <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} m³</Text>}
+
+                {r.sent ? (
+                  /* Phòng đã gửi kỳ này: chỉ hiện tóm tắt, không cho gửi lần hai. */
+                  <View style={styles.sentSummary}>
+                    <Text style={styles.sentSummaryText}>
+                      {r.consumption != null
+                        ? `${r.consumption} m³ · ${fmt(r.fee ?? 0)} — đã gửi hóa đơn`
+                        : 'Đã gửi hóa đơn nước của kỳ này'}
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={styles.formLabel}>Chỉ số cũ ({prevSourceLabel(r.prevSource)})</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      placeholder="Nhập chỉ số tháng trước"
+                      value={r.prevReading ? String(r.prevReading) : ''}
+                      onChangeText={t => updateRoomWater(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
+                    />
+                    <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
+                    <View style={styles.readingRow}>
+                      <TextInput
+                        style={[styles.input, { flex: 1, marginRight: Spacing.sm }]}
+                        keyboardType="numeric"
+                        placeholder={`> ${r.prevReading}`}
+                        value={r.newReading}
+                        onChangeText={t => updateRoomWater(r.roomId, { newReading: decimalDigits(t) })}
+                      />
+                      <TouchableOpacity
+                        style={styles.ocrBtn}
+                        onPress={() => askPhotoSource({ kind: 'meter', utility: 'water', roomId: r.roomId })}
+                        disabled={ocrRoomId === r.roomId}
+                      >
+                        {ocrRoomId === r.roomId
+                          ? <ActivityIndicator color={Colors.primary} />
+                          : <Text style={styles.ocrBtnText}>📷 OCR</Text>}
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
+                    {renderMeterPhoto(r, 'water')}
+                    {r.newReading && Number(r.newReading) > r.prevReading && (() => {
+                      const consumption = roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading);
+                      const fee = Math.round(consumption * waterUnitPriceExact);
+                      return (
+                        <>
+                          <View style={styles.calcPreview}>
+                            <Text style={styles.calcPreviewText}>
+                              {consumption} m³ × {fmt(Math.round(waterUnitPriceExact))}/m³ = {fmt(fee)}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.sendRoomBtn}
+                            onPress={() => sendSingleRoomWater(r.roomId)}
+                          >
+                            <Text style={styles.sendRoomBtnText}>
+                              💧 Gửi hóa đơn phòng {r.roomCode} · {fmt(fee)}
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
               </View>
             ))}
+
             <View style={styles.actionRow}>
               <TouchableOpacity style={styles.secondaryBtn} onPress={() => setWaterStep('bill_entry')}>
                 <Text style={styles.secondaryBtnText}>← Quay lại</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.primaryBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={calculateWaterFees}>
-                <Text style={styles.primaryBtnText}>Tính toán & Xem trước →</Text>
-              </TouchableOpacity>
+              {roomWaterReadings.every(r => r.sent) && (
+                <TouchableOpacity style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }]} onPress={() => setWaterStep('done')}>
+                  <Text style={styles.sendBtnText}>Hoàn tất ✓</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
 
-        {waterStep === 'review' && waterBillData && (
-          <View>
-            <SectionHeader title="Bước 3: Xem trước & Xác nhận" />
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Thông tin hóa đơn nước</Text>
-              <EVNDataRow label="Kỳ thanh toán" value={waterBillData.billingPeriod} />
-              <EVNDataRow label="Đơn giá"       value={`${fmt(waterBillData.pricePerM3)}/m³`} />
-              <EVNDataRow label="Tổng tiền"     value={fmt(waterBillData.totalAmount)} highlight />
-            </View>
-            <Text style={styles.sectionLabel}>Phân bổ theo phòng</Text>
-            {roomWaterReadings.map(r => (
-              <View key={r.roomId} style={styles.reviewRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.reviewRoomCode}>{r.roomCode} · {r.tenantName}</Text>
-                  <Text style={styles.reviewDetail}>{r.consumption} m³</Text>
-                </View>
-                <Text style={styles.reviewFee}>{fmt(r.fee ?? 0)}</Text>
-              </View>
-            ))}
-            <View style={styles.reviewTotal}>
-              <Text style={styles.reviewTotalLabel}>Tổng gửi</Text>
-              <Text style={styles.reviewTotalVal}>{fmt(roomWaterReadings.reduce((s, r) => s + (r.fee ?? 0), 0))}</Text>
-            </View>
-            <View style={styles.actionRow}>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={() => setWaterStep('room_readings')}>
-                <Text style={styles.secondaryBtnText}>← Sửa</Text>
-              </TouchableOpacity>
-              {(() => {
-                // Khoá khi MỌI phòng của nhà đã nhận hoá đơn nước kỳ này (1 khách 1 lần/kỳ).
-                const allSent = roomWaterReadings.length > 0
-                  && roomWaterReadings.every(r => waterSentKeys.has(r.roomId));
-                return (
-                  <TouchableOpacity
-                    style={[styles.sendBtn, { flex: 1, marginLeft: Spacing.sm }, allSent && styles.btnLocked]}
-                    onPress={sendWaterInvoices}
-                  >
-                    <Text style={styles.sendBtnText}>
-                      {allSent ? '🔒 Kỳ này đã gửi' : '💧 Gửi hóa đơn nước'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })()}
-            </View>
-          </View>
-        )}
+        {/*
+          Bước "Xem trước & gửi" đã BỎ 18/08/2026 — nước nay gửi từng phòng ngay tại bước
+          chỉ số, đúng như điện. Gộp cả nhà rồi bấm một nút có hai chỗ dở: một phòng lỗi là
+          cả mẻ dừng giữa chừng mà không biết phòng nào đã đi, và nhà nguyên căn thì hoá đơn
+          đã do hệ thống gửi cho khách từ lúc admin phát hành.
+        */}
         <View style={{ height: 80 }} />
       </ScrollView>
     );
@@ -2409,6 +2428,13 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   secondaryBtnText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  // Ô xác nhận CHỈ ĐỌC thay cho nút gửi ở luồng nguyên căn — cao bằng nút để hàng không lệch.
+  readonlyNote: {
+    backgroundColor: '#F0FDF4', borderRadius: BorderRadius.lg, borderWidth: 1,
+    borderColor: '#16A34A33', paddingVertical: 14, paddingHorizontal: Spacing.md,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  readonlyNoteText: { fontSize: 13, fontWeight: '700', color: '#15803D', textAlign: 'center' },
   sendBtn: { backgroundColor: Colors.success, borderRadius: BorderRadius.md, paddingVertical: Spacing.md, alignItems: 'center' },
   sendBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 

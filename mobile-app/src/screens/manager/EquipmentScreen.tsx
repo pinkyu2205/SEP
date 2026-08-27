@@ -7,8 +7,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
+import QRCode from 'react-native-qrcode-svg';
 import { managerPropertyService } from '@/services/manager/propertyService';
-import { realPropertyService, type ApiProperty, type ApiRoom } from '@/services/manager/propertyApi';
+import { type ApiProperty } from '@/services/manager/propertyApi';
 import type {
   EquipmentDto,
   EquipmentLifecycleStatus,
@@ -29,10 +30,8 @@ import {
  *
  * Nguồn dữ liệu hiện tại:
  *   • Nhà      → managerPropertyService.getScopedProperties()  (lọc theo manager đăng nhập)
- *   • Phòng    → GET /api/v1/properties/{id}/rooms             (chỉ để chọn phòng khi thêm)
  *   • Thiết bị → GET /api/v1/properties/{id}/equipments
  *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status-feature
- *   • Thêm     → POST  /api/v1/properties/{id}/equipments
  *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-history-feature
  *
  * Trạng thái dùng thẳng enum EquipmentStatus của BE (6 giá trị) thay vì bộ 5 nhãn cũ
@@ -59,9 +58,6 @@ const SOURCE_LABEL: Record<string, string> = {
   PURCHASED: 'Công ty mua mới',
   ADDED_BY_TENANT: 'Khách lắp thêm',
 };
-
-/** Gợi ý danh mục khi thêm thiết bị — BE nhận chuỗi tự do nên đây chỉ là phím tắt. */
-const CATEGORY_SUGGESTIONS = ['Điện lạnh', 'Điện nước', 'Nội thất', 'Thiết bị', 'Hạ tầng'];
 
 const UNCATEGORIZED = 'Chưa phân loại';
 const COMMON_AREA = 'Khu vực chung';
@@ -131,9 +127,16 @@ const EquipmentDetailModal: React.FC<{
 
   return (
     <Modal transparent animationType="slide" onRequestClose={onClose}>
+      {/*
+        ScrollView phải nằm TRONG khối `content`, không phải bọc ngoài.
+        Bản cũ là overlay → ScrollView → content(maxHeight 92%): phần trăm chiều cao đo
+        theo khung cha, mà cha ở đây là nội dung của ScrollView — vốn cao vô hạn. Nên
+        `maxHeight` không chặn được gì, sheet tràn quá đáy màn hình và ô "Cập nhật trạng
+        thái" cùng "Lịch sử bảo trì" bị cắt mất.
+      */}
       <View style={detailStyles.overlay}>
-        <ScrollView bounces={false}>
-          <View style={detailStyles.content}>
+        <View style={detailStyles.content}>
+          <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
             {/* Header */}
             <View style={detailStyles.header}>
               <Text style={detailStyles.title}>{eqName(item)}</Text>
@@ -163,13 +166,20 @@ const EquipmentDetailModal: React.FC<{
               </View>
             )}
 
-            {/* QR — chỉ hiện khi BE thực sự có mã */}
+            {/*
+              Mã QR THẬT, không phải emoji.
+              Bản cũ vẽ 📱 rồi ghi "Dán mã QR này lên thiết bị" — chẳng có mã nào để dán,
+              chỉ có chuỗi "EQ-251". `react-native-qrcode-svg` đã nằm sẵn trong dự án và
+              đang được dùng ở 3 màn khác (thu tiền, đón khách).
+            */}
             {item.qrCode ? (
               <View style={detailStyles.qrBox}>
-                <Text style={{ fontSize: 40 }}>📱</Text>
+                <View style={detailStyles.qrCanvas}>
+                  <QRCode value={item.qrCode} size={120} backgroundColor="#FFFFFF" />
+                </View>
                 <Text style={detailStyles.qrCode}>{item.qrCode}</Text>
                 <Text style={detailStyles.qrHint}>
-                  Dán mã QR này lên thiết bị để khách scan báo sự cố
+                  In và dán lên thiết bị — khách scan để báo hỏng đúng máy này
                 </Text>
               </View>
             ) : null}
@@ -178,7 +188,8 @@ const EquipmentDetailModal: React.FC<{
             <View style={detailStyles.section}>
               <Text style={detailStyles.sectionTitle}>Chi tiết thiết bị</Text>
               <Row label="Vị trí" value={`${houseName} · ${eqGroup(item, wholeHouse)}`} />
-              <Row label="Danh mục" value={eqCategory(item)} />
+              {/* Chưa phân loại thì bỏ hẳn dòng — in "Chưa phân loại" không cho biết thêm gì. */}
+              {item.category?.trim() ? <Row label="Danh mục" value={item.category.trim()} /> : null}
               {item.houseArea ? <Row label="Khu vực" value={getHouseAreaLabel(item.houseArea)} /> : null}
               {item.source ? <Row label="Nguồn gốc" value={SOURCE_LABEL[item.source] ?? item.source} /> : null}
               {item.price != null ? (
@@ -258,8 +269,8 @@ const EquipmentDetailModal: React.FC<{
             </View>
 
             <View style={{ height: 40 }} />
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       </View>
 
       {/* Chọn trạng thái */}
@@ -337,6 +348,11 @@ const detailStyles = StyleSheet.create({
     backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.xl,
     padding: Spacing.lg, alignItems: 'center', marginBottom: Spacing.lg,
   },
+  /** Nền trắng có đệm quanh mã — máy quét cần vùng trắng viền quanh mới bắt được. */
+  qrCanvas: {
+    backgroundColor: '#FFFFFF', padding: 10, borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.sm,
+  },
   qrCode: { fontSize: 16, fontWeight: '800', color: Colors.primary, marginTop: 4, letterSpacing: 1 },
   qrHint: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm },
   section: { marginBottom: Spacing.lg },
@@ -396,7 +412,6 @@ export const EquipmentScreen: React.FC = () => {
   const [houses, setHouses] = useState<ApiProperty[]>([]);
   const [selectedHouseId, setSelectedHouseId] = useState<number | null>(null);
   const [equipments, setEquipments] = useState<EquipmentDto[]>([]);
-  const [rooms, setRooms] = useState<ApiRoom[]>([]);
 
   const [bootLoading, setBootLoading] = useState(true);
   const [listLoading, setListLoading] = useState(false);
@@ -404,18 +419,13 @@ export const EquipmentScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
+  const [housePickerOpen, setHousePickerOpen] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState<EquipmentLifecycleStatus | 'all'>('all');
   // Lọc sẵn theo phòng vừa bấm — `eqGroup` trả về số phòng nên ô tìm khớp được luôn.
   const [search, setSearch] = useState<string>(() => route?.params?.roomCode ?? '');
   const [selectedItem, setSelectedItem] = useState<EquipmentDto | null>(null);
 
   // Form thêm thiết bị
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newCategory, setNewCategory] = useState(CATEGORY_SUGGESTIONS[2]);
-  const [newCost, setNewCost] = useState('');
-  const [newRoomId, setNewRoomId] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
   const selectedHouse = useMemo(
     () => houses.find((h) => h.id === selectedHouseId) ?? null,
@@ -449,12 +459,10 @@ export const EquipmentScreen: React.FC = () => {
     if (!silent) setListLoading(true);
     setError(null);
     try {
-      const [eqs, rms] = await Promise.all([
-        realEquipmentService.getByProperty(propertyId),
-        realPropertyService.getRooms(propertyId).catch(() => [] as ApiRoom[]),
-      ]);
+      // Bỏ tải danh sách phòng: nó chỉ phục vụ ô chọn phòng của modal thêm thiết bị,
+      // mà modal đó đã gỡ 20/08/2026.
+      const eqs = await realEquipmentService.getByProperty(propertyId);
       setEquipments(eqs ?? []);
-      setRooms(rms ?? []);
     } catch (err) {
       setEquipments([]);
       setError(readApiError(err, 'Không tải được danh sách thiết bị.'));
@@ -463,11 +471,11 @@ export const EquipmentScreen: React.FC = () => {
     }
   }, []);
 
-  // Đổi nhà → nạp lại thiết bị + phòng của nhà đó.
+  // Đổi nhà → nạp lại thiết bị của nhà đó, và bỏ lọc danh mục (danh mục của nhà cũ
+  // thường không tồn tại ở nhà mới, giữ lại là danh sách rỗng không rõ lý do).
   useEffect(() => {
     if (selectedHouseId == null) return;
     setSelectedCategory('Tất cả');
-    setNewRoomId(null);
     loadEquipment(selectedHouseId);
   }, [selectedHouseId, loadEquipment]);
 
@@ -528,34 +536,6 @@ export const EquipmentScreen: React.FC = () => {
     }
   };
 
-  const handleAdd = async () => {
-    if (!newName.trim()) return showAlert('Thiếu thông tin', 'Vui lòng nhập tên thiết bị.');
-    if (!newCategory.trim()) return showAlert('Thiếu thông tin', 'Vui lòng nhập danh mục.');
-    if (selectedHouseId == null) return;
-    if (!isWholeHouse && rooms.length > 0 && newRoomId == null) {
-      return showAlert('Thiếu thông tin', 'Chọn phòng lắp thiết bị, hoặc chọn "Khu vực chung".');
-    }
-
-    setSubmitting(true);
-    try {
-      const cost = Number(newCost.replace(/\D/g, ''));
-      await realEquipmentService.create(selectedHouseId, {
-        equipmentName: newName.trim(),
-        category: newCategory.trim(),
-        cost: Number.isFinite(cost) && cost > 0 ? cost : undefined,
-        roomId: newRoomId ?? undefined,
-      });
-      setShowAddModal(false);
-      setNewName(''); setNewCost(''); setNewRoomId(null);
-      await loadEquipment(selectedHouseId, true);
-      showAlert('Đã thêm thiết bị', `"${newName.trim()}" đã được ghi nhận vào nhà này.`);
-    } catch (err) {
-      showAlert('Không thêm được', readApiError(err, 'Vui lòng thử lại.'));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   // ---------- Trạng thái rỗng toàn màn ----------
   if (bootLoading) {
     return (
@@ -593,60 +573,30 @@ export const EquipmentScreen: React.FC = () => {
             <Text style={styles.subtitle}>Tổng: {equipments.length} thiết bị</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddModal(true)}>
-          <Text style={styles.addBtnText}>+ Thêm</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* Tab nhà */}
-      <View style={styles.houseTabsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.houseTabs}>
-          {houses.map((h) => (
-            <TouchableOpacity
-              key={h.id}
-              style={[styles.houseTab, selectedHouseId === h.id && styles.houseTabActive]}
-              onPress={() => setSelectedHouseId(h.id)}
-            >
-              <Text style={styles.houseEmoji}>{h.wholeHouse ? '🏡' : '🏠'}</Text>
-              <Text
-                style={[styles.houseTabText, selectedHouseId === h.id && styles.houseTabTextActive]}
-                numberOfLines={1}
-              >
-                {h.propertyName}
-              </Text>
-              {h.wholeHouse && (
-                <Text style={[styles.houseTypeMini, selectedHouseId === h.id && styles.houseTypeMiniActive]}>
-                  Nguyên căn
-                </Text>
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Chip trạng thái */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={styles.statusSummaryRow} contentContainerStyle={styles.statusSummaryContent}>
-        {QUICK_FILTERS.map((key) => {
-          const label = key === 'all' ? 'Tất cả' : getEquipmentLifecycleLabel(key);
-          const active = selectedStatus === key;
-          const c = key === 'all' ? null : getEquipmentLifecycleColor(key);
-          const hasIssue = (key === 'MAINTENANCE' || key === 'BROKEN') && statusCounts[key] > 0;
-          return (
-            <TouchableOpacity
-              key={key}
-              style={[styles.statusChip, active && styles.statusChipActive,
-                !active && hasIssue && { borderColor: c!.text }]}
-              onPress={() => setSelectedStatus(key)}
-            >
-              <Text style={[styles.statusChipText, active && styles.statusChipTextActive,
-                !active && hasIssue && { color: c!.text }]}>
-                {label} ({statusCounts[key] ?? 0})
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      {/*
+        Chọn nhà bằng NÚT MỞ DANH SÁCH, không phải thanh chip cuộn ngang.
+        Chip cũ vừa cắt cụt tên ("MTX#102 NGUYE…" — mà tên nhà là thứ duy nhất phân biệt
+        chúng), vừa giấu các nhà phía sau ngoài mép phải mà không có dấu hiệu gì. Đây cũng
+        không phải bộ lọc — nó chọn PHẠM VI đang xem, khác hẳn hai nhóm chip bên dưới.
+      */}
+      <TouchableOpacity
+        style={styles.housePicker}
+        onPress={() => setHousePickerOpen(true)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.houseEmoji}>{selectedHouse?.wholeHouse ? '🏡' : '🏠'}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.housePickerName} numberOfLines={1}>
+            {selectedHouse?.propertyName ?? 'Chọn nhà'}
+          </Text>
+          <Text style={styles.housePickerHint}>
+            {selectedHouse?.wholeHouse ? 'Nguyên căn' : 'Chia phòng'} · {houses.length} nhà phụ trách
+          </Text>
+        </View>
+        <Text style={styles.housePickerCaret}>▾</Text>
+      </TouchableOpacity>
 
       {/* Tìm kiếm */}
       <View style={styles.searchContainer}>
@@ -659,20 +609,50 @@ export const EquipmentScreen: React.FC = () => {
         />
       </View>
 
-      {/* Lọc danh mục — ẩn khi nhà chỉ có 1 danh mục, chip lúc đó vô nghĩa */}
+      {/* Hai nhóm chip đều `flexWrap` — không chip nào bị khuất ngoài mép nữa. */}
+      <View style={styles.filterGroup}>
+        <Text style={styles.filterGroupLabel}>Trạng thái</Text>
+        <View style={styles.chipWrap}>
+          {QUICK_FILTERS.map((key) => {
+            const label = key === 'all' ? 'Tất cả' : getEquipmentLifecycleLabel(key);
+            const active = selectedStatus === key;
+            const c = key === 'all' ? null : getEquipmentLifecycleColor(key);
+            const n = statusCounts[key] ?? 0;
+            const hasIssue = (key === 'MAINTENANCE' || key === 'BROKEN') && n > 0;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.statusChip, active && styles.statusChipActive,
+                  !active && hasIssue && { borderColor: c!.text },
+                  !active && n === 0 && styles.chipEmpty]}
+                onPress={() => setSelectedStatus(key)}
+              >
+                <Text style={[styles.statusChipText, active && styles.statusChipTextActive,
+                  !active && hasIssue && { color: c!.text }]}>
+                  {label} ({n})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* Ẩn khi nhà chỉ có 1 danh mục — lúc đó chip không lọc được gì. */}
       {categories.length > 2 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-          {categories.map((cat) => (
-            <TouchableOpacity
-              key={cat}
-              style={[styles.filterChip, selectedCategory === cat && styles.filterChipActive]}
-              onPress={() => setSelectedCategory(cat)}
-            >
-              <Text style={[styles.filterText, selectedCategory === cat && styles.filterTextActive]}>{cat}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <View style={styles.filterGroup}>
+          <Text style={styles.filterGroupLabel}>Danh mục</Text>
+          <View style={styles.chipWrap}>
+            {categories.map((cat) => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.filterChip, selectedCategory === cat && styles.filterChipActive]}
+                onPress={() => setSelectedCategory(cat)}
+              >
+                <Text style={[styles.filterText, selectedCategory === cat && styles.filterTextActive]}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       )}
 
       {/* Danh sách theo phòng */}
@@ -724,9 +704,20 @@ export const EquipmentScreen: React.FC = () => {
                             </View>
                           )}
                         </View>
+                        {/*
+                          Ưu tiên MÃ QR — đó là mã dán trên máy, manager đối chiếu được
+                          bằng mắt. `eq.id` là khoá chính trong DB, không có nghĩa với người
+                          dùng; chỉ dùng khi thiết bị chưa có mã QR.
+
+                          Danh mục chỉ hiện khi ĐÃ phân loại: chưa nhập thì mọi dòng đều in
+                          "Chưa phân loại" — lặp y hệt nhau nên không phân biệt được gì.
+                        */}
                         <Text style={styles.eqAssetId}>
-                          #{eq.id} · {eqCategory(eq)}
-                          {eq.operationalStatus === 'DISABLED' ? ' · Đã gỡ' : ''}
+                          {[
+                            eq.qrCode?.trim() || `#${eq.id}`,
+                            eq.category?.trim(),
+                            eq.operationalStatus === 'DISABLED' ? 'Đã gỡ' : null,
+                          ].filter(Boolean).join(' · ')}
                         </Text>
                         {eq.maintenanceCount > 0 && (
                           <Text style={styles.eqMaint}>🔧 Đã bảo trì {eq.maintenanceCount} lần</Text>
@@ -763,116 +754,45 @@ export const EquipmentScreen: React.FC = () => {
         />
       )}
 
-      {/* Thêm thiết bị */}
-      {showAddModal && (
-        <Modal transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
-          <View style={styles.modalOverlay}>
-            <ScrollView bounces={false} keyboardShouldPersistTaps="handled">
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>Thêm thiết bị mới</Text>
-                <Text style={styles.modalSubtitle}>
-                  {selectedHouse?.propertyName}{isWholeHouse ? ' · Nhà nguyên căn' : ''}
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Tên thiết bị *</Text>
-                  <TextInput
-                    style={styles.input} value={newName} onChangeText={setNewName}
-                    placeholder="Điều hòa Daikin 9000BTU..."
-                    placeholderTextColor={Colors.textMuted}
-                  />
-                </View>
-
-                {!isWholeHouse && rooms.length > 0 && (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Lắp ở đâu? *</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <View style={styles.categoryRow}>
-                        <TouchableOpacity
-                          style={[styles.catChip, newRoomId === null && styles.catChipActive]}
-                          onPress={() => setNewRoomId(null)}
-                        >
-                          <Text style={[styles.catChipText, newRoomId === null && { color: Colors.white }]}>
-                            {COMMON_AREA}
-                          </Text>
-                        </TouchableOpacity>
-                        {rooms.map((r) => (
-                          <TouchableOpacity
-                            key={r.id}
-                            style={[styles.catChip, newRoomId === r.id && styles.catChipActive]}
-                            onPress={() => setNewRoomId(r.id)}
-                          >
-                            <Text style={[styles.catChipText, newRoomId === r.id && { color: Colors.white }]}>
-                              {r.roomNumber}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
+      {/* Chọn nhà — thay cho thanh chip cuộn ngang, hiện đủ tên và không giấu nhà nào */}
+      {housePickerOpen && (
+        <Modal transparent animationType="fade" onRequestClose={() => setHousePickerOpen(false)}>
+          <TouchableOpacity
+            style={styles.pickerBackdrop}
+            activeOpacity={1}
+            onPress={() => setHousePickerOpen(false)}
+          >
+            <View style={styles.pickerSheet}>
+              <Text style={styles.pickerTitle}>Chọn nhà ({houses.length})</Text>
+              <ScrollView bounces={false} style={{ maxHeight: 380 }}>
+                {houses.map((h) => {
+                  const active = h.id === selectedHouseId;
+                  return (
+                    <TouchableOpacity
+                      key={h.id}
+                      style={[styles.pickerRow, active && styles.pickerRowActive]}
+                      onPress={() => { setSelectedHouseId(h.id); setHousePickerOpen(false); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.houseEmoji}>{h.wholeHouse ? '🏡' : '🏠'}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.pickerRowName, active && styles.pickerRowNameActive]} numberOfLines={2}>
+                          {h.propertyName}
+                        </Text>
+                        <Text style={styles.pickerRowType}>
+                          {h.wholeHouse ? 'Nguyên căn' : 'Chia phòng'}
+                        </Text>
                       </View>
-                    </ScrollView>
-                  </View>
-                )}
-
-                {isWholeHouse && (
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Vị trí</Text>
-                    <Text style={styles.wholeHouseLocationHint}>Gắn trực tiếp với toàn bộ nhà nguyên căn</Text>
-                  </View>
-                )}
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Danh mục *</Text>
-                  <TextInput
-                    style={styles.input} value={newCategory} onChangeText={setNewCategory}
-                    placeholder="Điện lạnh, Nội thất..."
-                    placeholderTextColor={Colors.textMuted}
-                  />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
-                    <View style={styles.categoryRow}>
-                      {CATEGORY_SUGGESTIONS.map((c) => (
-                        <TouchableOpacity
-                          key={c}
-                          style={[styles.catChip, newCategory === c && styles.catChipActive]}
-                          onPress={() => setNewCategory(c)}
-                        >
-                          <Text style={[styles.catChipText, newCategory === c && { color: Colors.white }]}>{c}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </ScrollView>
-                </View>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.label}>Chi phí mua (không bắt buộc)</Text>
-                  <TextInput
-                    style={styles.input} value={newCost} onChangeText={setNewCost}
-                    keyboardType="numeric" placeholder="8500000"
-                    placeholderTextColor={Colors.textMuted}
-                  />
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: Spacing.md, marginTop: Spacing.lg }}>
-                  <TouchableOpacity
-                    style={[styles.cancelBtn, { flex: 1 }]}
-                    disabled={submitting}
-                    onPress={() => setShowAddModal(false)}
-                  >
-                    <Text style={styles.cancelBtnText}>Hủy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.submitBtn, { flex: 2 }, submitting && { opacity: 0.6 }]}
-                    disabled={submitting}
-                    onPress={handleAdd}
-                  >
-                    {submitting
-                      ? <ActivityIndicator size="small" color={Colors.white} />
-                      : <Text style={styles.submitBtnText}>Thêm thiết bị</Text>}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </ScrollView>
-          </View>
+                      {active && <Text style={styles.pickerCheck}>✓</Text>}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </TouchableOpacity>
         </Modal>
       )}
+
     </SafeAreaView>
   );
 };
@@ -888,19 +808,49 @@ const styles = StyleSheet.create({
   backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  addBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.lg },
-  addBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
-  houseTabsContainer: { borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white },
-  houseTabs: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md, gap: Spacing.md },
-  houseTab: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.background, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, gap: 6, maxWidth: 240 },
-  houseTabActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
   houseEmoji: { fontSize: 16 },
-  houseTabText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, flexShrink: 1 },
-  houseTabTextActive: { color: Colors.primary },
-  houseTypeMini: { fontSize: 10, fontWeight: '700', color: '#D97706', backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: BorderRadius.full },
-  houseTypeMiniActive: { backgroundColor: Colors.white, color: Colors.primary },
-  statusSummaryRow: { maxHeight: 46 },
-  statusSummaryContent: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, gap: Spacing.sm },
+
+  // ── Chọn nhà ────────────────────────────────────────────────────────────
+  housePicker: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginHorizontal: Spacing.lg, marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md, paddingVertical: 10,
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.primary + '40',
+  },
+  housePickerName: { fontSize: 14, fontWeight: '800', color: Colors.primary },
+  housePickerHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  housePickerCaret: { fontSize: 16, color: Colors.primary, fontWeight: '800' },
+
+  pickerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  pickerSheet: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
+    padding: Spacing.lg, paddingBottom: Spacing.xl,
+  },
+  pickerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.md },
+  pickerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: 12, paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg, marginBottom: 6,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  pickerRowActive: { backgroundColor: Colors.primaryBg, borderColor: Colors.primary },
+  pickerRowName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  pickerRowNameActive: { color: Colors.primary },
+  pickerRowType: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  pickerCheck: { fontSize: 16, fontWeight: '800', color: Colors.primary },
+
+  // ── Nhóm chip lọc ───────────────────────────────────────────────────────
+  filterGroup: { paddingHorizontal: Spacing.lg, marginTop: Spacing.sm },
+  filterGroupLabel: {
+    fontSize: 10, fontWeight: '800', color: Colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6,
+  },
+  /** Chip rộng theo nội dung + tự xuống dòng — không có tỉ lệ nào để tính sai. */
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
+  /** Lọc ra 0 kết quả → làm nhạt cho khỏi mất công bấm thử. */
+  chipEmpty: { opacity: 0.45 },
   statusChip: { paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border },
   statusChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   statusChipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
@@ -942,17 +892,12 @@ const styles = StyleSheet.create({
   eqStatusText: { fontSize: 11, fontWeight: '600' },
   eqWarranty: { fontSize: 10, color: Colors.textMuted },
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.xl, paddingBottom: 40 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
   modalSubtitle: { fontSize: 13, color: Colors.textSecondary, marginBottom: Spacing.lg, marginTop: 2 },
   inputGroup: { marginBottom: Spacing.md },
   label: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4 },
   input: { backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md, padding: Spacing.md, fontSize: 15, color: Colors.textPrimary },
   categoryRow: { flexDirection: 'row', gap: Spacing.sm },
-  catChip: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full, backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border },
-  catChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  catChipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   cancelBtn: { backgroundColor: Colors.background, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
   cancelBtnText: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
   submitBtn: { backgroundColor: Colors.primary, padding: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', justifyContent: 'center', minHeight: 48 },

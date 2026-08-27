@@ -10,6 +10,7 @@ import type { PropertyResponse, UserResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import { Overlay } from '@/components/Overlay';
 import { zoneAssignmentService } from '@/services/zoneAssignment.service';
+import { hostService } from '@/services/host.service';
 import { STATUS_BADGE, typeLabel } from '@/pages/host/properties/propertyListState';
 import {
   groupByZone, isAssignable, loadByManager, previewAssign, unitsOf,
@@ -31,6 +32,80 @@ const nameOf = (m: ManagerItem) => m.fullName || m.username;
 
 /** Tài khoản không ở trạng thái này thì không vận hành được — cần báo động. */
 const isUsableAccount = (u?: UserResponse) => !u || u.status === 'ACTIVE';
+
+/**
+ * Khu vực "có quản lý nhưng chưa đăng ký phân công".
+ *
+ * Nhà trong khu vực đang mang `operationManagerId` (nên FE hiển thị là đã có quản lý),
+ * nhưng bảng `zone_managers` phía BE lại KHÔNG có bản ghi cho khu vực đó — thường do các
+ * nhà này được gán lẻ từng căn qua `PATCH /properties/{id}/operation-manager`, đường đó
+ * không ghi vào bảng phân công.
+ *
+ * Hệ quả người dùng gặp phải: lúc host duyệt một nhà mới, BE tra đúng bảng đó để tự gán
+ * (`PropertyOnboardingServiceImpl.hostConfirm`). Không có bản ghi → nhà rơi vào
+ * "Chờ gán quản lý" dù khu vực nhìn như đã có người phụ trách.
+ *
+ * Cách chữa: bấm "Gán quản lý" một lần — `PUT /zones/{zoneId}/manager` ghi bản ghi thật.
+ */
+const hasRegistryGap = (group: ZoneGroup, registered: Set<string>, known: boolean): boolean =>
+  known && !!group.managerId && !registered.has(group.zoneId);
+
+/** Hợp đồng còn hiệu lực của một nhà, tách theo trạng thái. */
+type ContractLoad = { active: number; pending: number; draft: number };
+
+/** Bán kính ảnh hưởng thật của việc gỡ quản lý khỏi một khu vực. */
+interface RemovalImpact {
+  /** Nhà đổi/gỡ được — số này sẽ rớt về "chờ gán quản lý". */
+  assignable: PropertyResponse[];
+  /** Nhà còn hợp đồng chưa kết thúc — nhà có việc dở dang gắn với người phụ trách. */
+  liveProperties: PropertyResponse[];
+  /** HĐ đang có khách ở. */
+  active: number;
+  /** HĐ đã chốt, khách chưa dọn vào — vẫn cần người phụ trách. */
+  pending: number;
+  /** HĐ "Chờ đón khách" — admin đã nhập, đang chờ đúng manager này đi onboard. */
+  draft: number;
+  /** Còn bất kỳ HĐ nào chưa kết thúc → cấm gỡ, bắt buộc đổi sang người khác. */
+  blocked: boolean;
+}
+
+/**
+ * Tính bán kính ảnh hưởng từ SỐ HỢP ĐỒNG THẬT, không đoán qua `property.status`.
+ *
+ * Nhà chia phòng đang có khách vẫn mang status `ACTIVE` (chỉ từng phòng mới `RENTED`),
+ * nên lọc theo status sẽ bỏ sót đúng loại nhà đông khách nhất.
+ *
+ * `known = false` (chưa tải được hợp đồng) → coi như KHÔNG an toàn: không chặn cứng
+ * nhưng cũng không được nói "khu vực không có khách nào".
+ *
+ * DRAFT cũng chặn, không chỉ ACTIVE/PENDING: HĐ "Chờ đón khách" là việc admin đã nhập và
+ * giao cho đúng manager này đi onboard. Gỡ người đó thì hợp đồng vẫn còn nguyên ngày nhận
+ * nhà mà không còn ai đi đón. BE cũng xoá `assignedManager` của mọi HĐ khác TERMINATED
+ * (`removeAssignedManagerByZoneId`) chứ không riêng HĐ đang ở.
+ */
+const removalImpact = (
+  group: ZoneGroup,
+  load: Map<number, ContractLoad>,
+  known: boolean,
+): RemovalImpact => {
+  const assignable = group.properties.filter(isAssignable);
+  let active = 0, pending = 0, draft = 0;
+  const liveProperties: PropertyResponse[] = [];
+
+  for (const p of assignable) {
+    const c = load.get(p.id);
+    if (!c) continue;
+    active += c.active;
+    pending += c.pending;
+    draft += c.draft;
+    if (c.active + c.pending + c.draft > 0) liveProperties.push(p);
+  }
+
+  return {
+    assignable, liveProperties, active, pending, draft,
+    blocked: known && active + pending + draft > 0,
+  };
+};
 
 type StateFilter = 'all' | ZoneState;
 type SortKey = 'todo' | 'properties' | 'units' | 'name';
@@ -133,9 +208,11 @@ const ManagerCard = ({ managerId, managerName, user, load }: {
 
 // ── Hộp chọn quản lý cho một khu vực ─────────────────────────────────────────
 const AssignModal = ({
-  group, managers, userMap, loads, mgrNames, onClose, onDone,
+  group, allGroups, managers, userMap, loads, mgrNames, onClose, onDone,
 }: {
   group: ZoneGroup;
+  /** Mọi khu vực — cần để biết người được chọn đang giữ những khu vực nào khác. */
+  allGroups: ZoneGroup[];
   managers: ManagerItem[];
   userMap: Map<string, UserResponse>;
   loads: Map<string, ManagerLoad>;
@@ -145,6 +222,14 @@ const AssignModal = ({
 }) => {
   const [picked, setPicked] = useState<string>(group.managerId ?? '');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /**
+   * Có tick = "chuyển hẳn": gán sang khu vực này XONG thì gỡ người đó khỏi khu vực cũ.
+   * Không tick = "kiêm nhiệm" (hành vi mặc định của hệ thống) — người đó giữ cả hai.
+   *
+   * Đây là chỗ hay hiểu nhầm nhất màn này: nút ghi "Đổi quản lý" nhưng thực chất chỉ đổi
+   * chủ của KHU VỰC ĐANG MỞ, không hề đụng tới khu vực cũ của người được chọn.
+   */
+  const [alsoReleaseOldZones, setAlsoReleaseOldZones] = useState(false);
 
   const preview = useMemo(() => (picked ? previewAssign(group, picked) : null), [group, picked]);
   const pickedManager = managers.find((m) => m.id === picked);
@@ -167,6 +252,24 @@ const AssignModal = ({
   const changeCount = preview ? preview.fresh.length + preview.handover.length : 0;
   const busy = progress !== null;
 
+  /** Các khu vực KHÁC mà người được chọn đang giữ — nền cho tick "chuyển hẳn". */
+  const otherZonesOfPicked = useMemo(
+    () => (picked ? allGroups.filter((g) => g.zoneId !== group.zoneId && g.managerId === picked) : []),
+    [allGroups, group.zoneId, picked],
+  );
+
+  /** Quản lý hiện tại của khu vực này — người sắp bị thay ra. */
+  const outgoingId = group.managerId;
+  const outgoingZonesAfter = useMemo(
+    () => (outgoingId && outgoingId !== picked
+      ? allGroups.filter((g) => g.zoneId !== group.zoneId && g.managerId === outgoingId).length
+      : null),
+    [allGroups, group.zoneId, outgoingId, picked],
+  );
+
+  const nameById = (id?: string) =>
+    (id ? (mgrNames.get(id) || managers.find((m) => m.id === id)?.username || '—') : '—');
+
   /**
    * MỘT lệnh cho cả khu vực. Bản trước gọi lặp `PATCH /properties/{id}/operation-manager`
    * cho từng nhà vì BE chưa có API gán theo lô — chết giữa chừng là khu vực nửa nạc nửa mỡ.
@@ -175,12 +278,25 @@ const AssignModal = ({
    */
   const handleApply = async () => {
     if (!preview || !pickedManager || changeCount === 0) return;
+    const toRelease = alsoReleaseOldZones ? otherZonesOfPicked : [];
     setProgress({ done: 0, total: changeCount });
     try {
-      const res = await zoneAssignmentService.assign(group.zoneId, pickedManager.id);
+      // MỘT lệnh cho cả hai việc: gán sang khu vực này + gỡ khỏi các khu vực cũ.
+      // BE chạy trong một transaction (POST /zones/manager-transfer, 19/08/2026) nên không
+      // còn cảnh gán xong mà gỡ hỏng, để người đó vừa nhận chỗ mới vừa ôm chỗ cũ.
+      const res = toRelease.length > 0
+        ? await zoneAssignmentService.transfer(
+          pickedManager.id, group.zoneId, toRelease.map((z) => z.zoneId))
+        : await zoneAssignmentService.assign(group.zoneId, pickedManager.id);
+
       const parts = [`${res.affectedProperties} nhà`];
       if (res.affectedContracts > 0) parts.push(`${res.affectedContracts} hợp đồng`);
       toast.success(`Đã gán ${nameOf(pickedManager)} cho ${group.zoneName} — ${parts.join(' · ')}.`);
+      if (toRelease.length > 0) {
+        toast.success(
+          `Đã gỡ khỏi ${toRelease.map((z) => z.zoneName).join(', ')} — các khu vực này giờ chưa có quản lý.`,
+        );
+      }
       onDone();
     } catch (e: any) {
       const data = e?.response?.data;
@@ -275,6 +391,78 @@ const AssignModal = ({
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* ── AI GIỮ KHU VỰC NÀO SAU KHI GÁN ────────────────────────────────
+              Phần xem trước bên dưới chỉ nói theo NHÀ. Nhưng hiểu nhầm lớn nhất của màn này
+              nằm ở cấp KHU VỰC: "Đổi quản lý" chỉ đổi chủ của khu vực đang mở, khu vực cũ
+              của người được chọn KHÔNG bị đụng tới — nên họ thành kiêm nhiệm, còn người bị
+              thay ra có thể về 0 khu vực. Bảng này nói thẳng ra điều đó trước khi bấm. */}
+          {picked && (outgoingId !== picked) && (
+            <div className="mt-5 rounded-xl border border-slate-200 p-4">
+              <p className="mb-2.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                Sau khi gán, ai giữ khu vực nào
+              </p>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-start justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2">
+                  <span className="min-w-0">
+                    <b className="text-emerald-800">{pickedManager ? nameOf(pickedManager) : 'Người được chọn'}</b>
+                    <span className="text-emerald-700"> nhận {group.zoneName}</span>
+                  </span>
+                  <span className="shrink-0 font-bold text-emerald-800">
+                    {otherZonesOfPicked.length > 0 && !alsoReleaseOldZones
+                      ? `${otherZonesOfPicked.length + 1} khu vực`
+                      : '1 khu vực'}
+                  </span>
+                </div>
+
+                {otherZonesOfPicked.length > 0 && (
+                  <p className={`px-3 ${alsoReleaseOldZones ? 'text-slate-400 line-through' : 'text-amber-700'}`}>
+                    {alsoReleaseOldZones ? 'Sẽ rời' : 'Vẫn giữ thêm'}: {otherZonesOfPicked.map((z) => z.zoneName).join(', ')}
+                    {!alsoReleaseOldZones && ' — sẽ kiêm nhiệm nhiều khu vực'}
+                  </p>
+                )}
+
+                {outgoingId && (
+                  <div className="flex items-start justify-between gap-3 rounded-lg bg-rose-50 px-3 py-2">
+                    <span className="min-w-0">
+                      <b className="text-rose-800">{nameById(outgoingId)}</b>
+                      <span className="text-rose-700"> mất {group.zoneName}</span>
+                    </span>
+                    <span className="shrink-0 font-bold text-rose-800">
+                      {outgoingZonesAfter === 0 ? 'còn 0 khu vực' : `còn ${outgoingZonesAfter} khu vực`}
+                    </span>
+                  </div>
+                )}
+
+                {outgoingZonesAfter === 0 && (
+                  <p className="px-3 text-slate-500">
+                    {nameById(outgoingId)} sẽ không còn khu vực nào — nhớ gán việc khác cho họ.
+                  </p>
+                )}
+              </div>
+
+              {/* Biến "kiêm nhiệm" thành "chuyển hẳn" bằng một tick, khỏi cần chế độ riêng */}
+              {otherZonesOfPicked.length > 0 && (
+                <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={alsoReleaseOldZones}
+                    onChange={(e) => setAlsoReleaseOldZones(e.target.checked)}
+                    disabled={busy}
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-slate-600">
+                    <b className="text-slate-800">Đồng thời gỡ khỏi {otherZonesOfPicked.length} khu vực cũ</b>{' '}
+                    ({otherZonesOfPicked.map((z) => z.zoneName).join(', ')}) — chuyển hẳn thay vì kiêm nhiệm.
+                    <span className="mt-0.5 block text-amber-700">
+                      Các khu vực đó sẽ thành <b>chưa có quản lý</b>, nhà rớt về &quot;chờ gán&quot; và hợp đồng
+                      mất người phụ trách cho tới khi bạn gán người mới.
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -411,8 +599,223 @@ const AssignModal = ({
   );
 };
 
+/**
+ * Hộp xác nhận GỠ quản lý khỏi khu vực.
+ *
+ * Cố tình dựng riêng thay vì `window.confirm`: hậu quả nặng hơn vẻ ngoài của một nút gỡ và
+ * phải nói ra bằng số trước khi bấm — BE sẽ đẩy nhà từ ACTIVE về "chờ gán" và xoá người
+ * phụ trách khỏi MỌI hợp đồng chưa chấm dứt, gồm cả hợp đồng đang có khách ở.
+ */
+const RemoveManagerModal = ({ group, mgrNames, impact, contractsKnown, registryGap, onClose, onDone, onSwitchToAssign }: {
+  group: ZoneGroup;
+  mgrNames: Map<string, string>;
+  impact: RemovalImpact;
+  contractsKnown: boolean;
+  /** Khu vực chưa có bản ghi phân công ở BE → API gỡ sẽ trả 404, phải đăng ký trước. */
+  registryGap: boolean;
+  onClose: () => void;
+  onDone: () => void;
+  /** Chuyển sang hộp "Đổi quản lý" — lối đi đúng khi khu vực đang có khách thuê. */
+  onSwitchToAssign: () => void;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [ack, setAck] = useState(false);
+
+  const managerName = group.managerName || mgrNames.get(group.managerId ?? '') || 'Quản lý hiện tại';
+  const { assignable, liveProperties, active, pending, draft } = impact;
+  /**
+   * Chưa đăng ký phân công thì cũng không gỡ được: `DELETE /zones/{id}/manager` tra
+   * `zone_managers` trước tiên, không có bản ghi là ném 404
+   * *"Zone manager assignment not found for zone: ..."*. Chặn từ đây cho khỏi đâm vào lỗi
+   * tiếng Anh khó hiểu.
+   */
+  const blocked = impact.blocked || registryGap;
+
+  const handleRemove = async () => {
+    setBusy(true);
+    try {
+      await zoneAssignmentService.remove(group.zoneId);
+      toast.success(`Đã gỡ ${managerName} khỏi ${group.zoneName}. Khu vực này giờ chưa có quản lý.`);
+      onDone();
+    } catch (e: any) {
+      const data = e?.response?.data;
+      const raw = data?.message || data?.error || e?.message || '';
+      // BE ném nguyên văn tiếng Anh khi bảng `zone_managers` không có bản ghi cho khu vực.
+      const msg = /Zone manager assignment not found/i.test(raw)
+        ? `${group.zoneName} chưa được đăng ký phân công nên không có gì để gỡ. Bấm "Gán quản lý" một lần để đăng ký trước.`
+        : raw || 'Không gỡ được quản lý.';
+      toast.error(msg, { duration: 6000 });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+        <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="border-b border-slate-100 px-6 py-5">
+            <p className={`text-xs font-bold uppercase tracking-wide ${blocked ? 'text-slate-400' : 'text-rose-500'}`}>
+              Gỡ quản lý khỏi khu vực
+            </p>
+            <h2 className="mt-1 flex items-center gap-2 text-lg font-extrabold text-slate-950">
+              <MapPin className={`h-5 w-5 ${blocked ? 'text-slate-400' : 'text-rose-500'}`} />
+              {group.zoneName}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Đang do <b className="text-slate-700">{managerName}</b> phụ trách
+              {assignable.length > 0 && <> · {assignable.length} nhà</>}
+            </p>
+          </div>
+
+          {registryGap ? (
+            /* ── Chưa đăng ký phân công → API gỡ không có gì để xoá ──────── */
+            <div className="space-y-3 px-6 py-5">
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <p className="flex items-center gap-2 text-sm font-black text-amber-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Chưa gỡ được — khu vực chưa đăng ký
+                  phân công
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-amber-800">
+                  {assignable.length > 0 && <><b>{assignable.length} nhà</b> ở đây đang mang tên {managerName}, </>}
+                  nhưng đó là do gán lẻ từng căn — <b>khu vực chưa hề có bản ghi phân công</b>, nên
+                  không có gì để gỡ ở cấp khu vực.
+                </p>
+              </div>
+
+              <p className="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-xs leading-relaxed text-slate-600">
+                Bấm <b className="text-slate-800">&quot;Gán quản lý&quot;</b> một lần để đăng ký khu vực
+                (chọn lại chính {managerName} cũng được). Sau đó nút Gỡ mới dùng được, và nhà mới
+                host duyệt cũng sẽ tự vào tay quản lý.
+              </p>
+            </div>
+          ) : blocked ? (
+            /* ── Còn khách / khách đã chốt → không cho gỡ ────────────────── */
+            <div className="space-y-3 px-6 py-5">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                <p className="flex items-center gap-2 text-sm font-black text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Không gỡ được — còn {active + pending + draft} hợp
+                  đồng chưa kết thúc
+                </p>
+                <ul className="mt-2 space-y-1 text-xs leading-relaxed text-rose-800">
+                  {active > 0 && (
+                    <li>• <b>{active} hợp đồng đang có khách ở</b> — cần người xử lý sửa chữa, hoá đơn, trả phòng.</li>
+                  )}
+                  {pending > 0 && (
+                    <li>• <b>{pending} hợp đồng đã chốt</b>, khách chưa dọn vào.</li>
+                  )}
+                  {draft > 0 && (
+                    <li>• <b>{draft} hợp đồng chờ đón khách</b> — {managerName} đang được giao đi onboard.</li>
+                  )}
+                </ul>
+                {liveProperties.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 border-t border-rose-200/70 pt-2">
+                    {liveProperties.slice(0, 4).map((p) => (
+                      <li key={p.id} className="truncate text-xs text-rose-700">· {p.propertyName}</li>
+                    ))}
+                    {liveProperties.length > 4 && (
+                      <li className="text-xs text-rose-600">· và {liveProperties.length - 4} nhà nữa</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+
+              <p className="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-xs leading-relaxed text-slate-600">
+                Gỡ quản lý sẽ xoá người phụ trách khỏi <b>tất cả</b> hợp đồng trên — kể cả hợp đồng
+                mới nhập chờ đón khách, khiến không còn ai đi nhận khách đúng hẹn. Hãy{' '}
+                <b className="text-slate-800">đổi sang quản lý khác</b>: hợp đồng chuyển thẳng sang
+                người mới, không việc nào bị bỏ rơi.
+              </p>
+            </div>
+          ) : (
+            /* ── Không còn khách → cho gỡ, chỉ nêu đúng thứ có thật ──────── */
+            <div className="space-y-3 px-6 py-5">
+              {assignable.length > 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="flex items-center gap-2 text-sm font-black text-amber-800">
+                    <AlertTriangle className="h-4 w-4 shrink-0" /> Gỡ xong sẽ kéo theo
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs leading-relaxed text-amber-800">
+                    <li>
+                      • <b>{assignable.length} nhà</b> rớt về trạng thái <b>chờ gán quản lý</b> cho tới
+                      khi bạn gán người mới.
+                    </li>
+                    {contractsKnown && (
+                      <li className="text-amber-700">
+                        • Khu vực <b>không còn hợp đồng nào chưa kết thúc</b> nên không ảnh hưởng
+                        khách thuê hay việc đón khách nào.
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+                  Khu vực chưa có nhà nào đang khai thác — gỡ quản lý không ảnh hưởng gì.
+                </p>
+              )}
+
+              {!contractsKnown && (
+                <p className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-xs leading-relaxed text-orange-800">
+                  <b>Chưa kiểm tra được hợp đồng của khu vực</b> (không tải được danh sách hợp đồng).
+                  Nếu ở đây còn khách đang thuê hoặc còn hợp đồng chờ đón khách, những việc đó sẽ
+                  mất người phụ trách. Nên tải lại trang trước khi gỡ.
+                </p>
+              )}
+
+              <p className="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-xs leading-relaxed text-slate-500">
+                Nếu đã có người thay, <b className="text-slate-700">hãy dùng &quot;Đổi quản lý&quot;</b> thay
+                vì gỡ. Chỉ gỡ khi thật sự chưa tìm được ai tiếp nhận.
+              </p>
+
+              {assignable.length > 0 && (
+                <label className="flex cursor-pointer items-start gap-2.5 text-xs font-semibold text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={ack}
+                    onChange={(e) => setAck(e.target.checked)}
+                    disabled={busy}
+                    className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Tôi hiểu {assignable.length} nhà sẽ không có người phụ trách cho tới khi gán người mới.</span>
+                </label>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-6 py-4">
+            <button
+              onClick={onClose}
+              disabled={busy}
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
+            >
+              {blocked ? 'Đóng' : 'Hủy'}
+            </button>
+            {blocked ? (
+              <button
+                onClick={onSwitchToAssign}
+                className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-700"
+              >
+                <UserCog className="h-4 w-4" /> Đổi quản lý
+              </button>
+            ) : (
+              <button
+                onClick={handleRemove}
+                disabled={busy || (assignable.length > 0 && !ack)}
+                className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-rose-500/30 transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+                Gỡ quản lý
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+};
+
 // ── Một dòng khu vực + phần chi tiết mở rộng ─────────────────────────────────
-const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, onAssign }: {
+const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryGap, open, onToggle, onAssign, onRemove }: {
   group: ZoneGroup;
   userMap: Map<string, UserResponse>;
   loads: Map<string, ManagerLoad>;
@@ -420,9 +823,15 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, o
   mgrNames: Map<string, string>;
   /** Chỉ Host được gán/đổi; Admin xem thôi. */
   canAssign: boolean;
+  /** Bán kính ảnh hưởng nếu gỡ quản lý — dùng để báo trước ngay trên nút Gỡ. */
+  impact: RemovalImpact;
+  /** Khu vực có quản lý trên nhà nhưng chưa có bản ghi phân công — nhà mới sẽ không tự gán. */
+  registryGap: boolean;
   open: boolean;
   onToggle: () => void;
   onAssign: () => void;
+  /** Gỡ quản lý — chỉ truyền khi vai hiện tại được phép sửa phân công. */
+  onRemove?: () => void;
 }) => {
   const meta = ZONE_STATE_META[group.state];
   const nameFor = (id?: string, fromProperty?: string) =>
@@ -431,6 +840,8 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, o
   // Khu vực có quản lý nhưng tài khoản người đó đang không dùng được → khu vực coi như
   // treo dù nhìn "đã gán". Đây là chỗ Admin cần thấy để nhắc Host đổi người.
   const brokenAccount = group.managerBreakdown.some((b) => !isUsableAccount(userMap.get(b.managerId)));
+  // Nút vẫn bấm được để hộp thoại giải thích, chỉ làm nhạt đi để báo trước là sẽ không gỡ được.
+  const removeBlocked = impact.blocked || registryGap;
 
   const subtitle =
     group.assignableCount === 0
@@ -441,7 +852,7 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, o
           ? `${group.managerBreakdown.length} quản lý đang lẫn nhau`
           : `QL: ${nameFor(group.managerId, group.managerName)}${
               group.state === 'PARTIAL' ? ` · ${group.unassignedCount} nhà chưa nhận` : ''
-            }`;
+            }${registryGap ? ' · chưa đăng ký phân công' : ''}`;
 
   return (
     <div>
@@ -476,16 +887,43 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, o
         </button>
 
         {canAssign ? (
-          <button
-            onClick={onAssign}
-            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-              group.state === 'ASSIGNED'
-                ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                : 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-            }`}
-          >
-            {group.state === 'ASSIGNED' ? 'Đổi quản lý' : group.state === 'MIXED' ? 'Chốt quản lý' : 'Gán quản lý'}
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              onClick={onAssign}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                group.state === 'ASSIGNED'
+                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  : 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
+              }`}
+            >
+              {group.state === 'ASSIGNED' ? 'Đổi quản lý' : group.state === 'MIXED' ? 'Chốt quản lý' : 'Gán quản lý'}
+            </button>
+
+            {/* GỠ QUẢN LÝ — để ngay hàng chính cho thấy được.
+                Bản trước giấu trong hàng mở rộng, in 11px màu xám: người dùng gán nhầm rồi
+                không tìm ra đường lùi. Một lối thoát mà không ai thấy thì coi như không có.
+                An toàn đã được lo bằng hộp xác nhận (bán kính ảnh hưởng + bắt tick), nên ở
+                đây chỉ cần khác biệt về sắc thái: viền nhạt, chữ đỏ, không phải nút đặc. */}
+            {group.managerId && onRemove && (
+              <button
+                onClick={onRemove}
+                title={
+                  registryGap
+                    ? 'Không gỡ được — khu vực chưa đăng ký phân công. Bấm "Gán quản lý" một lần trước.'
+                    : impact.blocked
+                      ? `Không gỡ được — khu vực còn ${impact.active + impact.pending + impact.draft} hợp đồng chưa kết thúc. Hãy đổi sang quản lý khác.`
+                      : 'Gỡ quản lý — khu vực về trạng thái chưa gán'
+                }
+                className={`rounded-lg border px-2.5 py-1.5 text-xs font-bold transition ${
+                  removeBlocked
+                    ? 'cursor-help border-slate-200 text-slate-300'
+                    : 'border-slate-200 text-slate-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600'
+                }`}
+              >
+                Gỡ
+              </button>
+            )}
+          </div>
         ) : (
           <button
             onClick={onToggle}
@@ -531,11 +969,32 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, open, onToggle, o
                     )}
                   </div>
                 ))}
+                {registryGap && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                    <p className="flex items-center gap-2 text-xs font-black text-amber-900">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      Khu vực chưa được đăng ký phân công
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+                      Các nhà ở đây đang mang tên {nameFor(group.managerId, group.managerName)}, nhưng
+                      khu vực <b>chưa có bản ghi phân công</b> — nên nhà mới host duyệt xong sẽ rơi vào{' '}
+                      <b>&quot;Chờ gán quản lý&quot;</b> thay vì tự vào tay người này.
+                      {canAssign
+                        ? ' Bấm "Gán quản lý" một lần để đăng ký, các lần duyệt sau sẽ tự động.'
+                        : ' Host cần bấm "Gán quản lý" một lần để đăng ký.'}
+                    </p>
+                  </div>
+                )}
                 {group.unassignedCount > 0 && (
                   <p className="px-1 text-[11px] font-semibold text-amber-600">
                     {group.unassignedCount} nhà trong khu vực chưa có quản lý.
                   </p>
                 )}
+
+                {/* GỠ QUẢN LÝ — thao tác phá, cố ý để ở vị trí phụ trong hàng mở rộng,
+                    không đặt cạnh nút chính. Đa số trường hợp nên ĐỔI sang người mới chứ
+                    không gỡ: gỡ là khách mất luôn đầu mối liên hệ. */}
+                {/* Nút gỡ đã chuyển lên hàng chính cho dễ thấy — xem ghi chú ở đó. */}
               </div>
             )}
           </div>
@@ -608,6 +1067,28 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
   const [sortBy, setSortBy] = useState<SortKey>('todo');
   const [openZone, setOpenZone] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<ZoneGroup | null>(null);
+  /** Khu vực đang chờ xác nhận GỠ quản lý — mở hộp cảnh báo bán kính ảnh hưởng. */
+  const [removing, setRemoving] = useState<ZoneGroup | null>(null);
+  /**
+   * Số hợp đồng còn hiệu lực của TỪNG NHÀ.
+   *
+   * Không thể suy khách thuê từ `property.status`: nhà chia phòng có khách vẫn mang
+   * `ACTIVE`, chỉ từng PHÒNG mới lên `RENTED`. Đoán theo status là bỏ sót đúng loại nhà
+   * đông khách nhất — nên phải đếm hợp đồng thật.
+   */
+  const [contractLoad, setContractLoad] = useState<Map<number, ContractLoad>>(new Map());
+  /** false = chưa xác minh được hợp đồng (API lỗi) → không được kết luận "không có khách". */
+  const [contractsKnown, setContractsKnown] = useState(false);
+  /**
+   * Các khu vực CÓ BẢN GHI trong bảng phân công `zone_managers` (GET /zones/assignments).
+   *
+   * Khác với `group.managerId` — cái đó FE suy ra từ `operationManagerId` của từng nhà.
+   * Hai thứ này lệch nhau được, và khi lệch thì việc tự gán quản lý lúc host duyệt nhà sẽ
+   * không chạy (xem `registryGap` bên dưới).
+   */
+  const [registeredZones, setRegisteredZones] = useState<Set<string>>(new Set());
+  /** false = chưa đọc được bảng phân công → không kết luận khu vực nào thiếu đăng ký. */
+  const [registryKnown, setRegistryKnown] = useState(false);
 
   const canAssign = audience === 'host';
 
@@ -621,6 +1102,39 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       setManagers(mgrs);
       setProperties(propsRes.content);
 
+      // Bảng phân công thật. Cả Admin lẫn Host đều đọc được, và cả hai đều cần thấy khu vực
+      // nào chưa đăng ký để biết vì sao nhà mới duyệt không tự vào tay ai.
+      try {
+        const assignments = await zoneAssignmentService.list();
+        setRegisteredZones(new Set(assignments.map((a) => a.zoneId)));
+        setRegistryKnown(true);
+      } catch {
+        setRegisteredZones(new Set());
+        setRegistryKnown(false);
+      }
+
+      // Chỉ Host mới gán/gỡ được nên chỉ Host cần dữ liệu này. `/host/contracts` cũng là
+      // endpoint Admin không gọi được.
+      if (canAssign) {
+        try {
+          const res = await hostService.listContracts({ size: 500 });
+          const map = new Map<number, ContractLoad>();
+          for (const c of res.content) {
+            if (c.propertyId == null) continue;
+            const cur = map.get(c.propertyId) ?? { active: 0, pending: 0, draft: 0 };
+            if (c.status === 'ACTIVE') cur.active += 1;
+            else if (c.status === 'PENDING') cur.pending += 1;
+            else if (c.status === 'DRAFT') cur.draft += 1;
+            map.set(c.propertyId, cur);
+          }
+          setContractLoad(map);
+          setContractsKnown(true);
+        } catch {
+          setContractLoad(new Map());
+          setContractsKnown(false); // hộp gỡ sẽ tự chuyển sang giọng "chưa xác minh được"
+        }
+      }
+
       // SĐT / trạng thái tài khoản quản lý — host có thể không đủ quyền, không có thì thôi.
       try {
         const users = await userService.getAllUsers();
@@ -633,7 +1147,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canAssign]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -643,6 +1157,18 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
     () => new Map(managers.map((m) => [m.id, nameOf(m)])),
     [managers],
   );
+
+  /**
+   * Quản lý có tài khoản nhưng KHÔNG phụ trách khu vực nào.
+   *
+   * Hay xuất hiện ngay sau một lần đổi quản lý: người bị thay ra rơi về 0 khu vực mà không
+   * ai nhắc, nên cứ nằm đó không việc. Đây là "việc còn dang dở" của thao tác vừa rồi.
+   */
+  const idleManagers = useMemo(() => {
+    const busyIds = new Set<string>();
+    groups.forEach((g) => g.managerBreakdown.forEach((b) => busyIds.add(b.managerId)));
+    return managers.filter((m) => !busyIds.has(m.id));
+  }, [groups, managers]);
 
   /** Đếm khu vực theo trạng thái — hiện trên chip lọc. */
   const stateCounts = useMemo(() => {
@@ -814,6 +1340,20 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           </div>
         </div>
 
+        {/* Quản lý đang rảnh — thường là việc còn sót lại sau một lần đổi quản lý */}
+        {canAssign && idleManagers.length > 0 && (
+          <div className="flex flex-wrap items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <p className="text-xs leading-relaxed text-amber-800">
+              <b>{idleManagers.length} quản lý chưa phụ trách khu vực nào</b>
+              {' — '}{idleManagers.map((m) => nameOf(m)).join(', ')}.
+              {(stateCounts.UNASSIGNED ?? 0) > 0
+                ? ` Đang có ${stateCounts.UNASSIGNED} khu vực chưa có quản lý — cân nhắc gán cho họ.`
+                : ' Mọi khu vực đều đã có người, nhưng những tài khoản này đang không có việc.'}
+            </p>
+          </div>
+        )}
+
         {/* Chip trạng thái + nút xoá lọc */}
         <div className="flex flex-wrap items-center gap-1.5">
           {STATE_CHIPS.map((c) => {
@@ -874,9 +1414,12 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
               loads={loads}
               mgrNames={mgrNames}
               canAssign={canAssign}
+              impact={removalImpact(g, contractLoad, contractsKnown)}
+              registryGap={hasRegistryGap(g, registeredZones, registryKnown)}
               open={openZone === g.zoneId}
               onToggle={() => setOpenZone(openZone === g.zoneId ? null : g.zoneId)}
               onAssign={() => setAssigning(g)}
+              onRemove={() => setRemoving(g)}
             />
           ))}
         </div>
@@ -885,12 +1428,26 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       {assigningGroup && canAssign && (
         <AssignModal
           group={assigningGroup}
+          allGroups={groups}
           managers={managers}
           userMap={userMap}
           loads={loads}
           mgrNames={mgrNames}
           onClose={() => setAssigning(null)}
           onDone={() => { setAssigning(null); fetchData(); }}
+        />
+      )}
+
+      {removing && canAssign && (
+        <RemoveManagerModal
+          group={removing}
+          mgrNames={mgrNames}
+          impact={removalImpact(removing, contractLoad, contractsKnown)}
+          contractsKnown={contractsKnown}
+          registryGap={hasRegistryGap(removing, registeredZones, registryKnown)}
+          onClose={() => setRemoving(null)}
+          onDone={() => { setRemoving(null); fetchData(); }}
+          onSwitchToAssign={() => { setAssigning(removing); setRemoving(null); }}
         />
       )}
     </div>

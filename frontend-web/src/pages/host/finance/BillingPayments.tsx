@@ -13,6 +13,7 @@ import {
   type AdminInvoiceRow, type AdminInvoiceStatus, type AdminInvoiceType, type AdminPaymentRow,
 } from '@/services/admin.service';
 import { hostService } from '@/services/host.service';
+import { RealtimeBadge } from '@/pages/admin/shared';
 import {
   CURRENT_MONTH, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
   cmpIsoDesc, fmtDate, fmtDateTime, matchVi, monthLabel, pageSlice, shiftMonth,
@@ -28,7 +29,8 @@ import {
 //     điện, nước, dịch vụ, bảo trì), ngày phát hành, hạn thu thật và các giao dịch
 //     khách đã báo. Đây là nguồn admin đang dùng.
 //     Hiện 2 endpoint này là `@PreAuthorize("hasAnyRole('MANAGER','ADMIN')")` nên
-//     Host gọi bị 403 — xem docs/BE-NEED-host-billing-2026-08-09.md.
+//     Host gọi bị 403 — xem BE-NEED-endpoint-hoa-don-quyen-loc-va-du-lieu-2026-08-18.md
+//     (phần A), gộp chung với các thiếu sót khác của cùng endpoint này.
 //
 //  B. RÚT GỌN — `GET /api/v1/host/invoices?month=` (fallback khi A trả 403)
 //     BE dựng hoá đơn tiền phòng on-the-fly từ hợp đồng ACTIVE của đúng 1 kỳ:
@@ -206,11 +208,13 @@ export const BillingPayments = () => {
    * hiện tiền; vá bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới. Refetch cũng lo luôn
    * trường hợp hoá đơn vừa PAID không nằm trong bộ lọc đang xem.
    */
-  useBillingRealtime((event) => {
-    if (event.event !== 'INVOICE_PAID') return;
-    load();
-    const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
-    toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+  const { connected: liveOn } = useBillingRealtime({
+    onRefresh: load,
+    onEvent: (event) => {
+      if (event.event !== 'INVOICE_PAID') return;
+      const who = [event.tenantName, event.roomNumber].filter(Boolean).join(' · ');
+      toast.success(who ? `Vừa thanh toán: ${who}` : 'Có hoá đơn vừa được thanh toán');
+    },
   });
   // Đổi bộ lọc client thì về trang 1.
   useEffect(() => { setPage(1); setOpenKey(null); }, [q, status, property, sort, perPage]);
@@ -324,6 +328,8 @@ export const BillingPayments = () => {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Nói rõ trang đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
+          <RealtimeBadge connected={liveOn} />
           <select
             value={period}
             onChange={e => { setPeriod(e.target.value); setPage(1); }}

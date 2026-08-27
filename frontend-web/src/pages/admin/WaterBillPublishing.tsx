@@ -1,15 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Droplets, FileUp, Loader2, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Droplets, FileUp, Loader2, RefreshCw, Search, Send, Trash2 } from 'lucide-react';
 import {
   waterBillService, waterUnitPrice, type WaterBill,
 } from '@/services/waterBill.service';
 import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
+import { utilityInvoiceService } from '@/services/utilityInvoice.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 import { PropertyCombobox } from './EvnBillPublishing';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
+import { matchBillToProperty } from '@/utils/billPropertyMatch';
+import { useOccupiedProperties } from '@/services/useOccupiedProperties';
+import { groupThousands } from '@/utils';import { normalizeVi } from '@/utils/helpers';
 import { serverNow } from '@/utils/serverTime';
 
 /**
@@ -33,8 +37,17 @@ interface BillForm {
   totalQuantity: string;
   totalAmount: string;
   billingPeriod: string;
+  /**
+   * Chỉ số đồng hồ CŨ / MỚI in trên giấy nước. Chỉ bắt buộc với NHÀ NGUYÊN CĂN vì
+   * loại đó phát hành thẳng cho khách (BE chặn: consumption = newReading − prevReading).
+   * Nhà chia phòng bỏ trống — quản lý đọc đồng hồ từng phòng.
+   */
+  prevReading: string;
+  newReading: string;
 }
-const EMPTY_FORM: BillForm = { totalQuantity: '', totalAmount: '', billingPeriod: '' };
+const EMPTY_FORM: BillForm = {
+  totalQuantity: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
+};
 
 const PROPERTY_PAGE_SIZE = 200;
 
@@ -57,10 +70,60 @@ export const WaterBillPublishing = () => {
   const [uploading, setUploading] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
+  /** Lần phát hành vừa rồi có gửi thẳng cho khách thuê không (chỉ nguyên căn). */
+  const [issuedToTenant, setIssuedToTenant] = useState(false);
   /** Câu nhắc sau khi đọc ảnh — OCR chỉ là gợi ý, admin vẫn phải soát. */
   const [scanNote, setScanNote] = useState<string | null>(null);
   /** Ảnh đang xem phóng to. Hoá đơn nước chữ nhỏ, xem ở khung thumbnail không đọc nổi số. */
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  /**
+   * Lọc bảng "Đã phát hành" — song sinh với trang điện, sửa thì sửa cả hai.
+   *
+   * Một kỳ có thể hàng chục nhà; không có ô tìm thì admin phải cuộn tay dò từng dòng để
+   * kiểm xem một căn đã phát hành chưa. Tìm được cả theo TÊN NHÀ lẫn CHUỖI KỲ, vì kỳ là
+   * thứ in trên tờ hoá đơn giấy nên hay được hỏi theo.
+   */
+  const [billSearch, setBillSearch] = useState('');
+  const [billStatus, setBillStatus] = useState<'all' | 'published' | 'revoked'>('all');
+
+  const visibleBills = useMemo(() => {
+    const q = normalizeVi(billSearch.trim());
+    return bills
+      .filter((b) => {
+        if (billStatus === 'published' && b.status === 'REVOKED') return false;
+        if (billStatus === 'revoked' && b.status !== 'REVOKED') return false;
+        if (!q) return true;
+        return normalizeVi(`${b.propertyName ?? ''} ${b.billingPeriod ?? ''}`).includes(q);
+      })
+      // Mới phát hành lên đầu — admin vừa bấm gửi xong không phải đi tìm dòng của mình.
+      // Thiếu `createdAt` thì đẩy xuống cuối chứ không cho lên đầu nhầm.
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, [bills, billSearch, billStatus]);
+
+  /**
+   * Ô chọn nhà CHỈ hiện căn đang có khách ở.
+   *
+   * Hoá đơn điện/nước chỉ có nghĩa với căn có người ở; đổ ra cả nhà chưa ai thuê thì
+   * admin phải tự nhớ căn nào đang có khách, chọn nhầm là phát hành một hoá đơn không
+   * gửi cho ai. Xem `useOccupiedProperties` để biết vì sao phải hỏi `handover-status`
+   * chứ không dùng được field nào trong danh sách nhà.
+   *
+   * CHỈ lọc ô chọn, KHÔNG lọc `properties` gốc: bảng "đã phát hành" bên dưới vẫn phải
+   * tra được hoá đơn cũ của căn mà khách đã trả phòng.
+   */
+  const { occupiedIds } = useOccupiedProperties();
+  const occupiedProperties = useMemo(
+    () => (occupiedIds ? properties.filter((p) => occupiedIds.has(p.id)) : properties),
+    [properties, occupiedIds],
+  );
+  const hiddenEmptyCount = properties.length - occupiedProperties.length;
+
+  /**
+   * Chữ OCR của ảnh, giữ lại để đối chiếu với căn nhà đang chọn — xem chú thích cùng
+   * tên bên `EvnBillPublishing`. Phải là state vì admin đổi ô chọn nhà lúc nào cũng
+   * được, kể cả sau khi đã tải ảnh; đó chính là cái nhầm cần bắt.
+   */
+  const [ocrRawText, setOcrRawText] = useState('');
 
   const selectedMonthPeriod = useMemo(
     () => monthPeriod(0, new Date(year, month - 1, 1)),
@@ -121,8 +184,31 @@ export const WaterBillPublishing = () => {
     [bills, propertyId],
   );
 
+  /**
+   * Nguyên căn đi luồng KHÁC: phát hành thẳng cho khách thuê, quản lý chỉ nhận thông báo.
+   * Xem services/utilityInvoice.service.ts.
+   */
+  const selectedProperty = properties.find((p) => p.id === propertyId);
+  const isWholeHouse = selectedProperty?.wholeHouse === true;
+
+  /** Ảnh hoá đơn có phải của căn nhà đang chọn không — xem @/utils/billPropertyMatch. */
+  const billMatch = useMemo(
+    () => matchBillToProperty(
+      ocrRawText,
+      selectedProperty?.fullAddress || selectedProperty?.shortAddress,
+    ),
+    [ocrRawText, selectedProperty],
+  );
+  const prevReadingNum = Number(onlyDigits(form.prevReading) || 0);
+  const newReadingNum = Number(onlyDigits(form.newReading) || 0);
+  /** Hiệu hai chỉ số phải bằng tổng m³ — kiểm ở FE để không nhận 422 sau khi đã tạo tổng. */
+  const readingMismatch = isWholeHouse
+    && !!form.prevReading && !!form.newReading
+    && newReadingNum - prevReadingNum !== quantity;
+
   const formReady = !!propertyId && quantity > 0 && amount > 0
-    && !!form.billingPeriod.trim() && !existingBill;
+    && !!form.billingPeriod.trim() && !existingBill
+    && (!isWholeHouse || (!!form.prevReading && !!form.newReading && !readingMismatch));
 
   /**
    * Upload ảnh rồi ĐỌC THỬ để điền sẵn 3 ô. Chỉ điền vào ô còn TRỐNG — admin đã gõ tay
@@ -136,11 +222,17 @@ export const WaterBillPublishing = () => {
       const url = await uploadToCloudinary(file);
       setImageUrl(url);
       try {
-        const parsed = parseWaterInvoice(await waterBillService.ocr(url));
+        const ocr = await waterBillService.ocr(url);
+        setOcrRawText(ocr?.rawText ?? '');
+        const parsed = parseWaterInvoice(ocr);
         setForm((f) => ({
+          ...f,
           totalQuantity: f.totalQuantity || (parsed.totalQuantity != null ? String(parsed.totalQuantity) : ''),
           totalAmount: f.totalAmount || (parsed.totalAmount != null ? String(parsed.totalAmount) : ''),
           billingPeriod: parsed.billingPeriod || f.billingPeriod,
+          // Chỉ số đồng hồ đọc từ bộ ba tự khớp phép trừ — chỉ điền ô còn trống.
+          prevReading: f.prevReading || (parsed.prevReading != null ? String(parsed.prevReading) : ''),
+          newReading: f.newReading || (parsed.newReading != null ? String(parsed.newReading) : ''),
         }));
         const got = parsed.totalQuantity != null || parsed.totalAmount != null;
         setScanNote(got
@@ -148,6 +240,8 @@ export const WaterBillPublishing = () => {
           : 'Không đọc được số từ ảnh — nhập tay giúp mình.');
       } catch {
         // OCR hỏng không được làm hỏng luôn việc đính ảnh: ảnh đã lên rồi, admin gõ tay.
+        // Nhưng phải xoá rawText cũ, kẻo đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
+        setOcrRawText('');
         setScanNote('Không đọc được ảnh — nhập tay giúp mình.');
       }
     } catch (e: any) {
@@ -161,17 +255,73 @@ export const WaterBillPublishing = () => {
     if (!formReady || !propertyId) return;
     setPublishing(true);
     setPublishError(null);
+    setIssuedToTenant(false);
+    const period = form.billingPeriod.trim();
     try {
-      await waterBillService.create({
+      const created = await waterBillService.create({
         propertyId,
-        billingPeriod: form.billingPeriod.trim(),
+        billingPeriod: period,
         month, year,
         totalQuantity: quantity,
         totalAmount: amount,
         imageUrl: imageUrl || undefined,
+        // Nguyên căn: BE (bản 2 luồng) dùng luôn 2 số này để TỰ phát hành hoá đơn cho
+        // khách trong cùng transaction. BE cũ bỏ qua field lạ nên gửi kèm là an toàn.
+        prevReading: isWholeHouse ? prevReadingNum : undefined,
+        newReading: isWholeHouse ? newReadingNum : undefined,
       });
+
+      /**
+       * NGUYÊN CĂN — phát hành thẳng cho khách. Giấy nước của căn nhà đã đủ chỉ số cũ /
+       * mới / tổng tiền của đúng khách đó, không phải chia cho ai nên không cần quản lý
+       * đi đọc đồng hồ.
+       *
+       * ⚠️ Hai bước không nguyên tử — nếu bước dưới lỗi thì tổng đã tạo mà khách chưa
+       * nhận. Báo lỗi rõ để admin đừng phát hành lại. Sửa gốc ở BE: xem
+       * doc/BE-NEED-nguyen-can-tu-phat-hanh-hoa-don-tien-ich.
+       */
+      if (isWholeHouse) {
+        try {
+          await utilityInvoiceService.createForWholeHouse(propertyId, {
+            type: 'WATER',
+            billingPeriod: period,
+            prevReading: prevReadingNum,
+            newReading: newReadingNum,
+            consumption: quantity,
+            // Lấy đơn giá BE trả về nếu có: BE tính ở scale 8, FE tự chia sẽ lệch
+            // và rơi vào AMOUNT_MISMATCH.
+            unitPrice: created?.unitPrice ?? unitPrice,
+            amount,
+            meterImageUrl: imageUrl || undefined,
+          });
+          setIssuedToTenant(true);
+        } catch (e: any) {
+          /**
+           * `INVOICE_ALREADY_EXISTS` KHÔNG phải lỗi: BE (bản 2 luồng) đã tự phát hành hoá
+           * đơn cho khách khi tạo hoá đơn tổng, nên lệnh gọi này thành dư. Khách đã có
+           * hoá đơn → coi như thành công.
+           *
+           * Vẫn giữ lệnh gọi vì BE/FE không deploy cùng lúc: bỏ hẳn bây giờ mà BE chưa lên
+           * thì nguyên căn tạo hoá đơn tổng rồi im lặng KHÔNG gửi cho khách. XOÁ khối này
+           * khi bản BE mới đã chạy ở mọi môi trường (BE yêu cầu 17/08/2026).
+           */
+          const code = e?.response?.data?.code;
+          const msg = e?.response?.data?.message || e?.message || '';
+          if (code === 'INVOICE_ALREADY_EXISTS' || /da ton tai|đã tồn tại/i.test(msg)) {
+            setIssuedToTenant(true);
+          } else {
+            setPublishError(
+              'Đã tạo hoá đơn tổng nhưng CHƯA gửi được cho khách thuê: '
+              + (msg || 'lỗi không rõ')
+              + '. Đừng phát hành lại — vào mục đã phát hành để gửi lại cho khách.',
+            );
+          }
+        }
+      }
+
       setForm({ ...EMPTY_FORM, billingPeriod: selectedMonthPeriod });
       setImageUrl('');
+      setOcrRawText('');
       setPropertyId(null);
       await loadBills();
     } catch (e: any) {
@@ -247,12 +397,19 @@ export const WaterBillPublishing = () => {
               {/* Dùng chung ô chọn nhà của trang EVN: có ô tìm + lọc theo loại. Danh sách
                   nhà dài hàng chục dòng nên `<select>` trần là phải cuộn tay để mò. */}
               <PropertyCombobox
-                properties={properties}
+                properties={occupiedProperties}
                 value={propertyId}
                 onChange={setPropertyId}
                 publishedIds={publishedIds}
                 disabled={loadingProps}
               />
+              {/* Nói rõ đã giấu bớt — im lặng thì admin tìm một căn quen thuộc, không
+                  thấy, tưởng nhà bị xoá khỏi hệ thống. */}
+              {hiddenEmptyCount > 0 && (
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Chỉ hiện nhà đang có khách ở — {hiddenEmptyCount} nhà trống đã được ẩn.
+                </p>
+              )}
               {!!existingBill && (
                 <p className="mt-1 text-xs font-semibold text-amber-600">
                   Nhà này đã có hoá đơn nước kỳ {month}/{year} — thu hồi bản cũ trước nếu muốn phát hành lại.
@@ -299,6 +456,7 @@ export const WaterBillPublishing = () => {
                       type="button"
                       onClick={() => {
                         setImageUrl('');
+                        setOcrRawText('');
                         if (fileRef.current) fileRef.current.value = '';
                       }}
                       className="flex-1 rounded-lg border border-rose-200 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
@@ -344,11 +502,15 @@ export const WaterBillPublishing = () => {
                 <label className="mb-1.5 block text-sm font-bold text-slate-700">
                   Tổng m³ <span className="text-rose-500">*</span>
                 </label>
+                {/* Chấm phân cách nghìn ngay khi gõ, giống hệt trang điện — state gốc vẫn
+                    là chuỗi chỉ chữ số. Trước đây ô này để trần nên "22435000" đập vào mắt
+                    không đếm nổi, mà gõ dư một số 0 là sai gấp mười lần cả hoá đơn. */}
                 <input
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
                   inputMode="numeric"
-                  value={form.totalQuantity}
-                  onChange={(e) => setForm((f) => ({ ...f, totalQuantity: e.target.value }))}
+                  placeholder="1.478"
+                  value={groupThousands(form.totalQuantity)}
+                  onChange={(e) => setForm((f) => ({ ...f, totalQuantity: onlyDigits(e.target.value) }))}
                 />
               </div>
               <div>
@@ -356,10 +518,11 @@ export const WaterBillPublishing = () => {
                   Tổng tiền (đ) <span className="text-rose-500">*</span>
                 </label>
                 <input
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
                   inputMode="numeric"
-                  value={form.totalAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, totalAmount: e.target.value }))}
+                  placeholder="22.435.000"
+                  value={groupThousands(form.totalAmount)}
+                  onChange={(e) => setForm((f) => ({ ...f, totalAmount: onlyDigits(e.target.value) }))}
                 />
                 {/* Nhập "Tổng tiền thanh toán" trên giấy (đã gồm VAT + phí BVMT), không
                     phải "Cộng tiền hàng". Không ghi chú lên UI — admin nắm nghiệp vụ
@@ -399,6 +562,79 @@ export const WaterBillPublishing = () => {
               </p>
             </div>
 
+            {/* ── Luồng sau khi phát hành, khác nhau theo LOẠI NHÀ ──
+                Nói trước khi bấm: một loại tới tay khách ngay, một loại còn phải qua quản lý
+                đọc đồng hồ. Admin cần biết mình đang tạo ra việc cho ai. */}
+            {!!propertyId && (
+              <div className={`rounded-xl border p-4 ${
+                isWholeHouse ? 'border-cyan-200 bg-cyan-50' : 'border-violet-200 bg-violet-50'
+              }`}>
+                <p className={`text-xs font-black uppercase tracking-wide ${
+                  isWholeHouse ? 'text-cyan-700' : 'text-violet-700'
+                }`}>
+                  {isWholeHouse ? 'Nguyên căn — gửi thẳng cho khách thuê' : 'Nhà chia phòng — quản lý đọc đồng hồ'}
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                  {isWholeHouse ? (
+                    <>
+                      Cả căn chỉ một khách thuê, giấy nước đã ghi đủ chỉ số cũ · mới · tổng tiền
+                      của chính căn đó — không còn gì phải chia. Bấm phát hành là <b>hoá đơn tới
+                      tay khách ngay</b>. Quản lý chỉ nhận thông báo để vào xem.
+                    </>
+                  ) : (
+                    <>
+                      Giấy nước chỉ có tổng của cả nhà nên phải chia về từng phòng theo đồng hồ
+                      riêng. Bấm phát hành là hệ thống chốt <b>đơn giá</b> rồi giao việc cho quản
+                      lý: <b>đi chụp đồng hồ và ghi số từng phòng trong NGÀY HÔM NAY</b>, rồi gửi
+                      hoá đơn cho từng khách.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* ── Chỉ số đồng hồ — CHỈ nguyên căn ──
+                Hoá đơn nguyên căn đi thẳng tới khách nên phải mang đúng hai số in trên giấy. */}
+            {isWholeHouse && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số cũ (m³) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số đầu kỳ trên giấy"
+                    value={form.prevReading}
+                    onChange={(e) => setForm((f) => ({ ...f, prevReading: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số mới (m³) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số cuối kỳ trên giấy"
+                    value={form.newReading}
+                    onChange={(e) => setForm((f) => ({ ...f, newReading: e.target.value }))}
+                  />
+                </div>
+                {readingMismatch ? (
+                  <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
+                    Chỉ số mới − chỉ số cũ = {(newReadingNum - prevReadingNum).toLocaleString('vi-VN')} m³,
+                    không khớp tổng {quantity.toLocaleString('vi-VN')} m³ ở trên. Sửa cho khớp rồi mới
+                    phát hành được.
+                  </p>
+                ) : (
+                  <p className="sm:col-span-2 text-xs text-slate-400">
+                    Hai số này in trên hoá đơn khách nhận. Hiệu của chúng phải bằng đúng tổng m³.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className={`rounded-xl border p-4 ${unitPrice > 0 ? 'border-sky-200 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Đơn giá hệ thống sẽ dùng</p>
               <p className={`mt-1 text-3xl font-black tabular-nums ${unitPrice > 0 ? 'text-sky-700' : 'text-slate-300'}`}>
@@ -418,6 +654,50 @@ export const WaterBillPublishing = () => {
               </p>
             )}
 
+            {/* Nói đúng việc đã xảy ra: khách đã có hoá đơn, hay mới chỉ giao việc
+                cho quản lý. Hai kết quả khác nhau nên không dùng chung một câu. */}
+            {issuedToTenant && !publishError && (
+              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                Đã phát hành cho khách thuê — khách nhận hoá đơn và thanh toán được ngay.
+                Quản lý nhận thông báo để vào xem.
+              </p>
+            )}
+
+            {/*
+              ── Chặn nhầm nhà (24/08/2026) ──
+              Song sinh với khối cùng tên bên `EvnBillPublishing` — sửa thì sửa cả hai.
+              Đặt sát nút phát hành vì đây là thứ cuối cùng cần đọc trước khi hoá đơn đi
+              tới khách. Cảnh báo chứ KHÔNG chặn: OCR sai nhiều, chặn cứng sẽ có ngày
+              admin cầm đúng hoá đơn mà không phát hành được.
+            */}
+            {billMatch.verdict === 'mismatch' && (
+              <div className="rounded-lg border-2 border-rose-300 bg-rose-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Ảnh có vẻ KHÔNG phải của căn nhà này
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-rose-700">{billMatch.message}</p>
+                <p className="mt-1.5 text-xs text-rose-600">
+                  Đang chọn: <b>{selectedProperty?.propertyName}</b>
+                  {selectedProperty?.shortAddress ? ` — ${selectedProperty.shortAddress}` : ''}
+                </p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'weak' && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Nên kiểm lại địa chỉ trên ảnh
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-700">{billMatch.message}</p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'match' && (
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <Check className="h-3.5 w-3.5" /> Địa chỉ trên ảnh khớp với căn nhà đang chọn.
+              </p>
+            )}
+
             <button
               type="button"
               onClick={publish}
@@ -425,7 +705,7 @@ export const WaterBillPublishing = () => {
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-bold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Gửi cho quản lý
+              {isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Gửi cho quản lý đọc đồng hồ'}
             </button>
           </div>
         </div>
@@ -434,6 +714,37 @@ export const WaterBillPublishing = () => {
       <SectionShell
         icon={Droplets}
         title={`Đã phát hành — kỳ ${month}/${year}`}
+        action={
+          bills.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5">
+                <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                <input
+                  className="w-44 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                  placeholder="Tìm nhà hoặc kỳ..."
+                  value={billSearch}
+                  onChange={(e) => setBillSearch(e.target.value)}
+                />
+              </div>
+              {([
+                { key: 'all',       label: `Tất cả ${bills.length}` },
+                { key: 'published', label: `Đang hiệu lực ${bills.filter((b) => b.status !== 'REVOKED').length}` },
+                { key: 'revoked',   label: `Đã thu hồi ${bills.filter((b) => b.status === 'REVOKED').length}` },
+              ] as { key: typeof billStatus; label: string }[]).map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setBillStatus(t.key)}
+                  className={`rounded-full px-2.5 py-1.5 text-xs font-bold transition ${
+                    billStatus === t.key ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ) : undefined
+        }
       >
         {loadingBills ? (
           <p className="flex items-center gap-2 py-6 text-sm text-slate-500">
@@ -443,8 +754,14 @@ export const WaterBillPublishing = () => {
           <p className="flex items-start gap-1.5 py-6 text-sm font-semibold text-rose-600">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {billsError}
           </p>
-        ) : bills.length === 0 ? (
-          <EmptyState text={`Chưa phát hành hoá đơn nước nào cho kỳ ${month}/${year}.`} />
+        ) : visibleBills.length === 0 ? (
+          /* Lọc không ra kết quả KHÁC HẲN chưa phát hành gì — nói chung một câu thì
+             admin tưởng cả kỳ chưa gửi hoá đơn nào. */
+          <EmptyState
+            text={bills.length === 0
+              ? `Chưa phát hành hoá đơn nước nào cho kỳ ${month}/${year}.`
+              : 'Không có hoá đơn nào khớp bộ lọc — thử xoá từ khoá hoặc chọn "Tất cả".'}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -459,7 +776,7 @@ export const WaterBillPublishing = () => {
                 </tr>
               </thead>
               <tbody>
-                {bills.map((b) => (
+                {visibleBills.map((b) => (
                   <tr key={b.id} className="border-b border-slate-100">
                     <td className="py-3 pr-3 font-semibold text-slate-700">{b.propertyName ?? `#${b.propertyId}`}</td>
                     <td className="py-3 pr-3 text-slate-600">{b.billingPeriod}</td>

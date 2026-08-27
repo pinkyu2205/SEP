@@ -12,14 +12,14 @@ import clsx from 'clsx';
  * bấm vào mới hiện các hành động, giống cách các app quản trị vẫn làm.
  */
 export const UserMenu = ({
-  name, subtitle, initials, settingsTo, onLogout, accent = 'indigo',
+  name, subtitle, initials, settingsTo, onLogout, accent = 'green',
 }: {
   name: string;
   subtitle?: string;
   initials: string;
   settingsTo: string;
   onLogout: () => void;
-  accent?: 'indigo' | 'cyan';
+  accent?: 'green' | 'red';
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -39,9 +39,9 @@ export const UserMenu = ({
     };
   }, [open]);
 
-  const avatar = accent === 'cyan'
-    ? 'from-cyan-500 to-cyan-700'
-    : 'from-primary-500 to-primary-700';
+  const avatar = accent === 'red'
+    ? 'from-brand-red-500 to-brand-red-700'
+    : 'from-brand-green-500 to-brand-green-700';
 
   return (
     <div ref={ref} className="relative">

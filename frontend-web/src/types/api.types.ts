@@ -176,7 +176,23 @@ export interface PropertyResponse {
   totalFloor?: number;   // field thực từ BE
   floorCount?: number;   // alias cũ, giữ tương thích
   roomsPerFloor?: number;
+  /** Số phòng KHAI BÁO trên hồ sơ nhà — có thể lệch với `roomCount` đếm thật. */
   totalRooms: number;
+  /**
+   * ── Sức chứa BE tính sẵn (PropertyOccupancyAssembler, 24/08/2026) ──
+   * Có ở MỌI `PropertyResponse`, gộp bằng 2 query nên không N+1. Nhờ vậy FE bỏ được
+   * vòng gọi `/properties/{id}/rooms` từng nhà — xem `occupancyFromProperty`.
+   */
+  /** Số phòng ĐẾM THẬT. Nguyên căn = 0. */
+  roomCount?: number;
+  /** Phòng còn nhận được khách — ĐÃ trừ phòng bị hợp đồng DRAFT/PENDING giữ chỗ. */
+  availableRooms?: number;
+  rentedRooms?: number;
+  maintenanceRooms?: number;
+  /** Phòng còn ở `RoomStatus.DRAFT` — chưa mở cho thuê. */
+  notOpenedRooms?: number;
+  /** Chỉ có ở `GET /properties/rentable`: căn này nhận được khách mới. */
+  rentalAvailable?: boolean;
   status: string;        // PropertyStatus
   /** @deprecated Dùng `listedPrice` / `appliedPrice`. Giữ cho code cũ. */
   price?: number;
@@ -191,6 +207,12 @@ export interface PropertyResponse {
   operationManagerId?: string;
   operationManagerName?: string;
   renovationCompleted: boolean;
+  /**
+   * Thời hạn hợp đồng với chủ nhà gốc (BE thêm 19/08/2026). Có ở đây để màn tạo HĐ khách
+   * thuê chặn được ngay lúc nhập, khỏi phải gọi thêm onboarding-summary hay chờ server 400.
+   */
+  leaseStartDate?: string;
+  leaseEndDate?: string;
   imageUrls?: string[];
   // Đơn giá điện/nước cấp nhà (theo giá nhà nước). BE trả ở GET /properties/{id}.
   electricityUnitPrice?: number | null;
@@ -621,7 +643,22 @@ export interface PricingCalculationResponse {
   cRenovation?: number;
   cEquipment?: number;
   capex: number;                 // Tổng vốn đầu tư (thuê trả trước + cải tạo + thiết bị)
+  /**
+   * Mẫu số chia vốn. Từ 19/08/2026 BE gán = `revenueMonths` (đã trừ tháng trôi vào cải tạo /
+   * chờ duyệt ở đầu kỳ VÀ cửa sổ bàn giao ở cuối kỳ) — trước đó là thời hạn hợp đồng thô.
+   */
   contractMonths: number;
+  // ── Bóc tách thời hạn (BE thêm 19/08/2026, xem InboundLeaseRules.RevenueWindow) ──
+  /** Thời hạn HĐ chủ nhà, tính trọn ngày kết thúc. Chưa trừ gì. */
+  leaseMonths?: number;
+  /** Ngày đầu tiên nhà thật sự cho thuê được = muộn nhất trong (HĐ bắt đầu, cải tạo xong, hôm nay). */
+  rentableFrom?: string;
+  /** Số tháng còn khai thác được, tính từ `rentableFrom`. Chưa trừ cửa sổ bàn giao. */
+  rentableMonths?: number;
+  /** Cửa sổ bàn giao cuối kỳ bị trừ ra (0 nếu HĐ quá ngắn để áp). */
+  handoverBufferMonths?: number;
+  /** = rentableMonths − handoverBufferMonths. Con số dùng để chia vốn VÀ tính doanh thu. */
+  revenueMonths?: number;
   monthlyRecovery: number;       // Hoàn vốn kế toán/tháng
   fixedOpex: number;             // Chi phí nền/tháng = oOperation + hoàn vốn
   revenueMin?: number;
@@ -846,6 +883,10 @@ export interface PropertyActivationResponse {
   propertyDeposit?: number;
   suggestedMinPrice?: number;
   rooms?: ActivatedRoom[];
+  /** Kích hoạt trước ngày HĐ chủ nhà có hiệu lực — BE cho qua nhưng cảnh báo (19/08/2026). */
+  leaseNotStartedWarning?: boolean;
+  /** Còn quá ít tháng khai thác (< 6) — cân nhắc trước khi mở bán. */
+  shortExploitationWarning?: boolean;
 }
 
 // =============================================================================
@@ -959,8 +1000,18 @@ export interface TenantContractResponse {
   paymentStatus?: string;          // PENDING | PAID | FAILED | CANCELLED
   depositMonths?: number;
   tenantUsername?: string;         // sau confirm — username khách (= SĐT)
+  /** Người ĐANG phụ trách — đổi theo quản lý khu vực. */
   assignedManagerId?: string;
   assignedManagerName?: string;
+  /**
+   * Người THỰC SỰ đón khách lúc onboard (BE thêm 20/08/2026). Ghi một lần, không bị ghi đè
+   * khi đổi quản lý khu vực — nên đây mới là người khách nhớ mặt và gọi lại.
+   * HĐ tạo trước 20/08/2026 không có dữ liệu này.
+   */
+  onboardedByManagerId?: string;
+  onboardedByManagerName?: string;
+  onboardedByManagerPhone?: string;
+  onboardedAt?: string;
   // File HĐ giờ là PDF (BE đổi từ DOCX 2026-07-14, xem FE-draft-contract-pdf.md);
   // HĐ tạo trước đó có thể còn trỏ file .docx cũ trên Cloudinary.
   draftContractFileUrl?: string;
@@ -1019,6 +1070,11 @@ export interface BulkImportError {
   contractCode: string | null;
   field: string | null;
   message: string;
+  /**
+   * Mã lỗi máy đọc được (BE thêm 20/08/2026). Dùng cái này để phân loại lỗi tạm thời vs
+   * sai dữ liệu — KHÔNG dò chuỗi tiếng Việt trong `message`, BE đổi câu chữ là hỏng thầm lặng.
+   */
+  code?: string;
 }
 
 /** Kết quả 1 căn nhà trong import (có cả ở dry-run lẫn import thật) */

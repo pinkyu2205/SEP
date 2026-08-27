@@ -1,4 +1,6 @@
 import type { PaymentBreakdown } from '@/services/tenant/tenantService';
+import type { InvoiceDispute } from '@/types/invoiceDispute';
+
 
 /**
  * Hoá đơn dùng chung cho màn khách thuê và màn quản lý.
@@ -70,6 +72,38 @@ export interface SharedBill {
   waterRate?: number;
   // Kỳ tính (hoá đơn điện/nước)
   billingPeriod?: string;
+  // ── Bằng chứng chỉ số (điện/nước) ─────────────────────────────────────────
+  // BE đã bắt buộc có ảnh công tơ mới cho phát hành hoá đơn (422 METER_PHOTO_REQUIRED),
+  // nên dữ liệu này CHẮC CHẮN tồn tại — trước 24/08/2026 chỉ là chưa trả về cho khách.
+  // Thiếu nó thì khách chỉ thấy con số cuối cùng và không có gì để đối chiếu.
+  /** Chỉ số đầu kỳ. */
+  prevReading?: number;
+  /** Chỉ số cuối kỳ — `newReading - prevReading` phải bằng kwhUsed/m3Used. */
+  newReading?: number;
+  /**
+   * Ảnh bằng chứng chính của hoá đơn này:
+   *   • nhà chia phòng → ảnh MẶT ĐỒNG HỒ phòng đó do quản lý chụp;
+   *   • nhà nguyên căn → ảnh HOÁ ĐƠN EVN/nước gốc admin tải lên
+   *     (xem `meterImageUrl` trong frontend-web/src/services/utilityInvoice.service.ts).
+   * Nhãn hiển thị phải đổi theo `propertyType`, đừng gọi chung là "ảnh đồng hồ".
+   */
+  meterImageUrl?: string;
+  /** Thời điểm chụp thật — khách đối chiếu xem ảnh có đúng kỳ này không. */
+  meterCapturedAt?: string;
+  /**
+   * Ảnh hoá đơn EVN/nước TỔNG của cả căn, chỉ có nghĩa với nhà CHIA PHÒNG: khách xem
+   * để kiểm đơn giá (tổng tiền ÷ tổng kWh) mà tiền phòng mình được nhân với.
+   * Nguyên căn không dùng field này — ảnh tổng chính là `meterImageUrl`.
+   */
+  utilityBillImageUrl?: string;
+  /** Địa chỉ in trên hoá đơn gốc — chỗ khách soi "có phải nhà mình không". */
+  billingAddress?: string;
+  /** Mã khách hàng EVN/cấp nước in trên hoá đơn gốc. */
+  customerCode?: string;
+
+  /** Khiếu nại đang treo / đã kết luận của hoá đơn này. Xem @/types/invoiceDispute. */
+  dispute?: InvoiceDispute;
+
   // PayOS (30/07/2026) — có sau khi gọi payInvoice(), dùng để hiện QR/mở trang thanh toán thật.
   payosOrderCode?: number;
   payosCheckoutUrl?: string;

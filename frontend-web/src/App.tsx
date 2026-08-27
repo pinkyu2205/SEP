@@ -20,6 +20,8 @@ import { AdminNotificationCenter } from '@/pages/admin/notifications/AdminNotifi
 import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring';
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
+import RefundDisputes from '@/pages/admin/RefundDisputes';
+import UtilityDisputes from '@/pages/admin/UtilityDisputes';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
 import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
@@ -116,6 +118,8 @@ function App() {
             <Route path="/admin/onboarding" element={<DraftOnboardingList />} />
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/admin/refund-disputes" element={<RefundDisputes />} />
+            <Route path="/admin/utility-disputes" element={<UtilityDisputes />} />
             <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/meter-override" element={<MeterOverridePasscodes />} />
             <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />

@@ -97,7 +97,11 @@ export const realEquipmentService = {
    */
   getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
-      `/api/v1/equipment/${id}/maintenance-history-feature`,
+      // Route thật của BE là `/maintenance-history` — hậu tố `-feature` là do FE tự thêm,
+      // không controller nào phía BE nhận. Kết quả: 404 và `GlobalExceptionHandler` trả
+      // "Route không tồn tại", hiện thẳng vào khối Lịch sử bảo trì.
+      // (`GlobalEquipmentController` dòng 26: @GetMapping("/{id}/maintenance-history"))
+      `/api/v1/equipment/${id}/maintenance-history`,
     );
     return data;
   },

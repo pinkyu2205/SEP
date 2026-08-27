@@ -140,12 +140,12 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
           )}
         </View>
 
-        {/* Thông tin nhà */}
-        <Section title="Thông tin nhà">
-          <InfoRow label="Tên nhà" value={prop?.name ?? '—'} />
-          <InfoRow label="Địa chỉ" value={prop?.address ?? '—'} last={!prop?.district} />
-          {!!prop?.district && <InfoRow label="Khu vực" value={prop.district} last />}
-        </Section>
+        {/*
+          Khối "Thông tin nhà" đã BỎ (20/08/2026): cả ba dòng đều đang lặp lại thứ vừa hiện
+          ngay phía trên — "Tên nhà" chính là tiêu đề trên thanh header, "Địa chỉ" đã nằm
+          trong hero, còn "Khu vực" là một phần của chính địa chỉ đó. Ba dòng, không dòng nào
+          nói thêm được gì.
+        */}
 
         {loading ? (
           <View style={s.loadingWrap}><ActivityIndicator size="large" color={Colors.primary} /></View>
@@ -226,12 +226,18 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
                 </View>
               ))}
             </View>
+            {/*
+              Nút này nằm TRONG nhánh có hợp đồng — trước đây nó nằm ngoài nên nhà đang
+              trống cũng hiện, mà bấm vào là ngõ cụt: BE ném `NO_ACTIVE_CONTRACT`
+              ("Nhà nguyên căn chưa có hợp đồng ACTIVE — không phát hành được hoá đơn cho
+              khách", `UtilityInvoiceServiceImpl.createFromWholeHouseBill`). Nhà chưa có
+              khách thì cũng chẳng có ai để gửi hoá đơn.
+            */}
+            <TouchableOpacity style={s.editBtn} activeOpacity={0.85} onPress={() => navigation.navigate('UtilityBilling')}>
+              <Text style={s.editBtnText}>⚡ Ghi chỉ số & gửi hóa đơn</Text>
+            </TouchableOpacity>
           </>
         )}
-
-        <TouchableOpacity style={s.editBtn} activeOpacity={0.85} onPress={() => navigation.navigate('UtilityBilling')}>
-          <Text style={s.editBtnText}>⚡ Ghi chỉ số & gửi hóa đơn</Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );

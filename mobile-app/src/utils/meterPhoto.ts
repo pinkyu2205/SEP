@@ -61,6 +61,11 @@ const ELEC_HINTS = [
 
 const WATER_HINTS = [
   'm3', 'm³', 'm 3', 'm^3', 'x0.0001', 'x 0.0001', 'x0.001', 'x0.01',
+  // Mặt đồng hồ VN/EU in dấu THẬP PHÂN BẰNG PHẨY: 'x0,0001'. Thiếu biến thể này thì
+  // đồng hồ ZR (ảnh thật 17/08/2026) mất một gợi ý mạnh.
+  'x0,0001', 'x 0,0001', 'x0,001', 'x0,01',
+  // Nhãn kiểm định MID của đồng hồ nước nhập (in trên mặt: DE-08-MI001-PTB017).
+  'mi001', 'ptb', 'mid', 'qn1.5', 'qn 1.5', 'q3=2.5', 'm3/h', 'm³/h',
   'nuoc', 'nước', 'water', 'water meter', 'dong ho nuoc', 'đồng hồ nước',
   'nuoc sach', 'nước sạch', 'cap nuoc', 'cấp nước',
   'q3', 'qn', 'qmax', 'dn15', 'dn20', 'dn25', 'dn 15', 'dn 20',
@@ -328,10 +333,46 @@ function reconstructFromUnitLine(text: string, kind: MeterKind): string[] {
     };
 
     push(head);
-    // Đơn vị đứng riêng một dòng (OCR hay tách vậy) → số nằm ở dòng trên.
-    if (digitsOnly(head).length === 0 && i > 0) push(lines[i - 1]);
+    /**
+     * Đơn vị tách thành dòng riêng → dãy số nằm ở dòng KỀ. Phải thử CẢ HAI PHÍA:
+     * mặt đồng hồ nước dân dụng hay in `m³` NGAY TRÊN ô số (ảnh thật 17/08/2026),
+     * còn công tơ điện thì đơn vị nằm dưới/ngang. Trước đây chỉ nhìn dòng TRÊN nên
+     * ảnh loại thứ hai không bao giờ ghép được dãy số, app báo "không tách được dãy số"
+     * dù ảnh rõ nét.
+     *
+     * Nới điều kiện từ "dòng đơn vị không có chữ số nào" sang "chưa đủ 4 chữ số": dòng
+     * `Qn1.5 m3/h B` có sẵn 2 chữ số nên luật cũ coi là đã có số rồi và bỏ qua dòng kề.
+     */
+    if (digitsOnly(head).length < 4) {
+      if (i > 0) push(lines[i - 1]);
+      if (i + 1 < lines.length) push(lines[i + 1]);
+    }
   });
 
+  return out;
+}
+
+/**
+ * Ghép dãy số từ HÀNG CHỮ SỐ RỜI của ô hiển thị (kiểu đồng hồ cơ).
+ *
+ * Ô số đồng hồ cơ là các bánh xe rời nhau nên OCR đọc ra `0 0 0 0 1 0 5 2` — từng chữ
+ * số một, cách nhau bằng khoảng trắng. `reconstructFromUnitLine` chỉ cứu được khi đơn vị
+ * nằm cùng dòng hoặc dòng kề; đồng hồ nào có `m³` in xa ô số thì vẫn trắng tay.
+ *
+ * Dấu hiệu của hàng số: **từ 4 nhóm chữ số rời trở lên** trên cùng một dòng, mỗi nhóm
+ * 1–2 chữ số (bánh xe lệch khe hay dính hai số), tổng 4–8 chữ số. Chuỗi kiểu này rất
+ * đặc trưng — số serial in liền một cụm, thông số kỹ thuật thì kèm đơn vị.
+ */
+function reconstructFromDigitRow(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/[\r\n]+/)) {
+    if (SCALE_ROW.test(line)) continue;
+    if (/vong|vòng|imp|r\//.test(line)) continue;
+    const groups = line.match(/\d{1,2}/g) ?? [];
+    if (groups.length < 4) continue;
+    const joined = groups.join('');
+    if (joined.length >= 4 && joined.length <= 8) out.push(joined);
+  }
   return out;
 }
 
@@ -388,7 +429,12 @@ function pickReading(
   // Số ghép lại từ dòng có đơn vị được ưu tiên tuyệt đối: chúng đến từ đúng ô hiển
   // thị, trong khi `numbers` của BE hay chỉ còn mấy mẩu thước chia / serial.
   const rebuilt = text ? reconstructFromUnitLine(text, kind) : [];
-  const uniq = Array.from(new Set([...rebuilt, ...numbers.map(digitsOnly)].filter(Boolean)))
+  // Hàng số rời: bằng chứng yếu hơn (không có đơn vị làm chứng) nên chấm điểm thấp hơn,
+  // nhưng vẫn đủ để tự điền — xem reconstructFromDigitRow.
+  const digitRows = text ? reconstructFromDigitRow(text) : [];
+  const uniq = Array.from(new Set([
+    ...rebuilt, ...digitRows, ...numbers.map(digitsOnly),
+  ].filter(Boolean)))
     // Hàng thước chia (10000 1000 100 10 1) là chữ IN SẴN trên mặt đồng hồ, không bao
     // giờ là chỉ số. Bỏ hẳn thay vì chỉ trừ điểm — để chúng không lọt vào cả gợi ý.
     .filter(n => !isPowerOfTen(n));
@@ -397,8 +443,14 @@ function pickReading(
   if (!text) return { reading: beReading || uniq[0], candidates: uniq.filter(n => n !== beReading) };
 
   const rebuiltSet = new Set(rebuilt);
+  const digitRowSet = new Set(digitRows);
   const ranked = uniq
-    .map(n => ({ n, s: scoreCandidate(n, text, kind) + (rebuiltSet.has(n) ? 8 : 0) }))
+    .map(n => ({
+      n,
+      s: scoreCandidate(n, text, kind)
+        + (rebuiltSet.has(n) ? 8 : 0)
+        + (digitRowSet.has(n) ? 6 : 0),
+    }))
     .sort((a, b) => b.s - a.s);
 
   // Chỉ tự điền khi có bằng chứng thật (ghép được từ dòng có đơn vị, hoặc số đứng

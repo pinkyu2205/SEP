@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Building2, UserCog, Users, FileText,
-  Wrench, DollarSign, BarChart3, Bell, Settings,
+  DollarSign, BarChart3, Bell, Settings,
   Coins, PiggyBank, CreditCard, MapPin,
 } from 'lucide-react';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
@@ -33,14 +33,13 @@ const SECTIONS: SidebarSection[] = [
     label: 'Hợp đồng',
     items: [{ label: 'Quản lý hợp đồng', path: '/host/contracts', icon: FileText }],
   },
-  {
-    label: 'Giám sát',
-    // Nhánh dev đã xoá hẳn module thiết bị của host (pages/host/equipments) và
-    // route /host/equipments, nên bỏ luôn mục "Thiết bị & Mã QR" ở đây.
-    items: [
-      { label: 'Giám sát bảo trì', path: '/host/maintenance', icon: Wrench },
-    ],
-  },
+  // ẨN NHÓM "GIÁM SÁT" (18/08/2026) — nhóm này chỉ còn mỗi "Giám sát bảo trì", mà
+  // trang đó gọi API bảo trì thì BE trả "Access Denied — kiểm tra lại Role hoặc Vùng
+  // quản lý địa lý": endpoint chưa mở cho ROLE_OWNER. Kết quả là host bấm vào chỉ thấy
+  // 4 toast lỗi đỏ và bảng rỗng. Giữ một mục luôn hỏng trong menu còn tệ hơn là không
+  // có nó. Route `/host/maintenance` vẫn còn — mở lại menu là dùng được ngay khi BE
+  // cho host vào (cùng nhóm với vụ host-403 ở BE-NEED-endpoint-hoa-don-...).
+  // (Trước đó nhóm này còn "Thiết bị & Mã QR", đã xoá cùng module pages/host/equipments.)
   {
     label: 'Tài chính & Báo cáo',
     items: [
@@ -81,9 +80,9 @@ export const Sidebar = () => {
   return (
     <aside className="sticky top-0 h-screen flex-shrink-0 select-none">
       <AppSidebar
-        accent="indigo"
+        accent="green"
         storageKey="hbl_sidebar_host"
-        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Host', icon: Building2 }}
+        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Host' }}
         sections={sections}
         user={{
           name: user?.fullName || 'Host',

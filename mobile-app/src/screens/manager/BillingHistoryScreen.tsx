@@ -258,7 +258,7 @@ export const BillingHistoryScreen: React.FC = () => {
               });
             }}
           >
-            <Text style={s.groupActionText}>💵  Ghi nhận thanh toán · còn {unpaidCount} hoá đơn  →</Text>
+            <Text style={s.groupActionText}>💵  Xem & thu hộ · còn {unpaidCount} hoá đơn  →</Text>
           </TouchableOpacity>
         )}
 

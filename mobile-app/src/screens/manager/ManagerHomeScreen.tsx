@@ -18,32 +18,59 @@ import {
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
+import { meterReadingService } from '@/services/manager/meterReadingService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { serverNow, todayIso } from '@/utils/serverTime';
 
+/**
+ * Lối tắt tới những màn KHÔNG nằm trong thanh tab dưới đáy, xếp thành lưới 4×2.
+ *
+ * Bản cũ có 11 ô trong một `ScrollView horizontal`. Hai vấn đề:
+ *
+ * 1. **Ba ô trùng tab** — `ManagerBilling`, `ManagerMaintenance`, `BuildingList` chính là
+ *    3 trong 5 tab đang hiện thường trực ngay bên dưới, cùng badge.
+ * 2. **Sáu ô cuối không ai thấy.** Cuộn ngang không có dấu hiệu nào báo còn nội dung phía
+ *    sau. Nặng nhất là "Trả phòng" — nó có badge `checkoutTodo` mà lại nằm thứ 11, tức là
+ *    badge đó chưa từng lọt vào mắt ai.
+ *
+ * Bỏ 3 ô trùng còn 8, vừa đúng lưới 4×2 — thấy hết trong một cái nhìn, không phải cuộn.
+ */
 const QUICK_ACTIONS = [
+  // — Hàng 1: việc thao tác hằng ngày —
   // Từ 13/08/2026 "Đón khách" và "Khách chờ đón" là MỘT luồng — cả hai vào
   // ResumeContract. Màn wizard cũ (OnboardingV2) đã gỡ khỏi navigator.
-  { emoji: '🤝', label: 'Đón khách',  route: 'ResumeContract',    color: Colors.primary },
-  // "Hóa đơn" chỉ còn lo tiền nhà/phòng; mọi khoản thu khác (cọc, bảo trì, điện
-  // nước) xem ở "Thu & Đối soát" để hai việc không lẫn vào nhau.
-  { emoji: '🧾', label: 'Hóa đơn',   route: 'ManagerBilling',     color: Colors.warning },
-  { emoji: '💳', label: 'Thu & Đối soát', route: 'ManagerPaymentHistory', color: Colors.info },
-  { emoji: '🔧', label: 'Bảo trì',   route: 'ManagerMaintenance', color: Colors.error },
-  { emoji: '⚡', label: 'Chốt số',   route: 'UtilityBilling',     color: Colors.accent },
-  // Danh sách phòng còn thiếu ảnh công tơ kỳ này. Không có lối vào từ đây thì màn chỉ
-  // mở được bằng cách bấm thông báo — mà cron chỉ gửi 1 lần/ngày, lỡ là mất.
-  { emoji: '📸', label: 'Cần chụp số', route: 'MeterReadingPending', color: Colors.warning },
-  // Màn này gồm cả nhà nguyên căn (không có phòng) nên không gọi là "Phòng".
-  // Gộp 13/08/2026: trước đây ô này mở RoomManage còn nút "Quản lý tất cả toà nhà" ở
-  // dưới mở BuildingList — hai màn khác nhau cho cùng một việc. Nay cả hai vào
-  // BuildingList; từ chi tiết từng nhà đã có sẵn lối sang RoomManage để đổi trạng thái phòng.
-  { emoji: '🏠', label: 'Nhà & phòng', route: 'BuildingList',     color: Colors.success },
-  { emoji: '👥', label: 'Khách thuê', route: 'TenantList',        color: Colors.primary },
-  { emoji: '📦', label: 'Thiết bị',  route: 'Equipment',          color: Colors.textSecondary },
-  { emoji: '📋', label: 'Hợp đồng',  route: 'ManagerContracts',   color: Colors.info },
-  { emoji: '🚪', label: 'Trả phòng',  route: 'CheckoutRequests',   color: Colors.error },
+  { emoji: '🤝', label: 'Đón khách',      route: 'ResumeContract',        color: Colors.primary },
+  // Đối xứng với 'Đón khách' — hai đầu vòng đời khách thuê, cùng nhìn từ phía manager.
+  // Không đặt 'Trả phòng': đó là hành động của KHÁCH, manager chỉ tiếp nhận và xử lý hồ sơ.
+  { emoji: '🚪', label: 'Tiễn khách',     route: 'CheckoutRequests',      color: Colors.error   },
+  // Mọi khoản thu ngoài tiền nhà (cọc, bảo trì, điện nước) — tách khỏi tab Hoá đơn để
+  // hai việc không lẫn vào nhau.
+  { emoji: '💳', label: 'Thu & Đối soát', route: 'ManagerPaymentHistory', color: Colors.info    },
+  // "Cần chụp số" từng ở đây, nay chuyển xuống "Cần xử lý": nó là một VIỆC có hạn và có
+  // số lượng, không phải một nơi để đi tới. Ở lưới này nó chiếm chỗ cố định dù hầu hết
+  // thời gian đếm bằng 0; ở dưới kia nó chỉ hiện khi thật sự còn phòng chưa chụp, và hiện
+  // kèm số — nên khó lỡ hơn hẳn.
+
+  // — Hàng 2: định kỳ và tra cứu —
+  { emoji: '⚡', label: 'Chốt số',        route: 'UtilityBilling',        color: Colors.accent  },
+  { emoji: '👥', label: 'Khách thuê',     route: 'TenantList',            color: Colors.primary },
+  { emoji: '📋', label: 'Hợp đồng',       route: 'ManagerContracts',      color: Colors.info    },
+  { emoji: '📦', label: 'Thiết bị',       route: 'Equipment',             color: Colors.textSecondary },
 ] as const;
+
+const ACTIONS_PER_ROW = 4;
+
+/**
+ * Cắt sẵn thành từng hàng 4 ô.
+ *
+ * Không dùng `flexWrap` + `width: '23.5%'`: bốn ô 23.5% cộng ba khoảng `gap` là vượt 100%,
+ * React Native đẩy ô thứ tư xuống hàng dưới và lưới vỡ thành 3 ô/hàng. Chia hàng sẵn rồi
+ * cho mỗi ô `flex: 1` thì phần còn lại sau `gap` tự chia đều — không còn số nào để tính sai.
+ */
+const ACTION_ROWS = Array.from(
+  { length: Math.ceil(QUICK_ACTIONS.length / ACTIONS_PER_ROW) },
+  (_, i) => QUICK_ACTIONS.slice(i * ACTIONS_PER_ROW, (i + 1) * ACTIONS_PER_ROW),
+);
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -57,24 +84,29 @@ export const ManagerHomeScreen: React.FC = () => {
   const [draftContracts, setDraftContracts] = useState<TenantContractResponse[]>([]);
   const [activeContracts, setActiveContracts] = useState<TenantContractResponse[]>([]);
   const [checkouts, setCheckouts] = useState<CheckoutRequestDto[]>([]);
+  /** Số dòng phòng còn thiếu ảnh công tơ kỳ này (mỗi HĐ thiếu cả điện lẫn nước tính 2 dòng). */
+  const [pendingMeterCount, setPendingMeterCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông: BE + thông báo trả phòng
 
   const load = useCallback(async () => {
     try {
-      const [props, inv, pay, drafts, checkoutList] = await Promise.all([
+      const [props, inv, pay, drafts, checkoutList, pendingMeters] = await Promise.all([
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
         realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
         checkoutService.list().catch(() => [] as CheckoutRequestDto[]),
+        // Phòng còn thiếu ảnh công tơ kỳ này — việc có hạn, đưa vào "Cần xử lý" bên dưới.
+        meterReadingService.listPending().catch(() => []),
       ]);
       setProperties(props);
       setInvoices(inv);
       setPayments(pay);
       setDraftContracts(drafts);
       setCheckouts(checkoutList);
+      setPendingMeterCount(pendingMeters.length);
 
       // HĐ đang hiệu lực — để loại hoá đơn của khách ĐÃ chấm dứt khỏi "My Task".
       // Hỏi theo từng nhà (xem listActiveByProperties) nên phải đợi có `props` trước.
@@ -131,12 +163,29 @@ export const ManagerHomeScreen: React.FC = () => {
     [invoices, rentingKeys],
   );
 
-  // Số liệu thật cho "Cần xử lý hôm nay" + badge thao tác nhanh.
-  const overdueCount  = actionableInvoices.filter(i => i.status === 'OVERDUE').length;
+  /**
+   * ─── ĐẾM TÁCH THEO LOẠI HOÁ ĐƠN ──────────────────────────────────────────────
+   *
+   * Mỗi ô ở đây bấm vào là sang một màn khác nhau, mà mỗi màn chỉ hiện đúng LOẠI hoá
+   * đơn của nó: "Hoá đơn tiền nhà" chỉ có RENT, "Ghi chỉ số & Hoá đơn" chỉ có
+   * điện/nước. Nên ô nào cũng phải đếm đúng phần màn đích hiện được.
+   *
+   * Trước 18/08/2026 ô "Hóa đơn quá hạn" đếm MỌI loại rồi dẫn sang màn tiền nhà:
+   * trang chủ báo 9, bấm vào đếm được 1 — 8 cái còn lại là điện/nước, nằm ở màn khác
+   * mà không ô nào chỉ đường tới. Người dùng chỉ thấy hai con số đá nhau.
+   */
+  const isUtility = (i: ManagerInvoice) => i.type === 'ELECTRICITY' || i.type === 'WATER';
+  const overdueRent = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && i.type === 'RENT').length;
+  const overdueUtility = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && isUtility(i)).length;
+  // Loại còn lại (SERVICE / OTHER) chưa có màn riêng — gộp vào ô tiền nhà để không
+  // mất hẳn khỏi danh sách việc, thà lệch một ít còn hơn giấu.
+  const overdueOther = actionableInvoices.filter(i =>
+    i.status === 'OVERDUE' && i.type !== 'RENT' && !isUtility(i)).length;
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
   const rentTerminable = actionableInvoices.filter(i =>
     i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
-  const unpaidCount   = actionableInvoices.filter(i => i.status === 'OVERDUE' || i.status === 'PENDING').length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   /**
@@ -173,7 +222,10 @@ export const ManagerHomeScreen: React.FC = () => {
 
   const priorityItems = [
     { id: 'p0', icon: '🤝', label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
-    { id: 'p1', icon: '🧾', label: 'Hóa đơn quá hạn',          count: overdueCount,  urgency: 'critical', color: Colors.error,   route: 'ManagerBilling' },
+    { id: 'p1', icon: '🧾', label: 'Tiền nhà quá hạn',          count: overdueRent + overdueOther, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
+    // `tab: 'history'` để vào thẳng danh sách hoá đơn điện/nước, không rơi vào bước
+    // ghi chỉ số — việc cần làm ở đây là đi đòi, không phải chụp đồng hồ.
+    { id: 'p1b', icon: '⚡', label: 'Điện/nước quá hạn',        count: overdueUtility, urgency: 'critical', color: Colors.error, route: 'UtilityBilling', params: { tab: 'history' } },
     { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
     { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
       count: checkoutPending > 0 ? checkoutPending : checkoutTodo,
@@ -182,13 +234,10 @@ export const ManagerHomeScreen: React.FC = () => {
     // hình lịch phát hành, còn thao tác chấm dứt HĐ nằm ở mục "Cần xử lý" của màn này.
     { id: 'p5', icon: '⛔', label: 'Tiền phòng quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
+    // Không chụp được ảnh công tơ thì không phát hành được hoá đơn điện/nước — việc này
+    // chặn cả kỳ thu tiền, nên xếp cùng nhóm gấp với tiền quá hạn.
+    { id: 'p6', icon: '📸', label: 'Phòng chưa chụp công tơ', count: pendingMeterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
   ];
-
-  const quickBadges: Record<string, number> = {
-    ManagerBilling: unpaidCount,
-    ManagerMaintenance: m.maintenance,
-    CheckoutRequests: checkoutTodo,
-  };
 
   const activeItems    = priorityItems.filter(p => p.count > 0);
   const criticalItems  = activeItems.filter(p => p.urgency === 'critical');
@@ -420,34 +469,33 @@ export const ManagerHomeScreen: React.FC = () => {
         <View style={[s.sectionRow, { marginTop: Spacing.lg }]}>
           <Text style={s.sectionTitle}>Thao tác nhanh</Text>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={s.actionsScroll}
-          contentContainerStyle={s.actionsContent}
-        >
-          {QUICK_ACTIONS.map((a, i) => {
-            const badge = quickBadges[a.route] ?? 0;
-            return (
+        {/*
+          Không gắn badge ở đây nữa. Mọi con số cần gấp đã nằm ở khối "Cần xử lý" phía trên
+          (`priorityItems` — có nhãn và số lượng, chỉ hiện khi > 0) hoặc trên chính thanh tab.
+          Lặp lại lần thứ ba chỉ làm loãng, và badge đứng một mình không nói được nó là việc gì.
+        */}
+        {ACTION_ROWS.map((row, rowIndex) => (
+          <View key={rowIndex} style={s.actionsRow}>
+            {row.map((a) => (
               <TouchableOpacity
-                key={i}
+                key={a.route}
                 style={s.actionChip}
                 onPress={() => navigation.navigate(a.route)}
                 activeOpacity={0.7}
               >
                 <View style={[s.actionIconWrap, { backgroundColor: a.color + '15' }]}>
                   <Text style={s.actionEmoji}>{a.emoji}</Text>
-                  {badge > 0 && (
-                    <View style={s.actionBadge}>
-                      <Text style={s.actionBadgeText}>{badge > 9 ? '9+' : badge}</Text>
-                    </View>
-                  )}
                 </View>
-                <Text style={s.actionLabel}>{a.label}</Text>
+                <Text style={s.actionLabel} numberOfLines={2}>{a.label}</Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+            ))}
+            {/* Ô trống giữ chỗ: hàng cuối thiếu ô thì `flex: 1` sẽ kéo giãn mấy ô còn lại
+                cho đầy hàng, làm chúng to hơn hàng trên. */}
+            {Array.from({ length: ACTIONS_PER_ROW - row.length }).map((_, i) => (
+              <View key={`spacer-${i}`} style={s.actionSpacer} />
+            ))}
+          </View>
+        ))}
 
         {/* ── Toà nhà cần chú ý ─────────────────────────────────────── */}
         <View style={[s.sectionRow, { marginTop: Spacing.lg }]}>
@@ -763,26 +811,33 @@ const s = StyleSheet.create({
   chevron: { fontSize: 15, color: Colors.textMuted },
 
   // ── Quick actions ─────────────────────────────────────────────────
-  actionsScroll:  { flexGrow: 0, marginBottom: Spacing.xs },
-  actionsContent: { paddingBottom: 2, gap: Spacing.sm },
+  actionsRow: {
+    flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.sm,
+  },
+  actionSpacer: { flex: 1 },
   actionChip: {
-    alignItems: 'center', backgroundColor: Colors.white,
+    flex: 1, alignItems: 'center',
+    backgroundColor: Colors.white,
     borderRadius: BorderRadius.lg,
-    paddingVertical: 6, paddingHorizontal: 9,
-    borderWidth: 1, borderColor: Colors.border, minWidth: 56,
+    paddingVertical: 10, paddingHorizontal: 3,
+    borderWidth: 1, borderColor: Colors.border,
   },
   actionIconWrap: {
-    width: 32, height: 32, borderRadius: 9,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+    width: 36, height: 36, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 5,
   },
-  actionEmoji:     { fontSize: 15 },
-  actionBadge:     {
-    position: 'absolute', top: -3, right: -3, minWidth: 14, height: 14,
-    borderRadius: 7, backgroundColor: Colors.error,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
+  actionEmoji:     { fontSize: 17 },
+  /**
+   * Nhãn chừa sẵn chỗ cho ĐÚNG 2 dòng (`minHeight = 2 × lineHeight`).
+   *
+   * Ép 1 dòng thì "Thu & Đối soát" bị cắt thành "Thu & Đối so…" — ô rộng khoảng 78px, ở
+   * cỡ 11px chỉ chứa nổi ~11 ký tự. Còn để 2 dòng mà không khoá chiều cao thì ô nào nhãn
+   * dài sẽ cao hơn hẳn các ô cùng hàng, lưới xô lệch.
+   */
+  actionLabel: {
+    fontSize: 11, fontWeight: '600', color: Colors.textSecondary,
+    textAlign: 'center', lineHeight: 14, minHeight: 28,
   },
-  actionBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
-  actionLabel:     { fontSize: 10, fontWeight: '500', color: Colors.textSecondary, textAlign: 'center' },
 
   // ── Building attention cards ──────────────────────────────────────
   buildingCard: {

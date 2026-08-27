@@ -8,8 +8,14 @@ import {
 } from '@/services/evnBill.service';
 import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
+import { useOccupiedProperties } from '@/services/useOccupiedProperties';
+import { groupThousands } from '@/utils';
+
+
+import { utilityInvoiceService } from '@/services/utilityInvoice.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { parseEvnInvoice, monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
+import { matchBillToProperty } from '@/utils/billPropertyMatch';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 import { serverNow } from '@/utils/serverTime';
 
@@ -35,19 +41,24 @@ const BILLS_PER_PAGE = 10;
 const fmtDateTime = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
-/** Hiển thị số có dấu phân cách nghìn khi gõ ("400000" -> "400.000"). */
-const groupThousands = (s: string) => {
-  const d = onlyDigits(s);
-  return d ? Number(d).toLocaleString('vi-VN') : '';
-};
-
 interface BillForm {
   totalKwh: string;
   totalAmount: string;
   billingPeriod: string;
+  /**
+   * Chỉ số công tơ CŨ / MỚI in trên giấy EVN. Chỉ bắt buộc với NHÀ NGUYÊN CĂN, vì
+   * loại đó phát hành thẳng cho khách nên hoá đơn khách nhận phải mang đúng hai số
+   * này (BE cũng chặn: consumption phải bằng newReading − prevReading).
+   * Nhà chia phòng thì bỏ trống — quản lý đọc đồng hồ từng phòng, số của cả nhà
+   * không dùng để tính cho ai.
+   */
+  prevReading: string;
+  newReading: string;
 }
 
-const EMPTY_FORM: BillForm = { totalKwh: '', totalAmount: '', billingPeriod: '' };
+const EMPTY_FORM: BillForm = {
+  totalKwh: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
+};
 
 // Dải dấu thanh Unicode mà NFD tách ra. Viết bằng escape ASCII để dấu tổ hợp không nằm
 // trần trong source (nhìn như ô trống, dễ bị editor/merge làm hỏng).
@@ -259,12 +270,22 @@ export const EvnBillPublishing = () => {
   const [billsUnavailable, setBillsUnavailable] = useState(false);
 
   const [imageUrl, setImageUrl] = useState('');
+  /**
+   * Chữ OCR đọc được từ ảnh, GIỮ LẠI để đối chiếu với căn nhà đang chọn.
+   *
+   * Phải là state chứ không phải một phép kiểm chạy một lần lúc upload: lỗi cần bắt là
+   * "chọn nhầm nhà", mà admin hoàn toàn có thể tải ảnh trước rồi mới đổi ô chọn nhà sau.
+   * Giữ rawText rồi tính lại bằng useMemo thì đổi nhà lúc nào cảnh báo cũng đúng lúc đó.
+   */
+  const [ocrRawText, setOcrRawText] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [form, setForm] = useState<BillForm>(EMPTY_FORM);
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [justPublished, setJustPublished] = useState<EvnBill | null>(null);
+  /** Lần phát hành vừa rồi có gửi thẳng cho khách thuê không (chỉ nguyên căn). */
+  const [issuedToTenant, setIssuedToTenant] = useState(false);
   /** Bộ lọc bảng 'Đã phát hành'. */
   const [billSearch, setBillSearch] = useState('');
   const [billStatus, setBillStatus] = useState<'all' | 'published' | 'revoked'>('all');
@@ -278,6 +299,24 @@ export const EvnBillPublishing = () => {
   /** Bản ghi đang mở chi tiết (null = đóng). */
   const [detailBill, setDetailBill] = useState<EvnBill | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /**
+   * Ô chọn nhà CHỈ hiện căn đang có khách ở.
+   *
+   * Hoá đơn điện/nước chỉ có nghĩa với căn có người ở; đổ ra cả nhà chưa ai thuê thì
+   * admin phải tự nhớ căn nào đang có khách, chọn nhầm là phát hành một hoá đơn không
+   * gửi cho ai. Xem `useOccupiedProperties` để biết vì sao phải hỏi `handover-status`
+   * chứ không dùng được field nào trong danh sách nhà.
+   *
+   * CHỈ lọc ô chọn, KHÔNG lọc `properties` gốc: bảng "đã phát hành" bên dưới vẫn phải
+   * tra được hoá đơn cũ của căn mà khách đã trả phòng.
+   */
+  const { occupiedIds } = useOccupiedProperties();
+  const occupiedProperties = useMemo(
+    () => (occupiedIds ? properties.filter((p) => occupiedIds.has(p.id)) : properties),
+    [properties, occupiedIds],
+  );
+  const hiddenEmptyCount = properties.length - occupiedProperties.length;
+
 
   // ── Tải danh sách nhà ──────────────────────────────────────────────────────
   const loadProperties = useCallback(async () => {
@@ -354,7 +393,25 @@ export const EvnBillPublishing = () => {
   }, [selectedMonthPeriod]);
 
   const selectedProperty = properties.find((p) => p.id === propertyId);
+  /**
+   * Nguyên căn đi luồng KHÁC HẲN: phát hành thẳng cho khách thuê, quản lý chỉ nhận
+   * thông báo. Xem services/utilityInvoice.service.ts để biết vì sao tách theo loại nhà.
+   */
   const isWholeHouse = selectedProperty?.wholeHouse === true;
+
+  /**
+   * Ảnh hoá đơn này có phải của căn nhà đang chọn không (xem @/utils/billPropertyMatch).
+   *
+   * Đáng giá nhất với NGUYÊN CĂN: ở loại nhà đó, bấm phát hành là hoá đơn đi thẳng tới
+   * khách trong cùng thao tác — không còn ai đứng giữa để phát hiện nhầm nhà.
+   */
+  const billMatch = useMemo(
+    () => matchBillToProperty(
+      ocrRawText,
+      selectedProperty?.fullAddress || selectedProperty?.shortAddress,
+    ),
+    [ocrRawText, selectedProperty],
+  );
 
   /** Nhà đã có bản PUBLISHED của kỳ này → chặn phát hành lần hai (BE cũng phải chặn). */
   const existingBill = useMemo(
@@ -412,11 +469,25 @@ export const EvnBillPublishing = () => {
 
   const unitPrice = evnUnitPrice(Number(onlyDigits(form.totalAmount)), Number(onlyDigits(form.totalKwh)));
 
+
+  const prevReadingNum = Number(onlyDigits(form.prevReading));
+  const newReadingNum = Number(onlyDigits(form.newReading));
+  const totalKwhNum = Number(onlyDigits(form.totalKwh));
+
+  /**
+   * Với nguyên căn: hiệu hai chỉ số PHẢI bằng tổng kWh. Kiểm ở đây thay vì để BE ném
+   * 422 — vì lúc đó hoá đơn tổng đã tạo xong rồi, admin phải thu hồi rồi làm lại.
+   */
+  const readingMismatch = isWholeHouse
+    && !!form.prevReading && !!form.newReading
+    && newReadingNum - prevReadingNum !== totalKwhNum;
+
   const formReady =
     !!propertyId &&
-    Number(onlyDigits(form.totalKwh)) > 0 &&
+    totalKwhNum > 0 &&
     Number(onlyDigits(form.totalAmount)) > 0 &&
-    !!form.billingPeriod.trim();
+    !!form.billingPeriod.trim() &&
+    (!isWholeHouse || (!!form.prevReading && !!form.newReading && !readingMismatch));
 
   // ── Upload + OCR ───────────────────────────────────────────────────────────
   const handleFile = async (file: File) => {
@@ -430,6 +501,7 @@ export const EvnBillPublishing = () => {
       try {
         const ocr = await evnBillService.ocr(url);
         const parsed = parseEvnInvoice(ocr);
+        setOcrRawText(ocr?.rawText ?? '');
 
         // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên
         // với dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Số của BE chỉ dùng để bù
@@ -439,9 +511,14 @@ export const EvnBillPublishing = () => {
         if (!parsed.billingPeriod && ocr?.billingPeriod) parsed.billingPeriod = ocr.billingPeriod;
 
         setForm((f) => ({
+          ...f,
           totalKwh: parsed.totalKwh || f.totalKwh,
           totalAmount: parsed.totalAmount || f.totalAmount,
           billingPeriod: parsed.billingPeriod || f.billingPeriod,
+          // Chỉ số công tơ: parser đọc được từ bộ ba tự khớp phép trừ. Chỉ điền vào ô
+          // còn trống — admin đã gõ tay thì không đè lên.
+          prevReading: f.prevReading || parsed.prevReading || '',
+          newReading: f.newReading || parsed.newReading || '',
         }));
 
         const got = parsed.totalKwh || parsed.totalAmount || parsed.billingPeriod;
@@ -451,6 +528,9 @@ export const EvnBillPublishing = () => {
             : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay.',
         );
       } catch {
+        // OCR hỏng thì cũng mất luôn đường đối chiếu địa chỉ — xoá rawText cũ để không
+        // đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
+        setOcrRawText('');
         setScanNote('Đã tải ảnh nhưng dịch vụ đọc hoá đơn đang lỗi. Vui lòng nhập tay số liệu.');
       }
     } catch (e: any) {
@@ -463,6 +543,7 @@ export const EvnBillPublishing = () => {
   const clearImage = () => {
     setImageUrl('');
     setScanNote(null);
+    setOcrRawText('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -477,16 +558,81 @@ export const EvnBillPublishing = () => {
     if (!formReady || !propertyId) return;
     setPublishing(true);
     setPublishError(null);
+    setIssuedToTenant(false);
+    const totalKwh = Number(onlyDigits(form.totalKwh));
+    const totalAmount = Number(onlyDigits(form.totalAmount));
+    const period = form.billingPeriod.trim();
     try {
       const created = await evnBillService.publish({
         propertyId,
-        billingPeriod: form.billingPeriod.trim(),
+        billingPeriod: period,
         month,
         year,
-        totalKwh: Number(onlyDigits(form.totalKwh)),
-        totalAmount: Number(onlyDigits(form.totalAmount)),
+        totalKwh,
+        totalAmount,
         imageUrl: imageUrl || undefined,
+        // Nguyên căn: BE (bản 2 luồng) dùng luôn 2 số này để TỰ phát hành hoá đơn
+        // cho khách trong cùng transaction. BE bản cũ bỏ qua field lạ nên gửi kèm
+        // an toàn cho cả hai bản.
+        prevReading: isWholeHouse ? Number(onlyDigits(form.prevReading)) : undefined,
+        newReading: isWholeHouse ? Number(onlyDigits(form.newReading)) : undefined,
       });
+
+      /**
+       * NGUYÊN CĂN — phát hành thẳng cho khách thuê ngay tại đây.
+       *
+       * Giấy EVN của căn nhà đã có đủ chỉ số cũ / mới / tổng tiền của đúng khách đó,
+       * không còn gì phải chia nên không cần ai đi đọc đồng hồ. Quản lý chỉ nhận
+       * thông báo (BE `notifyManagerBillPublished` đã gửi khi tạo hoá đơn tổng).
+       *
+       * ⚠️ HAI BƯỚC KHÔNG NGUYÊN TỬ: nếu bước dưới lỗi thì hoá đơn tổng đã tạo rồi
+       * mà khách chưa nhận gì. Nên báo lỗi RÕ là "tổng đã tạo, chưa gửi được cho
+       * khách" chứ không nói chung là thất bại — admin cần biết đừng phát hành lại.
+       * Sửa gốc là BE tự phát hành trong cùng transaction:
+       * xem doc/BE-NEED-nguyen-can-tu-phat-hanh-hoa-don-tien-ich.
+       */
+      if (isWholeHouse) {
+        const prevReading = Number(onlyDigits(form.prevReading));
+        const newReading = Number(onlyDigits(form.newReading));
+        try {
+          await utilityInvoiceService.createForWholeHouse(propertyId, {
+            type: 'ELECTRIC',
+            billingPeriod: period,
+            prevReading,
+            newReading,
+            consumption: totalKwh,
+            // Đơn giá lấy từ bản BE trả về nếu có — BE tính ở scale 8, FE tự chia
+            // sẽ lệch và rơi vào AMOUNT_MISMATCH.
+            unitPrice: created.unitPrice ?? evnUnitPrice(totalAmount, totalKwh),
+            amount: totalAmount,
+            meterImageUrl: imageUrl || undefined,
+          });
+          setIssuedToTenant(true);
+        } catch (e: any) {
+          /**
+           * `INVOICE_ALREADY_EXISTS` ở đây KHÔNG phải lỗi — nghĩa là BE (bản 2 luồng) đã
+           * tự phát hành hoá đơn cho khách trong lúc tạo hoá đơn tổng, nên lệnh gọi này
+           * thành ra dư. Khách đã có hoá đơn → coi như thành công, đừng hiện lỗi đỏ.
+           *
+           * Vì sao vẫn giữ lệnh gọi: BE và FE không deploy cùng lúc. Bỏ hẳn bây giờ mà BE
+           * chưa lên thì nguyên căn tạo hoá đơn tổng rồi im lặng KHÔNG gửi cho khách —
+           * hỏng nặng hơn. Khi BE bản mới đã chạy ở mọi môi trường thì XOÁ cả khối này
+           * (BE đã yêu cầu 17/08/2026).
+           */
+          const code = e?.response?.data?.code;
+          const msg = e?.response?.data?.message || e?.message || '';
+          if (code === 'INVOICE_ALREADY_EXISTS' || /da ton tai|đã tồn tại/i.test(msg)) {
+            setIssuedToTenant(true);
+          } else {
+            setPublishError(
+              'Đã tạo hoá đơn tổng nhưng CHƯA gửi được cho khách thuê: '
+              + (msg || 'lỗi không rõ')
+              + '. Đừng phát hành lại — vào mục Đã phát hành để gửi lại cho khách.',
+            );
+          }
+        }
+      }
+
       setJustPublished(created);
       resetForm();
       setPropertyId(null);
@@ -495,7 +641,7 @@ export const EvnBillPublishing = () => {
       setPublishError(
         e?.response?.data?.message
           || e?.message
-          || 'Không gửi được hoá đơn cho quản lý.',
+          || 'Không phát hành được hoá đơn.',
       );
     } finally {
       setPublishing(false);
@@ -566,12 +712,23 @@ export const EvnBillPublishing = () => {
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <div className="text-sm">
+              {/* Nói đúng việc đã xảy ra: nguyên căn thì khách đã có hoá đơn, nhà chia
+                  phòng thì mới chỉ giao việc cho quản lý. Trước đây câu nào cũng là
+                  "Đã gửi cho quản lý", đọc vào không biết khách đã nhận chưa. */}
               <p className="font-bold text-emerald-800">
-                Đã gửi cho quản lý — {justPublished.propertyName ?? `nhà #${justPublished.propertyId}`}
+                {issuedToTenant
+                  ? 'Đã phát hành cho khách thuê'
+                  : 'Đã giao cho quản lý đọc đồng hồ'}
+                {' — '}{justPublished.propertyName ?? `nhà #${justPublished.propertyId}`}
               </p>
               <p className="text-emerald-700">
                 {justPublished.totalKwh.toLocaleString('vi-VN')} kWh · {formatVnd(justPublished.totalAmount)} ·
                 đơn giá {formatVnd(justPublished.unitPrice ?? evnUnitPrice(justPublished.totalAmount, justPublished.totalKwh))}/kWh
+              </p>
+              <p className="mt-1 text-xs text-emerald-700">
+                {issuedToTenant
+                  ? 'Khách đã nhận hoá đơn và có thể thanh toán. Quản lý nhận thông báo để vào xem.'
+                  : 'Quản lý phải chụp đồng hồ và ghi số từng phòng trong hôm nay.'}
               </p>
             </div>
             <button
@@ -603,12 +760,21 @@ export const EvnBillPublishing = () => {
                   </button>
                 </div>
               ) : (
-                <PropertyCombobox
-                  properties={properties}
-                  value={propertyId}
-                  onChange={setPropertyId}
-                  publishedIds={publishedIds}
-                />
+                <>
+                  <PropertyCombobox
+                    properties={occupiedProperties}
+                    value={propertyId}
+                    onChange={setPropertyId}
+                    publishedIds={publishedIds}
+                  />
+                  {/* Nói rõ đã giấu bớt — im lặng thì admin tìm một căn quen thuộc,
+                      không thấy, tưởng nhà bị xoá khỏi hệ thống. */}
+                  {hiddenEmptyCount > 0 && (
+                    <p className="mt-1.5 text-xs text-slate-400">
+                      Chỉ hiện nhà đang có khách ở — {hiddenEmptyCount} nhà trống đã được ẩn.
+                    </p>
+                  )}
+                </>
               )}
 
               {selectedProperty && (
@@ -775,6 +941,83 @@ export const EvnBillPublishing = () => {
               </p>
             </div>
 
+            {/* ── Luồng sau khi phát hành, khác nhau theo LOẠI NHÀ ──
+                Nói trước khi bấm, vì hai loại nhà ra hai kết quả khác hẳn: một loại tới
+                tay khách ngay, một loại còn phải qua quản lý đọc đồng hồ. Admin cần biết
+                mình đang tạo ra việc cho ai. */}
+            {!!propertyId && (
+              <div className={`rounded-xl border p-4 ${
+                isWholeHouse ? 'border-cyan-200 bg-cyan-50' : 'border-violet-200 bg-violet-50'
+              }`}>
+                <p className={`text-xs font-black uppercase tracking-wide ${
+                  isWholeHouse ? 'text-cyan-700' : 'text-violet-700'
+                }`}>
+                  {isWholeHouse ? 'Nguyên căn — gửi thẳng cho khách thuê' : 'Nhà chia phòng — quản lý đọc đồng hồ'}
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                  {isWholeHouse ? (
+                    <>
+                      Cả căn chỉ một khách thuê, mà giấy EVN đã ghi đủ chỉ số cũ · mới · tổng tiền
+                      của chính căn đó — không còn gì phải chia. Bấm phát hành là <b>hoá đơn tới
+                      tay khách ngay</b>, khách xem và thanh toán. Quản lý chỉ nhận thông báo để
+                      vào xem, không phải làm bước nào.
+                    </>
+                  ) : (
+                    <>
+                      Giấy EVN chỉ có tổng của cả nhà nên phải chia về từng phòng theo đồng hồ
+                      riêng. Bấm phát hành là hệ thống chốt <b>đơn giá</b> rồi giao việc cho quản
+                      lý: <b>đi chụp đồng hồ và ghi số từng phòng trong NGÀY HÔM NAY</b>, rồi gửi
+                      hoá đơn cho từng khách. Để qua ngày là số đọc lệch với kỳ hoá đơn.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
+            {/* ── Chỉ số công tơ — CHỈ nguyên căn ──
+                Hoá đơn nguyên căn đi thẳng tới khách nên phải mang đúng hai số in trên giấy
+                EVN, không được bịa. Nhà chia phòng thì hai số này vô nghĩa: mỗi phòng có đồng
+                hồ riêng, quản lý đọc từng cái. */}
+            {isWholeHouse && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số cũ (kWh) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="input-field w-full tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số đầu kỳ trên giấy EVN"
+                    value={form.prevReading}
+                    onChange={(e) => setForm((f) => ({ ...f, prevReading: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-slate-700">
+                    Chỉ số mới (kWh) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    className="input-field w-full tabular-nums"
+                    inputMode="numeric"
+                    placeholder="Số cuối kỳ trên giấy EVN"
+                    value={form.newReading}
+                    onChange={(e) => setForm((f) => ({ ...f, newReading: e.target.value }))}
+                  />
+                </div>
+                {readingMismatch ? (
+                  <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
+                    Chỉ số mới − chỉ số cũ = {(newReadingNum - prevReadingNum).toLocaleString('vi-VN')} kWh,
+                    không khớp tổng {totalKwhNum.toLocaleString('vi-VN')} kWh ở trên. Sửa cho khớp rồi
+                    mới phát hành được — hoá đơn khách nhận phải đúng số trên giấy EVN.
+                  </p>
+                ) : (
+                  <p className="sm:col-span-2 text-xs text-slate-400">
+                    Hai số này in trên hoá đơn khách nhận. Hiệu của chúng phải bằng đúng tổng kWh.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Đơn giá là con số quan trọng nhất trang này: mọi hoá đơn phòng đều nhân với nó. */}
             <div className={`rounded-xl border p-4 ${unitPrice > 0 ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200 bg-slate-50'}`}>
               <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Đơn giá hệ thống sẽ dùng</p>
@@ -792,6 +1035,46 @@ export const EvnBillPublishing = () => {
               </div>
             )}
 
+            {/*
+              ── Chặn nhầm nhà (24/08/2026) ──
+              Đặt SÁT NÚT PHÁT HÀNH, không phải cạnh ô tải ảnh: đây là thứ cuối cùng cần
+              đọc trước khi tiền đi tới khách, và admin thường chọn nhà xong mới tải ảnh
+              (hoặc ngược lại) nên cảnh báo cạnh ô ảnh dễ bị cuộn qua mất.
+
+              CẢNH BÁO chứ không chặn — OCR ảnh chụp điện thoại sai nhiều, chặn cứng sẽ
+              có ngày admin cầm đúng hoá đơn mà không phát hành được. Lớp hậu kiểm là
+              quyền khiếu nại của khách (trang "Khiếu nại hoá đơn điện/nước").
+            */}
+            {billMatch.verdict === 'mismatch' && (
+              <div className="rounded-lg border-2 border-rose-300 bg-rose-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-rose-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Ảnh có vẻ KHÔNG phải của căn nhà này
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-rose-700">{billMatch.message}</p>
+                <p className="mt-1.5 text-xs text-rose-600">
+                  Đang chọn: <b>{selectedProperty?.propertyName}</b>
+                  {selectedProperty?.shortAddress ? ` — ${selectedProperty.shortAddress}` : ''}
+                </p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'weak' && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> Nên kiểm lại địa chỉ trên ảnh
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-amber-700">{billMatch.message}</p>
+              </div>
+            )}
+
+            {billMatch.verdict === 'match' && (
+              /* Nói cả khi ĐÚNG: cảnh báo chỉ đáng tin khi người dùng thấy nó có chạy
+                 thật. Im lặng lúc đúng thì lúc sai họ sẽ tưởng hệ thống lỗi. */
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                <Check className="h-3.5 w-3.5" /> Địa chỉ trên ảnh khớp với căn nhà đang chọn.
+              </p>
+            )}
+
             <button
               type="button"
               disabled={!formReady || publishing || !!existingBill}
@@ -799,7 +1082,9 @@ export const EvnBillPublishing = () => {
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {existingBill ? 'Kỳ này đã phát hành' : 'Gửi cho quản lý'}
+              {existingBill
+                ? 'Kỳ này đã phát hành'
+                : isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Gửi cho quản lý đọc đồng hồ'}
             </button>
           </div>
         </div>

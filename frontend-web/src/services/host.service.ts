@@ -71,13 +71,75 @@ export interface DepositItem {
   status: 'NOT_COLLECTED' | 'HELD' | 'REFUNDED' | 'FORFEITED';
   /** BE có trả — dùng để ghép khoản cọc vào đúng hợp đồng ở màn chi tiết HĐ. */
   contractId?: number; contractCode?: string; endDate?: string;
+  /**
+   * Hồ sơ trả phòng của HĐ này — `null` nghĩa là khách vẫn đang ở bình thường.
+   *
+   * Đây là tín hiệu phân biệt hai tình huống rất khác nhau: cọc của khách ĐANG THUÊ
+   * (không được đụng) và cọc của khách ĐANG TRẢ PHÒNG (chờ hoàn).
+   */
+  checkoutRequestId?: number;
+  /** Số cọc sẽ hoàn theo bảng quyết toán. Null = chưa có bảng quyết toán. */
+  refundAmount?: number;
+  refundedAt?: string;
+  /**
+   * Tài khoản khách yêu cầu hoàn cọc về (BE tách khỏi free-text `note` — 20/08/2026).
+   * Hợp đồng cũ không có, phần này để trống và host vẫn đọc ghi chú như trước.
+   */
+  refundBankName?: string;
+  refundBankAccount?: string;
+  refundAccountHolder?: string;
+  /** Khách đã trả hết phí cuối kỳ chưa — cọc chỉ được hoàn sau khi trả đủ. */
+  chargesSettled?: boolean;
+  /**
+   * Ghi chú của phiếu trả phòng — phương án DỰ PHÒNG cho phiếu tạo trước 20/08/2026,
+   * khi TK hoàn cọc còn nằm lẫn trong free-text vì BE chưa có field riêng.
+   *
+   * Chỉ hiện nguyên văn cho host đọc, KHÔNG parse ngược: bóc chuỗi tự do rồi bày ra như
+   * số tài khoản đã xác thực thì nguy hiểm hơn là để host tự đọc.
+   */
+  checkoutNote?: string;
+  /**
+   * Khách đã xác nhận nhận đủ chưa (BE thêm 20/08/2026).
+   *
+   * `refundedAt` là lời của HOST, `refundConfirmedAt` là lời của KHÁCH. Chỉ có cái đầu thì
+   * khoản đó CHƯA xong — không được gộp vào tổng đã hoàn.
+   */
+  refundConfirmedAt?: string;
+  /** Khách báo chưa nhận được tiền — hồ sơ đang tranh chấp, chờ admin xử lý. */
+  refundDisputedAt?: string;
+  refundDisputeReason?: string;
+  /** Admin đã kết luận khiếu nại chưa — BE giữ nguyên `refundDisputedAt` nên cần cờ này. */
+  refundDisputeResolvedAt?: string;
+  refundDisputeOutcome?: string;
+  /** Còn nợ bao nhiêu — để hiện lý do khoá nút thay vì chỉ khoá. */
+  outstandingAmount?: number;
 }
 export interface DepositsResponse { totalHeld: number; items: DepositItem[]; }
 
+/**
+ * Master lease (Host thuê lại nhà của chủ nhà gốc) — `GET /host/master-leases`.
+ *
+ * ⚠️ BE đã BỎ 4 field `ownerPhone` / `deposit` / `paymentDay` / `escalationPct` (19/08/2026):
+ * chúng từng được hard-code 0/1/null chứ không đọc từ DB, vì entity `InboundContract` không
+ * có mấy cột đó. Trả hằng số ra ngoài nguy hiểm hơn là không trả — `deposit: 0` khiến người
+ * đọc tin là "đã xác nhận không có cọc". Đừng thêm lại nếu chưa có cột thật.
+ *
+ * Đổi lại BE mở thêm `contractCode`, `contractScanUrl`, `totalRentAmount` — đều là dữ liệu thật.
+ */
 export interface MasterLease {
-  id: string; propertyId: string; ownerName: string; ownerPhone?: string;
-  monthlyRent: number; deposit: number; paymentDay: number;
-  startDate: string; endDate: string; escalationPct?: number;
+  id: string;
+  propertyId: string;
+  ownerName: string;
+  /** Mã HĐ để đối chiếu với hợp đồng giấy. */
+  contractCode?: string;
+  /** File scan hợp đồng gốc ký với chủ nhà. */
+  contractScanUrl?: string;
+  /** BE tính = totalRentAmount ÷ số tháng. */
+  monthlyRent: number;
+  /** Tổng tiền thuê cả kỳ — dùng số này thay vì nhân ngược monthlyRent (tránh sai số làm tròn). */
+  totalRentAmount?: number;
+  startDate: string;
+  endDate: string;
   status: 'ACTIVE' | 'EXPIRING' | 'EXPIRED' | 'TERMINATED';
 }
 
@@ -149,6 +211,30 @@ export const hostService = {
     api.get(`${FINANCE}/receivables-aging`),
   getDeposits: (status?: string): Promise<DepositsResponse> =>
     api.get(`${FINANCE}/deposits`, { params: status ? { status } : {} }),
+
+  /**
+   * Đánh dấu ĐÃ HOÀN CỌC cho khách — host là người chuyển tiền từ 18/08/2026.
+   *
+   * ⚠️ BE CHƯA CÓ ENDPOINT NÀY. Từ 18/08/2026 app quản lý bỏ bước "Ghi nhận hoàn cọc"
+   * (form đó buộc phải hiện tiền cọc — thứ manager không được biết, xem
+   * `mobile-app/src/constants/managerVisibility.ts`), nên không còn ai gọi
+   * `POST /api/v1/checkout-requests/{id}/refund` nữa và cọc nằm mãi ở "Đang giữ".
+   *
+   * Không tái dùng được endpoint cũ vì nó nhận **checkoutRequestId**, mà sổ cọc chỉ có
+   * `contractId` — host cũng không có endpoint nào liệt kê checkout-request để tra ra id
+   * (và endpoint kia là `hasAnyRole('MANAGER','ADMIN')` nên host gọi cũng 403).
+   *
+   * Vì vậy gọi theo endpoint ĐỀ NGHỊ trong
+   * `BE-BUG-checkout-disputed-khong-sua-duoc-bien-ban-2026-08-18.md` phần 2. Chừng nào
+   * BE chưa làm thì trả 404/403 — màn Sổ cọc bắt lỗi đó và nói rõ, xem `DepositLedger`.
+   */
+  markDepositRefunded: (contractId: number, body: {
+    method: 'BANK_TRANSFER' | 'CASH';
+    paidAt: string;        // yyyy-MM-dd
+    proofUrl?: string;
+    note?: string;
+  }): Promise<void> =>
+    api.post(`${FINANCE}/deposits/${contractId}/refund`, body),
   getInvoices: (params: { month?: string; status?: string; page?: number; size?: number } = {}): Promise<Page<InvoiceDto>> =>
     api.get('/api/v1/host/invoices', { params }),
 
