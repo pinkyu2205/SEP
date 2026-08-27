@@ -163,20 +163,100 @@ export type StatusFilter = 'all' | keyof typeof CONTRACT_STATUS;
  * Hôm nay hồ sơ đã kết thúc mới chiếm ~17% danh sách; sau vài năm vận hành nó sẽ là phần
  * lớn nhất và nhấn chìm mấy hợp đồng đang chạy nếu cứ trộn chung.
  */
-export type ContractScope = 'active' | 'ended' | 'all';
+/** 3 nhóm nền, dùng ở màn host — nơi chưa tách được "huỷ trước khi nhận nhà". */
+export type BaseContractScope = 'active' | 'ended' | 'all';
+export type ContractScope = BaseContractScope | 'aborted';
 
 const ENDED_STATUSES = new Set(['TERMINATED', 'EXPIRED']);
 
 export const isEndedContract = (status?: string): boolean => ENDED_STATUSES.has(status ?? '');
 
-export const SCOPE_OPTIONS: { key: ContractScope; label: string }[] = [
+/**
+ * HỢP ĐỒNG CHƯA TỪNG VẬN HÀNH — ký/nhập rồi huỷ trước khi đón khách.
+ *
+ * "Huỷ trước khi nhận nhà" KHÁC hẳn "đã kết thúc": một cái chưa từng bắt đầu, một cái
+ * chạy xong rồi dừng. Gộp chung là thẻ số liệu nói dối — bảng import 17 hợp đồng test rồi
+ * huỷ sạch sẽ hiện thành "17 hợp đồng, 100% đã chấm dứt", đọc ra như toàn bộ khách bỏ đi.
+ *
+ * Nhận diện KHÔNG cần BE thêm field, dựa vào 2 dấu vết chỉ sinh ra lúc ĐÓN KHÁCH:
+ *   • `paymentStatus` — thu cọc là bước đầu tiên của việc đón khách.
+ *   • mốc chụp công tơ điện/nước — bắt buộc phải có mới bàn giao được phòng.
+ * Không có cả ba thì chưa hề có ai dọn vào ở, dù hợp đồng đã ký trên giấy.
+ *
+ * Cố tình đòi ĐỦ cả ba: chỉ cần một dấu vết tồn tại là đã có giao dịch thật với khách,
+ * hợp đồng đó phải nằm ở "Đã kết thúc" để còn đối soát tiền, không được lùa sang đây.
+ */
+export const isNeverOnboarded = (c: {
+  status?: string;
+  paymentStatus?: string;
+  electricMeterCapturedAt?: string;
+  waterMeterCapturedAt?: string;
+}): boolean =>
+  isEndedContract(c.status)
+  && c.paymentStatus !== 'PAID'
+  && !c.electricMeterCapturedAt
+  && !c.waterMeterCapturedAt;
+
+/**
+ * Nhãn TRẠNG THÁI THU TIỀN đã đối chiếu với trạng thái hợp đồng.
+ *
+ * BE giữ nguyên `paymentStatus = PENDING` khi thanh lý hợp đồng chưa thu cọc, nên hợp đồng
+ * đã chết vẫn đeo nhãn "Chờ thu tiền". Đặt cạnh nhãn "Đã chấm dứt" trên cùng một dòng thì
+ * hai chữ đá nhau, và người đọc hiểu thành "còn phải đi đòi khách 30 triệu" trong khi hợp
+ * đồng đã chấm dứt, không còn ai để thu.
+ *
+ * Đây là vá ở lớp hiển thị — dữ liệu BE không sửa được từ FE. Khi nào BE set `CANCELLED`
+ * lúc thanh lý (xem doc-be/BE-BUG-coc-hop-dong-da-thanh-ly-va-khong-xoa-duoc-nha-2026-08-26.md)
+ * thì nhánh này thành thừa và bỏ đi được.
+ */
+export const paymentMeta = (c: { status?: string; paymentStatus?: string }): Badge | undefined => {
+  if (!c.paymentStatus) return undefined;
+  if (c.paymentStatus === 'PENDING' && isEndedContract(c.status)) {
+    return {
+      label: 'Không thu — HĐ đã chấm dứt',
+      color: 'bg-slate-100 text-slate-600',
+      dot: 'bg-slate-400',
+    };
+  }
+  return PAYMENT_STATUS[c.paymentStatus];
+};
+
+export const SCOPE_OPTIONS: { key: BaseContractScope; label: string }[] = [
   { key: 'active', label: 'Đang theo dõi' },
   { key: 'ended', label: 'Đã kết thúc' },
   { key: 'all', label: 'Tất cả' },
 ];
 
+/**
+ * Bản 4 nhóm cho màn admin — nơi có đủ dữ liệu để tách "huỷ trước khi nhận nhà".
+ * Màn host vẫn dùng `SCOPE_OPTIONS` 3 nhóm (`HostContractDto` không mang mốc công tơ).
+ */
+export const SCOPE_OPTIONS_WITH_ABORTED: { key: ContractScope; label: string }[] = [
+  { key: 'active', label: 'Đang theo dõi' },
+  { key: 'ended', label: 'Đã kết thúc' },
+  { key: 'aborted', label: 'Huỷ trước khi nhận nhà' },
+  { key: 'all', label: 'Tất cả' },
+];
+
+/**
+ * Lọc theo TRẠNG THÁI. `aborted` và `ended` cùng dải trạng thái (TERMINATED/EXPIRED) —
+ * tách hai nhóm đó cần cả object hợp đồng nên làm ở `inScopeContract`, không làm ở đây.
+ */
 export const inScope = (status: string | undefined, scope: ContractScope): boolean =>
-  scope === 'all' ? true : scope === 'ended' ? isEndedContract(status) : !isEndedContract(status);
+  scope === 'all' ? true
+    : scope === 'ended' || scope === 'aborted' ? isEndedContract(status)
+      : !isEndedContract(status);
+
+/** Lọc theo nhóm khi có đủ object hợp đồng — tách được `ended` với `aborted`. */
+export const inScopeContract = (
+  c: Parameters<typeof isNeverOnboarded>[0],
+  scope: ContractScope,
+): boolean => {
+  if (!inScope(c.status, scope)) return false;
+  if (scope === 'aborted') return isNeverOnboarded(c);
+  if (scope === 'ended') return !isNeverOnboarded(c);
+  return true;
+};
 
 /** Trạng thái được phép chọn trong ô lọc, theo nhóm đang xem — tránh chọn ra kết quả rỗng. */
 export const statusesInScope = (scope: ContractScope): string[] =>

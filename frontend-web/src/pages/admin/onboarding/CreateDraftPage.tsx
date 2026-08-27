@@ -29,6 +29,27 @@ const DRAFT_STATE = {
   DISABLED:    { label: 'Đã vô hiệu',   cls: 'bg-rose-100 text-rose-800' },
 } as const;
 
+/**
+ * Lý do BE từ chối, lấy nguyên văn câu tiếng Việt BE trả về.
+ *
+ * Thao tác hàng loạt gọi API với `silent: true` nên interceptor KHÔNG toast — không tự
+ * đọc lỗi ở đây thì lý do biến mất sạch, người dùng chỉ còn dòng "N nhà không xóa được"
+ * không nói được gì và không có đường nào lần ra nguyên nhân.
+ *
+ * 500 hầu như luôn là ràng buộc khoá ngoại lúc dọn dữ liệu phụ thuộc (BE không dịch ra
+ * câu tiếng Việt) — nói thẳng như vậy còn hơn để chữ "Lỗi hệ thống không xác định".
+ */
+const beReason = (err: unknown): string => {
+  const e = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
+  const data = e?.response?.data;
+  const msg = data?.error || data?.message;
+  if (msg && msg !== 'Lỗi hệ thống không xác định') return msg;
+  const status = e?.response?.status;
+  if (status === 500) return 'BE lỗi 500 — còn dữ liệu liên quan (hóa đơn / chỉ số / hợp đồng) chưa dọn được. Xem log server.';
+  if (status === 403) return 'Không đủ quyền';
+  return status ? `BE trả lỗi ${status}` : 'Không gọi được máy chủ';
+};
+
 const DRAFT_STATUS_OPTIONS: StatusOption[] = [
   { value: 'all',         label: 'Tất cả',       cls: 'border-slate-900 bg-slate-900 text-white' },
   { value: 'DRAFT',       label: 'Nháp',         cls: 'border-slate-600 bg-slate-600 text-white' },
@@ -312,8 +333,8 @@ export const TaoDraftPage = () => {
     const targets = buildings.filter(b => selectedSet.has(b.id));
     setBulkRunning(true);
     let ok = 0;
-    const blocked: string[] = [];   // còn khách thuê
-    const failed: string[] = [];    // BE từ chối
+    const blocked: string[] = [];                           // còn khách thuê
+    const failed: { name: string; reason: string }[] = [];  // BE từ chối, kèm lý do
     for (const b of targets) {
       if (b.status === 'ACTIVE' && !(await ensureVacant(b, true))) { blocked.push(b.propertyName); continue; }
       try {
@@ -323,13 +344,25 @@ export const TaoDraftPage = () => {
       } catch (err: any) {
         // 404 khi xóa = đã bị xóa trước đó → coi như thành công
         if (bulkAction === 'delete' && err?.response?.status === 404) ok++;
-        else failed.push(b.propertyName);
+        else failed.push({ name: b.propertyName, reason: beReason(err) });
       }
     }
     const verb = bulkAction === 'delete' ? 'xóa' : 'vô hiệu hóa';
     if (ok > 0) toast.success(`Đã ${verb} ${ok}/${targets.length} tòa nhà`);
     if (blocked.length) toast.error(`${blocked.length} nhà còn khách thuê nên bỏ qua: ${blocked.slice(0, 3).join(', ')}${blocked.length > 3 ? '…' : ''}`);
-    if (failed.length) toast.error(`${failed.length} nhà không ${verb} được: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`);
+    // Gom theo LÝ DO, không theo nhà: 8 nhà hỏng vì cùng một nguyên nhân thì đọc một
+    // dòng là đủ, mà vẫn biết chính xác phải đi sửa cái gì.
+    const byReason = new Map<string, string[]>();
+    failed.forEach(f => byReason.set(f.reason, [...(byReason.get(f.reason) ?? []), f.name]));
+    byReason.forEach((names, reason) => {
+      const list = `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` … (+${names.length - 3})` : ''}`;
+      // `<Toaster>` không đặt white-space nên `\n` sẽ bị nuốt — khai báo tại chỗ để lý do
+      // và danh sách nhà nằm hai dòng, đọc được thay vì dính thành một câu dài.
+      toast.error(`${names.length} nhà không ${verb} được — ${reason}\n${list}`, {
+        duration: 10000,
+        style: { whiteSpace: 'pre-line', maxWidth: 460 },
+      });
+    });
     setBulkRunning(false);
     setBulkAction(null);
     setSelectedIds([]);

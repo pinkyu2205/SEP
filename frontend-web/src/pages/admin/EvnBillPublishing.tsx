@@ -13,6 +13,10 @@ import { groupThousands } from '@/utils';
 
 
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
+import {
+  meterReadingService, resolvePrevReading, type ResolvedPrevReading,
+} from '@/services/meterReading.service';
+import { tenantService } from '@/services/tenant.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { parseEvnInvoice, monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
@@ -481,6 +485,86 @@ export const EvnBillPublishing = () => {
   const readingMismatch = isWholeHouse
     && !!form.prevReading && !!form.newReading
     && newReadingNum - prevReadingNum !== totalKwhNum;
+
+  /**
+   * Chỉ số mới hệ thống tự tính = chỉ số cũ + lượng tiêu thụ trên giấy EVN.
+   *
+   * Chỉ hiện khi có đủ cả hai vế; `null` nghĩa là chưa đủ dữ kiện để gợi ý.
+   */
+  const autoNewReading = isWholeHouse && prevReadingNum > 0 && totalKwhNum > 0
+    ? prevReadingNum + totalKwhNum
+    : null;
+
+  /**
+   * ── Chỉ số kỳ trước: NẠP TỪ MÁY CHỦ, KHÔNG cho gõ tay ────────────────────
+   *
+   * Chọn nhà nguyên căn → hỏi `meter-readings/latest`. Có số thì điền sẵn và khoá ô lại.
+   *
+   * Vì sao khoá: đó là số đã chốt với khách ở kỳ trước và đã thu tiền theo nó. Cho sửa
+   * nghĩa là cho phép hai kỳ liền nhau không nối tiếp — kỳ trước kết ở A mà kỳ này khai
+   * bắt đầu từ B, phần chênh giữa A và B biến mất khỏi mọi hoá đơn, không ai truy ra được.
+   *
+   * Nhà chưa từng có chỉ số nào thì mở khoá để nhập số đầu tiên; từ kỳ sau tự khoá.
+   */
+  const [prevReadingInfo, setPrevReadingInfo] = useState<ResolvedPrevReading | null>(null);
+  /**
+   * Chỉ số lúc đón khách, CHỈ khi nó mới hơn chốt kỳ trước — tức khách vừa dọn vào giữa kỳ.
+   * Không dùng để điền form (máy chủ chưa hỗ trợ), chỉ để cảnh báo phần khách bị tính dư.
+   */
+  const [handoverPrev, setHandoverPrev] = useState<ResolvedPrevReading | null>(null);
+  const [loadingPrev, setLoadingPrev] = useState(false);
+  const prevLocked = isWholeHouse && prevReadingInfo != null;
+
+  useEffect(() => {
+    if (!propertyId || !isWholeHouse) {
+      setPrevReadingInfo(null);
+      return;
+    }
+    let alive = true;
+    setLoadingPrev(true);
+    Promise.all([
+      meterReadingService.latestForProperty(propertyId, 'ELECTRIC'),
+      // Cần hợp đồng đang thuê để biết chỉ số lúc đón khách — khách dọn vào giữa kỳ thì
+      // mốc đó mới là điểm bắt đầu tính tiền, không phải đầu kỳ trên giấy EVN.
+      tenantService.listByProperty(propertyId, { silent: true }).catch(() => []),
+    ])
+      .then(([latest, contracts]) => {
+        if (!alive) return;
+        const active = contracts.find((c) => c.status === 'ACTIVE' && !c.roomId)
+          ?? contracts.find((c) => c.status === 'ACTIVE');
+        const resolved = resolvePrevReading(latest, active, 'ELECTRIC');
+
+        /**
+         * ⚠️ CỐ Ý điền chỉ số của KỲ TRƯỚC, không điền mốc đón khách — dù mốc đón khách
+         * mới là điểm đúng để bắt đầu tính tiền cho khách mới.
+         *
+         * Máy chủ ép `consumption = tổng kWh trên giấy` rồi bắt `mới − cũ` phải bằng đúng
+         * con số đó (`validateInvoiceAmounts`, CONSUMPTION_MISMATCH). Điền mốc đón khách
+         * vào là hiệu ra nhỏ hơn tổng → **không phát hành được hoá đơn nào cả**.
+         *
+         * Nên ở đây vẫn đi theo giấy EVN để luồng chạy được, còn phần khách bị tính dư
+         * thì bày ra bằng cảnh báo bên dưới (`midPeriodHandover`) thay vì im lặng. Sửa
+         * triệt để nằm ở BE — xem doc-be/BE-NEED-tinh-dien-nuoc-theo-moc-don-khach-*.md.
+         */
+        setPrevReadingInfo(latest ? { reading: Number(latest.reading), source: 'meter', at: latest.recordedAt || latest.period } : null);
+        setHandoverPrev(resolved?.source === 'handover' ? resolved : null);
+        if (latest) {
+          setForm((f) => ({ ...f, prevReading: String(Math.round(Number(latest.reading))) }));
+        }
+      })
+      .finally(() => { if (alive) setLoadingPrev(false); });
+    return () => { alive = false; };
+  }, [propertyId, isWholeHouse]);
+
+  /**
+   * Có chỉ số cũ + đã biết tổng kWh (OCR đọc ra hoặc admin gõ) → điền luôn chỉ số mới.
+   *
+   * Chỉ điền khi ô còn TRỐNG — admin sửa tay rồi thì tôn trọng, đừng ghi đè sau lưng.
+   */
+  useEffect(() => {
+    if (autoNewReading == null) return;
+    setForm((f) => (f.newReading ? f : { ...f, newReading: String(autoNewReading) }));
+  }, [autoNewReading]);
 
   const formReady =
     !!propertyId &&
@@ -980,17 +1064,35 @@ export const EvnBillPublishing = () => {
                 hồ riêng, quản lý đọc từng cái. */}
             {isWholeHouse && (
               <div className="grid gap-3 sm:grid-cols-2">
+                {/* Chỉ số cũ KHOÁ khi máy chủ đã có số của kỳ trước.
+                    Đây là số đã chốt với khách kỳ trước rồi — sửa nó nghĩa là sửa lại một
+                    kỳ đã thu tiền xong, và làm hai kỳ liền nhau không còn nối tiếp: kỳ
+                    trước kết ở A, kỳ này lại khai bắt đầu từ B. Chỉ mở khoá khi nhà chưa
+                    từng có chỉ số nào (nhà mới, chưa kỳ nào) — lúc đó phải gõ tay số đầu. */}
                 <div>
                   <label className="mb-1.5 block text-sm font-bold text-slate-700">
-                    Chỉ số cũ (kWh) <span className="text-rose-500">*</span>
+                    Chỉ số cũ (kWh) {!prevLocked && <span className="text-rose-500">*</span>}
                   </label>
                   <input
-                    className="input-field w-full tabular-nums"
+                    className={`input-field w-full tabular-nums ${
+                      prevLocked ? 'bg-slate-100 text-slate-600' : ''
+                    }`}
                     inputMode="numeric"
-                    placeholder="Số đầu kỳ trên giấy EVN"
+                    readOnly={prevLocked}
+                    placeholder={loadingPrev ? 'Đang lấy chỉ số kỳ trước…' : 'Số đầu kỳ trên giấy EVN'}
                     value={form.prevReading}
                     onChange={(e) => setForm((f) => ({ ...f, prevReading: e.target.value }))}
                   />
+                  {prevLocked ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      🔒 Số chốt cuối kỳ trước hệ thống đã lưu
+                      {prevReadingInfo?.at ? ` (${prevReadingInfo.at.slice(0, 7)})` : ''} — không sửa được.
+                    </p>
+                  ) : !loadingPrev && propertyId ? (
+                    <p className="mt-1 text-xs text-amber-600">
+                      Nhà này chưa có chỉ số kỳ nào — nhập số đầu kỳ, các kỳ sau hệ thống tự điền.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <label className="mb-1.5 block text-sm font-bold text-slate-700">
@@ -1003,7 +1105,48 @@ export const EvnBillPublishing = () => {
                     value={form.newReading}
                     onChange={(e) => setForm((f) => ({ ...f, newReading: e.target.value }))}
                   />
+                  {autoNewReading != null && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Tự tính: {prevReadingNum.toLocaleString('vi-VN')} + {totalKwhNum.toLocaleString('vi-VN')} kWh
+                      {' = '}<b className="text-slate-700">{autoNewReading.toLocaleString('vi-VN')}</b>. Sửa được nếu
+                      giấy EVN ghi khác.
+                    </p>
+                  )}
                 </div>
+                {/* ── Khách dọn vào giữa kỳ ──────────────────────────────────
+                    Hai ô trên vẫn là số trên giấy EVN (trọn tháng) — đó là chi phí công ty
+                    trả nhà nước, phải giữ nguyên. Máy chủ tự cắt phần trước mốc đón khách
+                    khi lập hoá đơn cho khách (BE 27/08/2026).
+                    Hiện khối này để admin biết TRƯỚC con số khách sẽ nhận khác giấy, không
+                    thì bấm phát hành xong thấy hoá đơn lệch lại tưởng hệ thống tính sai. */}
+                {handoverPrev && (
+                  <div className="sm:col-span-2 flex gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-indigo-600" />
+                    <div className="text-xs leading-relaxed text-indigo-900">
+                      <p className="font-bold">
+                        Khách dọn vào giữa kỳ — hoá đơn khách sẽ tính từ mốc đón khách, không tính
+                        trọn tháng.
+                      </p>
+                      <p className="mt-0.5">
+                        Đồng hồ lúc đón khách: <b>{Math.round(handoverPrev.reading).toLocaleString('vi-VN')} kWh</b>
+                        {handoverPrev.at
+                          ? ` (${handoverPrev.at.slice(0, 10).split('-').reverse().join('/')})`
+                          : ''}
+                        {newReadingNum > 0 && (
+                          <> → khách trả{' '}
+                            <b>{(newReadingNum - Math.round(handoverPrev.reading)).toLocaleString('vi-VN')} kWh</b>
+                            {', '}phần{' '}
+                            <b>{(Math.round(handoverPrev.reading) - prevReadingNum).toLocaleString('vi-VN')} kWh</b>
+                            {' '}trước khi họ dọn tới là chi phí công ty.
+                          </>
+                        )}
+                      </p>
+                      <p className="mt-0.5 text-indigo-700">
+                        Hai ô chỉ số trên giữ nguyên số trên giấy EVN — đó là chi phí công ty trả nhà nước.
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {readingMismatch ? (
                   <p className="sm:col-span-2 text-xs font-semibold text-rose-600">
                     Chỉ số mới − chỉ số cũ = {(newReadingNum - prevReadingNum).toLocaleString('vi-VN')} kWh,

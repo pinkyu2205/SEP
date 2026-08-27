@@ -73,14 +73,31 @@ export const ZONE_STATE_META: Record<ZoneState, { label: string; cls: string; do
 };
 
 /**
- * Gom danh sách nhà thành các khu vực.
+ * Nhà thuộc phạm vi màn Khu vực.
  *
- * Chỉ tính nhà Host đã duyệt giá (`isHostApproved`) — nhà admin còn đang onboarding
- * chưa cần quản lý, đưa vào chỉ làm nhiễu bảng đối chiếu.
+ * Gồm nhà Host đã duyệt giá, **và** nhà admin vừa gửi Host duyệt (`PENDING_HOST_REVIEW`).
+ *
+ * Vì sao thêm nhóm chờ duyệt: quản lý được gán theo KHU VỰC, và nhà tự nhận người của khu
+ * vực ngay khi Host bấm duyệt. Nếu màn này chỉ hiện nhà đã duyệt thì Host mở ra thấy
+ * "Tổng khu vực 0" cho tới lúc duyệt xong căn đầu tiên — đúng lúc cần nhìn để biết khu vực
+ * đó đã có ai chưa thì lại không thấy gì. Nhà chờ duyệt vẫn nằm trong khu vực và vẫn sẽ rơi
+ * vào tay người đang giữ khu vực đó, nên nó thuộc về bức tranh này.
+ *
+ * Vẫn ẩn DRAFT và RENOVATION_COMPLETED: admin chưa gửi đi thì chưa có gì để Host quyết.
+ *
+ * Lưu ý: nhà `PENDING_HOST_REVIEW` KHÔNG nằm trong `ASSIGNABLE_STATUSES`, nên nó đếm vào
+ * `blockedCount` và không tham gia quyết định `state` — đúng như mong muốn, vì BE chưa cho
+ * gán quản lý lên nhà chưa duyệt.
+ */
+export const isZoneRelevant = (p: PropertyResponse): boolean =>
+  isHostApproved(p) || p.status === 'PENDING_HOST_REVIEW';
+
+/**
+ * Gom danh sách nhà thành các khu vực. Phạm vi xem `isZoneRelevant`.
  */
 export const groupByZone = (properties: PropertyResponse[]): ZoneGroup[] => {
   const byZone = new Map<string, PropertyResponse[]>();
-  properties.filter(isHostApproved).forEach((p) => {
+  properties.filter(isZoneRelevant).forEach((p) => {
     const key = p.zoneId || '__none__';
     const list = byZone.get(key);
     if (list) list.push(p);
@@ -144,19 +161,44 @@ export interface ManagerLoad {
 
 export const loadByManager = (groups: ZoneGroup[]): Map<string, ManagerLoad> => {
   const map = new Map<string, ManagerLoad>();
+  const bump = (id: string) => {
+    const cur = map.get(id) ?? { zones: 0, properties: 0, units: 0 };
+    map.set(id, cur);
+    return cur;
+  };
+
   groups.forEach((g) => {
-    g.properties.forEach((p) => {
-      if (!p.operationManagerId) return;
-      const cur = map.get(p.operationManagerId) ?? { zones: 0, properties: 0, units: 0 };
-      cur.properties += 1;
-      cur.units += unitsOf(p);
-      map.set(p.operationManagerId, cur);
-    });
-    // Đếm khu vực riêng để một quản lý phụ trách nhiều nhà cùng quận chỉ tính 1.
-    new Set(g.properties.map((p) => p.operationManagerId).filter(Boolean)).forEach((mid) => {
-      const cur = map.get(mid as string);
-      if (cur) cur.zones += 1;
-    });
+    const assignedProps = g.properties.filter((p) => p.operationManagerId);
+
+    if (assignedProps.length > 0) {
+      assignedProps.forEach((p) => {
+        const cur = bump(p.operationManagerId as string);
+        cur.properties += 1;
+        cur.units += unitsOf(p);
+      });
+      // Đếm khu vực riêng để một quản lý phụ trách nhiều nhà cùng quận chỉ tính 1.
+      new Set(assignedProps.map((p) => p.operationManagerId as string)).forEach((mid) => {
+        bump(mid).zones += 1;
+      });
+      return;
+    }
+
+    /**
+     * Chưa nhà nào mang `operationManagerId` nhưng khu vực ĐÃ có người phụ trách
+     * (`g.managerId` được bù từ bảng `zone_managers` — xem `groups` ở ZoneOverview).
+     *
+     * Xảy ra ở đúng bước đầu quy trình: admin gửi nhà → Host gán quản lý khu vực → rồi
+     * mới duyệt giá. Nhà chỉ nhận id quản lý SAU khi duyệt, nên nếu chỉ đếm theo
+     * `operationManagerId` thì người vừa được gán vẫn hiện "chưa phụ trách khu vực nào" —
+     * Host mở hộp thoại gán khu vực thứ hai, không thấy ai đang bận, dễ giao trùng một
+     * người cho quá nhiều khu vực mà không hay.
+     */
+    if (g.managerId) {
+      const cur = bump(g.managerId);
+      cur.zones += 1;
+      cur.properties += g.properties.length;
+      cur.units += g.units;
+    }
   });
   return map;
 };

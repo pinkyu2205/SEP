@@ -10,8 +10,9 @@ import { openContractBlob } from '@/utils/contractFile';
 import { formatCurrency } from '@/utils';
 import type { PropertyResponse, TenantContractResponse } from '@/types/api.types';
 import {
-  EQUIPMENT_CONDITION, ESCALATION_LABEL, PAYMENT_STATUS, daysLeft, depositMonthsLabel,
-  fmtDate, fmtDateTime, snapshotToLines, statusMeta, termLabel, terminationTypeLabel,
+  EQUIPMENT_CONDITION, ESCALATION_LABEL, daysLeft, depositMonthsLabel,
+  fmtDate, fmtDateTime, isEndedContract, isNeverOnboarded, paymentMeta, snapshotToLines,
+  statusMeta, termLabel, terminationTypeLabel,
 } from './contractLabels';
 
 /**
@@ -130,7 +131,7 @@ export const ContractDetailDrawer = ({
 
   const status = statusMeta(detail.status);
   const remaining = daysLeft(detail.endDate);
-  const payment = detail.paymentStatus ? PAYMENT_STATUS[detail.paymentStatus] : undefined;
+  const payment = paymentMeta(detail);
   const houseName = property?.propertyName ?? propertyName ?? `Nhà #${detail.propertyId ?? '—'}`;
 
   const hasFile = !!(detail.contractFileAvailable || detail.draftContractFileUrl || detail.documentUrl || detail.pdfUrl);
@@ -165,7 +166,13 @@ export const ContractDetailDrawer = ({
   const hasHandover = meters.some((m) => m.value != null || m.img) || photos.length > 0 || !!detail.roomConditionNote;
   // Chỉ HĐ đã đón khách mới ĐÁNG LẼ phải có biên bản. Nháp/chờ kích hoạt thì trống là
   // đúng quy trình — cảnh báo ở đó chỉ tổ gây nhiễu.
-  const handoverExpected = detail.status === 'ACTIVE' || detail.status === 'TERMINATED' || detail.status === 'EXPIRED';
+  //
+  // TERMINATED/EXPIRED KHÔNG mặc nhiên là "đã đón khách": hợp đồng ký/nhập rồi huỷ trước
+  // khi bàn giao cũng mang đúng hai trạng thái đó. Vơ hết vào thì màn hình khẳng định
+  // "Hợp đồng đã đón khách nhưng chưa có biên bản bàn giao" cho một hợp đồng chưa hề có ai
+  // dọn vào ở — sai sự thật, lại còn giục quản lý đi bổ sung ảnh cho hợp đồng đã chết.
+  const handoverExpected = detail.status === 'ACTIVE'
+    || (isEndedContract(detail.status) && !isNeverOnboarded(detail));
 
   const equipments = detail.equipmentList?.length ? detail.equipmentList : detail.availableEquipmentList ?? [];
   const snapshotLines = equipments.length === 0 ? snapshotToLines(detail.equipmentSnapshot) : [];
@@ -423,8 +430,27 @@ export const ContractDetailDrawer = ({
                   : orDash(detail.paymentStatus)
               } />
               <Field label="Điều khoản tăng giá" value={
-                detail.rentEscalationType ? ESCALATION_LABEL[detail.rentEscalationType] ?? detail.rentEscalationType : undefined
+                detail.rentEscalationType
+                  ? <>
+                      {ESCALATION_LABEL[detail.rentEscalationType] ?? detail.rentEscalationType}
+                      {(detail.rentEscalationPercent ?? 0) > 0 && ` · ${detail.rentEscalationPercent}%/năm`}
+                    </>
+                  : undefined
               } />
+              {/* Mốc tăng kế tiếp — lấy THẲNG từ máy chủ, không tự suy.
+                  Quy tắc ân hạn + chống áp trùng nằm ở BE (`AnnualCalendarEscalation`); FE
+                  tính lại là có ngày lệch với con số máy chủ dùng để thu tiền, mà đây là
+                  dòng khách thuê đọc để biết tháng sau phải trả bao nhiêu. */}
+              {detail.nextEscalationDate && (
+                <Field label="Tăng giá kế tiếp" value={
+                  <span className="font-bold text-amber-700">
+                    {fmtDate(detail.nextEscalationDate)}
+                    {detail.nextEscalationAmount != null && (
+                      <> · {formatCurrency(detail.nextEscalationAmount)}/tháng</>
+                    )}
+                  </span>
+                } />
+              )}
             </Card>
 
             {extra}

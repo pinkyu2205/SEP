@@ -11,6 +11,8 @@ const initialsOf = (name?: string) =>
 const ROUTE_LABELS: Record<string, string> = {
   '/host': 'Bảng điều hành',
   '/host/properties': 'Bất động sản',
+  '/host/pricing-config': 'Cấu hình duyệt giá',
+  '/host/manager-salaries': 'Lương quản lý',
   '/host/zones': 'Khu vực & Quản lý',
   '/host/operations-managers': 'Quản lý vận hành',
   '/host/managers': 'Quản lý vận hành',

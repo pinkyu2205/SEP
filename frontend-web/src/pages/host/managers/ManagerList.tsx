@@ -5,6 +5,7 @@ import {
   DoorOpen, TrendingUp, MapPin, AlertTriangle, ChevronDown,
 } from 'lucide-react';
 import { groupByZone } from '@/pages/zones/zoneAssignmentState';
+import { zoneAssignmentService } from '@/services/zoneAssignment.service';
 import { AssignmentHistoryButton } from '@/components/AssignmentHistoryPanel';
 import { propertyService } from '@/services/property.service';
 import { userService } from '@/services/user.service';
@@ -72,6 +73,8 @@ export const ManagerList = () => {
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [contracts, setContracts]   = useState<HostContractDto[]>([]);
   const [perf, setPerf]             = useState<PropertyPerformanceRow[]>([]);
+  /** zoneId → quản lý phụ trách khu vực đó (bảng zone_managers). */
+  const [zoneManagerOf, setZoneManagerOf] = useState<Map<string, string>>(new Map());
   const [userMap, setUserMap]       = useState<Map<string, UserResponse>>(new Map());
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState('');
@@ -80,16 +83,20 @@ export const ManagerList = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [mgrs, propsRes, contractPage, perfRows] = await Promise.all([
+      const [mgrs, propsRes, contractPage, perfRows, zoneLinks] = await Promise.all([
         propertyService.getManagers(),
         propertyService.getProperties(0, 100),
         hostService.listContracts({ size: 500 }).then(p => p.content).catch(() => [] as HostContractDto[]),
         hostService.getPropertyPerformance(MONTH).catch(() => [] as PropertyPerformanceRow[]),
+        // Bảng phân công khu vực — xem `getAssignedProps`. Hỏng thì coi như chưa phân công,
+        // trang vẫn chạy theo `operationManagerId` như cũ.
+        zoneAssignmentService.list().catch(() => []),
       ]);
       setManagers(mgrs);
       setProperties(propsRes.content);
       setContracts(contractPage);
       setPerf(perfRows);
+      setZoneManagerOf(new Map(zoneLinks.map(a => [String(a.zoneId), a.managerId])));
 
       // Thử lấy phone/status — host có thể không có quyền, bỏ qua nếu lỗi
       try {
@@ -133,8 +140,20 @@ export const ManagerList = () => {
     );
   });
 
+  /**
+   * Nhà thuộc quyền một quản lý — tính theo CẢ HAI đường, không chỉ `operationManagerId`.
+   *
+   * Nhà chỉ nhận `operationManagerId` SAU khi Host duyệt giá. Nên ở giai đoạn admin vừa gửi
+   * nhà mà Host chưa duyệt, lọc theo mỗi trường đó thì mọi quản lý đều ra 0 nhà / 0 khu vực
+   * — trang này trắng trơn dù khu vực đã được phân công xong.
+   *
+   * Cộng thêm nhà nằm trong khu vực người đó phụ trách (bảng `zone_managers`): chúng sẽ về
+   * tay người này ngay khi Host duyệt, nên tính vào là đúng bức tranh phụ trách.
+   */
   const getAssignedProps = (mgId: string) =>
-    properties.filter(p => p.operationManagerId === mgId);
+    properties.filter(p =>
+      p.operationManagerId === mgId
+      || (p.zoneId != null && zoneManagerOf.get(String(p.zoneId)) === mgId));
 
   // Lấp đầy theo "đơn vị cho thuê": nhà nguyên căn = 1 đơn vị (đã thuê/còn trống),
   // nhà chia phòng = số phòng. Nhờ vậy nhà nguyên căn có khách vẫn hiện 100%.

@@ -33,6 +33,24 @@ export interface EvnBill {
   imageUrl?: string | null;
   status?: 'PUBLISHED' | 'REVOKED';
   createdAt?: string;
+
+  /**
+   * ─── HẠN MỨC TIÊU THỤ CÁC PHÒNG (BE 27/08/2026) ──────────────────────────
+   *
+   * Tổng tiêu thụ các phòng KHÔNG được vượt tổng trên giấy nhà nước cộng biên dự phòng.
+   * Vượt là chắc chắn có phòng đọc nhầm — BE chặn bằng 422 ROOM_SUM_EXCEEDS_BILL.
+   *
+   * Lấy trần TỪ BE thay vì app tự nhân hệ số: biên là cấu hình phía máy chủ
+   * (billing.utility.room-sum-tolerance-percent), tự nhân ở app là có ngày hai bên dùng
+   * hai mức khác nhau — app báo còn dư mà bấm gửi lại bị chặn.
+   */
+  /** Tổng tiêu thụ các phòng ĐÃ phát hành trong kỳ. */
+  roomSumQuantity?: number;
+  /** Trần cho phép = tổng giấy × (1 + biên). */
+  roomSumCap?: number;
+  /** Đã phát hành mấy phòng / cần mấy phòng. */
+  roomsBilled?: number;
+  roomsExpected?: number;
   /**
    * ─── NHIỆM VỤ GHI CHỈ SỐ TRONG NGÀY (BE 17/08/2026) ────────────────────────
    *

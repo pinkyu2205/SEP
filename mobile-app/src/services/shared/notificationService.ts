@@ -37,11 +37,33 @@ const normalizeType = (row: BeNotificationRow): string => {
   /**
    * Hoá đơn & chu kỳ tiền phòng tự động (BE 05/08/2026):
    *   BILLING_REMINDER · BILLING_OVERDUE  — cron nhắc nợ
-   *   RENT_ISSUED · RENT_REMINDER_PRE     — phát hành ngày 1 · nhắc trước ngày 28
+   *   RENT_ISSUED · RENT_REMINDER_PRE     — phát hành ngày 1 · nhắc trước vào NGÀY CUỐI THÁNG
+   *     (`remindUpcomingRent` chỉ chạy khi "ngày mai" là ngày 1, nên là 28/29/30/31 tuỳ
+   *      tháng — không phải cố định 28 như ghi chú cũ)
    *   RENT_OVERDUE_MANAGER                — ngày 8, báo quản lý được chấm dứt HĐ
    *   UTILITY_INVOICE_CREATED             — manager vừa chốt số điện/nước
    * Gom hết về 2 nhóm UI để lọc theo tab "Hoá đơn" là thấy đủ.
    */
+  /**
+   * `RENT_UNPAID_MANAGER` (BE 26/08/2026) — cron báo quản lý từ ngày hạn tới ngày đủ điều
+   * kiện chấm dứt HĐ.
+   *
+   * Xét TRƯỚC nhánh chung: chuỗi không chứa "OVERDUE" nên nó rơi vào `new_bill` — icon 🧾
+   * xanh, đọc như một hoá đơn mới bình thường. Nhưng tin này luôn là **việc quản lý phải
+   * làm ngay** (gọi nhắc khách), và tới ngày thứ ba là "mai đủ điều kiện chấm dứt hợp
+   * đồng". Tô xanh dịu một việc đang chạy nước rút là cách nhanh nhất để nó bị lướt qua —
+   * cùng lý do `MAINTENANCE_COMPLETED` được map sang màu cảnh báo thay vì xanh lá.
+   */
+  if (raw === 'RENT_UNPAID_MANAGER') return 'bill_overdue';
+  /**
+   * `UTILITY_LOSS_ALERT` (BE 27/08/2026) — tổng tiêu thụ các phòng thấp hơn giấy nhà nước
+   * bất thường: dấu hiệu rò điện, công tơ hỏng, hoặc có người dùng chùa.
+   *
+   * Xét TRƯỚC nhánh chung: chuỗi chứa "UTILITY" nên nó rơi vào `new_bill` — icon 🧾 xanh,
+   * đọc như một hoá đơn mới bình thường. Đây là việc phải đi kiểm tra hiện trường, càng
+   * phát hiện sớm càng đỡ tiền; tô xanh dịu là cách chắc chắn để nó bị lướt qua.
+   */
+  if (raw === 'UTILITY_LOSS_ALERT') return 'bill_overdue';
   if (raw.startsWith('BILLING_') || raw.startsWith('RENT_')
     || raw.includes('UTILITY') || raw.includes('INVOICE')) {
     return raw.includes('OVERDUE') ? 'bill_overdue' : 'new_bill';
