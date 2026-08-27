@@ -11,8 +11,9 @@ import { formatCurrency } from '@/utils';
 import { EmptyState, Pagination, SectionShell, StatCard, StatusPill } from './shared';
 import { ContractDetailDrawer } from '@/components/contract/ContractDetailDrawer';
 import {
-  CONTRACT_STATUS, EXPIRING_WINDOW_DAYS, SCOPE_OPTIONS, SORT_OPTIONS, daysLeft, fmtDate,
-  inScope, isEndedContract, isExpiringSoon, sortContracts, statusMeta, statusesInScope,
+  CONTRACT_STATUS, EXPIRING_WINDOW_DAYS, SCOPE_OPTIONS_WITH_ABORTED, SORT_OPTIONS, daysLeft,
+  fmtDate, inScope, inScopeContract, isEndedContract, isExpiringSoon, isNeverOnboarded,
+  sortContracts, statusMeta, statusesInScope,
   terminationTypeLabel, type ContractScope, type SortKey, type StatusFilter,
 } from '@/components/contract/contractLabels';
 
@@ -120,16 +121,26 @@ export const ContractMonitoring = () => {
     };
   }, [contracts, properties]);
 
+  /**
+   * Hợp đồng huỷ trước khi đón khách KHÔNG tính vào thẻ số liệu (xem `isNeverOnboarded`).
+   * Thẻ ở đây là KPI vận hành: "hệ thống đang chạy bao nhiêu hợp đồng, bao nhiêu cái đã
+   * dừng". Hợp đồng chưa từng có ai dọn vào ở thì không thuộc cả hai vế — đếm vào là ra
+   * bức tranh "17 hợp đồng, 100% chấm dứt" trong khi thực tế chưa hợp đồng nào từng chạy.
+   * Vẫn hiện số riêng để không ai tưởng dữ liệu bị mất.
+   */
   const stats = useMemo(() => {
-    const by = (s: string) => contracts.filter((c) => c.status === s).length;
-    const active = contracts.filter((c) => c.status === 'ACTIVE');
+    const aborted = contracts.filter(isNeverOnboarded);
+    const real = contracts.filter((c) => !isNeverOnboarded(c));
+    const by = (s: string) => real.filter((c) => c.status === s).length;
+    const active = real.filter((c) => c.status === 'ACTIVE');
     return {
-      total: contracts.length,
+      total: real.length,
       active: active.length,
       pending: by('PENDING'),
       draft: by('DRAFT'),
-      expiring: contracts.filter(isExpiringSoon).length,
+      expiring: real.filter(isExpiringSoon).length,
       terminated: by('TERMINATED') + by('EXPIRED'),
+      aborted: aborted.length,
       // Doanh thu thuê đang chạy — tổng giá thuê/tháng của HĐ còn hiệu lực.
       activeRent: active.reduce((sum, c) => sum + (c.rentAmount ?? 0), 0),
     };
@@ -153,7 +164,7 @@ export const ContractMonitoring = () => {
   }, [properties, statusFilter, expiringOnly, propertyFilter, zoneFilter, search]);
 
   const filtered = useMemo(
-    () => sortContracts(contracts.filter((c) => inScope(c.status, scope) && matchesFilters(c)), sort),
+    () => sortContracts(contracts.filter((c) => inScopeContract(c, scope) && matchesFilters(c)), sort),
     [contracts, scope, matchesFilters, sort],
   );
 
@@ -163,13 +174,14 @@ export const ContractMonitoring = () => {
    * kiểu "mặc định ẩn".
    */
   const hiddenByScope = useMemo(
-    () => (scope === 'all' ? 0 : contracts.filter((c) => !inScope(c.status, scope) && matchesFilters(c)).length),
+    () => (scope === 'all' ? 0 : contracts.filter((c) => !inScopeContract(c, scope) && matchesFilters(c)).length),
     [contracts, scope, matchesFilters],
   );
 
   const scopeCounts = useMemo(() => ({
     active: contracts.filter((c) => !isEndedContract(c.status)).length,
-    ended: contracts.filter((c) => isEndedContract(c.status)).length,
+    ended: contracts.filter((c) => isEndedContract(c.status) && !isNeverOnboarded(c)).length,
+    aborted: contracts.filter(isNeverOnboarded).length,
     all: contracts.length,
   }), [contracts]);
 
@@ -266,16 +278,18 @@ export const ContractMonitoring = () => {
             một trạng thái — lọc 'TERMINATED' thì số hiện và số ra bảng lệch nhau. */}
         <StatCard
           title="Đã kết thúc" value={stats.terminated} icon={Archive} tone="violet"
-          helper="Chấm dứt + hết hạn · xem ở nhóm riêng"
+          helper={stats.aborted
+            ? `Chấm dứt + hết hạn · ${stats.aborted} HĐ huỷ trước khi nhận nhà không tính ở đây`
+            : 'Chấm dứt + hết hạn · xem ở nhóm riêng'}
           progress={stats.total ? stats.terminated / stats.total : 0}
           active={scope === 'ended'}
           onClick={() => { setScope('ended'); setStatusFilter('all'); setExpiringOnly(false); }}
         />
       </div>
 
-      {/* ── Nhóm hồ sơ: đang theo dõi / đã kết thúc ───────────────────────── */}
+      {/* ── Nhóm hồ sơ: đang theo dõi / đã kết thúc / huỷ trước khi nhận nhà ── */}
       <div className="mb-3 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
-        {SCOPE_OPTIONS.map((s) => (
+        {SCOPE_OPTIONS_WITH_ABORTED.map((s) => (
           <button
             key={s.key}
             onClick={() => setScope(s.key)}
@@ -363,7 +377,7 @@ export const ContractMonitoring = () => {
             className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 font-bold text-amber-700 transition hover:bg-amber-200"
           >
             <Archive className="h-3 w-3" />
-            Còn {hiddenByScope} kết quả ở nhóm {scope === 'active' ? 'đã kết thúc' : 'đang theo dõi'} — xem tất cả
+            Còn {hiddenByScope} kết quả ở nhóm khác — xem tất cả
           </button>
         )}
       </div>

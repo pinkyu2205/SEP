@@ -41,6 +41,8 @@ import { ReceivablesAging } from '@/pages/host/finance/ReceivablesAging';
 import { DepositLedger } from '@/pages/host/finance/DepositLedger';
 import { BillingPayments } from '@/pages/host/finance/BillingPayments';
 import { HostPropertyReview } from '@/pages/host/PropertyReview';
+import { PricingConfigPage } from '@/pages/host/pricing/PricingConfigPage';
+import { ManagerSalaryPage } from '@/pages/host/managers/ManagerSalaryPage';
 
 // Public pages: lazy-loaded để tách bundle khỏi phần Dashboard quản trị.
 const HomePage = lazy(() => import('@/pages/public/HomePage'));
@@ -138,6 +140,8 @@ function App() {
           <Route element={<HostLayout />}>
             <Route path="/host/review/:id" element={<HostPropertyReview />} />
             <Route path="/host" element={<Dashboard />} />
+            <Route path="/host/pricing-config" element={<PricingConfigPage />} />
+            <Route path="/host/manager-salaries" element={<ManagerSalaryPage />} />
             <Route path="/host/properties" element={<PropertyList />} />
             <Route path="/host/properties/:id" element={<PropertyDetail />} />
             <Route path="/host/operations-managers" element={<ManagerList />} />

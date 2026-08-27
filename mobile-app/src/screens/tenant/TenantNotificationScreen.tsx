@@ -9,6 +9,7 @@ import { AppNotification } from '@/types';
 import { formatRelativeTime } from '@/utils';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
+import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { navigateFromNotification } from '@/navigation/navigationRef';
 import { serverNow } from '@/utils/serverTime';
@@ -168,6 +169,35 @@ export const TenantNotificationScreen: React.FC = () => {
 
   const handleNotifPress = async (notif: AppNotification) => {
     markRead(notif.id);
+
+    /**
+     * Thông báo hoá đơn có kèm `invoiceId` → mở THẲNG hoá đơn đó để trả tiền.
+     *
+     * Phải xét TRƯỚC nhánh `actionRoute`: BE gửi `screen: "InvoiceList"` kèm
+     * `params.invoiceId`, nhưng `InvoiceListScreen` không đọc `route.params` — nên id rơi
+     * mất và khách bị đổ về danh sách, phải tự dò lại đúng hoá đơn vừa được nhắc. Với tin
+     * "tiền phòng tới hạn / quá hạn" thì bấm vào là để trả ngay, bắt tìm thêm một bước là
+     * đúng chỗ khiến người ta bỏ ngang.
+     *
+     * `InvoiceDetail` nhận nguyên object `SharedBill` chứ không nhận id (xem
+     * `InvoiceDetailScreen`), nên phải nạp hoá đơn trước rồi mới điều hướng.
+     *
+     * Tin nhắc TRƯỚC ngày phát hành (`RENT_REMINDER_PRE`) chưa có hoá đơn nên không kèm
+     * id — tự rơi xuống danh sách, đúng như mong muốn.
+     */
+    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
+      const invoiceId = Number(notif.actionParams?.invoiceId);
+      if (Number.isFinite(invoiceId) && invoiceId > 0) {
+        try {
+          const inv = await realTenantBillingService.getInvoice(invoiceId);
+          navigation.navigate('InvoiceDetail', { invoice: toSharedBill(inv) });
+          return;
+        } catch { /* hoá đơn đã huỷ / không đọc được → rơi về danh sách */ }
+      }
+      navigation.navigate('TenantTabs', { screen: 'InvoiceList' });
+      return;
+    }
+
     // BE trả sẵn màn + tham số (từ 05/08/2026) → mở đúng hồ sơ/hoá đơn.
     if (notif.actionRoute) {
       navigateFromNotification({
@@ -192,11 +222,6 @@ export const TenantNotificationScreen: React.FC = () => {
         } catch { /* ticket không đọc được → rơi xuống danh sách */ }
       }
       navigation.navigate('TenantTabs', { screen: 'MaintenanceList' });
-      return;
-    }
-    // Thông báo hóa đơn (cron nhắc nợ — API-CRON-NhacNo-LateFee-BE-TODO.md) → tab hóa đơn.
-    if (notif.type === 'new_bill' || notif.type === 'bill_overdue') {
-      navigation.navigate('TenantTabs', { screen: 'InvoiceList' });
       return;
     }
     if (notif.actionRoute) {

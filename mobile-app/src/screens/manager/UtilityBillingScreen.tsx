@@ -314,7 +314,28 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * Hoá đơn EVN của kỳ này do ADMIN phát hành (chỉ đọc). null = admin chưa đẩy.
    * Trước 13/08/2026 đây là `evnData` do chính manager chụp/nhập — xem evnBillService.
    */
+  /**
+   * Tổng tiêu thụ CÁC PHÒNG đã phát hành trong kỳ đang chốt.
+   *
+   * Nền để tính hạn mức còn lại: tổng các phòng không được vượt tổng trên giấy nhà nước
+   * (cộng biên dự phòng). Vượt nghĩa là chắc chắn có phòng đọc nhầm — không phép cộng nào
+   * cho ra nhiều điện hơn lượng công ty đã mua.
+   */
+  const [elecIssuedQty,  setElecIssuedQty]  = useState(0);
+  const [waterIssuedQty, setWaterIssuedQty] = useState(0);
   const [evnBill,        setEvnBill]        = useState<EvnBill | null>(null);
+  /**
+   * Phần ĐANG GÕ mà chưa gửi — cộng vào hạn mức ngay để quản lý thấy trước khi bấm.
+   *
+   * Chỉ tính phòng chưa gửi: phòng đã gửi nằm trong `*IssuedQty` rồi, cộng lại là tính hai lần.
+   * Chỉ số mới ≤ chỉ số cũ thì bỏ qua — đó là đang gõ dở, chưa phải số thật.
+   */
+  const pendingQty = (rows: RoomMeterReading[], sentKeys: Set<string>) =>
+    rows.reduce((sum, r) => {
+      if (r.sent || sentKeys.has(r.roomId)) return sum;
+      const n = Number(r.newReading);
+      return Number.isFinite(n) && n > r.prevReading ? sum + (n - r.prevReading) : sum;
+    }, 0);
   const [evnBillLoading, setEvnBillLoading] = useState(false);
   const [evnBillError,   setEvnBillError]   = useState<string | null>(null);
   /** Đang gửi hoá đơn nhà nguyên căn (nút gửi thẳng ở bước 2). */
@@ -338,6 +359,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [waterBillLoading, setWaterBillLoading] = useState(false);
   const [waterBillError,   setWaterBillError]   = useState<string | null>(null);
   const [roomWaterReadings,setRoomWaterReadings]= useState<RoomWaterReading[]>([]);
+
+  // Hạn mức tiêu thụ — xem `QuotaBar`. Phải đặt SAU mọi khai báo state ở trên.
+  const pendingElecQty   = pendingQty(roomElecReadings,  elecSentKeys);
+  const pendingWaterQty  = pendingQty(roomWaterReadings, waterSentKeys);
+  const billedElecRooms  = roomElecReadings.filter(r => r.sent || elecSentKeys.has(r.roomId)).length;
+  const billedWaterRooms = roomWaterReadings.filter(r => r.sent || waterSentKeys.has(r.roomId)).length;
   const [waterBillForm,    setWaterBillForm]    = useState({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
 
   // Lịch sử gửi hoá đơn: BE chưa có endpoint → tạm rỗng, chỉ tích trong phiên (xem doc/ gap).
@@ -458,9 +485,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     propId: string,
     type: 'ELECTRICITY' | 'WATER',
     period?: string,
-  ): Promise<{ lastReadings: Map<string, number>; sentKeys: Set<string>; houseSent: boolean }> => {
+  ): Promise<{
+    lastReadings: Map<string, number>;
+    sentKeys: Set<string>;
+    houseSent: boolean;
+    /** Tổng tiêu thụ CÁC PHÒNG đã phát hành trong kỳ — nền để tính hạn mức còn lại. */
+    issuedQty: number;
+  }> => {
     const lastReadings = new Map<string, number>();
     const sentKeys = new Set<string>();
+    let issuedQty = 0;
     /** Nhà nguyên căn đã có hoá đơn kỳ này chưa — cờ riêng, không phụ thuộc khoá chuỗi. */
     let houseSent = false;
     const wanted = normPeriod(period);
@@ -496,12 +530,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         if (!samePeriod) continue;
         sentKeys.add(key);
         if (isHouse) houseSent = true;
+        // Chỉ cộng hoá đơn PHÒNG: hạn mức là để so tổng các phòng với giấy của cả toà.
+        if (!isHouse && inv.consumption != null) issuedQty += Number(inv.consumption);
       }
     } catch {
       // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
       // Cố tình KHÔNG chặn gửi khi lỗi mạng: chặn nhầm còn tệ hơn, vì BE vẫn chặn trùng.
     }
-    return { lastReadings, sentKeys, houseSent };
+    return { lastReadings, sentKeys, houseSent, issuedQty };
   };
 
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
@@ -568,7 +604,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
 
     const prop = properties.find(p => p.id === propId);
-    const { lastReadings, sentKeys, houseSent } = await fetchRoomHistory(
+    const { lastReadings, sentKeys, houseSent, issuedQty } = await fetchRoomHistory(
       propId, 'ELECTRICITY', bill?.billingPeriod,
     );
     // Nhà nguyên căn: hoá đơn của BE không mang roomId nên khoá chuỗi có thể lệch với id
@@ -576,6 +612,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     // việc hai bên đặt tên khoá giống nhau.
     setElecHouseSent(houseSent);
     setElecSentKeys(sentKeys);
+    setElecIssuedQty(issuedQty);
     if (prop) {
       setRoomElecReadings(prop.rooms.map(r => ({
         roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
@@ -793,7 +830,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const initRoomWaterReadings = async (propId: string, period: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
-    const { lastReadings, sentKeys } = await fetchRoomHistory(propId, 'WATER', period);
+    const { lastReadings, sentKeys, issuedQty } = await fetchRoomHistory(propId, 'WATER', period);
+    setWaterIssuedQty(issuedQty);
     setWaterSentKeys(sentKeys);
     const rows: RoomWaterReading[] = prop.rooms.map(r => ({
       roomId: r.id, roomCode: r.code, tenantName: r.tenantName,
@@ -1197,6 +1235,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
               )}
             </View>
 
+            <QuotaBar
+              total={evnBill?.totalKwh ?? 0}
+              serverCap={evnBill?.roomSumCap}
+              issued={evnBill?.roomSumQuantity ?? elecIssuedQty}
+              pending={pendingElecQty}
+              unit="kWh"
+              billedRooms={billedElecRooms}
+              totalRooms={roomElecReadings.length}
+            />
+
             {roomElecReadings.map(r => (
               <View key={r.roomId} style={[styles.roomCard, r.sent && styles.roomCardSent]}>
                 <View style={styles.roomCardHeader}>
@@ -1479,6 +1527,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 </TouchableOpacity>
               )}
             </View>
+
+            <QuotaBar
+              total={waterBill?.totalQuantity ?? 0}
+              serverCap={waterBill?.roomSumCap}
+              issued={waterBill?.roomSumQuantity ?? waterIssuedQty}
+              pending={pendingWaterQty}
+              unit="m³"
+              billedRooms={billedWaterRooms}
+              totalRooms={roomWaterReadings.length}
+            />
 
             {roomWaterReadings.map(r => (
               <View key={r.roomId} style={[styles.roomCard, r.sent && styles.roomCardSent]}>
@@ -1806,6 +1864,93 @@ const StepIndicator: React.FC<{ steps: string[]; current: number }> = ({ steps, 
 const SectionHeader: React.FC<{ title: string }> = ({ title }) => (
   <Text style={secSt.title}>{title}</Text>
 );
+
+/**
+ * Biên dự phòng — CHỈ dùng khi máy chủ chưa trả `roomSumCap`.
+ *
+ * Biên thật là cấu hình phía máy chủ (`billing.utility.room-sum-tolerance-percent`), và BE
+ * trả sẵn `roomSumCap` từ 27/08/2026. Tự nhân hệ số ở app là có ngày hai bên dùng hai mức
+ * khác nhau — app báo "còn dư 20 kWh" mà bấm gửi lại ăn 422.
+ */
+const ROOM_SUM_TOLERANCE_FALLBACK = 0.1;
+
+/**
+ * HẠN MỨC TIÊU THỤ CÒN LẠI của cả toà — chỉ nhà chia phòng.
+ *
+ * Tổng tiêu thụ các phòng cộng lại KHÔNG được vượt tổng trên giấy nhà nước (cộng 10% biên).
+ * Vượt nghĩa là chắc chắn có phòng đọc nhầm — gõ thừa số 0, đọc nhầm hàng, ghi nhầm phòng.
+ * Không phép cộng nào cho ra nhiều điện hơn lượng công ty đã mua.
+ *
+ * Hiện NGAY LÚC ĐANG GÕ chứ không đợi bấm gửi: chặn ở phòng cuối cùng thì quản lý đã đi hết
+ * các phòng rồi mới biết phải quay lại dò, mà lỗi thường nằm ở phòng ghi trước đó. Thấy hạn
+ * mức tụt bất thường từ phòng thứ hai là họ tự phát hiện ngay.
+ *
+ * Con số đang gõ (chưa gửi) cũng được cộng vào — đó mới là thứ quản lý cần thấy trước khi bấm.
+ */
+const QuotaBar: React.FC<{
+  total: number;
+  /** Trần máy chủ trả về. Thiếu thì mới tự nhân biên dự phòng. */
+  serverCap?: number;
+  /** Tổng phòng đã phát hành — ưu tiên số máy chủ, thiếu thì dùng số app tự cộng. */
+  issued: number;
+  pending: number;
+  unit: string;
+  billedRooms: number;
+  totalRooms: number;
+}> = ({ total, serverCap, issued, pending, unit, billedRooms, totalRooms }) => {
+  if (!total) return null;
+  const cap = serverCap && serverCap > 0
+    ? Math.round(serverCap)
+    : Math.round(total * (1 + ROOM_SUM_TOLERANCE_FALLBACK));
+  const used = issued + pending;
+  const left = cap - used;
+  const over = left < 0;
+  const ratio = Math.min(used / cap, 1);
+  const tone = over ? Colors.error : ratio > 0.9 ? Colors.warning : Colors.success;
+
+  return (
+    <View style={[qs.box, over && qs.boxOver]}>
+      <View style={qs.head}>
+        <Text style={qs.title}>
+          Đã ghi {billedRooms}/{totalRooms} phòng
+        </Text>
+        <Text style={[qs.left, { color: tone }]}>
+          {over
+            ? `Vượt ${Math.abs(left).toLocaleString('vi-VN')} ${unit}`
+            : `Còn ${left.toLocaleString('vi-VN')} ${unit}`}
+        </Text>
+      </View>
+      <View style={qs.track}>
+        <View style={[qs.fill, { width: `${ratio * 100}%`, backgroundColor: tone }]} />
+      </View>
+      <Text style={qs.sub}>
+        {used.toLocaleString('vi-VN')} / {cap.toLocaleString('vi-VN')} {unit}
+        {'  ·  '}giấy {total.toLocaleString('vi-VN')} {unit} + {Math.max(0, Math.round((cap / total - 1) * 100))}% dự phòng
+      </Text>
+      {over && (
+        <Text style={qs.warn}>
+          Tổng các phòng đã vượt giấy nhà nước. Kiểm lại chỉ số đã ghi — nhiều khả năng có phòng
+          đọc nhầm, và lỗi thường ở phòng ghi trước chứ không phải phòng đang gõ.
+        </Text>
+      )}
+    </View>
+  );
+};
+
+const qs = StyleSheet.create({
+  box: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    marginBottom: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
+  },
+  boxOver: { borderColor: Colors.error, backgroundColor: Colors.errorLight },
+  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  title: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  left: { fontSize: 13, fontWeight: '800' },
+  track: { height: 6, borderRadius: 3, backgroundColor: Colors.border, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 3 },
+  sub: { marginTop: 6, fontSize: 11, color: Colors.textMuted },
+  warn: { marginTop: 6, fontSize: 11, lineHeight: 16, fontWeight: '600', color: Colors.error },
+});
 
 const EVNDataRow: React.FC<{ label: string; value: string; highlight?: boolean }> = ({ label, value, highlight }) => (
   <View style={evnSt.row}>
