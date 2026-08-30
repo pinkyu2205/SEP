@@ -64,15 +64,15 @@ export const ManagerSalaryPage = () => {
     Promise.all([
       pricingConfigService.load(),
       propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-      propertyService.getProperties(0, 500).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
       zoneAssignmentService.list().catch(() => [] as ZoneManagerLink[]),
     ]).then(([{ config, source: s }, mgrs, page, links]) => {
       if (!alive) return;
       setCfg(config);
       setSource(s);
       setManagers(mgrs.map((m) => ({ id: m.id, fullName: m.fullName })));
-      setPropsByManager(propertyCountByManager(links, page?.content ?? []));
-      setPendingByManager(pendingCountByManager(links, page?.content ?? [], isHostApproved));
+      setPropsByManager(propertyCountByManager(links, page ?? []));
+      setPendingByManager(pendingCountByManager(links, page ?? [], isHostApproved));
       const zones = new Map<string, string[]>();
       links.forEach((l) => {
         zones.set(l.managerId, [...(zones.get(l.managerId) ?? []), l.zoneName || l.zoneId]);

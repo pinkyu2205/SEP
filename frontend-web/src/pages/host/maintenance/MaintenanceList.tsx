@@ -241,7 +241,7 @@ export const MaintenanceList = () => {
     Promise.all([
       maintenanceService.getRequests({}, 0, 200).catch(() => ({ content: [] as MaintenanceRequestResponse[] })),
       maintenanceService.getDashboard().catch(() => null),
-      propertyService.getProperties(0, 200).catch(() => ({ content: [] as PropertyResponse[] })),
+      propertyService.getAllProperties().catch(() => ({ content: [] as PropertyResponse[] })),
     ]).then(([reqPage, dash, propPage]) => {
       setRequests((reqPage as { content: MaintenanceRequestResponse[] }).content ?? []);
       setDashboard(dash as MaintenanceDashboardResponse | null);

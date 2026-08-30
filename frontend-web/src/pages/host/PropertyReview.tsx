@@ -6,6 +6,13 @@ import {
   Percent, PiggyBank, Send, SlidersHorizontal, Target, UserCog,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
+/*
+  Mọi phép "hôm nay" ở màn duyệt giá đều đi qua `serverNow()`.
+
+  Trang này tính số tháng còn khai thác được để chia vốn cải tạo — sai một ngày ở mốc
+  bắt đầu là lệch cả con số giá đề xuất, mà host bấm duyệt trên đúng con số đó.
+*/
+import { serverNow } from '@/utils/serverTime';
 import {
   managerCostForProperty, managerOfZone, managerPayroll, pricingConfigService,
   propertyCountByManager, totalOpex,
@@ -131,7 +138,7 @@ const leaseMonthsActual = (start?: string, end?: string): number | null => {
  */
 const rentableMonthsLeft = (start?: string, end?: string, renovationEnd?: string): number | null => {
   if (!start || !end) return null;
-  const candidates = [parseDate(start), new Date()];
+  const candidates = [parseDate(start), serverNow()];
   if (renovationEnd) {
     const r = parseDate(renovationEnd);
     if (!isNaN(r.getTime())) candidates.push(r);
@@ -309,14 +316,14 @@ export const HostPropertyReview = () => {
     Promise.all([
       pricingConfigService.load(),
       propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-      propertyService.getProperties(0, 500).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
       zoneAssignmentService.list().catch(() => [] as ZoneManagerLink[]),
     ]).then(([{ config, source }, mgrs, page, links]) => {
       if (!alive) return;
       setCfg(config);
       setCfgSource(source);
       setZoneLinks(links);
-      const count = propertyCountByManager(links, page?.content ?? []);
+      const count = propertyCountByManager(links, page ?? []);
       setPayroll(managerPayroll(config, mgrs, (id) => count[id] ?? 0));
     });
     return () => { alive = false; };
@@ -411,12 +418,12 @@ export const HostPropertyReview = () => {
     if (!leaseStart) return false;
     const s = parseDate(leaseStart);
     if (isNaN(s.getTime())) return false;
-    const today = new Date();
+    const today = serverNow();
     today.setHours(0, 0, 0, 0);
     return s > today;
   })();
   const daysUntilLease = leaseNotStarted && leaseStart
-    ? Math.round((parseDate(leaseStart).getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000)
+    ? Math.round((parseDate(leaseStart).getTime() - serverNow().setHours(0, 0, 0, 0)) / 86_400_000)
     : 0;
 
   /**
@@ -581,7 +588,7 @@ export const HostPropertyReview = () => {
     if (!inbound?.startDate) return null;
     const start = parseDate(inbound.startDate);
     if (isNaN(start.getTime())) return null;
-    const today = new Date();
+    const today = serverNow();
     today.setHours(0, 0, 0, 0);
     if (start <= today) return { started: true, daysLeft: 0 };
     return {

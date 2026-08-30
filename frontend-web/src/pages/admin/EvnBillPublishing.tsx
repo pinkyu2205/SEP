@@ -37,8 +37,6 @@ import { serverNow } from '@/utils/serverTime';
  * Nước không đi qua trang này — manager vẫn tự nhập hoá đơn nước trên app như cũ.
  */
 
-const PROPERTY_PAGE_SIZE = 200;
-
 /** Số dòng mỗi trang ở bảng "Đã phát hành". */
 const BILLS_PER_PAGE = 10;
 
@@ -327,8 +325,8 @@ export const EvnBillPublishing = () => {
     setLoadingProps(true);
     setPropsError(null);
     try {
-      const page = await propertyService.getProperties(0, PROPERTY_PAGE_SIZE);
-      setProperties(page?.content ?? []);
+      const page = await propertyService.getAllProperties();
+      setProperties(page ?? []);
     } catch (e: any) {
       setPropsError(e?.response?.data?.message || e?.message || 'Không tải được danh sách nhà');
     } finally {

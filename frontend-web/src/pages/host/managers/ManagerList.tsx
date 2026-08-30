@@ -85,15 +85,15 @@ export const ManagerList = () => {
     try {
       const [mgrs, propsRes, contractPage, perfRows, zoneLinks] = await Promise.all([
         propertyService.getManagers(),
-        propertyService.getProperties(0, 100),
-        hostService.listContracts({ size: 500 }).then(p => p.content).catch(() => [] as HostContractDto[]),
+        propertyService.getAllProperties(),
+        hostService.listAllContracts().catch(() => [] as HostContractDto[]),
         hostService.getPropertyPerformance(MONTH).catch(() => [] as PropertyPerformanceRow[]),
         // Bảng phân công khu vực — xem `getAssignedProps`. Hỏng thì coi như chưa phân công,
         // trang vẫn chạy theo `operationManagerId` như cũ.
         zoneAssignmentService.list().catch(() => []),
       ]);
       setManagers(mgrs);
-      setProperties(propsRes.content);
+      setProperties(propsRes);
       setContracts(contractPage);
       setPerf(perfRows);
       setZoneManagerOf(new Map(zoneLinks.map(a => [String(a.zoneId), a.managerId])));

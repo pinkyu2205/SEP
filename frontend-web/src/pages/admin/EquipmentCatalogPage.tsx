@@ -103,13 +103,13 @@ export const EquipmentCatalogPage = () => {
   // Tải danh sách bất động sản
   useEffect(() => {
     let active = true;
-    propertyService.getProperties(0, 200)
+    propertyService.getAllProperties()
       .then(page => {
         if (!active) return;
         // Admin quản trị toàn hệ thống nên KHÔNG lọc theo trạng thái duyệt của Host.
         // Bản dùng cho Host trước đây lọc `isHostApproved`, áp vào đây sẽ giấu mất các
         // căn đang PENDING_HOST_REVIEW / nháp — đúng thứ admin cần thao tác nhất.
-        const list = page.content ?? [];
+        const list = page ?? [];
         setProperties(list);
         if (list.length > 0) setPropertyId(list[0].id);
       })

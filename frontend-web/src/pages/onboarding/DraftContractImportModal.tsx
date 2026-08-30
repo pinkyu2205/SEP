@@ -132,10 +132,10 @@ export const DraftContractImportModal = ({
     setPreflight(null);
     try {
       const [propPage, drafts] = await Promise.all([
-        propertyService.getProperties(0, 200),
+        propertyService.getAllProperties(),
         tenantService.listDrafts().catch(() => []),
       ]);
-      const properties = propPage.content ?? [];
+      const properties = propPage ?? [];
 
       const scan = await runImportPreflight(f, properties);
       if (scan.parseError) { setPreflight(scan); return; }

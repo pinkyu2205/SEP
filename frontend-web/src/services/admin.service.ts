@@ -294,37 +294,6 @@ const depositToRow = (d: AdminDepositDto): AdminDepositRow => {
 
 // ── Host (giữ nguyên — dùng cho thẻ đếm ở Bảng điều hành) ─────────────────────
 /** Khớp `AdminHostDto` của BE ({ id, name }) — user có role OWNER. */
-// ── Mốc thu tiền (billing_config) ────────────────────────────────────────────
-/**
- * Ba số này KHÔNG độc lập — xem `ContractBillingCalendar` phía BE:
- *
- *   mốc          = ngày trong tháng của `startDate` từng hợp đồng
- *   phát hoá đơn = mốc − reminderLeadDays        ← ĐỒNG THỜI là hạn chụp công tơ
- *   nhắc chụp    = hạn chụp − meterReminderLeadDays
- *   hạn trả tiền = mốc + graceDays
- *
- * Nên đổi `reminderLeadDays` là dời cả ngày phát hoá đơn LẪN deadline chụp ảnh công
- * tơ của toàn bộ quản lý. UI phải cho xem trước dòng thời gian, đừng để admin gõ mù.
- */
-export interface BillingConfig {
-  /** Số ngày trước mốc bắt đầu nhắc + phát hành hoá đơn. BE: 0–14. */
-  reminderLeadDays: number;
-  /** Số ngày ân hạn sau mốc; quá là OVERDUE. BE: 0–14. */
-  graceDays: number;
-  /** Nhắc quản lý đi chụp công tơ trước hạn chụp bao nhiêu ngày. BE: 0–7. */
-  meterReminderLeadDays: number;
-  updatedAt?: string;
-}
-
-export type BillingConfigInput = Omit<BillingConfig, 'updatedAt'>;
-
-/** Khớp `@Min`/`@Max` của `UpdateBillingConfigRequest` — chặn ở FE trước khi gọi API. */
-export const BILLING_CONFIG_LIMITS = {
-  reminderLeadDays: { min: 0, max: 14 },
-  graceDays: { min: 0, max: 14 },
-  meterReminderLeadDays: { min: 0, max: 7 },
-} as const;
-
 export interface AdminHost {
   id: string;
   name: string;
@@ -467,22 +436,4 @@ export const adminService = {
     return Array.isArray(res) ? res : [];
   },
 
-  /**
-   * Mốc thu tiền toàn hệ thống. Lưu DB (bảng `billing_config`, một dòng id=1) nên
-   * sửa xong có hiệu lực ngay, không cần restart BE.
-   *
-   * Không bao giờ 404: `BillingConfigServiceImpl.current()` tự tạo bản mặc định khi
-   * bảng rỗng, và migration đã seed sẵn (3 / 2 / 1).
-   */
-  getBillingConfig: async (): Promise<BillingConfig> => {
-    return await api.get<unknown, BillingConfig>(`${ADMIN}/billing-config`);
-  },
-
-  /**
-   * `meterReminderLeadDays` optional phía BE, nhưng FE luôn gửi đủ 3 số để tránh
-   * chuyện bỏ trống rồi BE giữ giá trị cũ trong khi UI hiện giá trị mới.
-   */
-  updateBillingConfig: async (payload: BillingConfigInput): Promise<BillingConfig> => {
-    return await api.put<unknown, BillingConfig>(`${ADMIN}/billing-config`, payload);
-  },
 };

@@ -132,7 +132,7 @@ export const PricingConfigPage = () => {
       // Danh sách quản lý lấy từ hệ thống, KHÔNG cho Host tự gõ tên: gõ tay thì tên lệch
       // với tài khoản thật và không cách nào biết căn nào do ai phụ trách.
       propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-      propertyService.getProperties(0, 500).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
       // Số nhà mỗi người phụ trách đếm THEO KHU VỰC, không theo `operationManagerId`:
       // nhà chỉ nhận id quản lý sau khi Host duyệt giá, nên đếm kiểu kia sẽ bỏ sót toàn bộ
       // nhà đang chờ duyệt — mẫu số thiếu thì lương chia ra cao hơn thực tế.
@@ -142,7 +142,7 @@ export const PricingConfigPage = () => {
       setCfg(config);
       setSource(s);
       setManagers(mgrs.map((m) => ({ id: m.id, fullName: m.fullName })));
-      setPropsByManager(propertyCountByManager(links, page?.content ?? []));
+      setPropsByManager(propertyCountByManager(links, page ?? []));
       const zones = new Map<string, string[]>();
       links.forEach((l) => {
         zones.set(l.managerId, [...(zones.get(l.managerId) ?? []), l.zoneName || l.zoneId]);

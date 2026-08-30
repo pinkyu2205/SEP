@@ -145,8 +145,8 @@ export const TaoDraftPage = () => {
     setListLoading(true);
     setListError(false);
     try {
-      const res = await propertyService.getProperties(0, 100);
-      setBuildings(res.content);
+      const res = await propertyService.getAllProperties();
+      setBuildings(res);
     } catch (e) {
       console.error(e);
       setListError(true);

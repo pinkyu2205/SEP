@@ -12,7 +12,6 @@ import {
   Package,
   PackageCheck,
   Search,
-  Settings,
   Settings2,
   ShieldCheck,
   UserCog,
@@ -44,43 +43,42 @@ import { UserMenu } from './UserMenu';
  * thật không có yêu cầu bảo trì nào, đá nhau với Bảng điều hành. Giờ nhận từ API;
  * chưa có API nhật ký bảo mật thì không gắn badge còn hơn gắn số bịa.
  */
+/**
+ * ─── Vì sao gom lại như dưới đây (30/08/2026) ────────────────────────────────
+ * Gom cùng nguyên tắc với sidebar Host (`layouts/Sidebar.tsx`) — hai cổng dùng chung
+ * `AppSidebar` thì cũng nên gom menu cùng một kiểu, để người làm cả hai vai không phải
+ * học hai bản đồ.
+ *
+ * Bản cũ: 18 mục / 7 nhóm, trong đó BỐN nhóm chỉ có một mục (Tổng quan, Quản trị,
+ * Đón khách, Hệ thống). Tiêu đề nhóm tồn tại để PHÂN LOẠI — đặt trên đúng một dòng thì
+ * nó chỉ chia nhỏ menu ra cho vụn. Nay: 5 nhóm, không nhóm nào dưới hai mục, Bảng điều
+ * hành đứng riêng không cần tiêu đề.
+ *
+ * Hai cặp nhãn đụng nhau đã tách:
+ *   • "Danh mục khu vực" ↔ "Khu vực & Quản lý"  (đứng sát nhau, cùng chữ "khu vực")
+ *   • "Bảo trì & thiết bị" ↔ "Danh mục thiết bị" (đứng sát nhau, cùng chữ "thiết bị")
+ * Nguyên tắc tách: **mọi "Danh mục *" là DỮ LIỆU NỀN, thuộc Hệ thống** — chúng được
+ * khai báo một lần rồi gần như không đụng tới, khác hẳn việc vận hành hằng ngày. Còn
+ * "Khu vực & Quản lý" đổi thành "Phân công khu vực" cho đúng việc trang đó làm (gán
+ * quản lý cho quận/huyện) — trùng tên với bên Host, vì đúng là cùng một màn.
+ *
+ * "Khiếu nại" tách hẳn khỏi Tài chính: phân xử tranh chấp là việc XÉT XỬ (chỉ admin
+ * làm được, và làm khi có người tố), khác hẳn việc phát hành hoá đơn / theo dõi thu
+ * tiền. Trộn chung trong một nhóm 6 mục thì cả hai loại việc đều chìm.
+ */
 const buildSections = (openMaintenance: number): SidebarSection[] => [
   {
-    label: 'Tổng quan',
+    // Không tiêu đề — một mục thì tiêu đề không phân loại thêm được gì.
     items: [{ label: 'Bảng điều hành', path: '/admin', icon: BarChart3, end: true }],
   },
   {
-    label: 'Quản trị',
-    items: [{ label: 'Người dùng & RBAC', path: '/admin/users', icon: Users }],
-  },
-  {
-    label: 'Quy trình tiếp nhận nhà',
+    label: 'Tiếp nhận',
     items: [
       { label: 'Khởi tạo nhà', path: '/admin/buildings/draft', icon: FilePlus },
       { label: 'Cấu hình khai thác', path: '/admin/buildings/configuration', icon: Settings2 },
-    ],
-  },
-  {
-    label: 'Đón khách',
-    items: [{ label: 'Hồ sơ đón khách', path: '/admin/onboarding', icon: UserPlus }],
-  },
-  {
-    label: 'Tài chính & Hợp đồng',
-    items: [
-      { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
-      // Khiếu nại hoàn cọc: chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
-      { label: 'Khiếu nại hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
-      // Khiếu nại hoá đơn điện/nước (24/08/2026) — cùng lý do: là lời tố nhắm vào chính
-      // người phát hành hoá đơn (admin) hoặc người đọc đồng hồ (quản lý), nên không để
-      // hai vai đó tự phân xử. Admin cũng là vai duy nhất huỷ được hoá đơn đã phát hành.
-      { label: 'Khiếu nại hoá đơn', path: '/admin/utility-disputes', icon: ReceiptText },
-      // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
-      // xem services/evnBill.service.ts để biết vì sao đổi.
-      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
-      // Nước đi cùng mô hình với điện từ 14/08/2026 — trước đó manager tự khai đơn giá
-      // nước trong app, không ai đối chiếu được với hoá đơn giấy.
-      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets },
-      { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
+      // Nhập chung nhóm: tiếp nhận NHÀ rồi tiếp nhận KHÁCH là hai chặng liền nhau của
+      // cùng một quy trình. Trước đây đứng riêng thành nhóm "Đón khách" một mục.
+      { label: 'Hồ sơ đón khách', path: '/admin/onboarding', icon: UserPlus },
     ],
   },
   {
@@ -91,18 +89,50 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
       // còn chỉ nói về tiến độ bàn giao nữa. Đây là màn "1 dòng = 1 nhà" duy nhất —
       // trang Hồ sơ đón khách là "1 dòng = 1 hợp đồng", không gộp được vào nhau.
       { label: 'Tình trạng nhà & phòng', path: '/admin/handover', icon: PackageCheck },
+      { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
       // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
       { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
-      { label: 'Danh mục khu vực', path: '/admin/zones', icon: MapPin },
-      { label: 'Khu vực & Quản lý', path: '/admin/zones/assignment', icon: UserCog },
-      { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
-      { label: 'Danh mục thiết bị', path: '/admin/equipments', icon: Package },
+      { label: 'Phân công khu vực', path: '/admin/zones/assignment', icon: UserCog },
+    ],
+  },
+  {
+    label: 'Tài chính',
+    items: [
+      { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
+      { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
+      // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
+      // xem services/evnBill.service.ts để biết vì sao đổi.
+      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
+      // Nước đi cùng mô hình với điện từ 14/08/2026 — trước đó manager tự khai đơn giá
+      // nước trong app, không ai đối chiếu được với hoá đơn giấy.
+      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets },
+    ],
+  },
+  {
+    // Nhãn từng mục bỏ chữ "Khiếu nại" vì tiêu đề nhóm đã nói rồi.
+    label: 'Khiếu nại',
+    items: [
+      // Chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
+      { label: 'Hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
+      // Khiếu nại hoá đơn điện/nước (24/08/2026) — cùng lý do: là lời tố nhắm vào chính
+      // người phát hành hoá đơn (admin) hoặc người đọc đồng hồ (quản lý), nên không để
+      // hai vai đó tự phân xử. Admin cũng là vai duy nhất huỷ được hoá đơn đã phát hành.
+      { label: 'Hoá đơn điện nước', path: '/admin/utility-disputes', icon: ReceiptText },
     ],
   },
   {
     label: 'Hệ thống',
     items: [
-      { label: 'Cấu hình hệ thống', path: '/admin/settings', icon: Settings },
+      // "RBAC" là từ lóng kỹ thuật trong một giao diện tiếng Việt — gọi đúng tên việc.
+      { label: 'Người dùng & phân quyền', path: '/admin/users', icon: Users },
+      /*
+        `end` BẮT BUỘC ở đây: `/admin/zones` là tiền tố của `/admin/zones/assignment`,
+        mà `NavLink` mặc định khớp theo tiền tố. Thiếu nó thì đứng ở trang Phân công
+        khu vực sẽ thấy CẢ HAI mục cùng sáng — trước đây hai mục nằm sát nhau nên còn
+        đỡ, nay chúng ở hai nhóm cách xa nhau thì nhìn như menu bị lỗi.
+      */
+      { label: 'Danh mục khu vực', path: '/admin/zones', icon: MapPin, end: true },
+      { label: 'Danh mục thiết bị', path: '/admin/equipments', icon: Package },
       // ẨN — màn "Nhật ký & bảo mật" chạy 100% trên AUDIT_LOGS (dữ liệu giả trong
       // utils/adminMockData.ts): BE chưa có audit log nên không có gì thật để hiện.
       // Để lại một mục menu hứa hẹn giám sát bảo mật mà mở ra toàn dữ liệu bịa thì
@@ -222,7 +252,6 @@ export const AdminLayout = () => {
               name={sidebarUser.name}
               subtitle={sidebarUser.subtitle}
               initials={sidebarUser.initials}
-              settingsTo="/admin/settings"
               onLogout={logout}
             />
           </div>

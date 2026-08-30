@@ -53,8 +53,6 @@ const EMPTY_FORM: BillForm = {
   totalQuantity: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
 };
 
-const PROPERTY_PAGE_SIZE = 200;
-
 export const WaterBillPublishing = () => {
   const now = serverNow();
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -145,8 +143,8 @@ export const WaterBillPublishing = () => {
   const loadProperties = useCallback(async () => {
     setLoadingProps(true);
     try {
-      const page = await propertyService.getProperties(0, PROPERTY_PAGE_SIZE);
-      setProperties(page?.content ?? []);
+      const page = await propertyService.getAllProperties();
+      setProperties(page ?? []);
     } catch {
       setProperties([]);
     } finally {

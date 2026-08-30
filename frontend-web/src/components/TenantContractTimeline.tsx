@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
+import { serverNow } from '@/utils/serverTime';
 import {
-  Building2, CalendarRange, CreditCard, DoorOpen, FileText, Info, MapPin, Phone, Wallet, X,
+  ArrowRight, Building2, CalendarRange, CreditCard, DoorOpen, FileText, Info, MapPin, Phone, Wallet, X,
 } from 'lucide-react';
 import type { HostContractDto } from '@/services/host.service';
 import { Overlay } from '@/components/Overlay';
@@ -50,7 +51,8 @@ const fmtMoney = (v?: number) =>
 const durationLabel = (c: HostContractDto): string => {
   const start = parseDate(c.startDate);
   if (!start) return '';
-  const end = parseDate(c.endDate) ?? new Date();
+  // Giờ server: HĐ còn chạy thì tính tới "hôm nay" của server, không phải máy người dùng.
+  const end = parseDate(c.endDate) ?? serverNow();
   const months = Math.max(
     0,
     (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()),
@@ -95,8 +97,22 @@ const StatTile = ({ value, label }: { value: number | string; label: string }) =
   </div>
 );
 
+/**
+ * Mở hợp đồng cụ thể — do NƠI GỌI quyết định đi đâu.
+ *
+ * Không hardcode đường dẫn trong component này: nó dùng chung cho cả cổng Host
+ * (`/host/contracts`) lẫn cổng Admin (`/admin/contracts`), hai trang khác nhau hoàn
+ * toàn. Nơi nào không truyền thì nút không hiện — thà thiếu nút còn hơn có nút bấm
+ * vào ra trang trắng.
+ */
+export type OpenContractHandler = (contract: HostContractDto) => void;
+
 // ── Một mốc trên dòng thời gian ──────────────────────────────────────────────
-const TimelineItem = ({ contract, last }: { contract: HostContractDto; last: boolean }) => {
+const TimelineItem = ({ contract, last, onOpen }: {
+  contract: HostContractDto;
+  last: boolean;
+  onOpen?: OpenContractHandler;
+}) => {
   const st = STATUS[contract.status] ?? STATUS.DRAFT;
   const running = contract.status === 'ACTIVE';
 
@@ -149,13 +165,39 @@ const TimelineItem = ({ contract, last }: { contract: HostContractDto; last: boo
           )}
           <span className="ml-auto font-mono text-slate-400">{contract.code || '—'}</span>
         </div>
+
+        {/*
+          Lối ra hợp đồng đầy đủ.
+
+          Dòng thời gian chỉ tóm tắt (kỳ hạn, tiền thuê, tiền cọc, mã HĐ). Bản scan hợp
+          đồng, biên bản bàn giao thiết bị, sổ cọc, hoá đơn đều nằm ở trang Hợp đồng —
+          trước đây host đọc được mã HĐ ở đây rồi phải tự sang trang kia tìm lại đúng
+          mã đó. Mã hợp đồng hiện ra mà không bấm được chính là chỗ cụt.
+
+          Cần `code` mới mở được: nơi nhận điều hướng tìm hợp đồng theo mã.
+        */}
+        {onOpen && contract.code && (
+          <button
+            type="button"
+            onClick={() => onOpen(contract)}
+            className="group flex w-full items-center justify-center gap-1.5 rounded-b-xl border-t border-slate-100 px-3.5 py-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Xem hợp đồng đầy đủ
+            <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          </button>
+        )}
       </div>
     </li>
   );
 };
 
 // ── Thân dòng thời gian (nhúng được vào modal/drawer bất kỳ) ─────────────────
-export const TenantContractTimeline = ({ contracts }: { contracts: HostContractDto[] }) => {
+export const TenantContractTimeline = ({ contracts, onOpenContract }: {
+  contracts: HostContractDto[];
+  /** Bỏ trống = không hiện nút mở hợp đồng. Xem `OpenContractHandler`. */
+  onOpenContract?: OpenContractHandler;
+}) => {
   const stats = useMemo(() => {
     const properties = new Set(contracts.map((c) => c.propertyName));
     const active = contracts.filter((c) => c.status === 'ACTIVE').length;
@@ -201,7 +243,7 @@ export const TenantContractTimeline = ({ contracts }: { contracts: HostContractD
 
       <ul>
         {contracts.map((c, i) => (
-          <TimelineItem key={c.id} contract={c} last={i === contracts.length - 1} />
+          <TimelineItem key={c.id} contract={c} last={i === contracts.length - 1} onOpen={onOpenContract} />
         ))}
       </ul>
     </div>
@@ -209,11 +251,13 @@ export const TenantContractTimeline = ({ contracts }: { contracts: HostContractD
 };
 
 // ── Drawer đầy đủ (dùng ở màn Khách thuê của Host) ───────────────────────────
-export const TenantTimelineDrawer = ({ who, contracts, onClose }: {
+export const TenantTimelineDrawer = ({ who, contracts, onClose, onOpenContract }: {
   who: TenantIdentity;
   /** Toàn bộ hợp đồng đang có — component tự lọc ra của khách này. */
   contracts: HostContractDto[];
   onClose: () => void;
+  /** Bỏ trống = không hiện nút mở hợp đồng. Xem `OpenContractHandler`. */
+  onOpenContract?: OpenContractHandler;
 }) => {
   const mine = useMemo(() => contractsOfTenant(contracts, who), [contracts, who]);
   const display = who.name?.trim() || 'Khách thuê';
@@ -254,7 +298,7 @@ export const TenantTimelineDrawer = ({ who, contracts, onClose }: {
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">
             Dòng thời gian thuê
           </p>
-          <TenantContractTimeline contracts={mine} />
+          <TenantContractTimeline contracts={mine} onOpenContract={onOpenContract} />
         </div>
 
         {/* Chân — ghi chú giới hạn dữ liệu tách hẳn khỏi nội dung, không chen giữa các mốc */}

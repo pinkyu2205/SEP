@@ -1146,10 +1146,10 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
     try {
       const [mgrs, propsRes] = await Promise.all([
         propertyService.getManagers(),
-        propertyService.getProperties(0, 200),
+        propertyService.getAllProperties(),
       ]);
       setManagers(mgrs);
-      setProperties(propsRes.content);
+      setProperties(propsRes);
 
       // Bảng phân công thật. Cả Admin lẫn Host đều đọc được, và cả hai đều cần thấy khu vực
       // nào chưa đăng ký để biết vì sao nhà mới duyệt không tự vào tay ai.
@@ -1168,9 +1168,9 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
       // endpoint Admin không gọi được.
       if (canAssign) {
         try {
-          const res = await hostService.listContracts({ size: 500 });
+          const rows = await hostService.listAllContracts();
           const map = new Map<number, ContractLoad>();
-          for (const c of res.content) {
+          for (const c of rows) {
             if (c.propertyId == null) continue;
             const cur = map.get(c.propertyId) ?? { active: 0, pending: 0, draft: 0 };
             if (c.status === 'ACTIVE') cur.active += 1;

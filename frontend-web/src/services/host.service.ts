@@ -282,6 +282,51 @@ export const hostService = {
   // Contracts (host duyệt HĐ tenant)
   listContracts: (params: { propertyId?: number; status?: string; page?: number; size?: number } = {}): Promise<Page<HostContractDto>> =>
     api.get(CONTRACTS, { params }),
+
+  /**
+   * TẤT CẢ hợp đồng khớp bộ lọc — tự lật hết trang, không cắt cụt.
+   *
+   * ─── Vì sao cần (30/08/2026) ─────────────────────────────────────────────
+   * Trước đây mỗi màn tự gọi `listContracts({ size: N })` với N mỗi nơi một kiểu:
+   * 100 ở màn chi tiết nhà, 200 ở trang Hợp đồng, 500 ở Khách thuê / Sổ cọc /
+   * Quản lý vận hành / Khu vực. Ba vấn đề:
+   *
+   *   1. CẮT CỤT ÂM THẦM — hợp đồng chỉ tăng theo thời gian (HĐ đã hết hạn vẫn nằm
+   *      trong danh sách), nên sớm muộn cũng vượt ngưỡng. Vượt rồi thì màn hình vẫn
+   *      vẽ bình thường, chỉ là thiếu bản ghi, không có dấu hiệu gì.
+   *   2. LỆCH NHAU GIỮA CÁC MÀN — Khách thuê lấy 500 còn trang Hợp đồng lấy 200, nên
+   *      một hợp đồng ở vị trí 201–500 hiện ở màn này mà "không tồn tại" ở màn kia.
+   *      Đúng lỗi này làm hỏng nút "Xem hợp đồng đầy đủ".
+   *   3. Vượt ngưỡng ở chỗ tính TIỀN thì sai theo hướng nguy hiểm: một căn đang cho
+   *      thuê bị báo "đang để trống" vì hợp đồng của nó rơi ngoài trang đầu.
+   *
+   * Lấy đủ thì cả ba biến mất, và nơi gọi không phải đoán N là bao nhiêu cho an toàn.
+   */
+  listAllContracts: async (
+    params: { propertyId?: number; status?: string } = {},
+  ): Promise<HostContractDto[]> => {
+    /** Chặn vòng lặp vô hạn nếu BE trả `totalPages` sai. 10 × 500 = 5000 bản ghi. */
+    const MAX_PAGES = 10;
+    const SIZE = 500;
+
+    const first = await hostService.listContracts({ ...params, page: 0, size: SIZE });
+    const out = [...(first.content ?? [])];
+    const pages = Math.min(first.totalPages ?? 1, MAX_PAGES);
+    if (pages <= 1) return out;
+
+    // Các trang còn lại lấy song song — chúng độc lập nhau, xếp hàng tuần tự chỉ làm
+    // người dùng chờ lâu hơn mà không được gì.
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) =>
+        hostService.listContracts({ ...params, page: i + 1, size: SIZE })
+          .then((r) => r.content ?? [])
+          // Hỏng một trang thì thiếu phần đó còn hơn hỏng cả màn hình.
+          .catch(() => [] as HostContractDto[]),
+      ),
+    );
+    rest.forEach((chunk) => out.push(...chunk));
+    return out;
+  },
   approveContract: (id: string): Promise<HostContractDto> => api.put(`${CONTRACTS}/${id}/approve`),
   rejectContract: (id: string, reason: string): Promise<HostContractDto> =>
     api.put(`${CONTRACTS}/${id}/reject`, { reason }),

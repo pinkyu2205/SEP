@@ -3,7 +3,8 @@
  *
  *  - StatTile            : thẻ số liệu, bấm để lọc nhanh
  *  - PendingApprovalPanel: khối nổi bật liệt kê hồ sơ đang chờ Host phê duyệt
- *  - PropertyCard        : thẻ tòa nhà (ảnh + giá thuê + quản lý)
+ *  - PropertyCard        : thẻ tòa nhà (khai thác + thu tiền + giá + quản lý).
+ *                          KHÔNG có ảnh — xem chú thích hàng badge bên trong.
  *  - PropertyTable       : chế độ xem bảng, dễ so sánh nhiều căn một lúc
  *  - ListPagination      : phân trang có rút gọn
  *
@@ -13,17 +14,22 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   AlertCircle, ArrowDownUp, ArrowRight, Building2, ChevronLeft, ChevronRight, DoorOpen,
-  Home, Layers, LayoutGrid, MapPin, RotateCcw, Ruler, Search, SlidersHorizontal,
+  Home, KeyRound, Layers, LayoutGrid, MapPin, Receipt, RotateCcw, Ruler, Search, SlidersHorizontal,
   Table2, User, Wallet, X, type LucideIcon,
 } from 'lucide-react';
 import type { PropertyResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import {
   STATUS_BADGE, HOST_STATUS_CHIPS, SORT_LABEL, TYPE_LABEL, MANAGER_LABEL,
-  GRID_SIZES, TABLE_SIZES, typeLabel, formatVnd, formatRoomPriceRange,
+  RENTAL_FILTER_LABEL, BILL_FILTER_LABEL,
+  GRID_SIZES, TABLE_SIZES, typeLabel, formatVnd, formatRoomPriceTop,
   type PropertyListFilters, type SortKey, type TypeFilter, type ManagerFilter,
-  type RoomPriceRange,
+  type RentalFilter, type BillFilter, type RoomPriceRange,
 } from './propertyListState';
+import {
+  RENTAL_META, BILL_META,
+  type BillSource, type PropertyOperationStatus,
+} from './propertyOperationStatus';
 
 // ─── Thẻ số liệu ────────────────────────────────────────────────────────────
 export type StatTone = 'indigo' | 'emerald' | 'blue' | 'rose' | 'amber';
@@ -61,7 +67,7 @@ export const StatTile = ({
       } ${onClick ? 'hover:-translate-y-0.5 hover:shadow-md' : ''}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">{label}</p>
+        <p className="text-xs font-black uppercase tracking-wider text-slate-400">{label}</p>
         <div className={`shrink-0 rounded-xl p-2 ${t.icon}`}>
           <Icon className="h-4 w-4" />
         </div>
@@ -74,13 +80,13 @@ export const StatTile = ({
       )}
       <div className="mt-2 flex items-center gap-1.5">
         {active ? (
-          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-black uppercase tracking-wide text-white">
             Đang lọc
           </span>
         ) : (
           <>
-            {pct != null && <span className={`text-xs font-black tabular-nums ${t.text}`}>{pct}%</span>}
-            {helper && <span className="truncate text-xs text-slate-400">{helper}</span>}
+            {pct != null && <span className={`text-[13px] font-black tabular-nums ${t.text}`}>{pct}%</span>}
+            {helper && <span className="truncate text-[13px] text-slate-500">{helper}</span>}
           </>
         )}
       </div>
@@ -314,7 +320,7 @@ export const FilterToolbar = ({ f, action }: { f: PropertyListFilters; action?: 
             }`}>
             <SlidersHorizontal className="h-4 w-4" /> Bộ lọc
             {f.activeCount > 0 && (
-              <span className="rounded-full bg-indigo-600 px-1.5 py-0.5 text-[10px] font-black leading-none text-white">
+              <span className="rounded-full bg-indigo-600 px-1.5 py-0.5 text-[11px] font-black leading-none text-white">
                 {f.activeCount}
               </span>
             )}
@@ -345,7 +351,7 @@ export const FilterToolbar = ({ f, action }: { f: PropertyListFilters; action?: 
                 active ? c.cls : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
               }`}>
               {c.label}
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black leading-none ${
+              <span className={`rounded-full px-1.5 py-0.5 text-[11px] font-black leading-none ${
                 active ? 'bg-white/25' : 'bg-slate-100 text-slate-500'
               }`}>{f.statusCounts[c.value] ?? 0}</span>
             </button>
@@ -370,6 +376,16 @@ export const FilterToolbar = ({ f, action }: { f: PropertyListFilters; action?: 
               <option key={k} value={k}>{MANAGER_LABEL[k]}</option>
             ))}
           </FilterSelect>
+          <FilterSelect label="Tình trạng khai thác" value={f.rental} onChange={v => f.setRental(v as RentalFilter)}>
+            {(Object.keys(RENTAL_FILTER_LABEL) as RentalFilter[]).map(k => (
+              <option key={k} value={k}>{RENTAL_FILTER_LABEL[k]}</option>
+            ))}
+          </FilterSelect>
+          <FilterSelect label="Thu tiền kỳ này" value={f.bill} onChange={v => f.setBill(v as BillFilter)}>
+            {(Object.keys(BILL_FILTER_LABEL) as BillFilter[]).map(k => (
+              <option key={k} value={k}>{BILL_FILTER_LABEL[k]}</option>
+            ))}
+          </FilterSelect>
         </div>
       )}
 
@@ -385,6 +401,8 @@ export const FilterToolbar = ({ f, action }: { f: PropertyListFilters; action?: 
           {f.zone !== 'all' && <ActiveChip label={f.zone} onClear={() => f.setZone('all')} />}
           {f.type !== 'all' && <ActiveChip label={TYPE_LABEL[f.type]} onClear={() => f.setType('all')} />}
           {f.manager !== 'all' && <ActiveChip label={MANAGER_LABEL[f.manager]} onClear={() => f.setManager('all')} />}
+          {f.rental !== 'all' && <ActiveChip label={RENTAL_FILTER_LABEL[f.rental]} onClear={() => f.setRental('all')} />}
+          {f.bill !== 'all' && <ActiveChip label={BILL_FILTER_LABEL[f.bill]} onClear={() => f.setBill('all')} />}
           <button onClick={f.reset}
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-500 transition hover:bg-slate-100 hover:text-rose-600">
             <RotateCcw className="h-3.5 w-3.5" /> Xóa tất cả bộ lọc
@@ -428,18 +446,266 @@ export const ResultBar = ({ f }: { f: PropertyListFilters }) => {
 };
 
 // ─── Thẻ tòa nhà ────────────────────────────────────────────────────────────
-const MiniStat = ({ icon: Icon, value, label }: { icon: LucideIcon; value: ReactNode; label: string }) => (
-  <div className="py-2.5 text-center">
-    <Icon className="mx-auto mb-0.5 h-3.5 w-3.5 text-slate-300" />
-    <p className="text-sm font-black leading-tight text-slate-800">{value}</p>
-    <p className="text-[10px] font-semibold text-slate-400">{label}</p>
-  </div>
-);
+// ─── Tình trạng khai thác & thu tiền ────────────────────────────────────────
 
-export const PropertyCard = ({ p, roomPrice, onClick }: {
+/**
+ * "12.400.000" → "12,4tr" — đủ để host biết nợ nhiều hay ít mà không chiếm cả dòng.
+ *
+ * Khác `fmtMillion` ở @/utils/period ("12tr", làm tròn về triệu, không có tỷ/nghìn):
+ * hàm kia dùng cho trục biểu đồ, nơi nhãn phải cực ngắn và sai số không quan trọng.
+ * Ở đây là SỐ TIỀN NỢ nên phải giữ một chữ số thập phân. Đừng gộp hai hàm làm một.
+ */
+const shortVnd = (v: number) => {
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1).replace('.', ',')} tỷ`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace('.', ',')}tr`;
+  if (v >= 1_000) return `${Math.round(v / 1_000)}k`;
+  return String(v);
+};
+
+export const RentalBadge = ({ op, className = '' }: {
+  op?: PropertyOperationStatus;
+  className?: string;
+}) => {
+  if (!op || op.rental === 'UNKNOWN') return null;
+  const m = RENTAL_META[op.rental];
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-bold ${m.cls} ${className}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}
+    </span>
+  );
+};
+
+/**
+ * Thanh tỉ lệ phòng của nhà CHIA PHÒNG.
+ *
+ * Vẽ theo tỉ lệ chứ không viết thành câu: một dòng chữ liệt kê 5 con số bắt host tự
+ * cộng nhẩm mới biết còn bao nhiêu chỗ — cùng lý do `propertyOccupancy.service` đã bỏ
+ * hàm `occupancySummary()` cũ. Chỉ chú thích những nhóm KHÁC 0 để card không rối.
+ */
+const OccupancyBar = ({ op }: { op: PropertyOperationStatus }) => {
+  const { occ } = op;
+  if (occ.roomCount === 0) return null;
+  const seg = [
+    { n: occ.rented,      cls: 'bg-emerald-500', label: 'có khách' },
+    { n: occ.heldByDraft, cls: 'bg-violet-500',  label: 'chờ đón' },
+    { n: occ.available,   cls: 'bg-slate-300',   label: 'trống' },
+    { n: occ.maintenance, cls: 'bg-amber-500',   label: 'bảo trì' },
+    { n: occ.notReady,    cls: 'bg-slate-200',   label: 'chưa mở' },
+  ].filter(s => s.n > 0);
+
+  return (
+    <div>
+      <div className="flex h-2 w-full gap-px overflow-hidden rounded-full bg-slate-100">
+        {seg.map(s => (
+          <div key={s.label} className={s.cls} style={{ width: `${(s.n / occ.roomCount) * 100}%` }} />
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold text-slate-500">
+        {seg.map(s => (
+          <span key={s.label} className="inline-flex items-center gap-1">
+            <span className={`h-1.5 w-1.5 rounded-full ${s.cls}`} />
+            {s.n} {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Dòng "Khai thác" — trả lời "căn này đang ra tiền chưa".
+ *
+ * Nguyên căn không có phòng để vẽ thanh tỉ lệ, nên nói bằng chữ + hạn hợp đồng: với
+ * loại này thứ host cần biết tiếp theo là bao giờ khách đi để còn tìm khách mới.
+ */
+const OccupancyRow = ({ op }: { op?: PropertyOperationStatus }) => {
+  if (!op || op.rental === 'UNKNOWN') return null;
+
+  return (
+    <CardRow icon={KeyRound} label="Khai thác">
+      {op.occ.wholeHouse ? (
+        <span className="text-[13px] font-semibold text-slate-700">
+          {op.rental === 'RENTED' ? (
+            <>
+              {op.tenantName ? <b className="text-slate-900">{op.tenantName}</b> : 'Đang có khách ở'}
+              {op.contractEndDate && (
+                <span className="block text-xs font-semibold text-slate-500">
+                  HĐ đến {op.contractEndDate.split('T')[0].split('-').reverse().join('/')}
+                </span>
+              )}
+            </>
+          ) : op.rental === 'INCOMING' ? 'Đã có hồ sơ chờ đón khách'
+            : 'Chưa có khách nào'}
+        </span>
+      ) : op.occ.roomCount === 0 ? (
+        <span className="text-[13px] font-semibold text-slate-400">Chưa tạo phòng</span>
+      ) : (
+        <span className="block w-[150px]">
+          <span className="block text-[13px] font-black tabular-nums text-slate-800">
+            {op.occ.rented}/{op.occ.roomCount} phòng có khách
+          </span>
+          <OccupancyBar op={op} />
+        </span>
+      )}
+    </CardRow>
+  );
+};
+
+/**
+ * Dòng "Hoá đơn kỳ này" — khách đã trả chưa.
+ *
+ * ⚠️ Ở chế độ `rent-only` (BE chặn host ở `/manager/invoices`) dữ liệu CHỈ có tiền
+ * phòng. Tuyệt đối không viết "đã thu đủ" trong trường hợp đó: khách đang nợ tiền
+ * điện mà màn hình báo xanh thì tệ hơn hẳn việc không hiện gì. Nên chữ đổi thành
+ * "đã thu đủ tiền phòng" và có ghi chú nguồn.
+ */
+const BillRow = ({ op, source }: { op?: PropertyOperationStatus; source: BillSource }) => {
+  if (!op || source === 'none') return null;
+  const { bills } = op;
+  const m = BILL_META[op.billState];
+  const unpaid = bills.pending + bills.overdue;
+  const rentOnly = source === 'rent-only';
+  const tone = op.billState === 'OVERDUE' ? 'rose'
+    : op.billState === 'PENDING' ? 'amber'
+      : op.billState === 'CLEAR' ? 'emerald' : 'plain';
+
+  return (
+    <CardRow icon={Receipt} label={rentOnly ? 'Tiền phòng' : 'Hoá đơn'} tone={tone}>
+      {bills.total === 0 ? (
+        <span className="text-[13px] font-semibold text-slate-400">Kỳ này chưa có hoá đơn</span>
+      ) : unpaid === 0 ? (
+        <span className={`text-[13px] font-black ${m.text}`}>
+          Đã thu đủ {bills.paid}/{bills.total}
+          {rentOnly && <span className="block text-xs font-semibold text-slate-500">chỉ tính tiền phòng</span>}
+        </span>
+      ) : (
+        <span className={`text-[13px] font-black ${m.text}`}>
+          {bills.paid}/{bills.total} đã thu
+          <span className="block text-xs font-bold">
+            còn {shortVnd(bills.outstanding)}
+            {bills.overdue > 0 && ` · ${bills.overdue} quá hạn`}
+          </span>
+        </span>
+      )}
+    </CardRow>
+  );
+};
+
+/**
+ * Cảnh báo dữ liệu hoá đơn đang thiếu — hiện MỘT lần ở đầu trang, không lặp mỗi card.
+ *
+ * Im lặng trong lúc còn tải: `billSource` khởi tạo là `'none'`, nên không chặn thì mỗi
+ * lần vào trang đều nháy lên câu "chưa lấy được dữ liệu" rồi mới tự biến mất.
+ */
+export const BillSourceNote = ({ source, loading }: { source: BillSource; loading: boolean }) => {
+  if (loading || source === 'full') return null;
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-semibold text-amber-800">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+      {source === 'rent-only' ? (
+        <span>
+          Cột hoá đơn hiện <b>chỉ tính tiền phòng</b>. Tiền điện, nước và dịch vụ chưa
+          đếm được vì máy chủ chưa mở quyền xem hoá đơn đầy đủ cho chủ nhà — một căn báo
+          &quot;đã thu đủ&quot; vẫn có thể đang nợ tiền điện.
+        </span>
+      ) : (
+        <span>Chưa lấy được dữ liệu hoá đơn của kỳ này, phần thu tiền tạm ẩn.</span>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Giá thuê — phân biệt rõ TIỀN ĐANG THU với GIÁ CHÀO.
+ *
+ * ─── Vì sao phải tách (30/08/2026) ───────────────────────────────────────────
+ * Card cũ đọc `p.price` (giá niêm yết) và gọi nó là "Giá thuê"; màn chi tiết đọc
+ * `appliedPrice` (giá hợp đồng đang chạy) và cũng gọi là "Giá thuê". Cùng một nhãn,
+ * hai con số khác nhau ở hai màn — host không biết tin số nào.
+ *
+ * Nay: căn có khách thì hiện TIỀN THẬT lấy từ hợp đồng (`activeRent`), căn trống thì
+ * hiện giá niêm yết và nói rõ đó là giá chào. Khác nhau thì ghi thêm dòng niêm yết để
+ * host thấy được chênh lệch (vd đã tăng giá hàng năm).
+ *
+ * Dùng `activeRent` từ hợp đồng chứ không phải `appliedPrice` của nhà: nhà chia phòng
+ * không có con số nào ở cấp toà nhà nói được "căn này đang thu bao nhiêu" — mỗi phòng
+ * một khách một giá. Hợp đồng trả lời được cả hai loại. Xem chú thích `activeRent`.
+ */
+/** Một dòng trong bảng thông tin của card: icon + nhãn bên trái, nội dung bên phải. */
+const CardRow = ({ icon: Icon, label, tone = 'plain', children }: {
+  icon: LucideIcon;
+  label: string;
+  /** Nền nhạt để dòng quan trọng nổi lên khỏi các dòng còn lại. */
+  tone?: 'plain' | 'emerald' | 'indigo' | 'amber' | 'rose';
+  children: ReactNode;
+}) => {
+  const bg = {
+    plain: 'bg-white', emerald: 'bg-emerald-50/70', indigo: 'bg-indigo-50/60',
+    amber: 'bg-amber-50/70', rose: 'bg-rose-50/70',
+  }[tone];
+  return (
+    <div className={`flex items-center justify-between gap-2 px-3 py-2 ${bg}`}>
+      <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+        <Icon className="h-3.5 w-3.5" />{label}
+      </span>
+      <span className="min-w-0 text-right">{children}</span>
+    </div>
+  );
+};
+
+const PriceRow = ({ p, roomPrice, op }: {
+  p: PropertyResponse;
+  roomPrice?: RoomPriceRange | null;
+  op?: PropertyOperationStatus;
+}) => {
+  const listed = p.price ?? null;
+  const earning = (op?.activeRent ?? 0) > 0 ? op!.activeRent : null;
+  // Chỉ nhắc giá niêm yết khi nó THỰC SỰ khác tiền đang thu — bằng nhau mà vẫn ghi
+  // hai dòng thì card dài ra vì một thông tin không nói thêm được gì.
+  const showListed = earning != null && listed != null && listed !== earning;
+
+  return (
+    <CardRow icon={Wallet} label={earning != null ? 'Đang thu' : 'Giá chào'}
+      tone={earning != null ? 'emerald' : 'indigo'}>
+      <span className={`text-[15px] font-black ${earning != null ? 'text-emerald-700' : 'text-indigo-700'}`}>
+        {earning != null ? (
+          <>
+            {formatVnd(earning)}
+            {op!.activeContracts > 1 && (
+              <span className="block text-xs font-semibold text-emerald-600">
+                từ {op!.activeContracts} hợp đồng
+              </span>
+            )}
+          </>
+        ) : listed != null ? (
+          formatVnd(listed)
+        ) : roomPrice ? (
+          <>
+            {formatRoomPriceTop(roomPrice)}
+            <span className="block text-xs font-semibold text-indigo-500">
+              cao nhất trong {roomPrice.rooms} phòng
+            </span>
+          </>
+        ) : (
+          <span className="text-[13px] font-semibold text-slate-400">Chưa định giá</span>
+        )}
+      </span>
+      {showListed && (
+        <span className="block text-xs font-semibold text-slate-500">
+          niêm yết {formatVnd(listed!)}
+        </span>
+      )}
+    </CardRow>
+  );
+};
+
+export const PropertyCard = ({ p, roomPrice, op, billSource, onClick }: {
   p: PropertyResponse;
   /** Khoảng giá suy từ phòng — chỉ có với nhà chia phòng chưa đặt giá ở cấp toà nhà. */
   roomPrice?: RoomPriceRange | null;
+  /** Tình trạng khai thác & thu tiền; `undefined` khi chưa nạp xong → card im lặng. */
+  op?: PropertyOperationStatus;
+  billSource: BillSource;
   onClick: () => void;
 }) => {
   const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.DRAFT;
@@ -449,46 +715,53 @@ export const PropertyCard = ({ p, roomPrice, onClick }: {
     <div onClick={onClick}
       className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all hover:border-indigo-300 hover:shadow-lg">
 
-      {/* Ảnh + trạng thái */}
-      <div className="relative h-40 overflow-hidden bg-slate-100">
-        {p.imageUrls?.length ? (
-          <img src={p.imageUrls[0]} alt={p.propertyName}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-        ) : (
-          <div className="flex h-full items-center justify-center bg-gradient-to-br from-indigo-50 to-slate-50">
-            <Building2 className="h-10 w-10 text-indigo-200" />
-          </div>
-        )}
-        <span className={`absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold shadow-sm ${badge.cls}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />{badge.label}
-        </span>
-        {(p.imageUrls?.length ?? 0) > 1 && (
-          <span className="absolute bottom-2 right-2 rounded-full bg-black/50 px-2 py-0.5 text-xs font-semibold text-white">
-            +{p.imageUrls!.length - 1}
-          </span>
-        )}
-        {noManager && (
-          <span className="absolute right-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white shadow-sm">
-            <AlertCircle className="h-3 w-3" /> Chưa có QL
-          </span>
-        )}
-      </div>
+      {/*
+        ── Nội dung ──
+        Trước 30/08/2026 ba khối Giá / Khai thác / Hoá đơn là ba hộp có viền riêng, xếp
+        cách nhau `gap-3`. Mỗi hộp tự có padding + viền nên giữa chúng luôn có ba lớp
+        khoảng trắng chồng lên nhau — card trông rời rạc và loãng, mà chữ thì chỉ
+        10–11px nên phần "có nội dung" lại càng ít.
 
-      {/* Nội dung */}
-      <div className="flex flex-1 flex-col gap-3 p-4">
+        Nay gộp thành MỘT bảng liền chia dòng bằng `divide-y`: nhãn trái, số phải. Cùng
+        lượng thông tin nhưng ngắn hơn hẳn, và mắt có một cột số thẳng hàng để quét dọc.
+      */}
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-extrabold text-slate-900 transition group-hover:text-indigo-700">
+          {/*
+            Hàng badge, thay cho khối ảnh đã bỏ.
+
+            Ảnh trên card không giúp host quyết định gì — muốn xem nhà thì bấm vào chi
+            tiết, mà phần lớn nhà lại chưa có ảnh nên chỗ đó chỉ là một mảng trống cao
+            160px đẩy mọi thông tin thật xuống dưới. Ba badge trước đây nổi trên ảnh
+            nay xếp thành một hàng ở đây: cùng thông tin, tốn một dòng thay vì cả khối.
+
+            Badge khai thác đứng TÁCH khỏi badge trạng thái bằng dấu chấm phân cách vì
+            hai thứ trả lời hai câu khác nhau ("hồ sơ xong chưa" và "có khách chưa"),
+            dính liền nhau dễ bị đọc thành một.
+          */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${badge.cls}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />{badge.label}
+            </span>
+            <RentalBadge op={op} />
+            {noManager && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-1 text-xs font-bold text-white">
+                <AlertCircle className="h-3.5 w-3.5" /> Chưa có QL
+              </span>
+            )}
+          </div>
+          <h3 className="truncate text-[17px] font-extrabold leading-tight text-slate-900 transition group-hover:text-indigo-700">
             {p.propertyName}
           </h3>
-          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-400">
-            <MapPin className="h-3 w-3 shrink-0" />{p.fullAddress || p.shortAddress}
+          <p className="mt-1 flex items-center gap-1 truncate text-[13px] text-slate-500">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />{p.fullAddress || p.shortAddress}
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px]">
             {p.wholeHouse !== null && (
               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold ${
                 p.wholeHouse ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
               }`}>
-                <Home className="h-3 w-3" />{typeLabel(p)}
+                <Home className="h-3.5 w-3.5" />{typeLabel(p)}
               </span>
             )}
             {p.zoneName && (
@@ -497,36 +770,26 @@ export const PropertyCard = ({ p, roomPrice, onClick }: {
           </div>
         </div>
 
-        {/* Giá thuê — thông tin host quan tâm nhất */}
-        <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2">
-          <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-500">
-            <Wallet className="h-3.5 w-3.5" /> Giá thuê
-          </span>
-          <span className="text-right text-sm font-black text-indigo-700">
-            {p.price ? (
-              `${formatVnd(p.price)}/tháng`
-            ) : roomPrice ? (
-              <>
-                {formatRoomPriceRange(roomPrice)}/tháng
-                <span className="block text-[10px] font-semibold text-indigo-400">
-                  theo giá {roomPrice.rooms} phòng
-                </span>
-              </>
-            ) : (
-              <span className="text-slate-400">Chưa định giá</span>
-            )}
-          </span>
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+          <PriceRow p={p} roomPrice={roomPrice} op={op} />
+          <OccupancyRow op={op} />
+          <BillRow op={op} source={billSource} />
         </div>
 
-        <div className="grid grid-cols-3 divide-x divide-slate-100 overflow-hidden rounded-xl border border-slate-100 bg-slate-50/60">
-          <MiniStat icon={DoorOpen} value={p.totalRooms || 0} label="Phòng" />
-          <MiniStat icon={Layers} value={p.totalFloor ?? p.floorCount ?? '—'} label="Tầng" />
-          <MiniStat icon={Ruler} value={p.areaSize ? `${p.areaSize}m²` : '—'} label="Diện tích" />
-        </div>
+        {/*
+          Quy mô nhà gộp thành MỘT dòng thay cho lưới 3 ô như trước: số phòng thật đã
+          nằm ở dòng Khai thác bên trên, để nguyên lưới cũ là hiện hai con số phòng
+          cạnh nhau (khai báo và đếm thật) mà không nói rõ cái nào là cái nào.
+        */}
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-slate-500">
+          <span className="inline-flex items-center gap-1"><DoorOpen className="h-3.5 w-3.5 text-slate-400" />{p.totalRooms || 0} phòng</span>
+          <span className="inline-flex items-center gap-1"><Layers className="h-3.5 w-3.5 text-slate-400" />{p.totalFloor ?? p.floorCount ?? '—'} tầng</span>
+          <span className="inline-flex items-center gap-1"><Ruler className="h-3.5 w-3.5 text-slate-400" />{p.areaSize ? `${p.areaSize}m²` : '—'}</span>
+        </p>
 
-        <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-3">
-          <span className="flex min-w-0 items-center gap-1.5 text-xs">
-            <User className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+        <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+          <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
+            <User className="h-4 w-4 shrink-0 text-slate-400" />
             {p.operationManagerName ? (
               <span className="truncate font-semibold text-slate-600">{p.operationManagerName}</span>
             ) : p.operationManagerId ? (
@@ -535,8 +798,8 @@ export const PropertyCard = ({ p, roomPrice, onClick }: {
               <span className="font-semibold text-rose-500">Chưa có quản lý</span>
             )}
           </span>
-          <span className="flex shrink-0 items-center gap-1 text-xs font-bold text-indigo-600">
-            Chi tiết <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+          <span className="flex shrink-0 items-center gap-1 text-[13px] font-bold text-indigo-600">
+            Chi tiết <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </span>
         </div>
       </div>
@@ -545,21 +808,118 @@ export const PropertyCard = ({ p, roomPrice, onClick }: {
 };
 
 // ─── Chế độ xem bảng ────────────────────────────────────────────────────────
-export const PropertyTable = ({ rows, roomPrices = {}, onRowClick }: {
+/** Ô "Khai thác" trong bảng — bản một dòng của `OccupancyBlock`. */
+const OccupancyCell = ({ op }: { op?: PropertyOperationStatus }) => {
+  if (!op || op.rental === 'UNKNOWN') return <span className="text-[13px] text-slate-300">—</span>;
+  return (
+    <div className="w-[180px] space-y-1">
+      <RentalBadge op={op} />
+      {!op.occ.wholeHouse && op.occ.roomCount > 0 && (
+        <p className="whitespace-nowrap text-xs font-bold tabular-nums text-slate-500">
+          {op.occ.rented}/{op.occ.roomCount} phòng có khách
+          {op.occ.available > 0 && <span className="font-semibold text-slate-400"> · {op.occ.available} trống</span>}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** Ô "Thu tiền kỳ này" trong bảng. Xem chú thích `BillLine` về chế độ rent-only. */
+const BillCell = ({ op, source }: { op?: PropertyOperationStatus; source: BillSource }) => {
+  if (!op || source === 'none') return <span className="text-[13px] text-slate-300">—</span>;
+  const { bills } = op;
+  const m = BILL_META[op.billState];
+  const unpaid = bills.pending + bills.overdue;
+
+  if (bills.total === 0) {
+    return <span className="whitespace-nowrap text-[13px] text-slate-300">Chưa có hoá đơn</span>;
+  }
+  return (
+    <div className="w-[170px]">
+      <p className="flex items-center gap-1.5 whitespace-nowrap text-[13px] font-black tabular-nums">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.dot}`} />
+        <span className={m.text}>{bills.paid}/{bills.total} đã thu</span>
+      </p>
+      {unpaid > 0 && (
+        <p className="mt-0.5 whitespace-nowrap text-xs font-bold text-slate-500">
+          còn {formatVnd(bills.outstanding)}
+          {bills.overdue > 0 && <span className="text-rose-600"> · {bills.overdue} quá hạn</span>}
+        </p>
+      )}
+    </div>
+  );
+};
+
+/** Bản một ô của `PriceBlock` cho chế độ bảng — xem chú thích ở đó. */
+const PriceCell = ({ p, roomPrice, op }: {
+  p: PropertyResponse;
+  roomPrice?: RoomPriceRange | null;
+  op?: PropertyOperationStatus;
+}) => {
+  const listed = p.price ?? null;
+  const earning = (op?.activeRent ?? 0) > 0 ? op!.activeRent : null;
+
+  if (earning != null) {
+    return (
+      <>
+        <span className="whitespace-nowrap font-black text-emerald-700">{formatVnd(earning)}</span>
+        <span className="block whitespace-nowrap text-[11px] font-semibold text-emerald-500">
+          đang thu{op!.activeContracts > 1 && ` · ${op!.activeContracts} HĐ`}
+        </span>
+        {listed != null && listed !== earning && (
+          <span className="block whitespace-nowrap text-[11px] font-semibold text-slate-400">
+            niêm yết {formatVnd(listed)}
+          </span>
+        )}
+      </>
+    );
+  }
+
+  if (listed != null) {
+    return (
+      <>
+        <span className="whitespace-nowrap font-black text-indigo-700">{formatVnd(listed)}</span>
+        <span className="block text-[11px] font-semibold text-indigo-400">giá chào</span>
+      </>
+    );
+  }
+
+  if (roomPrice) {
+    return (
+      <>
+        <span className="whitespace-nowrap font-black text-indigo-700">{formatRoomPriceTop(roomPrice)}</span>
+        <span className="block whitespace-nowrap text-[11px] font-semibold text-indigo-400">
+          giá chào · cao nhất {roomPrice.rooms} phòng
+        </span>
+      </>
+    );
+  }
+
+  return <span className="text-[13px] text-slate-300">Chưa định giá</span>;
+};
+
+export const PropertyTable = ({ rows, roomPrices = {}, opStatus, billSource, onRowClick }: {
   rows: PropertyResponse[];
   /** id nhà → khoảng giá suy từ phòng (nhà chia phòng chưa đặt giá ở cấp toà nhà). */
   roomPrices?: Record<number, RoomPriceRange | null>;
+  opStatus: Map<number, PropertyOperationStatus>;
+  billSource: BillSource;
   onRowClick: (p: PropertyResponse) => void;
 }) => (
   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-    <table className="w-full min-w-[980px] text-sm">
-      <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
+    {/*
+      Rộng tối thiểu tăng theo 2 cột mới. Để hẹp thì trình duyệt bóp chữ xuống dòng —
+      "Nguyên căn" vỡ làm hai, số tiền tách chữ "đ" xuống dòng riêng, đọc rất khó.
+      Thà cuộn ngang còn hơn.
+    */}
+    <table className="w-full min-w-[1320px] text-sm">
+      <thead className="bg-slate-50 text-left text-[11px] font-black uppercase tracking-widest text-slate-400">
         <tr>
           <th className="px-4 py-3">Tòa nhà</th>
           <th className="px-4 py-3">Khu vực</th>
           <th className="px-4 py-3">Loại hình</th>
-          <th className="px-4 py-3 text-center">Phòng</th>
-          <th className="px-4 py-3 text-center">Tầng</th>
+          <th className="px-4 py-3">Khai thác</th>
+          <th className="px-4 py-3">{billSource === 'rent-only' ? 'Tiền phòng kỳ này' : 'Hoá đơn kỳ này'}</th>
           <th className="px-4 py-3 text-right">Giá thuê</th>
           <th className="px-4 py-3">Quản lý vận hành</th>
           <th className="px-4 py-3">Trạng thái</th>
@@ -569,6 +929,7 @@ export const PropertyTable = ({ rows, roomPrices = {}, onRowClick }: {
       <tbody className="divide-y divide-slate-100">
         {rows.map(p => {
           const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.DRAFT;
+          const op = opStatus.get(p.id);
           return (
             <tr key={p.id} onClick={() => onRowClick(p)}
               className="group cursor-pointer transition hover:bg-indigo-50/40">
@@ -591,33 +952,22 @@ export const PropertyTable = ({ rows, roomPrices = {}, onRowClick }: {
                 </div>
               </td>
               <td className="px-4 py-3">
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                <span className="inline-block whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
                   {p.zoneName || '—'}
                 </span>
               </td>
               <td className="px-4 py-3">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${
                   p.wholeHouse === null ? 'bg-slate-100 text-slate-500'
                     : p.wholeHouse ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
                 }`}>
                   {typeLabel(p)}
                 </span>
               </td>
-              <td className="px-4 py-3 text-center font-bold text-slate-700">{p.totalRooms || 0}</td>
-              <td className="px-4 py-3 text-center font-bold text-slate-700">{p.totalFloor ?? p.floorCount ?? '—'}</td>
+              <td className="px-4 py-3"><OccupancyCell op={op} /></td>
+              <td className="px-4 py-3"><BillCell op={op} source={billSource} /></td>
               <td className="px-4 py-3 text-right">
-                {p.price ? (
-                  <span className="font-black text-indigo-700">{formatVnd(p.price)}</span>
-                ) : roomPrices[p.id] ? (
-                  <>
-                    <span className="font-black text-indigo-700">{formatRoomPriceRange(roomPrices[p.id]!)}</span>
-                    <span className="block text-[10px] font-semibold text-indigo-400">
-                      theo giá {roomPrices[p.id]!.rooms} phòng
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-xs text-slate-300">Chưa định giá</span>
-                )}
+                <PriceCell p={p} roomPrice={roomPrices[p.id]} op={op} />
               </td>
               <td className="px-4 py-3">
                 {p.operationManagerName ? (

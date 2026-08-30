@@ -21,6 +21,12 @@ import {
 } from './PriceManagerPanel';
 import { formatCurrency } from '@/utils';
 import { normalizeVi } from '@/utils/helpers';
+import { MonthPicker, useServerPeriod } from '../shared';
+import { normalizeRoomNumber } from '@/services/propertyOccupancy.service';
+import { loadPropertyBills, type PropertyBillBreakdown } from './propertyOperationStatus';
+import {
+  PropertyStatusPanel, RoomBillChip, WholeHouseBillLine, billHeading,
+} from './PropertyStatusPanel';
 
 // ─── Tab của màn chi tiết ────────────────────────────────────────────────────
 // Tài chính & hợp đồng chủ nhà đã có trang riêng ở sidebar (Quản lý tài chính /
@@ -335,6 +341,12 @@ export const PropertyDetail = () => {
   const [tab, setTab] = useState<DetailTab>('overview');
   // Index ảnh đang xem phóng to trong thư viện ảnh tòa nhà (null = đóng).
   const [lightbox, setLightbox] = useState<number | null>(null);
+  /** Kỳ đang xem cho phần hoá đơn. Khai thác không phụ thuộc kỳ (luôn là hiện tại). */
+  const [period, setPeriod] = useServerPeriod();
+  const [bills, setBills] = useState<PropertyBillBreakdown | null>(null);
+  const [billsLoading, setBillsLoading] = useState(true);
+  /** Lưới phòng chỉ hiện phòng còn hoá đơn chưa trả trong kỳ. */
+  const [onlyUnpaid, setOnlyUnpaid] = useState(false);
 
   const fetchData = async () => {
     if (!id) return;
@@ -345,7 +357,7 @@ export const PropertyDetail = () => {
         propertyService.getRooms(Number(id)),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
         // Host xem HĐ khách thuê qua /host/contracts (endpoint /properties/.../tenant-contracts chỉ cho MANAGER/ADMIN).
-        hostService.listContracts({ propertyId: Number(id), size: 100 }).then(p => p.content).catch(() => null),
+        hostService.listAllContracts({ propertyId: Number(id) }).catch(() => null),
       ]);
 
       // Host dùng /host/contracts; nếu trống (vd manager/admin xem) thì fallback endpoint manager.
@@ -372,6 +384,23 @@ export const PropertyDetail = () => {
 
   useEffect(() => { fetchData(); }, [id]);
 
+  /**
+   * Hoá đơn của kỳ đang chọn.
+   *
+   * Chờ có `property` mới gọi: chế độ rút gọn (`/host/invoices`) không trả `propertyId`
+   * nên phải khớp bằng TÊN nhà — gọi trước khi biết tên thì lọc ra rỗng.
+   */
+  useEffect(() => {
+    if (!id || !property) return;
+    let cancelled = false;
+    setBillsLoading(true);
+    loadPropertyBills(Number(id), property.propertyName, period)
+      .then(res => { if (!cancelled) setBills(res); })
+      .catch(() => { if (!cancelled) setBills(null); })
+      .finally(() => { if (!cancelled) setBillsLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, property, period]);
+
   const handleUpdateRoomStatus = async (roomId: number, status: string) => {
     if (!id) return;
     try {
@@ -384,11 +413,20 @@ export const PropertyDetail = () => {
     }
   };
 
-  // Lọc theo trạng thái + tìm theo số phòng / tên khách + sắp xếp.
+  /** Phòng còn hoá đơn chưa trả trong kỳ — khoá là số phòng đã chuẩn hoá. */
+  const unpaidRoomKeys = useMemo(() => {
+    const set = new Set<string>();
+    bills?.byRoom.forEach((b, key) => { if (b.pending + b.overdue > 0) set.add(key); });
+    return set;
+  }, [bills]);
+  const unpaidRoomCount = unpaidRoomKeys.size;
+
+  // Lọc theo trạng thái + công nợ + tìm theo số phòng / tên khách + sắp xếp.
   const filteredRooms = useMemo(() => {
     const kw = normalizeVi(roomSearch.trim());
     const list = rooms.filter(r => {
       if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+      if (onlyUnpaid && !unpaidRoomKeys.has(normalizeRoomNumber(r.roomNumber))) return false;
       if (kw) {
         const tenant = contracts.find(c => c.roomId === r.id && c.status === 'ACTIVE');
         const hay = [r.roomNumber, r.structureDescription, tenant?.tenantFullName, tenant?.tenantPhone]
@@ -406,7 +444,7 @@ export const PropertyDetail = () => {
         default:            return a.roomNumber.localeCompare(b.roomNumber, 'vi', { numeric: true });
       }
     });
-  }, [rooms, contracts, filterStatus, roomSearch, roomSort]);
+  }, [rooms, contracts, filterStatus, roomSearch, roomSort, onlyUnpaid, unpaidRoomKeys]);
 
   if (loading) {
     return (
@@ -432,6 +470,8 @@ export const PropertyDetail = () => {
   const available   = rooms.filter(r => r.status === 'AVAILABLE').length;
   const rented      = rooms.filter(r => r.status === 'RENTED').length;
   const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
+  // Phòng đã tạo nhưng chưa mở cho thuê — phần dư, để thanh tỉ lệ cộng đủ 100%.
+  const notReady    = rooms.length - available - rented - maintenance;
   const propStatus  = propertyStatusLabel[property.status] ?? propertyStatusLabel.DRAFT;
 
   // Tách UI theo loại hình: nhà nguyên căn vs nhà chia phòng
@@ -566,6 +606,24 @@ export const PropertyDetail = () => {
           })}
         </div>
       </section>
+
+      {/*
+        ═══════════ Tình trạng nhà: có khách chưa · thu tiền tới đâu ═══════════
+        Đặt NGAY ĐẦU tab Tổng quan, trước cả ảnh: đây là hai câu host mở màn chi tiết
+        ra để hỏi. Trước 30/08/2026 cả trang không trả lời được câu nào trong hai câu.
+      */}
+      {tab === 'overview' && (
+        <PropertyStatusPanel
+          isWholeHouse={isWholeHouse}
+          counts={{ total: rooms.length, rented, available, maintenance, notReady }}
+          tenantName={activeContract?.tenantFullName}
+          contractEnd={activeContract?.endDate ? fmtDate(activeContract.endDate) : undefined}
+          bills={bills}
+          period={period}
+          onPeriodChange={setPeriod}
+          loading={billsLoading}
+        />
+      )}
 
       {/* ═══════════ Vị trí trên bản đồ (cả 2 loại hình) ═══════════ */}
       {/* ═══════════ Hình ảnh tòa nhà ═══════════ */}
@@ -727,6 +785,29 @@ export const PropertyDetail = () => {
                     <p className="font-bold text-slate-800 mt-0.5">{fmtDate(activeContract.startDate)} → {activeContract.endDate ? fmtDate(activeContract.endDate) : 'Không thời hạn'}</p>
                   </div>
                 </div>
+
+                {/* Khách này kỳ này trả tới đâu — cùng dữ liệu với khối ở tab Tổng quan. */}
+                <div>
+                  {/*
+                    Ô chọn kỳ lặp lại ở đây (state dùng chung với tab Tổng quan). Hai tab
+                    không bao giờ hiện cùng lúc nên không có chuyện nhìn thấy hai ô rồi
+                    tưởng là hai giá trị khác nhau — đổi lại host khỏi phải quay về tab
+                    Tổng quan chỉ để đổi tháng.
+                  */}
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                      {billHeading(bills?.source, period)}
+                    </p>
+                    <MonthPicker value={period} onChange={setPeriod} />
+                  </div>
+                  {billsLoading ? (
+                    <p className="text-sm text-slate-400">Đang tải…</p>
+                  ) : (bills?.total.total ?? 0) === 0 ? (
+                    <p className="text-sm text-slate-400">Kỳ này chưa phát sinh hoá đơn nào.</p>
+                  ) : (
+                    <WholeHouseBillLine bills={bills!} />
+                  )}
+                </div>
               </div>
             ) : (
               <div className="text-center py-10">
@@ -760,6 +841,23 @@ export const PropertyDetail = () => {
               }`}>{t.count}</span>
             </button>
           ))}
+          {/*
+            Lọc theo TIỀN, tách khỏi dãy chip trạng thái phòng bên trái: hai thứ khác
+            nhóm hẳn nhau (phòng đang ở tình trạng gì · phòng đã trả tiền chưa) và
+            được phép bật cùng lúc. Chỉ hiện khi có phòng còn nợ — không có ai nợ thì
+            nút này không lọc được gì.
+          */}
+          {unpaidRoomCount > 0 && (
+            <button onClick={() => setOnlyUnpaid(v => !v)}
+              className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-bold transition ${
+                onlyUnpaid ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+              }`}>
+              Còn nợ tiền
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black leading-none ${
+                onlyUnpaid ? 'bg-white/25' : 'bg-white text-rose-500'
+              }`}>{unpaidRoomCount}</span>
+            </button>
+          )}
         </div>
 
         <div className="relative ml-auto min-w-[150px]">
@@ -787,14 +885,41 @@ export const PropertyDetail = () => {
         {/* Lịch sử giá TOÀN NHÀ — từng phòng đã có nút riêng trên thẻ, nút này để xem
             tổng hợp mọi phòng khi cần rà lại cả nhà. */}
         <AllRoomsPriceHistoryButton property={property} />
+
+        {/*
+          Ô chọn kỳ lặp lại từ tab Tổng quan (chung state). Chip hoá đơn nằm trên từng
+          thẻ phòng ngay dưới đây, nên bắt host quay về tab kia chỉ để đổi tháng là
+          bắt đi đường vòng. Hai tab không hiện cùng lúc nên không sợ đọc nhầm thành
+          hai giá trị khác nhau.
+        */}
+        <MonthPicker value={period} onChange={setPeriod} />
       </div>
+
+      {/*
+        Tổng của cả nhà, đặt ngay trên lưới phòng: chip trên từng thẻ chỉ nói chuyện
+        một phòng, muốn biết "cả nhà tháng này thu tới đâu" mà không có dòng này thì
+        phải tự cộng nhẩm qua vài chục thẻ.
+      */}
+      {!billsLoading && bills && bills.source !== 'none' && bills.total.total > 0 && (
+        <p className="px-1 text-xs font-semibold text-slate-500">
+          {billHeading(bills.source, period)}:{' '}
+          <b className="text-slate-700">{bills.total.paid}/{bills.total.total}</b> đã thu
+          {unpaidRoomCount > 0 && (
+            <span className="text-rose-600">
+              {' '}· {unpaidRoomCount} phòng còn nợ {formatCurrency(bills.total.outstanding)}
+            </span>
+          )}
+        </p>
+      )}
 
       {/* Room Grid */}
       {filteredRooms.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
           <DoorOpen className="mx-auto mb-3 h-12 w-12 text-slate-200" />
           <p className="font-medium text-slate-400">
-            {roomSearch || filterStatus !== 'all' ? 'Không có phòng nào khớp bộ lọc.' : 'Không có phòng nào.'}
+            {roomSearch || filterStatus !== 'all' || onlyUnpaid
+              ? 'Không có phòng nào khớp bộ lọc.'
+              : 'Không có phòng nào.'}
           </p>
         </div>
       ) : (
@@ -855,6 +980,9 @@ export const PropertyDetail = () => {
                   ) : room.structureDescription ? (
                     <p className="line-clamp-2 text-xs text-slate-400">{room.structureDescription}</p>
                   ) : null}
+
+                  {/* Kỳ này phòng này trả chưa — im lặng nếu phòng không có hoá đơn nào. */}
+                  <RoomBillChip bills={bills} roomNumber={room.roomNumber} />
 
                   {/*
                     ── Giá: nhãn trên, số dưới ──

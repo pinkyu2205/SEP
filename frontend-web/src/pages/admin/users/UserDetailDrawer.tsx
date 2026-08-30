@@ -210,9 +210,9 @@ export const UserDetailDrawer = ({ user, displayName, onClose, onStatusChange }:
   const load = useCallback(async () => {
     setLoading(true);
     const [props, ctrs] = await Promise.all([
-      propertyService.getProperties(0, 200).then((r) => r.content).catch(() => [] as PropertyResponse[]),
+      propertyService.getAllProperties().catch(() => [] as PropertyResponse[]),
       // /host/contracts là endpoint của OWNER — admin có thể bị 403, khi đó bỏ phần hợp đồng.
-      hostService.listContracts({ size: 500 }).then((p) => p.content).catch(() => [] as HostContractDto[]),
+      hostService.listAllContracts().catch(() => [] as HostContractDto[]),
     ]);
     setProperties(props);
     setContracts(ctrs);

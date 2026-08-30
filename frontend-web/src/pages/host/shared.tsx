@@ -8,15 +8,16 @@
  * → select thu hẹp → select sắp xếp → phân trang, và MẶC ĐỊNH luôn xếp bản ghi mới
  * nhất lên đầu để Host mở trang là thấy ngay cái vừa phát sinh.
  */
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw, Search, X, type LucideIcon } from 'lucide-react';
 import { normalizeVi } from '@/utils/helpers';
-import { CURRENT_MONTH, shiftMonth } from '@/utils/period';
+import { currentMonth, shiftMonth } from '@/utils/period';
+import { isServerTimeSynced } from '@/utils/serverTime';
 
 // Helper kỳ/ngày nằm ở @/utils/period vì Admin cũng dùng; re-export để các trang
 // host chỉ cần import từ một chỗ.
 export {
-  CURRENT_MONTH, cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion,
+  currentMonth, cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion,
   monthLabel, monthShort, safePct, shiftMonth, ymOf,
 } from '@/utils/period';
 
@@ -51,9 +52,59 @@ export const SearchBox = ({
   </div>
 );
 
+/**
+ * Kỳ đang xem, mặc định là THÁNG HIỆN TẠI CỦA SERVER — dùng cặp với `MonthPicker`.
+ *
+ * ─── Vì sao không chỉ `useState(currentMonth)` ───────────────────────────────
+ * Giờ server suy ra từ header `Date` của response HTTP, mà lúc component render lần
+ * đầu thì thường CHƯA có response nào — `currentMonth()` khi đó rơi về đồng hồ máy.
+ * Máy lệch 2 tháng là host mở trang ra đã đứng sẵn ở tháng 8 trong khi hệ thống đang
+ * ở tháng 10, và không có gì báo cho họ biết.
+ *
+ * Nên: chờ tới lúc bắt được giờ server rồi nhảy về đúng kỳ — nhưng CHỈ khi host chưa
+ * tự đổi kỳ. Họ chủ động lùi về tháng cũ để xem lại mà bị kéo về tháng hiện tại thì
+ * còn khó chịu hơn hẳn.
+ */
+export const useServerPeriod = (): [string, (ym: string) => void] => {
+  const [period, setPeriodRaw] = useState(currentMonth);
+  /** Host đã tự chọn kỳ chưa — đã chọn thì không tự động kéo đi đâu nữa. */
+  const touched = useRef(false);
+
+  useEffect(() => {
+    const snap = () => {
+      if (touched.current) return;
+      const ym = currentMonth();
+      setPeriodRaw(prev => (prev === ym ? prev : ym));
+    };
+    if (isServerTimeSynced()) { snap(); return; }
+    // Thăm dò ngắn cho tới response đầu tiên rồi dừng hẳn — không phải vòng lặp vô hạn.
+    const timer = setInterval(() => {
+      if (!isServerTimeSynced()) return;
+      clearInterval(timer);
+      snap();
+    }, 250);
+    return () => clearInterval(timer);
+  }, []);
+
+  const setPeriod = (ym: string) => {
+    touched.current = true;
+    setPeriodRaw(ym);
+  };
+
+  return [period, setPeriod];
+};
+
 // ── Chọn kỳ (tháng) ──────────────────────────────────────────────────────────
+/**
+ * Trần mặc định là kỳ hiện tại theo GIỜ SERVER, đọc lại mỗi lần render.
+ *
+ * Trước 30/08/2026 chỗ này dùng một hằng số đọc đồng hồ MÁY (tính lúc nạp
+ * module). Máy lệch chậm 2 tháng so với server là trần đứng ở tháng 8 trong khi hệ
+ * thống đã sang tháng 10 — mọi kỳ từ tháng 8 trở đi đều bị coi là "đã ở kỳ mới nhất",
+ * nút "kỳ sau" tắt vĩnh viễn: host lùi về tháng trước rồi KHÔNG quay lại được.
+ */
 export const MonthPicker = ({
-  value, onChange, max = CURRENT_MONTH,
+  value, onChange, max = currentMonth(),
 }: { value: string; onChange: (ym: string) => void; max?: string }) => {
   const atMax = value >= max;
   return (

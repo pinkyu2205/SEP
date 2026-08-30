@@ -13,30 +13,32 @@ import {
   type AdminInvoiceRow, type AdminInvoiceStatus, type AdminInvoiceType, type AdminPaymentRow,
 } from '@/services/admin.service';
 import { hostService } from '@/services/host.service';
+import { canUseFullInvoices } from '@/services/invoiceAccess';
 import { RealtimeBadge } from '@/pages/admin/shared';
 import {
-  CURRENT_MONTH, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
+  currentMonth, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
   cmpIsoDesc, fmtDate, fmtDateTime, matchVi, monthLabel, pageSlice, shiftMonth,
 } from '../shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Hoá đơn & Thanh toán (Host) — bản cho Host của màn admin BillingPaymentMonitoring.
 //
-// ⚠ Nguồn dữ liệu phụ thuộc quyền BE, trang tự dò và báo rõ đang ở chế độ nào:
+// Nguồn dữ liệu phụ thuộc quyền BE; trang tự dò (`canUseFullInvoices`) và báo rõ đang
+// ở chế độ nào:
 //
 //  A. ĐẦY ĐỦ  — `GET /api/v1/manager/invoices` + `/api/v1/manager/payments`
 //     Hoá đơn THẬT trong bảng `tenant_invoice`: có mã hoá đơn, đủ loại (tiền phòng,
 //     điện, nước, dịch vụ, bảo trì), ngày phát hành, hạn thu thật và các giao dịch
 //     khách đã báo. Đây là nguồn admin đang dùng.
-//     Hiện 2 endpoint này là `@PreAuthorize("hasAnyRole('MANAGER','ADMIN')")` nên
-//     Host gọi bị 403 — xem BE-NEED-endpoint-hoa-don-quyen-loc-va-du-lieu-2026-08-18.md
-//     (phần A), gộp chung với các thiếu sót khác của cùng endpoint này.
 //
 //  B. RÚT GỌN — `GET /api/v1/host/invoices?month=` (fallback khi A trả 403)
 //     BE dựng hoá đơn tiền phòng on-the-fly từ hợp đồng ACTIVE của đúng 1 kỳ:
 //     không có mã hoá đơn thật, không có điện/nước/dịch vụ, không có giao dịch.
 //
-// Khi BE mở quyền cho ROLE_OWNER, trang tự chuyển sang chế độ A, không cần sửa FE.
+// ⚠️ Chú thích cũ ở đây ghi "2 endpoint này là hasAnyRole('MANAGER','ADMIN') nên Host
+// gọi bị 403" và trỏ sang một file doc BE đã không còn. Kiểm tra lại 03/10/2026: host
+// ĐỌC ĐƯỢC nguồn A, tức quyền đã mở. Giữ nhánh B làm phương án lùi chứ không phải vì
+// đang bị chặn — quyền nằm ngoài tầm FE, đổi lúc nào không báo.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const TYPE_META: Record<AdminInvoiceType, { label: string; color: string }> = {
@@ -126,19 +128,15 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'oldest', label: 'Cũ nhất' },
 ];
 
-/** 12 kỳ gần nhất, mới nhất trước. */
-const PERIODS = Array.from({ length: 12 }, (_, i) => shiftMonth(CURRENT_MONTH, -i));
-
 /**
- * Dò quyền đúng MỘT lần mỗi phiên (single-flight, nhớ cả kết quả âm).
- * Interceptor api.ts tự thử lại GET 403 một lần, cộng StrictMode nhân đôi effect →
- * nếu mỗi lần đổi bộ lọc đều dò lại thì console ngập 403 vô ích.
+ * 12 kỳ gần nhất, mới nhất trước.
+ *
+ * Là HÀM chứ không phải hằng module: `currentMonth()` chỉ trả đúng giờ server sau khi
+ * đã có ít nhất một response HTTP để đọc header `Date`. Tính sẵn lúc nạp module là
+ * chắc chắn rơi vào đồng hồ máy — máy lệch 2 tháng thì danh sách kỳ thiếu hẳn 2 tháng
+ * gần nhất, host không chọn được kỳ đang chạy.
  */
-let accessProbe: Promise<boolean> | null = null;
-const probeFullAccess = (): Promise<boolean> => {
-  accessProbe ??= adminService.listInvoices({}).then(() => true).catch(() => false);
-  return accessProbe;
-};
+const periodOptions = () => Array.from({ length: 12 }, (_, i) => shiftMonth(currentMonth(), -i));
 
 export const BillingPayments = () => {
   /** Đã dò được quyền chưa, và đang ở chế độ nào. */
@@ -163,7 +161,7 @@ export const BillingPayments = () => {
     setOpenKey(null);
 
     // Nguồn đầy đủ nếu BE cho phép; 403 = chưa mở quyền cho Host → rơi xuống fallback.
-    const canUseReal = await probeFullAccess();
+    const canUseReal = await canUseFullInvoices();
     setFullAccess(canUseReal);
 
     if (canUseReal) {
@@ -182,7 +180,7 @@ export const BillingPayments = () => {
     setPayments([]);
 
     // Fallback: hoá đơn tiền phòng suy từ hợp đồng, mỗi lần đúng 1 kỳ.
-    const ym = period || CURRENT_MONTH;
+    const ym = period || currentMonth();
     const page0 = await hostService.getInvoices({ month: ym, size: 500 }).catch(() => null);
     setRows((page0?.content ?? []).map(i => ({
       key: i.id,
@@ -323,7 +321,7 @@ export const BillingPayments = () => {
             <p className="mt-1 text-sm text-slate-500">
               {fullAccess
                 ? 'Toàn bộ hoá đơn thật của hệ thống (tiền phòng, điện, nước, dịch vụ, bảo trì) — mới phát hành nằm trên đầu'
-                : `Hoá đơn tiền phòng ${monthLabel(period || CURRENT_MONTH).toLowerCase()} — suy từ hợp đồng đang hiệu lực`}
+                : `Hoá đơn tiền phòng ${monthLabel(period || currentMonth()).toLowerCase()} — suy từ hợp đồng đang hiệu lực`}
             </p>
           </div>
         </div>
@@ -337,7 +335,7 @@ export const BillingPayments = () => {
           >
             {/* Chế độ rút gọn: BE host bắt buộc đúng 1 kỳ nên không có "tất cả". */}
             {fullAccess !== false && <option value="">Tất cả các kỳ</option>}
-            {PERIODS.map(p => <option key={p} value={p}>{monthLabel(p)}</option>)}
+            {periodOptions().map(p => <option key={p} value={p}>{monthLabel(p)}</option>)}
           </select>
           <button onClick={load} disabled={loading} title="Tải lại dữ liệu"
             className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50">
