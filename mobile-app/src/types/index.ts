@@ -279,6 +279,13 @@ export interface MaintenanceRequestDto {
   faultResolutionPath?: MaintenanceReqFaultResolutionPath;
   selfRepairDeadline?: string;
   estimatedDamageAmount?: number;
+  /** Set qua PUT /{id}/admin-review — null nghĩa là chưa duyệt (hoặc phiếu thuộc luồng
+   * reject-fault cũ, không đi qua report-fault/admin-review). */
+  adminReviewedAt?: string;
+  adminReviewedBy?: string;
+  adminReviewedByName?: string;
+  adminApproved?: boolean;
+  adminReviewNote?: string;
   /** Ảnh phân loại — ưu tiên hiển thị các field này; `images` là gộp tất cả (legacy). */
   beforeImages?: string[];
   afterImages?: string[];
@@ -371,6 +378,16 @@ export interface RejectFaultRequestDto {
   resolutionPath: MaintenanceReqFaultResolutionPath;
   selfRepairDeadline?: string;
   estimatedDamageAmount?: number;
+}
+
+/**
+ * PUT /{id}/report-fault — thay reject-fault cho luồng mới (01/09/2026): manager chỉ
+ * báo mô tả + ảnh bằng chứng, KHÔNG tự chọn hướng xử lý — gửi thẳng cho admin duyệt
+ * trên web qua PUT /{id}/admin-review. Xem docs/BE-YEUCAU-luong-loi-do-khach-admin-duyet.
+ */
+export interface ReportFaultRequestDto {
+  faultReason: string;
+  faultEvidenceImages: string[];
 }
 
 /** PUT /{id}/submit-self-repair — tenant nộp ảnh đã tự sửa (JSON hoặc multipart). */

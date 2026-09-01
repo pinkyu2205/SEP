@@ -3,6 +3,7 @@ import type {
   Page,
   MaintenanceRequestResponse,
   MaintenanceDashboardResponse,
+  MaintenanceAdminReviewRequest,
 } from '@/types/api.types';
 
 const BASE = '/api/v1/maintenance';
@@ -45,5 +46,14 @@ export const maintenanceService = {
   /** GET /api/v1/maintenance/{id} */
   getRequestById: (id: number): Promise<MaintenanceRequestResponse> => {
     return api.get(`${BASE}/${id}`);
+  },
+
+  /**
+   * PUT /api/v1/maintenance/{id}/admin-review — role ADMIN only. Duyệt/không duyệt
+   * phiếu "báo lỗi do khách" (report-fault, 01/09/2026) — không đổi status, chỉ ghi
+   * nhận quyết định; xử lý sửa/thu tiền tiếp theo nằm ngoài hệ thống.
+   */
+  adminReviewFault: (id: number, body: MaintenanceAdminReviewRequest): Promise<MaintenanceRequestResponse> => {
+    return api.put(`${BASE}/${id}/admin-review`, body);
   },
 };

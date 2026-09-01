@@ -77,11 +77,15 @@ type Badge = { label: string; color: string; dot: string };
 
 // Flow bảo trì mới 17/07: PENDING → APPROVED → WAITING_TENANT_CONFIRM → CLOSED
 // (nhánh REJECTED/CANCELLED). Web host chỉ giám sát — gom về 4 bucket hiển thị.
+/** 7 trạng thái thật (enum MaintenanceStatus bên BE) — dùng thẳng cho badge từng dòng. */
 export const maintenanceReqStatusMap: Record<string, Badge> = {
-  PENDING:     { label: 'Chờ duyệt',    color: 'bg-rose-50 text-rose-700 border border-rose-200',       dot: 'bg-rose-500' },
-  IN_PROGRESS: { label: 'Đang xử lý',   color: 'bg-blue-50 text-blue-700 border border-blue-200',       dot: 'bg-blue-500' },
-  RESOLVED:    { label: 'Đã hoàn thành', color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
-  CANCELLED:   { label: 'Đã hủy',       color: 'bg-slate-100 text-slate-500 border border-slate-200',    dot: 'bg-slate-400' },
+  OPEN:                  { label: 'Chờ kiểm tra',  color: 'bg-amber-50 text-amber-700 border border-amber-200',   dot: 'bg-amber-500' },
+  IN_REPAIR:             { label: 'Đang sửa chữa', color: 'bg-violet-50 text-violet-700 border border-violet-200', dot: 'bg-violet-500' },
+  TENANT_FAULT:          { label: 'Lỗi do khách',  color: 'bg-rose-50 text-rose-700 border border-rose-200',      dot: 'bg-rose-500' },
+  PENDING_TENANT_REPAIR: { label: 'Khách tự sửa',  color: 'bg-orange-50 text-orange-700 border border-orange-200', dot: 'bg-orange-500' },
+  OUTSTANDING_DAMAGE:    { label: 'Chờ trừ cọc',   color: 'bg-red-100 text-red-800 border border-red-300',        dot: 'bg-red-600' },
+  CLOSED:                { label: 'Hoàn tất',      color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
+  CANCELLED:             { label: 'Đã hủy',        color: 'bg-slate-100 text-slate-500 border border-slate-200', dot: 'bg-slate-400' },
 };
 
 export const maintenanceReqPriorityMap: Record<string, Badge> = {
@@ -91,13 +95,20 @@ export const maintenanceReqPriorityMap: Record<string, Badge> = {
   LOW:    { label: 'Thấp',       color: 'bg-slate-100 text-slate-600 border border-slate-200',    dot: 'bg-slate-400' },
 };
 
+/** Chỉ còn 4 loại — STRUCTURAL/OTHER đã bỏ khỏi redesign 2026-09. */
 export const maintenanceCategoryMap: Record<string, string> = {
-  ELECTRICAL: 'Điện',
-  PLUMBING:   'Nước',
-  FURNITURE:  'Nội thất',
   APPLIANCE:  'Trang thiết bị',
-  STRUCTURAL: 'Kết cấu / công trình',
-  OTHER:      'Khác',
+  FURNITURE:  'Nội thất',
+  PLUMBING:   'Nước',
+  ELECTRICAL: 'Điện',
+};
+
+/** Gợi ý hiển thị khối chi phí theo MaintenanceBillingHint (BE). */
+export const maintenanceBillingHintMap: Record<string, string> = {
+  HOST_PAID: 'Chủ nhà chi trả — số tiền chỉ mang tính tham khảo.',
+  TENANT_CHARGE_PENDING: 'Chi phí do lỗi khách — đã tạo hoá đơn cho khách.',
+  DEPOSIT_DEDUCTION_PENDING: 'Sẽ trừ vào tiền cọc khi khách trả phòng.',
+  NONE: '',
 };
 
 export const equipmentLifecycleMap: Record<string, Badge> = {
@@ -108,38 +119,28 @@ export const equipmentLifecycleMap: Record<string, Badge> = {
 };
 
 /**
- * Map trạng thái BE (flow mới + legacy trước migrate) về 4 bucket giám sát.
- * IN_PROGRESS = APPROVED + WAITING_TENANT_CONFIRM + REJECTED (khớp dashboard BE).
+ * Bucket 4 khối CHỈ dùng cho KPI dashboard fallback (khớp
+ * MaintenanceRequestRepository.countOpen/countInProgress/countResolved/countCancelled
+ * bên BE) khi gọi GET /maintenance/dashboard lỗi phải tự tính từ list. KHÔNG dùng
+ * để hiển thị badge từng dòng — badge dùng thẳng maintenanceReqStatusMap[status]
+ * (7 trạng thái thật, xem enum MaintenanceStatus).
+ * OUTSTANDING_DAMAGE: bucket dashboard thật của BE không đếm nó vào đâu cả — ở đây
+ * gộp tạm vào IN_PROGRESS để KPI fallback không "mất" phiếu.
  */
 export function normalizeMaintenanceStatus(
   s: string | undefined,
 ): 'PENDING' | 'IN_PROGRESS' | 'RESOLVED' | 'CANCELLED' {
   switch ((s ?? '').toUpperCase()) {
-    case 'PENDING':
     case 'OPEN':
       return 'PENDING';
-    case 'APPROVED':
-    case 'WAITING_TENANT_CONFIRM':
-    case 'REJECTED':
-    // legacy trước migrate 17/07
-    case 'ASSIGNED':
-    case 'ACCEPTED':
-    case 'ACKNOWLEDGED':
-    case 'SCHEDULED':
-    case 'IN_PROGRESS':
-    case 'WAITING_PARTS':
-    case 'ON_HOLD':
-    case 'PENDING_APPROVAL':
-    case 'REOPENED':
-    case 'DONE':
+    case 'IN_REPAIR':
+    case 'TENANT_FAULT':
+    case 'PENDING_TENANT_REPAIR':
+    case 'OUTSTANDING_DAMAGE':
       return 'IN_PROGRESS';
     case 'CLOSED':
-    case 'RESOLVED':
-    case 'COMPLETED':
-    case 'CONFIRMED':
       return 'RESOLVED';
     case 'CANCELLED':
-    case 'CANCELED':
       return 'CANCELLED';
     default:
       return 'PENDING';

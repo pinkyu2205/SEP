@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Loader2, Wrench } from 'lucide-react';
 import { maintenanceService } from '@/services/maintenance.service';
 import type { MaintenanceRequestResponse } from '@/types/api.types';
-import { normalizeMaintenanceStatus } from '@/utils';
 import {
   SectionShell,
   StatusPill,
@@ -10,12 +9,6 @@ import {
   formatVnd,
   maintenanceStatusMap,
 } from './shared';
-
-// BE trả PENDING/IN_PROGRESS/RESOLVED/CANCELLED → key của maintenanceStatusMap.
-const statusKey = (s: string): string => {
-  const n = normalizeMaintenanceStatus(s);
-  return n === 'PENDING' ? 'open' : n.toLowerCase();
-};
 
 export const MaintenanceEquipmentMonitoring = () => {
   const [loading, setLoading] = useState(true);
@@ -64,7 +57,7 @@ export const MaintenanceEquipmentMonitoring = () => {
                   </td></tr>
                 )}
                 {!loading && requests.map(request => {
-                  const s = maintenanceStatusMap[statusKey(request.status)] ?? maintenanceStatusMap.open;
+                  const s = maintenanceStatusMap[request.status] ?? maintenanceStatusMap.OPEN;
                   return (
                     <tr key={request.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
@@ -76,7 +69,7 @@ export const MaintenanceEquipmentMonitoring = () => {
                         <p className="text-xs text-slate-500">{request.roomName}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{request.assignedManagerName ?? 'Chưa gán'}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{request.repairCost != null ? formatVnd(request.repairCost) : 'N/A'}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-800">{request.invoiceAmount != null ? formatVnd(request.invoiceAmount) : 'N/A'}</td>
                       <td className="px-4 py-3"><StatusPill label={s.label} color={s.color} /></td>
                     </tr>
                   );

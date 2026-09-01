@@ -10,9 +10,8 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, TicketCategory, TicketPriority, PhotoEvidence, TimelineEntry,
-  FaultResolutionPath,
 } from '@/store/maintenanceStore';
-import type { MaintenanceReqCategory, MaintenanceReqPriority, EquipmentDto } from '@/types';
+import type { MaintenanceReqCategory, MaintenanceReqPriority } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { realEquipmentService } from '@/services/manager/equipmentService';
@@ -23,7 +22,7 @@ import { showAlert } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import {
   MAINTENANCE_STATUS_META, StatusMeta, MAINTENANCE_BILLING_HINT_META,
-  EQUIPMENT_REPLACE_SUGGEST_COUNT, MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS,
+  EQUIPMENT_REPLACE_SUGGEST_COUNT,
 } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -55,11 +54,14 @@ const mkEntry = (status: TicketStatus, note: string): TimelineEntry =>
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
-const addDaysIso = (days: number): string => {
-  const d = serverNow();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+/** Format tiền lúc gõ (dấu chấm ngăn cách nghìn) — parse lại bằng .replace(/[^0-9]/g, ''). */
+const formatMoneyInput = (text: string): string => {
+  const digits = text.replace(/[^0-9]/g, '');
+  return digits ? Number(digits).toLocaleString('vi-VN') : '';
 };
+
+/** Hoá đơn giờ chỉ cần ảnh + số tiền — BE vẫn bắt buộc non-blank nên tự điền ngầm. */
+const DEFAULT_INVOICE_VENDOR = 'Nội bộ';
 
 const daysLeft = (deadline?: string): number | null => {
   if (!deadline) return null;
@@ -201,44 +203,11 @@ export const TicketDetailScreen: React.FC = () => {
     setApproveCategory(c => c ?? 'appliance');
   }, [realTicket, realEquipmentId]);
 
-  // ── Luồng B: reject-fault (lỗi do khách) ────────────────────────────
+  // ── Luồng B: report-fault (lỗi do khách) — 01/09/2026: chỉ mô tả + ảnh bằng
+  // chứng, không còn chọn "Hướng xử lý" — gửi thẳng cho admin duyệt trên web.
   const [faultFormOpen,   setFaultFormOpen]   = useState(false);
   const [faultReason,     setFaultReason]     = useState('');
-  const [resolutionPath,  setResolutionPath]  = useState<FaultResolutionPath>('manager_repair');
-  const [selfRepairDeadlineText, setSelfRepairDeadlineText] = useState(addDaysIso(MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS));
-  const [estimatedAmountText,    setEstimatedAmountText]    = useState('');
   const [rejectingFault, setRejectingFault] = useState(false);
-
-  // Gợi ý số tiền thiệt hại ước tính từ dữ liệu bảo hành thiết bị (nếu có).
-  const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
-  const computeSuggestedAmount = (eq: EquipmentDto): { amount: number; note: string } | null => {
-    if (!eq.price || !eq.warrantyEndDate) return null;
-    const nowD = serverNow();
-    const end = new Date(eq.warrantyEndDate);
-    if (nowD > end) {
-      return eq.penaltyFee != null
-        ? { amount: eq.penaltyFee, note: `Hết bảo hành — mức phạt cố định ${fmt(eq.penaltyFee)}` }
-        : null;
-    }
-    if (!eq.warrantyStartDate) return null;
-    const start = new Date(eq.warrantyStartDate);
-    const totalDays = (end.getTime() - start.getTime()) / 86_400_000;
-    if (totalDays <= 0) return null;
-    const usedDays = (nowD.getTime() - start.getTime()) / 86_400_000;
-    const ratio = Math.max(0, (totalDays - usedDays) / totalDays);
-    const amount = Math.round((eq.price * ratio) / 1000) * 1000;
-    return { amount, note: `Còn bảo hành — khấu hao còn lại (${Math.round(ratio * 100)}%)` };
-  };
-  useEffect(() => {
-    if (!faultFormOpen || !realEquipmentId || estimatedAmountText) return;
-    realEquipmentService.getById(realEquipmentId)
-      .then(eq => {
-        const suggested = computeSuggestedAmount(eq);
-        if (suggested) { setEstimatedAmountText(String(suggested.amount)); setSuggestionNote(suggested.note); }
-      })
-      .catch(() => { /* không có dữ liệu giá — manager nhập tay */ });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [faultFormOpen, realEquipmentId]);
 
   const submitRejectFault = async () => {
     if (rejectingFault) return;
@@ -246,41 +215,19 @@ export const TicketDetailScreen: React.FC = () => {
     if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
     const evidenceUrls = ticket?.faultEvidenceImages ?? [];
     if (evidenceUrls.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh bằng chứng lỗi.'); return; }
-    let selfRepairDeadline: string | undefined;
-    let estimatedDamageAmount: number | undefined;
-    if (resolutionPath === 'tenant_self_repair') {
-      if (!selfRepairDeadlineText.trim()) { showAlert('Thiếu hạn', 'Vui lòng nhập hạn tự sửa.'); return; }
-      const amount = Number(estimatedAmountText.replace(/[^0-9]/g, ''));
-      if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu số tiền', 'Vui lòng nhập số tiền thiệt hại ước tính (> 0).'); return; }
-      selfRepairDeadline = selfRepairDeadlineText.trim();
-      estimatedDamageAmount = amount;
-    }
     try {
       setRejectingFault(true);
-      await realMaintenanceService.rejectFault(idNum, {
-        faultReason: reason,
-        faultEvidenceImages: evidenceUrls,
-        resolutionPath: resolutionPath === 'manager_repair' ? 'MANAGER_REPAIR' : 'TENANT_SELF_REPAIR',
-        selfRepairDeadline,
-        estimatedDamageAmount,
-      });
+      await realMaintenanceService.reportFault(idNum, { faultReason: reason, faultEvidenceImages: evidenceUrls });
       await refreshReal();
       setFaultFormOpen(false); setFaultReason('');
-      showAlert(
-        resolutionPath === 'manager_repair' ? '🔧 Đã ghi nhận lỗi khách' : '🛠 Đã giao khách tự sửa',
-        resolutionPath === 'manager_repair'
-          ? 'Sửa xong bấm "Báo sửa xong" — hệ thống sẽ tự tạo hoá đơn thu khách.'
-          : `Khách có tới ${selfRepairDeadlineText} để tự sửa và nộp ảnh.`,
-      );
-    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận. Vui lòng thử lại.')); }
+      showAlert('📨 Đã gửi admin duyệt', 'Quản trị viên sẽ xem xét mô tả và ảnh bằng chứng, việc sửa/thu tiền tiếp theo xử lý ngoài hệ thống.');
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi báo cáo. Vui lòng thử lại.')); }
     finally { setRejectingFault(false); }
   };
 
   // ── Complete (Luồng A / Luồng B nhánh manager sửa hộ) ───────────────
-  const [repairDescription, setRepairDescription] = useState('');
-  const [invoiceVendor,     setInvoiceVendor]     = useState('');
-  const [invoiceNumber,     setInvoiceNumber]     = useState('');
-  const [invoiceDateText,   setInvoiceDateText]   = useState(today());
+  // Chỉ còn ảnh + số tiền trên UI — vendor/date/mô tả tự điền ngầm (BE vẫn bắt buộc
+  // non-blank) từ ô "Ghi chú" dùng chung, không hỏi lại manager.
   const [invoiceAmountText, setInvoiceAmountText] = useState('');
 
   // ── Verify-repair (Luồng B — tenant đã tự sửa) ──────────────────────
@@ -385,8 +332,8 @@ export const TicketDetailScreen: React.FC = () => {
         // refreshReal() vừa nạp lại snapshot ảnh từ BE — đã chứa ảnh vừa upload, bỏ bản
         // optimistic cục bộ để tránh hiện trùng ảnh.
         setPhotos(prev => prev.filter(p => p.id !== localId));
-      } catch {
-        showAlert('Lỗi tải ảnh', 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.');
+      } catch (e: any) {
+        showAlert('Lỗi tải ảnh', apiErrMsg(e, 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.'));
       }
     }
   };
@@ -441,9 +388,6 @@ export const TicketDetailScreen: React.FC = () => {
     if (busy) return;
     if (!hasAfterPhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa.'); return; }
     if (!hasInvoicePhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hoá đơn.'); return; }
-    if (!repairDescription.trim()) { showAlert('Thiếu thông tin', 'Vui lòng mô tả việc đã sửa.'); return; }
-    if (!invoiceVendor.trim()) { showAlert('Thiếu thông tin', 'Vui lòng nhập tên nhà cung cấp/thợ sửa.'); return; }
-    if (!invoiceDateText.trim()) { showAlert('Thiếu thông tin', 'Vui lòng nhập ngày hoá đơn.'); return; }
     const amount = Number(invoiceAmountText.replace(/[^0-9]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).'); return; }
     if (isReal) {
@@ -451,14 +395,13 @@ export const TicketDetailScreen: React.FC = () => {
         setBusy(true);
         await realMaintenanceService.complete(idNum, {
           resolutionNote: noteInput.trim() || undefined,
-          repairDescription: repairDescription.trim(),
-          invoiceVendor: invoiceVendor.trim(),
-          invoiceNumber: invoiceNumber.trim() || undefined,
-          invoiceDate: invoiceDateText.trim(),
+          repairDescription: noteInput.trim() || 'Đã sửa xong',
+          invoiceVendor: DEFAULT_INVOICE_VENDOR,
+          invoiceDate: today(),
           invoiceAmount: amount,
         });
         await refreshReal();
-        setNoteInput(''); setRepairDescription(''); setInvoiceVendor(''); setInvoiceNumber(''); setInvoiceAmountText('');
+        setNoteInput(''); setInvoiceAmountText('');
         showAlert(
           '🛠 Đã báo sửa xong',
           ticket.status === 'tenant_fault'
@@ -470,7 +413,7 @@ export const TicketDetailScreen: React.FC = () => {
       return;
     }
     patchStore(
-      { status: 'closed', resolutionNote: noteInput.trim() || undefined, repairDescription: repairDescription.trim() },
+      { status: 'closed', resolutionNote: noteInput.trim() || undefined, repairDescription: noteInput.trim() || 'Đã sửa xong' },
       mkEntry('closed', noteInput.trim() || 'Đã sửa xong'),
     );
     setNoteInput('');
@@ -570,12 +513,16 @@ export const TicketDetailScreen: React.FC = () => {
               </View>
             </View>
           )}
-        </View>
 
-        {/* ── Description ────────────────────────────────────────── */}
-        <View style={s.card}>
-          <Text style={s.cardSectionTitle}>Mô tả vấn đề</Text>
+          <View style={s.sectionDivider} />
+          <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Mô tả vấn đề</Text>
           <Text style={s.descText}>{ticket.description}</Text>
+
+          <View style={s.sectionDivider} />
+          <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Ảnh hiện trạng</Text>
+          {/* Ảnh TRƯỚC sửa chữa là bằng chứng hiện trạng do TENANT chụp lúc tạo yêu cầu —
+              manager không được thêm/sửa để tránh có ý đồ xấu (ngụy tạo hiện trạng). */}
+          <PhotoEvidenceRow type="before" urls={beforeUrls} photos={photos} onAdd={() => {}} disabled />
         </View>
 
         {/* ── Cảnh báo vòng đời thiết bị ───────────────────────────── */}
@@ -587,33 +534,69 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Photos ─────────────────────────────────────────────── */}
-        <View style={s.card}>
-          <Text style={s.cardSectionTitle}>Hình ảnh / Bằng chứng</Text>
-          {/* Ảnh TRƯỚC sửa chữa là bằng chứng hiện trạng do TENANT chụp lúc tạo yêu cầu —
-              manager không được thêm/sửa để tránh có ý đồ xấu (ngụy tạo hiện trạng). */}
-          <PhotoEvidenceRow type="before" urls={beforeUrls} photos={photos} onAdd={() => {}} disabled />
-          {canComplete && (
-            <>
-              <PhotoEvidenceRow
-                type="after" urls={ticket.afterImages} photos={photos}
-                onAdd={() => setPhotoMenuFor('after')}
-              />
-              <PhotoEvidenceRow
-                type="invoice" urls={ticket.invoiceImages} photos={photos}
-                onAdd={() => setPhotoMenuFor('invoice')}
-              />
-            </>
-          )}
-          {!canComplete && (ticket.afterImages?.length ?? 0) > 0 && (
+        {/* ── Ảnh sau sửa chữa + Ghi chú (gộp khi đang có thể báo sửa xong) ── */}
+        {canComplete && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
+            <PhotoEvidenceRow
+              type="after" urls={ticket.afterImages} photos={photos}
+              onAdd={() => setPhotoMenuFor('after')}
+            />
+            <View style={s.sectionDivider} />
+            <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Ghi chú</Text>
+            <TextInput
+              style={[s.textInput, s.noteInput]}
+              value={noteInput}
+              onChangeText={setNoteInput}
+              placeholder="Ghi chú..."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+          </View>
+        )}
+        {!canComplete && (ticket.afterImages?.length ?? 0) > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
             <PhotoEvidenceRow type="after" urls={ticket.afterImages} photos={photos} onAdd={() => {}} disabled />
-          )}
-          {!canComplete && (ticket.invoiceImages?.length ?? 0) > 0 && (
-            <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled />
-          )}
-        </View>
+            {!!ticket.resolutionNote && (
+              <Text style={[s.descText, { marginTop: Spacing.sm }]}>{ticket.resolutionNote}</Text>
+            )}
+          </View>
+        )}
 
-        <MaintenancePhotoHistory photos={ticket.photoHistory} />
+        {/* ── Hoá đơn — chỉ cần ảnh + số tiền ────────────────────── */}
+        {canComplete && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+            <PhotoEvidenceRow
+              type="invoice" urls={ticket.invoiceImages} photos={photos}
+              onAdd={() => setPhotoMenuFor('invoice')}
+            />
+            <TextInput
+              style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
+              value={invoiceAmountText}
+              onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
+              placeholder="Số tiền hoá đơn (VNĐ)"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="numeric"
+            />
+            {ticket.status === 'tenant_fault' && (
+              <Text style={s.costHint}>Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.</Text>
+            )}
+          </View>
+        )}
+        {!canComplete && (ticket.invoiceImages?.length ?? 0) > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+            <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled />
+            {ticket.invoiceAmount != null && (
+              <Text style={[s.descText, s.moneyReadout]}>{fmt(ticket.invoiceAmount)}</Text>
+            )}
+          </View>
+        )}
+
+        {/* Lịch sử ảnh mọi vòng — chỉ có ý nghĩa tra cứu sau khi phiếu đã đóng. */}
+        {ticket.status === 'closed' && <MaintenancePhotoHistory photos={ticket.photoHistory} />}
 
         {/* ── Lỗi do khách (TENANT_FAULT/PENDING_TENANT_REPAIR/OUTSTANDING_DAMAGE) ── */}
         {['tenant_fault', 'pending_tenant_repair', 'outstanding_damage'].includes(ticket.status) && (
@@ -626,6 +609,20 @@ export const TicketDetailScreen: React.FC = () => {
                   <Image key={i} source={{ uri }} style={s.rejectImage} />
                 ))}
               </ScrollView>
+            )}
+            {/* Phiếu gửi qua report-fault (luồng mới) — faultResolutionPath luôn null. */}
+            {ticket.status === 'tenant_fault' && !ticket.faultResolutionPath && (
+              !ticket.adminReviewedAt ? (
+                <Text style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}>
+                  ⏳ Đang chờ admin duyệt trên web.
+                </Text>
+              ) : (
+                <Text style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}>
+                  {ticket.adminApproved ? '✅ Admin đã duyệt' : '❌ Admin không duyệt'}
+                  {ticket.adminReviewedByName ? ` — ${ticket.adminReviewedByName}` : ''}
+                  {ticket.adminReviewNote ? `: ${ticket.adminReviewNote}` : ''}
+                </Text>
+              )
             )}
             {ticket.status === 'pending_tenant_repair' && (
               <Text style={[s.descText, { marginTop: Spacing.sm, fontWeight: '600' }]}>
@@ -749,50 +746,9 @@ export const TicketDetailScreen: React.FC = () => {
                 onAdd={() => setPhotoMenuFor('fault_evidence')}
               />
             </View>
-
-            <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hướng xử lý</Text>
-            <View style={s.reviewRow}>
-              <TouchableOpacity
-                style={[s.reviewBtn, resolutionPath === 'manager_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
-                onPress={() => setResolutionPath('manager_repair')}
-              >
-                <Text style={[s.reviewBtnText, resolutionPath === 'manager_repair' && { color: Colors.primary }]}>Manager sửa hộ</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.reviewBtn, resolutionPath === 'tenant_self_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
-                onPress={() => setResolutionPath('tenant_self_repair')}
-              >
-                <Text style={[s.reviewBtnText, resolutionPath === 'tenant_self_repair' && { color: Colors.primary }]}>Khách tự sửa</Text>
-              </TouchableOpacity>
-            </View>
-
-            {resolutionPath === 'manager_repair' ? (
-              <Text style={s.pickHint}>Sửa xong bấm "Báo sửa xong" như bình thường — hệ thống tự tạo hoá đơn thu khách.</Text>
-            ) : (
-              <>
-                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hạn tự sửa</Text>
-                <TextInput
-                  style={s.textInput}
-                  value={selfRepairDeadlineText}
-                  onChangeText={setSelfRepairDeadlineText}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={Colors.textMuted}
-                />
-                <Text style={s.pickHint}>Gợi ý mặc định {MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS} ngày — có thể sửa lại.</Text>
-
-                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Số tiền thiệt hại ước tính (đ)</Text>
-                <TextInput
-                  style={s.textInput}
-                  value={estimatedAmountText}
-                  onChangeText={setEstimatedAmountText}
-                  placeholder="Nhập số tiền..."
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="numeric"
-                />
-                {suggestionNote && <Text style={s.costHint}>💡 Gợi ý: {suggestionNote} — có thể sửa lại.</Text>}
-                <Text style={s.pickHint}>Số cuối có thể điều chỉnh lúc trả phòng — đây chỉ là ước tính.</Text>
-              </>
-            )}
+            <Text style={s.pickHint}>
+              Gửi xong sẽ chuyển cho admin xem xét trên web — việc sửa/thu tiền tiếp theo xử lý ngoài hệ thống.
+            </Text>
 
             <TouchableOpacity
               style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }]}
@@ -800,7 +756,7 @@ export const TicketDetailScreen: React.FC = () => {
               disabled={rejectingFault || !hasFaultEvidence}
             >
               <Text style={s.advanceBtnText}>
-                {rejectingFault ? 'Đang gửi...' : !hasFaultEvidence ? 'Thêm ảnh bằng chứng trước' : 'Xác nhận lỗi do khách'}
+                {rejectingFault ? 'Đang gửi...' : !hasFaultEvidence ? 'Thêm ảnh bằng chứng trước' : 'Gửi cho admin duyệt'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setFaultFormOpen(false)}>
@@ -809,8 +765,10 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Note input (chưa terminal, không phải lúc mở form lỗi) ── */}
-        {!isTerminal && !faultFormOpen && (
+        {/* ── Note input — chỉ hiện riêng ở trạng thái không có ảnh AFTER đi kèm
+             (open/pending_tenant_repair); khi canComplete thì Ghi chú đã gộp vào
+             block "Ảnh sau sửa chữa" phía trên. ── */}
+        {!isTerminal && !faultFormOpen && !canComplete && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Ghi chú</Text>
             <TextInput
@@ -821,55 +779,6 @@ export const TicketDetailScreen: React.FC = () => {
               placeholderTextColor={Colors.textMuted}
               multiline
             />
-          </View>
-        )}
-
-        {/* ── Form báo sửa xong (IN_REPAIR / TENANT_FAULT nhánh manager sửa hộ) ── */}
-        {canComplete && (
-          <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🧾 Thông tin hoá đơn</Text>
-            <TextInput
-              style={s.textInput}
-              value={repairDescription}
-              onChangeText={setRepairDescription}
-              placeholder="Mô tả việc đã sửa (vd: nạp gas máy lạnh 1.5HP)"
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
-            <TextInput
-              style={[s.textInput, { marginTop: Spacing.sm }]}
-              value={invoiceVendor}
-              onChangeText={setInvoiceVendor}
-              placeholder="Nhà cung cấp / thợ sửa"
-              placeholderTextColor={Colors.textMuted}
-            />
-            <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm }}>
-              <TextInput
-                style={[s.textInput, { flex: 1 }]}
-                value={invoiceNumber}
-                onChangeText={setInvoiceNumber}
-                placeholder="Số hoá đơn (không bắt buộc)"
-                placeholderTextColor={Colors.textMuted}
-              />
-              <TextInput
-                style={[s.textInput, { flex: 1 }]}
-                value={invoiceDateText}
-                onChangeText={setInvoiceDateText}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={Colors.textMuted}
-              />
-            </View>
-            <TextInput
-              style={[s.textInput, { marginTop: Spacing.sm }]}
-              value={invoiceAmountText}
-              onChangeText={setInvoiceAmountText}
-              placeholder="Số tiền hoá đơn (VNĐ)"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="numeric"
-            />
-            {ticket.status === 'tenant_fault' && (
-              <Text style={s.costHint}>Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.</Text>
-            )}
           </View>
         )}
 
@@ -1038,12 +947,15 @@ const s = StyleSheet.create({
   equipHistory:{ fontSize: 10, color: Colors.textMuted, marginTop: 2, fontStyle: 'italic' },
 
   descText: { fontSize: 14, color: Colors.textPrimary, lineHeight: 22 },
+  sectionDivider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.md },
 
   textInput: {
     borderWidth: 1.5, borderColor: Colors.border, borderRadius: BorderRadius.md,
     padding: Spacing.md, fontSize: 14, color: Colors.textPrimary,
   },
   noteInput:  { minHeight: 80, textAlignVertical: 'top' },
+  moneyInput: { textAlign: 'right', fontWeight: '700' },
+  moneyReadout: { textAlign: 'right', fontWeight: '800', fontSize: 18, marginTop: Spacing.sm },
 
   replaceAlert:     { backgroundColor: '#FEF2F2', borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.md, borderWidth: 1, borderColor: '#FECACA' },
   replaceAlertText: { fontSize: 13, color: '#B91C1C', lineHeight: 19 },
