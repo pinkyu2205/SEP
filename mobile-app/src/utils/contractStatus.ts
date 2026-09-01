@@ -51,7 +51,11 @@ export interface ContractStatusMeta {
 export const CONTRACT_STATUS_META: Record<ContractUiStatus, ContractStatusMeta> = {
   pending_approval: { label: 'Chờ duyệt giá', hint: 'Đang chờ chủ nhà duyệt giá thuê', color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
   rejected:         { label: 'Bị từ chối giá', hint: 'Chủ nhà không đồng ý giá, cần chỉnh lại', color: '#EF4444', bg: '#FEF2F2', icon: '❌' },
-  waiting_deposit:  { label: 'Chờ nhận phòng', hint: 'Chờ khách đóng cọc và xác nhận OTP', color: '#3B82F6', bg: '#EFF6FF', icon: '🕗' },
+  // Hint đổi 27/08/2026: OTP không còn là bước cuối do một mình quản lý bấm, mà là
+  // hai bên cùng xác nhận. Cố ý KHÔNG tách thành trạng thái riêng — `ContractUiStatus`
+  // là union dùng chung nhiều màn, thêm giá trị là lan lỗi type ra khắp nơi. Màn đón
+  // khách tự tách chi tiết bằng `statusKeyOf` cục bộ của nó.
+  waiting_deposit:  { label: 'Chờ nhận phòng', hint: 'Chờ thu cọc và hai bên xác nhận hợp đồng', color: '#3B82F6', bg: '#EFF6FF', icon: '🕗' },
   active:           { label: 'Đang thuê',      hint: 'Hợp đồng đang có hiệu lực', color: '#10B981', bg: '#F0FDF4', icon: '🟢' },
   expiring_soon:    { label: 'Sắp hết hạn',    hint: 'Liên hệ khách để gia hạn hoặc chuẩn bị trả phòng', color: '#F97316', bg: '#FFF7ED', icon: '⏰' },
   expired:          { label: 'Đã hết hạn',     hint: 'Hết hạn nhưng chưa thanh lý', color: '#EF4444', bg: '#FEF2F2', icon: '🚫' },

@@ -1,4 +1,5 @@
-import { realTenantSelfService } from '@/services/tenant/selfService';
+import { realTenantSelfService, type MyContractListItem } from '@/services/tenant/selfService';
+import { contractConfirmService } from '@/services/shared/contractConfirmService';
 
 /**
  * Chặn khách thuê ĐÃ TRẢ PHÒNG XONG quay lại app.
@@ -67,6 +68,24 @@ export interface TenantAccess {
   daysLeft?: number;
 }
 
+/**
+ * Hợp đồng nào đang chờ chính khách này xác nhận — **suy tạm từ danh sách**.
+ *
+ * Chỉ dùng làm phương án dự phòng khi `GET /pending-confirm` hỏng; đường chính là gọi
+ * thẳng endpoint đó (xem `findPendingConfirmContractId`). Nhận diện theo `PENDING` vì
+ * tài khoản khách chỉ được tạo SAU khi tiền vào — khách đăng nhập được mà còn hợp đồng
+ * PENDING thì đúng là đang chờ xác nhận.
+ *
+ * KHÔNG loại hợp đồng khách đã nhập mã: xác nhận xong mà quản lý chưa nhập thì khách
+ * vẫn phải ở lại màn chờ. BE cũng làm đúng vậy — `findPendingConfirmForTenant` chỉ lọc
+ * `PENDING && PAID`, không xét mốc OTP của khách.
+ */
+const isAwaitingTenantConfirm = (c: MyContractListItem): boolean => {
+  if (c.status !== 'PENDING') return false;
+  if (c.paymentStatus && c.paymentStatus !== 'PAID') return false;
+  return true;
+};
+
 const daysSince = (iso?: string): number | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
@@ -114,4 +133,28 @@ export async function getTenantAccess(): Promise<TenantAccess> {
 /** Chặn ngay tại cổng đăng nhập — chỉ chặn khi đã hết cả hạn xem lại. */
 export async function isTenantAccountEnded(): Promise<boolean> {
   return (await getTenantAccess()).mode === 'ENDED';
+}
+
+/**
+ * Hợp đồng đang chờ khách xác nhận, `null` nếu không có.
+ *
+ * Hỏi thẳng `GET /api/v1/tenant/me/contracts/pending-confirm` — BE lọc bằng đúng điều
+ * kiện của nó (`PENDING && PAID`), khỏi phải đoán lại ở FE rồi lệch khi BE đổi luật.
+ * Endpoint hỏng thì lùi về suy từ danh sách hợp đồng.
+ *
+ * Lỗi cả hai đường → trả `null` (cho vào app). Cùng nguyên tắc với `getTenantAccess`:
+ * một lần rớt mạng không được phép nhốt khách trong màn xác nhận.
+ */
+export async function findPendingConfirmContractId(): Promise<number | null> {
+  try {
+    const c = await contractConfirmService.getPendingConfirm();
+    return c?.id ?? null;
+  } catch {
+    try {
+      const contracts = await realTenantSelfService.getMyContracts();
+      return contracts.find(isAwaitingTenantConfirm)?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
