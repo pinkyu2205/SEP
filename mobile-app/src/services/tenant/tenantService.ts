@@ -405,6 +405,27 @@ export const realTenantService = {
     return data;
   },
 
+  /**
+   * Gia hạn hợp đồng đang chạy — dời `endDate`, kèm giá mới nếu có.
+   * `PATCH /tenant-contracts/{id}/extend` (BE 01/09/2026, quyền MANAGER|ADMIN).
+   *
+   * BE tự chặn: chỉ nhận HĐ `ACTIVE`, ngày mới phải sau ngày cũ và không vượt quá hạn
+   * hợp đồng với chủ nhà gốc. Đổi giá thì ghi vào lịch sử giá loại `HOP_DONG`.
+   *
+   * Đây là đường DUY NHẤT để khách ở tiếp. Không gia hạn trước ngày hết hạn thì hôm sau
+   * cron đổi HĐ sang EXPIRED và tự mở phiếu trả phòng — lúc đó phải huỷ phiếu, không
+   * gia hạn được nữa.
+   */
+  extendContract: async (
+    contractId: number,
+    body: { newEndDate: string; newRentAmount?: number },
+  ): Promise<TenantContractResponse> => {
+    const { data } = await realApiClient.patch<TenantContractResponse>(
+      `/api/v1/tenant-contracts/${contractId}/extend`, body,
+    );
+    return data;
+  },
+
   // Chủ động hỏi PayOS & đồng bộ trạng thái thanh toán (local không có webhook)
   checkPayment: async (contractId: number): Promise<TenantContractResponse> => {
     const { data } = await realApiClient.post<TenantContractResponse>(

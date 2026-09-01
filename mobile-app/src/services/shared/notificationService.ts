@@ -146,6 +146,9 @@ const normalizeType = (row: BeNotificationRow): string => {
    * tiêu đề. Regex hỏng thì rơi về `contract_expiring` — vẫn đúng nhóm, chỉ mất sắc đỏ,
    * nên không lặp lại được cái bẫy của nhánh `RECEPTION_` ngay trên.
    */
+  /** `CONTRACT_EXTENDED` / `_MANAGER` — vừa gia hạn xong, thuộc nhóm Hợp đồng chứ không
+   *  phải "đón khách mới". Xét cùng chỗ với CONTRACT_EXPIRING, cùng lý do. */
+  if (raw.startsWith('CONTRACT_EXTENDED')) return 'contract_expiring';
   if (raw === 'CONTRACT_EXPIRING') {
     return /hôm nay/i.test(row.title) ? 'contract_expired' : 'contract_expiring';
   }

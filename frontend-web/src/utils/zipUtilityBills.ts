@@ -31,9 +31,21 @@ import type { PropertyResponse } from '@/types/api.types';
 
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 
-/** "MTX#124 THEO_PHONG NT cơ bản" → "mtx#124". Rỗng nếu tên nhà trống. */
-export const codeOfProperty = (p: PropertyResponse): string =>
-  (p.propertyName || '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+/**
+ * Mã nhà dùng để khớp với tên folder.
+ *
+ * Ưu tiên `propertyCode` — cột unique BE thêm 01/09/2026, KHÔNG đổi khi ai đó sửa tên
+ * nhà. Đây mới là khoá đáng tin.
+ *
+ * Vẫn giữ đường suy từ tên nhà làm dự phòng: BE sinh mã bằng đúng công thức này
+ * (`PropertyCodeHelper.extractFromPropertyName` — token đầu, lower-case) nên hai bên ra
+ * cùng kết quả, và bản ghi cũ chưa kịp backfill vẫn khớp được như trước.
+ */
+export const codeOfProperty = (p: PropertyResponse): string => {
+  const code = (p.propertyCode || '').trim().toLowerCase();
+  if (code) return code;
+  return (p.propertyName || '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+};
 
 /** File hoá đơn của một nhà, đã đọc ra `File` để upload tiếp. */
 export interface ZipBillEntry {

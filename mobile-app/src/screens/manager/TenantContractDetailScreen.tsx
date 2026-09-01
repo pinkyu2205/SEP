@@ -2,7 +2,8 @@ import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Linking, ActivityIndicator,
 } from 'react-native';
-import { showAlert } from '@/utils';
+import { showAlert, formatDate } from '@/utils';
+import { readApiError } from '@/utils/apiError';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
@@ -42,13 +43,37 @@ interface TenantContract {
 
 
 // ── Helpers ──────────────────────────────────────────────────────────────
-const parseViDate = (str: string): Date => {
-  const [d, m, y] = str.split('/').map(Number);
-  return new Date(y, m - 1, d);
+/**
+ * Ngày về `Date` — nhận CẢ hai khuôn.
+ *
+ * Bản cũ chỉ tách theo `/` (dd/mm/yyyy), trong khi `toContract` gán thẳng `c.endDate`
+ * của BE — luôn là ISO `yyyy-MM-dd`. `Number("2027-08-17")` ra NaN nên `new Date(NaN,…)`
+ * là Invalid Date: màn hiện "⏰ Còn NaN ngày", dòng "Thời gian còn lại" biến mất, và
+ * `statusFromApi` không bao giờ trả `expiring_soon` (vì `NaN >= 0` là false) — đúng cái
+ * trạng thái sinh ra để quản lý kịp đi gia hạn.
+ */
+const parseAnyDate = (str: string): Date | null => {
+  if (!str) return null;
+  const iso = str.split('T')[0];
+  const d = iso.includes('/')
+    ? (() => { const [dd, mm, yy] = iso.split('/').map(Number); return new Date(yy, mm - 1, dd); })()
+    : new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
-const getDaysRemaining = (dateStr: string): number =>
-  Math.ceil((parseViDate(dateStr).getTime() - TODAY.getTime()) / 86400000);
+const getDaysRemaining = (dateStr: string): number | null => {
+  const d = parseAnyDate(dateStr);
+  if (!d) return null;
+  return Math.ceil((d.getTime() - TODAY.getTime()) / 86400000);
+};
+
+/** Ngày kết thúc + N tháng, trả về ISO `yyyy-MM-dd` để gửi thẳng cho BE. */
+const addMonthsIso = (from: string, months: number): string => {
+  const base = parseAnyDate(from) ?? serverNow();
+  const d = new Date(base.getFullYear(), base.getMonth() + months, base.getDate());
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
@@ -174,6 +199,9 @@ export const TenantContractDetailScreen: React.FC = () => {
   /** DTO gốc — các field quản lý không có trong type TenantContract dùng chung. */
   const [raw, setRaw] = useState<TenantContractResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Hộp chọn ngày gia hạn. */
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [extending, setExtending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -198,15 +226,45 @@ export const TenantContractDetailScreen: React.FC = () => {
   const daysRemaining = contract?.endDate ? getDaysRemaining(contract.endDate) : null;
   const cfg = contract ? STATUS_CFG[contract.status] : null;
 
+  /**
+   * Gia hạn — dời ngày kết thúc, KHÔNG đụng tới giá.
+   *
+   * BE nhận thêm `newRentAmount` nhưng màn này cố tình không gửi: quản lý không được
+   * thấy giá thuê (`@/constants/managerVisibility`), mà cho sửa một con số mình không
+   * nhìn thấy là chuyện vô lý. Đổi giá là việc của host ở màn quản lý giá.
+   *
+   * Bản trước của hàm này chỉ hiện "Yêu cầu gia hạn đã được ghi nhận" rồi thôi — không
+   * gọi API nào cả. Quản lý bấm xong tưởng xong việc, tới ngày cron vẫn đổi hợp đồng
+   * sang EXPIRED và mở phiếu trả phòng.
+   */
   const handleRenew = () => {
-    showAlert(
-      'Gia hạn hợp đồng',
-      `Bạn muốn gia hạn hợp đồng cho ${tenantName}?\n\nHợp đồng mới sẽ bắt đầu ngay sau ngày ${contract?.endDate}.`,
-      [
-        { text: 'Hủy', style: 'cancel' },
-        { text: 'Xác nhận gia hạn', onPress: () => showAlert('Đã ghi nhận', 'Yêu cầu gia hạn đã được ghi nhận.') },
-      ],
-    );
+    if (!contract) return;
+    if (contract.status === 'expired') {
+      showAlert(
+        'Hợp đồng đã hết hạn',
+        'Hợp đồng hết hạn thì không gia hạn được nữa — hệ thống đã mở phiếu trả phòng. '
+        + 'Muốn khách ở tiếp thì huỷ phiếu trả phòng, hoặc làm hợp đồng mới từ đầu.',
+      );
+      return;
+    }
+    setExtendOpen(true);
+  };
+
+  const submitExtend = async (newEndDate: string) => {
+    if (!contract) return;
+    setExtending(true);
+    try {
+      await realTenantService.extendContract(Number(contract.id), { newEndDate });
+      setExtendOpen(false);
+      showAlert('Đã gia hạn', `Hợp đồng của ${tenantName} nay có hiệu lực tới ${formatDate(newEndDate)}.`);
+      load();
+    } catch (e: any) {
+      // BE trả câu tiếng Việt rõ nghĩa (vượt hạn HĐ chủ nhà, ngày không sau ngày cũ…)
+      // nên đọc thẳng ra thay vì thay bằng câu chung chung.
+      showAlert('Không gia hạn được', readApiError(e, 'Không gia hạn được hợp đồng.'));
+    } finally {
+      setExtending(false);
+    }
   };
 
   const handleCall = () => {
@@ -396,11 +454,91 @@ export const TenantContractDetailScreen: React.FC = () => {
 
         </ScrollView>
       )}
+
+      {extendOpen && contract && (
+        <ExtendSheet
+          endDate={contract.endDate}
+          tenantName={tenantName}
+          busy={extending}
+          onClose={() => setExtendOpen(false)}
+          onPick={submitExtend}
+        />
+      )}
     </SafeAreaView>
   );
 };
 
+/**
+ * Chọn mốc gia hạn.
+ *
+ * Chỉ đưa bốn mốc dựng sẵn thay vì lịch chọn ngày tự do: kỳ thuê thực tế luôn tính tròn
+ * tháng, và bấm một nút thì không gõ nhầm được ngày. Cần một ngày lẻ thì host sửa ở màn
+ * hợp đồng — hiếm, không đáng đánh đổi cả màn này.
+ *
+ * KHÔNG có ô sửa giá: quản lý không được thấy giá thuê, mà cho sửa con số mình không
+ * nhìn thấy là chuyện vô lý.
+ */
+const ExtendSheet: React.FC<{
+  endDate: string;
+  tenantName: string;
+  busy: boolean;
+  onClose: () => void;
+  onPick: (iso: string) => void;
+}> = ({ endDate, tenantName, busy, onClose, onPick }) => (
+  <View style={s.sheetBackdrop}>
+    <TouchableOpacity style={s.sheetDismiss} activeOpacity={1} onPress={busy ? undefined : onClose} />
+    <View style={s.sheet}>
+      <Text style={s.sheetTitle}>Gia hạn hợp đồng</Text>
+      <Text style={s.sheetSub}>
+        {tenantName} · đang hết hạn {formatDate(endDate)}
+      </Text>
+
+      <Text style={s.sheetLabel}>Gia hạn thêm</Text>
+      {[3, 6, 12, 24].map(m => {
+        const iso = addMonthsIso(endDate, m);
+        return (
+          <TouchableOpacity
+            key={m}
+            style={s.sheetOpt}
+            disabled={busy}
+            onPress={() => onPick(iso)}
+            activeOpacity={0.75}
+          >
+            <Text style={s.sheetOptMain}>{m} tháng</Text>
+            <Text style={s.sheetOptSub}>đến {formatDate(iso)}</Text>
+          </TouchableOpacity>
+        );
+      })}
+
+      <Text style={s.sheetNote}>
+        Không vượt quá hạn hợp đồng với chủ nhà — hệ thống sẽ báo nếu chọn quá.
+      </Text>
+
+      <TouchableOpacity style={s.sheetCancel} onPress={onClose} disabled={busy}>
+        <Text style={s.sheetCancelText}>{busy ? 'Đang gia hạn…' : 'Huỷ'}</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
+
 const s = StyleSheet.create({
+  sheetBackdrop: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.45)' },
+  sheetDismiss: { flex: 1 },
+  sheet: { backgroundColor: Colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: Spacing.lg, paddingBottom: Spacing.xl },
+  sheetTitle: { fontSize: 17, fontWeight: '900', color: Colors.textPrimary },
+  sheetSub: { fontSize: 13, color: Colors.textSecondary, marginTop: 2, marginBottom: Spacing.md },
+  sheetLabel: { fontSize: 11, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 },
+  sheetOpt: {
+    flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: Colors.border, borderRadius: 12,
+    paddingHorizontal: Spacing.md, paddingVertical: 12, marginBottom: 8,
+  },
+  sheetOptMain: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  sheetOptSub: { fontSize: 12, color: Colors.textSecondary },
+  sheetNote: { fontSize: 11, color: Colors.textMuted, lineHeight: 16, marginTop: 2 },
+  sheetCancel: { marginTop: Spacing.md, alignItems: 'center', paddingVertical: 12 },
+  sheetCancelText: { fontSize: 14, fontWeight: '800', color: Colors.textSecondary },
+
   safe: { flex: 1, backgroundColor: '#F8FAFC' },
 
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
