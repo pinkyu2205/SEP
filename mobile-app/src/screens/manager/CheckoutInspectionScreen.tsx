@@ -45,8 +45,12 @@ const readErr = readApiError;
  *
  * Trên Android, `"numeric"` map sang `TYPE_CLASS_NUMBER | TYPE_NUMBER_FLAG_DECIMAL` — Gboard
  * có lúc dựng thanh công cụ rút gọn (mic / xoá / emoji) thay vì bàn phím số, gõ không được.
- * `"number-pad"` là bàn phím số thuần. Không mất gì: `onlyDigits`/`toNum` vốn đã loại mọi ký
- * tự không phải chữ số, nên dấu thập phân và dấu âm chưa bao giờ dùng tới.
+ * `"number-pad"` là bàn phím số thuần.
+ *
+ * ⚠️ Từ 08/08/2026 tới 27/08/2026 chỗ này SAI: OCR điền chỉ số có phần lẻ ("3081.5") mà
+ * `toNum` xoá sạch dấu chấm → gửi BE 30815, lệch 10 lần so với chỉ số lúc đón khách.
+ * Nay chỉ số chỉ còn phần ĐEN (số nguyên) nên `toNum` đúng trở lại — nhưng đừng để OCR
+ * điền chuỗi có dấu vào đây lần nữa, xem `splitMeterReading(...).rounded` ở dưới.
  */
 const toNum = (v: string) => Number((v || '').replace(/[^\d]/g, '')) || 0;
 const onlyDigits = (v: string) => (v || '').replace(/[^\d]/g, '');
@@ -372,13 +376,11 @@ export const CheckoutInspectionScreen: React.FC<any> = ({ navigation, route }) =
       }
 
       setUrl(url);
-      // Tách phần lẻ (chữ số đỏ) trước khi điền — chỉ số chốt lúc trả phòng phải cùng
-      // quy ước với chỉ số chốt lúc đón khách, lệch một bên là hiệu số ra sai 10 lần.
+      // Tách phần lẻ (chữ số đỏ) rồi CHỈ GIỮ PHẦN ĐEN — chỉ số chốt lúc trả phòng phải
+      // cùng quy ước với chỉ số chốt lúc đón khách, lệch một bên là hiệu số ra sai 10 lần.
       if (check.reading) {
         const s = splitMeterReading(check.reading, kind);
-        setReading(s.decimalPart
-          ? `${Number(s.integerPart)}.${s.decimalPart}`
-          : String(Number(s.integerPart || 0)));
+        setReading(String(s.rounded));
       }
       setMeterStatus(prev => ({
         ...prev,

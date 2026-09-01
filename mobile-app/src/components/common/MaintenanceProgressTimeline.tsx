@@ -13,16 +13,21 @@ export interface MaintenanceTimelineEntry {
 
 const STATUS_CONFIG: Record<string, StatusMeta> = MAINTENANCE_STATUS_META;
 
-/** Sau mỗi trạng thái, các bước "còn lại" hiện dạng placeholder (chưa xảy ra, chưa có ghi chú). */
+/**
+ * Sau mỗi trạng thái, các bước "còn lại" hiện dạng placeholder (chưa xảy ra, chưa có
+ * ghi chú). `open` rẽ 3 nhánh (duyệt hao mòn / lỗi tenant sửa hộ / lỗi tenant tự sửa)
+ * nên không đoán trước — chỉ đoán khi đã ở nhánh cụ thể và bước cuối chắc chắn sẽ tới.
+ */
 const NEXT_PLACEHOLDERS: Record<string, string[]> = {
-  pending:         ['approved', 'waiting_confirm', 'closed'],
-  approved:        ['waiting_confirm', 'closed'],
-  waiting_confirm: ['closed'],
-  // Chưa biết manager sẽ "sửa lại" (quay lại approved) hay "giữ kết quả" (quay lại waiting_confirm)
-  // → chỉ đoán trước bước cuối cùng chắc chắn sẽ tới, bước thật sẽ tự nối thêm khi nó thật sự xảy ra.
-  rejected:        ['closed'],
-  closed:          [],
-  cancelled:       [],
+  open:                   [],
+  in_repair:               ['closed'],
+  tenant_fault:            ['closed'],
+  // Có thể rẽ sang outstanding_damage (quá hạn/không đạt) thay vì closed — không đoán
+  // nhánh xấu trước, bước thật sẽ tự nối thêm khi nó thật sự xảy ra.
+  pending_tenant_repair:  ['closed'],
+  outstanding_damage:     [],
+  closed:                 [],
+  cancelled:              [],
 };
 
 /**

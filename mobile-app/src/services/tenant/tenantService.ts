@@ -180,6 +180,18 @@ export interface TenantContractResponse {
   depositPaidAt?: string;
   /** BE suy ra: có payosOrderCode → 'PAYOS'; có xác nhận tiền mặt → 'CASH'; chưa thu → null. */
   depositMethod?: string;
+  /**
+   * Hai "chữ ký" OTP của luồng xác nhận hợp đồng (BE commit `bd2503b`, 27/08/2026) —
+   * xem `shared/contractConfirmService`. Đủ CẢ HAI thì BE mới chuyển HĐ sang ACTIVE.
+   *
+   * ⚠️ BE cố ý KHÔNG lưu mốc "khách đã bấm gửi OTP", nên từ hai field này không phân
+   * biệt được "khách chưa bấm gửi" với "đã gửi, chưa ai nhập". Đừng viết UI khẳng định
+   * chắc chắn khách chưa gửi — xem `toConfirmState`.
+   */
+  tenantOtpVerifiedAt?: string;
+  managerOtpVerifiedAt?: string;
+  /** Mốc HĐ chuyển ACTIVE. Null khi còn chờ một trong hai bên. */
+  activatedAt?: string;
   paidAt?: string;
   // HĐ tự động hủy no-show (quá 10 ngày sau moveInDate mà chưa kích hoạt) hoặc
   // thanh lý tay đều populate 3 field này — xem getContractTerminationTypeLabel.
@@ -434,9 +446,12 @@ export const realTenantService = {
     return data;
   },
 
-  // Gửi OTP xác nhận hợp đồng tới SĐT khách (BE: POST /tenant-contracts/{id}/send-otp).
-  // Dev OTP mode: BE không gửi SMS thật, confirm chấp nhận mọi mã 6 số. Prod (Twilio): bắt buộc
-  // gọi bước này trước confirm để có mã hợp lệ. Xem tài liệu tiếp khách §7.1.
+  // Gửi OTP xác nhận hợp đồng (BE: POST /tenant-contracts/{id}/send-otp).
+  //
+  // ⚠️ Comment cũ ở đây ghi "Dev OTP mode: confirm chấp nhận mọi mã 6 số" — SAI. Đọc
+  // `OtpServiceImpl.verifyOrThrow` thì không có nhánh nào bỏ qua việc so mã; khi chưa
+  // cấu hình Twilio, BE chỉ `log.warn` mã ra console chứ không nới lỏng kiểm tra. Gõ
+  // bừa 6 số luôn trả "Mã OTP không đúng" — lúc test phải lấy mã từ log server.
   sendContractOtp: async (contractId: number): Promise<void> => {
     await realApiClient.post(`/api/v1/tenant-contracts/${contractId}/send-otp`);
   },

@@ -6,7 +6,7 @@ import { authService } from '@/services/auth/authService';
 import { realAuthService } from '@/services/auth/realAuthService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import {
-  isTenantAccountEnded, TenantAccountEndedError,
+  findPendingConfirmContractId, isTenantAccountEnded, TenantAccountEndedError,
   TENANT_ACCOUNT_ENDED_TITLE, TENANT_ACCOUNT_ENDED_MESSAGE,
 } from '@/services/tenant/accountAccess';
 import { registerPushToken, unregisterPushToken } from '@/services/core/pushToken';
@@ -36,6 +36,13 @@ interface AuthContextType {
   activateTenant: (phoneNumber: string, otp: string, newPassword: string, confirmPassword: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
+  /**
+   * Hợp đồng khách đã trả tiền nhưng chưa xác nhận bằng OTP — `RootNavigator` đưa
+   * thẳng khách vào màn xác nhận. `null` = không có việc gì đang chờ.
+   */
+  pendingConfirmContractId: number | null;
+  /** Gọi lại sau khi xác nhận xong (hoặc khi cần kiểm tra lại) để mở đường vào app. */
+  refreshPendingConfirm: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -46,6 +53,8 @@ const AuthContext = createContext<AuthContextType>({
   activateTenant: async () => {},
   logout: async () => {},
   updateUser: () => {},
+  pendingConfirmContractId: null,
+  refreshPendingConfirm: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -53,6 +62,22 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingConfirmContractId, setPendingConfirmContractId] = useState<number | null>(null);
+
+  /**
+   * Kiểm lại xem còn hợp đồng nào chờ khách xác nhận không.
+   *
+   * Chỉ chạy với vai khách thuê. Lỗi thì coi như KHÔNG có việc chờ — nguyên tắc "thà
+   * cho vào nhầm còn hơn nhốt khách ở ngoài" đã áp cho `getTenantAccess`: một lần rớt
+   * mạng không được phép khoá khách trong màn xác nhận.
+   */
+  const refreshPendingConfirm = async (u: User | null = user) => {
+    if (!u || u.role !== 'tenant') {
+      setPendingConfirmContractId(null);
+      return;
+    }
+    setPendingConfirmContractId(await findPendingConfirmContractId());
+  };
 
   /** Lưu hồ sơ xuống máy để lần mở app sau vào thẳng, không phải đăng nhập lại. */
   const persistUser = async (u: User) => {
@@ -108,6 +133,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           registerPushToken();
           // Kiểm tra nền (không chặn màn hình): khách đã trả phòng xong thì đá ra ngay.
           enforceTenantAccess(storedUser);
+          // Mở lại app mà còn hợp đồng chưa xác nhận → đưa thẳng vào màn xác nhận.
+          refreshPendingConfirm(storedUser);
         } else {
           // Mất token (bị xoá / cài lại) → phiên không dùng được nữa, dọn cho sạch.
           await clearSession();
@@ -139,6 +166,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       touchSession();
       // Trả phòng xong trong lúc app nằm nền → mở lại là ra màn đăng nhập luôn.
       enforceTenantAccess(user);
+      // Quản lý vừa thu tiền xong trong lúc app nằm nền → mở lại là thấy việc xác nhận.
+      refreshPendingConfirm(user);
     });
     return () => sub.remove();
   }, [user]);
@@ -195,6 +224,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Lưu xuống máy: tắt app mở lại là vào thẳng, khỏi đăng nhập lại.
     await persistUser(nextUser);
     await touchSession();   // mốc đếm 10 ngày không dùng
+    // Phải AWAIT: `RootNavigator` rẽ nhánh ngay khi `user` được set, nên nếu để chạy
+    // nền thì khách kịp thấy trang chủ một nhịp rồi mới bị đẩy sang màn xác nhận.
+    await refreshPendingConfirm(nextUser);
     // Đăng ký Expo push token để nhận thông báo (cả tenant lẫn manager) — best-effort
     registerPushToken();
   };
@@ -253,6 +285,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // khoản khác đăng nhập sau trên cùng máy).
     await clearSession();
     setUser(null);
+    // Kẻo tài khoản đăng nhập sau trên cùng máy bị đẩy vào màn xác nhận hợp đồng của
+    // người trước — cùng loại lỗi mà `clearSession` đã phải xử cho "nhà đang thuê".
+    setPendingConfirmContractId(null);
   };
 
   const updateUser = (data: Partial<User>) => {
@@ -273,6 +308,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activateTenant,
         logout,
         updateUser,
+        pendingConfirmContractId,
+        refreshPendingConfirm: () => refreshPendingConfirm(),
       }}
     >
       {children}

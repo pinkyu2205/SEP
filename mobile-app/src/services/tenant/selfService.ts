@@ -109,6 +109,16 @@ export interface MyContractListItem {
    * Rỗng nghĩa là chưa xác nhận, khách vẫn còn việc phải làm trong app.
    */
   refundConfirmedAt?: string;
+  /**
+   * Dùng cho phương án DỰ PHÒNG của cổng "chưa xác nhận hợp đồng" (27/08/2026).
+   *
+   * Đường chính là `GET /api/v1/tenant/me/contracts/pending-confirm`; hai field này chỉ
+   * dùng khi endpoint đó hỏng (xem `findPendingConfirmContractId` trong accountAccess).
+   * Optional vì API list có thể chưa trả — KHÔNG được coi thiếu field là "đã xác nhận
+   * rồi", làm vậy là khách bỏ qua được bước xác nhận hợp đồng.
+   */
+  paymentStatus?: string;
+  tenantOtpVerifiedAt?: string;
 }
 
 export interface ContractEquipmentDto {

@@ -21,16 +21,15 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
-// Nhánh B (không gắn thiết bị) — 4 danh mục BE cho phép, KHÔNG gồm APPLIANCE/FURNITURE
-// (2 loại đó bắt buộc phải chọn thiết bị, BE tự chặn nếu gửi ở nhánh này).
-// Xem docs/FE-maintenance-non-equipment-create.md (repo BE) §3.3.
+// Nhánh B (không gắn thiết bị) — redesign 01/09/2026 category enum chỉ còn 4 giá trị
+// (APPLIANCE/FURNITURE/PLUMBING/ELECTRICAL, STRUCTURAL/OTHER đã bỏ hẳn — xem
+// docs/maintenance-implementation-spec.md §3.4). APPLIANCE/FURNITURE là thiết bị nên
+// đi theo nhánh có equipmentId; nhánh không gắn thiết bị chỉ còn 2 loại cố định trong phòng.
 const NON_EQUIPMENT_CATEGORIES: {
   value: string; emoji: string; label: string; subtitle: string; placeholder: string;
 }[] = [
-  { value: 'STRUCTURAL', emoji: '🧱', label: 'Kết cấu', subtitle: 'Tường, sàn, trần, cửa, khóa', placeholder: 'vd. Sơn tường bong / thấm góc...' },
   { value: 'ELECTRICAL', emoji: '⚡', label: 'Điện cố định', subtitle: 'Ổ cắm, đèn, cầu dao', placeholder: 'vd. Ổ cắm cháy / đèn không sáng...' },
   { value: 'PLUMBING', emoji: '🚰', label: 'Nước / WC', subtitle: 'Vòi, ống, toilet, thoát sàn', placeholder: 'vd. Vòi rò / bồn cầu tắc...' },
-  { value: 'OTHER', emoji: '🔘', label: 'Khác', subtitle: 'Không thuộc 3 nhóm trên', placeholder: 'Mô tả ngắn sự cố' },
 ];
 
 /**
@@ -49,10 +48,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const route = useRoute<any>();
   const { selectedContractId } = useTenantContract();
   const equipment: EquipmentDto | undefined = route.params?.equipment;
+  // Vào từ nút "Tạo yêu cầu mới" trên phiếu đã CLOSED (chưa ổn với lần sửa trước) —
+  // nối phiếu mới với phiếu cũ để manager/lịch sử dễ đối chiếu, không phải reopen.
+  const previousRequestId: number | undefined = route.params?.previousRequestId;
+  const prefillTitle: string | undefined = route.params?.prefillTitle;
   // Không có equipment (vào từ "Sự cố khác") → bắt buộc chọn danh mục trước khi gửi.
   const needsCategory = !equipment;
 
-  const [title, setTitle] = useState(equipment ? equipName(equipment) : '');
+  const [title, setTitle] = useState(prefillTitle || (equipment ? equipName(equipment) : ''));
   const [category, setCategory] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [descExpanded, setDescExpanded] = useState(false);
@@ -235,6 +238,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
         roomId: roomIdNum,
         propertyId: propertyIdNum,
         equipmentId: Number.isFinite(equipmentIdNum) && equipmentIdNum > 0 ? equipmentIdNum : undefined,
+        previousRequestId,
         title: title.trim(),
         description: description.trim() || undefined,
         category: category ?? undefined,
@@ -270,6 +274,15 @@ export const MaintenanceCreateScreen: React.FC = () => {
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {previousRequestId && (
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeText}>
+              🔁 Tạo yêu cầu mới nối tiếp phiếu #{previousRequestId} — dùng khi lần sửa trước
+              chưa ổn. Quản lý sẽ xem lại lịch sử phiếu cũ khi xử lý.
+            </Text>
+          </View>
+        )}
 
         {/* Equipment info card (QR flow only) */}
         {equipment && (
