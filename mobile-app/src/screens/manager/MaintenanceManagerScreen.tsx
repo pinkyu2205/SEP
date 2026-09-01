@@ -30,6 +30,7 @@ const daysBetween = (from: string) => {
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 const TERMINAL = ['closed', 'cancelled'];
+const WORKING = ['in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 // Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
 // Ticket chưa duyệt (priority null) tính theo ngưỡng mặc định 7 ngày.
 const isOverdue = (t: { status: string; priority?: string; createdAt: string }) =>
@@ -57,9 +58,6 @@ export const MaintenanceManagerScreen: React.FC = () => {
    * khi lỗi nằm ở backend. `readApiError` phân biệt được mất mạng / 500 / 403 / 404.
    */
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Khoản bồi thường treo (BE 30/07) — ticket MỌI status (kể cả đã đóng/hủy) còn
-  // costAgreementStatus PENDING/DISPUTED; list thường không bao phủ vì đã terminal.
-  const [pendingCost, setPendingCost] = useState<MaintenanceTicket[]>([]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -78,9 +76,6 @@ export const MaintenanceManagerScreen: React.FC = () => {
             return prev;
           });
         });
-      realMaintenanceService.getPendingCostResolution()
-        .then(list => { if (active) setPendingCost(list.map(dtoToTicket)); })
-        .catch(() => { /* best-effort — section tự ẩn khi rỗng */ });
       return () => { active = false; };
     }, []),
   );
@@ -94,8 +89,6 @@ export const MaintenanceManagerScreen: React.FC = () => {
 
   const stats = useMemo(() => {
     const open = tickets.filter(t => !TERMINAL.includes(t.status));
-    // Khớp dashboard BE: inProgress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED.
-    const WORKING = ['approved', 'waiting_confirm', 'rejected'];
     const now = serverNow();
     const isThisMonth = (iso: string) => {
       const d = new Date(iso);
@@ -103,7 +96,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
     };
     return {
       urgentOpen:   open.filter(t => t.priority === 'urgent').length,
-      pendingNew:   tickets.filter(t => t.status === 'pending').length,
+      pendingNew:   tickets.filter(t => t.status === 'open').length,
       inProgress:   tickets.filter(t => WORKING.includes(t.status)).length,
       resolvedMonth:tickets.filter(t => t.status === 'closed' && isThisMonth(t.updatedAt)).length,
       slaAtRisk:    tickets.filter(isOverdue).length,
@@ -210,18 +203,20 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Khoản bồi thường treo — khách khiếu nại / im lặng, ticket có thể đã đóng ── */}
-        {pendingCost.length > 0 && (
+        {/* ── Ticket lỗi khách đang chờ xử lý (tenant_fault / tự sửa / chờ trừ cọc) ── */}
+        {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').length > 0 && (
           <View style={s.section}>
             <View style={s.sectionHeaderRow}>
-              <Text style={s.sectionTitle}>💰 Bồi thường chờ xử lý</Text>
-              <Text style={s.sectionCount}>{pendingCost.length} khoản</Text>
+              <Text style={s.sectionTitle}>⚠️ Lỗi khách đang xử lý</Text>
+              <Text style={s.sectionCount}>
+                {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').length} ticket
+              </Text>
             </View>
             <View style={s.activityCard}>
-              {pendingCost.map((t, i) => (
+              {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').map((t, i, arr) => (
                 <TouchableOpacity
                   key={t.id}
-                  style={[s.activityRow, i !== pendingCost.length - 1 && s.activityRowBorder]}
+                  style={[s.activityRow, i !== arr.length - 1 && s.activityRowBorder]}
                   onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
                   activeOpacity={0.7}
                 >
@@ -229,16 +224,12 @@ export const MaintenanceManagerScreen: React.FC = () => {
                     <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
                     <Text style={s.activityMeta}>
                       {t.ticketCode} · {t.propertyName}{t.roomName ? ` · ${t.roomName}` : ''}
-                      {t.repairCost != null ? ` · ${t.repairCost.toLocaleString('vi-VN')}đ` : ''}
+                      {t.estimatedDamageAmount != null ? ` · ${t.estimatedDamageAmount.toLocaleString('vi-VN')}đ` : ''}
                     </Text>
                   </View>
-                  <View style={[s.activityStatus, {
-                    backgroundColor: t.costAgreementStatus === 'disputed' ? Colors.errorLight : Colors.warningLight,
-                  }]}>
-                    <Text style={[s.activityStatusText, {
-                      color: t.costAgreementStatus === 'disputed' ? Colors.error : Colors.warning,
-                    }]}>
-                      {t.costAgreementStatus === 'disputed' ? 'Khiếu nại' : 'Chờ phản hồi'}
+                  <View style={[s.activityStatus, { backgroundColor: STATUS_CONFIG[t.status].bg }]}>
+                    <Text style={[s.activityStatusText, { color: STATUS_CONFIG[t.status].color }]}>
+                      {STATUS_CONFIG[t.status].label}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -354,10 +345,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
           {buildingGroups.map(group => {
             const open      = group.tickets.filter(t => !TERMINAL.includes(t.status));
             const urgent    = open.filter(t => t.priority === 'urgent');
-            const inProg    = group.tickets.filter(t =>
-              ['approved', 'waiting_confirm', 'rejected'].includes(t.status));
+            const inProg    = group.tickets.filter(t => WORKING.includes(t.status));
             const resolved  = group.tickets.filter(t => t.status === 'closed');
-            const pending   = group.tickets.filter(t => t.status === 'pending');
+            const pending   = group.tickets.filter(t => t.status === 'open');
             const slaRisk   = open.filter(isOverdue);
             const total     = group.tickets.length;
             const doneRate  = total > 0 ? Math.round((resolved.length / total) * 100) : 100;

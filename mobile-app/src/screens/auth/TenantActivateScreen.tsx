@@ -4,15 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { Button, Input } from '@/components/common';
-import { useAuth } from '@/hooks';
+import { useAuth, useOtpCooldown, RESEND_COOLDOWN_SEC } from '@/hooks';
 import { realAuthService } from '@/services/auth/realAuthService';
 import { isAccountEndedError, TENANT_ACCOUNT_ENDED_TITLE } from '@/services/tenant/accountAccess';
 import { showAlert } from '@/utils';
 
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback;
-
-const RESEND_COOLDOWN_SEC = 60;
 
 /**
  * Kích hoạt tài khoản khách thuê lần đầu: SĐT -> OTP -> tự đặt mật khẩu.
@@ -30,21 +28,7 @@ export const TenantActivateScreen: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => () => { if (cooldownTimer.current) clearInterval(cooldownTimer.current); }, []);
-
-  const startCooldown = () => {
-    setCooldown(RESEND_COOLDOWN_SEC);
-    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
-    cooldownTimer.current = setInterval(() => {
-      setCooldown((s) => {
-        if (s <= 1 && cooldownTimer.current) clearInterval(cooldownTimer.current);
-        return s - 1;
-      });
-    }, 1000);
-  };
+  const { cooldown, startCooldown } = useOtpCooldown(RESEND_COOLDOWN_SEC);
 
   const validatePhone = (): boolean => {
     if (!/^[0-9]{10}$/.test(phone.trim())) {

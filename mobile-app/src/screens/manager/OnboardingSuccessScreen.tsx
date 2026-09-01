@@ -55,10 +55,14 @@ export const OnboardingSuccessScreen: React.FC<any> = ({ navigation, route }) =>
           {isNewAccount ? (
             <>
               <Row label="Tài khoản" value={loginUsername || '—'} />
+              {/* Từ 27/08/2026 khách đã phải kích hoạt tài khoản TRƯỚC bước này (để
+                  đọc và xác nhận hợp đồng), nên tới màn thành công thì việc đó xong
+                  rồi. Giữ nguyên hướng dẫn cũ là quản lý đi dặn khách làm lại một
+                  bước họ vừa làm xong. */}
               <Text style={styles.note}>
-                Tài khoản mới đã được tạo — KHÔNG có mật khẩu mặc định. Nhờ khách mở app
-                → chọn "Kích hoạt tài khoản" → nhập số điện thoại {loginUsername || 'trên hợp đồng'} →
-                xác nhận OTP → tự đặt mật khẩu.
+                Tài khoản {loginUsername || 'của khách'} đã được kích hoạt và khách đã tự
+                đặt mật khẩu ở bước xác nhận hợp đồng. Khách đăng nhập bằng số điện thoại
+                và mật khẩu đó.
               </Text>
             </>
           ) : (

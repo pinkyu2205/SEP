@@ -15,14 +15,13 @@ import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_CATEGORY_LABEL,
 } from '@/constants/maintenance';
 
-// ─── Filter tabs (flow mới: pending → approved → waiting_confirm → closed) ───
+// ─── Filter tabs (redesign 01/09: open → in_repair → closed, nhánh lỗi khách) ───
 type FilterKey = 'active' | 'completed' | MaintenanceStatus;
 const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'active',          label: 'Đang xử lý'    },
-  { key: 'pending',         label: 'Chờ duyệt'     },
-  { key: 'approved',        label: 'Đang sửa'      },
-  { key: 'waiting_confirm', label: 'Chờ nghiệm thu' },
-  { key: 'completed',       label: 'Hoàn tất'      },
+  { key: 'active',    label: 'Đang xử lý' },
+  { key: 'open',      label: 'Chờ kiểm tra' },
+  { key: 'in_repair', label: 'Đang sửa' },
+  { key: 'completed', label: 'Hoàn tất' },
 ];
 
 const COMPLETED: MaintenanceStatus[] = ['closed'];
@@ -37,7 +36,8 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot:
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
-const ACTIVE: MaintenanceStatus[] = ['pending', 'approved', 'waiting_confirm', 'rejected'];
+const ACTIVE: MaintenanceStatus[] =
+  ['open', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
 // ─── Card ──────────────────────────────────────────────────
@@ -95,9 +95,6 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
         {item.assignedTo && (
           <Text style={styles.techText}>👷 {item.assignedTo}</Text>
         )}
-        {item.estimatedCompletionDate && item.status === 'approved' && (
-          <Text style={styles.etaText}>⏱ {formatDate(item.estimatedCompletionDate)}</Text>
-        )}
       </View>
 
       {/* ── Progress dots ── */}
@@ -127,10 +124,10 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       )}
 
       {/* ── Cost banner for completed ── */}
-      {item.status === 'closed' && item.repairCost ? (
+      {item.status === 'closed' && item.invoiceAmount ? (
         <View style={styles.resolvedBanner}>
           <Text style={styles.resolvedText}>
-            ✅ Hoàn tất · Chi phí: {item.repairCost.toLocaleString('vi-VN')} đ
+            ✅ Hoàn tất · Chi phí: {item.invoiceAmount.toLocaleString('vi-VN')} đ
           </Text>
         </View>
       ) : null}
@@ -186,8 +183,8 @@ export const MaintenanceListScreen: React.FC = () => {
     : filter === 'completed' ? all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus))
     : all.filter(r => r.status === filter);
 
-  const pendingCount     = all.filter(r => r.status === 'pending').length;
-  const inProgressCount  = active.filter(r => r.status !== 'pending').length;
+  const pendingCount     = all.filter(r => r.status === 'open').length;
+  const inProgressCount  = active.filter(r => r.status !== 'open').length;
   const resolvedThisMonth = all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus)).length;
 
   return (

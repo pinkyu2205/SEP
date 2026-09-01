@@ -7,139 +7,71 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Shadow } from '@/constants';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
-import type { MaintenanceRequestDto } from '@/types';
+import { dtoToTicket } from '@/services/shared/maintenanceMappers';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
+import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority } from '@/store/maintenanceStore';
 
-// ── Types ────────────────────────────────────────────────────────────────
-type TicketStatus   = 'pending' | 'accepted' | 'in_progress' | 'resolved' | 'cancelled';
-type TicketPriority = 'urgent' | 'high' | 'medium' | 'low';
-type TicketCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'other';
-type FilterKey      = 'all' | TicketStatus;
+// ── Config — khớp BuildingMaintenanceScreen.tsx để 2 màn quản lý cùng bộ nhãn ──
+const STATUS_CFG = MAINTENANCE_STATUS_META;
+const CATEGORY_ICON = MAINTENANCE_CATEGORY_EMOJI;
 
-interface MaintenanceTicket {
-  id: string;
-  tenantId: string;
-  code: string;
-  title: string;
-  description: string;
-  category: TicketCategory;
-  priority: TicketPriority;
-  status: TicketStatus;
-  createdDate: string;
-  updatedDate: string;
-  assignedTech?: string;
-  etaDate?: string;
-  cost?: number;
-  resolution?: string;
-  propertyName: string;
-  roomName: string;
-  relatedEquipment?: string;
-}
-
-// ── Map DTO thật (flow mới 17/07 + legacy) → view model 5 nhóm màn tóm tắt ──
-// Chi tiết/thao tác đầy đủ nằm ở MaintenanceTicketDetail (đã nối real).
-const STATUS_FROM_BE: Record<string, TicketStatus> = {
-  PENDING: 'pending',
-  APPROVED: 'in_progress', WAITING_TENANT_CONFIRM: 'in_progress', REJECTED: 'in_progress',
-  CLOSED: 'resolved',
-  CANCELLED: 'cancelled',
-  // legacy trước migrate
-  REOPENED: 'in_progress', ACKNOWLEDGED: 'accepted', ACCEPTED: 'accepted',
-  SCHEDULED: 'in_progress', IN_PROGRESS: 'in_progress',
-  ON_HOLD: 'in_progress', PENDING_APPROVAL: 'in_progress',
-  DONE: 'in_progress', RESOLVED: 'resolved', CONFIRMED: 'resolved',
+const PRIORITY_CFG: Record<TicketPriority, { label: string; color: string }> = {
+  urgent: { label: '🚨 Khẩn cấp', color: '#EF4444' },
+  high:   { label: '🔴 Cao',       color: '#F97316' },
+  medium: { label: '🟡 Trung bình', color: '#F59E0B' },
+  low:    { label: '🟢 Thấp',      color: '#10B981' },
 };
-const CATEGORY_SET = new Set<TicketCategory>(['electrical', 'plumbing', 'furniture', 'appliance', 'other']);
-const PRIORITY_SET = new Set<TicketPriority>(['urgent', 'high', 'medium', 'low']);
+
+// Gom 6 status thật về 4 nhóm cho filter/stats (khớp BuildingMaintenanceScreen:
+// in_progress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED).
+type StatusBucket = 'pending' | 'in_progress' | 'resolved' | 'cancelled';
+const bucketOf = (st: TicketStatus): StatusBucket =>
+  st === 'open' ? 'pending'
+    : st === 'closed' ? 'resolved'
+    : st === 'cancelled' ? 'cancelled'
+    : 'in_progress';
+
+type FilterKey = 'all' | StatusBucket;
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all',         label: 'Tất cả' },
+  { key: 'pending',     label: '⏳ Chờ' },
+  { key: 'in_progress', label: '🔧 Đang xử lý' },
+  { key: 'resolved',    label: '✅ Hoàn tất' },
+  { key: 'cancelled',   label: '✕ Đã hủy' },
+];
+
+const isOpen = (t: MaintenanceTicket) => bucketOf(t.status) === 'pending' || bucketOf(t.status) === 'in_progress';
+
 const fmtDate = (iso?: string): string => {
   if (!iso) return '—';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('vi-VN');
 };
-const dtoToLocal = (dto: MaintenanceRequestDto): MaintenanceTicket => {
-  const cat = (dto.category ?? '').toLowerCase() as TicketCategory;
-  const pri = (dto.priority ?? '').toLowerCase() as TicketPriority;
-  return {
-    id: String(dto.id),
-    tenantId: String(dto.tenantId),
-    code: dto.requestCode,
-    title: dto.equipmentName ?? dto.description?.split('—')[0]?.trim() ?? 'Yêu cầu sửa chữa',
-    description: dto.description,
-    category: CATEGORY_SET.has(cat) ? cat : 'other',
-    priority: PRIORITY_SET.has(pri) ? pri : 'medium',
-    status: STATUS_FROM_BE[(dto.status ?? '').toUpperCase()] ?? 'pending',
-    createdDate: fmtDate(dto.createdAt),
-    updatedDate: fmtDate(dto.updatedAt),
-    assignedTech: dto.assignedManagerName,
-    etaDate: dto.scheduledDate ? fmtDate(dto.scheduledDate) : undefined,
-    cost: dto.repairCost,
-    resolution: dto.resolutionNote,
-    propertyName: dto.propertyName,
-    roomName: dto.roomName,
-    relatedEquipment: dto.equipmentName,
-  };
-};
-
-// ── Config ───────────────────────────────────────────────────────────────
-const STATUS_CFG: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  pending:     { label: 'Chờ xử lý',   color: '#D97706', bg: '#FFFBEB' },
-  accepted:    { label: 'Đã tiếp nhận', color: '#0369A1', bg: '#E0F2FE' },
-  in_progress: { label: 'Đang xử lý',  color: '#7C3AED', bg: '#F3E8FF' },
-  resolved:    { label: 'Hoàn thành',  color: '#16A34A', bg: '#F0FDF4' },
-  cancelled:   { label: 'Đã hủy',      color: '#6B7280', bg: '#F3F4F6' },
-};
-
-const PRIORITY_CFG: Record<TicketPriority, { label: string; color: string }> = {
-  urgent: { label: '🔴 Khẩn cấp', color: '#DC2626' },
-  high:   { label: '🟠 Cao',       color: '#EA580C' },
-  medium: { label: '🟡 Trung bình', color: '#CA8A04' },
-  low:    { label: '🟢 Thấp',      color: '#16A34A' },
-};
-
-const CATEGORY_CFG: Record<TicketCategory, { label: string; icon: string }> = {
-  electrical: { label: 'Điện',       icon: '⚡' },
-  plumbing:   { label: 'Cấp thoát nước', icon: '🚰' },
-  furniture:  { label: 'Đồ dùng/nội thất', icon: '🪑' },
-  appliance:  { label: 'Thiết bị điện tử', icon: '📺' },
-  other:      { label: 'Khác',       icon: '🔧' },
-};
-
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'all',         label: 'Tất cả' },
-  { key: 'pending',     label: 'Chờ xử lý' },
-  { key: 'in_progress', label: 'Đang xử lý' },
-  { key: 'resolved',    label: 'Hoàn thành' },
-  { key: 'cancelled',   label: 'Đã hủy' },
-];
-
-const isOpen = (t: MaintenanceTicket) =>
-  t.status === 'pending' || t.status === 'accepted' || t.status === 'in_progress';
-
-const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 
 // ── Ticket Card ──────────────────────────────────────────────────────────
 const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> = ({ ticket, onPress }) => {
-  const statusCfg   = STATUS_CFG[ticket.status];
-  const priorityCfg = PRIORITY_CFG[ticket.priority];
-  const catCfg      = CATEGORY_CFG[ticket.category];
-  const open        = isOpen(ticket);
+  const statusCfg = STATUS_CFG[ticket.status];
+  const priCfg    = ticket.priority ? PRIORITY_CFG[ticket.priority] : undefined;
+  const catIcon   = ticket.category ? CATEGORY_ICON[ticket.category] : '🏷';
+  const open      = isOpen(ticket);
+  const urgentOpen = open && ticket.priority === 'urgent';
 
   return (
     <TouchableOpacity
-      style={[tc.card, open && ticket.priority === 'urgent' && tc.cardUrgent]}
+      style={[tc.card, urgentOpen && tc.cardUrgent]}
       onPress={onPress}
       activeOpacity={0.85}
     >
-      {/* Left accent stripe for urgent */}
-      {ticket.priority === 'urgent' && open && <View style={tc.urgentStripe} />}
+      {urgentOpen && <View style={tc.urgentStripe} />}
 
-      {/* Top row */}
       <View style={tc.topRow}>
         <View style={tc.catBadge}>
-          <Text style={tc.catIcon}>{catCfg.icon}</Text>
+          <Text style={tc.catIcon}>{catIcon}</Text>
         </View>
         <View style={tc.topCenter}>
           <Text style={tc.title} numberOfLines={2}>{ticket.title}</Text>
-          <Text style={tc.code}>{ticket.code} · {ticket.roomName}</Text>
+          <Text style={tc.code}>{ticket.ticketCode} · {ticket.roomName}</Text>
         </View>
         <View style={[tc.statusPill, { backgroundColor: statusCfg.bg }]}>
           <Text style={[tc.statusPillText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
@@ -148,14 +80,11 @@ const TicketCard: React.FC<{ ticket: MaintenanceTicket; onPress: () => void }> =
 
       <View style={tc.divider} />
 
-      {/* Footer */}
       <View style={tc.footer}>
-        <Text style={[tc.priority, { color: priorityCfg.color }]}>{priorityCfg.label}</Text>
-        <Text style={tc.date}>
-          {open && ticket.etaDate ? `ETA: ${ticket.etaDate}` : `Cập nhật: ${ticket.updatedDate}`}
-        </Text>
-        {ticket.assignedTech && (
-          <Text style={tc.tech}>👷 {ticket.assignedTech}</Text>
+        {priCfg && <Text style={[tc.priority, { color: priCfg.color }]}>{priCfg.label}</Text>}
+        <Text style={tc.date}>Cập nhật: {fmtDate(ticket.updatedAt)}</Text>
+        {ticket.assignedTo && (
+          <Text style={tc.tech}>👷 {ticket.assignedTo}</Text>
         )}
       </View>
     </TouchableOpacity>
@@ -200,10 +129,8 @@ export const TenantMaintenanceScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
-  // Ticket THẬT của khách này (trước đây màn dùng MOCK_TICKETS lọc theo tenantId
-  // 't1'/'t2'... nên với khách thật luôn rỗng/giả). Lưu ý: param `tenantId` từ
-  // TenantListScreen thực chất là id HỢP ĐỒNG → lọc theo phòng (server-side) hoặc
-  // property + tên khách (nguyên căn) thay vì tenantId.
+  // Param `tenantId` từ TenantListScreen thực chất là id HỢP ĐỒNG → lọc theo phòng
+  // (server-side) hoặc property + tên khách (nguyên căn) thay vì tenantId.
   const load = useCallback(async () => {
     try {
       const page = await realMaintenanceService.listForManager({
@@ -219,7 +146,7 @@ export const TenantMaintenanceScreen: React.FC = () => {
         const name = tenantName.trim().toLowerCase();
         rows = rows.filter((d) => (d.tenantName ?? '').trim().toLowerCase() === name);
       }
-      setAllTickets(rows.map(dtoToLocal));
+      setAllTickets(rows.map(dtoToTicket));
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -231,32 +158,36 @@ export const TenantMaintenanceScreen: React.FC = () => {
 
   // Sort: open (urgent → high → medium → low) first, then resolved/cancelled
   const PRIORITY_ORDER: Record<TicketPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-  const STATUS_ORDER: Record<TicketStatus, number> = { pending: 0, accepted: 1, in_progress: 2, resolved: 3, cancelled: 4 };
+  const BUCKET_ORDER: Record<StatusBucket, number> = { pending: 0, in_progress: 1, resolved: 2, cancelled: 3 };
 
   const sortedTickets = useMemo(() => [...allTickets].sort((a, b) => {
     const aOpen = isOpen(a);
     const bOpen = isOpen(b);
     if (aOpen !== bOpen) return aOpen ? -1 : 1;
-    if (aOpen && bOpen) return PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
-    return STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
+    if (aOpen && bOpen) {
+      const ap = a.priority ? PRIORITY_ORDER[a.priority] : 99;
+      const bp = b.priority ? PRIORITY_ORDER[b.priority] : 99;
+      return ap - bp;
+    }
+    return BUCKET_ORDER[bucketOf(a.status)] - BUCKET_ORDER[bucketOf(b.status)];
   }), [allTickets]);
 
   const filtered = useMemo(
-    () => activeFilter === 'all' ? sortedTickets : sortedTickets.filter(t => t.status === activeFilter),
+    () => activeFilter === 'all' ? sortedTickets : sortedTickets.filter(t => bucketOf(t.status) === activeFilter),
     [sortedTickets, activeFilter],
   );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: allTickets.length };
-    FILTERS.slice(1).forEach(f => { c[f.key] = allTickets.filter(t => t.status === f.key).length; });
+    FILTERS.slice(1).forEach(f => { c[f.key] = allTickets.filter(t => bucketOf(t.status) === f.key).length; });
     return c;
   }, [allTickets]);
 
   const stats = useMemo(() => ({
-    open:        allTickets.filter(t => t.status === 'pending').length,
-    inProgress:  allTickets.filter(t => t.status === 'accepted' || t.status === 'in_progress').length,
-    resolved:    allTickets.filter(t => t.status === 'resolved').length,
-  }), [allTickets]);
+    open:       counts.pending ?? 0,
+    inProgress: counts.in_progress ?? 0,
+    resolved:   counts.resolved ?? 0,
+  }), [counts]);
 
   const hasUrgent = allTickets.some(t => t.priority === 'urgent' && isOpen(t));
 
@@ -335,7 +266,6 @@ export const TenantMaintenanceScreen: React.FC = () => {
         renderItem={({ item }) => (
           <TicketCard
             ticket={item}
-            // Mở màn chi tiết THẬT (đủ thao tác duyệt/báo xong/review-reject) thay vì modal tóm tắt.
             onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: item.id })}
           />
         )}

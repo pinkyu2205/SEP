@@ -23,6 +23,28 @@ export interface VisionLabel {
 /** Số ảnh tối đa BE nhận trong một lần mô tả (`vision.describe.max-images`, mặc định 8). */
 export const DESCRIBE_ROOM_MAX_IMAGES = 8;
 
+/**
+ * Timeout RIÊNG cho describe-room — timeout chung 15s (`API_CONFIG.TIMEOUT`) là quá ngắn.
+ *
+ * BE tải TUẦN TỰ từng ảnh Cloudinary về máy chủ rồi mới base64 gửi model: 20s/ảnh là
+ * trần của `ImageSource`, cộng thêm tối đa 30s cho Gemini. Với một ảnh thì 15s thường
+ * đủ — nên luồng tự động sau khi thêm ảnh vẫn chạy được — nhưng nút "Tạo lại mô tả"
+ * gửi CẢ BỘ ảnh nên gần như chắc chắn vượt 15s và ngã với `ECONNABORTED`. Đó đúng là
+ * triệu chứng "thêm ảnh thì được, bấm nút thì lỗi".
+ */
+export const DESCRIBE_ROOM_TIMEOUT_MS = 60_000;
+
+/**
+ * BE chỉ nhận ảnh HTTPS thuộc `vision.allowed-image-hosts` (= `res.cloudinary.com`);
+ * sai host hoặc sai giao thức là 422 "Chỉ chấp nhận ảnh đã upload lên hệ thống".
+ *
+ * Cần lọc ở FE vì danh sách ảnh của màn đón khách được nạp sẵn từ `roomConditionUrls`
+ * của hợp đồng — dữ liệu cũ/seed có thể chứa URL không phải Cloudinary, và chỉ cần MỘT
+ * URL hỏng là cả request chết, kể cả khi những ảnh còn lại đều hợp lệ.
+ */
+export const isVisionUsableUrl = (url: string): boolean =>
+  /^https:\/\/res\.cloudinary\.com\//i.test(url || '');
+
 export interface RoomDescription {
   /** Đoạn mô tả tiếng Việt, dùng làm BẢN NHÁP cho người nhập sửa. */
   description: string;
@@ -58,11 +80,14 @@ export const visionService = {
    * Cả hai đều là lỗi MỀM: người dùng gõ tay được, đừng chặn luồng đón khách.
    */
   describeRoom: async (imageUrls: string[]): Promise<RoomDescription | null> => {
-    const urls = imageUrls.filter(Boolean).slice(0, DESCRIBE_ROOM_MAX_IMAGES);
+    // Cắt từ CUỐI: khi vượt trần thì ảnh mới chụp mô tả hiện trạng sát thực tế hơn ảnh
+    // đầu tiên. `.slice(0, n)` cũ giữ đúng mấy ảnh cũ nhất.
+    const urls = imageUrls.filter(isVisionUsableUrl).slice(-DESCRIBE_ROOM_MAX_IMAGES);
     if (urls.length === 0) return null;
     const { data } = await realApiClient.post<RoomDescription>(
       '/api/v1/vision/describe-room',
       { imageUrls: urls },
+      { timeout: DESCRIBE_ROOM_TIMEOUT_MS },
     );
     return data?.description ? data : null;
   },

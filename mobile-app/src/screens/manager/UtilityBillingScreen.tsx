@@ -5,7 +5,7 @@ import {
   TextInput, Alert, SectionList, ActivityIndicator, Image, Platform, Modal,
 } from 'react-native';
 import {
-  showAlert, validateMeterPhoto, splitMeterReading, roundConsumptionByMentorRule,
+  showAlert, validateMeterPhoto, splitMeterReading, roundConsumption,
 } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRoute } from '@react-navigation/native';
@@ -125,16 +125,13 @@ const fmt = (n: number | null | undefined) => {
 };
 const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
 /**
- * Cho gõ CHỈ SỐ đồng hồ có phần thập phân ("3081.5") — khác `onlyDigits` vốn xoá sạch
- * dấu chấm. Chỉ số nay lưu cả phần lẻ (chữ số đỏ trên mặt đồng hồ) nên ô nhập tay phải
- * nhận được dấu; nếu không, người dùng sửa số OCR điền là mất luôn phần lẻ.
- * Chấp nhận dấu phẩy (bàn phím tiếng Việt) và chỉ giữ MỘT dấu ngăn.
+ * Ô nhập CHỈ SỐ đồng hồ — số nguyên, không dấu thập phân.
+ *
+ * Từ 27/08/2026 chỉ số chỉ ghi phần ĐEN (xem `roundReading` trong utils/meterPhoto).
+ * Trước đó hàm này (tên cũ `decimalDigits`) cố tình cho gõ dấu chấm để giữ phần đỏ;
+ * giờ giữ lại là mở đường cho chỉ số lệch đơn vị giữa hai kỳ hoá đơn, nên chặn thẳng.
  */
-const decimalDigits = (s: string) => {
-  const cleaned = (s || '').replace(',', '.').replace(/[^\d.]/g, '');
-  const [head, ...rest] = cleaned.split('.');
-  return rest.length ? `${head}.${rest.join('')}` : head;
-};
+const readingDigits = (s: string) => onlyDigits(s);
 // Hiển thị số có dấu phân cách nghìn (vd "400000" -> "400.000"); rỗng nếu không có số.
 const groupThousands = (s: string) => {
   const d = onlyDigits(s);
@@ -684,16 +681,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         return;
       }
 
-      // Tách phần lẻ (chữ số đỏ) khỏi dãy OCR đọc được. `onlyDigits` cũ nuốt luôn phần
-      // lẻ nên "030815" thành 30815 — chỉ số to gấp 10 lần, và từ 08/08/2026 còn lệch
-      // đơn vị với `prevReading` (lấy từ chỉ số lúc đón khách, nay đã có phần lẻ).
-      // Số chữ số lẻ khác nhau theo loại (điện 1 · nước 3) — xem DEFAULT_DIGIT_CONFIG.
+      // Tách phần lẻ (chữ số đỏ) khỏi dãy OCR đọc được rồi CHỈ GIỮ PHẦN ĐEN. Vẫn phải
+      // tách trước: `onlyDigits` trên chuỗi gốc nuốt luôn phần lẻ nên "030815" thành
+      // 30815 — chỉ số to gấp 10 lần. Số chữ số lẻ khác nhau theo loại (điện 1 · nước 3)
+      // — xem DEFAULT_DIGIT_CONFIG. Từ 27/08/2026 chỉ ghi số đen, đỏ ≥ nửa thì lên 1.
       const split = splitMeterReading(check.reading || '', utility);
-      const reading = split.integerPart
-        ? (split.decimalPart
-            ? `${Number(split.integerPart)}.${split.decimalPart}`
-            : String(Number(split.integerPart)))
-        : '';
+      const reading = split.integerPart ? String(split.rounded) : '';
       setList(prev => prev.map(r =>
         r.roomId === roomId
           ? { ...r, newReading: reading || r.newReading, hasPhoto: true, meterImageUrl: url }
@@ -728,7 +721,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
-    const consumption = roundConsumptionByMentorRule(Math.max(newVal - room.prevReading, 0));
+    const consumption = roundConsumption(Math.max(newVal - room.prevReading, 0));
     const fee         = Math.round(consumption * elecUnitPrice);
 
     try {
@@ -765,7 +758,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
     try {
       await Promise.all(unsent.map(r => {
-        const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
+        const consumption = roundConsumption(Math.max(Number(r.newReading) - r.prevReading, 0));
         const fee = Math.round(consumption * elecUnitPrice);
         return realManagerInvoiceService.createRoomUtilityInvoice(
           Number(selectedProperty.id), Number(r.roomId),
@@ -781,7 +774,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       let total = 0;
       setRoomElecReadings(prev => prev.map(r => {
         if (!sentIds.has(r.roomId)) return r;
-        const consumption = roundConsumptionByMentorRule(Math.max(Number(r.newReading) - r.prevReading, 0));
+        const consumption = roundConsumption(Math.max(Number(r.newReading) - r.prevReading, 0));
         const fee = Math.round(consumption * elecUnitPrice);
         total += fee;
         return { ...r, consumption, fee, sent: true };
@@ -931,7 +924,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       showAlert('Chỉ số không hợp lệ', 'Chỉ số mới phải lớn hơn chỉ số cũ.');
       return;
     }
-    const consumption = roundConsumptionByMentorRule(Math.max(newVal - room.prevReading, 0));
+    const consumption = roundConsumption(Math.max(newVal - room.prevReading, 0));
     const fee         = Math.round(consumption * waterUnitPriceExact);
 
     try {
@@ -1284,7 +1277,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                       keyboardType="numeric"
                       placeholder="Nhập chỉ số tháng trước"
                       value={r.prevReading ? String(r.prevReading) : ''}
-                      onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
+                      onChangeText={t => updateRoomElec(r.roomId, { prevReading: Number(readingDigits(t)) || 0 })}
                     />
                     <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
                     <View style={styles.readingRow}>
@@ -1293,7 +1286,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         keyboardType="numeric"
                         placeholder={`> ${r.prevReading}`}
                         value={r.newReading}
-                        onChangeText={t => updateRoomElec(r.roomId, { newReading: decimalDigits(t) })}
+                        onChangeText={t => updateRoomElec(r.roomId, { newReading: readingDigits(t) })}
                       />
                       <TouchableOpacity
                         style={styles.ocrBtn}
@@ -1309,7 +1302,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     {renderMeterPhoto(r)}
                     {r.newReading && Number(r.newReading) > r.prevReading && (() => {
                       // Đơn giá do admin chốt, dùng chung cho mọi phòng của nhà này.
-                      const consumption = roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading);
+                      const consumption = roundConsumption(Number(r.newReading) - r.prevReading);
                       const fee = Math.round(consumption * elecUnitPrice);
                       return (
                         <>
@@ -1576,7 +1569,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                       keyboardType="numeric"
                       placeholder="Nhập chỉ số tháng trước"
                       value={r.prevReading ? String(r.prevReading) : ''}
-                      onChangeText={t => updateRoomWater(r.roomId, { prevReading: Number(decimalDigits(t)) || 0 })}
+                      onChangeText={t => updateRoomWater(r.roomId, { prevReading: Number(readingDigits(t)) || 0 })}
                     />
                     <Text style={styles.formLabel}>Chỉ số mới (tháng này)</Text>
                     <View style={styles.readingRow}>
@@ -1585,7 +1578,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         keyboardType="numeric"
                         placeholder={`> ${r.prevReading}`}
                         value={r.newReading}
-                        onChangeText={t => updateRoomWater(r.roomId, { newReading: decimalDigits(t) })}
+                        onChangeText={t => updateRoomWater(r.roomId, { newReading: readingDigits(t) })}
                       />
                       <TouchableOpacity
                         style={styles.ocrBtn}
@@ -1600,7 +1593,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     <Text style={styles.prevReading}>📷 Chụp đồng hồ để tự đọc, hoặc nhập tay số ở trên.</Text>
                     {renderMeterPhoto(r, 'water')}
                     {r.newReading && Number(r.newReading) > r.prevReading && (() => {
-                      const consumption = roundConsumptionByMentorRule(Number(r.newReading) - r.prevReading);
+                      const consumption = roundConsumption(Number(r.newReading) - r.prevReading);
                       const fee = Math.round(consumption * waterUnitPriceExact);
                       return (
                         <>

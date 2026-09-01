@@ -35,6 +35,7 @@ import { CheckoutRequestsScreen } from '@/screens/manager/CheckoutRequestsScreen
 // Tenant-specific screens
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
 import { ContractDetailScreen } from '@/screens/tenant/ContractDetailScreen';
+import { ContractConfirmScreen } from '@/screens/tenant/ContractConfirmScreen';
 import { MaintenanceCreateScreen } from '@/screens/tenant/MaintenanceCreateScreen';
 import { MaintenanceDetailScreen } from '@/screens/tenant/MaintenanceDetailScreen';
 import { PaymentHistoryScreen } from '@/screens/tenant/PaymentHistoryScreen';
@@ -67,7 +68,7 @@ const baseStackOptions = {
 };
 
 export const RootNavigator: React.FC = () => {
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, pendingConfirmContractId } = useAuth();
 
   // Vai hiện tại quyết định thông báo mở màn nào (manager và khách xem màn khác nhau).
   useEffect(() => { setNotificationRole(user?.role); }, [user?.role]);
@@ -132,6 +133,24 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="CheckoutInspection" component={CheckoutInspectionScreen} />
             <Stack.Screen name="CheckoutSettlement" component={CheckoutSettlementScreen} />
           </Stack.Group>
+        ) : pendingConfirmContractId != null ? (
+          /*
+            CỔNG CHẶN (27/08/2026): khách đã trả tiền, tài khoản đã được tạo, nhưng hợp
+            đồng chưa được xác nhận bằng OTP thì chưa vào app được. Nhánh này render
+            ĐÚNG MỘT màn — không đăng ký TenantTabs — nên không có đường vòng nào lách
+            qua, kể cả deep link.
+
+            Không nhốt được người dùng: `pendingConfirmContractId` chỉ bật khi hợp đồng
+            còn PENDING; xác nhận xong hoặc lỗi mạng đều cho ra (xem
+            `refreshPendingConfirm` trong useAuth — lỗi thì trả null). Vẫn đăng xuất
+            được từ trong màn nếu cần gọi hỗ trợ.
+          */
+          <Stack.Screen
+            name="ContractConfirm"
+            component={ContractConfirmScreen}
+            initialParams={{ contractId: pendingConfirmContractId }}
+            options={{ gestureEnabled: false }}
+          />
         ) : (
           // Tenant stack — tabs + all detail screens
           <Stack.Group>

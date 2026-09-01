@@ -89,10 +89,10 @@ export const MaintenanceHistoryScreen: React.FC = () => {
           <Text style={styles.assignedText}>👷 {item.assignedTo}</Text>
         )}
 
-        {item.repairCost != null && item.repairCost > 0 && (
+        {item.invoiceAmount != null && item.invoiceAmount > 0 && (
           <View style={styles.costBanner}>
             <Text style={styles.costText}>
-              Chi phí sửa chữa: {item.repairCost.toLocaleString('vi-VN')} đ
+              Chi phí sửa chữa: {item.invoiceAmount.toLocaleString('vi-VN')} đ
             </Text>
           </View>
         )}
