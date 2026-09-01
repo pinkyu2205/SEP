@@ -129,64 +129,63 @@ export interface SplitReading {
   integerPart: string;
   /** Chữ số phần thập phân (phần "màu đỏ"). Rỗng khi đồng hồ không có số lẻ. */
   decimalPart: string;
-  /** Giá trị thật, còn nguyên phần lẻ — ĐÂY là số gửi lên BE. */
+  /** Giá trị thật, còn nguyên phần lẻ. CHỈ để đối chiếu — KHÔNG còn gửi lên BE. */
   value: number;
-  /** Đã làm tròn theo luật mentor (chỉ để hiển thị/đối chiếu, xem `roundByMentorRule`). */
+  /** Phần ĐEN sau khi làm tròn theo phần đỏ — ĐÂY là số gửi lên BE (xem `roundReading`). */
   rounded: number;
 }
 
 /**
- * Luật làm tròn mentor chốt 07/08/2026: chữ số lẻ đầu tiên **LỚN HƠN 5** mới lên 1.
- * Tức chữ số bằng 5 thì làm tròn XUỐNG — khác `Math.round` thông thường (5 lên 1).
+ * Chỉ lấy phần ĐEN của mặt đồng hồ; phần ĐỎ chỉ còn để quyết định có cộng 1 hay không.
+ *
+ * Luật chốt 27/08/2026: phần lẻ **từ một nửa trở lên** thì lên 1 (làm tròn toán học,
+ * HALF_UP). Trước đó là luật `>5` của mentor chốt 07/08/2026 (chữ số 5 làm tròn XUỐNG);
+ * muốn quay lại thì lật đúng một dấu so sánh trong `isAtLeastHalf`, không đụng gì khác.
  */
-export function roundByMentorRule(integerPart: string, decimalPart: string): number {
+export function roundReading(integerPart: string, decimalPart: string): number {
   const base = Number(integerPart || '0');
-  return base + (isAboveHalf(decimalPart) ? 1 : 0);
+  return base + (isAtLeastHalf(decimalPart) ? 1 : 0);
 }
 
 /**
- * Lõi của luật `>5`, diễn đạt lại thành "phần lẻ LỚN HƠN một nửa".
+ * Lõi của luật làm tròn, diễn đạt thành "phần lẻ TỪ một nửa trở lên".
  *
- * Với đồng hồ điện (1 chữ số đỏ) hai cách nói là một: chữ số > 5 ⇔ phần lẻ > 0,5.
+ * Với đồng hồ điện (1 chữ số đỏ) hai cách nói là một: chữ số ≥ 5 ⇔ phần lẻ ≥ 0,5.
  * Nhưng đồng hồ nước có tới 3 chữ số đỏ, lúc đó "chỉ nhìn chữ số đầu" thành ra tuỳ
- * tiện (12,567 → nhìn số 5 → xuống, trong khi phần lẻ rõ ràng quá nửa). Dùng ngưỡng
- * nửa đơn vị thì đúng cho mọi số chữ số mà vẫn khớp tuyệt đối với luật mentor chốt.
+ * tiện (12,499 → nhìn số 4 → xuống, đúng; nhưng 12,4999 với cấu hình khác lại lệch).
+ * Dùng ngưỡng nửa đơn vị thì đúng cho mọi số chữ số đỏ.
  *
  * `HALF_EPS` là biên phòng thủ, KHÔNG phải vá một ca đã gặp: ở đây phần lẻ dựng lại
- * từ chuỗi (`Number('0.' + '5')`) nên ra đúng 0.5, không có sai số. Thử ngẫu nhiên
- * 200k phép trừ chỉ số điện (1 số lẻ) và 300k phép trừ chỉ số nước (3 số lẻ) đều
- * không ra ca nào lệch 0,5 dưới 1e-9. Giữ epsilon vì nó vô hại và chặn được trường
- * hợp sau này có ai truyền vào số đã qua tính toán thay vì chuỗi gốc.
+ * từ chuỗi (`Number('0.' + '5')`) nên ra đúng 0.5, không có sai số. Trừ epsilon (thay
+ * vì cộng như luật `>5` cũ) để đúng 0,5 vẫn lọt vào nhánh làm tròn LÊN.
  *
- * Rác dấu phẩy động CÓ THẬT nằm ở chỗ khác — xem `roundConsumptionByMentorRule`.
+ * Rác dấu phẩy động CÓ THẬT nằm ở chỗ khác — xem `roundConsumption`.
  */
 const HALF_EPS = 1e-9;
-const isAboveHalf = (decimalPart: string): boolean => {
+const isAtLeastHalf = (decimalPart: string): boolean => {
   const d = (decimalPart || '').replace(/[^\d]/g, '');
   if (!d) return false;
-  return Number(`0.${d}`) > 0.5 + HALF_EPS;
+  return Number(`0.${d}`) >= 0.5 - HALF_EPS;
 };
 
 /**
- * Cùng luật `>5` nhưng cho một SỐ đã tính sẵn — dùng cho SỐ TIÊU THỤ (hiệu hai chỉ số).
+ * Cùng luật làm tròn nhưng cho một SỐ đã tính sẵn — dùng cho SỐ TIÊU THỤ (hiệu hai chỉ số).
  *
- * Vì sao cần bản số: chỉ số nay lưu cả phần lẻ, nên hiệu hai kỳ ra số thực
- * (3090,1 − 3081,9 = 8,2). Không làm tròn thì hoá đơn nhận nguyên rác dấu phẩy động
- * kiểu `8.199999999999932`.
- *
- * ⚠️ Đây là PHƯƠNG ÁN (b) ở Phần F doc PLAN: trừ trước rồi mới làm tròn. Nếu BA chốt
- * phương án (a) — làm tròn từng chỉ số rồi mới trừ — thì đổi ở chỗ GỌI hàm này, đừng
- * sửa luật bên trong (luật `>5` là của mentor, hai phương án dùng chung).
+ * Từ 27/08/2026 chỉ số lưu là SỐ NGUYÊN nên hiệu hai kỳ cũng nguyên và hàm này thành
+ * no-op. Vẫn phải giữ: dữ liệu CŨ trong DB còn phần lẻ (`initial_*_reading` là
+ * `NUMERIC(19,2)`, `utility_invoices.*_reading` là `NUMERIC(19,4)`), nên kỳ hoá đơn đầu
+ * tiên sau khi đổi vẫn lấy `prevReading` có lẻ trừ `newReading` nguyên. Bỏ hàm này là
+ * hoá đơn kỳ đó nhận nguyên rác dấu phẩy động kiểu `8.199999999999932`.
  */
-export function roundConsumptionByMentorRule(value: number): number {
+export function roundConsumption(value: number): number {
   if (!Number.isFinite(value)) return 0;
   const sign = value < 0 ? -1 : 1;
   const abs = Math.abs(value);
   const int = Math.floor(abs);
-  // Dùng chung ngưỡng nửa đơn vị với `roundByMentorRule` (xem isAboveHalf) — KHÔNG tự
+  // Dùng chung ngưỡng nửa đơn vị với `roundReading` (xem isAtLeastHalf) — KHÔNG tự
   // đọc chữ số lẻ đầu tiên bằng phép trừ: 8,6 − 8 ra 0.5999999999999996 nên chữ số đó
   // bị đọc thành 5 và số tiêu thụ 8,6 kWh bị làm tròn xuống 8 thay vì lên 9.
-  return sign * (int + (abs - int > 0.5 + HALF_EPS ? 1 : 0));
+  return sign * (int + (abs - int >= 0.5 - HALF_EPS ? 1 : 0));
 }
 
 /**
@@ -216,7 +215,7 @@ export function splitMeterReading(
       integerPart,
       decimalPart,
       value: Number(`${integerPart}.${decimalPart}`),
-      rounded: roundByMentorRule(integerPart, decimalPart),
+      rounded: roundReading(integerPart, decimalPart),
     };
   }
 
@@ -242,7 +241,7 @@ export function splitMeterReading(
     integerPart,
     decimalPart,
     value: Number(`${integerPart}.${decimalPart}`),
-    rounded: roundByMentorRule(integerPart, decimalPart),
+    rounded: roundReading(integerPart, decimalPart),
   };
 }
 

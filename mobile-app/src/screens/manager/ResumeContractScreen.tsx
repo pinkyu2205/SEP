@@ -26,8 +26,15 @@ import {
 } from '@/utils';
 import { MeterOverrideModal } from '@/components/common';
 import type { MeterOverrideKind } from '@/services/manager/meterOverrideService';
-import { visionService, type VisionLabel } from '@/services/shared/visionService';
+import {
+  visionService, isVisionUsableUrl, DESCRIBE_ROOM_MAX_IMAGES, type VisionLabel,
+} from '@/services/shared/visionService';
 import { nowIso, serverNow, todayIso } from '@/utils/serverTime';
+import { useBillingRealtime } from '@/hooks/useBillingRealtime';
+import {
+  contractConfirmService,
+  type ContractConfirmState, type ConfirmWaitingFor,
+} from '@/services/shared/contractConfirmService';
 import { DatePickerField } from '@/components/common/DatePickerField';
 import { maskTenantPhone } from '@/constants/managerVisibility';
 import {
@@ -39,9 +46,12 @@ import {
 const onlyDigits = (s: string) => String(s).replace(/[^\d]/g, '')
 const parseNum = (s: string) => Number(onlyDigits(s)) || 0
 /**
- * Dãy chữ số OCR đọc được ("030815") → chuỗi chỉ số thật ("3081.5").
+ * Dãy chữ số OCR đọc được ("030815") → chỉ số để ghi sổ ("3082").
  *
- * Không tách thì chỉ số bị ghi to gấp 10 lần và sai luôn tiền điện cả kỳ thuê.
+ * Từ 27/08/2026 chỉ ghi phần ĐEN; phần ĐỎ chỉ dùng để quyết định làm tròn (≥ nửa đơn
+ * vị thì lên 1 — xem `roundReading`). Vẫn phải TÁCH đúng số chữ số đỏ trước đã: bỏ
+ * qua bước tách thì "030815" thành 30815, to gấp 10 lần và sai tiền điện cả kỳ thuê.
+ *
  * Màn này dùng số chữ số MẶC ĐỊNH (điện 5+1, nước 5+3) vì `TenantContractResponse`
  * chưa mang cấu hình của phòng — trùng đúng mặc định BE, và người nhập vẫn sửa
  * được trực tiếp trong ô.
@@ -53,7 +63,7 @@ const parseNum = (s: string) => Number(onlyDigits(s)) || 0
  */
 const toReadingValue = (raw: string, kind: 'elec' | 'water'): string => {
   const s = splitMeterReading(raw, kind)
-  return s.decimalPart ? `${Number(s.integerPart)}.${s.decimalPart}` : String(Number(s.integerPart || 0))
+  return String(s.rounded)
 }
 const formatVnd = (v: number) => (v ? v.toLocaleString('vi-VN') : '0')
 const formatDateVi = (iso?: string): string => {
@@ -63,6 +73,36 @@ const formatDateVi = (iso?: string): string => {
 }
 const readErr = (err: any, fallback: string): string =>
   err?.response?.data?.error || err?.response?.data?.message || err?.message || fallback
+
+/**
+ * Dịch lỗi của `POST /vision/describe-room` thành câu người dùng làm được gì đó.
+ *
+ * Trước 27/08/2026 mọi lỗi ngoài quota đều gộp thành "Chưa tạo được mô tả" + message
+ * thô của BE, nên ba nguyên nhân hoàn toàn khác nhau (timeout ở FE · thiếu Gemini key
+ * ở server · ảnh không thuộc Cloudinary) hiện ra giống hệt nhau và không ai lần được.
+ * Mô tả AI là tính năng phụ — mọi nhánh đều kết bằng lời nhắc nhập tay, tuyệt đối
+ * không chặn luồng đón khách.
+ */
+const explainDescribeError = (err: any): { title: string; message: string } => {
+  const code = err?.response?.data?.code
+  // axios đặt `ECONNABORTED` cho cả timeout lẫn request bị huỷ; ở đây chỉ có timeout.
+  if (err?.code === 'ECONNABORTED') {
+    return {
+      title: 'Máy chủ xử lý quá lâu',
+      message: 'Mô tả từ nhiều ảnh mất nhiều thời gian. Thử lại với ít ảnh hơn, hoặc nhập tay giúp nhé.',
+    }
+  }
+  if (code === 'VISION_DESCRIBE_QUOTA') {
+    return {
+      title: 'Hết lượt tạo mô tả',
+      message: readErr(err, 'Đã dùng hết lượt tạo mô tả trong giờ này. Nhập tay giúp nhé.'),
+    }
+  }
+  return {
+    title: 'Chưa tạo được mô tả',
+    message: readErr(err, 'Không tạo được mô tả từ ảnh. Nhập tay giúp nhé.'),
+  }
+}
 
 /** Đón sớm tối đa mấy ngày so với ngày vào ở — khớp `contract.max-early-move-in-days` của BE. */
 const MAX_EARLY_ONBOARD_DAYS = 3
@@ -96,14 +136,29 @@ const isTooEarly = (c: TenantContractResponse): boolean => {
  * Một nhãn trạng thái DUY NHẤT cho mỗi hợp đồng — dùng chung cho chip lọc và nhãn
  * trên thẻ, để hai chỗ không bao giờ phân loại lệch nhau.
  */
-type StatusKey = 'paid_wait_otp' | 'wait_price' | 'price_rejected' | 'wait_transfer' | 'draft'
+type StatusKey =
+  | 'my_otp'          // khách đã đồng ý, ĐANG CHỜ CHÍNH QUẢN LÝ nhập mã
+  | 'wait_tenant_otp' // quản lý xong, chờ khách nhập mã
+  | 'wait_tenant_ok'  // đã thu tiền, chờ khách kích hoạt tài khoản + đồng ý hợp đồng
+  | 'wait_price'
+  | 'price_rejected'
+  | 'wait_transfer'
+  | 'draft'
 
-const STATUS_KEYS: StatusKey[] = ['paid_wait_otp', 'wait_price', 'price_rejected', 'wait_transfer', 'draft']
+// Thứ tự = độ ưu tiên hiển thị. `my_otp` đứng đầu vì đó là việc quản lý bấm một cái
+// là xong; ba nhóm "chờ người khác" xếp sau việc của chính mình.
+const STATUS_KEYS: StatusKey[] = [
+  'my_otp', 'wait_tenant_otp', 'wait_tenant_ok',
+  'wait_price', 'price_rejected', 'wait_transfer', 'draft',
+]
 
 const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string; bg: string }> = {
-  // Khách ĐÃ chuyển tiền nhưng chưa xong OTP là việc gấp nhất — manager chỉ cần bấm
-  // tiếp là xong. Trạng thái này phải thắng mọi nhãn khác.
-  paid_wait_otp:  { label: '✅ Đã thu — chờ OTP',    short: 'Chờ OTP',      color: '#047857', bg: '#ECFDF5' },
+  // Khách đã đồng ý hợp đồng và mã của quản lý đã gửi — quản lý chỉ cần nhập là xong.
+  // Việc gấp nhất, phải thắng mọi nhãn khác.
+  my_otp:          { label: '🔔 Chờ BẠN nhập OTP',   short: 'Bạn nhập OTP', color: '#047857', bg: '#ECFDF5' },
+  // Hai nhãn dưới là "chờ người khác" — quản lý không làm gì được, chỉ nhắc khách.
+  wait_tenant_otp: { label: 'Chờ khách nhập OTP',    short: 'Chờ khách OTP', color: '#0891B2', bg: '#ECFEFF' },
+  wait_tenant_ok:  { label: '✅ Đã thu — chờ khách xác nhận', short: 'Chờ khách', color: '#0891B2', bg: '#ECFEFF' },
   wait_price:     { label: 'Chờ Host duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
   price_rejected: { label: 'Host từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
   wait_transfer:  { label: 'Chờ khách chuyển tiền',  short: 'Chờ chuyển tiền', color: '#0891B2', bg: '#ECFEFF' },
@@ -112,7 +167,17 @@ const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string
 
 const statusKeyOf = (c: TenantContractResponse): StatusKey => {
   const paid = c.paymentStatus === 'PAID' || !!c.depositPaidAt
-  if (c.status === 'PENDING' && paid) return 'paid_wait_otp'
+  if (c.status === 'PENDING' && paid) {
+    // Đã thu tiền → tách theo hai "chữ ký" OTP.
+    //
+    // Khách đã ký mà quản lý chưa → việc của chính quản lý, ưu tiên cao nhất. Ngược
+    // lại thì đang chờ khách. Khi CHƯA bên nào ký thì không phân biệt được "khách chưa
+    // bấm gửi" với "đã gửi, chưa ai nhập" (BE không lưu mốc bấm gửi) — xếp vào "chờ
+    // khách" vì đó là bước kế tiếp theo đúng quy trình.
+    if (c.tenantOtpVerifiedAt && !c.managerOtpVerifiedAt) return 'my_otp'
+    if (c.managerOtpVerifiedAt && !c.tenantOtpVerifiedAt) return 'wait_tenant_otp'
+    return 'wait_tenant_ok'
+  }
   if (c.priceApprovalStatus === 'PENDING_PRICE_APPROVAL') return 'wait_price'
   if (c.priceApprovalStatus === 'PRICE_REJECTED') return 'price_rejected'
   if (c.status === 'PENDING' || c.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT') return 'wait_transfer'
@@ -1024,20 +1089,44 @@ const InspectionSection: React.FC<{
   }
 
   /**
+   * Nối mô tả mới vào cuối ghi chú đang có, ngăn bằng dấu chấm.
+   *
+   * Chỉ thêm dấu chấm khi câu trước chưa có dấu kết — không thì ra "… sạch.. Phòng…".
+   */
+  const joinSentences = (prev: string, add: string) => {
+    const left = (prev || '').trim()
+    const right = (add || '').trim()
+    if (!right) return left
+    if (!left) return right
+    return /[.!?…]$/.test(left) ? `${left} ${right}` : `${left}. ${right}`
+  }
+
+  /**
    * Soạn ghi chú hiện trạng từ ảnh (BE `POST /api/v1/vision/describe-room`).
    *
    * Kết quả luôn là BẢN NHÁP: đổ vào ô ghi chú cho manager đọc lại và sửa, không tự
    * lưu. Biên bản hiện trạng là căn cứ trừ cọc lúc trả phòng — để máy viết rồi lưu
    * thẳng là ký một văn bản không ai đọc.
    *
-   * Không ghi đè chữ manager đã gõ (`noteTouched`) trừ khi bấm nút "Tạo lại mô tả".
+   * Hai chế độ:
+   *   • `append` — chạy tự động mỗi khi thêm ảnh. Chỉ mô tả ẢNH VỪA THÊM rồi nối vào
+   *     cuối ghi chú. Vì chỉ thêm chứ không đè nên KHÔNG cần xét `noteTouched`: chữ
+   *     manager gõ và các câu mô tả trước đó đều còn nguyên. Mỗi ảnh cũng chỉ tốn một
+   *     ảnh trong payload thay vì gửi lại cả bộ.
+   *   • mặc định (thay thế) — nút "Tạo lại mô tả": soạn lại từ TOÀN BỘ ảnh và ghi đè,
+   *     dùng khi ghi chú đã rối và muốn làm lại từ đầu.
+   *
    * Lỗi quota/model là lỗi MỀM: im lặng bỏ qua khi chạy tự động sau lúc upload, chỉ
    * báo khi manager chủ động bấm nút — không được chặn luồng đón khách.
    */
-  const describeFromPhotos = async (urls: string[], opts?: { force?: boolean }) => {
+  const describeFromPhotos = async (
+    urls: string[],
+    opts?: { force?: boolean; append?: boolean },
+  ) => {
     const force = opts?.force === true
+    const append = opts?.append === true
     if (describing || urls.length === 0) return
-    if (noteTouched && !force) return
+    if (!append && noteTouched && !force) return
 
     try {
       setDescribing(true)
@@ -1046,31 +1135,63 @@ const InspectionSection: React.FC<{
         if (force) showAlert('Chưa tạo được mô tả', 'Model không trả về nội dung. Nhập tay giúp nhé.')
         return
       }
-      setNote(result.description)
+      if (append) {
+        setNote((prev) => joinSentences(prev, result.description))
+      } else {
+        setNote(result.description)
+        setNoteTouched(false)
+      }
       setAiDrafted(true)
-      setNoteTouched(false)
     } catch (err: any) {
-      if (!force) return // chạy nền sau upload — không làm phiền
-      const code = err?.response?.data?.code
-      showAlert(
-        code === 'VISION_DESCRIBE_QUOTA' ? 'Hết lượt tạo mô tả' : 'Chưa tạo được mô tả',
-        readErr(err, 'Không tạo được mô tả từ ảnh. Nhập tay giúp nhé.'),
-      )
+      if (!force) {
+        // Chạy nền sau upload — không làm phiền bằng popup. Nhưng phải để lại dấu vết:
+        // im lặng hoàn toàn là lý do describe-room hỏng cả tuần mà không ai biết, tới
+        // khi có người bấm nút mới lộ ra.
+        console.warn('[describe-room] lỗi ở luồng tự động:', err?.code, readErr(err, ''))
+        return
+      }
+      const { title, message } = explainDescribeError(err)
+      showAlert(title, message)
     } finally {
       setDescribing(false)
     }
   }
 
-  /** Nút "Tạo lại mô tả" — hỏi trước khi đè lên chữ manager đã gõ. */
+  /**
+   * Nút "Tạo lại mô tả" — soạn lại từ TOÀN BỘ ảnh và ghi đè.
+   *
+   * Hỏi trước khi đè nếu ô ghi chú đang có chữ, bất kể chữ đó do manager gõ hay do AI
+   * nối vào: sau vài lần thêm ảnh thì hai loại đã trộn lẫn, không tách ra được nữa nên
+   * cứ có chữ là hỏi.
+   */
   const regenerateDescription = () => {
-    if (noteTouched && note.trim()) {
-      showAlert('Tạo lại mô tả?', 'Ghi chú đang có sẽ bị thay bằng mô tả mới từ ảnh.', [
+    // Lọc TRƯỚC khi gọi: ảnh nạp sẵn từ `contract.roomConditionUrls` có thể là URL cũ
+    // không thuộc Cloudinary, mà BE thì 422 cả request chỉ vì một URL hỏng. Báo thẳng ở
+    // đây rõ hơn nhiều so với để BE trả "Chỉ chấp nhận ảnh đã upload lên hệ thống".
+    const usable = photos.filter(isVisionUsableUrl)
+    if (usable.length === 0) {
+      showAlert(
+        'Chưa mô tả được',
+        'Ảnh hiện trạng của hợp đồng này chưa nằm trên kho ảnh của hệ thống. Chụp lại ảnh phòng rồi thử lại giúp nhé.',
+      )
+      return
+    }
+
+    // Chỉ gửi những ảnh THẬT SỰ được dùng, và nói rõ số lượng — người bấm cần biết mô
+    // tả dựa trên mấy ảnh, nhất là khi bộ ảnh vượt trần của BE.
+    const batch = usable.slice(-DESCRIBE_ROOM_MAX_IMAGES)
+    const scope = batch.length < photos.length
+      ? `${batch.length} ảnh gần nhất`
+      : `${batch.length} ảnh`
+
+    if (note.trim()) {
+      showAlert('Tạo lại mô tả?', `Ghi chú đang có sẽ bị thay bằng mô tả mới từ ${scope}.`, [
         { text: 'Hủy', style: 'cancel' },
-        { text: 'Tạo lại', onPress: () => void describeFromPhotos(photos, { force: true }) },
+        { text: 'Tạo lại', onPress: () => void describeFromPhotos(batch, { force: true }) },
       ])
       return
     }
-    void describeFromPhotos(photos, { force: true })
+    void describeFromPhotos(batch, { force: true })
   }
 
   const uploadConditionPhotos = async (uris: string[]) => {
@@ -1099,14 +1220,15 @@ const InspectionSection: React.FC<{
 
       if (accepted.length > 0) {
         const now = nowIso()
-        setPhotos((prev) => {
-          const next = [...prev, ...accepted]
-          // Mô tả trên TOÀN BỘ ảnh chứ không chỉ lô vừa thêm — mentor muốn "chụp nhiều
-          // ảnh thì ghi chú thêm", nên mỗi lần thêm ảnh là soạn lại từ cả bộ.
-          void describeFromPhotos(next)
-          return next
-        })
+        setPhotos((prev) => [...prev, ...accepted])
         setPhotosCapturedAt((prev) => [...prev, ...accepted.map(() => now)])
+        // Mô tả CHỈ ẢNH VỪA THÊM rồi nối vào cuối ghi chú — mentor muốn "chụp thêm ảnh
+        // thì ghi chú thêm vào", nên thêm câu chứ không soạn lại từ đầu.
+        //
+        // Gọi ở đây chứ KHÔNG gọi trong hàm cập nhật của `setPhotos`: hàm đó phải thuần,
+        // React StrictMode chạy nó hai lần nên đặt lời gọi mạng vào trong là gửi hai
+        // request và nối mô tả hai lần.
+        void describeFromPhotos(accepted, { append: true })
       }
       if (rejected.length > 0) {
         showAlert(
@@ -1192,8 +1314,11 @@ const InspectionSection: React.FC<{
     try {
       setSaving(true)
       const updated = await realTenantService.updateDraftContract(contract.id, {
-        initialElectricReading: elecReading ? Number(elecReading) : undefined,
-        initialWaterReading: waterReading ? Number(waterReading) : undefined,
+        // `Math.round` là lưới đỡ, không phải chỗ áp luật: ô nhập đã lọc `onlyDigits` và
+        // OCR đã trả `rounded`. Giữ vì cột BE là NUMERIC(19,2) — lọt một số lẻ vào đây là
+        // mốc chỉ số của cả kỳ thuê lệch đơn vị so với các kỳ hoá đơn sau.
+        initialElectricReading: elecReading ? Math.round(Number(elecReading)) : undefined,
+        initialWaterReading: waterReading ? Math.round(Number(waterReading)) : undefined,
         electricMeterImageUrl: elecUrl || undefined,
         electricMeterCapturedAt: meterCapturedAt.elec,
         waterMeterImageUrl: waterUrl || undefined,
@@ -1299,10 +1424,17 @@ const InspectionSection: React.FC<{
                   sau, nếu không hiệu số giữa 2 kỳ sẽ sai. */}
               <View style={styles.meterRuleBox}>
                 <Text style={styles.meterRuleText}>
-                  • Nhập cả phần <Text style={styles.meterRuleStrong}>ĐEN</Text>
-                  {kind === 'elec' ? ' (kWh)' : ' (m³)'} lẫn phần{' '}
-                  <Text style={styles.meterRuleRed}>ĐỎ</Text>, ngăn nhau bằng dấu chấm —
-                  vd <Text style={styles.meterRuleStrong}>3081.5</Text>.
+                  • Chỉ nhập phần <Text style={styles.meterRuleStrong}>ĐEN</Text>
+                  {kind === 'elec' ? ' (kWh)' : ' (m³)'}, bỏ phần{' '}
+                  <Text style={styles.meterRuleRed}>ĐỎ</Text>.
+                </Text>
+                <Text style={styles.meterRuleText}>
+                  • Số <Text style={styles.meterRuleRed}>ĐỎ</Text> từ{' '}
+                  <Text style={styles.meterRuleStrong}>5 trở lên</Text> → cộng thêm 1 vào
+                  phần đen. Vd 3081<Text style={styles.meterRuleRed}>5</Text> →{' '}
+                  <Text style={styles.meterRuleStrong}>3082</Text>; 3081
+                  <Text style={styles.meterRuleRed}>4</Text> →{' '}
+                  <Text style={styles.meterRuleStrong}>3081</Text>.
                 </Text>
                 <Text style={styles.meterRuleText}>
                   • Chữ số đang nhảy giữa 2 số → lấy số{' '}
@@ -1318,13 +1450,17 @@ const InspectionSection: React.FC<{
                 ]}
                 value={kind === 'elec' ? elecReading : waterReading}
                 onChangeText={(v) => {
-                  if (kind === 'elec') setElecReading(v)
-                  else setWaterReading(v)
+                  // Chỉ số nay là SỐ NGUYÊN (chỉ phần đen) — chặn luôn dấu chấm/phẩy ở
+                  // ô nhập, nếu không người dùng vẫn gõ "3081.5" theo thói quen cũ và
+                  // `Number()` lúc gửi sẽ đẩy phần lẻ lên BE.
+                  const digits = onlyDigits(v)
+                  if (kind === 'elec') setElecReading(digits)
+                  else setWaterReading(digits)
                   setManualEdited((prev) => ({ ...prev, [kind]: true }))
                   setManualConfirmed((prev) => ({ ...prev, [kind]: false }))
                 }}
                 editable={meterUnlocked(kind)}
-                keyboardType="numeric"
+                keyboardType="number-pad"
                 placeholder={
                   meterUnlocked(kind)
                     ? 'OCR tự điền, có thể chỉnh'
@@ -1450,7 +1586,9 @@ const InspectionSection: React.FC<{
                     <ActivityIndicator size="small" color={Colors.primary} />
                   ) : (
                     <Text style={styles.aiBtnText}>
-                      ✨ {noteTouched ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
+                      {/* Đã có chữ trong ô → nút này là "làm lại từ đầu", nên phải nói
+                          rõ là TẠO LẠI để không ai bấm nhầm rồi mất phần đã soạn. */}
+                      ✨ {note.trim() ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -1473,9 +1611,12 @@ const InspectionSection: React.FC<{
             {describing && (
               <Text style={styles.aiHint}>Đang đọc ảnh để soạn mô tả…</Text>
             )}
-            {!!note && aiDrafted && !noteTouched && (
+            {/* Bỏ điều kiện `!noteTouched`: giờ AI NỐI thêm chứ không đè, nên ô ghi chú
+                thường là chữ manager gõ trộn với câu AI soạn. Vẫn phải nhắc đọc lại —
+                đây là căn cứ trừ cọc lúc trả phòng. */}
+            {!!note && aiDrafted && (
               <Text style={styles.aiHint}>
-                ✨ Mô tả do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
+                ✨ Có phần do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
               </Text>
             )}
           </View>
@@ -1582,7 +1723,8 @@ const DepositOtpPanel: React.FC<{
   const [busy, setBusy] = useState(false)
   const [otp, setOtp] = useState('')
   const [otpSending, setOtpSending] = useState(false)
-  const otpSentRef = React.useRef(false)
+  /** Tiến độ xác nhận hai bên. Null = chưa hỏi được BE (chưa thu tiền, hoặc lỗi mạng). */
+  const [confirmState, setConfirmState] = useState<ContractConfirmState | null>(null)
 
   /**
    * Đã lưu hiện trạng phòng chưa — điều kiện để lộ nút "Tạo mã thanh toán".
@@ -1618,24 +1760,59 @@ const DepositOtpPanel: React.FC<{
     return () => clearInterval(timer)
   }, [paid, contract.id])
 
-  // Giữ OTP: khi đã thu cọc xong, tự gửi OTP tới SĐT khách để kích hoạt HĐ.
+  /**
+   * Theo dõi tiến độ xác nhận sau khi đã thu tiền.
+   *
+   * ⚠️ Trước 27/08/2026 chỗ này là một `useEffect` TỰ ĐỘNG GỬI OTP ngay khi `paid`
+   * chuyển true. Đã bỏ hẳn: giờ chính KHÁCH mới là người bấm gửi, sau khi đọc hợp đồng
+   * trên máy của họ — đó là toàn bộ điểm của việc đổi quy trình. Quản lý gửi thay thì
+   * lại quay về chỗ cũ: hợp đồng có hiệu lực mà không có bằng chứng khách đã đồng ý.
+   */
   useEffect(() => {
-    if (!paid || otpSentRef.current) return
-    otpSentRef.current = true
-    setOtpSending(true)
-    realTenantService
-      .sendContractOtp(contract.id)
-      .catch(() => {
-        otpSentRef.current = false
-      })
-      .finally(() => setOtpSending(false))
+    if (!paid) return
+    let alive = true
+    const load = async () => {
+      try {
+        const s = await contractConfirmService.getConfirmState(contract.id)
+        if (alive) setConfirmState(s)
+      } catch {
+        // Giữ tiến độ đang hiện — nhấp nháy về rỗng khi rớt mạng còn khó hiểu hơn.
+      }
+    }
+    void load()
+    const timer = setInterval(load, 5000)
+    return () => { alive = false; clearInterval(timer) }
   }, [paid, contract.id])
+
+  /**
+   * Realtime: khách vừa gửi OTP / vừa ký thì panel đổi ngay.
+   *
+   * BE đẩy `CONTRACT_CONFIRM_PROGRESS` và `CONTRACT_ACTIVATED` qua chính queue
+   * `/user/queue/billing` của hook này. Poll 5s bên trên vẫn giữ làm lưới đỡ cho lúc
+   * WebSocket rớt — hai người đang đứng cạnh nhau chờ, không được để màn hình đứng im.
+   */
+  useBillingRealtime({
+    enabled: paid,
+    onEvent: (e) => {
+      if (e.contractId !== contract.id) return
+      if (e.event !== 'CONTRACT_CONFIRM_PROGRESS' && e.event !== 'CONTRACT_ACTIVATED') return
+      contractConfirmService.getConfirmState(contract.id).then(setConfirmState).catch(() => {})
+    },
+  })
+
+  /** Bên nào đang bị chờ. Chưa hỏi được BE thì coi như chưa ai xác nhận. */
+  const waitingFor: ConfirmWaitingFor = confirmState?.waitingFor ?? 'BOTH'
+  const managerDone = !!confirmState?.managerOtpVerified
+  const tenantDone = !!confirmState?.tenantOtpVerified
 
   const resendOtp = async () => {
     try {
       setOtpSending(true)
-      await realTenantService.sendContractOtp(contract.id)
-      showAlert('Đã gửi lại OTP', `Mã xác nhận mới đã gửi tới ${maskTenantPhone(contract.tenantPhone)}.`)
+      // Xin lại mã CỦA QUẢN LÝ. Không dùng lại `sendContractOtp` cũ: hàm đó gửi mã cho
+      // khách, mà bắt khách bấm hộ để quản lý có mã là sai vai — quản lý phải tự xin
+      // được mã của mình.
+      await contractConfirmService.resendManagerOtp(contract.id)
+      showAlert('Đã gửi lại mã', 'Mã xác nhận mới đã gửi tới số của bạn.')
     } catch (err: any) {
       /**
        * BE trả đúng một câu cho MỌI lỗi Twilio: "Không gửi được SMS OTP. Vui lòng thử lại
@@ -1696,15 +1873,39 @@ const DepositOtpPanel: React.FC<{
       setBusy(true)
       const res = await realTenantService.confirmContract(contract.id, { otp })
       onChanged(res)
-      navigation.navigate('OnboardingSuccess', {
-        contractCode: res.contractCode,
-        tenantFullName: res.tenantFullName,
-        roomNumber: res.roomNumber,
-        phone: res.tenantPhone,
-        username: res.tenantUsername ?? res.tenantPhone,
-        accountCreated: res.tenantAccountCreated ?? false,
-        rolePromoted: res.tenantRolePromoted ?? false,
-      })
+      setOtp('')
+
+      /**
+       * Chỉ ăn mừng khi hợp đồng THẬT SỰ đã hiệu lực.
+       *
+       * Trước 27/08/2026 chỗ này navigate vô điều kiện sau khi BE trả 200 — đúng với
+       * quy trình cũ (nhập OTP xong là ACTIVE ngay). Với quy trình hai bên thì 200 chỉ
+       * có nghĩa "mã của bạn đúng", hợp đồng vẫn PENDING nếu khách chưa nhập. Giữ
+       * nguyên là quản lý thấy màn "Đón khách thành công" rồi bỏ đi, để khách kẹt lại
+       * với hợp đồng chưa hiệu lực.
+       */
+      if (res.status === 'ACTIVE') {
+        navigation.navigate('OnboardingSuccess', {
+          contractCode: res.contractCode,
+          tenantFullName: res.tenantFullName,
+          roomNumber: res.roomNumber,
+          phone: res.tenantPhone,
+          username: res.tenantUsername ?? res.tenantPhone,
+          accountCreated: res.tenantAccountCreated ?? false,
+          rolePromoted: res.tenantRolePromoted ?? false,
+        })
+        return
+      }
+
+      setConfirmState((prev) => (prev
+        ? { ...prev, managerOtpVerified: true, managerOtpVerifiedAt: nowIso(), waitingFor: 'TENANT' }
+        : prev))
+      showAlert(
+        'Đã ghi nhận mã của bạn',
+        'Còn chờ khách nhập mã trên máy của khách là hợp đồng có hiệu lực.',
+        undefined,
+        '✅',
+      )
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
     } finally {
@@ -1791,35 +1992,74 @@ const DepositOtpPanel: React.FC<{
             <Text style={styles.paidIcon}>✅</Text>
             <Text style={styles.paidText}>Đã ghi nhận thanh toán!</Text>
           </View>
-          <View style={{ marginTop: Spacing.md }}>
-            <Text style={styles.label}>Mã OTP gửi tới SĐT khách</Text>
-            <Text style={styles.label}>{maskTenantPhone(contract.tenantPhone)}</Text>
-          </View>
-          <TextInput
-            style={[styles.input, styles.otpInput]}
-            value={otp}
-            onChangeText={setOtp}
-            keyboardType="number-pad"
-            maxLength={6}
-            placeholder="------"
-            placeholderTextColor={Colors.textMuted}
-          />
-          <TouchableOpacity onPress={resendOtp} disabled={otpSending} style={{ paddingVertical: Spacing.sm }}>
-            <Text style={{ color: Colors.primary, fontWeight: '600', textAlign: 'center' }}>
-              {otpSending ? 'Đang gửi OTP...' : 'Gửi lại OTP'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.primaryBtn, (otp.length !== 6 || busy) && styles.btnDisabled]}
-            onPress={confirm}
-            disabled={otp.length !== 6 || busy}
-          >
-            {busy ? (
-              <ActivityIndicator color={Colors.white} />
-            ) : (
-              <Text style={styles.primaryBtnText}>Hoàn tất & kích hoạt</Text>
-            )}
-          </TouchableOpacity>
+
+          {managerDone ? (
+            <View style={{ marginTop: Spacing.md, gap: Spacing.sm }}>
+              <Text style={styles.confirmStepTitle}>✅ Bạn đã xác nhận</Text>
+              <View style={styles.confirmWaitRow}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={styles.confirmStepText}>
+                  Đang chờ khách nhập mã trên máy của khách…
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={{ marginTop: Spacing.md, gap: Spacing.sm }}>
+                {/*
+                  BE không lưu mốc "khách đã bấm gửi OTP" nên KHÔNG nói chắc được khách
+                  đã gửi hay chưa — chỉ nói đúng thứ biết chắc: khách đã nhập mã chưa.
+                  Nói bừa "khách chưa gửi" thì quản lý đi giục nhầm; nói bừa "đã gửi"
+                  thì quản lý đi tìm một tin nhắn chưa hề tồn tại.
+                */}
+                <Text style={styles.confirmStepTitle}>
+                  {tenantDone ? '✅ Khách đã xác nhận' : '⏳ Chờ khách xác nhận hợp đồng'}
+                </Text>
+                {!tenantDone && (
+                  <Text style={styles.confirmStepText}>
+                    Hướng dẫn khách: mở app →{' '}
+                    <Text style={styles.confirmStrong}>Kích hoạt tài khoản</Text> (SĐT{' '}
+                    {maskTenantPhone(contract.tenantPhone)}) → đặt mật khẩu → đọc hợp đồng →{' '}
+                    <Text style={styles.confirmStrong}>Gửi OTP xác nhận</Text>.
+                  </Text>
+                )}
+                {/* Mã này là CỦA QUẢN LÝ, không phải mã của khách. Copy cũ ghi "gửi tới
+                    SĐT khách" nên quản lý đi hỏi khách đọc mã — sai người, sai mã. */}
+                <Text style={styles.label}>Nhập mã OTP đã gửi tới số của bạn</Text>
+                <Text style={styles.confirmHint}>
+                  Chưa có mã? Mã của bạn được gửi khi khách bấm gửi — hoặc bấm
+                  "Gửi lại mã của tôi" bên dưới.
+                </Text>
+              </View>
+              <TextInput
+                style={[styles.input, styles.otpInput]}
+                value={otp}
+                onChangeText={setOtp}
+                keyboardType="number-pad"
+                maxLength={6}
+                placeholder="------"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TouchableOpacity onPress={resendOtp} disabled={otpSending} style={{ paddingVertical: Spacing.sm }}>
+                <Text style={{ color: Colors.primary, fontWeight: '600', textAlign: 'center' }}>
+                  {otpSending ? 'Đang gửi mã...' : 'Gửi lại mã của tôi'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.primaryBtn, (otp.length !== 6 || busy) && styles.btnDisabled]}
+                onPress={confirm}
+                disabled={otp.length !== 6 || busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  /* KHÔNG còn là "Hoàn tất & kích hoạt": nút này chỉ ghi nhận phần của
+                     quản lý, hợp đồng chỉ hiệu lực khi cả khách cũng đã nhập. */
+                  <Text style={styles.primaryBtnText}>Xác nhận</Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       )}
     </ScrollView>
@@ -1992,6 +2232,13 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   otpInput: { textAlign: 'center', letterSpacing: 8, fontSize: 20, fontWeight: '700' },
+
+  // Khối tiến độ xác nhận hai bên (27/08/2026).
+  confirmStepTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  confirmStepText: { fontSize: 13, color: Colors.textSecondary, lineHeight: 20, flex: 1 },
+  confirmStrong: { fontWeight: '700', color: Colors.textPrimary },
+  confirmHint: { fontSize: 12, color: Colors.textMuted, lineHeight: 18 },
+  confirmWaitRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
 
   methodRow: { flexDirection: 'row', gap: Spacing.md },
   methodChip: {

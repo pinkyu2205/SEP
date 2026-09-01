@@ -24,18 +24,16 @@ const PRIORITY_CONFIG = {
 } as const;
 
 const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> = {
-  electrical: { label: 'Điện',           icon: '⚡' },
-  plumbing:   { label: 'Nước',           icon: '🚰' },
-  furniture:  { label: 'Nội thất',       icon: '🪑' },
   appliance:  { label: 'Trang thiết bị', icon: '📺' },
-  structural: { label: 'Kết cấu',        icon: '🧱' },
-  other:      { label: 'Khác',           icon: '🔧' },
+  furniture:  { label: 'Nội thất',       icon: '🪑' },
+  plumbing:   { label: 'Nước',           icon: '🚰' },
+  electrical: { label: 'Điện',           icon: '⚡' },
 };
 
-// Quick action trên card: PENDING → mở màn chi tiết để duyệt (duyệt BẮT BUỘC
-// chọn category — flow 17/07 chiều — nên không duyệt nhanh ngay trên card được).
+// Quick action trên card: OPEN → mở màn chi tiết để duyệt (duyệt BẮT BUỘC chọn
+// category, hoặc báo lỗi khách — không xử lý nhanh ngay trên card được).
 const QUICK_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
-  pending: '✅ Duyệt yêu cầu',
+  open: '✅ Xử lý yêu cầu',
 };
 
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
@@ -44,7 +42,7 @@ const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
 // inProgress = APPROVED + WAITING_TENANT_CONFIRM + REJECTED).
 type StatusBucket = 'pending' | 'in_progress' | 'resolved' | 'cancelled';
 const bucketOf = (st: TicketStatus): StatusBucket =>
-  st === 'pending' ? 'pending'
+  st === 'open' ? 'pending'
     : st === 'closed' ? 'resolved'
     : st === 'cancelled' ? 'cancelled'
     : 'in_progress';
@@ -111,8 +109,8 @@ const TicketCard: React.FC<{
         )}
         {/* `!== undefined` KHÔNG chắn được null — BE trả null cho phiếu chưa nhập chi phí,
             và null lọt qua điều kiện này rồi nổ ở toLocaleString. Dùng `!= null` chắn cả hai. */}
-        {ticket.repairCost != null && ticket.status === 'closed' && (
-          <Text style={s.cardCost}>{Number(ticket.repairCost).toLocaleString('vi-VN')}đ</Text>
+        {ticket.invoiceAmount != null && ticket.status === 'closed' && (
+          <Text style={s.cardCost}>{Number(ticket.invoiceAmount).toLocaleString('vi-VN')}đ</Text>
         )}
       </View>
 
@@ -229,11 +227,10 @@ export const BuildingMaintenanceScreen: React.FC = () => {
 
   const CAT_FILTERS: { id: CategoryFilter; label: string }[] = [
     { id: 'all',        label: 'Tất cả' },
-    { id: 'electrical', label: '⚡ Điện' },
-    { id: 'plumbing',   label: '🚰 Nước' },
-    { id: 'furniture',  label: '🪑 Nội thất' },
     { id: 'appliance',  label: '📺 Thiết bị' },
-    { id: 'other',      label: '🔧 Khác' },
+    { id: 'furniture',  label: '🪑 Nội thất' },
+    { id: 'plumbing',   label: '🚰 Nước' },
+    { id: 'electrical', label: '⚡ Điện' },
   ];
 
   return (

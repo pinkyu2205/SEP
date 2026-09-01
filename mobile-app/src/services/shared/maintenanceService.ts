@@ -4,21 +4,25 @@ import type {
   CreateMaintenanceRequestDto,
   ApproveMaintenanceRequestDto,
   CompleteMaintenanceRequestDto,
-  ConfirmMaintenanceRequestDto,
-  ResolveCostRequestDto,
+  RejectFaultRequestDto,
+  SubmitSelfRepairRequestDto,
+  VerifyRepairRequestDto,
+  OutstandingDamageDto,
   MaintenanceDashboardDto,
 } from '@/types';
 
 /**
- * Maintenance service — flow mới 17/07 (FE-maintenance-flow):
- *   PENDING → approve → APPROVED → complete → WAITING_TENANT_CONFIRM
- *   → confirm → CLOSED  |  → reject → REJECTED → review-reject.
- * Không còn lịch hẹn / chi phí trong luồng này (billing sau CLOSED).
- * Base path /api/v1/maintenance, JWT tự inject qua realApiClient.
+ * Maintenance service — redesign 01/09/2026 (BE commit 8ddbc3e/28b177b, as-built):
+ *   Luồng A: OPEN → approve → IN_REPAIR → complete → CLOSED
+ *   Luồng B: OPEN → reject-fault → TENANT_FAULT → complete → CLOSED (tự tạo charge)
+ *                  → reject-fault → PENDING_TENANT_REPAIR → submit-self-repair
+ *                    → verify-repair → CLOSED | OUTSTANDING_DAMAGE
+ * Không còn tenant confirm/reject nghiệm thu, không còn reopen — tạo phiếu mới kèm
+ * previousRequestId. Base path /api/v1/maintenance, JWT tự inject qua realApiClient.
  */
 const BASE = '/api/v1/maintenance';
 
-export type MaintenancePhotoType = 'BEFORE' | 'AFTER' | 'REJECT';
+export type MaintenancePhotoType = 'BEFORE' | 'FAULT_EVIDENCE' | 'SELF_REPAIR' | 'AFTER' | 'INVOICE';
 
 export interface SpringPage<T> {
   content: T[];
@@ -56,8 +60,8 @@ export const realMaintenanceService = {
   // ---- Tenant ----
 
   /**
-   * POST / — tenant tạo yêu cầu: title + description + ≥1 ảnh BEFORE (URL). → PENDING.
-   * KHÔNG gửi category/priority — manager gán khi duyệt (flow 17/07 chiều).
+   * POST / — tenant tạo yêu cầu: title + ≥1 ảnh BEFORE (URL) + category (nếu không có
+   * equipmentId). Gửi kèm previousRequestId khi tạo lại vì phiếu trước chưa ổn. → OPEN.
    */
   createRequest: async (body: CreateMaintenanceRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.post<MaintenanceRequestDto>(BASE, body);
@@ -79,31 +83,20 @@ export const realMaintenanceService = {
     return data;
   },
 
-  /** PUT /{id}/confirm — TENANT xác nhận đã sửa xong (chỉ accept=true). → CLOSED */
   /**
-   * agreeToCharge bắt buộc khi ticket có costAgreementStatus=PENDING (khách làm hư,
-   * đang chờ đồng ý bồi thường) — BE ném BusinessException nếu thiếu. Response có thể
-   * kèm `issuedInvoice` (agreeToCharge=true) để FE điều hướng thẳng tới màn hoá đơn/QR.
+   * PUT /{id}/submit-self-repair — tenant nộp ảnh đã tự sửa (Luồng B, status
+   * PENDING_TENANT_REPAIR). Cần ≥1 ảnh SELF_REPAIR — có thể đã upload trước qua
+   * uploadPhotos hoặc gửi kèm ở đây (multipart).
    */
-  confirm: async (id: number, body: ConfirmMaintenanceRequestDto = {}): Promise<MaintenanceRequestDto> => {
-    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm`, {
-      accept: true,
-      ...body,
-    });
-    return data;
-  },
-
-  /**
-   * PUT /{id}/reject — TENANT từ chối nghiệm thu (multipart: reason + files ≥1 ảnh).
-   * → REJECTED. Từ chối KHÔNG dùng confirm accept=false.
-   */
-  reject: async (id: number, reason: string, imageUris: string[]): Promise<MaintenanceRequestDto> => {
+  submitSelfRepair: async (
+    id: number, note: string | undefined, imageUris: string[],
+  ): Promise<MaintenanceRequestDto> => {
     const form = new FormData();
-    form.append('reason', reason);
+    if (note) form.append('note', note);
     await appendFiles(form, imageUris);
-    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(
+      `${BASE}/${id}/submit-self-repair`, form, { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
     return data;
   },
 
@@ -119,8 +112,8 @@ export const realMaintenanceService = {
   },
 
   /**
-   * PUT /{id}/approve — manager duyệt yêu cầu, BẮT BUỘC gán category (phục vụ báo cáo
-   * chi phí), priority tùy chọn. PENDING → APPROVED (phòng → MAINTENANCE).
+   * PUT /{id}/approve — manager duyệt (Luồng A: hao mòn/lỗi chủ), BẮT BUỘC gán
+   * category, priority tùy chọn. OPEN → IN_REPAIR (phòng → MAINTENANCE).
    */
   approve: async (id: number, body: ApproveMaintenanceRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/approve`, body);
@@ -128,53 +121,44 @@ export const realMaintenanceService = {
   },
 
   /**
-   * PUT /{id}/complete — manager báo sửa xong (cần ảnh AFTER: upload trước qua
-   * uploadPhotos hoặc gửi kèm URL). APPROVED → WAITING_TENANT_CONFIRM.
+   * PUT /{id}/reject-fault — manager xác định lỗi do tenant (Luồng B). resolutionPath
+   * MANAGER_REPAIR → TENANT_FAULT; TENANT_SELF_REPAIR → PENDING_TENANT_REPAIR (bắt buộc
+   * kèm selfRepairDeadline + estimatedDamageAmount — BE không tự default).
+   */
+  rejectFault: async (id: number, body: RejectFaultRequestDto): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject-fault`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/verify-repair — manager duyệt kết quả tenant tự sửa (status
+   * PENDING_TENANT_REPAIR, cần đã có ≥1 ảnh SELF_REPAIR). accepted=true → CLOSED;
+   * accepted=false → OUTSTANDING_DAMAGE (ghi outstanding_damage_records, chờ checkout).
+   */
+  verifyRepair: async (id: number, body: VerifyRepairRequestDto): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/verify-repair`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/complete — manager báo sửa xong. Dùng cho cả IN_REPAIR (Luồng A) và
+   * TENANT_FAULT (Luồng B nhánh manager sửa hộ — tự tạo charge + issuedInvoice trong
+   * response). Cần AFTER + INVOICE + repairDescription + invoiceVendor/Date/Amount(>0).
    */
   complete: async (id: number, body: CompleteMaintenanceRequestDto = {}): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/complete`, body);
     return data;
   },
 
-  /**
-   * PUT /{id}/review-reject — manager xem xét từ chối của tenant.
-   * approve=true → APPROVED (sửa lại, ảnh AFTER cũ bị xóa);
-   * approve=false → WAITING_TENANT_CONFIRM (giữ kết quả, chờ tenant/auto-confirm).
-   * BE 30/07: approve=false BẮT BUỘC kèm note (lý do giữ nguyên kết quả) — thiếu là 422.
-   */
-  reviewReject: async (id: number, approve: boolean, note?: string): Promise<MaintenanceRequestDto> => {
-    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/review-reject`, {
-      approve,
-      ...(note ? { note } : {}),
-    });
-    return data;
-  },
-
-  /**
-   * PUT /{id}/resolve-cost — manager xử lý khoản bồi thường treo (PENDING/DISPUTED),
-   * dùng được cả trên ticket đã CLOSED/CANCELLED. CHARGE trả kèm issuedInvoice.
-   */
-  resolveCost: async (id: number, body: ResolveCostRequestDto): Promise<MaintenanceRequestDto> => {
-    const { data } = await realApiClient.put<MaintenanceRequestDto>(
-      `${BASE}/${id}/resolve-cost`, body,
-    );
-    return data;
-  },
-
-  /**
-   * GET /pending-cost-resolution — ticket còn khoản bồi thường treo (mọi status,
-   * kể cả CLOSED/CANCELLED — vd khách khiếu nại xong ticket đã đóng, hoặc auto-confirm).
-   */
-  getPendingCostResolution: async (
-    params: { propertyId?: number; roomId?: number } = {},
-  ): Promise<MaintenanceRequestDto[]> => {
-    const { data } = await realApiClient.get<MaintenanceRequestDto[]>(
-      `${BASE}/pending-cost-resolution`, { params },
-    );
+  /** GET /outstanding-damages — thiết bị hư chưa xử lý, chờ trừ cọc lúc checkout. */
+  getOutstandingDamages: async (
+    params: { propertyId?: number; tenantContractId?: number } = {},
+  ): Promise<OutstandingDamageDto[]> => {
+    const { data } = await realApiClient.get<OutstandingDamageDto[]>(`${BASE}/outstanding-damages`, { params });
     return data ?? [];
   },
 
-  /** PUT /{id}/cancel — manager hủy (mọi trạng thái trừ CLOSED/CANCELLED). */
+  /** PUT /{id}/cancel — hủy (tenant chỉ khi OPEN; manager khi OPEN/IN_REPAIR). */
   cancel: async (id: number, reason?: string): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/cancel`, null, {
       params: reason ? { reason } : {},
@@ -184,7 +168,7 @@ export const realMaintenanceService = {
 
   // ---- Shared ----
 
-  /** POST /{id}/photos?type= — upload ảnh BEFORE / AFTER / REJECT (multipart). */
+  /** POST /{id}/photos?type= — upload ảnh BEFORE / FAULT_EVIDENCE / SELF_REPAIR / AFTER / INVOICE. */
   uploadPhotos: async (
     id: number,
     uris: string[],
@@ -199,7 +183,7 @@ export const realMaintenanceService = {
     return data;
   },
 
-  /** GET /dashboard — pending / inProgress (APPROVED+WAITING+REJECTED) / resolved (CLOSED) / cancelled. */
+  /** GET /dashboard — open / inProgress / resolved / cancelled / totalRepairCost. */
   getDashboard: async (propertyId?: number): Promise<MaintenanceDashboardDto> => {
     const { data } = await realApiClient.get<MaintenanceDashboardDto>(`${BASE}/dashboard`, {
       params: propertyId ? { propertyId } : {},

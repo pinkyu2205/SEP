@@ -39,7 +39,18 @@ import { SESSION_KEYS } from '@/services/core/session';
 }
 
 export interface BillingRealtimeEvent {
-  event: 'INVOICE_PAID' | string;
+  /**
+   * · `INVOICE_PAID`              — hoá đơn chuyển PAID (ca gốc của hook này)
+   * · `CONTRACT_CONFIRM_PROGRESS` — một bên vừa ký OTP xác nhận hợp đồng
+   * · `CONTRACT_ACTIVATED`        — hợp đồng vừa có hiệu lực
+   *
+   * Hai event hợp đồng dùng CHUNG queue `/user/queue/billing` (BE `RealtimeEventServiceImpl
+   * .publishContractEvent`, commit `bd2503b`) — đó là lý do chúng nằm ở đây thay vì
+   * trong một hook riêng: thêm hook là thêm một WebSocket connection thứ hai cho cùng
+   * một luồng dữ liệu.
+   */
+  event: 'INVOICE_PAID' | 'CONTRACT_CONFIRM_PROGRESS' | 'CONTRACT_ACTIVATED' | string;
+  /** Không có với hai event hợp đồng — đọc `contractId` thay vì field này. */
   invoiceId: number;
   invoiceCode?: string;
   /** RENT · ELECTRICITY · WATER · SERVICE · MAINTENANCE · OTHER (= cọc onboard) */
@@ -61,6 +72,12 @@ export interface BillingRealtimeEvent {
   paymentMethod?: string;
   transactionId?: string;
   paidAt?: string;
+
+  /** Chỉ có với `CONTRACT_CONFIRM_PROGRESS` / `CONTRACT_ACTIVATED`. */
+  tenantOtpVerified?: boolean;
+  managerOtpVerified?: boolean;
+  contractStatus?: string;
+  paymentStatus?: string;
 }
 
 /** Base URL là http(s) → đổi sang ws(s). Web (Metro proxy) để trống thì lấy origin. */

@@ -5,16 +5,17 @@ import { formatDate } from '@/utils';
 import type { MaintenancePhotoHistoryDto } from '@/types';
 
 const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: string }[] = [
-  { type: 'BEFORE', label: '📸 Trước sửa chữa', color: Colors.warning },
-  { type: 'AFTER',  label: '🛠️ Sau sửa chữa',   color: Colors.success },
-  { type: 'REJECT', label: '↩️ Khách từ chối',   color: Colors.error },
+  { type: 'BEFORE',         label: '📸 Hiện trạng ban đầu', color: Colors.warning },
+  { type: 'FAULT_EVIDENCE', label: '⚠️ Bằng chứng lỗi',      color: '#DC2626' },
+  { type: 'SELF_REPAIR',    label: '🛠 Tenant tự sửa',       color: '#F97316' },
+  { type: 'AFTER',          label: '🖼️ Sau sửa chữa',        color: Colors.success },
+  { type: 'INVOICE',        label: '🧾 Hoá đơn',             color: '#0369A1' },
 ];
 
 /**
- * Log ảnh đầy đủ MỌI vòng sửa/từ chối (BE 23/07/2026, field `photoHistory`) — khác với
- * beforeImages/afterImages/rejectImages chỉ là snapshot vòng hiện tại (bị reset khi sửa lại).
- * Dùng để đối chiếu khi có tranh chấp: xem lại ảnh AFTER lần 1 dù đã sang lần 2, lý do từ
- * chối lần trước dù đã được xử lý, v.v. Dùng chung cho cả tenant và manager.
+ * Log ảnh đầy đủ MỌI vòng (append-only, field `photoHistory`) — khác với
+ * beforeImages/afterImages/invoiceImages... chỉ là snapshot vòng hiện tại. Dùng để đối
+ * chiếu khi có tranh chấp. Dùng chung cho cả tenant và manager.
  */
 export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistoryDto[] }> = ({ photos }) => {
   if (!photos || photos.length === 0) return null;

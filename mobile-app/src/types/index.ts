@@ -117,17 +117,31 @@ export interface PaymentTransaction {
 }
 
 // ======================== MAINTENANCE (Bảo trì) ========================
-// Flow mới 17/07 (FE-maintenance-flow): PENDING → APPROVED → WAITING_TENANT_CONFIRM
-// → CLOSED, nhánh REJECTED (tenant từ chối) + CANCELLED. Status cũ đã migrate.
+// Redesign 01/09/2026 (BE commit 8ddbc3e/28b177b — as-built, xem
+// docs/maintenance-implementation-spec.md): 2 luồng.
+//   Luồng A (hao mòn/lỗi chủ):  OPEN → IN_REPAIR → CLOSED
+//   Luồng B (lỗi tenant):       OPEN → TENANT_FAULT → CLOSED (manager sửa hộ, tự tạo charge)
+//                                OPEN → PENDING_TENANT_REPAIR → CLOSED | OUTSTANDING_DAMAGE
+// KHÔNG còn tenant confirm/reject nghiệm thu, KHÔNG còn reopen cùng phiếu — không hài
+// lòng thì tạo phiếu mới kèm previousRequestId. Chi phí không còn dispute trong module
+// này — HOST_PAID chỉ hiển thị tham khảo, TENANT_CHARGE_PENDING/DEPOSIT_DEDUCTION_PENDING
+// tự động qua billing/checkout.
 export type MaintenanceStatus =
-  | 'pending'          // chờ manager duyệt
-  | 'approved'         // đã duyệt, chờ thợ ngoài sửa
-  | 'waiting_confirm'  // manager báo xong, chờ tenant xác nhận (auto-close 3 ngày)
-  | 'rejected'         // tenant từ chối kèm lý do + ảnh, chờ manager xem xét
-  | 'closed'           // kết thúc
+  | 'open'                    // chờ manager check
+  | 'in_repair'                // đang sửa (Luồng A, hoặc Luồng B nhánh manager sửa hộ)
+  | 'tenant_fault'              // lỗi tenant, manager sẽ sửa hộ rồi charge
+  | 'pending_tenant_repair'    // giao tenant tự sửa trước deadline
+  | 'outstanding_damage'       // quá hạn/không đạt — chờ checkout trừ cọc
+  | 'closed'                   // hoàn tất
   | 'cancelled';
-export type MaintenanceCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'structural' | 'other';
+export type MaintenanceCategory = 'appliance' | 'furniture' | 'plumbing' | 'electrical';
 export type MaintenancePriority = 'low' | 'medium' | 'high' | 'urgent';
+export type MaintenanceFlowType = 'normal_wear' | 'tenant_fault';
+/** Gợi ý FE hiển thị khối chi phí — xem MaintenanceBillingHint (BE). */
+export type MaintenanceBillingHint =
+  | 'host_paid' | 'tenant_charge_pending' | 'deposit_deduction_pending' | 'none';
+export type FaultResolutionPath = 'manager_repair' | 'tenant_self_repair';
+export type DamageCause = 'wear' | 'tenant_misuse' | 'tenant_modification' | 'misuse';
 
 export interface MaintenanceTimeline {
   status: MaintenanceStatus;
@@ -148,46 +162,48 @@ export interface MaintenanceRequest {
   tenantPhone?: string;
   title: string;
   description: string;
-  /** null khi ticket còn PENDING — manager gán lúc duyệt (flow 17/07 chiều). */
+  /** null khi ticket còn OPEN — manager gán lúc duyệt. */
   category?: MaintenanceCategory;
   /** Optional — manager có thể gán khi duyệt, không bắt buộc. */
   priority?: MaintenancePriority;
   status: MaintenanceStatus;
+  flowType?: MaintenanceFlowType;
+  /** Gợi ý FE render khối chi phí — xem MaintenanceBillingHint. */
+  billingHint?: MaintenanceBillingHint;
   images: string[];
-  /** Ảnh phân loại theo flow mới — ưu tiên dùng thay cho `images` (gộp cả 3). */
+  /** Ảnh phân loại — ưu tiên dùng thay cho `images` (gộp legacy). */
   beforeImages?: string[];
   afterImages?: string[];
-  rejectImages?: string[];
-  /** Lý do tenant từ chối nghiệm thu (status = rejected). */
-  rejectReason?: string;
+  invoiceImages?: string[];
+  faultEvidenceImages?: string[];
+  selfRepairImages?: string[];
   resolutionNote?: string;
+  /** Mô tả việc đã sửa (bắt buộc khi manager complete()). */
+  repairDescription?: string;
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
+  /** Id phiếu trước đó nếu đây là phiếu tạo lại (khách chưa ổn với lần sửa trước). */
+  previousRequestId?: string;
+  damageCause?: DamageCause;
+  /** Lý do manager ghi khi reject-fault (lỗi do tenant). */
+  faultReason?: string;
+  faultResolutionPath?: FaultResolutionPath;
+  /** Hạn tenant tự sửa (status = pending_tenant_repair). */
+  selfRepairDeadline?: string;
+  /** Ước tính thiệt hại — chốt số cuối lúc checkout. */
+  estimatedDamageAmount?: number;
   assignedTo?: string;
-  repairCost?: number;
   resolvedAt?: string;
   timeline: MaintenanceTimeline[];
   equipmentId?: string;
   equipmentName?: string;
   createdAt: string;
   updatedAt: string;
-  estimatedCompletionDate?: string;
-  actualCompletionDate?: string;
-  doneAt?: string;
-  tenantConfirmedAt?: string;
-  /** Ai trả phí sửa (luồng hóa đơn sau CLOSED): HOST = công ty · TENANT = khách làm hư. */
-  costPaidBy?: 'HOST' | 'TENANT';
-  /** Nguyên nhân hư hỏng — chỉ có ý nghĩa khi costPaidBy=TENANT. */
-  cause?: 'wear' | 'misuse';
-  /**
-   * Trạng thái đồng ý bồi thường (28/07/2026, BE-DONE-maintenance-damage-compensation) —
-   * độc lập với `status` chính của ticket. 'pending' → tenant cần trả lời agreeToCharge
-   * khi confirm(); 'disputed' → tenant đã khiếu nại, không có charge nào được tạo.
-   */
-  costAgreementStatus?: 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived';
-  /** Lý do khiếu nại số tiền (khi costAgreementStatus=disputed). */
-  costDisputeReason?: string;
-  /** Số lần tenant đã từ chối nghiệm thu. */
-  reopenCount?: number;
-  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
+  issuedInvoice?: MaintenanceIssuedInvoiceDto;
+  /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
 }
 
@@ -198,25 +214,27 @@ export interface CreateMaintenanceRequest {
   equipmentId?: string;
 }
 
-// ===== Real API DTOs (FE-maintenance-flow 17/07) — enum UPPERCASE khớp BE =====
-// BE đã migrate status legacy (ACKNOWLEDGED/SCHEDULED/...) về bộ 6 giá trị này;
-// mapper vẫn nhận string legacy phòng dữ liệu cũ (xem BE_STATUS_MAP).
+// ===== Real API DTOs (redesign 01/09/2026) — enum UPPERCASE khớp BE =====
 export type MaintenanceReqStatus =
-  | 'PENDING' | 'APPROVED' | 'WAITING_TENANT_CONFIRM'
-  | 'REJECTED' | 'CLOSED' | 'CANCELLED';
+  | 'OPEN' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
+  | 'OUTSTANDING_DAMAGE' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-export type MaintenanceReqCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
+export type MaintenanceReqCategory = 'APPLIANCE' | 'FURNITURE' | 'PLUMBING' | 'ELECTRICAL';
+export type MaintenanceReqFlowType = 'NORMAL_WEAR' | 'TENANT_FAULT';
+export type MaintenanceReqBillingHint =
+  | 'HOST_PAID' | 'TENANT_CHARGE_PENDING' | 'DEPOSIT_DEDUCTION_PENDING' | 'NONE';
+export type MaintenanceReqFaultResolutionPath = 'MANAGER_REPAIR' | 'TENANT_SELF_REPAIR';
+export type MaintenanceReqDamageCause = 'WEAR' | 'TENANT_MISUSE' | 'TENANT_MODIFICATION' | 'MISUSE';
 
 export interface MaintenancePhotoHistoryDto {
-  type: 'BEFORE' | 'AFTER' | 'REJECT';
+  type: 'BEFORE' | 'FAULT_EVIDENCE' | 'SELF_REPAIR' | 'AFTER' | 'INVOICE';
   url: string;
   createdAt: string;
 }
 
 export interface MaintenanceTimelineDto {
   // string (không phải MaintenanceReqStatus) vì timeline cũ còn chứa status legacy
-  // trước migrate (ACKNOWLEDGED, SCHEDULED, DONE...) — mapper tự quy về bộ mới.
+  // trước migrate 01/09 (PENDING/APPROVED/...) — mapper tự quy về bộ mới.
   oldStatus?: string;
   newStatus: string;
   note?: string;
@@ -228,10 +246,11 @@ export interface MaintenanceTimelineDto {
 export interface MaintenanceRequestDto {
   id: number;
   requestCode: string;
-  /** Tiêu đề sự cố tenant nhập (flow 17/07 chiều — field riêng, không còn ghép vào description). */
   title?: string;
   status: MaintenanceReqStatus;
-  /** null khi PENDING — manager gán lúc duyệt. */
+  flowType?: MaintenanceReqFlowType;
+  billingHint?: MaintenanceReqBillingHint;
+  /** null khi OPEN chưa duyệt — manager gán lúc duyệt. */
   category?: MaintenanceReqCategory | null;
   /** null trừ khi manager gán lúc duyệt (optional). */
   priority?: MaintenanceReqPriority | null;
@@ -249,32 +268,32 @@ export interface MaintenanceRequestDto {
   assignedManagerId?: number;
   assignedManagerName?: string;
   resolutionNote?: string;
-  /** Lý do tenant từ chối (status REJECTED). */
-  rejectReason?: string;
-  /** Số lần tenant đã từ chối nghiệm thu. */
-  reopenCount?: number;
-  /** Ảnh phân loại — ưu tiên hiển thị 3 field này; `images` là gộp cả ba (legacy). */
+  repairDescription?: string;
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
+  previousRequestId?: number;
+  damageCause?: MaintenanceReqDamageCause;
+  faultReason?: string;
+  faultResolutionPath?: MaintenanceReqFaultResolutionPath;
+  selfRepairDeadline?: string;
+  estimatedDamageAmount?: number;
+  /** Ảnh phân loại — ưu tiên hiển thị các field này; `images` là gộp tất cả (legacy). */
   beforeImages?: string[];
   afterImages?: string[];
-  rejectImages?: string[];
+  invoiceImages?: string[];
+  faultEvidenceImages?: string[];
+  selfRepairImages?: string[];
   images: string[];
-  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
   acknowledgedAt?: string;
   resolvedAt?: string;
-  tenantConfirmedAt?: string;
   timeline: MaintenanceTimelineDto[];
   createdAt: string;
   updatedAt: string;
-  repairCost?: number;
-  costPaidBy?: 'HOST' | 'TENANT';
-  cause?: 'WEAR' | 'MISUSE';
-  scheduledDate?: string;
-  /** 28/07/2026 — bồi thường khách làm hư (BE-DONE-maintenance-damage-compensation).
-   * WAIVED (30/07): manager miễn thu qua /resolve-cost — khác NOT_APPLICABLE (chưa từng có phí). */
-  costAgreementStatus?: 'NOT_APPLICABLE' | 'PENDING' | 'AGREED' | 'DISPUTED' | 'WAIVED';
-  costDisputeReason?: string;
-  /** Chỉ có khi vừa confirm(agreeToCharge=true) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
+  /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
   issuedInvoice?: MaintenanceIssuedInvoiceDto;
 }
 
@@ -300,71 +319,88 @@ export interface MaintenanceIssuedInvoiceDto {
   payosOrderCode?: number;
 }
 
-// Flow 17/07: tenant không gửi priority — manager gán khi duyệt.
-// category: xem field riêng bên dưới (thêm 27/07 — bắt buộc khi báo hỏng không gắn thiết bị).
-// roomId/propertyId (fix 27/07): thuê theo phòng → gửi roomId; thuê nguyên căn → roomId
-// để trống, propertyId BẮT BUỘC thay thế (BE không tự suy được, thiếu sẽ lỗi rõ ràng
-// thay vì 500 như bản trước). Xem docs/BE-FIX-maintenance-wholehouse-roomId-2026-07-27.md.
+// Tenant không gửi priority — manager gán khi duyệt. roomId/propertyId: thuê theo
+// phòng → gửi roomId; thuê nguyên căn → roomId để trống, propertyId BẮT BUỘC thay thế.
 export interface CreateMaintenanceRequestDto {
   roomId?: number;
   /** Bắt buộc khi KHÔNG có roomId (thuê nguyên căn). */
   propertyId?: number;
   equipmentId?: number;
+  /** Id phiếu trước — dùng khi tạo lại vì phiếu cũ đã CLOSED nhưng chưa ổn. */
+  previousRequestId?: number;
   /** Bắt buộc, ≤200 ký tự — hiển thị trên list/detail. */
   title: string;
-  /** Optional từ 27/07 — BE bỏ validate bắt buộc. */
   description?: string;
-  /**
-   * Bắt buộc khi KHÔNG có equipmentId (STRUCTURAL | ELECTRICAL | PLUMBING | OTHER —
-   * không dùng APPLIANCE/FURNITURE ở nhánh này, BE tự chặn). Optional khi có equipmentId
-   * (manager gán lúc duyệt). Xem docs/FE-maintenance-non-equipment-create.md (repo BE).
-   */
+  /** Bắt buộc khi KHÔNG có equipmentId — APPLIANCE | FURNITURE | PLUMBING | ELECTRICAL. */
   category?: string;
   images: string[];
 }
 
-/** PUT /{id}/approve — manager duyệt: BẮT BUỘC gán category, priority tùy chọn. */
+/** PUT /{id}/approve — manager duyệt (Luồng A): BẮT BUỘC gán category, priority tùy chọn. */
 export interface ApproveMaintenanceRequestDto {
   category: MaintenanceReqCategory;
   priority?: MaintenanceReqPriority;
 }
 
 /**
- * PUT /{id}/complete — manager báo sửa xong (cần ảnh AFTER trước hoặc gửi kèm).
- * costPaidBy=TENANT bắt buộc kèm cause + repairCost>0 (BE validate, xem
- * BE-DONE-maintenance-damage-compensation-2026-07-28.md).
+ * PUT /{id}/complete — manager báo sửa xong, dùng cho cả IN_REPAIR (Luồng A) lẫn
+ * TENANT_FAULT + MANAGER_REPAIR (Luồng B — tự tạo charge + issuedInvoice trong response).
+ * BE bắt buộc: repairDescription, afterImages, invoiceImages, invoiceVendor, invoiceDate,
+ * invoiceAmount(>0) — afterImages/invoiceImages có thể đã upload trước qua POST /photos.
  */
 export interface CompleteMaintenanceRequestDto {
   resolutionNote?: string;
+  repairDescription?: string;
   afterImages?: string[];
-  costPaidBy?: 'HOST' | 'TENANT';
-  cause?: 'WEAR' | 'MISUSE';
-  repairCost?: number;
-}
-
-/** PUT /{id}/confirm — tenant nghiệm thu; agreeToCharge bắt buộc khi costAgreementStatus=PENDING. */
-export interface ConfirmMaintenanceRequestDto {
-  accept?: boolean;
-  agreeToCharge?: boolean;
-  chargeDisputeReason?: string;
+  invoiceImages?: string[];
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
 }
 
 /**
- * PUT /{id}/resolve-cost (BE 30/07 — BE-HANDOFF-maintenance-flow-deadends) — manager xử lý
- * khoản bồi thường treo (costAgreementStatus PENDING/DISPUTED), dùng được cả khi ticket đã
- * CLOSED/CANCELLED. CHARGE: chốt thu (repairCost mới ghi đè số cũ nếu gửi) + phát hoá đơn
- * ngay (response kèm issuedInvoice). WAIVE: miễn thu → WAIVED.
+ * PUT /{id}/reject-fault — manager xác định lỗi do tenant (Luồng B). BE bắt buộc
+ * faultReason, faultEvidenceImages(≥1), resolutionPath; TENANT_SELF_REPAIR còn bắt buộc
+ * thêm selfRepairDeadline + estimatedDamageAmount(>0) — BE KHÔNG tự default 14 ngày dù
+ * config có, FE phải tự gửi (xem docs/BE-YEUCAU-chot-redesign-maintenance-2026-09-01.md).
  */
-export interface ResolveCostRequestDto {
-  action: 'CHARGE' | 'WAIVE';
-  /** Chỉ dùng với CHARGE — bỏ trống = giữ số tiền cũ trên ticket. */
-  repairCost?: number;
+export interface RejectFaultRequestDto {
+  faultReason: string;
+  faultEvidenceImages: string[];
+  resolutionPath: MaintenanceReqFaultResolutionPath;
+  selfRepairDeadline?: string;
+  estimatedDamageAmount?: number;
+}
+
+/** PUT /{id}/submit-self-repair — tenant nộp ảnh đã tự sửa (JSON hoặc multipart). */
+export interface SubmitSelfRepairRequestDto {
   note?: string;
+  selfRepairImages?: string[];
+}
+
+/** PUT /{id}/verify-repair — manager duyệt kết quả tenant tự sửa. */
+export interface VerifyRepairRequestDto {
+  accepted: boolean;
+  note?: string;
+  verifyImages?: string[];
+}
+
+/** GET /outstanding-damages — thiết bị hư chưa xử lý, chờ trừ cọc lúc checkout. */
+export interface OutstandingDamageDto {
+  id: number;
+  maintenanceRequestId: number;
+  tenantContractId: number;
+  equipmentId?: number;
+  label: string;
+  estimatedAmount: number;
+  note?: string;
+  photos: string[];
+  createdAt: string;
 }
 
 export interface MaintenanceDashboardDto {
-  total: number;
-  pending: number;
+  open: number;
   inProgress: number;
   resolved: number;
   cancelled: number;

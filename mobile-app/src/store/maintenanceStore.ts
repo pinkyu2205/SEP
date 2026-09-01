@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { MaintenanceRequest, MaintenanceStatus, MaintenancePhotoHistoryDto } from '@/types';
+import { MaintenanceRequest, MaintenanceStatus, MaintenanceBillingHint, MaintenancePhotoHistoryDto } from '@/types';
 
 // ===================== TENANT MAINTENANCE REQUESTS =====================
 
-const ACTIVE_STATUSES: MaintenanceStatus[] = ['pending', 'approved', 'waiting_confirm', 'rejected'];
+const ACTIVE_STATUSES: MaintenanceStatus[] =
+  ['open', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
 
 /**
@@ -42,17 +43,21 @@ export const useTenantRequests = () => {
 };
 
 // ===================== TYPES =====================
-// Flow mới 17/07 — khớp MaintenanceStatus bên types/index.ts.
+// Redesign 01/09/2026 — khớp MaintenanceStatus bên types/index.ts.
 export type TicketStatus =
-  | 'pending'          // chờ manager duyệt
-  | 'approved'         // đã duyệt, chờ thợ ngoài sửa
-  | 'waiting_confirm'  // báo xong, chờ tenant xác nhận
-  | 'rejected'         // tenant từ chối kèm lý do + ảnh
+  | 'open'                  // chờ manager check
+  | 'in_repair'              // đang sửa (Luồng A hoặc Luồng B nhánh manager sửa hộ)
+  | 'tenant_fault'            // lỗi tenant, manager sẽ sửa hộ rồi charge
+  | 'pending_tenant_repair'  // giao tenant tự sửa trước deadline
+  | 'outstanding_damage'     // quá hạn/không đạt — chờ checkout trừ cọc
   | 'closed'
   | 'cancelled';
-export type TicketCategory = 'electrical' | 'plumbing' | 'furniture' | 'appliance' | 'structural' | 'other';
+export type TicketCategory = 'appliance' | 'furniture' | 'plumbing' | 'electrical';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
-export type CostPaidBy     = 'host' | 'tenant';
+export type TicketFlowType = 'normal_wear' | 'tenant_fault';
+export type TicketBillingHint = 'host_paid' | 'tenant_charge_pending' | 'deposit_deduction_pending' | 'none';
+export type FaultResolutionPath = 'manager_repair' | 'tenant_self_repair';
+export type DamageCause = 'wear' | 'tenant_misuse' | 'tenant_modification' | 'misuse';
 
 export interface TimelineEntry {
   status: TicketStatus;
@@ -63,7 +68,7 @@ export interface TimelineEntry {
 
 export interface PhotoEvidence {
   id: string;
-  type: 'before' | 'after' | 'reject';
+  type: 'before' | 'after' | 'invoice' | 'fault_evidence' | 'self_repair';
   uri: string;
   caption?: string;
   capturedAt: string;
@@ -80,30 +85,40 @@ export interface MaintenanceTicket {
   tenantPhone: string;
   title: string;
   description: string;
-  /** null/undefined khi PENDING — manager gán lúc duyệt (flow 17/07 chiều). */
+  /** null/undefined khi OPEN chưa duyệt — manager gán lúc duyệt. */
   category?: TicketCategory;
   /** Optional — manager có thể gán khi duyệt. */
   priority?: TicketPriority;
   status: TicketStatus;
-  /** Ảnh gộp (legacy) — ưu tiên 3 field phân loại bên dưới. */
+  flowType?: TicketFlowType;
+  /** Gợi ý FE render khối chi phí — xem TicketBillingHint. */
+  billingHint?: TicketBillingHint;
+  /** Ảnh gộp (legacy) — ưu tiên các field phân loại bên dưới. */
   images: string[];
   beforeImages?: string[];
   afterImages?: string[];
-  rejectImages?: string[];
-  rejectReason?: string;
+  invoiceImages?: string[];
+  faultEvidenceImages?: string[];
+  selfRepairImages?: string[];
   resolutionNote?: string;
+  /** Mô tả việc đã sửa (bắt buộc khi complete()). */
+  repairDescription?: string;
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
+  previousRequestId?: string;
+  damageCause?: DamageCause;
+  /** Lý do manager ghi khi reject-fault. */
+  faultReason?: string;
+  faultResolutionPath?: FaultResolutionPath;
+  /** Hạn tenant tự sửa (status = pending_tenant_repair). */
+  selfRepairDeadline?: string;
+  /** Ước tính thiệt hại — chốt số cuối lúc checkout. */
+  estimatedDamageAmount?: number;
   photos: PhotoEvidence[];
   assignedTo?: string;
-  /** Chi phí thuộc luồng hóa đơn sau CLOSED — chỉ hiển thị nếu BE còn trả. */
-  repairCost?: number;
-  costPaidBy?: CostPaidBy;
-  cause?: 'wear' | 'misuse';
-  /** 28/07/2026 — bồi thường khách làm hư, độc lập với `status` chính. */
-  costAgreementStatus?: 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived';
-  costDisputeReason?: string;
   resolvedAt?: string;
-  tenantConfirmedAt?: string;
-  reopenCount?: number;
   timeline: TimelineEntry[];
   equipmentName?: string;
   equipmentQr?: string;
@@ -111,7 +126,9 @@ export interface MaintenanceTicket {
   lastRepairDate?: string;
   createdAt: string;
   updatedAt: string;
-  /** Log ảnh đầy đủ mọi vòng (BE 23/07/2026) — không bị mất khi sửa lại/từ chối lại. */
+  /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo. */
+  issuedInvoice?: MaintenanceRequest['issuedInvoice'];
+  /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
 }
 
