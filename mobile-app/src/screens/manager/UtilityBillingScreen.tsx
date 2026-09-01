@@ -31,8 +31,17 @@ type MainTab  = 'electricity' | 'water' | 'history';
  * `evn_bill` = XEM hoá đơn EVN admin đã phát hành (trước 13/08/2026 là `evn_upload`,
  * manager tự chụp/nhập). Nhà nguyên căn kết thúc luôn ở bước này.
  */
-type ElecStep = 'select_property' | 'evn_bill' | 'room_readings' | 'review' | 'done';
-type WaterStep = 'bill_entry' | 'room_readings' | 'review' | 'done';
+/*
+  Điện và Nước đi CÙNG MỘT khuôn 3 bước: chọn nhà → hoá đơn cả nhà → chỉ số từng phòng.
+  Trước 30/08/2026 hai luồng lệch nhau: Nước nhét ô chọn nhà vào chung bước hoá đơn nên
+  thanh bước chỉ có 2 nấc, còn Điện thì quảng cáo 4 nấc trong đó nấc cuối không tồn tại.
+  Cùng một việc mà hai tab đếm bước khác nhau thì không ai nhớ nổi đang ở đâu.
+
+  `review` đã bỏ khỏi cả hai: từ khi gửi hoá đơn theo TỪNG PHÒNG ngay ở bước chỉ số thì
+  không còn màn xem trước gộp cả nhà. `setElecStep('review')` cũng chưa từng được gọi.
+*/
+type ElecStep = 'select_property' | 'evn_bill' | 'room_readings' | 'done';
+type WaterStep = 'select_property' | 'bill_entry' | 'room_readings' | 'done';
 
 /**
  * Ảnh sắp chụp: mặt đồng hồ ĐIỆN hoặc NƯỚC của 1 phòng.
@@ -80,6 +89,35 @@ interface WaterBillData {
  * Chỉ số nước cũng là tiền, cũng cần bằng chứng ảnh y như điện.
  */
 type RoomWaterReading = RoomMeterReading;
+
+/**
+ * Hoá đơn điện/nước của một phòng đã đi tới đâu.
+ *
+ * `viewed = null` nghĩa là KHÔNG BIẾT chứ không phải "chưa xem" — hoá đơn phát hành trước
+ * khi BE gắn khoá tra cứu (30/08/2026) thì không truy được. Xem `UtilityInvoiceLite.tenantViewed`.
+ */
+interface DeliveryState {
+  paid: boolean;
+  viewed: boolean | null;
+}
+
+/**
+ * Ba mốc giao hoá đơn, hiện thành MỘT dòng.
+ *
+ * Vì sao cần: quản lý hay bị khách nói "tôi có nhận được hoá đơn đâu". Trước đây màn này
+ * chỉ nói được "đã gửi" — tức chỉ là lời của hệ thống, không đối chất được. Nay phân biệt
+ * rõ khách đã MỞ hay chưa.
+ */
+const DeliveryLine = ({ state }: { state?: DeliveryState }) => {
+  if (!state) return null;
+  const { paid, viewed } = state;
+  const text = paid ? '✓ Khách đã thanh toán'
+    : viewed === true ? '👁 Khách đã xem — chưa thanh toán'
+      : viewed === false ? '📬 Đã chuyển — khách chưa mở'
+        : '📬 Đã chuyển'; // viewed == null: không tra được, đừng đoán
+  const color = paid ? Colors.success : viewed === true ? Colors.info : Colors.textMuted;
+  return <Text style={[styles.deliveryLine, { color }]}>{text}</Text>;
+};
 
 interface HistoryEntry {
   id: string;
@@ -346,14 +384,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * Nạp từ BE mỗi lần vào bước ghi chỉ số nên khoá còn hiệu lực qua cả lần mở app khác.
    */
   const [elecSentKeys,  setElecSentKeys]  = useState<Set<string>>(new Set());
+  const [elecDelivery,  setElecDelivery]  = useState<Map<string, DeliveryState>>(new Map());
   /** Nhà nguyên căn đã gửi hoá đơn điện kỳ này — xem chú thích chỗ setElecHouseSent. */
   const [elecHouseSent, setElecHouseSent] = useState(false);
   const [waterSentKeys, setWaterSentKeys] = useState<Set<string>>(new Set());
+  const [waterDelivery, setWaterDelivery] = useState<Map<string, DeliveryState>>(new Map());
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
   const [waterBillData,    setWaterBillData]    = useState<WaterBillData | null>(null);
-  const [waterStep,        setWaterStep]        = useState<WaterStep>('bill_entry');
+  const [waterStep,        setWaterStep]        = useState<WaterStep>('select_property');
   /** Hoá đơn nước admin đã chốt cho kỳ này — manager CHỈ ĐỌC (14/08/2026). */
   const [waterBill,        setWaterBill]        = useState<WaterBill | null>(null);
   const [waterBillLoading, setWaterBillLoading] = useState(false);
@@ -491,9 +531,17 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     houseSent: boolean;
     /** Tổng tiêu thụ CÁC PHÒNG đã phát hành trong kỳ — nền để tính hạn mức còn lại. */
     issuedQty: number;
+    /**
+     * Hoá đơn kỳ này đã tới tay khách chưa — khoá giống `sentKeys`.
+     *
+     * Có để trả lời câu quản lý hay bị hỏi ngược: khách bảo "tôi có nhận được đâu".
+     * Không có nó thì quản lý chỉ biết "hệ thống báo đã gửi", không đối chất được.
+     */
+    delivery: Map<string, DeliveryState>;
   }> => {
     const lastReadings = new Map<string, number>();
     const sentKeys = new Set<string>();
+    const delivery = new Map<string, DeliveryState>();
     let issuedQty = 0;
     /** Nhà nguyên căn đã có hoá đơn kỳ này chưa — cờ riêng, không phụ thuộc khoá chuỗi. */
     let houseSent = false;
@@ -529,6 +577,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           || normPeriod(inv.billingPeriod) === wanted;
         if (!samePeriod) continue;
         sentKeys.add(key);
+        // Mảng đã sắp mới-nhất-trước nên bản ghi ĐẦU TIÊN của mỗi phòng là kỳ gần nhất;
+        // đừng để hoá đơn cũ hơn ghi đè trạng thái.
+        if (!delivery.has(key)) {
+          delivery.set(key, {
+            paid: (inv.status || '').toUpperCase() === 'PAID',
+            viewed: inv.tenantViewed ?? null,
+          });
+        }
         if (isHouse) houseSent = true;
         // Chỉ cộng hoá đơn PHÒNG: hạn mức là để so tổng các phòng với giấy của cả toà.
         if (!isHouse && inv.consumption != null) issuedQty += Number(inv.consumption);
@@ -537,7 +593,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
       // Cố tình KHÔNG chặn gửi khi lỗi mạng: chặn nhầm còn tệ hơn, vì BE vẫn chặn trùng.
     }
-    return { lastReadings, sentKeys, houseSent, issuedQty };
+    return { lastReadings, sentKeys, houseSent, issuedQty, delivery };
   };
 
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
@@ -604,12 +660,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
 
     const prop = properties.find(p => p.id === propId);
-    const { lastReadings, sentKeys, houseSent, issuedQty } = await fetchRoomHistory(
+    const { lastReadings, sentKeys, houseSent, issuedQty, delivery } = await fetchRoomHistory(
       propId, 'ELECTRICITY', bill?.billingPeriod,
     );
     // Nhà nguyên căn: hoá đơn của BE không mang roomId nên khoá chuỗi có thể lệch với id
     // phòng ảo FE tự dựng. Dùng thẳng cờ `houseSent` để nút "đã gửi" không phụ thuộc vào
     // việc hai bên đặt tên khoá giống nhau.
+    setElecDelivery(delivery);
     setElecHouseSent(houseSent);
     setElecSentKeys(sentKeys);
     setElecIssuedQty(issuedQty);
@@ -830,7 +887,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const initRoomWaterReadings = async (propId: string, period: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
-    const { lastReadings, sentKeys, issuedQty } = await fetchRoomHistory(propId, 'WATER', period);
+    const { lastReadings, sentKeys, issuedQty, delivery } = await fetchRoomHistory(propId, 'WATER', period);
+    setWaterDelivery(delivery);
     setWaterIssuedQty(issuedQty);
     setWaterSentKeys(sentKeys);
     const rows: RoomWaterReading[] = prop.rooms.map(r => ({
@@ -987,7 +1045,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
   const resetWater = () => {
     setWaterPropertyId(null); setWaterBillData(null); setWaterBill(null); setWaterBillError(null);
-    setWaterStep('bill_entry'); setRoomWaterReadings([]);
+    setWaterStep('select_property'); setRoomWaterReadings([]);
     setWaterBillForm({ totalAmount: '', billingPeriod: monthPeriod(), pricePerM3: '20000' });
   };
 
@@ -1038,8 +1096,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
     const stepIndex =
       elecStep === 'select_property' ? 0 :
-      elecStep === 'evn_bill'        ? 1 :
-      elecStep === 'room_readings'   ? 2 : 3;
+      elecStep === 'evn_bill'        ? 1 : 2;
 
     return (
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
@@ -1051,11 +1108,20 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           động tác nào — nhãn cũ "Hóa đơn EVN & Gửi" và nút "⚡ Gửi hóa đơn" là hứa một
           việc đã có người làm; bấm vào chỉ nhận `INVOICE_ALREADY_EXISTS`.
         */}
+        {/*
+          BA bước, trùng khuôn với tab Nước — xem chú thích ở stepper của Nước.
+
+          Bỏ bước "Xem trước": `setElecStep('review')` KHÔNG được gọi ở bất kỳ đâu, tức
+          bước 4 là lời hứa không bao giờ tới. Từ khi gửi hoá đơn theo TỪNG PHÒNG ngay
+          tại bước chỉ số, không còn màn xem trước gộp cả nhà nữa — thanh bước chỉ chưa
+          được cập nhật theo.
+        */}
         <StepIndicator
           steps={isWholeHouse
-            ? ['Chọn tòa nhà', 'Hóa đơn đã gửi khách']
-            : ['Chọn tòa nhà', 'Hóa đơn EVN', 'Chỉ số phòng', 'Xem trước']}
+            ? ['Chọn nhà', 'Hoá đơn đã gửi khách']
+            : ['Chọn nhà', 'Hoá đơn EVN', 'Chỉ số phòng']}
           current={stepIndex}
+          note={UTILITY_WINDOW_TEXT}
         />
 
         {selectedPropertyId && (
@@ -1065,7 +1131,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         {/* ── STEP 1: Chọn tòa nhà ─────────────────────────────────── */}
         {elecStep === 'select_property' && (
           <View>
-            <SectionHeader title="Bước 1: Chọn tòa nhà / căn hộ" />
+            <SectionHeader title="Nhà nào cần chốt số kỳ này?" />
 
             <PropertyPicker
               properties={properties}
@@ -1094,7 +1160,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           const houseSent = elecHouseSent || (!!unit && elecSentKeys.has(unit.roomId));
           return (
             <View>
-              <SectionHeader title={isWholeHouse ? 'Hóa đơn điện của căn nhà' : 'Bước 2: Hóa đơn EVN'} />
+              <SectionHeader title={isWholeHouse ? 'Hoá đơn điện của căn nhà' : 'Hoá đơn EVN của cả nhà'} />
               {selectedProperty && (
                 <View style={styles.infoBanner}>
                   <Text style={styles.infoBannerText}>
@@ -1215,7 +1281,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
             EVN của admin chính là hoá đơn của căn đó — không cần chụp đồng hồ. */}
         {elecStep === 'room_readings' && evnBill && (
           <View>
-            <SectionHeader title="Bước 3: Chỉ số điện từng phòng" />
+            <SectionHeader title="Chỉ số điện từng phòng" />
             <View style={styles.infoBanner}>
               <Text style={styles.infoBannerText}>
                 EVN: {evnBill.totalKwh.toLocaleString('vi-VN')} kWh · {fmt(evnBill.totalAmount)}
@@ -1274,6 +1340,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         ? `${r.consumption} kWh · ${fmt(r.fee ?? 0)} — đã gửi hóa đơn`
                         : 'Đã gửi hóa đơn điện của kỳ này'}
                     </Text>
+                    <DeliveryLine state={elecDelivery.get(r.roomId)} />
                   </View>
                 ) : (
                   /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
@@ -1379,35 +1446,53 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.tabContent} showsVerticalScrollIndicator={false}>
         {/* Nước đi đúng luồng điện: gửi từng phòng ngay ở bước chỉ số, không còn
             bước "Xem trước & gửi" gộp cả nhà. */}
+        {/* Cùng khuôn 3 bước với tab Điện — xem chú thích ở `type ElecStep`. */}
         <StepIndicator
-          steps={['Hóa đơn nước', 'Chỉ số phòng']}
-          current={waterStep === 'bill_entry' ? 0 : 1}
+          steps={['Chọn nhà', 'Hoá đơn nước', 'Chỉ số phòng']}
+          current={waterStep === 'select_property' ? 0 : waterStep === 'bill_entry' ? 1 : 2}
+          note={UTILITY_WINDOW_TEXT}
         />
 
         {waterPropertyId && (
           <SentInvoicePanel propertyId={waterPropertyId} type="WATER" reloadKey={utilReloadKey} />
         )}
 
+        {/* ── BƯỚC 1: Chọn nhà (tách riêng để trùng khuôn với tab Điện) ── */}
+        {waterStep === 'select_property' && (
+          <View style={styles.formCard}>
+            <View style={styles.formCardHead}>
+              <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>🏠</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.formCardTitle}>Chọn nhà cần chốt</Text>
+                <Text style={styles.formCardSub}>Chỉ số nước sẽ ghi cho các phòng của nhà này.</Text>
+              </View>
+            </View>
+            <PropertyPicker
+              properties={properties}
+              loading={loadingProps}
+              error={errorProps}
+              selectedId={waterPropertyId}
+              onSelect={(id) => {
+                setWaterPropertyId(id);
+                // Chọn xong đi thẳng sang bước hoá đơn — không bắt bấm thêm nút "Tiếp".
+                if (id) { loadWaterBill(id); setWaterStep('bill_entry'); }
+              }}
+              onRetry={() => { setLoadingProps(true); loadProperties(); }}
+            />
+          </View>
+        )}
+
         {waterStep === 'bill_entry' && (
           <View>
-            {/* ── Chọn nhà ── */}
-            <View style={styles.formCard}>
-              <View style={styles.formCardHead}>
-                <View style={styles.formCardIcon}><Text style={{ fontSize: 18 }}>🏠</Text></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.formCardTitle}>Chọn nhà cần chốt</Text>
-                  <Text style={styles.formCardSub}>Chỉ số nước sẽ ghi cho các phòng của nhà này.</Text>
-                </View>
-              </View>
-              <PropertyPicker
-                properties={properties}
-                loading={loadingProps}
-                error={errorProps}
-                selectedId={waterPropertyId}
-                onSelect={(id) => { setWaterPropertyId(id); if (id) loadWaterBill(id); }}
-                onRetry={() => { setLoadingProps(true); loadProperties(); }}
-              />
-            </View>
+            {/* Đổi nhà: quay lại bước 1, giống nút "Đổi tòa nhà" bên tab Điện. */}
+            <TouchableOpacity
+              style={styles.changePropBtn}
+              onPress={() => setWaterStep('select_property')}
+            >
+              <Text style={styles.changePropText}>
+                🏠  {waterProperty?.name ?? 'Đã chọn nhà'} — đổi nhà khác
+              </Text>
+            </TouchableOpacity>
 
             {/* Thẻ hoá đơn nằm SAU thẻ chọn nhà và chỉ hiện khi đã chọn: hoá đơn là của
                 một căn cụ thể, bày thẻ rỗng lên trước rồi mới cho chọn nhà là ngược với
@@ -1508,7 +1593,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 
         {waterStep === 'room_readings' && waterBill && (
           <View>
-            <SectionHeader title="Bước 2: Chỉ số nước từng phòng" />
+            <SectionHeader title="Chỉ số nước từng phòng" />
             <View style={styles.infoBanner}>
               <Text style={styles.infoBannerText}>
                 Hóa đơn nước: {waterBill.totalQuantity.toLocaleString('vi-VN')} m³ · {fmt(waterBill.totalAmount)}
@@ -1567,6 +1652,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         ? `${r.consumption} m³ · ${fmt(r.fee ?? 0)} — đã gửi hóa đơn`
                         : 'Đã gửi hóa đơn nước của kỳ này'}
                     </Text>
+                    <DeliveryLine state={waterDelivery.get(r.roomId)} />
                   </View>
                 ) : (
                   <>
@@ -1795,14 +1881,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         ))}
       </View>
 
-      {/* Nhắc quy tắc gửi — không còn cửa sổ ngày 1–10, chỉ còn "1 khách 1 hoá đơn/kỳ". */}
-      {activeTab !== 'history' && (
-        <View style={[styles.windowBar, styles.windowBarOpen]}>
-          <Text style={[styles.windowBarText, { color: Colors.success }]}>
-            ● {UTILITY_WINDOW_TEXT}
-          </Text>
-        </View>
-      )}
+      {/*
+        Dải quy tắc gửi ĐÃ BỎ khỏi đây (30/08/2026) — nay là dòng `note` nhỏ trong thanh
+        bước. Nó là chú thích chứ không phải cảnh báo: chiếm một dải xanh chạy hết bề
+        ngang, thường trực trên mọi bước, chỉ để nhắc một quy tắc không đổi.
+      */}
 
       {activeTab === 'electricity' && renderElecTab()}
       {activeTab === 'water'       && renderWaterTab()}
@@ -1843,21 +1926,43 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
 };
 
 // ===================== SUB-COMPONENTS =====================
-const StepIndicator: React.FC<{ steps: string[]; current: number }> = ({ steps, current }) => (
+/**
+ * Thanh bước — MỘT dòng chữ + thanh chia đoạn.
+ *
+ * ─── Vì sao thu lại (30/08/2026) ─────────────────────────────────────────────
+ * Bản cũ vẽ 4 ô tròn có số + nhãn dưới mỗi ô, cao ~90px. Cộng với thanh tab, dải
+ * chính sách và dòng "Bước 1: Chọn tòa nhà / căn hộ" ngay bên dưới thì phần KHUNG
+ * chiếm gần một phần ba màn trước khi tới nội dung thật — trên điện thoại thì đó là
+ * chỗ đáng lẽ dành cho danh sách phòng.
+ *
+ * Tệ hơn: nhãn bước lặp lại y nguyên ở tiêu đề bên dưới. Cùng một chữ nói hai lần,
+ * tốn hai khối chỗ. Nay thanh bước tự xưng tên bước hiện tại nên tiêu đề kia bỏ được.
+ *
+ * `note` là dòng quy tắc gửi (trước đây là một dải riêng chạy hết bề ngang) — nhét vào
+ * đây vì nó chỉ là chú thích, không đáng một khối riêng.
+ */
+const StepIndicator: React.FC<{ steps: string[]; current: number; note?: string }> = ({
+  steps, current, note,
+}) => (
   <View style={stepSt.wrap}>
-    {steps.map((label, i) => (
-      <React.Fragment key={i}>
-        <View style={stepSt.item}>
-          <View style={[stepSt.dot, i < current && stepSt.dotDone, i === current && stepSt.dotActive]}>
-            <Text style={[stepSt.dotText, i > current && stepSt.dotTextIdle]}>
-              {i < current ? '✓' : String(i + 1)}
-            </Text>
-          </View>
-          <Text style={[stepSt.label, i === current && stepSt.labelActive]} numberOfLines={1}>{label}</Text>
-        </View>
-        {i < steps.length - 1 && <View style={[stepSt.line, i < current && stepSt.lineDone]} />}
-      </React.Fragment>
-    ))}
+    <View style={stepSt.head}>
+      <Text style={stepSt.counter}>Bước {Math.min(current + 1, steps.length)}/{steps.length}</Text>
+      <Text style={stepSt.name} numberOfLines={1}>{steps[current] ?? steps[steps.length - 1]}</Text>
+    </View>
+    <View style={stepSt.bar}>
+      {steps.map((_, i) => (
+        <View
+          key={i}
+          style={[
+            stepSt.seg,
+            i < current && stepSt.segDone,
+            i === current && stepSt.segActive,
+            i > 0 && stepSt.segGap,
+          ]}
+        />
+      ))}
+    </View>
+    {!!note && <Text style={stepSt.note}>{note}</Text>}
   </View>
 );
 
@@ -2099,14 +2204,19 @@ const PropertyPicker: React.FC<{
   }
   if (properties.length === 0) {
     return (
-      <View style={styles.pickerState}>
-        <Text style={styles.pickerStateEmoji}>🏢</Text>
-        <Text style={styles.pickerStateText}>
-          Chưa có nhà nào đang có khách thuê.{'\n'}
+      /*
+        Gọn lại thành một khối viền nhạt (30/08/2026): bản cũ căn giữa với emoji 32px và
+        nhiều khoảng đệm nên chiếm gần hết màn cho một tin nhắn 2 dòng, phần dưới trống trơn.
+        Câu chữ giữ nguyên — nó giải thích ĐÚNG lý do danh sách rỗng, bỏ đi thì quản lý
+        tưởng app hỏng.
+      */
+      <View style={styles.emptyPick}>
+        <Text style={styles.emptyPickTitle}>Chưa có nhà nào đang có khách thuê</Text>
+        <Text style={styles.emptyPickText}>
           Nhà trống không hiển thị vì không phát sinh tiền điện / nước.
         </Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={onRetry}>
-          <Text style={styles.retryBtnText}>Tải lại</Text>
+        <TouchableOpacity style={styles.emptyPickBtn} onPress={onRetry}>
+          <Text style={styles.emptyPickBtnText}>Tải lại</Text>
         </TouchableOpacity>
       </View>
     );
@@ -2290,10 +2400,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
 
   tabBar: { flexDirection: 'row', backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  windowBar: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
-  windowBarOpen: { backgroundColor: Colors.successLight },
-  windowBarClosed: { backgroundColor: Colors.errorLight },
-  windowBarText: { fontSize: 12, fontWeight: '700', lineHeight: 17 },
   /** Nút gửi khi ngoài cửa sổ chốt sổ — vẫn bấm được để hiện lý do, nhưng nhìn là biết khoá. */
   btnLocked: { backgroundColor: Colors.textMuted, opacity: 0.7 },
   tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center' },
@@ -2391,6 +2497,17 @@ const styles = StyleSheet.create({
 
   pickerState:      { alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.sm },
   pickerStateEmoji: { fontSize: 32 },
+  emptyPick: {
+    borderWidth: 1, borderColor: Colors.border, borderStyle: 'dashed',
+    borderRadius: BorderRadius.lg, padding: Spacing.base, alignItems: 'center',
+  },
+  emptyPickTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
+  emptyPickText: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: 4, lineHeight: 17 },
+  emptyPickBtn: {
+    marginTop: Spacing.sm, backgroundColor: Colors.primaryBg,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.base, paddingVertical: 7,
+  },
+  emptyPickBtnText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
   pickerStateText:  { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
   retryBtn:         { marginTop: Spacing.xs, backgroundColor: Colors.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   retryBtnText:     { color: Colors.white, fontWeight: '800', fontSize: 13 },
@@ -2478,6 +2595,12 @@ const styles = StyleSheet.create({
     padding: Spacing.sm, marginTop: Spacing.xs,
   },
   sentSummaryText: { fontSize: 13, color: Colors.success, fontWeight: '600' },
+  changePropBtn: {
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.base, paddingVertical: 10, marginBottom: Spacing.sm,
+  },
+  changePropText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  deliveryLine: { fontSize: 12, fontWeight: '600', marginTop: 4 },
 
   calcPreview: { backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.sm, padding: Spacing.xs, marginTop: Spacing.xs },
   calcPreviewText: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
@@ -2637,26 +2760,20 @@ const styles = StyleSheet.create({
 });
 
 const stepSt = StyleSheet.create({
-  // Bó gọn lại giữa màn: trước đây trải hết bề ngang nên đường nối dài ngoằng
-  // còn nhãn thì 10px bé xíu, nhìn không ra đang ở bước nào.
-  wrap: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center',
-    width: '100%', maxWidth: 460, alignSelf: 'center', marginBottom: Spacing.lg,
+  wrap: { marginBottom: Spacing.base },
+  head: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 6 },
+  counter: {
+    fontSize: 11, fontWeight: '900', color: Colors.primary,
+    backgroundColor: Colors.primaryBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999,
+    overflow: 'hidden',
   },
-  item: { alignItems: 'center', width: 76 },
-  dot: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: Colors.white, borderWidth: 2, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 5,
-  },
-  dotActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dotDone:   { backgroundColor: Colors.success, borderColor: Colors.success },
-  dotText:   { fontSize: 12, fontWeight: '800', color: Colors.white },
-  dotTextIdle: { color: Colors.textMuted },
-  label:       { fontSize: 11, color: Colors.textMuted, textAlign: 'center', fontWeight: '600' },
-  labelActive: { color: Colors.primary, fontWeight: '800' },
-  line:     { flex: 1, height: 2, backgroundColor: Colors.border, marginTop: 14, minWidth: 12 },
-  lineDone: { backgroundColor: Colors.success },
+  name: { flex: 1, fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  bar: { flexDirection: 'row', height: 4 },
+  seg: { flex: 1, borderRadius: 2, backgroundColor: Colors.border },
+  segGap: { marginLeft: 4 },
+  segDone: { backgroundColor: Colors.success },
+  segActive: { backgroundColor: Colors.primary },
+  note: { fontSize: 11, color: Colors.textMuted, marginTop: 6 },
 });
 
 const secSt = StyleSheet.create({

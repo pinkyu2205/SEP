@@ -23,7 +23,11 @@ import { formatCurrency } from '@/utils';
 import { normalizeVi } from '@/utils/helpers';
 import { MonthPicker, useServerPeriod } from '../shared';
 import { normalizeRoomNumber } from '@/services/propertyOccupancy.service';
-import { loadPropertyBills, type PropertyBillBreakdown } from './propertyOperationStatus';
+import { adminService, type AdminInvoiceRow } from '@/services/admin.service';
+import { canUseFullInvoices } from '@/services/invoiceAccess';
+import {
+  INVOICE_TYPE_META, loadPropertyBills, type PropertyBillBreakdown,
+} from './propertyOperationStatus';
 import {
   PropertyStatusPanel, RoomBillChip, WholeHouseBillLine, billHeading,
 } from './PropertyStatusPanel';
@@ -179,11 +183,120 @@ function InfoCell({ icon: Icon, label, value, highlight, className }: { icon: ty
 }
 
 
+/** Trạng thái hoá đơn → nhãn + màu, dùng trong lịch sử hoá đơn của phòng. */
+const INV_STATUS_META: Record<string, { label: string; cls: string }> = {
+  PAID:      { label: 'Đã thu',       cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  PENDING:   { label: 'Chờ thu',      cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  PARTIAL:   { label: 'Thu một phần', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  OVERDUE:   { label: 'Quá hạn',      cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  CANCELLED: { label: 'Đã huỷ',       cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+};
+
+/**
+ * Lịch sử hoá đơn của MỘT phòng — mọi kỳ, không chỉ kỳ đang xem.
+ *
+ * Gọi `listInvoices({})` không kèm `period` để lấy trọn lịch sử, rồi lọc tại máy theo
+ * nhà + số phòng. Chỉ gọi khi host thực sự mở phòng ra xem: đây là dữ liệu nặng và
+ * phần lớn lần vào trang chi tiết là để xem phòng trống / đổi trạng thái, không ai
+ * cần tới nó.
+ */
+function RoomInvoiceHistory({ propertyId, roomNumber }: { propertyId: number; roomNumber: string }) {
+  const [rows, setRows] = useState<AdminInvoiceRow[] | null>(null);
+  const [denied, setDenied] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!(await canUseFullInvoices())) { if (active) setDenied(true); return; }
+      const all = await adminService.listInvoices({}).catch(() => [] as AdminInvoiceRow[]);
+      if (!active) return;
+      const want = normalizeRoomNumber(roomNumber);
+      setRows(all
+        .filter(r => r.propertyId === propertyId && normalizeRoomNumber(r.roomNumber) === want)
+        .sort((a, b) => (b.periodKey ?? '').localeCompare(a.periodKey ?? '')));
+    })();
+    return () => { active = false; };
+  }, [propertyId, roomNumber]);
+
+  if (denied) {
+    return (
+      <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+        Máy chủ chưa mở quyền xem hoá đơn điện, nước, dịch vụ cho chủ nhà — chưa liệt kê được
+        lịch sử hoá đơn của phòng.
+      </p>
+    );
+  }
+  if (rows == null) {
+    return <p className="px-1 text-xs text-slate-400">Đang tải lịch sử hoá đơn…</p>;
+  }
+  if (rows.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+        Phòng này chưa phát sinh hoá đơn nào.
+      </p>
+    );
+  }
+
+  // Gom theo kỳ: host đọc hoá đơn theo tháng, không theo dòng rời rạc.
+  const byPeriod = new Map<string, AdminInvoiceRow[]>();
+  for (const r of rows) {
+    const k = r.periodKey ?? '—';
+    const bucket = byPeriod.get(k);
+    if (bucket) bucket.push(r); else byPeriod.set(k, [r]);
+  }
+
+  return (
+    <div className="space-y-3">
+      {[...byPeriod.entries()].map(([key, list]) => {
+        const unpaid = list.filter(r => r.status !== 'PAID' && r.status !== 'CANCELLED').length;
+        return (
+          <div key={key}>
+            <div className="mb-1 flex items-center justify-between px-1">
+              <p className="text-xs font-black text-slate-500">
+                {key === '—' ? 'Không rõ kỳ' : `Tháng ${Number(key.slice(5))}/${key.slice(0, 4)}`}
+              </p>
+              <p className={`text-[11px] font-bold ${unpaid > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                {unpaid > 0 ? `${unpaid} chưa thu` : 'Đã thu đủ'}
+              </p>
+            </div>
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+              {list.map(r => {
+                const meta = INVOICE_TYPE_META[r.type] ?? INVOICE_TYPE_META.OTHER;
+                const st = INV_STATUS_META[r.status] ?? INV_STATUS_META.PENDING;
+                return (
+                  <div key={r.id} className="flex items-center gap-2 px-3 py-2">
+                    <span className="w-4 shrink-0 text-center leading-none">{meta.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-slate-800">
+                        {r.isOnboardEnvelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
+                      </p>
+                      <p className="truncate font-mono text-[11px] text-slate-400">{r.code}</p>
+                    </div>
+                    <span className="shrink-0 text-xs font-black tabular-nums text-slate-900">
+                      {formatCurrency(r.amount)}
+                    </span>
+                    <span className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-black ${st.cls}`}>
+                      {st.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RoomDetailModal({
-  room, tenant, canChange, onClose, onConfirmStatus,
+  room, tenant, pastTenants, propertyId, canChange, onClose, onConfirmStatus,
 }: {
   room: RoomResponse;
   tenant: TenantContractResponse | null;
+  /** Hợp đồng ĐÃ kết thúc của chính phòng này — các đời khách trước. */
+  pastTenants: TenantContractResponse[];
+  propertyId: number;
   canChange: boolean;
   onClose: () => void;
   onConfirmStatus: (roomId: number, status: string) => Promise<void>;
@@ -260,6 +373,13 @@ function RoomDetailModal({
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                {/* CCCD — host được xem đủ (bấm mắt), trước đây khối này bỏ hẳn nên
+                    muốn đối chiếu giấy tờ phải sang màn Hợp đồng tìm lại. */}
+                <div className="col-span-2 rounded-lg bg-white/70 px-3 py-2">
+                  <p className="text-xs text-slate-400">CCCD / MST</p>
+                  <MaskedField value={tenant.tenantCccd} emptyText="Chưa có"
+                    className="text-sm font-bold text-slate-800" />
+                </div>
                 <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400">Giá thuê</p>
                   <p className="font-bold text-slate-800">{formatCurrency(tenant.rentAmount)}</p>
@@ -267,13 +387,24 @@ function RoomDetailModal({
                 <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Tiền cọc</p>
                   <p className="font-bold text-slate-800">{tenant.deposit ? formatCurrency(tenant.deposit) : '—'}</p>
+                  <p className={`text-[11px] font-bold ${
+                    (tenant.paymentStatus || '').toUpperCase() === 'PAID' ? 'text-emerald-600' : 'text-amber-600'
+                  }`}>
+                    {(tenant.paymentStatus || '').toUpperCase() === 'PAID' ? '✓ Đã thu cọc' : 'Chưa thu cọc'}
+                  </p>
                 </div>
                 <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Kỳ hạn</p>
                   <p className="font-bold text-slate-800 text-xs mt-0.5">{fmtDate(tenant.startDate)} → {tenant.endDate ? fmtDate(tenant.endDate) : 'Không thời hạn'}</p>
                 </div>
+                <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <p className="text-xs text-slate-400">Ngày vào ở</p>
+                  <p className="font-bold text-slate-800 text-xs mt-0.5">
+                    {fmtDate(tenant.moveInDate || tenant.startDate)}
+                  </p>
+                </div>
                 {tenant.contractCode && (
-                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <div className="col-span-2 rounded-lg bg-white/70 px-3 py-2">
                     <p className="text-xs text-slate-400">Mã hợp đồng</p>
                     <p className="font-bold text-slate-800 text-xs mt-0.5">{tenant.contractCode}</p>
                   </div>
@@ -281,6 +412,44 @@ function RoomDetailModal({
               </div>
             </div>
           )}
+
+          {/* Các đời khách trước của CHÍNH phòng này.
+              Cùng một phòng qua nhiều đời khách, mà trước đây modal chỉ biết đến hợp
+              đồng ACTIVE — phòng vừa trả là sạch trơn, không còn dấu vết ai từng ở. */}
+          {pastTenants.length > 0 && (
+            <div>
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+                <History className="h-4 w-4 text-slate-400" /> Khách đã ở ({pastTenants.length})
+              </p>
+              <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+                {pastTenants.map(c => (
+                  <div key={c.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
+                      {c.tenantFullName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-slate-800">{c.tenantFullName}</p>
+                      <p className="truncate text-xs text-slate-400">
+                        {fmtDate(c.startDate)} → {c.endDate ? fmtDate(c.endDate) : '—'}
+                        {c.contractCode && ` · ${c.contractCode}`}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">
+                      {c.status === 'EXPIRED' ? 'Hết hạn' : c.status === 'TERMINATED' ? 'Đã thanh lý' : c.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Lịch sử hoá đơn của phòng — mọi kỳ */}
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+              <Wallet className="h-4 w-4 text-slate-400" /> Hoá đơn của phòng
+            </p>
+            <RoomInvoiceHistory propertyId={propertyId} roomNumber={room.roomNumber} />
+          </div>
 
           {/* Đổi trạng thái */}
           {canChange ? (
@@ -1080,6 +1249,11 @@ export const PropertyDetail = () => {
         <RoomDetailModal
           room={selectedRoom}
           tenant={contracts.find(c => c.roomId === selectedRoom.id && c.status === 'ACTIVE') ?? null}
+          pastTenants={contracts
+            .filter(c => c.roomId === selectedRoom.id && c.status !== 'ACTIVE'
+              && c.status !== 'DRAFT' && c.status !== 'PENDING')
+            .sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''))}
+          propertyId={property.id}
           canChange={['DRAFT', 'ACTIVE'].includes(property.status) && selectedRoom.status !== 'RENTED'}
           onClose={() => setSelectedRoom(null)}
           onConfirmStatus={handleUpdateRoomStatus}

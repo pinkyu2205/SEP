@@ -131,6 +131,24 @@ const normalizeType = (row: BeNotificationRow): string => {
    * BE sửa lại câu chữ một lần là thông báo rơi xuống nhóm "Hệ thống".
    */
   if (raw.startsWith('RECEPTION_')) return 'contract_assigned';
+  /**
+   * `CONTRACT_EXPIRING` (BE 01/09/2026) — cron nhắc D-30 / D-15 / D-7 / D-1 / D-0.
+   *
+   * PHẢI xét trước nhánh `raw.includes('CONTRACT')` bên dưới, nếu không nó rơi vào
+   * `contract_assigned` — nhóm "được giao đón khách MỚI", icon chào mừng. Tin báo hợp
+   * đồng sắp hết hạn mà nằm đó thì vừa sai nhóm khi lọc tab, vừa đọc ngược nghĩa: khách
+   * sắp phải dọn đi lại thấy một thông báo trông như vừa nhận nhà.
+   *
+   * Hai UI type `contract_expiring` / `contract_expired` đã có sẵn từ trước (đúng nhóm
+   * "Hợp đồng", màu vàng và đỏ) — chỉ là chưa có đường nào sinh ra chúng.
+   *
+   * BE dùng CHUNG một type cho cả 5 mốc, chỉ khác câu chữ, nên mốc D-0 phải nhận ra qua
+   * tiêu đề. Regex hỏng thì rơi về `contract_expiring` — vẫn đúng nhóm, chỉ mất sắc đỏ,
+   * nên không lặp lại được cái bẫy của nhánh `RECEPTION_` ngay trên.
+   */
+  if (raw === 'CONTRACT_EXPIRING') {
+    return /hôm nay/i.test(row.title) ? 'contract_expired' : 'contract_expiring';
+  }
   // Gán đón khách / hợp đồng (assign-manager, duyệt giá...) → mở ResumeContract.
   if (raw.includes('CONTRACT') || raw.includes('ASSIGN') || raw.includes('ONBOARD') ||
       /đón khách|hợp đồng/i.test(row.title)) {

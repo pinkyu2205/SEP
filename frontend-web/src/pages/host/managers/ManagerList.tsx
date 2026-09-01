@@ -48,25 +48,38 @@ function StatCard({ icon: Icon, label, value, tone }: {
   );
 }
 
-// Chip chỉ số gọn nằm trên dòng quản lý (thu gọn).
-function KpiChip({ icon: Icon, value, label, tone }: {
+/**
+ * Chip chỉ số gọn nằm trên dòng quản lý (thu gọn).
+ *
+ * `dim` làm nhạt cả chip khi giá trị bằng 0. Năm chip cùng một độ đậm thì mắt phải
+ * đọc từng con số mới biết có gì đáng chú ý; làm nhạt số 0 thì cái khác 0 tự nổi lên.
+ */
+function KpiChip({ icon: Icon, value, label, tone, dim }: {
   icon: typeof Users; value: string | number; label: string;
-  tone: 'indigo' | 'blue' | 'emerald' | 'amber';
+  tone: 'indigo' | 'blue' | 'emerald' | 'amber' | 'rose' | 'slate';
+  dim?: boolean;
 }) {
   const tones = {
     indigo:  'text-indigo-600',
     blue:    'text-blue-600',
     emerald: 'text-emerald-600',
     amber:   'text-amber-600',
+    rose:    'text-rose-500',
+    slate:   'text-slate-400',
   };
   return (
-    <div className="flex items-center gap-1.5" title={label}>
+    <div className={`flex items-center gap-1.5 ${dim ? 'opacity-45' : ''}`} title={label}>
       <Icon className={`h-4 w-4 ${tones[tone]}`} />
       <span className="text-sm font-bold text-slate-800">{value}</span>
       <span className="hidden text-xs text-slate-400 sm:inline">{label}</span>
     </div>
   );
 }
+
+/** Màu của tỉ lệ lấp đầy — 0% PHẢI đỏ. Bản cũ để cứng `emerald` nên căn không có
+    khách nào vẫn hiện "0% lấp đầy" màu xanh lá, đọc thành tín hiệu tốt. */
+const occTone = (rate: number, hasUnits: boolean): 'emerald' | 'amber' | 'rose' | 'slate' =>
+  !hasUnits ? 'slate' : rate >= 80 ? 'emerald' : rate >= 50 ? 'amber' : 'rose';
 
 export const ManagerList = () => {
   const [managers, setManagers]     = useState<ManagerItem[]>([]);
@@ -190,6 +203,8 @@ export const ManagerList = () => {
   const activeManagers = managers.filter(m => (userMap.get(m.id)?.status ?? 'ACTIVE') === 'ACTIVE').length;
   const totalTenants   = [...tenantsByProp.values()].reduce((a, b) => a + b, 0);
   const totalOpenMaint = perf.reduce((a, r) => a + (r.openMaintenance ?? 0), 0);
+  /** Quản lý chưa được giao khu vực nào — việc còn sót của Host sau mỗi lần đổi phân công. */
+  const idleManagers   = managers.filter(m => groupByZone(getAssignedProps(m.id)).length === 0).length;
 
   return (
     <div className="space-y-6">
@@ -207,12 +222,31 @@ export const ManagerList = () => {
         </button>
       </div>
 
-      {/* Stat cards */}
+      {/*
+        Thẻ thống kê — hai ô cảnh báo CHỈ dựng khi thật sự có việc.
+
+        Bản cũ luôn đủ bốn ô: "Tổng quản lý 5" và "Đang hoạt động 5" nói y hệt nhau khi
+        không ai bị khoá tài khoản, còn hai ô kia nằm đó hiện số 0. Bốn ô to chiếm trọn
+        một hàng mà không ô nào cho biết phải làm gì tiếp.
+      */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={UserCog} label="Tổng quản lý" value={managers.length} tone="indigo" />
-        <StatCard icon={CheckCircle2} label="Đang hoạt động" value={activeManagers} tone="emerald" />
-        <StatCard icon={Users} label="Khách thuê đang ở" value={totalTenants} tone="blue" />
-        <StatCard icon={Wrench} label="Bảo trì chờ xử lý" value={totalOpenMaint} tone="amber" />
+        <StatCard
+          icon={UserCog}
+          label={activeManagers === managers.length ? 'Quản lý · đều đang hoạt động' : 'Tổng quản lý'}
+          value={managers.length} tone="indigo"
+        />
+        {activeManagers < managers.length && (
+          <StatCard icon={CheckCircle2} label="Đang hoạt động" value={`${activeManagers}/${managers.length}`} tone="emerald" />
+        )}
+        {idleManagers > 0 && (
+          <StatCard icon={MapPin} label="Chưa phụ trách khu vực nào" value={idleManagers} tone="amber" />
+        )}
+        {totalTenants > 0 && (
+          <StatCard icon={Users} label="Khách thuê đang ở" value={totalTenants} tone="blue" />
+        )}
+        {totalOpenMaint > 0 && (
+          <StatCard icon={Wrench} label="Bảo trì chờ xử lý" value={totalOpenMaint} tone="amber" />
+        )}
       </div>
 
       {/* Search */}
@@ -274,13 +308,22 @@ export const ManagerList = () => {
                     </div>
                   </div>
 
+                  {/* Chưa có khu vực = việc còn sót của Host, phải thấy ngay trên dòng
+                      chứ không phải mở ra mới biết. */}
+                  {zones.length === 0 && (
+                    <span className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 md:inline-flex">
+                      <AlertTriangle className="h-3 w-3" /> Chưa có khu vực
+                    </span>
+                  )}
+
                   {/* KPI gọn */}
                   <div className="hidden items-center gap-5 md:flex">
-                    <KpiChip icon={MapPin}     value={zones.length}         label="khu vực" tone="indigo" />
-                    <KpiChip icon={Building2}  value={assignedProps.length} label="nhà"    tone="indigo" />
-                    <KpiChip icon={Users}      value={s.tenants}            label="khách"  tone="blue" />
-                    <KpiChip icon={TrendingUp} value={`${s.occRate}%`}      label="lấp đầy" tone="emerald" />
-                    <KpiChip icon={Wrench}     value={s.openMaint}          label="bảo trì" tone="amber" />
+                    <KpiChip icon={MapPin}     value={zones.length}         label="khu vực" tone="indigo" dim={zones.length === 0} />
+                    <KpiChip icon={Building2}  value={assignedProps.length} label="nhà"     tone="indigo" dim={assignedProps.length === 0} />
+                    <KpiChip icon={Users}      value={s.tenants}            label="khách"   tone="blue"   dim={s.tenants === 0} />
+                    <KpiChip icon={TrendingUp} value={s.rooms > 0 ? `${s.occRate}%` : '—'} label="lấp đầy"
+                      tone={occTone(s.occRate, s.rooms > 0)} dim={s.rooms === 0} />
+                    <KpiChip icon={Wrench}     value={s.openMaint}          label="bảo trì" tone="amber"  dim={s.openMaint === 0} />
                   </div>
 
                   {/* Số nhà (mobile) + mũi tên */}
@@ -295,24 +338,27 @@ export const ManagerList = () => {
                 {/* Chi tiết (mở rộng) */}
                 {isOpen && (
                   <div className="bg-slate-50/60 px-4 pb-4 pt-3">
-                    {/* Lịch sử phân công — để trên đầu, mở ra cửa sổ riêng */}
-                    <div className="mb-3">
-                      <AssignmentHistoryButton
-                        userId={mgr.id}
-                        subjectName={displayName}
-                        extraNote="Lưu ý khi đánh giá: người vừa nhận khu vực vài ngày vẫn bị chấm doanh thu cả tháng."
-                      />
-                    </div>
-
-                    {/* Tổng quan + doanh thu */}
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-2.5 ring-1 ring-slate-100">
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 md:hidden">
-                        <DoorOpen className="h-3.5 w-3.5" /> {s.occupied}/{s.rooms} phòng · {s.tenants} khách · {s.openMaint} bảo trì
-                      </div>
+                    {/* Doanh thu + lịch sử phân công trên CÙNG một dải.
+                        Bản cũ để nút lịch sử đứng riêng cả một hàng phía trên, còn dải
+                        doanh thu thì chỉ có hai chữ ở hai đầu — hai băng gần trống nối
+                        đuôi nhau trước khi tới nội dung thật. */}
+                    <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-white px-4 py-2.5 ring-1 ring-slate-100">
                       <span className="text-xs font-medium text-slate-500">
                         Doanh thu tháng {MONTH.slice(5)}/{MONTH.slice(0, 4)}
                       </span>
-                      <span className="text-sm font-bold text-emerald-600">{formatCurrency(s.revenue)}</span>
+                      <span className={`text-sm font-bold ${s.revenue > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        {formatCurrency(s.revenue)}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-xs text-slate-500 md:hidden">
+                        <DoorOpen className="h-3.5 w-3.5" /> {s.occupied}/{s.rooms} phòng · {s.tenants} khách · {s.openMaint} bảo trì
+                      </span>
+                      <div className="ml-auto">
+                        <AssignmentHistoryButton
+                          userId={mgr.id}
+                          subjectName={displayName}
+                          extraNote="Lưu ý khi đánh giá: người vừa nhận khu vực vài ngày vẫn bị chấm doanh thu cả tháng."
+                        />
+                      </div>
                     </div>
 
                     <div className="mb-2 flex items-center justify-between gap-2 px-1">

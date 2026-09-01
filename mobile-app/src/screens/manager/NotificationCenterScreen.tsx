@@ -12,7 +12,8 @@ import { serverNow } from '@/utils/serverTime';
 // ===================== TYPES =====================
 type NotifType =
   | 'new_bill' | 'bill_overdue' | 'payment_success' | 'payment_pending_verify'
-  | 'contract_expiring' | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
+  | 'contract_expiring' | 'contract_expired'
+  | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
   | 'maintenance_confirm' | 'maintenance_cost' | 'maintenance_cancelled' | 'maintenance_rejected'
   | 'contract_assigned' | 'checkout_request'
   | 'equipment_damaged' | 'tenant_onboarded' | 'meter_reading_due' | 'system';
@@ -41,6 +42,9 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   payment_success: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Thanh toán' },
   payment_pending_verify: { icon: '💳', color: Colors.warning, bg: Colors.warningLight, category: 'Thanh toán' },
   contract_expiring: { icon: '📋', color: Colors.info, bg: Colors.infoLight, category: 'Hợp đồng' },
+  // D-0: hôm nay hết hạn, hệ thống vừa mở phiếu trả phòng — quản lý phải đi nhận phòng.
+  // Không dùng chung màu xanh của `contract_expiring` (mốc nhắc trước, chưa phải làm gì).
+  contract_expired: { icon: '📕', color: Colors.error, bg: Colors.errorLight, category: 'Hợp đồng' },
   maintenance_new: { icon: '🔧', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
   maintenance_resolved: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
   maintenance_accepted: { icon: '🔧', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },
@@ -55,7 +59,7 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
   tenant_onboarded: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Khách thuê' },
   // Chưa có ảnh công tơ kỳ này → BE chặn phát hành hoá đơn điện/nước cho tới khi chụp.
-  meter_reading_due: { icon: '📸', color: Colors.warning, bg: Colors.warningLight, category: 'Chốt số' },
+  meter_reading_due: { icon: '📸', color: Colors.warning, bg: Colors.warningLight, category: 'Ghi điện nước' },
   system: { icon: '🔔', color: Colors.textSecondary, bg: Colors.divider, category: 'Hệ thống' },
 };
 // BE có thể gửi type FE chưa biết — luôn fallback, KHÔNG để cfg undefined làm crash render.
@@ -71,7 +75,7 @@ const FILTER_TABS = [
   // Lọc theo tiền tố (xem `filtered`): key 'payment_*' gom cả `payment_success` mà
   // BE bắn khi khách vừa thanh toán.
   { key: 'payment_pending_verify', label: 'Thanh toán' },
-  { key: 'meter_reading_due', label: 'Chốt số' },
+  { key: 'meter_reading_due', label: 'Ghi điện nước' },
 ];
 
 function timeAgo(dateStr: string): string {

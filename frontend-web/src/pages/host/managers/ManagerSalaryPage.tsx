@@ -125,14 +125,45 @@ export const ManagerSalaryPage = () => {
             Lương ở đây đi thẳng vào giá thuê: mỗi căn gánh <b>lương ÷ số nhà</b> người đó phụ trách.
           </p>
         </div>
-        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${
-          source === 'server'
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-amber-200 bg-amber-50 text-amber-700'
-        }`}>
-          {source === 'server' ? <Cloud className="h-3.5 w-3.5" /> : <HardDrive className="h-3.5 w-3.5" />}
-          {source === 'server' ? 'Đã đồng bộ máy chủ' : 'Chỉ lưu trên máy này'}
-        </span>
+        {/* Nút Lưu lên HEADER. Bản cũ để nó dưới đáy, sau bảng lương và ba khối chữ
+            giải thích — sửa một ô lương xong phải cuộn qua cả bức tường chữ mới bấm
+            được, mà không có gì nhắc là còn chưa lưu. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${
+            source === 'server'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-amber-200 bg-amber-50 text-amber-700'
+          }`}>
+            {source === 'server' ? <Cloud className="h-3.5 w-3.5" /> : <HardDrive className="h-3.5 w-3.5" />}
+            {source === 'server' ? 'Đã đồng bộ máy chủ' : 'Chỉ lưu trên máy này'}
+          </span>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? 'Đang lưu…' : 'Lưu bảng lương'}
+          </button>
+        </div>
+      </div>
+
+      {/* Ba con số kết quả, đặt TRƯỚC bảng.
+          Chúng vốn chỉ nằm ở dòng chân bảng — phải cuộn hết danh sách mới biết quỹ
+          lương bao nhiêu và mỗi căn gánh bao nhiêu, mà đó đúng là hai con số cả trang
+          này sinh ra để trả lời. */}
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        {[
+          { label: 'Tổng quỹ lương', value: formatVND(totalSalary), cls: 'text-slate-900' },
+          { label: 'Số nhà gánh lương', value: `${totalProps} nhà`, cls: 'text-slate-900' },
+          { label: 'Bình quân mỗi nhà', value: formatVND(blended), cls: 'text-indigo-700' },
+        ].map((s) => (
+          <div key={s.label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{s.label}</p>
+            <p className={`mt-1 text-lg font-black tabular-nums ${s.cls}`}>{s.value}</p>
+          </div>
+        ))}
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -156,16 +187,19 @@ export const ManagerSalaryPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {payroll.map((m, i) => (
-                  <tr key={m.managerId}>
+                {payroll.map((m) => {
+                  const zoneNames = zonesByManager.get(m.managerId) ?? [];
+                  return (
+                  <tr key={m.managerId} className="transition hover:bg-slate-50/60">
                     <td className="py-2.5 pr-3">
                       <p className="font-bold text-slate-800">{m.fullName}</p>
-                      <p className="text-[11px] text-slate-400">
-                        Quản lý số {i + 1}
-                        {zonesByManager.get(m.managerId)?.length
-                          ? ` · phân công ${zonesByManager.get(m.managerId)!.join(', ')}`
-                          : ' · chưa phân công khu vực'}
-                      </p>
+                      {/* Bỏ "Quản lý số N": đó là số thứ tự dòng, đổi theo cách sắp xếp
+                          chứ không phải mã của ai cả — chiếm chỗ mà không định danh gì. */}
+                      {zoneNames.length > 0 ? (
+                        <p className="text-[11px] text-slate-400">Phân công {zoneNames.join(', ')}</p>
+                      ) : (
+                        <p className="text-[11px] font-semibold text-amber-600">Chưa phân công khu vực</p>
+                      )}
                     </td>
                     <td className="w-44 py-2.5 pl-2">
                       <MoneyInput value={m.salary} onChange={(v) => setSalary(m.managerId, v)} />
@@ -194,7 +228,8 @@ export const ManagerSalaryPage = () => {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-slate-200">
@@ -234,28 +269,26 @@ export const ManagerSalaryPage = () => {
           </p>
         )}
 
-        {/* Đánh đổi đã biết của cách chia theo số nhà thực — nói trước, đừng để Host phát
-            hiện qua việc khách hỏi vì sao hai căn giống nhau khác giá. */}
-        <div className="mt-3 flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />
-          <p className="text-xs leading-relaxed text-slate-600">
+        {/* Đánh đổi đã biết của cách chia theo số nhà thực — vẫn phải nói, nhưng THU GỌN.
+            Đây là đoạn đọc một lần để hiểu cơ chế, không phải thứ cần đọc lại mỗi lần
+            sửa lương; để mở sẵn thì nó là khối chữ dài nhất trang, đẩy nút bấm xuống
+            dưới và làm cả trang nặng nề. */}
+        <details className="group mt-3 rounded-xl border border-slate-200 bg-slate-50">
+          <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-xs font-bold text-slate-600 transition hover:text-slate-900">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-slate-400" />
+            Vì sao hai căn giống nhau có thể gánh lương khác nhau?
+            <span className="ml-auto text-slate-400 transition-transform group-open:rotate-180">▾</span>
+          </summary>
+          <p className="border-t border-slate-200 px-3 py-2.5 text-xs leading-relaxed text-slate-600">
             Mẫu số là <b>số nhà đang phụ trách</b>, nên nó đổi mỗi khi khu vực nhận thêm nhà: coi 1 nhà
             thì căn đó gánh trọn lương, tới căn thứ 5 chỉ còn 1/5. Giá của căn <b>đã duyệt</b> giữ nguyên
             theo mức lúc duyệt — nên căn duyệt sớm gánh nhiều hơn căn duyệt muộn. Đổi lại, quỹ lương
             luôn được thu hồi đủ và bạn không phải đoán trước tháng này admin sẽ gửi bao nhiêu nhà.
           </p>
-        </div>
+        </details>
 
+        {/* Nút Lưu đã chuyển lên header — dưới này chỉ còn hai lối đi tiếp. */}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {saving ? 'Đang lưu…' : 'Lưu bảng lương'}
-          </button>
           <button
             type="button"
             onClick={() => navigate('/host/pricing-config')}

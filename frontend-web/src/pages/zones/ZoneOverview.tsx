@@ -231,6 +231,8 @@ const AssignModal = ({
 }) => {
   const [picked, setPicked] = useState<string>(group.managerId ?? '');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /** Lọc danh sách quản lý — chỉ dựng ô tìm khi danh sách đủ dài để phải cuộn. */
+  const [mgrSearch, setMgrSearch] = useState('');
   /**
    * Có tick = "chuyển hẳn": gán sang khu vực này XONG thì gỡ người đó khỏi khu vực cũ.
    * Không tick = "kiêm nhiệm" (hành vi mặc định của hệ thống) — người đó giữ cả hai.
@@ -242,6 +244,16 @@ const AssignModal = ({
 
   const preview = useMemo(() => (picked ? previewAssign(group, picked) : null), [group, picked]);
   const pickedManager = managers.find((m) => m.id === picked);
+
+  /** Người đang được chọn LUÔN nằm trong danh sách, kể cả khi từ khoá không khớp —
+      lọc mất họ thì dấu tick biến mất và người dùng tưởng mình chưa chọn ai. */
+  const visibleManagers = useMemo(() => {
+    const kw = normalizeVi(mgrSearch.trim());
+    if (!kw) return managers;
+    return managers.filter((m) =>
+      m.id === picked
+      || normalizeVi(`${nameOf(m)} ${userMap.get(m.id)?.phoneNumber ?? ''}`).includes(kw));
+  }, [managers, mgrSearch, picked, userMap]);
 
   // Tải SAU khi gán = tải hiện tại của người được chọn + phần khu vực này chuyển sang.
   const projected = useMemo(() => {
@@ -388,24 +400,46 @@ const AssignModal = ({
           )}
 
           {/* Chọn quản lý */}
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Chọn quản lý</p>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Chọn quản lý</p>
+            {managers.length > 5 && (
+              <div className="relative w-52">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={mgrSearch}
+                  onChange={(e) => setMgrSearch(e.target.value)}
+                  placeholder="Tìm quản lý..."
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-2 text-xs outline-none transition focus:border-indigo-400 focus:bg-white"
+                />
+              </div>
+            )}
+          </div>
           {managers.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
               Chưa có tài khoản quản lý vận hành nào.
             </p>
+          ) : visibleManagers.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-400">
+              Không có quản lý nào khớp &quot;{mgrSearch}&quot;.
+            </p>
           ) : (
             <div className="space-y-1.5">
-              {managers.map((m) => {
+              {visibleManagers.map((m) => {
                 const load = loads.get(m.id);
                 const on = picked === m.id;
                 const phone = userMap.get(m.id)?.phoneNumber;
+                /* Người ĐANG phụ trách khu vực này. Cần nhãn riêng vì ô tick được đặt
+                   sẵn vào chính người đó lúc mở hộp thoại — không có nhãn thì dấu tick
+                   vừa mang nghĩa "đang giữ" vừa mang nghĩa "tôi vừa chọn", nhìn vào
+                   không biết mình đã đổi gì hay chưa. */
+                const current = m.id === (group.managerId ?? registeredManagerId);
                 return (
                   <button
                     key={m.id}
                     onClick={() => setPicked(m.id)}
                     disabled={busy}
                     className={`flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition disabled:opacity-50 ${
-                      on ? 'border-indigo-600 bg-indigo-50/60' : 'border-slate-200 hover:border-indigo-300'
+                      on ? 'border-indigo-600 bg-indigo-50/60 ring-1 ring-indigo-200' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
                     }`}
                   >
                     <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-bold ${
@@ -414,7 +448,14 @@ const AssignModal = ({
                       {nameOf(m).charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-slate-900">{nameOf(m)}</p>
+                      <p className="flex items-center gap-2 truncate text-sm font-bold text-slate-900">
+                        {nameOf(m)}
+                        {current && (
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                            ĐANG PHỤ TRÁCH
+                          </span>
+                        )}
+                      </p>
                       <p className="mt-0.5 truncate text-xs text-slate-400">
                         {phone ? `${phone} · ` : ''}
                         {load
@@ -615,12 +656,21 @@ const AssignModal = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-6 py-4">
-          <p className="text-xs text-slate-400">
-            {busy ? 'Đang cập nhật cả khu vực…' : 'Một khu vực chỉ có một quản lý.'}
+        {/* Footer.
+            Nút bấm nói VIỆC SẼ LÀM, còn lý do chưa bấm được thì nằm ở dòng chữ bên trái.
+            Bản trước để nhãn nút là "Không có thay đổi" — một câu trạng thái đứng ở chỗ
+            của một mệnh lệnh, đọc vào tưởng bấm để "không thay đổi gì". */}
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-white px-6 py-4">
+          <p className={`text-xs ${canApply ? 'text-slate-400' : 'font-semibold text-slate-500'}`}>
+            {busy
+              ? 'Đang cập nhật cả khu vực…'
+              : !picked
+                ? 'Chọn một quản lý ở trên để tiếp tục.'
+                : canApply
+                  ? 'Một khu vực chỉ có một quản lý.'
+                  : `${pickedManager ? nameOf(pickedManager) : 'Người này'} đã phụ trách khu vực này rồi — chọn người khác để đổi.`}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={onClose}
               disabled={busy}
@@ -634,9 +684,7 @@ const AssignModal = ({
               className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-indigo-500/30 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {changeCount > 0
-                ? `Áp dụng cho ${changeCount} nhà`
-                : registryChanges ? 'Gán phụ trách khu vực' : 'Không có thay đổi'}
+              {changeCount > 0 ? `Áp dụng cho ${changeCount} nhà` : 'Gán phụ trách khu vực'}
             </button>
           </div>
         </div>
@@ -890,16 +938,20 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
   // Nút vẫn bấm được để hộp thoại giải thích, chỉ làm nhạt đi để báo trước là sẽ không gỡ được.
   const removeBlocked = impact.blocked || registryGap;
 
+  /*
+   * Dòng phụ chỉ còn nói về KHU VỰC. Tên người phụ trách tách hẳn ra cột riêng bên
+   * phải: đó là câu trả lời chính của cả trang này, mà bản cũ nhét nó vào cuối một
+   * chuỗi "1 nhà · 1 đơn vị · QL: …" cỡ 12px màu xám — muốn biết ai quản khu nào
+   * phải đọc hết từng dòng chứ không quét dọc được.
+   */
   const subtitle =
     group.assignableCount === 0
       ? 'không có nhà nào đổi quản lý được lúc này'
-      : group.state === 'UNASSIGNED'
-        ? 'chưa có quản lý'
-        : group.state === 'MIXED'
-          ? `${group.managerBreakdown.length} quản lý đang lẫn nhau`
-          : `QL: ${nameFor(group.managerId, group.managerName)}${
-              group.state === 'PARTIAL' ? ` · ${group.unassignedCount} nhà chưa nhận` : ''
-            }${registryGap ? ' · chưa đăng ký phân công' : ''}`;
+      : group.state === 'MIXED'
+        ? `${group.managerBreakdown.length} quản lý đang lẫn nhau`
+        : group.state === 'PARTIAL'
+          ? `${group.unassignedCount} nhà chưa nhận quản lý`
+          : registryGap ? 'chưa đăng ký phân công' : '';
 
   return (
     <div>
@@ -925,13 +977,38 @@ const ZoneRow = ({ group, userMap, loads, mgrNames, canAssign, impact, registryG
               )}
             </p>
             <p className="mt-0.5 truncate text-xs text-slate-400">
-              {group.properties.length} nhà · {group.units} đơn vị · {subtitle}
+              {group.properties.length} nhà · {group.units} đơn vị
+              {subtitle && <span> · {subtitle}</span>}
               {group.blockedCount > 0 && group.assignableCount > 0 && (
-                <span className="text-slate-400"> · {group.blockedCount} nhà chưa đổi được</span>
+                <span> · {group.blockedCount} nhà chưa đổi được</span>
               )}
             </p>
           </div>
         </button>
+
+        {/* Người phụ trách — cột riêng, có avatar, để quét dọc cả danh sách là ra
+            ngay ai quản khu nào. */}
+        <div className="hidden min-w-0 shrink-0 items-center gap-2 md:flex md:w-52">
+          {group.managerId ? (
+            <>
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-black text-white">
+                {nameFor(group.managerId, group.managerName).charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold text-slate-700">
+                  {nameFor(group.managerId, group.managerName)}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {loads.get(group.managerId)?.zones ?? 1} khu vực
+                </p>
+              </div>
+            </>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+              <UserRound className="h-4 w-4" /> Chưa có quản lý
+            </span>
+          )}
+        </div>
 
         {canAssign ? (
           <div className="flex shrink-0 items-center gap-1.5">
@@ -1297,6 +1374,16 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
   const doneCount = stateCounts.ASSIGNED ?? 0;
   const waitingHouses = groups.reduce((s, g) => s + g.unassignedCount, 0);
 
+  /**
+   * Số chip trạng thái có dữ liệu, KHÔNG tính chip "Tất cả".
+   *
+   * Còn đúng một chip nghĩa là cả danh sách chung một trạng thái — lúc đó "Tất cả N"
+   * và chip kia là cùng một tập, cùng một con số. Hàng chip không lọc được gì nữa.
+   */
+  const visibleStateChips = STATE_CHIPS.filter(
+    (c) => c.key !== 'all' && (stateCounts[c.key] ?? 0) > 0,
+  ).length;
+
   const filterCount =
     (stateFilter !== 'all' ? 1 : 0) + (managerFilter !== 'all' ? 1 : 0) + (search.trim() ? 1 : 0);
   const resetFilters = () => { setStateFilter('all'); setManagerFilter('all'); setSearch(''); };
@@ -1327,7 +1414,14 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
         </button>
       </div>
 
-      {/* Thống kê — bấm để lọc nhanh */}
+      {/*
+        Thống kê — bấm để lọc nhanh.
+
+        Hai ô cảnh báo CHỈ dựng khi thật sự có việc. Mọi khu vực đã gán xong thì bản cũ
+        vẫn chiếm nửa hàng để hiện hai số 0, cộng thêm "Đã gán xong 5" lặp y hệt
+        "Tổng khu vực 5" — bốn ô to mà không ô nào nói được điều gì mới. Lọc theo một
+        trạng thái đang rỗng cũng chẳng để làm gì, nên ẩn đi không mất chức năng nào.
+      */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           icon={MapPin} label="Tổng khu vực" value={groups.length} tone="indigo"
@@ -1335,18 +1429,24 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           onClick={resetFilters}
         />
         <StatCard
-          icon={ShieldCheck} label="Đã gán xong" value={doneCount} tone="emerald"
+          icon={ShieldCheck}
+          label={doneCount === groups.length ? 'Đều đã có quản lý' : 'Đã gán xong'}
+          value={`${doneCount}/${groups.length}`} tone="emerald"
           active={stateFilter === 'ASSIGNED'} onClick={() => toggleState('ASSIGNED')}
         />
-        <StatCard
-          icon={Building2} label="Nhà chờ quản lý" value={waitingHouses} tone="amber"
-          active={managerFilter === 'none'}
-          onClick={() => setManagerFilter((cur) => (cur === 'none' ? 'all' : 'none'))}
-        />
-        <StatCard
-          icon={AlertTriangle} label="Khu vực cần chốt" value={mixedCount} tone="rose"
-          active={stateFilter === 'MIXED'} onClick={() => toggleState('MIXED')}
-        />
+        {waitingHouses > 0 && (
+          <StatCard
+            icon={Building2} label="Nhà chờ quản lý" value={waitingHouses} tone="amber"
+            active={managerFilter === 'none'}
+            onClick={() => setManagerFilter((cur) => (cur === 'none' ? 'all' : 'none'))}
+          />
+        )}
+        {mixedCount > 0 && (
+          <StatCard
+            icon={AlertTriangle} label="Khu vực cần chốt" value={mixedCount} tone="rose"
+            active={stateFilter === 'MIXED'} onClick={() => toggleState('MIXED')}
+          />
+        )}
       </div>
 
       {/* Nhắc đối chiếu dữ liệu cũ */}
@@ -1432,8 +1532,11 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
           </div>
         )}
 
-        {/* Chip trạng thái + nút xoá lọc */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        {/* Chip trạng thái + nút xoá lọc.
+            Cả danh sách cùng một trạng thái thì hàng chip chỉ còn "Tất cả N" và
+            "<trạng thái đó> N" — hai chip cùng một con số, bấm cái nào cũng ra y
+            hệt nhau. Ẩn cả hàng, không mất gì. */}
+        <div className={`flex flex-wrap items-center gap-1.5 ${visibleStateChips <= 1 ? 'hidden' : ''}`}>
           {STATE_CHIPS.map((c) => {
             const count = stateCounts[c.key] ?? 0;
             if (c.key !== 'all' && count === 0) return null; // ẩn chip rỗng cho đỡ rối

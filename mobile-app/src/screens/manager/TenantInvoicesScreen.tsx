@@ -6,9 +6,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
+  invoiceKind, invoiceAmountText,
 } from '@/services/manager/invoiceService';
 import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
 
@@ -89,16 +90,20 @@ const InvoiceDetailModal: React.FC<{
         <View style={ds.sheet}>
           <View style={[ds.head, { backgroundColor: tc.bg }]}>
             <View style={ds.headTop}>
-              <Text style={ds.headIcon}>{tc.icon}</Text>
+              <Text style={ds.headIcon}>{invoiceKind(invoice).icon}</Text>
               <View style={{ flex: 1 }}>
-                <Text style={[ds.headTitle, { color: tc.color }]}>{tc.label}</Text>
+                <Text style={[ds.headTitle, { color: tc.color }]}>{invoiceKind(invoice).label}</Text>
                 <Text style={ds.headCode}>{invoice.code}</Text>
               </View>
               <TouchableOpacity onPress={onClose} hitSlop={10}>
                 <Text style={ds.close}>✕</Text>
               </TouchableOpacity>
             </View>
-            <Text style={[ds.headAmount, { color: tc.color }]}>{fmt(invoice.amount)}</Text>
+            {/* Số tiền bị mask thì nói thẳng, đừng in "0đ" — đây là chỗ chữ to
+                nhất màn hình, sai ở đây là sai to nhất. */}
+            {invoiceAmountText(invoice)
+              ? <Text style={[ds.headAmount, { color: tc.color }]}>{invoiceAmountText(invoice)}</Text>
+              : <Text style={[ds.headAmount, ds.headAmountHidden]}>{HIDDEN_AMOUNT_TEXT}</Text>}
             <View style={[ds.statusPill, { backgroundColor: sc.bg }]}>
               <Text style={[ds.statusText, { color: sc.color }]}>{sc.label}</Text>
             </View>
@@ -118,7 +123,7 @@ const InvoiceDetailModal: React.FC<{
 
               Thay bằng "Thu tiền hộ khách": nộp thay khách bằng QR thật, và phải có mã
               admin cấp cho đúng hoá đơn này (xem CollectPaymentSheet). Việc duyệt khoản
-              khách TỰ BÁO đã chuyển vẫn nằm ở màn Thu & Đối soát.
+              khách TỰ BÁO đã chuyển vẫn nằm ở màn Tiền khách đã trả.
             */}
             {/* HAI nút cho HAI ca, không bắt chọn lại trong sheet. */}
             {collectable && (
@@ -136,7 +141,7 @@ const InvoiceDetailModal: React.FC<{
 
             <Text style={ds.note}>
               Khách tự trả xong thì trạng thái ở đây tự đổi. Xác nhận khoản khách báo đã
-              chuyển thì làm ở màn Thu & Đối soát.
+              chuyển thì làm ở màn Tiền khách đã trả.
             </Text>
           </ScrollView>
         </View>
@@ -159,20 +164,28 @@ const Row: React.FC<{ label: string; value: string; last?: boolean }> = ({ label
 const InvoiceCard: React.FC<{ invoice: ManagerInvoice; onPress: () => void }> = ({ invoice, onPress }) => {
   const tc = TYPE_CFG[invoice.type] ?? TYPE_CFG.OTHER;
   const sc = STATUS_CFG[invoice.status] ?? STATUS_CFG.PENDING;
+  // Nhãn lấy từ helper dùng chung: hoá đơn đón khách là phong bì "cọc + tiền nhà
+  // kỳ đầu", trước đây rơi vào nhánh mặc định và hiện thành "Khoản khác".
+  const kind = invoiceKind(invoice);
+  const amount = invoiceAmountText(invoice);
   return (
     <TouchableOpacity style={cs.card} onPress={onPress} activeOpacity={0.7}>
       <View style={[cs.iconWrap, { backgroundColor: tc.bg }]}>
-        <Text style={cs.icon}>{tc.icon}</Text>
+        <Text style={cs.icon}>{kind.icon}</Text>
       </View>
       <View style={cs.mid}>
-        <Text style={cs.type} numberOfLines={1}>{tc.label}</Text>
+        <Text style={cs.type} numberOfLines={1}>{kind.label}</Text>
         <Text style={cs.meta} numberOfLines={1}>
           Tháng {String(invoice.month).padStart(2, '0')}/{invoice.year} · hạn {fmtDay(invoice.dueDate)}
         </Text>
         <Text style={cs.code} numberOfLines={1}>{invoice.code}</Text>
       </View>
       <View style={cs.right}>
-        <Text style={cs.amount}>{fmt(invoice.amount)}</Text>
+        {/* Tiền nhà bị BE mask → `invoiceAmountText` trả null. Đưa vào `fmt()` như
+            trước là in ra "0đ", đọc thành hoá đơn không đồng. */}
+        {amount
+          ? <Text style={cs.amount}>{amount}</Text>
+          : <Text style={cs.amountHidden}>{HIDDEN_AMOUNT_TEXT}</Text>}
         <View style={[cs.badge, { backgroundColor: sc.bg }]}>
           <Text style={[cs.badgeText, { color: sc.color }]}>{sc.label}</Text>
         </View>
@@ -185,10 +198,13 @@ const InvoiceCard: React.FC<{ invoice: ManagerInvoice; onPress: () => void }> = 
 export const TenantInvoicesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { tenantName, roomName, propertyId, propertyName, autoOpenFirst } =
+  const { tenantName, roomName, propertyId, propertyName, contractId, autoOpenFirst } =
     route.params as {
       tenantId: string; tenantName: string; roomId: string; roomName: string;
-      propertyId: string; propertyName: string; autoOpenFirst?: boolean;
+      propertyId: string; propertyName: string;
+      /** Có thì lọc thẳng theo hợp đồng — chính xác hơn mọi cách suy từ số phòng. */
+      contractId?: number;
+      autoOpenFirst?: boolean;
     };
 
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
@@ -218,8 +234,18 @@ export const TenantInvoicesScreen: React.FC = () => {
       const all = await realManagerInvoiceService.listInvoices();
       const mine = all.filter(inv => {
         if (inv.propertyId !== propId) return false;
-        // Nhà nguyên căn: hoá đơn không có số phòng.
-        if (!wantRoom) return !inv.roomNumber;
+        // Có contractId thì ghép thẳng theo hợp đồng — vừa đúng, vừa không kéo
+        // nhầm hoá đơn của đời khách trước ở cùng một căn.
+        if (contractId != null && inv.contractId != null) return inv.contractId === contractId;
+        /*
+         * Nhà nguyên căn (không có tên phòng): khớp theo BẤT ĐỘNG SẢN.
+         *
+         * Bản cũ đòi thêm `!inv.roomNumber` — nhưng BE có gắn số phòng cho hoá đơn
+         * TIỀN NHÀ của nhà nguyên căn (căn nào cũng có một bản ghi room), nên cả 3
+         * hoá đơn HD-RENT-* bị loại sạch: màn nhà ghi 8 hoá đơn mà sổ này chỉ hiện
+         * 5, và "còn phải thu" ra 0 trong khi đang có một kỳ chưa thu.
+         */
+        if (!wantRoom) return true;
         return String(inv.roomNumber ?? '') === wantRoom;
       });
       setInvoices(mine);
@@ -230,7 +256,7 @@ export const TenantInvoicesScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [propId, wantRoom]);
+  }, [propId, wantRoom, contractId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -285,17 +311,24 @@ export const TenantInvoicesScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Tổng còn phải thu — con số quản lý cần thấy đầu tiên */}
+      {/*
+        SỐ ĐẾM chứ không phải tổng tiền.
+        Hai lý do: (1) quy tắc `managerVisibility` ghi rõ màn quản lý "không hiện
+        tổng phải thu"; (2) cộng tiền ở đây luôn ra số sai — tiền nhà bị BE mask
+        về null nên chỉ cộng được phần điện/nước, mà vẫn dán nhãn "còn phải thu".
+        Ảnh chụp cho thấy đúng hậu quả: "0đ" trong khi đang có một kỳ chưa thu.
+      */}
       <View style={ss.summary}>
         <Text style={ss.summaryLabel}>Còn phải thu</Text>
-        <Text style={[ss.summaryValue, totalUnpaid > 0 && { color: Colors.error }]}>
-          {fmt(totalUnpaid)}
+        <Text style={[ss.summaryValue, counts.unpaid > 0 && { color: Colors.error }]}>
+          {counts.unpaid === 0 ? 'Không còn' : `${counts.unpaid} hoá đơn`}
         </Text>
       </View>
 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={ss.filterBar}
         contentContainerStyle={ss.filterRow}
       >
         {FILTERS.map(f => {
@@ -403,7 +436,19 @@ const ss = StyleSheet.create({
   summaryLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   summaryValue: { fontSize: 18, fontWeight: '900', color: Colors.textPrimary },
 
-  filterRow: { gap: 8, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  /**
+   * Thanh lọc PHẢI tự co theo nội dung, và chip PHẢI thôi kéo giãn theo chiều dọc.
+   *
+   * Thiếu `flexGrow: 0`, `ScrollView` ngang này là con của một cột flex nên nó nở
+   * ra ăn hết chỗ trống còn lại; thiếu `alignItems: 'center'` thì chip lại giãn
+   * theo chiều cao đó (mặc định của flex row là `stretch`). Hai thứ cộng lại:
+   * danh sách càng ngắn chip càng cao — lọc ra rỗng là chip cao gần hết màn hình.
+   */
+  filterBar: { flexGrow: 0, flexShrink: 0 },
+  filterRow: {
+    gap: 8, alignItems: 'center',
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
+  },
   chip: {
     paddingHorizontal: 14, paddingVertical: 7, borderRadius: BorderRadius.full,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
@@ -438,6 +483,8 @@ const cs = StyleSheet.create({
   code: { fontSize: 10, color: Colors.textMuted, marginTop: 1 },
   right: { alignItems: 'flex-end', gap: 5 },
   amount: { fontSize: 14, fontWeight: '900', color: Colors.textPrimary },
+  /** Tiền nhà bị mask — hiện chữ, KHÔNG hiện "0đ". */
+  amountHidden: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
   badge: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 3 },
   badgeText: { fontSize: 10, fontWeight: '800' },
 });
@@ -455,6 +502,8 @@ const ds = StyleSheet.create({
   headCode: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   close: { fontSize: 18, color: Colors.textMuted, fontWeight: '700' },
   headAmount: { fontSize: 28, fontWeight: '900', marginTop: Spacing.md },
+  /** Tiền nhà bị mask — chữ nhỏ và mờ hơn, để không đọc nhầm thành một con số. */
+  headAmountHidden: { fontSize: 17, color: Colors.textMuted },
   statusPill: { alignSelf: 'flex-start', marginTop: Spacing.sm, borderRadius: BorderRadius.full, paddingHorizontal: 12, paddingVertical: 5 },
   statusText: { fontSize: 12, fontWeight: '800' },
 

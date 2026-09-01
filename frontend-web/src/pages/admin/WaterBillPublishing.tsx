@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Droplets, FileUp, Loader2, RefreshCw, Search, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Droplets, FileArchive, FileUp, Loader2, RefreshCw, Search, Send, Trash2 } from 'lucide-react';
 import {
   waterBillService, waterUnitPrice, type WaterBill,
 } from '@/services/waterBill.service';
@@ -16,6 +16,7 @@ import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 import { PropertyCombobox } from './EvnBillPublishing';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
+import { UtilityBillZipImport } from './UtilityBillZipImport';
 import { useOccupiedProperties } from '@/services/useOccupiedProperties';
 import { groupThousands } from '@/utils';import { normalizeVi } from '@/utils/helpers';
 import { serverNow } from '@/utils/serverTime';
@@ -63,6 +64,8 @@ export const WaterBillPublishing = () => {
   const [propertyId, setPropertyId] = useState<number | null>(null);
 
   const [bills, setBills] = useState<WaterBill[]>([]);
+  /** Mở hộp nhập lô từ file .zip. */
+  const [zipOpen, setZipOpen] = useState(false);
   const [loadingBills, setLoadingBills] = useState(false);
   const [billsError, setBillsError] = useState<string | null>(null);
 
@@ -412,6 +415,14 @@ export const WaterBillPublishing = () => {
         subtitle="Admin chốt hoá đơn nước của từng nhà, hệ thống tính đơn giá rồi đẩy xuống cho quản lý."
         action={(
           <div className="flex items-center gap-2">
+            {/* Nhập lô — một .zip cho cả danh mục, thay vì lặp 5 thao tác × N nhà. */}
+            <button
+              type="button"
+              onClick={() => setZipOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700"
+            >
+              <FileArchive className="h-4 w-4" /> Nhập từ .zip
+            </button>
             <select
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
               value={month}
@@ -904,6 +915,19 @@ export const WaterBillPublishing = () => {
           </div>
         )}
       </SectionShell>
+
+      {zipOpen && (
+        <UtilityBillZipImport
+          kind="WATER"
+          properties={properties}
+          month={month}
+          year={year}
+          defaultPeriod={selectedMonthPeriod}
+          existing={bills}
+          onClose={() => setZipOpen(false)}
+          onDone={loadBills}
+        />
+      )}
     </div>
   );
 };

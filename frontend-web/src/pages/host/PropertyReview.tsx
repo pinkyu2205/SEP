@@ -225,6 +225,15 @@ export const HostPropertyReview = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Bước xác nhận cuối trước khi kích hoạt.
+   *
+   * Kích hoạt là hành động MỘT CHIỀU về mặt vận hành: nhà lên danh sách cho thuê, quản lý
+   * khu vực nhận nhà, và từ lúc có khách vào thì giá bị khoá cho tới khi khách rời đi
+   * (xem `PriceManagerPanel`). Nút cũ nằm ở thanh dính đáy trang, bấm phát là chạy luôn —
+   * mà đúng lúc đó Host thường đang cuộn ở giữa trang, không nhìn thấy giá từng phòng.
+   */
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [success, setSuccess] = useState(false);
 
   /**
@@ -454,6 +463,7 @@ export const HostPropertyReview = () => {
 
   const handleConfirm = async () => {
     if (!canConfirm || !summary || !calc) return;
+    setConfirmOpen(false);
 
     // KHÔNG gửi operationManagerId nữa: quản lý vận hành được phân công theo KHU VỰC
     // (màn /host/zones), không gán riêng cho từng nhà. Nhà thuộc quận chưa có quản lý sẽ
@@ -1592,7 +1602,7 @@ export const HostPropertyReview = () => {
               </p>
             ) : null}
             <button
-              onClick={handleConfirm}
+              onClick={() => setConfirmOpen(true)}
               disabled={!canConfirm || submitting}
               className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 font-bold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1601,9 +1611,176 @@ export const HostPropertyReview = () => {
           </div>
         </div>
       </div>
+
+      {confirmOpen && calc && (
+        <ActivateConfirmDialog
+          propertyName={propertyName}
+          isRoomScope={isRoomScope}
+          rooms={(calc.roomResults || []).map((r) => ({
+            roomId: r.roomId,
+            label: r.roomNumber ? `Phòng ${r.roomNumber}` : `Phòng #${r.roomId}`,
+            price: roomPrices[r.roomId] || 0,
+          }))}
+          totalMonthly={totalMonthly}
+          revenueMonths={revenueMonths}
+          pnl={pnl}
+          targetPerMonth={d?.profitPerMonth ?? 0}
+          zoneName={property?.zoneName}
+          managerName={ownManager?.fullName || zoneLink?.managerFullName}
+          submitting={submitting}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={handleConfirm}
+        />
+      )}
     </div>
   );
 };
+
+/**
+ * Hộp xác nhận cuối trước khi kích hoạt cho thuê.
+ *
+ * Gộp lại đúng ba thứ Host cần thấy lần cuối, mà thanh dính đáy trang KHÔNG nói được:
+ *   1. GIÁ TỪNG PHÒNG — thanh đáy chỉ có tổng. Chốt nhầm một phòng thì cả bảng tổng vẫn
+ *      trông bình thường, và giá sai chỉ lộ ra khi khách đầu tiên vào ở.
+ *   2. LỜI THẬT so với mục tiêu — con số quyết định có nên chốt hay không.
+ *   3. Chuyện gì xảy ra SAU khi bấm — phần này trước đây không nói ở đâu cả.
+ */
+const ActivateConfirmDialog = ({
+  propertyName, isRoomScope, rooms, totalMonthly, revenueMonths, pnl, targetPerMonth,
+  zoneName, managerName, submitting, onCancel, onConfirm,
+}: {
+  propertyName: string;
+  isRoomScope: boolean;
+  rooms: { roomId: number; label: string; price: number }[];
+  totalMonthly: number;
+  revenueMonths: number;
+  pnl: { net: number; perMonth: number } | null;
+  targetPerMonth: number;
+  zoneName?: string;
+  managerName?: string;
+  submitting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) => {
+  const belowTarget = !!pnl && targetPerMonth > 0 && pnl.perMonth < targetPerMonth;
+  const losing = !!pnl && pnl.perMonth < 0;
+
+  return (
+    <div className="fixed inset-0 z-[60] overflow-y-auto">
+      <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden />
+      <div className="relative flex min-h-full items-start justify-center p-4 sm:py-10"
+        onClick={submitting ? undefined : onCancel}>
+        <div className="relative w-full max-w-xl rounded-2xl bg-white shadow-2xl"
+          onClick={(e) => e.stopPropagation()}>
+          <div className="border-b border-slate-100 px-6 py-5">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Xác nhận lần cuối</p>
+            <h2 className="mt-1 text-lg font-black text-slate-950">Kích hoạt cho thuê</h2>
+            <p className="mt-0.5 truncate text-sm text-slate-500">{propertyName}</p>
+          </div>
+
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto px-6 py-5">
+            {/* Hai con số quyết định */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Giá chốt / tháng</p>
+                <p className="mt-1 text-xl font-black tabular-nums text-slate-900">{formatVND(totalMonthly)}</p>
+              </div>
+              <div className={`rounded-xl border px-4 py-3 ${
+                losing ? 'border-rose-200 bg-rose-50'
+                : belowTarget ? 'border-amber-200 bg-amber-50'
+                : 'border-emerald-200 bg-emerald-50'}`}>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tiền lời thật / tháng</p>
+                <p className={`mt-1 text-xl font-black tabular-nums ${
+                  losing ? 'text-rose-700' : belowTarget ? 'text-amber-700' : 'text-emerald-700'}`}>
+                  {pnl ? `${pnl.perMonth < 0 ? '− ' : ''}${formatVND(Math.abs(pnl.perMonth))}` : '—'}
+                </p>
+                {targetPerMonth > 0 && (
+                  <p className="text-[11px] font-semibold text-slate-500">mục tiêu {formatVND(targetPerMonth)}</p>
+                )}
+              </div>
+            </div>
+
+            {(losing || belowTarget) && (
+              <p className={`rounded-xl border px-3 py-2 text-xs font-semibold leading-relaxed ${
+                losing ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                {losing
+                  ? 'Với giá này cả kỳ đang LỖ sau khi trừ tiền bỏ ra và chi phí vận hành. Vẫn kích hoạt được, nhưng nên cân nhắc nâng giá trước.'
+                  : 'Lời thật đang THẤP HƠN mục tiêu bạn đặt ra. Vẫn kích hoạt được — chỉ để bạn biết trước khi chốt.'}
+              </p>
+            )}
+
+            {/* Giá TỪNG PHÒNG — thứ thanh đáy trang không hiện được */}
+            {isRoomScope && rooms.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-black uppercase tracking-wide text-slate-400">
+                  Giá chốt từng phòng ({rooms.length})
+                </p>
+                <div className="max-h-44 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
+                  {rooms.map((r) => (
+                    <div key={r.roomId} className="flex items-center justify-between px-3 py-2">
+                      <span className="text-sm font-semibold text-slate-700">{r.label}</span>
+                      <span className={`text-sm font-black tabular-nums ${
+                        r.price > 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                        {r.price > 0 ? formatVND(r.price) : 'chưa có giá'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+              <RowLine label="Kỳ thu được tiền" value={`${revenueMonths} tháng`} />
+              <RowLine label="Tiền lời thật cả kỳ"
+                value={pnl ? `${pnl.net < 0 ? '− ' : ''}${formatVND(Math.abs(pnl.net))}` : '—'}
+                tone={pnl && pnl.net < 0 ? 'rose' : 'emerald'} />
+              <RowLine label="Quản lý sẽ nhận nhà"
+                value={managerName ? `${managerName}${zoneName ? ` · ${zoneName}` : ''}` : 'Chưa xác định'} />
+            </div>
+
+            {/* Chuyện gì xảy ra sau khi bấm — trước đây không nói ở đâu cả */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-1.5 text-xs font-black uppercase tracking-wide text-slate-500">
+                Sau khi kích hoạt
+              </p>
+              <ul className="space-y-1.5 text-xs leading-relaxed text-slate-600">
+                <li>• Nhà lên danh sách cho thuê và quản lý khu vực bắt đầu vận hành.</li>
+                <li>
+                  • Giá này là giá bán cho khách vào ở. <b className="text-slate-800">Chỉ sửa được khi
+                  đơn vị còn TRỐNG</b> — có khách rồi thì khoá tới lúc khách rời đi, vì hợp đồng
+                  đã ký là cam kết hai chiều.
+                </li>
+                <li>• Muốn đổi giá thì đổi ngay bây giờ, đừng chờ tới lúc đã nhận khách.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-6 py-4">
+            <button onClick={onCancel} disabled={submitting}
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-40">
+              Xem lại
+            </button>
+            <button onClick={onConfirm} disabled={submitting}
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm shadow-emerald-500/30 transition hover:bg-emerald-700 disabled:opacity-50">
+              <Send className="h-4 w-4" />
+              {submitting ? 'Đang xử lý…' : 'Kích hoạt cho thuê'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RowLine = ({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) => (
+  <div className="flex items-center justify-between px-3 py-2.5">
+    <span className="text-sm text-slate-500">{label}</span>
+    <span className={`text-sm font-black tabular-nums ${
+      tone === 'rose' ? 'text-rose-700' : tone === 'emerald' ? 'text-emerald-700' : 'text-slate-900'}`}>
+      {value}
+    </span>
+  </div>
+);
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 

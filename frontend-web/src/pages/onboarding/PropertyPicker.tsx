@@ -25,7 +25,8 @@ import { capacityTone } from './CapacityBar';
 
 interface Props {
   properties: PropertyResponse[];
-  occupancy: Map<number, PropertyOccupancy>;
+  /** Bỏ trống khi màn không quan tâm sức chứa (vd in tem QR) — lúc đó không vẽ chip. */
+  occupancy?: Map<number, PropertyOccupancy>;
   /** id nhà đang chọn, dạng chuỗi để khớp state của form. */
   value: string;
   onChange: (propertyId: string) => void;
@@ -48,7 +49,7 @@ export const PropertyPicker = ({ properties, occupancy, value, onChange }: Props
   const searchRef = useRef<HTMLInputElement>(null);
 
   const rows: Row[] = useMemo(() => properties.map((p) => {
-    const occ = occupancy.get(p.id);
+    const occ = occupancy?.get(p.id);
     return {
       p,
       chip: occupancyChip(occ),

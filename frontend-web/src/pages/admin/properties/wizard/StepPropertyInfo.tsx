@@ -37,9 +37,17 @@ interface StepPropertyInfoProps {
   confirmBeforeNext?: boolean;
   confirmTitle?: string;
   confirmMessage?: ReactNode;
+  /**
+   * Nội dung chèn NGAY TRƯỚC thanh nút cuối (VD: bảng thiết bị chủ nhà bàn giao).
+   *
+   * Cần slot này vì thanh nút là thứ kết thúc trang — trang gọi mà tự render thêm
+   * card bên dưới component thì nút "Quay về danh sách" mắc kẹt giữa trang, phía
+   * dưới vẫn còn nội dung, nhìn như trang bị đứt đoạn.
+   */
+  beforeNav?: ReactNode;
 }
 
-export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →', prefillContract, confirmBeforeNext = false, confirmTitle, confirmMessage }: StepPropertyInfoProps) => {
+export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục cấu hình →', prefillContract, confirmBeforeNext = false, confirmTitle, confirmMessage, beforeNav }: StepPropertyInfoProps) => {
   const [loading, setLoading] = useState(false);
   const [confirmNextOpen, setConfirmNextOpen] = useState(false);
   
@@ -64,6 +72,9 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
   // đã "Cấu hình khai thác" / đang "Chờ duyệt" (PENDING_HOST_REVIEW) / đang kinh doanh.
   // Chỉ khóa input (disabled) — không hiển thị badge/banner cảnh báo cho đỡ rối.
   const locked = property.status !== 'DRAFT';
+
+  // Khoá thì không có nút xóa → bỏ luôn cột 48px, tránh lệch header với dòng.
+  const manifestCols = locked ? 'grid-cols-[1fr_96px_128px]' : 'grid-cols-[1fr_96px_128px_48px]';
 
   const formatVND = (value: number) =>
     value > 0 ? value.toLocaleString('vi-VN') : '';
@@ -98,8 +109,13 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             const last = manifestData.value[manifestData.value.length - 1];
             setManifestSearch(catalogData.value.find(c => c.id === last.catalogId)?.name || '');
           }
-        } else {
-          // Initialize empty if no manifest
+        } else if (!locked) {
+          // Chưa khai báo gì & còn sửa được → mở sẵn 1 dòng trống để nhập luôn.
+          //
+          // Ở chế độ KHOÁ thì tuyệt đối không seed dòng này: nó không sửa được,
+          // không xoá được, nên hiện ra thành một dòng ma "— · 1 · Mới 100%"
+          // trông y như tòa nhà có thiết bị trong khi thực tế chưa khai gì.
+          // Danh sách rỗng → phần thân hiện empty state.
           setManifestItems([{ catalogId: 0, quantity: 1, status: 'NEW', source: 'INITIAL_HANDOVER' }]);
         }
 
@@ -352,12 +368,23 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
           )}
         </div>
         <div className="p-5">
+          {manifestItems.length === 0 ? (
+            /* Chỉ rơi vào đây ở chế độ khoá — còn sửa được thì luôn có sẵn 1 dòng trống. */
+            <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center">
+              <Package className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+              <p className="text-sm font-semibold text-slate-500">Chưa khai báo thiết bị có sẵn nào</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Tòa nhà đã rời trạng thái nháp nên không bổ sung ở đây được nữa.
+              </p>
+            </div>
+          ) : (
+          <>
           {/* Header */}
-          <div className="grid grid-cols-[1fr_96px_128px_48px] gap-2 pb-2 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          <div className={`grid ${manifestCols} gap-2 pb-2 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide`}>
             <span>Tên Thiết bị</span>
             <span className="text-right">Số lượng</span>
             <span>Tình trạng</span>
-            <span className="text-center">Xóa</span>
+            {!locked && <span className="text-center">Xóa</span>}
           </div>
 
           {/* Rows */}
@@ -367,7 +394,7 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
               const isLocked = locked || idx < manifestItems.length - 1;
               const suggestions = catalog.filter(c => normalizeText(c.name).includes(normalizeText(manifestSearch)));
               return (
-                <div key={idx} className="grid grid-cols-[1fr_96px_128px_48px] gap-2 items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                <div key={idx} className={`grid ${manifestCols} gap-2 items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0`}>
                   {/* Tên thiết bị */}
                   <div className="relative">
                     {isLocked ? (
@@ -436,18 +463,20 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
                     </select>
                   )}
 
-                  {/* Xóa */}
-                  <div className="flex justify-center">
-                    {!locked && (
+                  {/* Xóa — ở chế độ khoá thì bỏ hẳn cột, khỏi chừa ô trống vô nghĩa */}
+                  {!locked && (
+                    <div className="flex justify-center">
                       <button onClick={() => handleRemoveManifestRow(idx)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md">
                         <Trash2 className="w-4 h-4" />
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
+          </>
+          )}
           {!locked && (
             <button
               onClick={handleAddManifestRow}
@@ -461,19 +490,26 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
         </div>
       </section>
 
+      {beforeNav}
+
       {/* Navigation */}
-      <div className="mt-8 flex justify-end pt-4 border-t border-slate-200">
+      <div className="mt-8 flex items-center justify-end pt-4 border-t border-slate-200">
         {!isFormComplete && !locked && (
           <p className="text-sm font-semibold text-amber-600 flex items-center gap-1 mr-4">
             <AlertCircle className="w-4 h-4" /> Vui lòng Lưu Thiết bị và Lưu Hợp đồng trước khi tiếp tục
           </p>
         )}
+        {/* Khoá thì nút này chỉ còn là điều hướng, không chốt gì cả — để kiểu
+            primary sẽ đọc thành "bấm vào đây để hoàn tất", trong khi thực tế nó
+            trùng đúng link "← Quay lại danh sách" ở đầu trang. */}
         <button
           onClick={() => (locked ? onNext() : confirmBeforeNext ? setConfirmNextOpen(true) : onNext())}
           disabled={!locked && !isFormComplete}
-          className="btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className={locked
+            ? 'rounded-xl border border-slate-200 bg-white px-8 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900'
+            : 'btn-primary rounded-xl px-8 py-3 text-sm font-bold shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed'}
         >
-          {locked ? 'Quay về danh sách' : nextLabel}
+          {locked ? '← Quay về danh sách' : nextLabel}
         </button>
       </div>
 

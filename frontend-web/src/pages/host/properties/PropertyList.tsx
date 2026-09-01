@@ -6,7 +6,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import { monthLabel } from '@/utils/period';
-import { MonthPicker, useServerPeriod } from '../shared';
+import { useServerPeriod } from '../shared';
 import {
   usePropertyListFilters, isHostApproved, formatVnd, type RoomPriceRange,
 } from './propertyListState';
@@ -58,7 +58,18 @@ export const PropertyList = () => {
   const active = useMemo(() => properties.filter(isHostApproved), [properties]);
 
   /** Kỳ đang xem cho phần thu tiền. Khai thác không phụ thuộc kỳ (luôn là hiện tại). */
-  const [period, setPeriod] = useServerPeriod();
+  /**
+   * Danh sách LUÔN xem kỳ hiện tại — ô chọn tháng đã bỏ khỏi trang này (31/08/2026).
+   *
+   * Trang danh sách trả lời câu "hôm nay còn căn nào chưa thu"; lật về tháng cũ ở đây
+   * chỉ tạo ra một trạng thái dễ quên: cột "Hoá đơn kỳ này" đổi số mà tiêu đề trang thì
+   * không, nên nhìn tưởng số hiện tại. Muốn soi lịch sử thì vào chi tiết từng căn —
+   * ở đó ô chọn kỳ vẫn còn và đứng ngay cạnh bảng hoá đơn nó chi phối.
+   *
+   * Vẫn dùng `useServerPeriod` (không phải `currentMonth()` một lần) vì kỳ phải bám
+   * giờ SERVER: lần render đầu chưa có response nào để suy ra giờ server.
+   */
+  const [period] = useServerPeriod();
   const { status: opStatus, billSource, loading: opLoading, reload: reloadStatus } =
     useHostPropertyStatus(active, period);
 
@@ -199,8 +210,6 @@ export const PropertyList = () => {
               <RefreshCw className="h-3 w-3 animate-spin" /> Đang tính tình trạng…
             </span>
           )}
-          {/* Kỳ CHỈ đổi phần thu tiền — tình trạng khai thác luôn là "ngay lúc này". */}
-          <MonthPicker value={period} onChange={setPeriod} />
           <button onClick={() => { fetchProperties(); reloadStatus(); }} disabled={loading}
             className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Làm mới

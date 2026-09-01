@@ -571,7 +571,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
               </>
             ) : (
               <ActionItem
-                icon="🏠" label="Đón khách" primary
+                icon="🤝" label="Khách chờ đón" primary
                 sublabel="Mở danh sách khách chờ đón để bàn giao nhà"
                 onPress={() => navigation.navigate('ResumeContract')}
               />
@@ -762,10 +762,11 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 )}
 
                 {/* Status-conditional ops */}
+                {/* Hồ sơ khách do admin soạn sẵn — nút này chỉ mở danh sách hồ sơ đang chờ đón. */}
                 {actionRoom.status === 'available' && (
                   <ActionItem
-                    icon="🟢"
-                    label="Đón khách mới / Gán khách thuê"
+                    icon="🤝"
+                    label="Xem khách chờ đón"
                     primary
                     onPress={() => handleCheckIn(actionRoom)}
                   />

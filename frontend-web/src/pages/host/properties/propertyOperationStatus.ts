@@ -26,7 +26,7 @@
  * `priceLocked` bật cả với HĐ đã hết hạn, `currentTenant` luôn rỗng).
  */
 import { useCallback, useEffect, useState } from 'react';
-import { adminService, type AdminInvoiceRow } from '@/services/admin.service';
+import { adminService, type AdminInvoiceRow, type AdminInvoiceType } from '@/services/admin.service';
 import { canUseFullInvoices } from '@/services/invoiceAccess';
 import { hostService, type HostContractDto } from '@/services/host.service';
 import {
@@ -79,14 +79,19 @@ const rentalStateOf = (occ: PropertyOccupancy): RentalState => {
 /**
  * Kết quả thu tiền của MỘT căn trong MỘT kỳ.
  *
- * `outstanding` cộng nguyên số tiền của cả hoá đơn `PARTIAL`: BE không trả phần đã
- * thu nên trừ đi bao nhiêu cũng là đoán. Thà báo nợ cao hơn thực tế còn hơn thấp hơn
- * — host nhìn đúng con số này để đi đòi tiền.
+ * `outstanding` là con số CHÍNH XÁC, không phải ước lượng: nghiệp vụ chỉ có hai kết
+ * cục — khách trả đủ 100%, hoặc không trả và hợp đồng bị chấm dứt. Không có thu một
+ * phần. `TenantInvoiceStatus.PARTIAL` tồn tại trong enum của BE nhưng KHÔNG chỗ nào
+ * gán (chỉ xuất hiện trong danh sách trạng thái đem đi truy vấn ở
+ * `BillingCronServiceImpl`), nên mọi hoá đơn chưa thu đều còn nguyên số tiền.
+ *
+ * Vẫn xếp `PARTIAL` vào nhóm chưa thu để phòng khi BE đổi ý — chưa trả đủ thì vẫn là
+ * chưa thu, gộp vào đó không bao giờ sai.
  */
 export interface BillSummary {
   total: number;
   paid: number;
-  /** PENDING + PARTIAL — chưa trả nhưng chưa quá hạn. */
+  /** Chưa trả nhưng chưa quá hạn. */
   pending: number;
   overdue: number;
   outstanding: number;
@@ -345,11 +350,52 @@ export interface PropertyBillBreakdown {
   byRoom: Map<string, BillSummary>;
   /** Hoá đơn không gắn phòng nào: nhà nguyên căn, hoặc khoản thu cấp toà nhà. */
   house: BillSummary;
+  /** Tách theo LOẠI khoản thu — "2/3 đã thu" không nói được thiếu tiền điện hay tiền nhà. */
+  byType: Map<AdminInvoiceType, BillSummary>;
+  /** Từng hoá đơn một, để host mở ra xem đích xác đang chờ khoản nào. */
+  lines: BillLine[];
   total: BillSummary;
 }
 
+/**
+ * Một hoá đơn cụ thể trong kỳ.
+ *
+ * Có danh sách này thì host trả lời được câu "thiếu cái gì" chứ không chỉ "thiếu mấy
+ * cái" — hai hoá đơn cùng số lượng nhưng một cái là tiền nhà 5 triệu, một cái là tiền
+ * nước 200 nghìn thì mức độ phải đi đòi khác hẳn nhau.
+ */
+export interface BillLine {
+  id: string;
+  code: string;
+  type: AdminInvoiceType;
+  roomNumber?: string;
+  tenantName?: string;
+  amount: number;
+  status: string;
+  dueDate?: string;
+  /**
+   * `HD-ONBOARD-*` — vỏ bọc gộp cọc + tiền nhà kỳ đầu. VẪN liệt kê để host không
+   * thấy hụt một dòng so với sổ hoá đơn, nhưng KHÔNG cộng vào tổng (xem `addInvoice`).
+   */
+  envelope?: boolean;
+}
+
+/** Thứ tự + nhãn của các loại khoản thu, dùng chung mọi nơi hiển thị. */
+export const INVOICE_TYPE_META: Record<AdminInvoiceType, { label: string; icon: string }> = {
+  RENT:        { label: 'Tiền nhà',    icon: '🏠' },
+  ELECTRICITY: { label: 'Tiền điện',   icon: '⚡' },
+  WATER:       { label: 'Tiền nước',   icon: '💧' },
+  SERVICE:     { label: 'Phí dịch vụ', icon: '🧾' },
+  MAINTENANCE: { label: 'Bảo trì',     icon: '🔧' },
+  OTHER:       { label: 'Khoản khác',  icon: '📄' },
+};
+
+export const INVOICE_TYPE_ORDER: AdminInvoiceType[] =
+  ['RENT', 'ELECTRICITY', 'WATER', 'SERVICE', 'MAINTENANCE', 'OTHER'];
+
 const EMPTY_BREAKDOWN: PropertyBillBreakdown = {
-  source: 'none', byRoom: new Map(), house: EMPTY_BILLS, total: EMPTY_BILLS,
+  source: 'none', byRoom: new Map(), house: EMPTY_BILLS,
+  byType: new Map(), lines: [], total: EMPTY_BILLS,
 };
 
 /**
@@ -370,8 +416,10 @@ export const loadPropertyBills = async (
   };
 
   const byRoom = new Map<string, BillSummary>();
+  const byType = new Map<AdminInvoiceType, BillSummary>();
   const house: BillSummary = { ...EMPTY_BILLS };
   const total: BillSummary = { ...EMPTY_BILLS };
+  const lines: BillLine[] = [];
 
   if (await canUseFullInvoices()) {
     const rows = await adminService.listInvoices({ period }).catch(() => [] as AdminInvoiceRow[]);
@@ -379,9 +427,16 @@ export const loadPropertyBills = async (
       if (r.propertyId !== propertyId) continue;
       const key = normalizeRoomNumber(r.roomNumber);
       addInvoice(key ? bump(byRoom, key) : house, r.status, r.amount, r.isOnboardEnvelope);
+      addInvoice(bumpType(byType, r.type), r.status, r.amount, r.isOnboardEnvelope);
       addInvoice(total, r.status, r.amount, r.isOnboardEnvelope);
+      lines.push({
+        id: String(r.id), code: r.code, type: r.type,
+        roomNumber: r.roomNumber, tenantName: r.tenantName,
+        amount: r.amount, status: r.status, dueDate: r.dueDate,
+        envelope: r.isOnboardEnvelope,
+      });
     }
-    return { source: 'full', byRoom, house, total };
+    return { source: 'full', byRoom, byType, house, lines: sortLines(lines), total };
   }
 
   const page = await hostService.getInvoices({ month: period, size: 500 }).catch(() => null);
@@ -394,10 +449,33 @@ export const loadPropertyBills = async (
     const status = inv.status === 'UNPAID' ? 'PENDING' : inv.status;
     const key = normalizeRoomNumber(inv.roomCode);
     addInvoice(key ? bump(byRoom, key) : house, status, inv.amount);
+    // `/host/invoices` dựng từ hợp đồng ACTIVE nên mọi dòng đều là tiền nhà —
+    // endpoint này không có trường `type` để đọc.
+    addInvoice(bumpType(byType, 'RENT'), status, inv.amount);
     addInvoice(total, status, inv.amount);
+    lines.push({
+      id: inv.id, code: inv.id, type: 'RENT',
+      roomNumber: inv.roomCode, tenantName: inv.tenantName,
+      amount: inv.amount, status, dueDate: inv.dueDate,
+    });
   }
-  return { source: 'rent-only', byRoom, house, total };
+  return { source: 'rent-only', byRoom, byType, house, lines: sortLines(lines), total };
 };
+
+const bumpType = (map: Map<AdminInvoiceType, BillSummary>, t: AdminInvoiceType) => {
+  const cur = map.get(t) ?? { ...EMPTY_BILLS };
+  map.set(t, cur);
+  return cur;
+};
+
+/** Chưa thu lên trước (host cần đòi), rồi theo thứ tự loại cố định cho dễ quét mắt. */
+const sortLines = (lines: BillLine[]): BillLine[] =>
+  [...lines].sort((a, b) => {
+    const rank = (l: BillLine) => (l.status === 'OVERDUE' ? 0 : l.status === 'PAID' ? 2 : 1);
+    return rank(a) - rank(b)
+      || INVOICE_TYPE_ORDER.indexOf(a.type) - INVOICE_TYPE_ORDER.indexOf(b.type)
+      || (a.roomNumber ?? '').localeCompare(b.roomNumber ?? '', 'vi');
+  });
 
 /*
  * Ở đây từng có `occupancyText()` — gộp tình trạng khai thác thành một câu chữ. Bỏ vì

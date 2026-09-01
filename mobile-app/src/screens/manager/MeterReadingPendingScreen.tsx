@@ -22,7 +22,7 @@ import {
  * Đích đến của deep-link `screen: "MeterReadingPending"` mà BE gửi kèm
  * `METER_READING_DUE`.
  *
- * Bấm một dòng → sang màn Chốt số của đúng nhà đó để chụp và ghi chỉ số.
+ * Bấm một dòng → sang màn Ghi điện nước của đúng nhà đó để chụp và ghi chỉ số.
  */
 
 /** `yyyy-MM` của tháng hiện tại — khớp mặc định phía BE (Asia/Ho_Chi_Minh). */
@@ -114,7 +114,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
     }
   }, [period]);
 
-  // Nạp lại mỗi lần quay về màn: manager vừa đi chụp xong ở màn Chốt số thì dòng đó
+  // Nạp lại mỗi lần quay về màn: manager vừa đi chụp xong ở màn Ghi điện nước thì dòng đó
   // phải biến mất, không bắt họ tự kéo refresh để biết mình đã làm gì.
   useFocusEffect(
     useCallback(() => {

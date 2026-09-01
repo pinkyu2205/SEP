@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Building2, Check, ChevronDown, FileUp, Loader2, RefreshCw,
+  AlertTriangle, Building2, Check, ChevronDown, FileArchive, FileUp, Loader2, RefreshCw,
   Search, Send, Trash2, Zap,
 } from 'lucide-react';
 import {
@@ -10,6 +10,7 @@ import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
 import { useOccupiedProperties } from '@/services/useOccupiedProperties';
 import { groupThousands } from '@/utils';
+import { UtilityBillZipImport } from './UtilityBillZipImport';
 
 
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
@@ -264,6 +265,8 @@ export const EvnBillPublishing = () => {
   const [propertyId, setPropertyId] = useState<number | null>(null);
 
   const [bills, setBills] = useState<EvnBill[]>([]);
+  /** Mở hộp nhập lô từ file .zip. */
+  const [zipOpen, setZipOpen] = useState(false);
   const [loadingBills, setLoadingBills] = useState(false);
   /**
    * BE chưa có endpoint evn-bills → list() ném lỗi. Phân biệt "chưa có BE" với "kỳ này
@@ -762,6 +765,14 @@ export const EvnBillPublishing = () => {
         icon={Zap}
         action={
           <div className="flex items-center gap-2">
+            {/* Nhập lô — một .zip cho cả danh mục, thay vì lặp 5 thao tác × N nhà. */}
+            <button
+              type="button"
+              onClick={() => setZipOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700"
+            >
+              <FileArchive className="h-4 w-4" /> Nhập từ .zip
+            </button>
             <select
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold"
               value={month}
@@ -1572,6 +1583,19 @@ export const EvnBillPublishing = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {zipOpen && (
+        <UtilityBillZipImport
+          kind="ELECTRIC"
+          properties={properties}
+          month={month}
+          year={year}
+          defaultPeriod={selectedMonthPeriod}
+          existing={bills}
+          onClose={() => setZipOpen(false)}
+          onDone={loadBills}
+        />
       )}
     </div>
   );

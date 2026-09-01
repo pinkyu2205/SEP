@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-  ArrowLeft, Building, Building2, CheckCircle2, Clock, DoorOpen, Eye, FilePlus,
-  FileSpreadsheet, FileText, Image as ImageIcon, Layers, MapPin, Plus, Power,
-  TrendingUp, Trash2, Upload, X, XCircle,
+  AlertTriangle, ArrowLeft, Building, Building2, CheckCircle2, Clock, Eye,
+  FilePlus, FileSignature, FileSpreadsheet, FileText, FileWarning, Image as ImageIcon,
+  Layers, MapPin, Plus, Power, TrendingUp, Trash2, Upload, X, XCircle,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 import { zoneService } from '@/services/zone.service';
@@ -19,14 +19,17 @@ import { LeaseImportPanel } from './LeaseImportPanel';
 import { HandoverEquipmentSection } from './HandoverEquipmentSection';
 import { BuildingFilterBar, ResultBar, BuildingTable, BulkActionBar } from './BuildingFilters';
 import { useBuildingFilters, ONBOARDING_STEPS, type StatusOption } from './buildingFilterState';
+import { LEASE_ENDING_SOON_DAYS, leaseNeedsAttention, leaseTerm } from './leaseTerm';
+import { fmtDate } from '@/utils/period';
 
 // Module này CHỈ quan tâm bước khởi tạo hồ sơ — mọi trạng thái phía sau
 // (cải tạo / duyệt giá / kinh doanh) thuộc module "Cấu hình khai thác",
 // ở đây gộp hết thành "Đã khởi tạo".
 const DRAFT_STATE = {
-  DRAFT:       { label: 'Nháp',         cls: 'bg-slate-100 text-slate-700' },
-  INITIALIZED: { label: 'Đã khởi tạo',  cls: 'bg-indigo-100 text-indigo-800' },
-  DISABLED:    { label: 'Đã vô hiệu',   cls: 'bg-rose-100 text-rose-800' },
+  NO_LEASE:    { label: 'Thiếu HĐ chủ nhà', cls: 'bg-rose-100 text-rose-800' },
+  DRAFT:       { label: 'Nháp',            cls: 'bg-slate-100 text-slate-700' },
+  INITIALIZED: { label: 'Đã khởi tạo',     cls: 'bg-indigo-100 text-indigo-800' },
+  DISABLED:    { label: 'Đã vô hiệu',      cls: 'bg-rose-100 text-rose-800' },
 } as const;
 
 /**
@@ -51,10 +54,11 @@ const beReason = (err: unknown): string => {
 };
 
 const DRAFT_STATUS_OPTIONS: StatusOption[] = [
-  { value: 'all',         label: 'Tất cả',       cls: 'border-slate-900 bg-slate-900 text-white' },
-  { value: 'DRAFT',       label: 'Nháp',         cls: 'border-slate-600 bg-slate-600 text-white' },
-  { value: 'INITIALIZED', label: 'Đã khởi tạo',  cls: 'border-indigo-600 bg-indigo-600 text-white' },
-  { value: 'DISABLED',    label: 'Đã vô hiệu',   cls: 'border-rose-600 bg-rose-600 text-white' },
+  { value: 'all',         label: 'Tất cả',            cls: 'border-slate-900 bg-slate-900 text-white' },
+  { value: 'NO_LEASE',    label: 'Thiếu HĐ chủ nhà',  cls: 'border-rose-600 bg-rose-600 text-white' },
+  { value: 'DRAFT',       label: 'Nháp',              cls: 'border-slate-600 bg-slate-600 text-white' },
+  { value: 'INITIALIZED', label: 'Đã khởi tạo',       cls: 'border-indigo-600 bg-indigo-600 text-white' },
+  { value: 'DISABLED',    label: 'Đã vô hiệu',        cls: 'border-rose-600 bg-rose-600 text-white' },
 ];
 
 // ─── "Đã hoàn tất khởi tạo" — đánh dấu FE-side ──────────────────────────────
@@ -112,12 +116,19 @@ export const TaoDraftPage = () => {
 
   /**
    * Trạng thái theo góc nhìn của riêng module khởi tạo:
+   * - DISABLED → Đã vô hiệu
+   * - Chưa có HĐ với chủ nhà gốc → Thiếu HĐ chủ nhà
    * - DRAFT chưa bấm "Xác nhận" bước cuối → Nháp
    * - DRAFT đã xác nhận, hoặc đã sang bất kỳ bước vận hành nào → Đã khởi tạo
-   * - DISABLED → Đã vô hiệu
+   *
+   * "Thiếu HĐ chủ nhà" xếp trên "Nháp" vì nó là dữ liệu THẬT từ BE, còn dấu
+   * "đã xác nhận" chỉ nằm ở localStorage của đúng một trình duyệt (BE chưa có
+   * endpoint chốt bước khởi tạo). Máy khác mở lên là mất dấu, nên không thể để
+   * nó che mất việc căn nhà chưa có hợp đồng đầu vào — thứ chặn mọi bước sau.
    */
   const draftState = (b: PropertyResponse): keyof typeof DRAFT_STATE => {
     if (b.status === 'DISABLED') return 'DISABLED';
+    if (!b.leaseEndDate) return 'NO_LEASE';
     if (b.status === 'DRAFT' && !submittedDrafts.includes(b.id)) return 'DRAFT';
     return 'INITIALIZED';
   };
@@ -168,25 +179,39 @@ export const TaoDraftPage = () => {
 
   const kpi = useMemo(() => buildings.reduce(
     (acc, b) => {
-      const st = b.status === 'DISABLED'
-        ? 'DISABLED'
-        : b.status === 'DRAFT' && !submittedDrafts.includes(b.id) ? 'DRAFT' : 'INITIALIZED';
+      const st = draftState(b);
+      const lease = leaseTerm(b);
       return {
         total: acc.total + 1,
         draft: acc.draft + (st === 'DRAFT' ? 1 : 0),
         initialized: acc.initialized + (st === 'INITIALIZED' ? 1 : 0),
         rooms: acc.rooms + (b.totalRooms || 0),
+        noLease: acc.noLease + (lease.health === 'missing' ? 1 : 0),
+        leaseEnding: acc.leaseEnding + (lease.health === 'ending' || lease.health === 'expired' ? 1 : 0),
       };
     },
-    { total: 0, draft: 0, initialized: 0, rooms: 0 }
+    { total: 0, draft: 0, initialized: 0, rooms: 0, noLease: 0, leaseEnding: 0 }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [buildings, submittedDrafts]);
+
+  /**
+   * "Còn việc phải làm" ở module này = hồ sơ chưa chốt HOẶC hợp đồng chủ nhà
+   * có vấn đề (thiếu / quá hạn / sắp hết hạn). Hai vế cắt nhau chứ không loại
+   * trừ nhau nên không nhét chung vào ô trạng thái được — xem `needsAttention`
+   * trong `useBuildingFilters`.
+   */
+  const needsAttention = useCallback(
+    (b: PropertyResponse): boolean =>
+      b.status !== 'DISABLED' && (draftState(b) === 'DRAFT' || leaseNeedsAttention(b)),
+    [submittedDrafts]
+  );
 
   const effectiveStatus = useCallback(
     (b: PropertyResponse): string => draftState(b),
     [submittedDrafts]
   );
 
-  const f = useBuildingFilters(buildings, { storageKey: 'draft-list', effectiveStatus });
+  const f = useBuildingFilters(buildings, { storageKey: 'draft-list', effectiveStatus, needsAttention });
 
   // ─── form handlers ────────────────────────────────────────────────
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -534,6 +559,7 @@ export const TaoDraftPage = () => {
     const badge = getStatusBadge(selectedBuilding);
     const isDraft = draftState(selectedBuilding) === 'DRAFT';
     const address = selectedBuilding.fullAddress || selectedBuilding.shortAddress;
+    const lease = leaseTerm(selectedBuilding);
 
     return (
       <div className="mx-auto max-w-6xl space-y-5">
@@ -583,8 +609,33 @@ export const TaoDraftPage = () => {
             </div>
           </div>
 
+          {/* Hạn HĐ chủ nhà — vốn nằm trong form bên dưới, nhưng phải cuộn qua
+              cả khối hợp đồng mới thấy. Đây là con số quyết định trần thời hạn
+              của mọi HĐ khách thuê nên kéo thẳng lên đầu trang. */}
+          <div className={`mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3 ${
+            lease.health === 'ok' ? 'border-slate-200 bg-slate-50' : lease.cls
+          }`}>
+            <FileSignature className={`h-4 w-4 shrink-0 ${lease.health === 'ok' ? 'text-slate-400' : ''}`} />
+            <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">Hợp đồng chủ nhà</span>
+            <span className="text-sm font-bold tabular-nums text-slate-800">{lease.range}</span>
+            <span className={`rounded-full border bg-white/70 px-2.5 py-0.5 text-xs font-black ${lease.cls}`}>
+              {lease.label}
+            </span>
+            {lease.health === 'missing' && (
+              <span className="w-full text-xs font-semibold text-rose-700">
+                Chưa đính hợp đồng đầu vào — nhập ở khối “Hợp đồng với chủ nhà” bên dưới. Thiếu nó thì
+                không duyệt giá và không ký được hợp đồng khách thuê.
+              </span>
+            )}
+            {(lease.health === 'ending' || lease.health === 'expired') && (
+              <span className="w-full text-xs font-semibold text-amber-800">
+                Hợp đồng khách thuê ở căn này không được vượt quá <b>{fmtDate(selectedBuilding.leaseEndDate)}</b>.
+              </span>
+            )}
+          </div>
+
           {isDraft && (
-            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <Clock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <p className="text-sm font-semibold text-amber-800">
                 Hồ sơ còn ở dạng nháp — bổ sung hợp đồng đầu vào & thiết bị bàn giao rồi bấm
@@ -597,16 +648,17 @@ export const TaoDraftPage = () => {
         {/* ── Nội dung: 2 cột ── */}
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
-            {/* Hợp đồng đầu vào & khai báo thiết bị */}
+            {/* Hợp đồng đầu vào & khai báo thiết bị.
+                `beforeNav` chèn TB bàn giao vào trong, ngay trước thanh nút cuối:
+                để nó thành sibling bên ngoài thì nút "Xác nhận & Quay về danh sách"
+                rơi vào giữa trang, dưới nút vẫn còn một card nội dung nữa. */}
             <StepPropertyInfo
               property={selectedBuilding}
               onNext={() => handleFinishOnboarding(selectedBuilding.id)}
               nextLabel="Xác nhận & Quay về danh sách"
               confirmBeforeNext
+              beforeNav={<HandoverEquipmentSection propertyId={selectedBuilding.id} />}
             />
-
-            {/* Thiết bị chủ nhà bàn giao (import đợt 1 — chỉ hiển thị) */}
-            <HandoverEquipmentSection propertyId={selectedBuilding.id} />
           </div>
 
           <div className="space-y-5">
@@ -1059,20 +1111,48 @@ export const TaoDraftPage = () => {
         steps={ONBOARDING_STEPS.map(s => ({ ...s, current: s.to === '/admin/buildings/draft' }))}
       />
 
-      {/* ── Số liệu: bấm để lọc nhanh ── */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ── Số liệu: bấm để lọc nhanh ──
+          "Tổng phòng" trước đây chiếm một ô mà không bấm được và không nói lên
+          việc gì phải làm — gộp vào phần chú thích của "Tổng tòa nhà", nhường ô
+          cho hai con số thực sự cần hành động: thiếu HĐ chủ nhà và HĐ sắp hết. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard title="Tổng tòa nhà" value={kpi.total} icon={Building2} tone="blue"
-          helper="Toàn bộ hồ sơ đã tiếp nhận"
-          onClick={() => f.setStatus('all')} active={f.status === 'all'} />
-        <StatCard title="Tổng phòng" value={kpi.rooms} icon={DoorOpen} tone="indigo"
-          helper={kpi.total ? `TB ${(kpi.rooms / kpi.total).toFixed(1)} phòng / tòa` : undefined} />
+          helper={kpi.total ? `${kpi.rooms} phòng · TB ${(kpi.rooms / kpi.total).toFixed(1)}/tòa` : 'Chưa có hồ sơ nào'}
+          onClick={() => { f.setStatus('all'); f.setAttention(false); }}
+          active={f.status === 'all' && !f.attention} />
+        <StatCard title="Cần xử lý" value={f.attentionCount} icon={AlertTriangle} tone="amber"
+          helper="còn việc phải làm" progress={kpi.total ? f.attentionCount / kpi.total : 0}
+          onClick={() => { f.setStatus('all'); f.setAttention(!f.attention); }}
+          active={f.attention} />
+        <StatCard title="Thiếu HĐ chủ nhà" value={kpi.noLease} icon={FileWarning} tone="rose"
+          helper="chưa đính hợp đồng đầu vào" progress={kpi.total ? kpi.noLease / kpi.total : 0}
+          onClick={() => { f.setAttention(false); f.setStatus('NO_LEASE'); }}
+          active={f.status === 'NO_LEASE'} />
         <StatCard title="Đang nháp" value={kpi.draft} icon={TrendingUp} tone="slate"
           helper="chưa hoàn tất khởi tạo" progress={kpi.total ? kpi.draft / kpi.total : 0}
-          onClick={() => f.setStatus('DRAFT')} active={f.status === 'DRAFT'} />
+          onClick={() => { f.setAttention(false); f.setStatus('DRAFT'); }}
+          active={f.status === 'DRAFT'} />
         <StatCard title="Đã khởi tạo" value={kpi.initialized} icon={CheckCircle2} tone="emerald"
           helper="hồ sơ đã hoàn tất" progress={kpi.total ? kpi.initialized / kpi.total : 0}
-          onClick={() => f.setStatus('INITIALIZED')} active={f.status === 'INITIALIZED'} />
+          onClick={() => { f.setAttention(false); f.setStatus('INITIALIZED'); }}
+          active={f.status === 'INITIALIZED'} />
       </div>
+
+      {/* Cảnh báo HĐ chủ nhà sắp/đã hết hạn — không nằm trong ô trạng thái nào
+          nên phải nói riêng, kèm lối bấm thẳng vào danh sách đó. */}
+      {kpi.leaseEnding > 0 && (
+        <button
+          onClick={() => { f.setStatus('all'); f.setAttention(true); f.setSortBy('lease_soon'); }}
+          className="flex w-full items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left transition hover:bg-amber-100"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <p className="text-sm font-semibold text-amber-900">
+            <b>{kpi.leaseEnding} tòa nhà</b> có hợp đồng chủ nhà đã hết hạn hoặc còn dưới{' '}
+            {LEASE_ENDING_SOON_DAYS} ngày — hợp đồng khách thuê không được vượt quá ngày này.
+          </p>
+          <span className="ml-auto shrink-0 text-xs font-black uppercase tracking-wide text-amber-700">Xem ngay</span>
+        </button>
+      )}
 
       {/* ── Thanh tìm kiếm & bộ lọc ── */}
       <BuildingFilterBar
@@ -1127,6 +1207,7 @@ export const TaoDraftPage = () => {
             <BuildingTable
               rows={f.paged}
               getBadge={getStatusBadge}
+              getLease={leaseTerm}
               onRowClick={openDetail}
               showRenovation={false}
               showManager={false}
@@ -1152,9 +1233,11 @@ export const TaoDraftPage = () => {
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {f.paged.map(b => {
                 const isDraft = draftState(b) === 'DRAFT';
+                const lease = leaseTerm(b);
                 return (
                   <BuildingCard
                     key={b.id}
+                    lease={{ range: lease.range, label: lease.label, cls: lease.cls }}
                     onClick={() => openDetail(b)}
                     name={b.propertyName}
                     address={b.fullAddress || b.shortAddress}
