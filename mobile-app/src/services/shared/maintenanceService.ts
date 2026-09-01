@@ -5,6 +5,7 @@ import type {
   ApproveMaintenanceRequestDto,
   CompleteMaintenanceRequestDto,
   RejectFaultRequestDto,
+  ReportFaultRequestDto,
   SubmitSelfRepairRequestDto,
   VerifyRepairRequestDto,
   OutstandingDamageDto,
@@ -127,6 +128,16 @@ export const realMaintenanceService = {
    */
   rejectFault: async (id: number, body: RejectFaultRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject-fault`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/report-fault — thay reject-fault cho luồng mới (01/09/2026): chỉ mô tả +
+   * ảnh bằng chứng, KHÔNG chọn hướng xử lý. OPEN → TENANT_FAULT, faultResolutionPath để
+   * null, không tạo hoá đơn/notify — chờ admin duyệt trên web (PUT /{id}/admin-review).
+   */
+  reportFault: async (id: number, body: ReportFaultRequestDto): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/report-fault`, body);
     return data;
   },
 

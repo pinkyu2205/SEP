@@ -116,6 +116,11 @@ export interface MaintenanceTicket {
   selfRepairDeadline?: string;
   /** Ước tính thiệt hại — chốt số cuối lúc checkout. */
   estimatedDamageAmount?: number;
+  /** Set qua admin-review (web) — null = chưa duyệt hoặc phiếu thuộc luồng reject-fault cũ. */
+  adminReviewedAt?: string;
+  adminReviewedByName?: string;
+  adminApproved?: boolean;
+  adminReviewNote?: string;
   photos: PhotoEvidence[];
   assignedTo?: string;
   resolvedAt?: string;

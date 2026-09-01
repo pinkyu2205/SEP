@@ -390,6 +390,11 @@ export const MaintenanceCreateScreen: React.FC = () => {
         {/* Ảnh đính kèm */}
         <View style={styles.field}>
           <Text style={styles.fieldLabel}>Ảnh hiện trạng <Text style={styles.required}>*</Text></Text>
+          {needsVerifiedPhoto && (
+            <Text style={styles.imageHint}>
+              Chụp cận đúng chỗ hư vẫn được — chỉ cần thêm 1 ảnh thấy rõ thân máy nếu có thể.
+            </Text>
+          )}
           <View style={styles.imageRow}>
             <TouchableOpacity style={styles.imageAddBtn} onPress={takePhoto} disabled={checking}>
               <Text style={styles.imageAddEmoji}>📷</Text>

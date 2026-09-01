@@ -54,11 +54,15 @@ export const equipmentStatusMap: Record<string, { label: string; color: string }
   disposed: { label: 'Đã thanh lý', color: 'bg-slate-100 text-slate-600' },
 };
 
+/** 7 trạng thái thật (enum MaintenanceStatus bên BE) — redesign 2026-09. */
 export const maintenanceStatusMap: Record<string, { label: string; color: string }> = {
-  open: { label: 'Pending', color: 'bg-rose-100 text-rose-700' },
-  in_progress: { label: 'In progress', color: 'bg-blue-100 text-blue-700' },
-  resolved: { label: 'Resolved', color: 'bg-emerald-100 text-emerald-700' },
-  cancelled: { label: 'Rejected', color: 'bg-slate-100 text-slate-600' },
+  OPEN: { label: 'Chờ kiểm tra', color: 'bg-amber-100 text-amber-700' },
+  IN_REPAIR: { label: 'Đang sửa chữa', color: 'bg-violet-100 text-violet-700' },
+  TENANT_FAULT: { label: 'Lỗi do khách', color: 'bg-rose-100 text-rose-700' },
+  PENDING_TENANT_REPAIR: { label: 'Khách tự sửa', color: 'bg-orange-100 text-orange-700' },
+  OUTSTANDING_DAMAGE: { label: 'Chờ trừ cọc', color: 'bg-red-200 text-red-800' },
+  CLOSED: { label: 'Hoàn tất', color: 'bg-emerald-100 text-emerald-700' },
+  CANCELLED: { label: 'Đã hủy', color: 'bg-slate-100 text-slate-600' },
 };
 
 export const auditSeverityMap = {

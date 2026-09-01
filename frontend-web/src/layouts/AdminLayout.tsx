@@ -6,6 +6,7 @@ import {
   CreditCard, ShieldAlert,
   FileText,
   FilePlus,
+  Gavel,
   MapPin,
   Menu,
   KeyRound,
@@ -44,7 +45,7 @@ import { UserMenu } from './UserMenu';
  * thật không có yêu cầu bảo trì nào, đá nhau với Bảng điều hành. Giờ nhận từ API;
  * chưa có API nhật ký bảo mật thì không gắn badge còn hơn gắn số bịa.
  */
-const buildSections = (openMaintenance: number): SidebarSection[] => [
+const buildSections = (openMaintenance: number, pendingFaultReview: number): SidebarSection[] => [
   {
     label: 'Tổng quan',
     items: [{ label: 'Bảng điều hành', path: '/admin', icon: BarChart3, end: true }],
@@ -96,6 +97,7 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
       { label: 'Danh mục khu vực', path: '/admin/zones', icon: MapPin },
       { label: 'Khu vực & Quản lý', path: '/admin/zones/assignment', icon: UserCog },
       { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
+      { label: 'Báo lỗi do khách — Duyệt', path: '/admin/maintenance/fault-review', icon: Gavel, badge: pendingFaultReview || undefined },
       { label: 'Danh mục thiết bị', path: '/admin/equipments', icon: Package },
     ],
   },
@@ -119,6 +121,7 @@ const initialsOf = (name?: string) =>
 export const AdminLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMaintenance, setOpenMaintenance] = useState(0);
+  const [pendingFaultReview, setPendingFaultReview] = useState(0);
   const { user, logout } = useWebAuth();
 
   // Badge bảo trì = yêu cầu chờ + đang xử lý (số thật, cùng nguồn với Bảng điều hành).
@@ -130,7 +133,20 @@ export const AdminLayout = () => {
     return () => { active = false; };
   }, []);
 
-  const sections = buildSections(openMaintenance);
+  // Badge "Báo lỗi do khách" = phiếu report-fault (faultResolutionPath null) chưa admin-review.
+  useEffect(() => {
+    let active = true;
+    maintenanceService.getRequests({ status: 'TENANT_FAULT' }, 0, 200)
+      .then(page => {
+        if (!active) return;
+        const n = (page.content ?? []).filter(r => !r.faultResolutionPath && !r.adminReviewedAt).length;
+        setPendingFaultReview(n);
+      })
+      .catch(() => { /* lỗi mạng: không gắn badge còn hơn gắn số sai */ });
+    return () => { active = false; };
+  }, []);
+
+  const sections = buildSections(openMaintenance, pendingFaultReview);
   const sidebarUser = {
     name: user?.fullName ?? 'Admin',
     subtitle: user?.username ? `@${user.username}` : 'Toàn quyền hệ thống',

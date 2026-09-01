@@ -1163,20 +1163,26 @@ export interface PropertyPurgeResponse {
 }
 
 // =============================================================================
-// MAINTENANCE — Bảo trì / Sửa chữa (flow mới 17/07: PENDING → APPROVED →
-// WAITING_TENANT_CONFIRM → CLOSED, nhánh REJECTED/CANCELLED; web chỉ giám sát)
+// MAINTENANCE — Bảo trì / Sửa chữa. Redesign 2026-09 (BE enum MaintenanceStatus):
+//   Luồng A (hao mòn):    OPEN → IN_REPAIR → CLOSED
+//   Luồng B (lỗi tenant): OPEN → TENANT_FAULT → CLOSED
+//                         OPEN → PENDING_TENANT_REPAIR → CLOSED | OUTSTANDING_DAMAGE
+// Web (host/admin) chỉ giám sát — duyệt/reject-fault/verify-repair/complete làm
+// trên mobile manager.
 // =============================================================================
 
 export type MaintenanceRequestStatus =
-  | 'PENDING' | 'APPROVED' | 'WAITING_TENANT_CONFIRM' | 'REJECTED' | 'CLOSED' | 'CANCELLED'
-  // legacy trước migrate — normalizeMaintenanceStatus tự quy về bucket hiển thị
-  | 'IN_PROGRESS' | 'RESOLVED';
+  | 'OPEN' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
+  | 'OUTSTANDING_DAMAGE' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-export type MaintenanceRequestCategory =
-  | 'ELECTRICAL' | 'PLUMBING' | 'FURNITURE' | 'APPLIANCE' | 'STRUCTURAL' | 'OTHER';
+export type MaintenanceRequestCategory = 'APPLIANCE' | 'FURNITURE' | 'PLUMBING' | 'ELECTRICAL';
+export type MaintenanceFlowType = 'NORMAL_WEAR' | 'TENANT_FAULT';
+export type MaintenanceBillingHint =
+  | 'HOST_PAID' | 'TENANT_CHARGE_PENDING' | 'DEPOSIT_DEDUCTION_PENDING' | 'NONE';
+export type MaintenanceDamageCause = 'WEAR' | 'TENANT_MISUSE' | 'TENANT_MODIFICATION' | 'MISUSE';
+export type MaintenanceFaultResolutionPath = 'MANAGER_REPAIR' | 'TENANT_SELF_REPAIR';
 
 export interface MaintenanceTimelineEntry {
-  // string vì timeline cũ còn chứa status legacy trước migrate
   oldStatus?: string;
   newStatus: string;
   note?: string;
@@ -1185,18 +1191,25 @@ export interface MaintenanceTimelineEntry {
   changedAt: string;
 }
 
+export interface MaintenancePhotoHistoryEntry {
+  type: 'BEFORE' | 'FAULT_EVIDENCE' | 'SELF_REPAIR' | 'AFTER' | 'INVOICE';
+  url: string;
+  createdAt: string;
+}
+
 export interface MaintenanceRequestResponse {
   id: number;
   requestCode: string;
-  /** Tiêu đề tenant nhập (field mới 17/07 chiều). */
   title?: string;
   status: MaintenanceRequestStatus;
-  /** null khi PENDING — manager gán lúc duyệt. */
+  /** null khi OPEN chưa duyệt — manager gán lúc duyệt. */
   category?: MaintenanceRequestCategory | null;
-  /** null trừ khi manager gán lúc duyệt (tùy chọn). */
   priority?: MaintenanceRequestPriority | null;
+  flowType?: MaintenanceFlowType;
+  /** Gợi ý FE render khối chi phí — xem MaintenanceBillingHint (BE). */
+  billingHint?: MaintenanceBillingHint;
   description: string;
-  tenantId: number;
+  tenantId: string;
   tenantName: string;
   tenantPhone?: string;
   roomId: number;
@@ -1205,20 +1218,57 @@ export interface MaintenanceRequestResponse {
   propertyName: string;
   equipmentId?: number;
   equipmentName?: string;
-  assignedManagerId?: number;
+  assignedManagerId?: string;
   assignedManagerName?: string;
-  scheduledDate?: string;
-  repairCost?: number;
-  resolutionNote?: string;
-  /** Ai chịu chi phí: HOST = tính vào expense nhà, TENANT = khách tự trả. */
-  costPaidBy?: 'HOST' | 'TENANT';
-  /** Số lần khách từ chối nghiệm thu (REOPENED) — đã đề nghị BE expose. */
-  reopenCount?: number;
   resolvedAt?: string;
+  resolutionNote?: string;
+  /** Mô tả việc đã sửa — manager nhập lúc complete(). */
+  repairDescription?: string;
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
+  /** Phiếu tiếp nối khi tenant tạo "vẫn chưa ổn" từ 1 phiếu CLOSED trước đó. */
+  previousRequestId?: number;
+  damageCause?: MaintenanceDamageCause;
+  /** Lý do manager ghi khi reject-fault (Luồng B). */
+  faultReason?: string;
+  faultResolutionPath?: MaintenanceFaultResolutionPath;
+  /** Hạn tenant tự sửa (status = PENDING_TENANT_REPAIR). */
+  selfRepairDeadline?: string;
+  /** Ước tính thiệt hại — chốt số cuối lúc checkout. */
+  estimatedDamageAmount?: number;
+  /**
+   * Set qua PUT /{id}/admin-review — chỉ áp dụng cho phiếu gửi qua report-fault
+   * (luồng mới 01/09/2026, faultResolutionPath luôn null). null = chưa duyệt.
+   */
+  adminReviewedAt?: string;
+  adminReviewedBy?: string;
+  adminReviewedByName?: string;
+  adminApproved?: boolean;
+  adminReviewNote?: string;
   images: string[];
+  beforeImages?: string[];
+  afterImages?: string[];
+  invoiceImages?: string[];
+  faultEvidenceImages?: string[];
+  selfRepairImages?: string[];
+  photoHistory?: MaintenancePhotoHistoryEntry[];
   timeline: MaintenanceTimelineEntry[];
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * LƯU Ý: OUTSTANDING_DAMAGE không được BE đếm vào bucket nào trong 4 field dưới
+ * (xem MaintenanceRequestRepository.countInProgress chỉ gồm IN_REPAIR/TENANT_FAULT/
+ * PENDING_TENANT_REPAIR) — tổng 4 field có thể nhỏ hơn total. Hành vi thật của BE,
+ * không phải bug hiển thị FE.
+ */
+/** PUT /{id}/admin-review — role ADMIN only. */
+export interface MaintenanceAdminReviewRequest {
+  approved: boolean;
+  note?: string;
 }
 
 export interface MaintenanceDashboardResponse {

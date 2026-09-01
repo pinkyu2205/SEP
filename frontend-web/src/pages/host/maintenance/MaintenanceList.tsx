@@ -19,6 +19,7 @@ import {
   maintenanceReqPriorityMap,
   maintenanceReqStatusMap,
   maintenanceCategoryMap,
+  maintenanceBillingHintMap,
   normalizeMaintenanceStatus,
 } from '@/utils';
 
@@ -37,10 +38,9 @@ const DetailModal = ({ request, onClose }: {
   request: MaintenanceRequestResponse;
   onClose: () => void;
 }) => {
-  const status = normalizeMaintenanceStatus(request.status);
-  // priority/category null khi ticket PENDING — manager gán lúc duyệt (flow 17/07 chiều)
+  // priority/category null khi ticket OPEN — manager gán lúc duyệt
   const pBadge = request.priority ? maintenanceReqPriorityMap[request.priority] : undefined;
-  const sBadge = maintenanceReqStatusMap[status];
+  const sBadge = maintenanceReqStatusMap[request.status] ?? maintenanceReqStatusMap.OPEN;
   const [history, setHistory] = useState<EquipmentMaintenanceHistoryResponse[]>([]);
 
   useEffect(() => {
@@ -132,36 +132,61 @@ const DetailModal = ({ request, onClose }: {
                 <Calendar className="w-3.5 h-3.5" /> Thời gian
               </p>
               <p className="text-sm text-slate-900">Tạo: <strong>{fmtDate(request.createdAt)}</strong></p>
-              {request.scheduledDate && <p className="text-xs text-slate-500 mt-0.5">Hẹn: {fmtDate(request.scheduledDate)}</p>}
               {request.resolvedAt && <p className="text-xs text-emerald-700 mt-0.5">Xong: {fmtDate(request.resolvedAt)}</p>}
             </div>
           </div>
 
-          {/* Chi phí + ghi chú xử lý */}
+          {/* Chi phí + hoá đơn + ghi chú xử lý */}
           <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1.5">
-                <DollarSign className="w-3.5 h-3.5" /> Chi phí sửa chữa
+                <DollarSign className="w-3.5 h-3.5" /> Hoá đơn sửa chữa
               </p>
               <p className="text-lg font-bold text-emerald-700">
-                {request.repairCost != null ? formatCurrency(request.repairCost) : 'Chưa có'}
+                {request.invoiceAmount != null ? formatCurrency(request.invoiceAmount) : 'Chưa có'}
               </p>
             </div>
-            {request.costPaidBy && (
-              <p className="text-xs text-emerald-800 mt-1.5">
-                Bên chi trả:{' '}
-                <strong>{request.costPaidBy === 'HOST' ? '🏠 Chủ nhà (tính vào chi phí)' : '👤 Khách thuê'}</strong>
+            {request.billingHint && maintenanceBillingHintMap[request.billingHint] && (
+              <p className="text-xs text-emerald-800 mt-1.5">{maintenanceBillingHintMap[request.billingHint]}</p>
+            )}
+            {(request.invoiceVendor || request.invoiceNumber || request.invoiceDate) && (
+              <p className="text-xs text-emerald-700 mt-1">
+                {[request.invoiceVendor, request.invoiceNumber, request.invoiceDate ? fmtDate(request.invoiceDate) : null]
+                  .filter(Boolean).join(' · ')}
               </p>
             )}
-            {!!request.reopenCount && request.reopenCount > 0 && (
-              <p className="text-xs text-rose-700 mt-1.5">
-                🔄 Khách đã từ chối nghiệm thu <strong>{request.reopenCount} lần</strong>
-              </p>
+            {request.repairDescription && (
+              <p className="text-sm text-emerald-900 mt-2 leading-relaxed">{request.repairDescription}</p>
             )}
             {request.resolutionNote && (
               <p className="text-sm text-emerald-900 mt-2 leading-relaxed">{request.resolutionNote}</p>
             )}
           </div>
+
+          {/* Luồng B — lỗi tenant */}
+          {request.status === 'TENANT_FAULT' && request.faultReason && (
+            <div className="bg-rose-50 border border-rose-100 rounded-xl p-4">
+              <p className="text-xs font-bold text-rose-800 uppercase tracking-wider mb-1.5">Lý do lỗi do khách</p>
+              <p className="text-sm text-rose-900">{request.faultReason}</p>
+            </div>
+          )}
+          {request.status === 'PENDING_TENANT_REPAIR' && (
+            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
+              <p className="text-xs font-bold text-orange-800 uppercase tracking-wider mb-1.5">Khách tự sửa</p>
+              {request.faultReason && <p className="text-sm text-orange-900">{request.faultReason}</p>}
+              {request.selfRepairDeadline && (
+                <p className="text-xs text-orange-700 mt-1">Hạn tự sửa: {fmtDate(request.selfRepairDeadline)}</p>
+              )}
+            </div>
+          )}
+          {request.status === 'OUTSTANDING_DAMAGE' && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <p className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1.5">Chờ trừ vào tiền cọc</p>
+              <p className="text-sm text-red-900">
+                Ước tính thiệt hại: {request.estimatedDamageAmount != null ? formatCurrency(request.estimatedDamageAmount) : 'Chưa có'}
+              </p>
+            </div>
+          )}
 
           {/* Timeline */}
           {request.timeline?.length > 0 && (
@@ -169,7 +194,7 @@ const DetailModal = ({ request, onClose }: {
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Diễn biến xử lý</p>
               <ol className="relative border-l border-slate-200 ml-1.5 space-y-3">
                 {request.timeline.map((t, i) => {
-                  const ns = maintenanceReqStatusMap[normalizeMaintenanceStatus(t.newStatus)];
+                  const ns = maintenanceReqStatusMap[t.newStatus] ?? maintenanceReqStatusMap.OPEN;
                   return (
                     <li key={i} className="ml-4">
                       <span className="absolute -left-1.5 w-3 h-3 rounded-full bg-primary-500 border-2 border-white" />
@@ -261,7 +286,7 @@ export const MaintenanceList = () => {
       inProgress: requests.filter(r => norm(r) === 'IN_PROGRESS').length,
       resolved: requests.filter(r => norm(r) === 'RESOLVED').length,
       cancelled: requests.filter(r => norm(r) === 'CANCELLED').length,
-      totalRepairCost: requests.reduce((s, r) => s + (r.repairCost ?? 0), 0),
+      totalRepairCost: requests.reduce((s, r) => s + (r.invoiceAmount ?? 0), 0),
     } as MaintenanceDashboardResponse;
   }, [dashboard, requests]);
 
@@ -274,7 +299,7 @@ export const MaintenanceList = () => {
       (r.tenantName ?? '').toLowerCase().includes(kw);
     const matchProperty = filterProperty === 'all' || String(r.propertyId) === filterProperty;
     const matchPriority = filterPriority === 'all' || r.priority === filterPriority;
-    const matchStatus = filterStatus === 'all' || normalizeMaintenanceStatus(r.status) === filterStatus;
+    const matchStatus = filterStatus === 'all' || r.status === filterStatus;
     const matchCategory = filterCategory === 'all' || r.category === filterCategory;
     return matchSearch && matchProperty && matchPriority && matchStatus && matchCategory;
   }), [requests, searchTerm, filterProperty, filterPriority, filterStatus, filterCategory]);
@@ -394,10 +419,9 @@ export const MaintenanceList = () => {
                 </td></tr>
               )}
               {!loading && filtered.map(req => {
-                const status = normalizeMaintenanceStatus(req.status);
-                // priority/category null khi PENDING — manager gán lúc duyệt
+                // priority/category null khi OPEN — manager gán lúc duyệt
                 const pBadge = req.priority ? maintenanceReqPriorityMap[req.priority] : undefined;
-                const sBadge = maintenanceReqStatusMap[status];
+                const sBadge = maintenanceReqStatusMap[req.status] ?? maintenanceReqStatusMap.OPEN;
                 return (
                   <tr key={req.id} className="transition-colors hover:bg-slate-50/80 cursor-pointer" onClick={() => setSelected(req)}>
                     <td className="px-5 py-4">
@@ -433,8 +457,8 @@ export const MaintenanceList = () => {
                     <td className="px-5 py-4 text-xs text-slate-700">{req.tenantName}</td>
                     <td className="px-5 py-4 text-xs text-slate-500">{fmtDate(req.createdAt)}</td>
                     <td className="px-5 py-4 text-right">
-                      {req.repairCost != null
-                        ? <p className="font-semibold text-slate-900 text-sm">{formatCurrency(req.repairCost)}</p>
+                      {req.invoiceAmount != null
+                        ? <p className="font-semibold text-slate-900 text-sm">{formatCurrency(req.invoiceAmount)}</p>
                         : <p className="text-slate-400 text-xs">—</p>}
                     </td>
                     <td className="px-5 py-4 text-center" onClick={e => e.stopPropagation()}>
