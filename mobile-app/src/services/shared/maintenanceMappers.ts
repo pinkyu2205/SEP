@@ -1,49 +1,53 @@
 /**
- * Mapper: DTO real API (FE-maintenance-flow 17/07) -> model FE,
- * để các màn hình giữ nguyên UI mà chỉ đổi nguồn dữ liệu.
+ * Mapper: DTO real API (redesign 01/09/2026) -> model FE, để các màn hình giữ
+ * nguyên UI mà chỉ đổi nguồn dữ liệu.
  */
 import type { MaintenanceRequestDto, MaintenanceTimelineDto } from '@/types';
 import type { MaintenanceRequest, MaintenanceStatus, MaintenanceCategory, MaintenancePriority } from '@/types';
 import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority, TimelineEntry } from '@/store/maintenanceStore';
 
-// Flow mới chỉ còn 6 status; các giá trị legacy (trước migrate 17/07) quy về
-// status mới gần nhất để timeline/dữ liệu cũ vẫn hiển thị đúng.
+// Bộ 7 status chính thức. Legacy (trước migrate 01/09) quy về status mới gần nhất
+// để timeline cũ vẫn hiển thị đúng — REJECTED cũ không map thẳng sang trạng thái lỗi
+// tenant nào (BE không tự suy được ý định cũ), quy an toàn về 'in_repair' để không
+// crash UI; WAITING_TENANT_CONFIRM cũ (chờ nghiệm thu) cũng không còn ý nghĩa, coi
+// như đang sửa. Status lạ không có trong bảng → mặc định 'in_repair', không throw.
 const BE_STATUS_MAP: Record<string, MaintenanceStatus> = {
-  // Bộ chính thức
-  PENDING: 'pending',
-  APPROVED: 'approved',
-  WAITING_TENANT_CONFIRM: 'waiting_confirm',
-  REJECTED: 'rejected',
+  // Bộ chính thức (redesign 01/09/2026)
+  OPEN: 'open',
+  IN_REPAIR: 'in_repair',
+  TENANT_FAULT: 'tenant_fault',
+  PENDING_TENANT_REPAIR: 'pending_tenant_repair',
+  OUTSTANDING_DAMAGE: 'outstanding_damage',
   CLOSED: 'closed',
   CANCELLED: 'cancelled',
-  // Legacy (đã migrate phía BE, còn gặp trong timeline cũ)
-  ACKNOWLEDGED: 'approved',
-  SCHEDULED: 'approved',
-  IN_PROGRESS: 'approved',
-  ON_HOLD: 'approved',
-  REOPENED: 'approved',
-  PENDING_APPROVAL: 'waiting_confirm',
-  DONE: 'waiting_confirm',
+  // Legacy (trước migrate 01/09 — BE tự map PENDING→OPEN, APPROVED/WAITING/REJECTED→IN_REPAIR
+  // khi migrate DB, nhưng timeline cũ vẫn còn ghi lại các giá trị này).
+  PENDING: 'open',
+  APPROVED: 'in_repair',
+  WAITING_TENANT_CONFIRM: 'in_repair',
+  REJECTED: 'in_repair',
+  // Legacy xa hơn (trước 17/07)
+  ACKNOWLEDGED: 'in_repair',
+  SCHEDULED: 'in_repair',
+  IN_PROGRESS: 'in_repair',
+  ON_HOLD: 'in_repair',
+  REOPENED: 'in_repair',
+  PENDING_APPROVAL: 'in_repair',
+  DONE: 'in_repair',
   CONFIRMED: 'closed',
   RESOLVED: 'closed',
   COMPLETED: 'closed',
-  OPEN: 'pending',
-  ASSIGNED: 'approved',
-  ACCEPTED: 'approved',
+  ASSIGNED: 'in_repair',
+  ACCEPTED: 'in_repair',
   CANCELED: 'cancelled',
 };
 
 export const mapBeStatus = (s: string | undefined): MaintenanceStatus =>
-  BE_STATUS_MAP[(s ?? '').toUpperCase()] ?? 'pending';
+  BE_STATUS_MAP[(s ?? '').toUpperCase()] ?? 'in_repair';
 
 const lc = (s: string | undefined): string => (s ?? '').toLowerCase();
 
-const mapCostAgreement = (
-  s: string | undefined,
-): 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived' | undefined =>
-  s ? (s.toLowerCase() as 'not_applicable' | 'pending' | 'agreed' | 'disputed' | 'waived') : undefined;
-
-// category/priority null khi ticket PENDING (manager gán lúc duyệt) → undefined để UI ẩn badge.
+// category/priority null khi ticket OPEN chưa duyệt → undefined để UI ẩn badge.
 const lcOrUndef = <T extends string>(s: string | null | undefined): T | undefined =>
   s ? (s.toLowerCase() as T) : undefined;
 
@@ -79,16 +83,29 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   category: lcOrUndef<MaintenanceCategory>(dto.category),
   priority: lcOrUndef<MaintenancePriority>(dto.priority),
   status: mapBeStatus(dto.status),
+  flowType: dto.flowType ? (lc(dto.flowType) as MaintenanceRequest['flowType']) : undefined,
+  billingHint: dto.billingHint ? (lc(dto.billingHint) as MaintenanceRequest['billingHint']) : undefined,
   images: dto.images ?? [],
   beforeImages: dto.beforeImages ?? dto.images ?? [],
   afterImages: dto.afterImages ?? [],
-  rejectImages: dto.rejectImages ?? [],
-  rejectReason: dto.rejectReason,
+  invoiceImages: dto.invoiceImages ?? [],
+  faultEvidenceImages: dto.faultEvidenceImages ?? [],
+  selfRepairImages: dto.selfRepairImages ?? [],
   resolutionNote: dto.resolutionNote,
+  repairDescription: dto.repairDescription,
+  invoiceVendor: dto.invoiceVendor,
+  invoiceNumber: dto.invoiceNumber,
+  invoiceDate: dto.invoiceDate,
+  invoiceAmount: dto.invoiceAmount,
+  previousRequestId: dto.previousRequestId != null ? String(dto.previousRequestId) : undefined,
+  damageCause: dto.damageCause ? (lc(dto.damageCause) as MaintenanceRequest['damageCause']) : undefined,
+  faultReason: dto.faultReason,
+  faultResolutionPath: dto.faultResolutionPath
+    ? (lc(dto.faultResolutionPath) as MaintenanceRequest['faultResolutionPath']) : undefined,
+  selfRepairDeadline: dto.selfRepairDeadline,
+  estimatedDamageAmount: dto.estimatedDamageAmount,
   assignedTo: dto.assignedManagerName,
-  repairCost: dto.repairCost,
   resolvedAt: dto.resolvedAt,
-  tenantConfirmedAt: dto.tenantConfirmedAt,
   timeline: mapTimeline(dto.timeline).map(t => ({
     status: t.status as MaintenanceStatus,
     note: t.note,
@@ -99,11 +116,7 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   equipmentName: dto.equipmentName,
   createdAt: dto.createdAt,
   updatedAt: dto.updatedAt,
-  costPaidBy: dto.costPaidBy,
-  cause: dto.cause ? (lc(dto.cause) as 'wear' | 'misuse') : undefined,
-  costAgreementStatus: mapCostAgreement(dto.costAgreementStatus),
-  costDisputeReason: dto.costDisputeReason,
-  reopenCount: dto.reopenCount,
+  issuedInvoice: dto.issuedInvoice,
   photoHistory: dto.photoHistory,
 });
 
@@ -121,26 +134,35 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   category: lcOrUndef<TicketCategory>(dto.category),
   priority: lcOrUndef<TicketPriority>(dto.priority),
   status: mapBeStatus(dto.status) as TicketStatus,
+  flowType: dto.flowType ? (lc(dto.flowType) as MaintenanceTicket['flowType']) : undefined,
+  billingHint: dto.billingHint ? (lc(dto.billingHint) as MaintenanceTicket['billingHint']) : undefined,
   images: dto.images ?? [],
   beforeImages: dto.beforeImages ?? dto.images ?? [],
   afterImages: dto.afterImages ?? [],
-  rejectImages: dto.rejectImages ?? [],
-  rejectReason: dto.rejectReason,
+  invoiceImages: dto.invoiceImages ?? [],
+  faultEvidenceImages: dto.faultEvidenceImages ?? [],
+  selfRepairImages: dto.selfRepairImages ?? [],
   resolutionNote: dto.resolutionNote,
+  repairDescription: dto.repairDescription,
+  invoiceVendor: dto.invoiceVendor,
+  invoiceNumber: dto.invoiceNumber,
+  invoiceDate: dto.invoiceDate,
+  invoiceAmount: dto.invoiceAmount,
+  previousRequestId: dto.previousRequestId != null ? String(dto.previousRequestId) : undefined,
+  damageCause: dto.damageCause ? (lc(dto.damageCause) as MaintenanceTicket['damageCause']) : undefined,
+  faultReason: dto.faultReason,
+  faultResolutionPath: dto.faultResolutionPath
+    ? (lc(dto.faultResolutionPath) as MaintenanceTicket['faultResolutionPath']) : undefined,
+  selfRepairDeadline: dto.selfRepairDeadline,
+  estimatedDamageAmount: dto.estimatedDamageAmount,
   photos: [],
   assignedTo: dto.assignedManagerName,
-  repairCost: dto.repairCost,
-  costPaidBy: dto.costPaidBy ? (lc(dto.costPaidBy) as 'host' | 'tenant') : undefined,
-  cause: dto.cause ? (lc(dto.cause) as 'wear' | 'misuse') : undefined,
-  costAgreementStatus: mapCostAgreement(dto.costAgreementStatus),
-  costDisputeReason: dto.costDisputeReason,
-  reopenCount: dto.reopenCount ?? undefined,
   resolvedAt: dto.resolvedAt,
-  tenantConfirmedAt: dto.tenantConfirmedAt,
   timeline: mapTimeline(dto.timeline),
   equipmentName: dto.equipmentName,
   maintenanceCount: undefined,
   createdAt: dto.createdAt,
   updatedAt: dto.updatedAt,
+  issuedInvoice: dto.issuedInvoice,
   photoHistory: dto.photoHistory,
 });

@@ -4,23 +4,21 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { MaintenanceRequest, MaintenanceStatus, MaintenanceTimeline } from '@/types';
+import { MaintenanceRequest } from '@/types';
 import {
   formatDate, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor, showAlert,
 } from '@/utils';
 import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI,
-  MAINTENANCE_AUTO_CONFIRM_DAYS,
+  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
 } from '@/constants/maintenance';
-import { tenantMaintenanceStore } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
-import { nowIso } from '@/utils/serverTime';
+import { serverNow } from '@/utils/serverTime';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
@@ -31,8 +29,12 @@ const STATUS_META: Record<string, { label: string; color: string; emoji: string 
     ]),
   );
 
-const mkTenantEntry = (status: MaintenanceStatus, note: string): MaintenanceTimeline =>
-  ({ status, note, updatedBy: 'Khách thuê', updatedAt: nowIso() });
+const daysLeft = (deadline?: string): number | null => {
+  if (!deadline) return null;
+  const end = new Date(deadline).getTime();
+  if (Number.isNaN(end)) return null;
+  return Math.ceil((end - serverNow().getTime()) / 86_400_000);
+};
 
 export const MaintenanceDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -51,8 +53,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const routeRequest = params.request;
 
   // Ticket luôn tới từ BE thật (id số) — nạp bản mới nhất, route param chỉ dùng khi
-  // đang tải hoặc offline. Không còn đọc từ mock store: id thật (vd "1") có thể trùng
-  // id mock hardcode trong maintenanceStore.ts, từng khiến màn hiện nhầm ticket giả.
+  // đang tải hoặc offline.
   const idNum = Number(routeRequest?.id ?? params.requestId);
   const isRealId = Number.isFinite(idNum) && idNum > 0;
   const [realRequest, setRealRequest] = useState<MaintenanceRequest | undefined>(undefined);
@@ -75,124 +76,57 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const apiErrMsg = (e: any, fallback: string) =>
     e?.response?.data?.error || e?.response?.data?.message || fallback;
 
-  // Form từ chối nghiệm thu (reason + ảnh minh chứng, bắt buộc cả hai).
-  const [rejectMode,   setRejectMode]   = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectUris,   setRejectUris]   = useState<string[]>([]);
-  const [busy,         setBusy]         = useState(false);
-  const [cameraOpen,   setCameraOpen]   = useState(false);
-
-  // Bồi thường khách làm hư (28/07/2026) — TÁCH RIÊNG khỏi nghiệm thu chất lượng sửa
-  // ở trên: "sửa tốt không" và "đồng ý trả tiền" là 2 việc khác nhau, không gộp 1 nút.
-  const [disputeMode,   setDisputeMode]   = useState(false);
-  const [disputeReason, setDisputeReason] = useState('');
-  const [chargeBusy,    setChargeBusy]    = useState(false);
+  // Nộp ảnh đã tự sửa (Luồng B — status pending_tenant_repair, chưa nộp ảnh).
+  const [selfRepairNote, setSelfRepairNote] = useState('');
+  const [selfRepairUris, setSelfRepairUris] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
 
   // `request` chưa có ở lần render đầu khi vào bằng deep-link (chỉ có `requestId`).
-  const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.pending;
+  const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.open;
   const priorityColor = getMaintenancePriorityColor(request?.priority ?? 'medium');
+  const billingMeta = request?.billingHint && request.billingHint !== 'none'
+    ? MAINTENANCE_BILLING_HINT_META[request.billingHint] : null;
 
   // ── Actions ────────────────────────────────────────────────────────
 
-  /** Tenant xác nhận đã sửa xong → CLOSED. */
-  const confirmDone = async () => {
-    if (busy) return;
-    if (isReal) {
-      try {
-        setBusy(true);
-        await realMaintenanceService.confirm(idNum);
-        showAlert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể nghiệm thu. Vui lòng thử lại.')); }
-      finally { setBusy(false); }
-      return;
-    }
-    // Nhánh mock/offline — chỉ chạy khi id không phải id thật, lúc đó luôn vào từ danh
-    // sách nên `request` chắc chắn có. Guard để TS yên tâm.
-    if (!request) return;
-    tenantMaintenanceStore.update(request.id, {
-      status: 'closed',
-      tenantConfirmedAt: nowIso().slice(0, 10),
-      resolvedAt: nowIso().slice(0, 10),
-      timeline: [...request.timeline, mkTenantEntry('closed', 'Khách đã nghiệm thu, đồng ý hoàn tất')],
-      updatedAt: nowIso().slice(0, 10),
-    });
-    showAlert('✅ Cảm ơn bạn', 'Yêu cầu đã được xác nhận hoàn tất.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-  };
-
-  // Menu "Thêm ảnh minh chứng" trong UI (không dùng Alert.alert 3 nút) — Alert.alert
-  // là no-op trên react-native-web nên trước đây bấm "+Ảnh" không hiện gì trên web.
-  const [rejectPhotoMenuOpen, setRejectPhotoMenuOpen] = useState(false);
-  const pickRejectFromCamera = async () => {
-    setRejectPhotoMenuOpen(false);
+  const pickFromCamera = async () => {
+    setPhotoMenuOpen(false);
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
     const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    if (!r.canceled && r.assets[0]) setRejectUris(prev => [...prev, r.assets[0].uri]);
+    if (!r.canceled && r.assets[0]) setSelfRepairUris(prev => [...prev, r.assets[0].uri]);
   };
-  const pickRejectFromLibrary = async () => {
-    setRejectPhotoMenuOpen(false);
+  const pickFromLibrary = async () => {
+    setPhotoMenuOpen(false);
     const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
-    if (!r.canceled) setRejectUris(prev => [...prev, ...r.assets.map(a => a.uri)]);
+    if (!r.canceled) setSelfRepairUris(prev => [...prev, ...r.assets.map(a => a.uri)]);
   };
 
-  /** Tenant từ chối nghiệm thu (bắt buộc lý do + ≥1 ảnh) → REJECTED. */
-  const submitReject = async () => {
+  /** Tenant nộp ảnh đã tự sửa xong (bắt buộc ≥1 ảnh) — chờ manager verify-repair. */
+  const submitSelfRepair = async () => {
     if (busy) return;
-    const reason = rejectReason.trim();
-    if (!reason) { showAlert('Thiếu lý do', 'Vui lòng nhập lý do chưa đạt.'); return; }
-    if (rejectUris.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh minh chứng.'); return; }
-    if (isReal) {
-      try {
-        setBusy(true);
-        await realMaintenanceService.reject(idNum, reason, rejectUris);
-        await refreshReal();
-        setRejectMode(false); setRejectReason(''); setRejectUris([]);
-        showAlert('Đã gửi phản hồi', 'Quản lý sẽ xem xét và xử lý lại.');
-      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi phản hồi. Vui lòng thử lại.')); }
-      finally { setBusy(false); }
-      return;
-    }
-    if (!request) return; // nhánh mock/offline — xem ghi chú ở confirmDone
-    tenantMaintenanceStore.update(request.id, {
-      status: 'rejected',
-      rejectReason: reason,
-      rejectImages: rejectUris,
-      timeline: [...request.timeline, mkTenantEntry('rejected', `Khách từ chối: ${reason}`)],
-      updatedAt: nowIso().slice(0, 10),
+    if (selfRepairUris.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh chứng minh đã sửa xong.'); return; }
+    try {
+      setBusy(true);
+      await realMaintenanceService.submitSelfRepair(idNum, selfRepairNote.trim() || undefined, selfRepairUris);
+      await refreshReal();
+      setSelfRepairNote(''); setSelfRepairUris([]);
+      showAlert('✅ Đã gửi', 'Quản lý sẽ kiểm tra và xác nhận kết quả sửa chữa của bạn.');
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi ảnh. Vui lòng thử lại.')); }
+    finally { setBusy(false); }
+  };
+
+  /** Không ổn với lần sửa trước — tạo phiếu mới nối tiếp (không còn reopen cùng phiếu). */
+  const createFollowUp = () => {
+    if (!request) return;
+    navigation.navigate('MaintenanceCreate', {
+      previousRequestId: idNum,
+      prefillTitle: request.title,
+      equipment: request.equipmentId ? { id: Number(request.equipmentId), equipmentName: request.equipmentName } : undefined,
     });
-    setRejectMode(false); setRejectReason(''); setRejectUris([]);
-    showAlert('Đã gửi phản hồi', 'Quản lý sẽ xem xét và xử lý lại.');
-  };
-
-  /** Khách đồng ý trả khoản bồi thường → BE tự tạo hoá đơn + QR PayOS, điều hướng thẳng tới đó. */
-  const agreeToCharge = async () => {
-    if (chargeBusy) return;
-    try {
-      setChargeBusy(true);
-      const res = await realMaintenanceService.confirm(idNum, { agreeToCharge: true });
-      if (res.issuedInvoice) {
-        navigation.navigate('InvoiceDetail', { invoice: toSharedBill(res.issuedInvoice as unknown as TenantInvoice) });
-      } else {
-        showAlert('✅ Đã đồng ý', 'Hoá đơn đang được tạo — xem ở tab Hoá đơn.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-      }
-    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể xác nhận. Vui lòng thử lại.')); }
-    finally { setChargeBusy(false); }
-  };
-
-  /** Khách khiếu nại số tiền — ticket vẫn đóng (sửa đã xong), KHÔNG tạo hoá đơn. */
-  const submitChargeDispute = async () => {
-    if (chargeBusy) return;
-    try {
-      setChargeBusy(true);
-      await realMaintenanceService.confirm(idNum, {
-        agreeToCharge: false,
-        chargeDisputeReason: disputeReason.trim() || undefined,
-      });
-      setDisputeMode(false); setDisputeReason('');
-      showAlert('Đã gửi khiếu nại', 'Quản lý sẽ xem xét và liên hệ lại với bạn.', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi khiếu nại. Vui lòng thử lại.')); }
-    finally { setChargeBusy(false); }
   };
 
   // Vào bằng deep-link (chỉ có `requestId`) thì lần render đầu chưa có dữ liệu — hiện
@@ -214,6 +148,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
       </SafeAreaView>
     );
   }
+
+  const remainingDays = daysLeft(request.selfRepairDeadline);
+  const hasSelfRepairPhotos = (request.selfRepairImages?.length ?? 0) > 0;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -287,40 +224,6 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   <Text style={styles.metaValue}>👤 {request.assignedTo}</Text>
                 </View>
               )}
-              {request.repairCost != null && (
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>Chi phí sửa</Text>
-                  <Text style={[styles.metaValue, { color: Colors.success, fontWeight: '700' }]}>
-                    {request.repairCost.toLocaleString('vi-VN')} đ
-                  </Text>
-                </View>
-              )}
-              {!!request.reopenCount && request.reopenCount > 0 && (
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>Đã từ chối</Text>
-                  <Text style={[styles.metaValue, { color: Colors.error }]}>{request.reopenCount} lần</Text>
-                </View>
-              )}
-              {/* Khách làm hư — trạng thái đồng ý bồi thường. Lúc PENDING không hiện note
-                  này nữa, khối hành động riêng bên dưới (💰 Yêu cầu bồi thường) xử lý. */}
-              {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
-                (request.repairCost ?? 0) > 0 &&
-                request.costAgreementStatus === 'agreed' && (
-                <View style={styles.tenantPayNote}>
-                  <Text style={styles.tenantPayNoteText}>
-                    ✅ Bạn đã đồng ý bồi thường {request.repairCost!.toLocaleString('vi-VN')} đ — hoá đơn đã tạo, xem ở tab Hoá đơn.
-                  </Text>
-                </View>
-              )}
-              {(request.costPaidBy ?? '').toUpperCase() === 'TENANT' &&
-                (request.repairCost ?? 0) > 0 &&
-                request.costAgreementStatus === 'disputed' && (
-                <View style={[styles.tenantPayNote, { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5' }]}>
-                  <Text style={[styles.tenantPayNoteText, { color: '#B91C1C' }]}>
-                    ↩ Bạn đã khiếu nại khoản bồi thường {request.repairCost!.toLocaleString('vi-VN')} đ — quản lý sẽ liên hệ lại.
-                  </Text>
-                </View>
-              )}
               {request.resolvedAt && (
                 <View style={styles.metaItem}>
                   <Text style={styles.metaLabel}>Hoàn thành</Text>
@@ -345,6 +248,27 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Lỗi do bạn — bằng chứng manager ghi nhận (Luồng B) */}
+        {['tenant_fault', 'pending_tenant_repair', 'outstanding_damage'].includes(request.status) && (
+          <View style={styles.section}>
+            <View style={[styles.helpCard, { backgroundColor: '#FEF2F2' }]}>
+              <Text style={[styles.helpText, { color: '#B91C1C', fontWeight: '700', marginBottom: 4 }]}>
+                ⚠️ Quản lý xác định đây là lỗi do sử dụng
+              </Text>
+              {!!request.faultReason && (
+                <Text style={[styles.helpText, { color: '#B91C1C' }]}>{request.faultReason}</Text>
+              )}
+            </View>
+            {(request.faultEvidenceImages?.length ?? 0) > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
+                {request.faultEvidenceImages!.map((uri, i) => (
+                  <Image key={i} source={{ uri }} style={styles.attachmentImage} />
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
+
         {/* Ảnh sau sửa (AFTER) — hiện khi manager đã báo xong */}
         {(request.afterImages?.length ?? 0) > 0 && (
           <View style={styles.section}>
@@ -357,138 +281,119 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Hoá đơn (INVOICE) — ảnh + mô tả việc đã sửa */}
+        {(request.invoiceImages?.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🧾 Hoá đơn sửa chữa</Text>
+            {!!request.repairDescription && (
+              <Text style={[styles.descText, { marginBottom: Spacing.sm }]}>{request.repairDescription}</Text>
+            )}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
+              {request.invoiceImages!.map((uri, i) => (
+                <Image key={i} source={{ uri }} style={styles.attachmentImage} />
+              ))}
+            </ScrollView>
+            {request.invoiceAmount != null && billingMeta && (
+              <View style={[styles.tenantPayNote, { backgroundColor: billingMeta.bg, borderColor: billingMeta.color + '40' }]}>
+                <Text style={[styles.tenantPayNoteTitle, { color: billingMeta.color }]}>{billingMeta.label}</Text>
+                <Text style={[styles.tenantPayNoteAmount, { color: billingMeta.color }]}>
+                  {request.invoiceAmount.toLocaleString('vi-VN')} đ
+                </Text>
+                <Text style={[styles.tenantPayNoteText, { color: billingMeta.color }]}>{billingMeta.detail}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         <MaintenancePhotoHistory photos={request.photoHistory} />
 
-        {/* Nghiệm thu chất lượng sửa (WAITING_TENANT_CONFIRM) — TÁCH RIÊNG khỏi việc
-            đồng ý bồi thường (khối 💰 bên dưới). Khi còn khoản bồi thường PENDING, ẩn nút
-            "Đã OK" ở đây vì BE bắt buộc phải trả lời agreeToCharge cùng lúc — dùng 2 nút
-            ở khối bồi thường bên dưới thay thế (vừa xác nhận sửa tốt, vừa trả lời tiền). */}
-        {request.status === 'waiting_confirm' && !rejectMode && (
+        {/* Tự sửa — chưa nộp ảnh: form nộp ảnh + ghi chú */}
+        {request.status === 'pending_tenant_repair' && !hasSelfRepairPhotos && (
           <View style={styles.actionSection}>
-            <Text style={styles.sectionTitle}>🛠 Quản lý báo đã sửa xong</Text>
-            {!!request.resolutionNote && (
-              <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.sm }]}>
-                📝 {request.resolutionNote}
+            <View style={[styles.helpCard, { backgroundColor: '#FFF7ED', marginBottom: Spacing.md }]}>
+              <Text style={[styles.helpText, { color: '#C2410C' }]}>
+                🛠 Bạn cần tự sửa lỗi này{remainingDays != null
+                  ? remainingDays >= 0 ? ` trong ${remainingDays} ngày nữa` : ' — ĐÃ QUÁ HẠN'
+                  : ''}{request.selfRepairDeadline ? ` (hạn ${formatDate(request.selfRepairDeadline)})` : ''}.
+                Sửa xong thì chụp ảnh gửi để quản lý xác nhận.
               </Text>
-            )}
-            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
-              Vui lòng kiểm tra và xác nhận. Không phản hồi sau {MAINTENANCE_AUTO_CONFIRM_DAYS} ngày,
-              hệ thống sẽ tự xác nhận hoàn tất.
-            </Text>
-            {request.costAgreementStatus !== 'pending' && (
-              <TouchableOpacity style={styles.confirmBtn} onPress={confirmDone} disabled={busy}>
-                <Text style={styles.confirmBtnText}>✅ Đã OK — xác nhận hoàn tất</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.reopenBtn} onPress={() => setRejectMode(true)}>
-              <Text style={styles.reopenBtnText}>↩ Chưa ổn — gửi phản hồi</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* 💰 Yêu cầu bồi thường — độc lập với nghiệm thu chất lượng ở trên. */}
-        {request.status === 'waiting_confirm' && !rejectMode &&
-          request.costAgreementStatus === 'pending' && !disputeMode && (
-          <View style={styles.chargeSection}>
-            <Text style={styles.sectionTitle}>💰 Yêu cầu bồi thường</Text>
-            <Text style={styles.chargeAmount}>{(request.repairCost ?? 0).toLocaleString('vi-VN')} đ</Text>
-            <Text style={[styles.helpText, { color: Colors.textSecondary, marginBottom: Spacing.md }]}>
-              Nguyên nhân: {request.cause === 'wear' ? 'Hao mòn tự nhiên' : 'Khách làm hư'}. Đồng ý để hệ
-              thống tạo hoá đơn + mã QR thanh toán ngay, hoặc khiếu nại nếu bạn thấy không hợp lý.
-            </Text>
-            <TouchableOpacity style={styles.confirmBtn} onPress={agreeToCharge} disabled={chargeBusy}>
-              <Text style={styles.confirmBtnText}>{chargeBusy ? 'Đang xử lý...' : '✅ Đồng ý thanh toán'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.reopenBtn} onPress={() => setDisputeMode(true)} disabled={chargeBusy}>
-              <Text style={styles.reopenBtnText}>↩ Gửi khiếu nại</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Form khiếu nại số tiền bồi thường */}
-        {request.status === 'waiting_confirm' && !rejectMode &&
-          request.costAgreementStatus === 'pending' && disputeMode && (
-          <View style={styles.chargeSection}>
-            <Text style={styles.sectionTitle}>↩ Khiếu nại — cho biết lý do</Text>
-            <TextInput
-              style={styles.rejectInput}
-              value={disputeReason}
-              onChangeText={setDisputeReason}
-              placeholder="VD: Máy lạnh đã cũ, không phải do tôi làm hư..."
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
-            <TouchableOpacity style={styles.rejectSubmitBtn} onPress={submitChargeDispute} disabled={chargeBusy}>
-              <Text style={styles.confirmBtnText}>{chargeBusy ? 'Đang gửi...' : 'Gửi khiếu nại'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.reopenBtn} onPress={() => setDisputeMode(false)}>
-              <Text style={[styles.reopenBtnText, { color: Colors.textSecondary }]}>← Quay lại</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Form từ chối nghiệm thu */}
-        {request.status === 'waiting_confirm' && rejectMode && (
-          <View style={styles.actionSection}>
-            <Text style={styles.sectionTitle}>↩ Chưa ổn — cho biết lý do</Text>
-            <TextInput
-              style={styles.rejectInput}
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              placeholder="VD: Máy vẫn không lạnh sau khi thợ đến..."
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
+            </View>
+            <Text style={styles.sectionTitle}>Ảnh chứng minh đã sửa xong</Text>
             <View style={styles.rejectImagesRow}>
-              {rejectUris.map((uri, i) => (
+              {selfRepairUris.map((uri, i) => (
                 <View key={`${uri}-${i}`} style={styles.rejectThumbWrap}>
                   <Image source={{ uri }} style={styles.rejectThumb} />
                   <TouchableOpacity
                     style={styles.rejectThumbRemove}
-                    onPress={() => setRejectUris(prev => prev.filter((_, idx) => idx !== i))}
+                    onPress={() => setSelfRepairUris(prev => prev.filter((_, idx) => idx !== i))}
                   >
                     <Text style={styles.rejectThumbRemoveText}>×</Text>
                   </TouchableOpacity>
                 </View>
               ))}
-              <TouchableOpacity style={styles.rejectAddBtn} onPress={() => setRejectPhotoMenuOpen(true)}>
+              <TouchableOpacity style={styles.rejectAddBtn} onPress={() => setPhotoMenuOpen(true)}>
                 <Text style={styles.rejectAddBtnText}>＋{'\n'}Ảnh</Text>
               </TouchableOpacity>
             </View>
-            <Text style={[styles.helpText, { color: Colors.textMuted, marginBottom: Spacing.md }]}>
-              Cần ít nhất 1 ảnh minh chứng để quản lý xem xét.
-            </Text>
-            <TouchableOpacity style={styles.rejectSubmitBtn} onPress={submitReject} disabled={busy}>
-              <Text style={styles.confirmBtnText}>{busy ? 'Đang gửi...' : 'Gửi phản hồi chưa đạt'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.reopenBtn} onPress={() => setRejectMode(false)}>
-              <Text style={[styles.reopenBtnText, { color: Colors.textSecondary }]}>← Quay lại</Text>
+            <TextInput
+              style={styles.rejectInput}
+              value={selfRepairNote}
+              onChangeText={setSelfRepairNote}
+              placeholder="Ghi chú (không bắt buộc)..."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+            />
+            <TouchableOpacity style={styles.confirmBtn} onPress={submitSelfRepair} disabled={busy}>
+              <Text style={styles.confirmBtnText}>{busy ? 'Đang gửi...' : '✅ Gửi ảnh đã sửa xong'}</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Đã từ chối — chờ manager xem xét */}
-        {request.status === 'rejected' && (
+        {/* Tự sửa — đã nộp ảnh, chờ manager xác nhận */}
+        {request.status === 'pending_tenant_repair' && hasSelfRepairPhotos && (
+          <View style={styles.actionSection}>
+            <View style={styles.helpCard}>
+              <Text style={styles.helpText}>⏳ Đã gửi ảnh sửa chữa — chờ quản lý kiểm tra và xác nhận.</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Chờ trừ cọc khi trả phòng */}
+        {request.status === 'outstanding_damage' && (
           <View style={styles.actionSection}>
             <View style={[styles.helpCard, { backgroundColor: '#FEF2F2' }]}>
               <Text style={[styles.helpText, { color: '#B91C1C' }]}>
-                ↩ Bạn đã từ chối nghiệm thu{request.rejectReason ? `: "${request.rejectReason}"` : ''}.
-                Quản lý đang xem xét — bạn sẽ nhận thông báo khi có kết quả.
+                💸 Chưa xử lý xong trong hạn — khoản thiệt hại này sẽ được chốt và trừ vào
+                tiền cọc khi bạn trả phòng.
+                {request.estimatedDamageAmount != null
+                  ? ` Ước tính: ${request.estimatedDamageAmount.toLocaleString('vi-VN')} đ.`
+                  : ''}
               </Text>
             </View>
           </View>
         )}
 
         {/* Nút liên hệ nếu đang xử lý */}
-        {(request.status === 'pending' || request.status === 'approved') && (
+        {(request.status === 'open' || request.status === 'in_repair' || request.status === 'tenant_fault') && (
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
               <Text style={styles.helpText}>
-                {request.status === 'pending'
-                  ? '⏳ Yêu cầu đang chờ quản lý duyệt. Cần hỗ trợ gấp? Liên hệ quản lý.'
-                  : '🔧 Đã duyệt — thợ sẽ đến sửa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
+                {request.status === 'open'
+                  ? '⏳ Yêu cầu đang chờ quản lý kiểm tra. Cần hỗ trợ gấp? Liên hệ quản lý.'
+                  : request.status === 'tenant_fault'
+                    ? '🔧 Quản lý sẽ sửa hộ — bạn sẽ nhận hoá đơn sau khi hoàn tất.'
+                    : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
               </Text>
             </View>
+          </View>
+        )}
+
+        {/* Đã hoàn tất — tạo yêu cầu mới nếu chưa ổn */}
+        {request.status === 'closed' && (
+          <View style={styles.actionSection}>
+            <TouchableOpacity style={styles.reopenBtnOutline} onPress={createFollowUp}>
+              <Text style={styles.reopenBtnOutlineText}>🔁 Vẫn chưa ổn — tạo yêu cầu mới</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
@@ -496,22 +401,22 @@ export const MaintenanceDetailScreen: React.FC = () => {
       <CameraCaptureModal
         visible={cameraOpen}
         multi
-        onCapture={(uri) => setRejectUris(prev => [...prev, uri])}
+        onCapture={(uri) => setSelfRepairUris(prev => [...prev, uri])}
         onClose={() => setCameraOpen(false)}
       />
 
-      {/* Menu "Thêm ảnh minh chứng" — thay Alert.alert (no-op trên web) bằng modal trong UI. */}
-      <Modal visible={rejectPhotoMenuOpen} transparent animationType="fade" onRequestClose={() => setRejectPhotoMenuOpen(false)}>
-        <Pressable style={styles.photoMenuBackdrop} onPress={() => setRejectPhotoMenuOpen(false)}>
+      {/* Menu "Thêm ảnh" — thay Alert.alert (no-op trên web) bằng modal trong UI. */}
+      <Modal visible={photoMenuOpen} transparent animationType="fade" onRequestClose={() => setPhotoMenuOpen(false)}>
+        <Pressable style={styles.photoMenuBackdrop} onPress={() => setPhotoMenuOpen(false)}>
           <Pressable style={styles.photoMenuCard} onPress={() => {}}>
-            <Text style={styles.photoMenuTitle}>Thêm ảnh minh chứng</Text>
-            <TouchableOpacity style={styles.photoMenuOption} onPress={pickRejectFromCamera}>
+            <Text style={styles.photoMenuTitle}>Thêm ảnh</Text>
+            <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromCamera}>
               <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.photoMenuOption} onPress={pickRejectFromLibrary}>
+            <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromLibrary}>
               <Text style={styles.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.photoMenuCancel} onPress={() => setRejectPhotoMenuOpen(false)}>
+            <TouchableOpacity style={styles.photoMenuCancel} onPress={() => setPhotoMenuOpen(false)}>
               <Text style={styles.photoMenuCancelText}>Đóng</Text>
             </TouchableOpacity>
           </Pressable>
@@ -570,21 +475,17 @@ const styles = StyleSheet.create({
   metaLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
   metaValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
   tenantPayNote: {
-    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.md,
-    borderWidth: 1, borderColor: '#FDE68A',
+    borderRadius: BorderRadius.md, borderWidth: 1,
     padding: Spacing.md, marginTop: Spacing.sm,
   },
-  tenantPayNoteText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
+  tenantPayNoteTitle: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  tenantPayNoteAmount: { fontSize: 20, fontWeight: '800', marginBottom: 4 },
+  tenantPayNoteText: { fontSize: 12, lineHeight: 18 },
 
   imagesRow: { marginTop: Spacing.sm },
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
 
   actionSection: { paddingHorizontal: Spacing.base, paddingBottom: 40 },
-  chargeSection: {
-    marginHorizontal: Spacing.base, marginBottom: Spacing.md, padding: Spacing.base,
-    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: '#FDE68A',
-  },
-  chargeAmount: { fontSize: 22, fontWeight: '800', color: '#B45309', marginBottom: Spacing.sm },
   helpCard: { backgroundColor: Colors.infoLight, borderRadius: BorderRadius.md, padding: Spacing.md },
   helpText: { fontSize: 13, color: Colors.info, lineHeight: 20 },
 
@@ -593,8 +494,11 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.sm, ...Shadow.sm,
   },
   confirmBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
-  reopenBtn: { alignItems: 'center', paddingVertical: Spacing.md },
-  reopenBtnText: { fontSize: 14, fontWeight: '600', color: Colors.error },
+  reopenBtnOutline: {
+    borderWidth: 1.5, borderColor: Colors.primary, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.base, alignItems: 'center',
+  },
+  reopenBtnOutlineText: { fontSize: 14, fontWeight: '700', color: Colors.primary },
 
   rejectInput: {
     backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border,
@@ -614,10 +518,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
   },
   rejectAddBtnText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 16 },
-  rejectSubmitBtn: {
-    backgroundColor: Colors.error, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.sm, ...Shadow.sm,
-  },
 
   photoMenuBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'flex-end' },
   photoMenuCard: { backgroundColor: Colors.white, borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl, padding: Spacing.lg, paddingBottom: Spacing.xl },
