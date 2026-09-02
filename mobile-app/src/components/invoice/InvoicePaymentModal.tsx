@@ -3,10 +3,10 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Modal, ActivityIndicator, Platform,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Colors, Spacing, BorderRadius, Shadow, PAY_SUCCESS_URL, PAY_CANCEL_URL } from '@/constants';
+import * as Clipboard from 'expo-clipboard';
+import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { billMonthLabel, formatCurrency, formatDate, showAlert } from '@/utils';
 import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
@@ -39,15 +39,22 @@ interface Props {
 
 export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose, onUpdate }) => {
   const [creatingPayment, setCreatingPayment] = useState(false);
-  const [showWebView, setShowWebView] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  /**
+   * Bong bóng "Sao chép" hiện lên khi ẤN ĐÈ vào mã QR.
+   *
+   * `idle` ẩn · `ready` đang mời bấm · `copying` đang chép · `done` vừa chép xong.
+   * Bắt chước đúng thói quen sẵn có của điện thoại — ấn đè vào một thứ thì hiện chữ chép.
+   */
+  const [copyState, setCopyState] = useState<'idle' | 'ready' | 'copying' | 'done'>('idle');
   const qrRef = useRef<any>(null);
+  /** Hẹn giờ tự ẩn bong bóng. Giữ ref để mỗi lần ấn đè lại là huỷ hẹn cũ, không chồng. */
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mở modal → tạo link PayOS ngay nếu hoá đơn chưa có sẵn (vd hoá đơn thường mới tạo).
   useEffect(() => {
     if (!visible || !invoice) return;
-    setShowWebView(false);
     if (invoice.payosQrCode || invoice.payosCheckoutUrl) return;
     setCreatingPayment(true);
     realTenantBillingService.payInvoice(invoice.id)
@@ -56,6 +63,21 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
       .finally(() => setCreatingPayment(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, invoice?.id]);
+
+  /*
+   * Đóng modal thì dọn hẹn giờ và ẩn bong bóng, để lần mở sau bắt đầu từ trạng thái sạch
+   * và hẹn giờ không gọi setState trên component đã tháo.
+   *
+   * PHẢI đứng TRƯỚC `if (!invoice) return null` bên dưới: hook nằm sau một lệnh return
+   * có điều kiện là hook bị gọi lúc có lúc không, và React sẽ ném "Rendered fewer hooks
+   * than expected" ngay khi `invoice` từ null chuyển sang có giá trị — tức đúng lúc
+   * khách bấm mở một hoá đơn.
+   */
+  useEffect(() => {
+    if (visible) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    setCopyState('idle');
+  }, [visible]);
 
   if (!invoice) return null;
   const tc = TYPE_LABEL[invoice.invoiceType];
@@ -68,7 +90,6 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
         const next = toSharedBill(updated);
         onUpdate(next);
         if (next.status === 'paid') {
-          setShowWebView(false);
           onClose();
         } else {
           showAlert('Chưa nhận được thanh toán', 'PayOS chưa ghi nhận giao dịch. Thử lại sau vài giây.');
@@ -76,6 +97,45 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
       })
       .catch(() => showAlert('Lỗi', 'Không kiểm tra được trạng thái thanh toán. Vui lòng thử lại.'))
       .finally(() => setProcessing(false));
+  };
+
+  /** Đặt lịch tự ẩn bong bóng, huỷ lịch cũ trước — tránh hai hẹn giờ đá nhau. */
+  const scheduleHide = (ms: number) => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setCopyState('idle'), ms);
+  };
+
+  const showCopyBubble = () => {
+    setCopyState('ready');
+    scheduleHide(5000);
+  };
+
+  /**
+   * CHÉP ẢNH MÃ QR vào bộ nhớ tạm.
+   *
+   * `toDataURL` của react-native-qrcode-svg trả base64 THÔ (không có tiền tố `data:`),
+   * đúng thứ `Clipboard.setImageAsync` nhận — cùng chuỗi mà `handleDownloadQr` đang ghi
+   * ra file, nên hai đường cho ra đúng một tấm ảnh.
+   */
+  const copyQrImage = () => {
+    if (!qrRef.current || copyState !== 'ready') return;
+    setCopyState('copying');
+    qrRef.current.toDataURL((base64: string) => {
+      Clipboard.setImageAsync(base64)
+        .then(() => {
+          setCopyState('done');
+          scheduleHide(1600);
+        })
+        .catch(() => {
+          setCopyState('idle');
+          // Máy/trình duyệt không cho chép ảnh (web thiếu ngữ cảnh bảo mật, máy cũ…).
+          // Chỉ đường lui thay vì báo lỗi cụt: nút "Tải mã QR" ngay bên dưới vẫn chạy.
+          showAlert(
+            'Không chép được ảnh',
+            'Thiết bị không cho phép chép ảnh vào bộ nhớ tạm. Dùng nút "Tải mã QR" bên dưới để lưu hoặc gửi ảnh.',
+          );
+        });
+    });
   };
 
   // Tải QR kèm nội dung thanh toán (số tiền, mã hoá đơn, hạn TT) thành 1 ảnh.
@@ -111,8 +171,8 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={s.overlay}>
-        <View style={[s.modal, showWebView && s.modalWebview]}>
-          <TouchableOpacity style={s.modalClose} onPress={() => { setShowWebView(false); onClose(); }}>
+        <View style={s.modal}>
+          <TouchableOpacity style={s.modalClose} onPress={onClose}>
             <Text style={{ fontSize: 15, color: Colors.textMuted }}>✕</Text>
           </TouchableOpacity>
 
@@ -133,12 +193,32 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
             </View>
           ) : (
             <>
-              {!!invoice.payosQrCode && !showWebView && (
+              {!!invoice.payosQrCode && (
                 <View style={s.qrBox}>
                   <Text style={s.qrAmount}>{formatCurrency(invoice.grandTotal)}</Text>
-                  <View style={s.qrWrap}>
+                  {/* Ấn đè vào mã → hiện bong bóng "Sao chép" → bấm là chép ảnh QR. */}
+                  <TouchableOpacity
+                    style={s.qrWrap}
+                    activeOpacity={1}
+                    onLongPress={showCopyBubble}
+                    delayLongPress={350}
+                  >
                     <QRCode value={invoice.payosQrCode} size={220} getRef={(c) => { qrRef.current = c; }} />
-                  </View>
+                    {copyState !== 'idle' && (
+                      <TouchableOpacity
+                        style={s.copyBubble}
+                        activeOpacity={0.85}
+                        onPress={copyQrImage}
+                        disabled={copyState !== 'ready'}
+                      >
+                        <Text style={s.copyBubbleText}>
+                          {copyState === 'ready' ? '📋  Sao chép'
+                            : copyState === 'copying' ? 'Đang chép…'
+                            : '✓  Đã sao chép'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </TouchableOpacity>
                   <Text style={s.qrHint}>Mở app Ngân hàng bất kỳ → Quét mã VietQR để thanh toán.</Text>
 
                   <TouchableOpacity
@@ -153,28 +233,20 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
                 </View>
               )}
 
-              {!!invoice.payosCheckoutUrl && !showWebView && (
-                <TouchableOpacity style={s.checkoutBtn} onPress={() => setShowWebView(true)}>
-                  <Text style={s.checkoutBtnText}>💳 Mở trang thanh toán PayOS</Text>
-                </TouchableOpacity>
-              )}
+              {/*
+                ĐÃ BỎ nút "Mở trang thanh toán PayOS" và khối WebView đi kèm (02/09/2026).
 
-              {showWebView && !!invoice.payosCheckoutUrl && (
-                <View style={s.webviewBox}>
-                  <WebView
-                    source={{ uri: invoice.payosCheckoutUrl }}
-                    onNavigationStateChange={(nav) => {
-                      if (nav.url?.startsWith(PAY_SUCCESS_URL)) {
-                        setShowWebView(false);
-                        handleConfirmPaid();
-                      } else if (nav.url?.startsWith(PAY_CANCEL_URL)) {
-                        setShowWebView(false);
-                      }
-                    }}
-                  />
-                </View>
-              )}
+                Khách quét mã VietQR bằng app ngân hàng CỦA HỌ — đó là đường đi vừa quen
+                vừa an toàn, và nó đã nằm ngay trên cùng màn này. Cái nút kia dẫn sang một
+                trang web mở trong WebView để gõ thông tin thẻ: chậm hơn, dễ hỏng hơn, và
+                là đúng hình dạng của một trang lừa đảo — người dùng được dạy là đừng gõ
+                thông tin thẻ vào WebView lạ trong app.
 
+                Hai lối trả tiền cho cùng một hoá đơn còn khiến khách phải chọn, mà chọn
+                sai thì hoặc trả hai lần hoặc bỏ dở giữa chừng. Màn đón khách của quản lý
+                đã bỏ nút này từ trước vì cùng lý do (`ResumeContractScreen`) — giờ khách
+                thuê đi cùng một đường: quét QR, rồi bấm nút xác nhận bên dưới.
+              */}
               {(invoice.lateFee ?? 0) > 0 && (
                 <View style={s.lateFeeBox}>
                   <Text style={s.lateFeeBoxText}>
@@ -199,7 +271,7 @@ export const InvoicePaymentModal: React.FC<Props> = ({ visible, invoice, onClose
               </TouchableOpacity>
 
               {!processing && (
-                <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowWebView(false); onClose(); }}>
+                <TouchableOpacity style={s.cancelBtn} onPress={onClose}>
                   <Text style={s.cancelBtnText}>Để sau</Text>
                 </TouchableOpacity>
               )}
@@ -270,7 +342,6 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderTopLeftRadius: 24, borderTopRightRadius: 24,
     padding: Spacing.lg, paddingBottom: 40, maxHeight: '95%',
   },
-  modalWebview: { height: '90%' },
   modalClose: {
     position: 'absolute', top: 16, right: 16, zIndex: 10,
     width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.divider,
@@ -290,6 +361,16 @@ const s = StyleSheet.create({
     padding: Spacing.md, borderRadius: BorderRadius.lg,
     borderWidth: 2, borderColor: Colors.divider, marginBottom: Spacing.md,
   },
+  /* Bong bóng nổi ĐÈ LÊN mã, không đẩy bố cục: hiện/ẩn mà mã QR nhảy lên nhảy xuống thì
+     ngón tay đang giữ trên đó sẽ trỏ vào chỗ khác. Nền tối đặc để nổi trên mã đen trắng. */
+  copyBubble: {
+    position: 'absolute', alignSelf: 'center', bottom: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    borderRadius: BorderRadius.full,
+    paddingVertical: Spacing.sm, paddingHorizontal: Spacing.lg,
+  },
+  copyBubbleText: { fontSize: 13, fontWeight: '800', color: Colors.white },
+
   qrHint: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', marginBottom: Spacing.md, fontStyle: 'italic' },
 
   downloadBtn: {
@@ -298,12 +379,6 @@ const s = StyleSheet.create({
   },
   downloadBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
-  checkoutBtn: {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.base, alignItems: 'center', marginBottom: Spacing.md,
-  },
-  checkoutBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
-  webviewBox: { height: 420, borderRadius: BorderRadius.lg, overflow: 'hidden', marginBottom: Spacing.md },
 
   lateFeeBox: { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: Spacing.sm, marginBottom: Spacing.md },
   lateFeeBoxText: { fontSize: 13, fontWeight: '600', color: Colors.error, textAlign: 'center' },
