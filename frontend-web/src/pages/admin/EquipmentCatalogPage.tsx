@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import {
   Package, Printer, QrCode, Search, Loader2, MapPin, ShieldCheck, Wrench,
-  X, Download, CheckSquare, Square, AlertTriangle,
+  X, Download, CheckSquare, Square, AlertTriangle, ScanLine, Rows3, Table2,
+  ChevronUp, ChevronDown, ArrowUpDown,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
@@ -92,6 +93,29 @@ const roomLabel = (e: MaintenanceEquipmentResponse): string => {
   return rn || 'Khu vực chung / Toàn nhà';
 };
 
+// Cỡ tem khi in — literal class names (không ghép chuỗi) để Tailwind quét thấy được lúc build.
+const PRINT_LAYOUT: Record<'sm' | 'md' | 'lg', { cols: string; qrSize: number; label: string }> = {
+  sm: { cols: 'grid-cols-4', qrSize: 110, label: 'Nhỏ' },
+  md: { cols: 'grid-cols-3', qrSize: 150, label: 'Vừa' },
+  lg: { cols: 'grid-cols-2', qrSize: 200, label: 'Lớn' },
+};
+
+type SortKey = 'name' | 'room' | 'status' | 'warranty' | 'maintenance';
+
+/** Chạy tối đa `limit` promise cùng lúc — tránh bắn hàng trăm request song song khi hệ thống nhiều nhà. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export const EquipmentCatalogPage = () => {
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [propertyId, setPropertyId] = useState<number | null>(null);
@@ -103,6 +127,23 @@ export const EquipmentCatalogPage = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [qrModal, setQrModal] = useState<MaintenanceEquipmentResponse | null>(null);
+  const [viewMode, setViewMode] = useState<'grouped' | 'table'>('grouped');
+  const [sortKey, setSortKey] = useState<SortKey>('room');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [labelSize, setLabelSize] = useState<'sm' | 'md' | 'lg'>('md');
+  const [printMode, setPrintMode] = useState<'view' | 'all'>('view');
+  const [printTick, setPrintTick] = useState(0);
+
+  // Đếm thiết bị đang hỏng theo TỪNG nhà — tô badge lên PropertyPicker để thấy ngay
+  // nhà nào cần chú ý mà không phải mở từng nhà một. Chạy nền, không chặn màn chính;
+  // nhà nào lỗi tải thì bỏ qua badge (không có badge còn hơn hiện số sai).
+  const [brokenCounts, setBrokenCounts] = useState<Map<number, number>>(new Map());
+
+  // Tra cứu thiết bị theo mã QR xuyên toàn hệ thống — dùng khi tìm trong nhà đang
+  // chọn ra 0 kết quả (vd nhặt được tem QR rời, chưa biết thuộc nhà nào).
+  const [crossLoading, setCrossLoading] = useState(false);
+  const [crossError, setCrossError] = useState<string | null>(null);
+  const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
 
   // Tải danh sách bất động sản
   useEffect(() => {
@@ -122,6 +163,31 @@ export const EquipmentCatalogPage = () => {
     return () => { active = false; };
   }, []);
 
+  // Prefetch song song (giới hạn 5 cùng lúc) số thiết bị BROKEN của mỗi nhà — chỉ chạy
+  // 1 lần khi danh sách nhà vừa tải xong. Đây là N request GET rời rạc (chưa có API tổng
+  // hợp phía BE); ở quy mô vài chục nhà của hệ thống thì chấp nhận được, nhà nào lỗi
+  // mạng thì lặng lẽ bỏ qua badge của riêng nhà đó.
+  useEffect(() => {
+    if (properties.length === 0) return;
+    let active = true;
+    mapWithConcurrency(properties, 5, async (p) => {
+      try {
+        const list = await equipmentService.getPropertyEquipment(p.id);
+        const broken = (list ?? []).filter(e => e.status === 'BROKEN' && !isDisabled(e)).length;
+        return [p.id, broken] as const;
+      } catch {
+        return null;
+      }
+    }).then(entries => {
+      if (!active) return;
+      const m = new Map<number, number>();
+      entries.forEach(e => { if (e && e[1] > 0) m.set(e[0], e[1]); });
+      setBrokenCounts(m);
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [properties]);
+
   // Tải thiết bị theo nhà
   useEffect(() => {
     if (propertyId == null) return;
@@ -136,6 +202,37 @@ export const EquipmentCatalogPage = () => {
       .finally(() => active && setLoadingEq(false));
     return () => { active = false; };
   }, [propertyId]);
+
+  // Sau khi nhảy nhà nhờ tra cứu QR xuyên hệ thống: chờ thiết bị của nhà đó tải xong
+  // rồi tự mở modal QR lớn của đúng món vừa tìm — người dùng thấy ngay kết quả.
+  useEffect(() => {
+    if (pendingFocusId == null) return;
+    const found = equipments.find(e => e.id === pendingFocusId);
+    if (found) {
+      setQrModal(found);
+      setPendingFocusId(null);
+    }
+  }, [equipments, pendingFocusId]);
+
+  // Đổi nhà hoặc gõ lại từ khoá thì lỗi tra cứu cũ (nếu có) không còn ý nghĩa.
+  useEffect(() => { setCrossError(null); }, [search, propertyId]);
+
+  // Reset kiểu in về mặc định sau khi hộp thoại in đóng lại (in xong hoặc bấm Huỷ) —
+  // để lần bấm "In tem đã chọn" kế tiếp không bị dính chế độ "in cả nhà" trước đó.
+  useEffect(() => {
+    const reset = () => setPrintMode('view');
+    window.addEventListener('afterprint', reset);
+    return () => window.removeEventListener('afterprint', reset);
+  }, []);
+
+  // `printTick` chỉ tăng lên để ép effect dưới chạy SAU khi React đã commit `printMode`
+  // mới vào DOM — gọi window.print() ngay trong onClick có thể in nhầm state cũ vì
+  // setState không đồng bộ.
+  useEffect(() => {
+    if (printTick === 0) return;
+    window.print();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printTick]);
 
   const selectedProperty = properties.find(p => p.id === propertyId);
 
@@ -168,7 +265,7 @@ export const EquipmentCatalogPage = () => {
     });
   }, [equipments, search, statusFilter]);
 
-  // Nhóm theo phòng
+  // Nhóm theo phòng (chế độ xem "Theo phòng")
   const grouped = useMemo(() => {
     const map = new Map<string, MaintenanceEquipmentResponse[]>();
     filtered.forEach(e => {
@@ -178,6 +275,33 @@ export const EquipmentCatalogPage = () => {
     });
     return Array.from(map.entries());
   }, [filtered]);
+
+  // Sắp xếp theo cột (chế độ xem "Bảng")
+  const sortedFiltered = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      switch (sortKey) {
+        case 'name': return dir * equipName(a).localeCompare(equipName(b), 'vi');
+        case 'room': return dir * roomLabel(a).localeCompare(roomLabel(b), 'vi');
+        case 'status': return dir * (STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
+        case 'warranty': {
+          // Không có ngày hết hạn thì luôn xếp cuối, bất kể chiều sắp xếp.
+          const av = a.warrantyExpiredDate ? new Date(a.warrantyExpiredDate).getTime() : Infinity;
+          const bv = b.warrantyExpiredDate ? new Date(b.warrantyExpiredDate).getTime() : Infinity;
+          return dir * (av - bv);
+        }
+        case 'maintenance': return dir * (a.maintenanceCount - b.maintenanceCount);
+        default: return 0;
+      }
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
 
   // ── Chọn để in ──────────────────────────────────────────────────────────
   const toggleOne = (id: number) =>
@@ -211,14 +335,52 @@ export const EquipmentCatalogPage = () => {
       return new Set([...prev, ...printableAll.map(e => e.id)]);
     });
 
-  // Tem cần in: nếu có chọn -> in mục đã chọn; nếu không -> in toàn bộ đang lọc.
+  /** Toàn bộ thiết bị của CẢ NHÀ, bỏ qua tìm kiếm/bộ lọc/lựa chọn — cho nút "In toàn bộ nhà". */
+  const printableWholeProperty = useMemo(() => equipments.filter(e => !isDisabled(e)), [equipments]);
+
+  // Tem cần in:
+  //  - printMode === 'all'  -> toàn bộ nhà, bỏ qua mọi bộ lọc/lựa chọn (nút "In toàn bộ nhà").
+  //  - có chọn thủ công     -> đúng các món đã tick.
+  //  - còn lại              -> đang lọc/tìm kiếm thế nào thì in đúng thế đó.
   // Luôn loại thiết bị đã gỡ (DISABLED) khỏi tem in.
-  const toPrint = (selected.size > 0
-    ? equipments.filter(e => selected.has(e.id))
+  const toPrint = (
+    printMode === 'all' ? printableWholeProperty
+    : selected.size > 0 ? equipments.filter(e => selected.has(e.id))
     : filtered
   ).filter(e => !isDisabled(e));
 
-  const handlePrint = () => window.print();
+  const handlePrint = () => { setPrintMode('view'); setPrintTick(t => t + 1); };
+  const handlePrintWholeProperty = () => { setPrintMode('all'); setPrintTick(t => t + 1); };
+
+  // Đang có bộ lọc/tìm kiếm thu hẹp danh sách so với cả nhà -> nút in chính không còn
+  // đồng nghĩa với "in cả nhà" nữa, cần nói rõ trong nhãn nút.
+  const isNarrowedByFilter = printableAll.length !== printableWholeProperty.length;
+
+  const lookupAcrossSystem = async () => {
+    const code = search.trim();
+    if (!code || crossLoading) return;
+    setCrossLoading(true);
+    setCrossError(null);
+    try {
+      const found = await equipmentService.getByQrCode(code);
+      setPendingFocusId(found.id);
+      // Đổi nhà nếu khác nhà đang xem -> effect tải-thiết-bị-theo-nhà sẽ chạy lại rồi
+      // effect theo dõi `pendingFocusId` tự mở modal QR khi tìm thấy đúng món trong
+      // danh sách vừa tải. Nếu đã đúng nhà rồi thì `equipments` không đổi, effect đó
+      // vẫn chạy vì `pendingFocusId` vừa đổi và tìm thấy ngay.
+      if (found.propertyId !== propertyId) setPropertyId(found.propertyId);
+    } catch {
+      setCrossError(`Không tìm thấy thiết bị với mã "${code}" trong toàn hệ thống.`);
+    } finally {
+      setCrossLoading(false);
+    }
+  };
+
+  const propertyBadges = useMemo(() => {
+    const m = new Map<number, { count: number; label: string }>();
+    brokenCounts.forEach((count, id) => m.set(id, { count, label: `${count} hỏng` }));
+    return m;
+  }, [brokenCounts]);
 
   return (
     <div className="space-y-6">
@@ -235,7 +397,7 @@ export const EquipmentCatalogPage = () => {
               Xem toàn bộ thiết bị trong tòa nhà và in tem QR để dán — khách thuê quét QR để báo bảo trì.
             </p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 flex-shrink-0">
             {selected.size > 0 && (
               <button
                 onClick={clearSelection}
@@ -244,18 +406,45 @@ export const EquipmentCatalogPage = () => {
                 Bỏ chọn
               </button>
             )}
+            {/* Cỡ tem — chỉ ảnh hưởng bản IN, không đổi gì trên màn hình. */}
+            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5">
+              {(Object.keys(PRINT_LAYOUT) as Array<'sm' | 'md' | 'lg'>).map(k => (
+                <button
+                  key={k}
+                  onClick={() => setLabelSize(k)}
+                  title={`Cỡ tem: ${PRINT_LAYOUT[k].label}`}
+                  className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                    labelSize === k ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {PRINT_LAYOUT[k].label}
+                </button>
+              ))}
+            </div>
+            {/* Nút in CHÍNH: theo lựa chọn hiện tại (đã tick, hoặc đang lọc/tìm kiếm gì thì in đúng thứ đó). */}
             <button
               onClick={handlePrint}
               disabled={toPrint.length === 0}
               className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 disabled:opacity-40 transition-colors"
             >
               <Printer className="w-4 h-4" />
-              {/* Đếm theo `toPrint`, KHÔNG phải `filtered`/`selected.size`.
-                  Thiết bị đã gỡ luôn bị loại khỏi tem, nên hai con số kia nói thừa:
-                  nhà có 10 món mà 2 món đã gỡ thì nút ghi "In tất cả tem QR (10)"
-                  trong khi máy in ra 8 tờ. */}
-              {selected.size > 0 ? `In tem đã chọn (${toPrint.length})` : `In tất cả tem QR (${toPrint.length})`}
+              {selected.size > 0
+                ? `In tem đã chọn (${toPrint.length})`
+                : isNarrowedByFilter
+                  ? `In theo bộ lọc (${toPrint.length})`
+                  : `In tất cả tem QR (${toPrint.length})`}
             </button>
+            {/* Nút in PHỤ, tách riêng: luôn in TOÀN BỘ nhà đang chọn, bất kể đang lọc/tìm/tick gì. */}
+            {printableWholeProperty.length > 0 && (
+              <button
+                onClick={handlePrintWholeProperty}
+                title="In tem cho toàn bộ thiết bị của nhà này, bỏ qua bộ lọc và lựa chọn hiện tại"
+                className="inline-flex items-center gap-2 px-3.5 py-2.5 text-sm font-semibold text-primary-700 bg-primary-50 border border-primary-200 rounded-xl hover:bg-primary-100 transition-colors"
+              >
+                <Printer className="w-4 h-4" />
+                In toàn bộ nhà ({printableWholeProperty.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -264,7 +453,9 @@ export const EquipmentCatalogPage = () => {
           {/* Ô chọn nhà có TÌM KIẾM. Bản cũ là `<select>` trần: hệ thống vài chục
               tới hàng trăm căn thì phải kéo danh sách xổ tìm bằng mắt, gõ chữ trong
               select chỉ nhảy theo ký tự đầu. Dùng lại `PropertyPicker` của màn tạo
-              hợp đồng — bỏ dấu, lọc theo cả tên/địa chỉ/khu vực, đi bằng phím được. */}
+              hợp đồng — bỏ dấu, lọc theo cả tên/địa chỉ/khu vực, đi bằng phím được.
+              Badge "N hỏng" (nếu có) giúp thấy ngay nhà nào cần chú ý mà không phải
+              mở từng nhà một. */}
           <div className="md:min-w-[320px]">
             {loadingProps ? (
               <div className="input-field flex items-center gap-2 text-sm text-slate-400">
@@ -273,6 +464,7 @@ export const EquipmentCatalogPage = () => {
             ) : (
               <PropertyPicker
                 properties={properties}
+                badges={propertyBadges}
                 value={propertyId != null ? String(propertyId) : ''}
                 onChange={(id) => setPropertyId(id ? Number(id) : null)}
               />
@@ -285,6 +477,7 @@ export const EquipmentCatalogPage = () => {
               placeholder="Tìm theo tên, mã thiết bị, phòng…"
               value={search}
               onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && filtered.length === 0) lookupAcrossSystem(); }}
               className="input-field pl-9 text-sm w-full"
             />
           </div>
@@ -322,10 +515,7 @@ export const EquipmentCatalogPage = () => {
           </div>
         )}
 
-        {/* Tổng quan nhanh + chọn tất cả.
-            Bỏ tên nhà ở cuối dòng — nó đang lặp lại đúng cái vừa đọc trong ô chọn nhà
-            ngay phía trên. Thay bằng nút chọn toàn bộ: trước đây muốn in tem lẻ cho
-            cả nhà phải đi tick "Chọn phòng" từng phòng một. */}
+        {/* Tổng quan nhanh + chọn tất cả + chuyển chế độ xem. */}
         {selectedProperty && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <Package className="w-4 h-4 text-slate-400" />
@@ -335,16 +525,37 @@ export const EquipmentCatalogPage = () => {
             {printableAll.length > 0 && (
               <button
                 onClick={toggleAll}
-                className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-primary-600"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-primary-600"
               >
                 {allPrintableSelected ? <CheckSquare className="w-3.5 h-3.5 text-primary-600" /> : <Square className="w-3.5 h-3.5" />}
                 {allPrintableSelected ? 'Bỏ chọn tất cả' : `Chọn tất cả ${printableAll.length} tem`}
               </button>
             )}
+            {/* Theo phòng / Bảng — bảng dễ quét mắt và sắp xếp khi nhà có nhiều thiết bị. */}
+            <div className="ml-auto inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5">
+              <button
+                onClick={() => setViewMode('grouped')}
+                title="Xem theo phòng"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  viewMode === 'grouped' ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <Rows3 className="w-3.5 h-3.5" /> Theo phòng
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                title="Xem dạng bảng"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  viewMode === 'table' ? 'bg-primary-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <Table2 className="w-3.5 h-3.5" /> Bảng
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Danh sách theo phòng */}
+        {/* Danh sách */}
         {loadingEq ? (
           <div className="py-16 text-center"><Loader2 className="w-6 h-6 text-slate-300 animate-spin mx-auto" /></div>
         ) : loadError ? (
@@ -365,6 +576,96 @@ export const EquipmentCatalogPage = () => {
             <p className="text-sm font-medium text-slate-500">
               {equipments.length === 0 ? 'Nhà này chưa có thiết bị nào' : 'Không có thiết bị khớp bộ lọc'}
             </p>
+            {/* Tìm không ra trong nhà đang chọn -> có thể thiết bị thuộc nhà khác.
+                Tra theo mã QR chính xác (vd tem rời chưa rõ của nhà nào) xuyên toàn hệ thống. */}
+            {search.trim() && (
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <button
+                  onClick={lookupAcrossSystem}
+                  disabled={crossLoading}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold text-primary-600 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 disabled:opacity-50 transition-colors"
+                >
+                  {crossLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4" />}
+                  Tìm mã "{search.trim()}" ở nhà khác
+                </button>
+                {crossError && <p className="text-xs text-rose-500">{crossError}</p>}
+              </div>
+            )}
+          </div>
+        ) : viewMode === 'table' ? (
+          <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-slate-50 border-b border-slate-100">
+                <tr>
+                  <th className="w-9 px-3 py-3" />
+                  <th className="w-14 px-2 py-3" />
+                  <SortableTh label="Thiết bị" sortKey="name" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <SortableTh label="Phòng" sortKey="room" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <SortableTh label="Tình trạng" sortKey="status" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <SortableTh label="Bảo hành" sortKey="warranty" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <SortableTh label="Bảo trì" sortKey="maintenance" active={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <th className="w-24 px-3 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedFiltered.map(e => {
+                  const st = STATUS_MAP[e.status] ?? STATUS_MAP.GOOD;
+                  const wInfo = warrantyInfo(e.warrantyExpiredDate);
+                  const isSel = selected.has(e.id);
+                  const broken = e.status === 'BROKEN';
+                  const removed = isDisabled(e);
+                  return (
+                    <tr key={e.id} className={`${removed ? 'bg-slate-50/80' : broken ? 'bg-rose-50/40' : ''} ${isSel ? 'bg-primary-50/40' : ''}`}>
+                      <td className="px-3 py-3">
+                        {removed ? (
+                          <span className="text-slate-300" title="Đã gỡ — không in tem"><Square className="w-4.5 h-4.5" /></span>
+                        ) : (
+                          <button onClick={() => toggleOne(e.id)} className="text-slate-400 hover:text-primary-600">
+                            {isSel ? <CheckSquare className="w-4.5 h-4.5 text-primary-600" /> : <Square className="w-4.5 h-4.5" />}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-2 py-3">
+                        <button onClick={() => setQrModal(e)} className={removed ? 'opacity-40' : ''} title="Xem QR lớn">
+                          <QRCodeSVG value={qrPayload(e)} size={32} level="M" className="rounded border border-slate-200" />
+                        </button>
+                      </td>
+                      <td className={`px-3 py-3 max-w-[220px] ${removed ? 'opacity-70' : ''}`}>
+                        <p className="font-semibold text-slate-900 truncate">{equipName(e)}</p>
+                        <p className="text-xs text-slate-500 truncate">
+                          {e.catalogName} · <span className="font-mono font-semibold text-slate-600">{equipCode(e)}</span>
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600 whitespace-nowrap">{roomLabel(e)}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {removed && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">⛔ Đã gỡ</span>}
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        {wInfo ? (
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${wInfo.cls}`}>
+                            <ShieldCheck className="w-3 h-3" /> {wInfo.label}
+                          </span>
+                        ) : <span className="text-xs text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-500 whitespace-nowrap">
+                        <Wrench className="inline w-3 h-3 mr-1 -mt-0.5" />{e.maintenanceCount} lần
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          onClick={() => setQrModal(e)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-primary-600 bg-primary-50 border border-primary-200 rounded-lg hover:bg-primary-100 transition-colors"
+                        >
+                          <QrCode className="w-3.5 h-3.5" /> QR
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           grouped.map(([room, items]) => {
@@ -508,10 +809,10 @@ export const EquipmentCatalogPage = () => {
       <div className="hidden print:block">
         <h2 className="text-lg font-bold mb-1">Tem QR thiết bị — {selectedProperty?.propertyName}</h2>
         <p className="text-xs text-slate-500 mb-4">{selectedProperty?.shortAddress}</p>
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid ${PRINT_LAYOUT[labelSize].cols} gap-4`}>
           {toPrint.map(e => (
             <div key={e.id} className="border border-slate-300 rounded-lg p-3 flex flex-col items-center text-center break-inside-avoid">
-              <QRCodeSVG value={qrPayload(e)} size={150} level="M" />
+              <QRCodeSVG value={qrPayload(e)} size={PRINT_LAYOUT[labelSize].qrSize} level="M" />
               <p className="font-bold text-sm mt-2 leading-tight">{equipName(e)}</p>
               <p className="text-[11px] text-slate-500">{roomLabel(e)}</p>
               <p className="text-[11px] font-mono font-semibold text-slate-600">{equipCode(e)}</p>
@@ -548,6 +849,28 @@ const FilterChip = ({
       {label}
       <span className={`text-[10px] font-bold px-1.5 rounded-full ${active ? 'bg-white/25' : 'bg-slate-100 text-slate-500'}`}>{count}</span>
     </button>
+  );
+};
+
+const SortableTh = ({
+  label, sortKey: key, active, dir, onSort,
+}: {
+  label: string; sortKey: SortKey; active: SortKey; dir: 'asc' | 'desc'; onSort: (k: SortKey) => void;
+}) => {
+  const isActive = active === key;
+  return (
+    <th className="px-3 py-3 text-left">
+      <button
+        onClick={() => onSort(key)}
+        className={`inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide transition-colors ${
+          isActive ? 'text-primary-700' : 'text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        {label}
+        {isActive ? (dir === 'asc' ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />)
+          : <ArrowUpDown className="w-3 h-3 opacity-40" />}
+      </button>
+    </th>
   );
 };
 

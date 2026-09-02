@@ -876,7 +876,11 @@ export const TicketDetailScreen: React.FC = () => {
           </TouchableOpacity>
         )}
 
-        {!isTerminal && (
+        {/* Admin đã duyệt/không duyệt "Lỗi do khách" là bước cuối app theo dõi (xem
+            MaintenanceFaultReview bên web) — status vẫn giữ nguyên 'tenant_fault' nên
+            KHÔNG rơi vào isTerminal, phải chặn riêng bằng adminReviewedAt kẻo hiện nút
+            Hủy trên một phiếu admin đã kết luận xong. */}
+        {!isTerminal && !ticket.adminReviewedAt && (
           <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
             <Text style={s.cancelBtnText}>Hủy yêu cầu này</Text>
           </TouchableOpacity>
