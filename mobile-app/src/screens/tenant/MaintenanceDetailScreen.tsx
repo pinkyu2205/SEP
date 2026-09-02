@@ -9,9 +9,7 @@ import {
   formatDate, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor, showAlert,
 } from '@/utils';
-import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
-} from '@/constants/maintenance';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
@@ -86,8 +84,6 @@ export const MaintenanceDetailScreen: React.FC = () => {
   // `request` chưa có ở lần render đầu khi vào bằng deep-link (chỉ có `requestId`).
   const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.open;
   const priorityColor = getMaintenancePriorityColor(request?.priority ?? 'medium');
-  const billingMeta = request?.billingHint && request.billingHint !== 'none'
-    ? MAINTENANCE_BILLING_HINT_META[request.billingHint] : null;
 
   // ── Actions ────────────────────────────────────────────────────────
 
@@ -281,31 +277,13 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Hoá đơn (INVOICE) — ảnh + mô tả việc đã sửa */}
-        {(request.invoiceImages?.length ?? 0) > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🧾 Hoá đơn sửa chữa</Text>
-            {!!request.repairDescription && (
-              <Text style={[styles.descText, { marginBottom: Spacing.sm }]}>{request.repairDescription}</Text>
-            )}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
-              {request.invoiceImages!.map((uri, i) => (
-                <Image key={i} source={{ uri }} style={styles.attachmentImage} />
-              ))}
-            </ScrollView>
-            {request.invoiceAmount != null && billingMeta && (
-              <View style={[styles.tenantPayNote, { backgroundColor: billingMeta.bg, borderColor: billingMeta.color + '40' }]}>
-                <Text style={[styles.tenantPayNoteTitle, { color: billingMeta.color }]}>{billingMeta.label}</Text>
-                <Text style={[styles.tenantPayNoteAmount, { color: billingMeta.color }]}>
-                  {request.invoiceAmount.toLocaleString('vi-VN')} đ
-                </Text>
-                <Text style={[styles.tenantPayNoteText, { color: billingMeta.color }]}>{billingMeta.detail}</Text>
-              </View>
-            )}
-          </View>
-        )}
+        {/* Hoá đơn/chi phí sửa chữa CHỦ ĐỘNG ẨN với tenant (yêu cầu 02/09/2026) — đây là
+            giấy tờ nội bộ giữa manager/host/admin (ảnh hoá đơn, mô tả sửa, số tiền chi
+            trả), tenant không cần biết. Khoản tenant THỰC SỰ phải trả (billingHint =
+            tenant_charge_pending/deposit_deduction_pending) đã có kênh riêng ở tab Hoá
+            đơn/khi trừ cọc — không mất thông tin gì tenant cần hành động. */}
 
-        <MaintenancePhotoHistory photos={request.photoHistory} />
+        <MaintenancePhotoHistory photos={request.photoHistory?.filter(p => p.type !== 'INVOICE')} />
 
         {/* Tự sửa — chưa nộp ảnh: form nộp ảnh + ghi chú */}
         {request.status === 'pending_tenant_repair' && !hasSelfRepairPhotos && (
@@ -474,13 +452,6 @@ const styles = StyleSheet.create({
   metaItem: { width: '47%' },
   metaLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 2 },
   metaValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  tenantPayNote: {
-    borderRadius: BorderRadius.md, borderWidth: 1,
-    padding: Spacing.md, marginTop: Spacing.sm,
-  },
-  tenantPayNoteTitle: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
-  tenantPayNoteAmount: { fontSize: 20, fontWeight: '800', marginBottom: 4 },
-  tenantPayNoteText: { fontSize: 12, lineHeight: 18 },
 
   imagesRow: { marginTop: Spacing.sm },
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },

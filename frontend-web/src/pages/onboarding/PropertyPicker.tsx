@@ -27,6 +27,11 @@ interface Props {
   properties: PropertyResponse[];
   /** Bỏ trống khi màn không quan tâm sức chứa (vd in tem QR) — lúc đó không vẽ chip. */
   occupancy?: Map<number, PropertyOccupancy>;
+  /**
+   * Badge cảnh báo tuỳ màn (vd "3 hỏng" ở trang Danh mục thiết bị) — bỏ trống thì
+   * không vẽ gì thêm, không ảnh hưởng các màn khác đang dùng chung component này.
+   */
+  badges?: Map<number, { count: number; label: string }>;
   /** id nhà đang chọn, dạng chuỗi để khớp state của form. */
   value: string;
   onChange: (propertyId: string) => void;
@@ -35,12 +40,13 @@ interface Props {
 interface Row {
   p: PropertyResponse;
   chip: string;
+  badge?: { count: number; label: string };
   /** Nhà chưa mở phòng nào — hiện được nhưng KHÔNG chọn được, kèm lý do. */
   blocked: boolean;
   haystack: string;
 }
 
-export const PropertyPicker = ({ properties, occupancy, value, onChange }: Props) => {
+export const PropertyPicker = ({ properties, occupancy, badges, value, onChange }: Props) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   /** Dòng đang được đánh dấu bằng bàn phím (↑ ↓ + Enter). */
@@ -53,11 +59,12 @@ export const PropertyPicker = ({ properties, occupancy, value, onChange }: Props
     return {
       p,
       chip: occupancyChip(occ),
+      badge: badges?.get(p.id),
       blocked: !!occ?.loaded && capacityTone(occ) === 'setup',
       haystack: normalizeVi([p.propertyName, p.shortAddress, p.fullAddress, p.zoneName]
         .filter(Boolean).join(' ')),
     };
-  }), [properties, occupancy]);
+  }), [properties, occupancy, badges]);
 
   const filtered = useMemo(() => {
     const kw = normalizeVi(q.trim());
@@ -131,6 +138,7 @@ export const PropertyPicker = ({ properties, occupancy, value, onChange }: Props
             <span className="block truncate text-xs text-slate-500">
               {selected.p.shortAddress || selected.p.fullAddress}
               {selected.chip && <> · {selected.chip}</>}
+              {selected.badge && <span className="ml-1 font-semibold text-rose-600">· {selected.badge.label}</span>}
             </span>
           </span>
         ) : (
@@ -204,6 +212,11 @@ export const PropertyPicker = ({ properties, occupancy, value, onChange }: Props
                         {r.p.wholeHouse ? 'Nguyên căn' : 'Chia phòng'}
                       </span>
                       {r.chip && <span className="font-semibold text-slate-500">{r.chip}</span>}
+                      {r.badge && (
+                        <span className="rounded-full bg-rose-50 px-1.5 py-0.5 font-bold text-rose-600">
+                          {r.badge.label}
+                        </span>
+                      )}
                       {r.blocked && (
                         <span className="font-semibold text-amber-600">— chưa mở phòng, chưa xếp khách được</span>
                       )}

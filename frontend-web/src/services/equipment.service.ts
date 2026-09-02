@@ -23,6 +23,16 @@ export const equipmentService = {
     return api.get(`/api/v1/properties/${propertyId}/equipments`);
   },
 
+  /**
+   * GET /api/v1/equipments/by-qr/{qrCode} — tra cứu thiết bị theo mã QR, KHÔNG cần
+   * biết trước thuộc nhà nào (`EquipmentQrController`, role ADMIN/MANAGER/TENANT).
+   * Trả về `propertyId` + `roomId` để nhảy thẳng tới đúng nhà — dùng cho ô "tìm xuyên
+   * hệ thống" ở trang Danh mục thiết bị khi tìm trong nhà đang chọn ra 0 kết quả.
+   */
+  getByQrCode: (qrCode: string): Promise<MaintenanceEquipmentResponse> => {
+    return api.get(`/api/v1/equipments/by-qr/${encodeURIComponent(qrCode)}`);
+  },
+
   // ===========================================================================
   // Lifecycle + Maintenance history
   //

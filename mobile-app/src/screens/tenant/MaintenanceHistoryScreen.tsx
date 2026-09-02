@@ -1,6 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -30,6 +30,8 @@ export const MaintenanceHistoryScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | MaintenanceStatus>('all');
 
   const load = useCallback(async () => {
     try {
@@ -45,9 +47,43 @@ export const MaintenanceHistoryScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const historyItems = allRequests.filter(r =>
-    HISTORY_STATUSES.includes(r.status as MaintenanceStatus)
+  // Mới nhất trước — trước đây giữ nguyên thứ tự API trả về (không đảm bảo theo thời
+  // gian), "lịch sử" mà không sắp theo mốc gần đây nhất thì rất khó dò.
+  const resolvedTimestamp = (r: MaintenanceRequest) => {
+    const entry = r.timeline.find(t => t.status === 'closed' || t.status === 'cancelled');
+    return r.resolvedAt ?? entry?.updatedAt ?? r.updatedAt ?? r.createdAt ?? '';
+  };
+  const allHistory = useMemo(() =>
+    allRequests
+      .filter(r => HISTORY_STATUSES.includes(r.status as MaintenanceStatus))
+      .sort((a, b) => resolvedTimestamp(b).localeCompare(resolvedTimestamp(a))),
+    [allRequests],
   );
+
+  // Số theo trạng thái trên TOÀN BỘ lịch sử — dùng cho chip lọc, không đổi theo search.
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    allHistory.forEach(r => { c[r.status] = (c[r.status] ?? 0) + 1; });
+    return c;
+  }, [allHistory]);
+
+  const historyItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return allHistory.filter(r => {
+      const matchStatus = statusFilter === 'all' || r.status === statusFilter;
+      const matchQuery = !q
+        || r.title.toLowerCase().includes(q)
+        || r.ticketCode.toLowerCase().includes(q)
+        || (r.roomName ?? '').toLowerCase().includes(q)
+        || (r.propertyName ?? '').toLowerCase().includes(q)
+        || getMaintenanceCategoryLabel(r.category).toLowerCase().includes(q)
+        || (r.assignedTo ?? '').toLowerCase().includes(q);
+      return matchStatus && matchQuery;
+    });
+  }, [allHistory, search, statusFilter]);
+
+  const hasActiveFilter = search.trim() !== '' || statusFilter !== 'all';
+  const clearFilters = () => { setSearch(''); setStatusFilter('all'); };
 
   const renderItem = ({ item }: { item: MaintenanceRequest }) => {
     const cfg = STATUS_CONFIG[item.status] ?? STATUS_CONFIG.cancelled;
@@ -89,14 +125,6 @@ export const MaintenanceHistoryScreen: React.FC = () => {
           <Text style={styles.assignedText}>👷 {item.assignedTo}</Text>
         )}
 
-        {item.invoiceAmount != null && item.invoiceAmount > 0 && (
-          <View style={styles.costBanner}>
-            <Text style={styles.costText}>
-              Chi phí sửa chữa: {item.invoiceAmount.toLocaleString('vi-VN')} đ
-            </Text>
-          </View>
-        )}
-
         {resolvedEntry?.note && (
           <Text style={styles.noteText}>"{resolvedEntry.note}"</Text>
         )}
@@ -115,8 +143,37 @@ export const MaintenanceHistoryScreen: React.FC = () => {
         </TouchableOpacity>
         <View>
           <Text style={styles.title}>Lịch sử bảo trì</Text>
-          <Text style={styles.subtitle}>{historyItems.length} yêu cầu đã xử lý</Text>
+          <Text style={styles.subtitle}>{historyItems.length}/{allHistory.length} yêu cầu đã xử lý</Text>
         </View>
+      </View>
+
+      <View style={styles.filterBar}>
+        <TextInput
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Tìm mã, tiêu đề, phòng, quản lý..."
+          placeholderTextColor={Colors.textMuted}
+        />
+        {(statusCounts.closed ?? 0) > 0 && (statusCounts.cancelled ?? 0) > 0 && (
+          <View style={styles.chipsRow}>
+            {([
+              ['all', `Tất cả ${allHistory.length}`],
+              ['closed', `✅ Hoàn tất ${statusCounts.closed ?? 0}`],
+              ['cancelled', `✕ Đã hủy ${statusCounts.cancelled ?? 0}`],
+            ] as const).map(([k, label]) => (
+              <TouchableOpacity
+                key={k}
+                style={[styles.filterChip, statusFilter === k && styles.filterChipActive]}
+                onPress={() => setStatusFilter(k)}
+              >
+                <Text style={[styles.filterChipText, statusFilter === k && styles.filterChipTextActive]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
       <FlatList
@@ -138,6 +195,14 @@ export const MaintenanceHistoryScreen: React.FC = () => {
               <Text style={styles.emptyTitle}>Không tải được lịch sử</Text>
               <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); load(); }}>
                 <Text style={styles.retryBtnText}>Thử lại</Text>
+              </TouchableOpacity>
+            </View>
+          ) : hasActiveFilter ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyEmoji}>🔍</Text>
+              <Text style={styles.emptyTitle}>Không tìm thấy yêu cầu phù hợp</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={clearFilters}>
+                <Text style={styles.retryBtnText}>Bỏ lọc</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -168,6 +233,21 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
 
+  filterBar: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.md },
+  searchInput: {
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: 10,
+    fontSize: 14, color: Colors.textPrimary,
+  },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: Spacing.sm },
+  filterChip: {
+    paddingHorizontal: Spacing.sm, paddingVertical: 6, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  filterChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterChipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  filterChipTextActive: { color: Colors.white },
+
   list: { paddingHorizontal: Spacing.lg, paddingBottom: 40 },
 
   card: {
@@ -187,12 +267,6 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', gap: Spacing.lg, marginBottom: Spacing.xs },
   metaText: { fontSize: 12, color: Colors.textSecondary },
   assignedText: { fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.sm },
-
-  costBanner: {
-    backgroundColor: Colors.successLight, borderRadius: BorderRadius.md,
-    padding: Spacing.sm, marginTop: Spacing.sm,
-  },
-  costText: { fontSize: 13, fontWeight: '700', color: Colors.success },
 
   noteText: {
     fontSize: 13, color: Colors.textMuted, fontStyle: 'italic',

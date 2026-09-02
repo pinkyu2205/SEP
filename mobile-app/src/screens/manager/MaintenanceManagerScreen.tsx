@@ -6,7 +6,10 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import type { MaintenanceTicket } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS } from '@/constants/maintenance';
+import {
+  MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS,
+  type MaintenanceStatusKey,
+} from '@/constants/maintenance';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { readApiError } from '@/utils/apiError';
 
@@ -31,6 +34,10 @@ const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, 
 
 const TERMINAL = ['closed', 'cancelled'];
 const WORKING = ['in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+// Trạng thái có thể xuất hiện trong "Hàng đợi xử lý" (mọi thứ trừ closed/cancelled),
+// theo đúng thứ tự luồng — dùng để dựng chip lọc theo trạng thái.
+const QUEUE_STATUSES: MaintenanceStatusKey[] = ['open', ...WORKING] as MaintenanceStatusKey[];
+const QUEUE_PAGE_SIZE = 8;
 // Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
 // Ticket chưa duyệt (priority null) tính theo ngưỡng mặc định 7 ngày.
 const isOverdue = (t: { status: string; priority?: string; createdAt: string }) =>
@@ -48,6 +55,8 @@ export const MaintenanceManagerScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | MaintenanceStatusKey>('all');
+  const [queueExpanded, setQueueExpanded] = useState(false);
   // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
   // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
   /**
@@ -104,11 +113,23 @@ export const MaintenanceManagerScreen: React.FC = () => {
     };
   }, [tickets]);
 
-  // Hàng đợi xử lý: ticket đang mở, sắp theo ưu tiên rồi theo thời gian.
+  // Ticket đang mở (chưa closed/cancelled) — nền cho cả chip lọc lẫn hàng đợi.
+  const openTickets = useMemo(() => tickets.filter(t => !TERMINAL.includes(t.status)), [tickets]);
+
+  // Số lượng theo từng trạng thái trong tập đang mở — hiện trên chip lọc, tính TRƯỚC
+  // khi áp search để chip vẫn phản ánh đúng toàn bộ hàng đợi chứ không phải phần đã lọc.
+  const queueStatusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    openTickets.forEach(t => { c[t.status] = (c[t.status] ?? 0) + 1; });
+    return c;
+  }, [openTickets]);
+
+  // Hàng đợi xử lý: ticket đang mở, lọc theo trạng thái + tìm kiếm, sắp theo ưu tiên
+  // rồi theo thời gian.
   const openQueue = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return tickets
-      .filter(t => !TERMINAL.includes(t.status))
+    return openTickets
+      .filter(t => statusFilter === 'all' || t.status === statusFilter)
       .filter(t => !q
         || t.title.toLowerCase().includes(q)
         || t.ticketCode.toLowerCase().includes(q)
@@ -120,7 +141,11 @@ export const MaintenanceManagerScreen: React.FC = () => {
           - (b.priority ? PRIORITY_ORDER[b.priority] ?? 9 : 9);
         return p !== 0 ? p : b.updatedAt.localeCompare(a.updatedAt);
       });
-  }, [tickets, search]);
+  }, [openTickets, search, statusFilter]);
+
+  // Đổi bộ lọc/tìm kiếm thì thu gọn lại danh sách — tránh cuộn dài dằng dặc mỗi lần
+  // gõ tìm kiếm mới sau khi đã "Xem thêm" ở lượt lọc trước.
+  React.useEffect(() => { setQueueExpanded(false); }, [search, statusFilter]);
 
   // Recent activity: last 4 tickets sorted by updatedAt desc
   const recentActivity = useMemo(() =>
@@ -251,6 +276,36 @@ export const MaintenanceManagerScreen: React.FC = () => {
             placeholder="Tìm mã ticket, tiêu đề, nhà, phòng, khách..."
             placeholderTextColor={Colors.textMuted}
           />
+
+          {/* Chip lọc theo trạng thái — tính trên TOÀN BỘ hàng đợi (openTickets), không
+              phải phần đã lọc bởi tìm kiếm, để số trên chip luôn ổn định khi gõ tìm. */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            style={s.chipScroll} contentContainerStyle={s.chipContent}>
+            <TouchableOpacity
+              style={[s.filterChip, statusFilter === 'all' && s.filterChipActive]}
+              onPress={() => setStatusFilter('all')}
+            >
+              <Text style={[s.filterChipText, statusFilter === 'all' && s.filterChipTextActive]}>
+                Tất cả {openTickets.length}
+              </Text>
+            </TouchableOpacity>
+            {QUEUE_STATUSES.filter(st => (queueStatusCounts[st] ?? 0) > 0).map(st => {
+              const cfg = STATUS_CONFIG[st];
+              const active = statusFilter === st;
+              return (
+                <TouchableOpacity
+                  key={st}
+                  style={[s.filterChip, active && { backgroundColor: cfg.color, borderColor: cfg.color }]}
+                  onPress={() => setStatusFilter(st)}
+                >
+                  <Text style={[s.filterChipText, active && s.filterChipTextActive]}>
+                    {cfg.icon} {cfg.label} {queueStatusCounts[st]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
           <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
             {loadError ? (
               <View style={s.queueEmpty}>
@@ -259,16 +314,16 @@ export const MaintenanceManagerScreen: React.FC = () => {
             ) : openQueue.length === 0 ? (
               <View style={s.queueEmpty}>
                 <Text style={s.queueEmptyText}>
-                  {search.trim() ? 'Không tìm thấy ticket phù hợp.' : '🎉 Không có ticket nào đang mở.'}
+                  {search.trim() || statusFilter !== 'all' ? 'Không tìm thấy ticket phù hợp.' : '🎉 Không có ticket nào đang mở.'}
                 </Text>
               </View>
-            ) : openQueue.slice(0, 8).map((t, i) => {
+            ) : (queueExpanded ? openQueue : openQueue.slice(0, QUEUE_PAGE_SIZE)).map((t, i, arr) => {
               const cfg    = STATUS_CONFIG[t.status];
               // priority null khi chưa duyệt → badge "Chờ phân loại" trung tính.
               const priCfg = t.priority
                 ? PRIORITY_CONFIG[t.priority]
                 : { label: 'Chưa phân loại', color: Colors.textMuted, bg: Colors.divider };
-              const isLast = i === Math.min(openQueue.length, 8) - 1;
+              const isLast = i === arr.length - 1;
               const overdue = isOverdue(t);
               return (
                 <TouchableOpacity
@@ -294,6 +349,14 @@ export const MaintenanceManagerScreen: React.FC = () => {
               );
             })}
           </View>
+
+          {openQueue.length > QUEUE_PAGE_SIZE && (
+            <TouchableOpacity style={s.expandBtn} onPress={() => setQueueExpanded(v => !v)}>
+              <Text style={s.expandBtnText}>
+                {queueExpanded ? 'Thu gọn' : `Xem thêm ${openQueue.length - QUEUE_PAGE_SIZE} ticket`}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ── Recent Activity ──────────────────────────────────────── */}
@@ -488,6 +551,19 @@ const s = StyleSheet.create({
   },
   queueEmpty:     { padding: Spacing.lg, alignItems: 'center' },
   queueEmptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+
+  chipScroll:  { flexGrow: 0, marginTop: Spacing.sm },
+  chipContent: { gap: 6, paddingVertical: 2 },
+  filterChip: {
+    paddingHorizontal: Spacing.sm, paddingVertical: 6, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  },
+  filterChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  filterChipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  filterChipTextActive: { color: Colors.white },
+
+  expandBtn:     { alignItems: 'center', paddingVertical: Spacing.sm, marginTop: 2 },
+  expandBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
   activityCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
