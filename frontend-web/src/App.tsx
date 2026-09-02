@@ -29,7 +29,6 @@ import { WaterBillPublishing } from '@/pages/admin/WaterBillPublishing';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { MaintenanceFaultReview } from '@/pages/admin/MaintenanceFaultReview';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
-import { SystemConfiguration } from '@/pages/admin/SystemConfiguration';
 import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
 import { ZoneManagement } from '@/pages/admin/zones/ZoneManagement';
@@ -133,7 +132,6 @@ function App() {
             <Route path="/admin/maintenance/fault-review" element={<MaintenanceFaultReview />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />
             <Route path="/admin/notifications" element={<AdminNotificationCenter />} />
-            <Route path="/admin/settings" element={<SystemConfiguration />} />
           </Route>
         </Route>
 

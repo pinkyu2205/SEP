@@ -3,38 +3,50 @@ import { RealtimeBadge } from '@/components/common';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
-  TextInput,
+  TextInput, Modal, Pressable,
 } from 'react-native';
 import { showAlert, activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_AMOUNT_HIDDEN_NOTE,
+  canTerminateForUnpaidRent, monthLabel as monthLabelOf, shiftMonthKey, toMonthKey,
+  RENT_TERMINATION_AFTER_DAYS,
 } from '@/constants';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerPayment,
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { serverNow } from '@/utils/serverTime';
+import { checkoutService } from '@/services/manager/checkoutService';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 /**
- * HOÁ ĐƠN TIỀN NHÀ — màn theo dõi kỳ thu HIỆN TẠI.
+ * HOÁ ĐƠN TIỀN NHÀ — một màn duy nhất cho cả kỳ thu.
  *
- * Phạm vi màn này CHỈ là tiền nhà/phòng: hoá đơn hệ thống tự phát hành hằng kỳ và
- * việc thu chúng. Tiền cọc, phí bảo trì, điện nước… đều đã tách sang màn
- * "Thu & Đối soát" (ManagerPaymentHistory, vào từ Thao tác nhanh ở Trang chủ) —
- * trước đây trộn chung nên không quản lý được việc nào ra việc nào.
+ * ─── Vì sao dựng lại (30/08/2026) ────────────────────────────────────────────
+ * Bản trước tách làm HAI màn: màn này cho con số tổng, rồi phải nhảy sang "Tiền phòng
+ * tự động" chọn nhà mới thấy được TỪNG KHÁCH. Nhưng câu hỏi duy nhất manager mở màn
+ * này để hỏi lại là "kỳ này còn AI chưa trả" — tức luôn luôn phải nhảy màn. Hai nửa
+ * của cùng một việc mà đặt ở hai nơi thì thao tác nào cũng dở dang.
+ *
+ * Nay gộp một màn: bấm tên nhà là bung ra từng khách ngay tại chỗ, bấm một khách là
+ * mở sheet hành động. Không rời màn, không mất ngữ cảnh danh sách.
+ *
+ * Ba thứ khác đã sửa cùng lúc:
+ *   • Bản cũ khi kỳ chưa có hoá đơn hiện BA khối rỗng nói cùng một chuyện. Nay đúng MỘT.
+ *   • "0/0 · 0% hoàn thành" tô ĐỎ khi chưa phát hành hoá đơn nào — đỏ nghĩa là đang tệ,
+ *     trong khi thực tế chỉ là chưa tới ngày 1. Nay chưa có hoá đơn thì không vẽ tiến độ.
+ *   • Ô tìm kiếm nằm trên cùng kể cả khi không có gì để tìm. Nay chỉ hiện khi có dữ liệu.
+ *
+ * Thêm được ô CHỌN KỲ mà không cần API mới: `listInvoices({type:'RENT'})` vốn trả về
+ * mọi tháng, trước đây bị lọc bỏ hết trừ tháng hiện tại. Giờ cho chọn tháng để tra lại
+ * kỳ cũ ngay tại đây.
  *
  * ⚠️ Màn này KHÔNG hiện số tiền (chốt 07/08/2026 — xem @/constants/managerVisibility).
- * Manager chỉ cần biết khách đã thanh toán hoá đơn tiền phòng của kỳ hay chưa, nên
- * mọi thống kê ở đây đếm theo SỐ HOÁ ĐƠN chứ không cộng tiền.
+ * Mọi thống kê đếm theo SỐ HOÁ ĐƠN. Đừng thêm cột tiền vào đây.
  *
- * Thứ tự trên màn đi theo việc manager cần làm, không theo thứ tự dữ liệu:
- *   1. Kỳ này thu tới đâu (bao nhiêu hoá đơn đã thanh toán / tổng).
- *   2. Việc cần xử lý: giao dịch chờ xác nhận, hoá đơn quá hạn.
- *   3. Từng nhà: nhà nào chưa thu xong, bấm vào xem chi tiết.
- *   4. Giao dịch gần đây.
- * Lịch sử mọi kỳ đã qua nằm ở màn riêng (BillingHistory) — vào từ mục "Theo nhà".
+ * Phạm vi: CHỈ tiền nhà/phòng. Tiền cọc, điện nước, phí bảo trì nằm ở màn
+ * "Tiền khách đã trả" (ManagerPaymentHistory).
  */
 
 const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
@@ -66,36 +78,46 @@ const fmtWhen = (iso: string) => {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hhmm}`;
 };
 
-const TX_PREVIEW = 5;
-/**
- * Số dòng hiện sẵn mỗi danh sách. Manager có thể phụ trách 50–100 nhà, mỗi kỳ vài
- * trăm hoá đơn — đổ hết ra một trang thì vừa không cuộn nổi vừa dựng chậm. Cắt ngắn
- * mặc định, ai cần xem đủ thì bấm "Xem thêm".
- */
-const LIST_PREVIEW = 5;
+const fmtDay = (iso?: string | null) =>
+  iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—';
 
-/** Nút bung/thu gọn cuối mỗi danh sách bị cắt. */
-const MoreRow = ({ hidden, expanded, onPress, unit }: {
-  hidden: number; expanded: boolean; onPress: () => void; unit: string;
-}) => (
-  <TouchableOpacity style={s.moreRow} onPress={onPress} activeOpacity={0.7}>
-    <Text style={s.moreRowText}>
-      {expanded ? '⌃  Thu gọn' : `⌄  Xem thêm ${hidden} ${unit}`}
-    </Text>
-  </TouchableOpacity>
-);
+/** Số ngày trễ so với hạn nộp; ≤0 = còn hạn. */
+const lateDays = (dueDate?: string | null) => {
+  if (!dueDate) return 0;
+  const d = new Date(`${dueDate.slice(0, 10)}T00:00:00`);
+  if (isNaN(d.getTime())) return 0;
+  const today = serverNow(); today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - d.getTime()) / 86_400_000);
+};
 
 type StatusKey = 'all' | 'PAID' | 'PENDING' | 'OVERDUE';
+
+/** Trạng thái một hoá đơn, quy về đúng thứ manager cần thấy trên một dòng. */
+const rowState = (inv: ManagerInvoice) => {
+  if (inv.status === 'PAID') {
+    return { icon: '✓', label: 'Đã thu', color: Colors.success, bg: Colors.successLight };
+  }
+  const late = lateDays(inv.dueDate);
+  if (inv.status === 'OVERDUE' || late > 0) {
+    return { icon: '🔴', label: `Trễ ${late} ngày`, color: Colors.error, bg: Colors.errorLight };
+  }
+  return {
+    icon: '⏰',
+    label: late === 0 ? 'Hạn hôm nay' : `Còn ${-late} ngày`,
+    color: Colors.warning,
+    bg: Colors.warningLight,
+  };
+};
 
 /**
  * Thanh tiến độ 3 đoạn: đã thu · chưa thu · quá hạn.
  *
- * Thay cho thanh 1 màu cũ (chỉ vẽ tỉ lệ đã thu) — nhìn một cái là biết phần còn
- * lại đang kẹt ở "chưa tới hạn" hay đã "quá hạn", không phải đọc con số bên dưới.
+ * Thay cho thanh 1 màu cũ (chỉ vẽ tỉ lệ đã thu) — nhìn một cái là biết phần còn lại
+ * đang kẹt ở "chưa tới hạn" hay đã "quá hạn", không phải đọc con số bên dưới.
  */
 const SegBar = ({ paid, pending, overdue }: { paid: number; pending: number; overdue: number }) => {
   const total = paid + pending + overdue;
-  if (total === 0) return <View style={s.segBg} />;
+  if (total === 0) return null;
   const pct = (n: number) => `${(n / total) * 100}%` as any;
   return (
     <View style={s.segBg}>
@@ -106,37 +128,50 @@ const SegBar = ({ paid, pending, overdue }: { paid: number; pending: number; ove
   );
 };
 
+/** Chip lọc kiêm ô số — thay 3 ô số rời của bản cũ (chiếm 1/4 màn mà không bấm được). */
+const Chip = ({ label, count, active, tone, onPress }: {
+  label: string; count: number; active: boolean; tone: string; onPress: () => void;
+}) => (
+  <TouchableOpacity
+    style={[s.chip, active && { backgroundColor: tone, borderColor: tone }]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <Text style={[s.chipText, active && { color: Colors.white }]}>{label}</Text>
+    <View style={[s.chipCount, active && { backgroundColor: 'rgba(255,255,255,0.28)' }]}>
+      <Text style={[s.chipCountText, active && { color: Colors.white }]}>{count}</Text>
+    </View>
+  </TouchableOpacity>
+);
+
 export const BillingManagementScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showVerifications, setShowVerifications] = useState(true);
   const [search, setSearch] = useState('');
-  /** Bấm vào ô số ở thẻ tổng quan để thu hẹp danh sách "Theo nhà" bên dưới. */
   const [statusFilter, setStatusFilter] = useState<StatusKey>('all');
-  const [expandOverdue, setExpandOverdue] = useState(false);
-  const [expandPending, setExpandPending] = useState(false);
-  const [expandBuildings, setExpandBuildings] = useState(false);
+  /** Kỳ đang xem — bản cũ chốt cứng tháng hiện tại, không tra lại kỳ cũ được. */
+  const [month, setMonth] = useState(() => toMonthKey());
+  /** Nhà nào đang bung. Mặc định đóng hết cho danh sách ngắn, trừ khi chỉ có 1 nhà. */
+  const [openHouses, setOpenHouses] = useState<Set<number>>(new Set());
+  /** Dòng đang mở sheet chi tiết. */
+  const [sheetRow, setSheetRow] = useState<ManagerInvoice | null>(null);
+  const [terminating, setTerminating] = useState(false);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
 
   const [activeContracts, setActiveContracts] = useState<TenantContractResponse[]>([]);
-  /** Phòng còn khách thuê — dùng lọc việc "Cần xử lý". */
   const rentingKeys = useMemo(() => activeRentingKeys(activeContracts), [activeContracts]);
 
   const load = useCallback(() => {
     Promise.all([
-      // Màn này CHỈ về tiền nhà (RENT). Điện/nước có thống kê riêng ở màn Ghi chỉ số
-      // & Hóa đơn; tiền cọc và mọi khoản thu khác nằm ở màn Thu & Đối soát.
       realManagerInvoiceService.listInvoices({ type: 'RENT' }).catch(() => [] as ManagerInvoice[]),
       realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
     ])
       .then(async ([inv, pay]) => {
         setInvoices(inv);
         setPayments(pay);
-        // Cần HĐ đang hiệu lực để loại hoá đơn của khách ĐÃ chấm dứt khỏi "Cần xử lý".
-        // Lấy propertyId từ chính hoá đơn — chúng đã được BE giới hạn theo quyền manager,
-        // nên không cần gọi thêm API danh sách nhà. Xem listActiveByProperties.
         const ids = [...new Set(inv.map(i => Number(i.propertyId)).filter(Number.isFinite))];
         const cts = await realTenantService.listActiveByProperties(ids)
           .catch(() => [] as TenantContractResponse[]);
@@ -146,8 +181,6 @@ export const BillingManagementScreen: React.FC = () => {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Danh sách hoá đơn của quản lý — khách trả xong là đổi trạng thái ngay, không phải
-  // thoát ra vào lại màn. `onRefresh` để hook dùng được cả lớp poll dự phòng khi WS chết.
   const { connected: liveOn } = useBillingRealtime({
     filter: (e) => e.event === 'INVOICE_PAID',
     onRefresh: load,
@@ -158,8 +191,8 @@ export const BillingManagementScreen: React.FC = () => {
     else navigation.navigate('ManagerHome');
   };
 
-  // Tìm theo khách / phòng / nhà / mã hoá đơn — áp cho cả hoá đơn lẫn giao dịch để
-  // gõ 1 lần là cả màn cùng thu hẹp, không phải nhớ ô nào lọc phần nào.
+  // Một ô tìm cho cả nhà, phòng, khách và mã hoá đơn — manager không phải nhớ ô nào
+  // lọc phần nào.
   const kw = norm(search.trim());
   const matchInvoice = useCallback((i: ManagerInvoice) =>
     !kw || [i.tenantName, i.roomNumber, i.propertyName, i.code].some(v => norm(v || '').includes(kw)),
@@ -168,83 +201,85 @@ export const BillingManagementScreen: React.FC = () => {
     !kw || [p.tenantName, p.roomNumber, p.propertyName, p.invoiceCode].some(v => norm(v || '').includes(kw)),
     [kw]);
 
-  /**
-   * CHỈ hoá đơn của KỲ ĐANG HIỂN THỊ.
-   *
-   * `listInvoices({ type: 'RENT' })` không nhận tham số kỳ nên BE trả về hoá đơn của
-   * MỌI tháng. Trước đây màn này đếm hết → tiêu đề ghi "Kỳ thu Tháng 08/2026" nhưng
-   * con số lại gộp cả các kỳ trước, và không khớp với màn "Tiền phòng tự động"
-   * (màn đó luôn tính theo đúng một kỳ).
-   */
-  const period = useMemo(() => {
-    const d = serverNow();
-    return { month: d.getMonth() + 1, year: d.getFullYear() };
-  }, []);
+  const [pyear, pmonth] = month.split('-').map(Number);
+  /** Hoá đơn của ĐÚNG kỳ đang chọn. BE trả mọi tháng nên phải tự lọc. */
+  const periodInvoices = useMemo(
+    () => invoices.filter(i => i.month === pmonth && i.year === pyear),
+    [invoices, pmonth, pyear],
+  );
   const shownInvoices = useMemo(
-    () => invoices.filter(i => i.month === period.month && i.year === period.year && matchInvoice(i)),
-    [invoices, period, matchInvoice],
+    () => periodInvoices.filter(matchInvoice),
+    [periodInvoices, matchInvoice],
   );
 
-  /**
-   * Đếm theo SỐ HOÁ ĐƠN, không cộng tiền — manager không được thấy số tiền thuê
-   * (xem @/constants/managerVisibility). Tỉ lệ hoàn thành cũng tính theo số hoá đơn.
-   */
   const stats = useMemo(() => {
-    const paid    = shownInvoices.filter(i => i.status === 'PAID');
-    const pending = shownInvoices.filter(i => i.status === 'PENDING');
-    const overdue = shownInvoices.filter(i => i.status === 'OVERDUE');
+    const paid    = shownInvoices.filter(i => i.status === 'PAID').length;
+    const pending = shownInvoices.filter(i => i.status === 'PENDING').length;
+    const overdue = shownInvoices.filter(i => i.status === 'OVERDUE').length;
     const total = shownInvoices.length;
-    return {
-      paidCount: paid.length,
-      pendingCount: pending.length,
-      overdueCount: overdue.length,
-      total,
-      rate: total > 0 ? Math.round((paid.length / total) * 100) : 0,
-    };
+    return { paid, pending, overdue, total, rate: total > 0 ? Math.round((paid / total) * 100) : 0 };
   }, [shownInvoices]);
 
   const pendingVerifications = useMemo(
     () => payments.filter(p => p.status === 'PENDING_VERIFY' && matchPayment(p)),
     [payments, matchPayment],
   );
-  /**
-   * Giao dịch của hoá đơn TIỀN NHÀ.
-   *
-   * ManagerPaymentResponse của BE không có field loại hoá đơn, chỉ có `invoiceCode`.
-   * Thay vì đoán loại từ hình dạng mã (HD-RENT-…, INV0001-202607-R, …) — dễ sai khi
-   * BE đổi quy tắc sinh mã — đối chiếu thẳng với tập mã của hoá đơn RENT đã tải ở
-   * trên. Chính xác tuyệt đối, và tự đúng khi BE thêm loại hoá đơn mới.
-   */
+
   const rentInvoiceCodes = useMemo(
     () => new Set(invoices.map(i => i.code).filter(Boolean)),
     [invoices],
   );
-  const isRentPayment = useCallback(
-    (p: ManagerPayment) => rentInvoiceCodes.has(p.invoiceCode),
-    [rentInvoiceCodes],
-  );
-
   const verifiedTx = useMemo(
-    () => payments.filter(p => p.status === 'VERIFIED' && isRentPayment(p) && matchPayment(p))
-      .sort((a, b) => (b.verifiedAt || b.createdAt).localeCompare(a.verifiedAt || a.createdAt)),
-    [payments, isRentPayment, matchPayment],
+    () => payments
+      .filter(p => p.status === 'VERIFIED' && rentInvoiceCodes.has(p.invoiceCode) && matchPayment(p))
+      .sort((a, b) => (b.verifiedAt || b.createdAt).localeCompare(a.verifiedAt || a.createdAt))
+      .slice(0, 5),
+    [payments, rentInvoiceCodes, matchPayment],
   );
 
-  const buildingGroups = useMemo(() => {
-    const map = new Map<number, { propertyId: number; propertyName: string; invoices: ManagerInvoice[] }>();
-    // Lọc theo trạng thái đang chọn ở thẻ tổng quan; nhà nào không còn hoá đơn nào
-    // khớp thì tự biến mất khỏi danh sách.
+  /**
+   * Khách quá hạn cần gọi — loại hoá đơn của người ĐÃ chấm dứt hợp đồng: họ rời đi rồi,
+   * manager không đòi được, để lại chỉ làm đầy danh sách bằng việc không làm được.
+   */
+  const needAction = useMemo(
+    () => shownInvoices
+      .filter(i => i.status === 'OVERDUE' && belongsToActiveTenant(i, rentingKeys))
+      .sort((a, b) => lateDays(b.dueDate) - lateDays(a.dueDate)),
+    [shownInvoices, rentingKeys],
+  );
+
+  /** Gom theo nhà; nhà còn nợ nhiều nhất lên đầu — đó là nhà phải đụng tới trước. */
+  const houses = useMemo(() => {
     const scoped = statusFilter === 'all'
       ? shownInvoices
       : shownInvoices.filter(i => i.status === statusFilter);
+    const map = new Map<number, { id: number; name: string; items: ManagerInvoice[] }>();
     scoped.forEach(i => {
-      if (!map.has(i.propertyId)) map.set(i.propertyId, { propertyId: i.propertyId, propertyName: i.propertyName, invoices: [] });
-      map.get(i.propertyId)!.invoices.push(i);
+      if (!map.has(i.propertyId)) map.set(i.propertyId, { id: i.propertyId, name: i.propertyName, items: [] });
+      map.get(i.propertyId)!.items.push(i);
     });
-    // Nhà nào còn nợ nhiều nhất lên đầu — đó là nhà cần đụng tới trước.
-    return Array.from(map.values()).sort((a, b) =>
-      b.invoices.filter(x => x.status === 'OVERDUE').length - a.invoices.filter(x => x.status === 'OVERDUE').length);
+    return [...map.values()]
+      .map(h => ({
+        ...h,
+        items: h.items.sort((a, b) => lateDays(b.dueDate) - lateDays(a.dueDate)),
+        paid: h.items.filter(x => x.status === 'PAID').length,
+        overdue: h.items.filter(x => x.status === 'OVERDUE').length,
+      }))
+      .sort((a, b) => b.overdue - a.overdue || a.name.localeCompare(b.name, 'vi'));
   }, [shownInvoices, statusFilter]);
+
+  /*
+    Gõ tìm kiếm thì bung sẵn mọi nhà còn khớp: người dùng gõ tên khách là muốn thấy
+    NGAY dòng khách đó, bắt bấm thêm một lần để bung nhà là thừa một thao tác.
+    Một nhà duy nhất cũng bung sẵn — không có gì để chọn thì đừng bắt chọn.
+  */
+  const autoOpen = kw.length > 0 || houses.length === 1;
+
+  const toggleHouse = (id: number) => setOpenHouses(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const handleVerify = (p: ManagerPayment, approved: boolean) => {
     const doIt = async () => {
@@ -253,10 +288,9 @@ export const BillingManagementScreen: React.FC = () => {
         else await realManagerInvoiceService.rejectPayment(p.id);
         load();
       } catch (e: any) {
-        showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch (BE chưa có endpoint?).');
+        showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch.');
       }
     };
-
     showAlert(
       approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?',
       approved
@@ -269,676 +303,655 @@ export const BillingManagementScreen: React.FC = () => {
     );
   };
 
-  const now = serverNow();
-  const monthLabel = `Tháng ${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
-  const inCollectWindow = now.getDate() >= RENT_CYCLE.issueDay && now.getDate() <= RENT_CYCLE.dueDay;
-  const rateColor = stats.rate >= 80 ? Colors.success : stats.rate >= 50 ? Colors.warning : Colors.error;
   /**
-   * Số ngày trễ so với hạn nộp; âm = còn hạn.
+   * Chấm dứt hợp đồng vì không đóng tiền phòng.
    *
-   * Trước 13/08/2026 chỗ này có nhánh "kỳ đầu": nhận diện bằng hoá đơn phát hành cùng
-   * ngày với hạn nộp rồi cộng thêm 3 ngày ân hạn. Bỏ hẳn — tiền kỳ đầu nay thu chung
-   * với tiền cọc ở mã QR lúc đón khách nên không còn hoá đơn kỳ đầu nào chờ thu, mà
-   * cách nhận diện đó lại quét trúng cả hoá đơn khác có ngày phát hành trùng hạn nộp.
+   * Chấm dứt xong PHẢI mở luôn thủ tục trả phòng: kiểm kê thiết bị, chốt số điện nước,
+   * tất toán cọc. Bỏ bước này là mất tiền thật (cọc không trừ được nợ, điện nước những
+   * ngày cuối không thu). Tạo hụt phiếu trả phòng thì vẫn báo phần chấm dứt đã xong và
+   * chỉ đường tạo tay — im lặng ở đây là để rơi mất khoản cọc.
    */
-  const daysLate = useCallback((inv: ManagerInvoice) => {
-    if (!inv.dueDate) return 0;
-    const d = new Date(`${inv.dueDate.slice(0, 10)}T00:00:00`);
-    if (isNaN(d.getTime())) return 0;
-    const today = serverNow(); today.setHours(0, 0, 0, 0);
-    return Math.round((today.getTime() - d.getTime()) / 86_400_000);
-  }, []);
+  const handleTerminate = (inv: ManagerInvoice) => {
+    const od = lateDays(inv.dueDate);
+    const contractId = inv.contractId;
+    if (contractId == null) {
+      showAlert('Thiếu dữ liệu', 'Hoá đơn này không gắn với hợp đồng nào nên không chấm dứt được từ đây.');
+      return;
+    }
+    showAlert(
+      'Đề nghị chấm dứt hợp đồng?',
+      `${inv.tenantName || 'Khách'}${inv.roomNumber ? ` · phòng ${inv.roomNumber}` : ''} đã quá hạn `
+      + `${od} ngày. Sau khi chấm dứt, hệ thống mở luôn yêu cầu trả phòng để kiểm kê và tất toán cọc.`,
+      [
+        { text: 'Để sau', style: 'cancel' },
+        {
+          text: 'Chấm dứt',
+          style: 'destructive',
+          onPress: async () => {
+            setTerminating(true);
+            try {
+              await realTenantService.terminateContract(contractId, {
+                type: 'VIOLATION',
+                reason: `Không thanh toán tiền phòng ${monthLabelOf(month).toLowerCase()} — quá hạn ${od} ngày, `
+                  + 'đã nhắc đủ các mốc theo chính sách.',
+              });
+              let checkoutId: number | null = null;
+              try {
+                const req = await checkoutService.createForTenant({
+                  contractId,
+                  expectedMoveOutDate: todayIso(),
+                  reason: `Chấm dứt hợp đồng do không thanh toán tiền phòng ${monthLabelOf(month).toLowerCase()} (quá hạn ${od} ngày).`,
+                });
+                checkoutId = req?.id ?? null;
+              } catch { /* xem chú thích trên */ }
+              setSheetRow(null);
+              load();
+              showAlert(
+                'Đã chấm dứt hợp đồng',
+                checkoutId
+                  ? 'Đã mở yêu cầu trả phòng cho khách này. Sang đó để kiểm kê thiết bị, chốt số điện nước và tất toán tiền cọc.'
+                  : 'Hợp đồng đã thanh lý, nhưng CHƯA mở được yêu cầu trả phòng. Bạn vào mục Trả phòng tạo thủ công để còn tất toán cọc.',
+                [
+                  { text: 'Để sau', style: 'cancel' },
+                  { text: checkoutId ? 'Xử lý trả phòng' : 'Mở mục Trả phòng', onPress: () => navigation.navigate('CheckoutRequests') },
+                ],
+              );
+            } catch (e: any) {
+              showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không chấm dứt được hợp đồng.');
+            } finally {
+              setTerminating(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const atCurrentMonth = month >= toMonthKey();
+  const hasAnyThisPeriod = periodInvoices.length > 0;
 
   /**
-   * Việc cần xử lý, xếp theo mức gấp: quá hạn lâu nhất → quá hạn ít → chưa thu.
-   * Hiện thẳng tên khách + phòng + số ngày trễ để manager biết gọi ai trước,
-   * thay vì chỉ đưa một con số rồi bắt tự đi tìm.
-   */
-  /**
-   * Khách ĐÃ chấm dứt hợp đồng thì hoá đơn còn nợ của họ KHÔNG nằm trong "Cần xử lý":
-   * họ đã rời đi, manager không đòi được nữa, để lại chỉ làm đầy danh sách bằng việc
-   * không làm được. Phần nợ đó thuộc luồng tất toán ở mục Trả phòng.
-   * BE vẫn giữ hoá đơn ở trạng thái OVERDUE nên phải tự lọc — xem @/utils.
-   */
-  const actionable = useMemo(
-    () => shownInvoices.filter(i => belongsToActiveTenant(i, rentingKeys)),
-    [shownInvoices, rentingKeys],
-  );
-  /**
-   * QUÁ HẠN LẤY THEO MỌI KỲ, không riêng kỳ đang xem.
+   * 12 kỳ gần nhất cho danh sách chọn, kèm số hoá đơn của từng kỳ.
    *
-   * Nợ không hết hạn khi sang tháng mới: hoá đơn tháng 8 chưa trả thì tháng 10 vẫn là
-   * việc phải đòi. Trước 18/08/2026 danh sách này dựng từ `actionable` (đã lọc theo kỳ
-   * hiện tại) nên Trang chủ báo "8 hoá đơn quá hạn" mà bấm vào đây lại hiện "Không còn
-   * việc tồn" — hai màn cùng một dữ liệu mà nói ngược nhau.
-   *
-   * Thẻ "Kỳ này đã thu tới đâu" phía trên VẪN theo đúng một kỳ — đó là tiến độ thu của
-   * kỳ, khác việc tồn đọng.
+   * Con số đó quan trọng hơn vẻ ngoài: nó cho biết kỳ nào có dữ liệu TRƯỚC KHI bấm.
+   * Không có nó thì manager bấm mò vào một tháng rỗng rồi lại phải bấm ra.
    */
-  const overdueList = useMemo(
-    () => invoices
-      .filter(i => i.status === 'OVERDUE' && matchInvoice(i) && belongsToActiveTenant(i, rentingKeys))
-      .sort((a, b) => daysLate(b) - daysLate(a)),
-    [invoices, matchInvoice, rentingKeys, daysLate],
-  );
-  const pendingList = useMemo(
-    () => actionable.filter(i => i.status === 'PENDING')
-      .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || '')),
-    [actionable],
-  );
-  const hasTodo = pendingVerifications.length > 0 || overdueList.length > 0 || pendingList.length > 0;
-  // Chỉ xem nhanh vài giao dịch mới nhất — đủ thì sang màn Lịch sử thanh toán.
-  const shownTx = verifiedTx.slice(0, TX_PREVIEW);
+  const monthOptions = useMemo(() => {
+    const cur = toMonthKey();
+    return Array.from({ length: 12 }, (_, i) => {
+      const key = shiftMonthKey(cur, -i);
+      const [y, m] = key.split('-').map(Number);
+      return { key, label: monthLabelOf(key), count: invoices.filter(x => x.month === m && x.year === y).length };
+    });
+  }, [invoices]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <View style={s.center}><ActivityIndicator size="large" color={Colors.primary} /></View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={s.safe} edges={['top']}>
+      {/* ── Header: quay lại · tiêu đề · chọn kỳ ── */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={handleBack} style={s.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={s.backIcon}>‹</Text>
+        </TouchableOpacity>
+        <View style={s.headerMid}>
+          <Text style={s.h1}>Hoá đơn tiền nhà</Text>
+          {/*
+            Mũi tên để nhảy kỳ liền kề, BẤM VÀO TÊN THÁNG để mở danh sách chọn.
+            Chỉ có mũi tên thì lùi 5 kỳ phải bấm 5 lần, mà vùng chạm của mũi tên cũng
+            nhỏ — hai lý do đều đủ để cần một danh sách chọn thẳng.
+          */}
+          <View style={s.monthRow}>
+            <TouchableOpacity onPress={() => setMonth(m => shiftMonthKey(m, -1))} style={s.monthBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={s.monthArrow}>‹</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setMonthPickerOpen(true)} style={s.monthPick} activeOpacity={0.7}>
+              <Text style={s.monthText}>{monthLabelOf(month)}</Text>
+              <Text style={s.monthCaret}>▾</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => !atCurrentMonth && setMonth(m => shiftMonthKey(m, 1))}
+              disabled={atCurrentMonth}
+              style={s.monthBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={[s.monthArrow, atCurrentMonth && s.monthArrowOff]}>›</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <RealtimeBadge connected={liveOn} />
+      </View>
+
       <ScrollView
-        contentContainerStyle={s.scroll}
-        showsVerticalScrollIndicator={false}
+        style={s.scroll}
+        contentContainerStyle={s.scrollBody}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.primary} />
         }
       >
-        {/* ── Header ── */}
-        <View style={s.header}>
-          <TouchableOpacity style={s.backBtn} onPress={handleBack}>
-            <Text style={s.backBtnText}>‹</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={s.title}>Hóa đơn tiền nhà</Text>
-            <Text style={s.subtitle}>Kỳ thu {monthLabel}</Text>
+        {/*
+          Ô tìm chỉ hiện khi kỳ này CÓ hoá đơn. Bản cũ để nó trên cùng kể cả lúc chưa
+          phát hành gì — một ô tìm kiếm không tìm được gì chỉ chiếm chỗ và gợi ý sai
+          rằng dữ liệu đang bị lọc mất.
+        */}
+        {hasAnyThisPeriod && (
+          <View style={s.searchWrap}>
+            <Text style={s.searchIcon}>🔍</Text>
+            <TextInput
+              style={s.searchInput}
+              placeholder="Tìm nhà, phòng, khách thuê…"
+              placeholderTextColor={Colors.textMuted}
+              value={search}
+              onChangeText={setSearch}
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={s.searchClear}>✕</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          {/* Nói rõ màn đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
-          <RealtimeBadge connected={liveOn} />
-        </View>
-
-        {loading ? (
-          <View style={s.loading}><ActivityIndicator size="large" color={Colors.primary} /></View>
-        ) : (
-          <>
-            {/* ── Tìm kiếm: lọc cùng lúc hoá đơn + giao dịch bên dưới ── */}
-            <View style={s.searchBox}>
-              <Text style={s.searchIcon}>🔍</Text>
-              <TextInput
-                style={s.searchInput}
-                value={search}
-                onChangeText={setSearch}
-                placeholder="Tìm khách thuê, phòng, nhà, mã hoá đơn..."
-                placeholderTextColor={Colors.textMuted}
-                autoCorrect={false}
-                returnKeyType="search"
-              />
-              {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={s.searchClear}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* ── (1) Kỳ này thu tới đâu — đếm theo SỐ HOÁ ĐƠN, không hiện tiền ── */}
-            <View style={s.heroCard}>
-              <View style={s.heroTop}>
-                <Text style={s.heroLabel}>{search ? 'Kết quả tìm kiếm' : 'Kỳ này đã thu tới đâu'}</Text>
-                <TouchableOpacity style={s.autoChip} onPress={() => navigation.navigate('RentInvoice')}>
-                  <Text style={s.autoChipText}>
-                    {inCollectWindow ? `● Đang thu (ngày ${RENT_CYCLE.issueDay}–${RENT_CYCLE.dueDay})` : '🤖 Tự động'} ›
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={s.heroFigure}>
-                <Text style={s.heroAmount}>{stats.paidCount}</Text>
-                <Text style={s.heroSlash}>/{stats.total}</Text>
-                <View style={s.heroFigureText}>
-                  <Text style={s.heroUnit}>hoá đơn đã thu</Text>
-                  <Text style={[s.heroRate, { color: rateColor }]}>{stats.rate}% hoàn thành</Text>
-                </View>
-              </View>
-
-              <SegBar paid={stats.paidCount} pending={stats.pendingCount} overdue={stats.overdueCount} />
-
-              {/* Ô số bấm được = bộ lọc nhanh cho danh sách "Theo nhà" bên dưới. */}
-              <View style={s.heroStats}>
-                {([
-                  { key: 'PAID' as const, num: stats.paidCount, label: 'Đã thu', color: Colors.success },
-                  { key: 'PENDING' as const, num: stats.pendingCount, label: 'Chưa thu', color: Colors.warning },
-                  { key: 'OVERDUE' as const, num: stats.overdueCount, label: 'Quá hạn', color: Colors.error },
-                ]).map(st => {
-                  const on = statusFilter === st.key;
-                  return (
-                    <TouchableOpacity
-                      key={st.key}
-                      style={[s.heroStat, on && { backgroundColor: st.color + '14', borderColor: st.color + '55' }]}
-                      onPress={() => setStatusFilter(on ? 'all' : st.key)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[s.heroDot, { backgroundColor: st.num > 0 ? st.color : Colors.textMuted }]} />
-                      <Text style={[s.heroStatNum, { color: st.num > 0 ? st.color : Colors.textMuted }]}>{st.num}</Text>
-                      <Text style={s.heroStatLbl}>{st.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <Text style={s.heroTotal}>
-                {stats.total > 0 ? RENT_AMOUNT_HIDDEN_NOTE : 'Chưa có hoá đơn nào trong kỳ'}
-              </Text>
-            </View>
-
-
-            {/* ── (2) Việc cần xử lý ── */}
-            {hasTodo ? (
-              <View style={s.section}>
-                <Text style={s.sectionTitle}>Cần xử lý</Text>
-
-                {/* ① Quá hạn — gấp nhất, trễ lâu nhất lên đầu. */}
-                {overdueList.length > 0 && (
-                  <View style={[s.todoGroup, { borderLeftColor: Colors.error }]}>
-                    <View style={s.todoGroupHead}>
-                      <Text style={[s.todoGroupTitle, { color: Colors.error }]}>
-                        ⚠️  {overdueList.length} hoá đơn quá hạn
-                      </Text>
-                      <Text style={s.todoGroupHint}>
-                        Trễ {RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay}+ ngày được quyền chấm dứt HĐ
-                      </Text>
-                    </View>
-                    {(expandOverdue ? overdueList : overdueList.slice(0, LIST_PREVIEW)).map((inv, i) => {
-                      const late = daysLate(inv);
-                      // Hạn ngày 5, ngày 8 mới được chấm dứt — tức trễ 3 ngày.
-                      const canTerminate = late >= RENT_CYCLE.terminationFromDay - RENT_CYCLE.dueDay;
-                      return (
-                        <TouchableOpacity
-                          key={inv.id}
-                          style={[s.todoItem, i > 0 && s.todoItemBorder]}
-                          activeOpacity={0.7}
-                          onPress={() => navigation.navigate('BuildingBilling', {
-                            propertyId: String(inv.propertyId), propertyName: inv.propertyName,
-                          })}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.todoItemName}>
-                              {inv.tenantName || 'Khách thuê'}{inv.roomNumber ? ` · ${inv.roomNumber}` : ''}
-                            </Text>
-                            {/* Danh sách này gồm cả kỳ cũ nên PHẢI ghi rõ kỳ nào —
-                                không thì "trễ 47 ngày" đọc ra như nợ của kỳ đang xem. */}
-                            <Text style={s.todoItemMeta} numberOfLines={1}>
-                              {inv.propertyName}
-                              {(inv.month !== period.month || inv.year !== period.year)
-                                && `  ·  kỳ ${String(inv.month).padStart(2, '0')}/${inv.year}`}
-                            </Text>
-                          </View>
-                          <View style={s.todoItemRight}>
-                            <Text style={[s.todoLate, { color: Colors.error }]}>trễ {late} ngày</Text>
-                            {canTerminate && <Text style={s.todoFlag}>được chấm dứt HĐ</Text>}
-                          </View>
-                          <Text style={s.todoArrow}>›</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    {overdueList.length > LIST_PREVIEW && (
-                      <MoreRow hidden={overdueList.length - LIST_PREVIEW} expanded={expandOverdue}
-                        onPress={() => setExpandOverdue(v => !v)} unit="khách" />
-                    )}
-                  </View>
-                )}
-
-                {/* ② Chưa thanh toán — chưa tới hạn, chỉ cần nhắc. */}
-                {pendingList.length > 0 && (
-                  <View style={[s.todoGroup, { borderLeftColor: Colors.warning }]}>
-                    <View style={s.todoGroupHead}>
-                      <Text style={[s.todoGroupTitle, { color: Colors.warning }]}>
-                        ⏳  {pendingList.length} hoá đơn chưa thanh toán
-                      </Text>
-                      <Text style={s.todoGroupHint}>Hệ thống tự nhắc khách mỗi ngày tới hạn nộp</Text>
-                    </View>
-                    {(expandPending ? pendingList : pendingList.slice(0, LIST_PREVIEW)).map((inv, i) => {
-                      const late = daysLate(inv);
-                      return (
-                        <TouchableOpacity
-                          key={inv.id}
-                          style={[s.todoItem, i > 0 && s.todoItemBorder]}
-                          activeOpacity={0.7}
-                          onPress={() => navigation.navigate('BuildingBilling', {
-                            propertyId: String(inv.propertyId), propertyName: inv.propertyName,
-                          })}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.todoItemName}>
-                              {inv.tenantName || 'Khách thuê'}{inv.roomNumber ? ` · ${inv.roomNumber}` : ''}
-                            </Text>
-                            <Text style={s.todoItemMeta} numberOfLines={1}>{inv.propertyName}</Text>
-                          </View>
-                          <Text style={[s.todoLate, { color: Colors.warning }]}>
-                            {late >= 0 ? 'tới hạn hôm nay' : `còn ${-late} ngày`}
-                          </Text>
-                          <Text style={s.todoArrow}>›</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                    {pendingList.length > LIST_PREVIEW && (
-                      <MoreRow hidden={pendingList.length - LIST_PREVIEW} expanded={expandPending}
-                        onPress={() => setExpandPending(v => !v)} unit="khách" />
-                    )}
-                  </View>
-                )}
-
-                {/* ③ Giao dịch chờ xác nhận — việc phải thao tác tay. */}
-                {pendingVerifications.length > 0 && (
-                  <>
-                    <TouchableOpacity
-                      style={s.todoRow}
-                      onPress={() => setShowVerifications(v => !v)}
-                      activeOpacity={0.8}
-                    >
-                      <View style={[s.todoIcon, { backgroundColor: Colors.primaryBg }]}>
-                        <Text style={{ fontSize: 16 }}>💳</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.todoTitle}>{pendingVerifications.length} giao dịch chờ xác nhận</Text>
-                        <Text style={s.todoSub}>Khách báo đã chuyển — kiểm tra rồi xác nhận đã nhận tiền</Text>
-                      </View>
-                      <Text style={s.todoArrow}>{showVerifications ? '⌄' : '›'}</Text>
-                    </TouchableOpacity>
-
-                    {showVerifications && pendingVerifications.map(item => {
-                      const mc = methodOf(item.method);
-                      return (
-                        <View key={item.id} style={s.verifyCard}>
-                          <View style={s.verifyTop}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={s.verifyName}>
-                                {item.tenantName}{item.roomNumber ? ` · ${item.roomNumber}` : ''}
-                              </Text>
-                              <Text style={s.verifyMeta}>
-                                {item.propertyName} · {item.invoiceCode}
-                              </Text>
-                              <Text style={s.verifyMeta}>
-                                {mc.icon} {mc.label} · {fmtWhen(item.createdAt)}
-                              </Text>
-                            </View>
-                          </View>
-                          {!!item.transferContent && (
-                            <Text style={s.verifyContent} numberOfLines={1}>📝 {item.transferContent}</Text>
-                          )}
-                          <View style={s.verifyActions}>
-                            <TouchableOpacity style={s.rejectBtn} onPress={() => handleVerify(item, false)}>
-                              <Text style={s.rejectBtnText}>Từ chối</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={s.approveBtn} onPress={() => handleVerify(item, true)}>
-                              <Text style={s.approveBtnText}>✓ Đã nhận tiền</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </>
-                )}
-              </View>
-            ) : shownInvoices.length > 0 && (
-              <View style={s.clearCard}>
-                <Text style={s.clearText}>✅  Không còn việc tồn — kỳ này đang chạy ổn</Text>
-              </View>
-            )}
-
-            {/* ── (3) Theo nhà ── */}
-            {buildingGroups.length > 0 && (
-              <View style={s.section}>
-                <View style={s.sectionHeaderRow}>
-                  <Text style={s.sectionTitle}>
-                    Theo nhà
-                    {statusFilter !== 'all' && (
-                      <Text style={s.sectionNote}>
-                        {'  '}· {statusFilter === 'PAID' ? 'đã thu' : statusFilter === 'PENDING' ? 'chưa thu' : 'quá hạn'}
-                      </Text>
-                    )}
-                  </Text>
-                  {/* Đang lọc thì nút bỏ lọc nằm ngay trên danh sách nó tác động,
-                      không cần thêm một dải báo riêng ở trên nữa. */}
-                  <TouchableOpacity onPress={() =>
-                    statusFilter === 'all' ? navigation.navigate('BillingHistory') : setStatusFilter('all')}>
-                    <Text style={s.sectionLink}>
-                      {statusFilter === 'all' ? '🗂 Lịch sử các kỳ →' : 'Bỏ lọc ✕'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {(expandBuildings ? buildingGroups : buildingGroups.slice(0, LIST_PREVIEW)).map(group => {
-                  const paid    = group.invoices.filter(b => b.status === 'PAID');
-                  const pending = group.invoices.filter(b => b.status === 'PENDING');
-                  const overdue = group.invoices.filter(b => b.status === 'OVERDUE');
-                  const unpaidCount = pending.length + overdue.length;
-                  const rate = group.invoices.length > 0
-                    ? Math.round((paid.length / group.invoices.length) * 100) : 0;
-                  const barColor = rate >= 80 ? Colors.success : rate >= 50 ? Colors.warning : Colors.error;
-
-                  return (
-                    <TouchableOpacity
-                      key={group.propertyId}
-                      style={s.buildingCard}
-                      onPress={() => navigation.navigate('BuildingBilling', {
-                        propertyId: String(group.propertyId), propertyName: group.propertyName,
-                      })}
-                      activeOpacity={0.75}
-                    >
-                      <View style={s.buildingTop}>
-                        <View style={[s.buildingAvatar, { backgroundColor: barColor + '18' }]}>
-                          <Text style={[s.buildingAvatarText, { color: barColor }]}>{rate}%</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.buildingName} numberOfLines={1}>{group.propertyName}</Text>
-                          <Text style={s.buildingMoney}>
-                            {unpaidCount > 0
-                              ? <>Còn <Text style={{ color: Colors.error, fontWeight: '800' }}>{unpaidCount} khách</Text> chưa thanh toán</>
-                              : <Text style={{ color: Colors.success, fontWeight: '800' }}>Tất cả đã thanh toán</Text>}
-                          </Text>
-                        </View>
-                        <Text style={s.buildingArrow}>›</Text>
-                      </View>
-
-                      <SegBar paid={paid.length} pending={pending.length} overdue={overdue.length} />
-
-                      <View style={s.pillRow}>
-                        <View style={[s.pill, { backgroundColor: Colors.successLight }]}>
-                          <Text style={[s.pillText, { color: Colors.success }]}>✓ {paid.length} đã thu</Text>
-                        </View>
-                        {pending.length > 0 && (
-                          <View style={[s.pill, { backgroundColor: Colors.warningLight }]}>
-                            <Text style={[s.pillText, { color: Colors.warning }]}>{pending.length} chưa thu</Text>
-                          </View>
-                        )}
-                        {overdue.length > 0 && (
-                          <View style={[s.pill, { backgroundColor: Colors.errorLight }]}>
-                            <Text style={[s.pillText, { color: Colors.error }]}>⚠ {overdue.length} quá hạn</Text>
-                          </View>
-                        )}
-                        <Text style={s.buildingCount}>{group.invoices.length} hoá đơn</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-                {buildingGroups.length > LIST_PREVIEW && (
-                  <MoreRow hidden={buildingGroups.length - LIST_PREVIEW} expanded={expandBuildings}
-                    onPress={() => setExpandBuildings(v => !v)} unit="nhà" />
-                )}
-              </View>
-            )}
-
-            {/* ── (4) Giao dịch tiền nhà gần đây ──
-                Chỉ giao dịch của hoá đơn TIỀN NHÀ. Cọc, bảo trì, điện nước đã chuyển
-                hẳn sang màn "Thu & Đối soát" (ManagerPaymentHistory) — màn này chỉ lo
-                đúng một việc: phát hành & theo dõi thu tiền nhà. ── */}
-            <View style={s.section}>
-              <View style={s.sectionHeaderRow}>
-                <Text style={s.sectionTitle}>Giao dịch tiền nhà gần đây</Text>
-                <TouchableOpacity onPress={() => navigation.navigate('ManagerPaymentHistory')}>
-                  <Text style={s.sectionLink}>💳 Thu & Đối soát →</Text>
-                </TouchableOpacity>
-              </View>
-
-              {verifiedTx.length === 0 ? (
-                <View style={s.emptyBox}>
-                  <Text style={s.emptyText}>Chưa có giao dịch tiền nhà nào được xác nhận.</Text>
-                </View>
-              ) : (
-                <View style={s.txCard}>
-                  {shownTx.map((tx, i) => {
-                    const mc = methodOf(tx.method);
-                    return (
-                      <View key={tx.id} style={[s.txRow, i > 0 && s.txRowBorder]}>
-                        <View style={s.txIcon}><Text style={{ fontSize: 16 }}>{mc.icon}</Text></View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={s.txName}>
-                            {tx.tenantName}{tx.roomNumber ? ` · ${tx.roomNumber}` : ''}
-                          </Text>
-                          <Text style={s.txMeta}>
-                            {mc.label} · {fmtWhen(tx.verifiedAt || tx.createdAt)}
-                          </Text>
-                        </View>
-                        <Text style={s.txAmt}>✓ Đã thu</Text>
-                      </View>
-                    );
-                  })}
-                  {/* Chỉ xem nhanh vài giao dịch mới nhất ở đây; xem đủ thì sang màn
-                      Lịch sử thanh toán (có lọc theo trạng thái + gộp cả tiền cọc). */}
-                  {verifiedTx.length > TX_PREVIEW && (
-                    <TouchableOpacity
-                      style={s.txMore}
-                      onPress={() => navigation.navigate('ManagerPaymentHistory')}
-                    >
-                      <Text style={s.txMoreText}>
-                        Xem toàn bộ {verifiedTx.length} giao dịch →
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              )}
-            </View>
-
-            {shownInvoices.length === 0
-              && pendingVerifications.length === 0 && verifiedTx.length === 0 && (
-              <View style={s.emptyBox}>
-                <Text style={s.emptyEmoji}>{search ? '🔍' : '🧾'}</Text>
-                <Text style={s.emptyText}>
-                  {search
-                    ? `Không tìm thấy khách thuê, phòng hay hoá đơn nào khớp "${search.trim()}".`
-                    : `Chưa có hoá đơn tiền nhà nào trong kỳ này.\nHệ thống tự phát hành vào ngày ${RENT_CYCLE.issueDay} hằng tháng.`}
-                </Text>
-              </View>
-            )}
-          </>
         )}
 
-        <View style={{ height: 100 }} />
+        {/* ── Tiến độ kỳ + chip lọc ── */}
+        {stats.total > 0 && (
+          <View style={s.card}>
+            <View style={s.progressTop}>
+              <Text style={s.progressNum}>
+                {stats.paid}<Text style={s.progressDen}>/{stats.total}</Text>
+              </Text>
+              <Text style={s.progressLabel}>hoá đơn đã thu</Text>
+              <View style={s.flex1} />
+              <Text style={[s.ratePill, stats.rate === 100 && { color: Colors.success }]}>{stats.rate}%</Text>
+            </View>
+            <SegBar paid={stats.paid} pending={stats.pending} overdue={stats.overdue} />
+            <View style={s.chipRow}>
+              <Chip label="Tất cả" count={stats.total} tone={Colors.textPrimary}
+                active={statusFilter === 'all'} onPress={() => setStatusFilter('all')} />
+              <Chip label="Chưa thu" count={stats.pending} tone={Colors.warning}
+                active={statusFilter === 'PENDING'} onPress={() => setStatusFilter(statusFilter === 'PENDING' ? 'all' : 'PENDING')} />
+              <Chip label="Quá hạn" count={stats.overdue} tone={Colors.error}
+                active={statusFilter === 'OVERDUE'} onPress={() => setStatusFilter(statusFilter === 'OVERDUE' ? 'all' : 'OVERDUE')} />
+              <Chip label="Đã thu" count={stats.paid} tone={Colors.success}
+                active={statusFilter === 'PAID'} onPress={() => setStatusFilter(statusFilter === 'PAID' ? 'all' : 'PAID')} />
+            </View>
+            <Text style={s.hiddenNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
+          </View>
+        )}
+
+        {/* ── Cần xử lý: giao dịch chờ xác nhận (thao tác tay) ── */}
+        {pendingVerifications.length > 0 && (
+          <View style={[s.card, s.cardWarn]}>
+            <Text style={s.sectionTitle}>⚡ Chờ bạn xác nhận ({pendingVerifications.length})</Text>
+            {pendingVerifications.slice(0, 5).map(p => {
+              const m = methodOf(p.method);
+              return (
+                <View key={p.id} style={s.verifyRow}>
+                  <View style={s.flex1}>
+                    <Text style={s.verifyName} numberOfLines={1}>
+                      {p.tenantName}{p.roomNumber ? ` · ${p.roomNumber}` : ''}
+                    </Text>
+                    <Text style={s.verifySub} numberOfLines={1}>
+                      {m.icon} {m.label} · {fmtWhen(p.createdAt)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={s.btnReject} onPress={() => handleVerify(p, false)}>
+                    <Text style={s.btnRejectText}>Từ chối</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.btnOk} onPress={() => handleVerify(p, true)}>
+                    <Text style={s.btnOkText}>Xác nhận</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Cần xử lý: khách quá hạn ── */}
+        {needAction.length > 0 && (
+          <View style={[s.card, s.cardDanger]}>
+            <Text style={s.sectionTitle}>🔴 Cần gọi nhắc ({needAction.length})</Text>
+            {needAction.slice(0, 5).map(i => (
+              <TouchableOpacity key={i.id} style={s.actionRow} onPress={() => setSheetRow(i)} activeOpacity={0.7}>
+                <View style={s.flex1}>
+                  <Text style={s.actionName} numberOfLines={1}>
+                    {i.tenantName || 'Khách thuê'}{i.roomNumber ? ` · ${i.roomNumber}` : ''}
+                  </Text>
+                  <Text style={s.actionSub} numberOfLines={1}>{i.propertyName}</Text>
+                </View>
+                <Text style={s.actionLate}>trễ {lateDays(i.dueDate)} ngày</Text>
+                <Text style={s.chev}>›</Text>
+              </TouchableOpacity>
+            ))}
+            {needAction.length > 5 && (
+              <Text style={s.moreHint}>… và {needAction.length - 5} khách nữa ở danh sách bên dưới</Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Theo nhà: bấm để bung từng khách ── */}
+        {houses.length > 0 && (
+          <View style={s.section}>
+            <Text style={s.sectionTitleOut}>
+              Theo nhà{statusFilter !== 'all' ? ' (đang lọc)' : ''}
+            </Text>
+            {houses.map(h => {
+              const open = autoOpen || openHouses.has(h.id);
+              const done = h.paid === h.items.length;
+              return (
+                <View key={h.id} style={s.house}>
+                  <TouchableOpacity style={s.houseHead} onPress={() => toggleHouse(h.id)} activeOpacity={0.7}>
+                    <Text style={s.houseCaret}>{open ? '▾' : '▸'}</Text>
+                    <View style={s.flex1}>
+                      <Text style={s.houseName} numberOfLines={1}>{h.name}</Text>
+                      <Text style={s.houseSub}>
+                        {done
+                          ? 'đã thu đủ'
+                          : `${h.paid}/${h.items.length} đã thu${h.overdue > 0 ? ` · ${h.overdue} quá hạn` : ''}`}
+                      </Text>
+                    </View>
+                    {/*
+                      Lối vào lịch sử MỌI KỲ của riêng nhà này — khác với ô chọn kỳ ở
+                      header (một kỳ, mọi nhà). Đặt ngay trên dòng tên nhà vì đó là chỗ
+                      duy nhất đang có sẵn ngữ cảnh "nhà nào".
+                      Là TouchableOpacity lồng nhau: bấm vào đây KHÔNG bung/thu accordion.
+                    */}
+                    <TouchableOpacity
+                      onPress={() => navigation.navigate('BillingHistory', { propertyId: h.id })}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={s.houseHistory}>Lịch sử</Text>
+                    </TouchableOpacity>
+                    <View style={[s.houseDot, {
+                      backgroundColor: h.overdue > 0 ? Colors.error : done ? Colors.success : Colors.warning,
+                    }]} />
+                  </TouchableOpacity>
+
+                  {open && h.items.map(i => {
+                    const st = rowState(i);
+                    return (
+                      <TouchableOpacity key={i.id} style={s.tRow} onPress={() => setSheetRow(i)} activeOpacity={0.7}>
+                        <Text style={s.tRoom} numberOfLines={1}>{i.roomNumber || 'Nguyên căn'}</Text>
+                        <Text style={s.tName} numberOfLines={1}>{i.tenantName || '—'}</Text>
+                        <View style={[s.tPill, { backgroundColor: st.bg }]}>
+                          <Text style={[s.tPillText, { color: st.color }]}>{st.label}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Giao dịch gần đây (chỉ khi có) ── */}
+        {verifiedTx.length > 0 && (
+          <View style={s.section}>
+            <View style={s.txHead}>
+              <Text style={s.sectionTitleOut}>Giao dịch gần đây</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('ManagerPaymentHistory')}>
+                <Text style={s.link}>Xem tất cả ›</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={s.card}>
+              {verifiedTx.map(p => {
+                const m = methodOf(p.method);
+                return (
+                  <View key={p.id} style={s.txRow}>
+                    <Text style={s.txIcon}>{m.icon}</Text>
+                    <View style={s.flex1}>
+                      <Text style={s.txName} numberOfLines={1}>
+                        {p.tenantName}{p.roomNumber ? ` · ${p.roomNumber}` : ''}
+                      </Text>
+                      <Text style={s.txSub} numberOfLines={1}>{m.label} · {fmtWhen(p.verifiedAt || p.createdAt)}</Text>
+                    </View>
+                    <Text style={s.txOk}>✓</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/*
+          ── Trạng thái rỗng: ĐÚNG MỘT khối ──
+          Bản cũ hiện ba khối rỗng chồng nhau ("chưa có hoá đơn", "chưa có giao dịch",
+          "chưa có hoá đơn tiền nhà nào") — cùng một tin nhắc lại ba lần.
+          Câu chữ đổi theo lý do thật: chưa tới ngày phát hành, hay lọc/tìm không ra.
+        */}
+        {houses.length === 0 && (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>🧾</Text>
+            {!hasAnyThisPeriod ? (
+              <>
+                <Text style={s.emptyTitle}>Kỳ này chưa có hoá đơn</Text>
+                <Text style={s.emptyText}>
+                  Hệ thống tự phát hành vào ngày {RENT_CYCLE.issueDay} hằng tháng,
+                  hạn nộp ngày {RENT_CYCLE.dueDay}.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={s.emptyTitle}>Không có hoá đơn nào khớp</Text>
+                <Text style={s.emptyText}>
+                  {kw ? `Không tìm thấy “${search.trim()}”. ` : ''}
+                  Thử bỏ bớt bộ lọc hoặc từ khoá.
+                </Text>
+                <TouchableOpacity
+                  style={s.emptyBtn}
+                  onPress={() => { setSearch(''); setStatusFilter('all'); }}
+                >
+                  <Text style={s.emptyBtnText}>Xoá bộ lọc</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
       </ScrollView>
+
+      {/* ── Chọn kỳ thu ── */}
+      <Modal visible={monthPickerOpen} transparent animationType="slide" onRequestClose={() => setMonthPickerOpen(false)}>
+        <Pressable style={s.sheetBackdrop} onPress={() => setMonthPickerOpen(false)} />
+        <View style={s.sheet}>
+          <View style={s.sheetGrip} />
+          <Text style={s.sheetName}>Chọn kỳ thu</Text>
+          <Text style={s.sheetSub}>Hệ thống phát hành hoá đơn ngày {RENT_CYCLE.issueDay} hằng tháng</Text>
+          <ScrollView style={s.monthList} showsVerticalScrollIndicator={false}>
+            {monthOptions.map(o => {
+              const active = o.key === month;
+              return (
+                <TouchableOpacity
+                  key={o.key}
+                  style={[s.monthItem, active && s.monthItemOn]}
+                  onPress={() => { setMonth(o.key); setMonthPickerOpen(false); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.monthItemText, active && s.monthItemTextOn]}>{o.label}</Text>
+                  <View style={s.flex1} />
+                  <Text style={[s.monthItemCount, o.count === 0 && s.monthItemEmpty]}>
+                    {o.count === 0 ? 'chưa có' : `${o.count} hoá đơn`}
+                  </Text>
+                  {active && <Text style={s.monthItemTick}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <TouchableOpacity style={s.sheetClose} onPress={() => setMonthPickerOpen(false)}>
+            <Text style={s.sheetCloseText}>Đóng</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* ── Sheet chi tiết một khách ── */}
+      <Modal visible={sheetRow != null} transparent animationType="slide" onRequestClose={() => setSheetRow(null)}>
+        <Pressable style={s.sheetBackdrop} onPress={() => setSheetRow(null)} />
+        <View style={s.sheet}>
+          <View style={s.sheetGrip} />
+          {sheetRow && (() => {
+            const st = rowState(sheetRow);
+            const od = lateDays(sheetRow.dueDate);
+            const canTerm = sheetRow.status !== 'PAID'
+              && canTerminateForUnpaidRent(sheetRow.dueDate, sheetRow.status);
+            return (
+              <>
+                <Text style={s.sheetName}>{sheetRow.tenantName || 'Khách thuê'}</Text>
+                <Text style={s.sheetSub}>
+                  {sheetRow.propertyName}{sheetRow.roomNumber ? ` · ${sheetRow.roomNumber}` : ' · Nguyên căn'}
+                </Text>
+
+                <View style={[s.sheetState, { backgroundColor: st.bg }]}>
+                  <Text style={[s.sheetStateText, { color: st.color }]}>{st.icon}  {st.label}</Text>
+                </View>
+
+                <View style={s.sheetInfo}>
+                  <View style={s.sheetLine}>
+                    <Text style={s.sheetKey}>Mã hoá đơn</Text>
+                    <Text style={s.sheetVal}>{sheetRow.code || '—'}</Text>
+                  </View>
+                  <View style={s.sheetLine}>
+                    <Text style={s.sheetKey}>Hạn nộp</Text>
+                    <Text style={s.sheetVal}>{fmtDay(sheetRow.dueDate)}</Text>
+                  </View>
+                  <View style={s.sheetLine}>
+                    <Text style={s.sheetKey}>Kỳ thu</Text>
+                    <Text style={s.sheetVal}>{monthLabelOf(month)}</Text>
+                  </View>
+                </View>
+
+                {/* Số tiền cố ý KHÔNG hiện — xem chú thích đầu file. */}
+                <Text style={s.sheetNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
+
+                {canTerm ? (
+                  <TouchableOpacity
+                    style={[s.sheetDanger, terminating && s.btnDisabled]}
+                    disabled={terminating}
+                    onPress={() => handleTerminate(sheetRow)}
+                  >
+                    <Text style={s.sheetDangerText}>
+                      {terminating ? 'Đang xử lý…' : '⚠️  Đề nghị chấm dứt hợp đồng'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : sheetRow.status !== 'PAID' && (
+                  /*
+                    Nói rõ CÒN BAO LÂU nữa mới được chấm dứt, thay vì ẩn nút không lời
+                    giải thích — manager hay hỏi "sao nhà kia bấm được mà đây không".
+                  */
+                  <Text style={s.sheetHint}>
+                    {od <= 0
+                      ? 'Chưa tới hạn nộp — chưa đề nghị chấm dứt hợp đồng được.'
+                      : `Quá hạn ${od} ngày. Quá hạn đủ ${RENT_TERMINATION_AFTER_DAYS} ngày mới đề nghị chấm dứt được.`}
+                  </Text>
+                )}
+
+                <TouchableOpacity style={s.sheetClose} onPress={() => setSheetRow(null)}>
+                  <Text style={s.sheetCloseText}>Đóng</Text>
+                </TouchableOpacity>
+              </>
+            );
+          })()}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: Colors.background },
-  scroll: { paddingHorizontal: Spacing.base },
-  loading: { paddingVertical: Spacing.xl * 2, alignItems: 'center' },
+  safe: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  flex1: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollBody: { padding: Spacing.md, paddingBottom: Spacing.xl * 2 },
 
   // ── Header ──
   header: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    paddingTop: Spacing.md, paddingBottom: Spacing.base,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.surface, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.primaryBg,
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryBg,
     alignItems: 'center', justifyContent: 'center',
   },
-  backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
-  title:    { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-
-  // ── (1) Hero: kỳ này thu tới đâu ──
-  heroCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, borderWidth: 1, borderColor: Colors.border,
-    marginBottom: Spacing.lg, ...Shadow.sm,
-  },
-  heroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  heroLabel: { fontSize: 12, fontWeight: '700', color: Colors.textMuted, textTransform: 'uppercase' },
-  autoChip: {
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.full,
+  backIcon: { fontSize: 22, lineHeight: 24, color: Colors.primary, fontWeight: '800' },
+  headerMid: { flex: 1 },
+  h1: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  monthRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  monthBtn: { paddingHorizontal: 4 },
+  monthArrow: { fontSize: 18, lineHeight: 20, color: Colors.primary, fontWeight: '800' },
+  monthArrowOff: { color: Colors.textMuted },
+  monthPick: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 999, backgroundColor: Colors.primaryBg,
   },
-  autoChipText: { fontSize: 10.5, fontWeight: '800', color: Colors.primary },
-  heroFigure: { flexDirection: 'row', alignItems: 'baseline', gap: 2, marginTop: Spacing.sm },
-  heroAmount: { fontSize: 38, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -1 },
-  heroSlash: { fontSize: 20, fontWeight: '800', color: Colors.textMuted },
-  heroFigureText: { marginLeft: Spacing.sm, flex: 1 },
-  heroUnit: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
-  heroRate: { fontSize: 11.5, fontWeight: '800', marginTop: 1 },
-  heroTotal: {
-    fontSize: 11.5, color: Colors.textMuted, marginTop: Spacing.md, lineHeight: 17,
-    paddingTop: Spacing.md, borderTopWidth: 1, borderTopColor: Colors.divider,
+  monthText: { fontSize: 13, fontWeight: '800', color: Colors.primary, textAlign: 'center' },
+  monthCaret: { fontSize: 10, color: Colors.primary },
+
+  // ── Danh sách chọn kỳ ──
+  monthList: { marginTop: Spacing.md, maxHeight: 340 },
+  monthItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 13, paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md, marginBottom: 4, backgroundColor: Colors.background,
   },
+  monthItemOn: { backgroundColor: Colors.primaryBg },
+  monthItemText: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
+  monthItemTextOn: { color: Colors.primary, fontWeight: '900' },
+  monthItemCount: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  monthItemEmpty: { color: Colors.textMuted, fontStyle: 'italic', fontWeight: '500' },
+  monthItemTick: { fontSize: 15, fontWeight: '900', color: Colors.primary },
 
-  // ── Thanh tiến độ phân đoạn (đã thu · chưa thu · quá hạn) ──
-  segBg: {
-    flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden',
-    backgroundColor: Colors.divider, marginTop: Spacing.md, gap: 2,
-  },
-  segPart: { height: '100%' },
-
-  // ── Chip nhỏ trong thẻ nhà ──
-  pillRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: Spacing.md },
-  pill: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 3 },
-  pillText: { fontSize: 10.5, fontWeight: '800' },
-
-  // ── Thanh tìm kiếm ──
-  searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
+  // ── Tìm kiếm ──
+  searchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, height: 44, marginBottom: Spacing.md,
     borderWidth: 1, borderColor: Colors.border,
-    marginBottom: Spacing.base, ...Shadow.sm,
   },
   searchIcon: { fontSize: 14 },
-  searchInput: {
-    flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 4,
-  },
-  searchClear: { fontSize: 15, fontWeight: '800', color: Colors.textMuted, paddingHorizontal: 4 },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
+  searchClear: { fontSize: 14, color: Colors.textMuted, paddingHorizontal: 4 },
 
-  heroStats: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
-  heroStat: {
-    flex: 1, alignItems: 'center', paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: 'transparent',
-    backgroundColor: Colors.background,
+  // ── Thẻ ──
+  card: {
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, marginBottom: Spacing.md, ...Shadow.sm,
   },
-  heroDot: { width: 6, height: 6, borderRadius: 3, marginBottom: 4 },
-  heroStatNum: { fontSize: 18, fontWeight: '900' },
-  heroStatLbl: { fontSize: 10.5, color: Colors.textMuted, marginTop: 1, textAlign: 'center' },
+  cardWarn: { borderLeftWidth: 3, borderLeftColor: Colors.warning },
+  cardDanger: { borderLeftWidth: 3, borderLeftColor: Colors.error },
+  section: { marginBottom: Spacing.md },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  sectionTitleOut: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
 
-  // ── Section chung ──
-  section: { marginBottom: Spacing.lg },
-  // Các con bên trong đã có marginBottom nên hàng này không thêm nữa (tránh hở gấp đôi).
-  sectionHeaderRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  sectionLink:  { fontSize: 12, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
-  sectionCount: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.sm },
-  sectionNote: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+  // ── Tiến độ ──
+  progressTop: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginBottom: Spacing.sm },
+  progressNum: { fontSize: 26, fontWeight: '900', color: Colors.textPrimary },
+  progressDen: { fontSize: 15, fontWeight: '700', color: Colors.textMuted },
+  progressLabel: { fontSize: 13, color: Colors.textSecondary },
+  ratePill: { fontSize: 15, fontWeight: '900', color: Colors.textSecondary },
+  segBg: { height: 7, borderRadius: 4, backgroundColor: Colors.divider, flexDirection: 'row', overflow: 'hidden' },
+  segPart: { height: '100%' },
 
-  // ── (2) Việc cần xử lý ──
-  todoRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  // ── Chip ──
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: Spacing.md },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background,
   },
-  todoIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  todoTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  todoSub: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2, lineHeight: 16 },
-  todoArrow: { fontSize: 18, color: Colors.textMuted, fontWeight: '700', marginLeft: 4 },
-  moreRow: {
-    paddingVertical: Spacing.md, alignItems: 'center',
-    borderTopWidth: 1, borderTopColor: Colors.divider,
-  },
-  moreRowText: { fontSize: 12.5, fontWeight: '800', color: Colors.primary },
+  chipText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  chipCount: { minWidth: 18, paddingHorizontal: 4, borderRadius: 9, backgroundColor: Colors.divider, alignItems: 'center' },
+  chipCountText: { fontSize: 11, fontWeight: '900', color: Colors.textSecondary },
+  hiddenNote: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm, lineHeight: 15 },
 
-  // ── Nhóm việc cần xử lý: dải màu trái báo mức gấp ──
-  todoGroup: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: Colors.border, borderLeftWidth: 3,
+  // ── Chờ xác nhận ──
+  verifyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  verifyName: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  verifySub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
+  btnReject: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: BorderRadius.md, backgroundColor: Colors.background },
+  btnRejectText: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
+  btnOk: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: BorderRadius.md, backgroundColor: Colors.success },
+  btnOkText: { fontSize: 12, fontWeight: '800', color: Colors.white },
+
+  // ── Cần gọi nhắc ──
+  actionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  actionName: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  actionSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
+  actionLate: { fontSize: 12, fontWeight: '800', color: Colors.error },
+  chev: { fontSize: 18, color: Colors.textMuted },
+  moreHint: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm, fontStyle: 'italic' },
+
+  // ── Theo nhà ──
+  house: {
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.lg,
     marginBottom: Spacing.sm, overflow: 'hidden', ...Shadow.sm,
   },
-  todoGroupHead: {
-    paddingHorizontal: Spacing.base, paddingTop: Spacing.md, paddingBottom: Spacing.sm,
+  houseHead: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: Spacing.md },
+  houseCaret: { fontSize: 13, color: Colors.textMuted, width: 12 },
+  houseName: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  houseSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  houseHistory: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  houseDot: { width: 9, height: 9, borderRadius: 5 },
+  tRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 10, paddingHorizontal: Spacing.md,
+    borderTopWidth: 1, borderTopColor: Colors.divider, backgroundColor: Colors.background,
   },
-  todoGroupTitle: { fontSize: 13.5, fontWeight: '800' },
-  todoGroupHint: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  todoItem: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
-  },
-  todoItemBorder: { borderTopWidth: 1, borderTopColor: Colors.divider },
-  todoItemName: { fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
-  todoItemMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  todoItemRight: { alignItems: 'flex-end' },
-  todoLate: { fontSize: 11.5, fontWeight: '800' },
-  todoFlag: {
-    fontSize: 9.5, fontWeight: '800', color: Colors.error,
-    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
-    paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, overflow: 'hidden',
-  },
+  tRoom: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, width: 76 },
+  tName: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  tPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  tPillText: { fontSize: 11, fontWeight: '800' },
 
-  clearCard: {
-    backgroundColor: Colors.successLight, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.lg, alignItems: 'center',
-  },
-  clearText: { fontSize: 13, fontWeight: '700', color: Colors.success },
-
-  verifyCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.primary + '30',
-  },
-  verifyTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  verifyName: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
-  verifyMeta: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2 },
-  verifyContent: {
-    fontSize: 11.5, color: Colors.textSecondary, backgroundColor: Colors.background,
-    borderRadius: BorderRadius.sm, padding: Spacing.sm, marginTop: Spacing.sm,
-  },
-  verifyActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
-  rejectBtn: {
-    flex: 1, alignItems: 'center', paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border,
-  },
-  rejectBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
-  approveBtn: {
-    flex: 1.6, alignItems: 'center', paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg, backgroundColor: Colors.success,
-  },
-  approveBtnText: { fontSize: 13, fontWeight: '800', color: Colors.white },
-
-  // ── (3) Theo nhà ──
-  buildingCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
-  },
-  buildingTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
-  buildingAvatar: {
-    width: 44, height: 44, borderRadius: BorderRadius.lg,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  buildingAvatarText: { fontSize: 13, fontWeight: '900' },
-  buildingName: { fontSize: 14.5, fontWeight: '800', color: Colors.textPrimary },
-  buildingArrow: { fontSize: 20, color: Colors.textMuted, fontWeight: '700' },
-  buildingMoney: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginTop: 2 },
-  buildingCount: { fontSize: 11, fontWeight: '600', color: Colors.textMuted, marginLeft: 'auto' },
-
-  // ── (4) Giao dịch ──
-  txCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
-  },
-  txRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.base },
-  txRowBorder: { borderTopWidth: 1, borderTopColor: Colors.divider },
-  txIcon: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.background,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  txName: { fontSize: 13.5, fontWeight: '700', color: Colors.textPrimary },
-  txMeta: { fontSize: 11.5, color: Colors.textMuted, marginTop: 2 },
-  txAmt:  { fontSize: 13, fontWeight: '800', color: Colors.success },
-  txMore: {
-    paddingVertical: Spacing.md, alignItems: 'center',
-    borderTopWidth: 1, borderTopColor: Colors.divider,
-  },
-  txMoreText: { fontSize: 12.5, fontWeight: '700', color: Colors.primary },
+  // ── Giao dịch ──
+  txHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  link: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
+  txRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  txIcon: { fontSize: 16 },
+  txName: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
+  txSub: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
+  txOk: { fontSize: 14, color: Colors.success, fontWeight: '900' },
 
   // ── Rỗng ──
-  emptyBox: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.lg, alignItems: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  empty: {
+    backgroundColor: Colors.surface, borderRadius: BorderRadius.lg,
+    padding: Spacing.xl, alignItems: 'center', ...Shadow.sm,
   },
-  emptyEmoji: { fontSize: 36, marginBottom: Spacing.sm },
-  emptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', lineHeight: 19 },
+  emptyIcon: { fontSize: 34, marginBottom: Spacing.sm },
+  emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
+  emptyText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
+  emptyBtn: {
+    marginTop: Spacing.md, paddingHorizontal: Spacing.lg, paddingVertical: 9,
+    borderRadius: BorderRadius.md, backgroundColor: Colors.primaryBg,
+  },
+  emptyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+
+  // ── Sheet ──
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)' },
+  sheet: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: Spacing.lg, paddingBottom: Spacing.xl * 1.5,
+  },
+  sheetGrip: {
+    width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border,
+    alignSelf: 'center', marginBottom: Spacing.md,
+  },
+  sheetName: { fontSize: 18, fontWeight: '900', color: Colors.textPrimary },
+  sheetSub: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  sheetState: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, marginTop: Spacing.md },
+  sheetStateText: { fontSize: 13, fontWeight: '800' },
+  sheetInfo: { marginTop: Spacing.md, borderTopWidth: 1, borderTopColor: Colors.divider },
+  sheetLine: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  sheetKey: { fontSize: 13, color: Colors.textSecondary },
+  sheetVal: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  sheetNote: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.md, lineHeight: 15 },
+  sheetHint: { fontSize: 12, color: Colors.textSecondary, marginTop: Spacing.md, lineHeight: 17 },
+  sheetDanger: {
+    marginTop: Spacing.md, paddingVertical: 13, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.errorLight, alignItems: 'center',
+  },
+  sheetDangerText: { fontSize: 14, fontWeight: '800', color: Colors.error },
+  btnDisabled: { opacity: 0.5 },
+  sheetClose: {
+    marginTop: Spacing.sm, paddingVertical: 13, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.background, alignItems: 'center',
+  },
+  sheetCloseText: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary },
 });

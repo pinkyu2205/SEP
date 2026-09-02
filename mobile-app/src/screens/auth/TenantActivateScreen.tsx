@@ -27,6 +27,8 @@ export const TenantActivateScreen: React.FC = () => {
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  /** Hiện/ẩn cho CẢ HAI ô mật khẩu — xem chú thích ở chỗ dùng. */
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { cooldown, startCooldown } = useOtpCooldown(RESEND_COOLDOWN_SEC);
 
@@ -172,19 +174,35 @@ export const TenantActivateScreen: React.FC = () => {
 
           {step === 'password' && (
             <>
+              {/*
+                MỘT nút "Hiện" điều khiển cả hai ô, không phải mỗi ô một nút.
+                Việc của khách ở đây là đối chiếu hai ô có khớp nhau không — bật/tắt
+                riêng từng ô thì vẫn phải nhớ ô kia gõ gì, đúng cái mà nút này sinh ra
+                để khỏi phải làm. Cùng cách hiển thị với màn Đăng nhập.
+              */}
               <Input
                 label="Mật khẩu mới"
                 placeholder="Ít nhất 6 ký tự"
                 value={newPassword}
                 onChangeText={setNewPassword}
-                secureTextEntry
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                rightIcon={
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(v => !v)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.showPasswordText}>{showPassword ? 'Ẩn' : 'Hiện'}</Text>
+                  </TouchableOpacity>
+                }
               />
               <Input
                 label="Xác nhận mật khẩu"
                 placeholder="Nhập lại mật khẩu mới"
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
-                secureTextEntry
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
               />
               <Button
                 title="Hoàn tất kích hoạt"
@@ -213,4 +231,5 @@ const styles = StyleSheet.create({
   resendBtn: { alignSelf: 'center', marginTop: Spacing.md, padding: Spacing.sm },
   resendText: { color: Colors.primary, fontWeight: '600', fontSize: 14 },
   resendTextDisabled: { color: Colors.textMuted },
+  showPasswordText: { fontSize: 14, color: Colors.primary, fontWeight: '600' },
 });

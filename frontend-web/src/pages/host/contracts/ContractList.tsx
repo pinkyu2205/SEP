@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
   Archive, Building2, CalendarClock, ChevronRight, ClipboardList, FileText, Handshake, Loader2,
   PiggyBank, RefreshCw, Search, ShieldAlert, Users, Wallet, X,
@@ -116,23 +118,34 @@ export const ContractList = () => {
   const [selectedContract, setSelectedContract] = useState<HostContractDto | null>(null);
   const [selectedLease, setSelectedLease] = useState<MasterLease | null>(null);
 
+  /**
+   * `?contract=<mã HĐ>` — mở sẵn đúng hồ sơ khi đi từ nơi khác sang.
+   *
+   * Dùng ở dòng thời gian thuê của một khách (`TenantTimelineDrawer`): ở đó host đọc
+   * được mã hợp đồng nhưng muốn xem bản scan / biên bản thiết bị / sổ cọc thì phải
+   * sang trang này. Không có tham số này thì họ phải tự gõ lại mã vừa đọc vào ô tìm
+   * kiếm — mã hiện ra mà không bấm được chính là ngõ cụt.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkCode = searchParams.get('contract');
+
   const load = async () => {
     setLoading(true);
     setLoadError(false);
     try {
-      const [contractPage, leaseList, propPage, depositRes] = await Promise.all([
-        hostService.listContracts({ page: 0, size: 200 }),
+      const [contractList, leaseList, propPage, depositRes] = await Promise.all([
+        hostService.listAllContracts(),
         hostService.listMasterLeases().catch(() => [] as MasterLease[]),
-        propertyService.getProperties(0, 200).catch(() => null),
+        propertyService.getAllProperties().catch(() => null),
         hostService.getDeposits().catch(() => null),
       ]);
-      setContracts(contractPage.content ?? []);
+      setContracts(contractList);
       setLeases(leaseList);
       setDeposits(depositRes?.items ?? []);
       // Giữ nguyên bản ghi Property (không chỉ tên) — drawer cần địa chỉ, khu vực,
       // quy mô và quản lý vận hành để nói được căn này nằm ở đâu, ai đang trông.
       if (propPage) {
-        setProperties(Object.fromEntries(propPage.content.map((p) => [String(p.id), p])));
+        setProperties(Object.fromEntries(propPage.map((p) => [String(p.id), p])));
       }
     } catch {
       setLoadError(true); /* interceptor đã toast */
@@ -141,6 +154,28 @@ export const ContractList = () => {
     }
   };
   useEffect(() => { load(); }, []);
+
+  /*
+    Bung drawer cho `?contract=` sau khi danh sách đã về.
+
+    Xoá tham số ngay sau khi mở: để lại thì đóng drawer xong effect chạy lại và mở lại
+    ngay — host bấm X mà cửa sổ không chịu đóng.
+
+    Không tìm thấy mã thì NÓI RÕ thay vì im lặng. `listContracts` chỉ lấy 200 bản ghi
+    đầu, nên hợp đồng cũ hoàn toàn có thể nằm ngoài; im lặng thì host bấm "Xem hợp đồng
+    đầy đủ" xong thấy trang hợp đồng bình thường và tưởng mình bấm hụt.
+  */
+  useEffect(() => {
+    if (!deepLinkCode || loading) return;
+    const found = contracts.find((c) => c.code === deepLinkCode);
+    if (found) setSelectedContract(found);
+    else toast.error(`Không tìm thấy hợp đồng ${deepLinkCode} trong danh sách đang tải.`);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('contract');
+      return next;
+    }, { replace: true });
+  }, [deepLinkCode, loading, contracts, setSearchParams]);
 
   // Đổi tab hay đổi bộ lọc mà vẫn đứng ở trang 5 thì thấy bảng trống — luôn về trang đầu.
   useEffect(() => {

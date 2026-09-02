@@ -17,7 +17,8 @@ export const UserMenu = ({
   name: string;
   subtitle?: string;
   initials: string;
-  settingsTo: string;
+  /** Bỏ trống = cổng đó không có trang cài đặt → ẩn luôn mục trong menu. */
+  settingsTo?: string;
   onLogout: () => void;
   accent?: 'green' | 'red';
 }) => {
@@ -71,14 +72,21 @@ export const UserMenu = ({
             <p className="truncate text-sm font-bold text-slate-900">{name}</p>
             {subtitle && <p className="truncate text-xs text-slate-500">{subtitle}</p>}
           </div>
-          <Link
-            to={settingsTo}
-            onClick={() => setOpen(false)}
-            role="menuitem"
-            className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-          >
-            <Settings className="h-4 w-4 text-slate-400" /> Cài đặt tài khoản
-          </Link>
+          {/*
+            Không có trang cài đặt thì KHÔNG hiện mục này (cổng Admin, từ 30/08/2026).
+            Hiện một dòng "Cài đặt tài khoản" bấm vào ra trang trắng còn tệ hơn là
+            không có dòng nào.
+          */}
+          {settingsTo && (
+            <Link
+              to={settingsTo}
+              onClick={() => setOpen(false)}
+              role="menuitem"
+              className="flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Settings className="h-4 w-4 text-slate-400" /> Cài đặt tài khoản
+            </Link>
+          )}
           <button
             onClick={() => { setOpen(false); onLogout(); }}
             role="menuitem"

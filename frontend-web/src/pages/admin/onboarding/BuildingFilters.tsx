@@ -192,6 +192,7 @@ export const BuildingFilterBar = ({ f, statusOptions, action, hiddenFilters = []
               onClear={() => f.setStatus('all')}
             />
           )}
+          {f.attention && <ActiveChip label="Cần xử lý" onClear={() => f.setAttention(false)} />}
           {f.zone !== 'all' && <ActiveChip label={f.zone} onClear={() => f.setZone('all')} />}
           {f.type !== 'all' && <ActiveChip label={TYPE_LABEL[f.type]} onClear={() => f.setType('all')} />}
           {f.renovation !== 'all' && <ActiveChip label={RENO_LABEL[f.renovation]} onClear={() => f.setRenovation('all')} />}
@@ -240,11 +241,13 @@ export const ResultBar = ({ f, noun = 'tòa nhà' }: { f: BuildingFilters; noun?
 
 // ─── Chế độ xem bảng ────────────────────────────────────────────────────────
 export const BuildingTable = ({
-  rows, getBadge, onRowClick, renderActions, showRenovation = true, showManager = true,
+  rows, getBadge, getLease, onRowClick, renderActions, showRenovation = true, showManager = true,
   selectedIds, onToggleRow, onToggleAll,
 }: {
   rows: PropertyResponse[];
   getBadge: (b: PropertyResponse) => { label: string; cls: string } | null;
+  /** Truyền để bật cột "HĐ chủ nhà" — xem `onboarding/leaseTerm.ts`. */
+  getLease?: (b: PropertyResponse) => { range: string; label: string; cls: string };
   onRowClick?: (b: PropertyResponse) => void;
   renderActions?: (b: PropertyResponse) => ReactNode;
   /** cột/chip thuộc bước vận hành — ẩn ở module chỉ lo khởi tạo */
@@ -260,7 +263,7 @@ export const BuildingTable = ({
 
   return (
   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-    <table className={`w-full text-sm ${showManager ? 'min-w-[900px]' : 'min-w-[780px]'}`}>
+    <table className={`w-full text-sm ${showManager ? 'min-w-[900px]' : 'min-w-[780px]'} ${getLease ? 'min-w-[1040px]' : ''}`}>
       <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
         <tr>
           {selectable && (
@@ -276,6 +279,7 @@ export const BuildingTable = ({
           <th className="px-4 py-3 text-center">Phòng</th>
           <th className="px-4 py-3 text-center">Tầng</th>
           <th className="px-4 py-3 text-center">Diện tích</th>
+          {getLease && <th className="px-4 py-3">HĐ chủ nhà</th>}
           {showManager && <th className="px-4 py-3">Quản lý</th>}
           <th className="px-4 py-3">Trạng thái</th>
           {renderActions && <th className="px-4 py-3 text-right">Hành động</th>}
@@ -327,6 +331,17 @@ export const BuildingTable = ({
               <td className="px-4 py-3 text-center font-bold text-slate-700">{b.totalRooms || 0}</td>
               <td className="px-4 py-3 text-center font-bold text-slate-700">{b.totalFloor ?? b.floorCount ?? '—'}</td>
               <td className="px-4 py-3 text-center text-slate-600">{b.areaSize ? `${b.areaSize} m²` : '—'}</td>
+              {getLease && (() => {
+                const lease = getLease(b);
+                return (
+                  <td className="px-4 py-3">
+                    <p className="whitespace-nowrap text-xs font-semibold tabular-nums text-slate-700">{lease.range}</p>
+                    <span className={`mt-1 inline-block whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${lease.cls}`}>
+                      {lease.label}
+                    </span>
+                  </td>
+                );
+              })()}
               {showManager && (
                 <td className="px-4 py-3">
                   {b.operationManagerName ? (

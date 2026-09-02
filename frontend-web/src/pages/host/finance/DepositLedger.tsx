@@ -10,6 +10,13 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@/utils';
 import { normalizeVi } from '@/utils/helpers';
+/*
+  `todayIso` lấy từ @/utils/serverTime, KHÔNG tự khai bản cục bộ đọc đồng hồ máy như
+  trước: ngày ở đây đi vào phiếu hoàn cọc — một mốc TIỀN BẠC, phải trùng với ngày
+  server ghi nhận. Máy người dùng lệch múi giờ là sổ cọc ghi một ngày, BE ghi ngày
+  khác, về sau đối chiếu không khớp.
+*/
+import { todayIso } from '@/utils/serverTime';
 import { hostService, type DepositItem, type HostContractDto } from '@/services/host.service';
 import { exportToExcel } from '@/utils/exportExcel';
 import {
@@ -208,7 +215,6 @@ const depositItemToRow = (
   };
 };
 
-const todayIso = (): string => new Date().toLocaleDateString('en-CA');
 
 /**
  * So tên người, bỏ qua dấu và khoảng trắng thừa.
@@ -309,11 +315,11 @@ export const DepositLedger = () => {
      * bình thường — hoàn cọc cho người còn đang ở là sai nghiệp vụ nặng.
      * (Danh sách HĐ cũng là nguồn DỰ PHÒNG khi endpoint cọc lỗi, nên gọi luôn một thể.)
      */
-    const [res, contractPage] = await Promise.all([
+    const [res, contractList] = await Promise.all([
       hostService.getDeposits().catch(() => null),
-      hostService.listContracts({ size: 500 }).catch(() => null),
+      hostService.listAllContracts().catch(() => null),
     ]);
-    const contracts = contractPage?.content ?? [];
+    const contracts = contractList ?? [];
     const contractStatuses = new Map(contracts.map(c => [String(c.id), c.status]));
 
     const items = (res?.items ?? []).map((d, i) => depositItemToRow(d, i, contractStatuses));

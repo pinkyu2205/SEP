@@ -26,11 +26,62 @@
 
 import { serverNow } from '@/utils/serverTime';
 
-/** Kỳ hoá đơn hiện tại (tháng dương lịch) — đơn vị để đếm "đã gửi 1 lần chưa". */
-export const currentPeriod = (now: Date = serverNow()) => ({
-  month: now.getMonth() + 1,
-  year: now.getFullYear(),
-});
+/**
+ * KỲ ĐANG LÀM của điện/nước = **THÁNG TRƯỚC**, không phải tháng dương lịch hiện tại.
+ *
+ * Hai loại tiền trong hệ thống chạy ngược chiều nhau:
+ *   • Tiền nhà/phòng **trả trước** — tháng 9 khách đóng là đóng cho tháng 9.
+ *   • Điện/nước **trả sau** — tháng 9 khách đóng là đóng cho tháng 8, vì phải hết
+ *     tháng 8 công tơ mới chốt được và nhà cung cấp mới ra giấy.
+ *
+ * BUG 02/09/2026 — vì sao phải sửa: web admin đã chuyển sang phát hành theo kỳ trả sau
+ * (`arrearsPeriod`), trong khi hàm này vẫn trả tháng dương lịch. Hai đầu nhìn hai kỳ
+ * khác nhau: admin phát hành xong kỳ 8/2026 và bắn thông báo "HÔM NAY phải chụp công
+ * tơ", quản lý bấm vào thì màn hình đi hỏi kỳ 9/2026 → không thấy gì, hiện đúng câu
+ * "Admin chưa tải hoá đơn điện kỳ 9/2026 của nhà này lên hệ thống". Việc thì có thật,
+ * mà cả hai bên đều tin là mình đúng.
+ *
+ * Đây là nguồn sự thật của app quản lý cho kỳ điện/nước — đổi ở đây là đổi cho mọi màn.
+ */
+export const currentPeriod = (now: Date = serverNow()) => {
+  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return { month: d.getMonth() + 1, year: d.getFullYear() };
+};
+
+/** Cùng kỳ đó ở dạng `yyyy-MM` — dạng BE nhận cho các API ghi chỉ số. */
+export const currentPeriodIso = (now: Date = serverNow()): string => {
+  const { month, year } = currentPeriod(now);
+  return `${year}-${String(month).padStart(2, '0')}`;
+};
+
+/**
+ * CHUẨN HOÁ mọi kiểu chuỗi kỳ về `yyyy-MM` — dạng DUY NHẤT máy chủ hiểu.
+ *
+ * BUG 02/09/2026 — vì sao cần: thông báo của BE gắn kèm `params.period` lấy thẳng từ
+ * `bill.getBillingPeriod()`, tức chuỗi HIỂN THỊ cho người đọc (`"01/08 – 31/08/2026"`).
+ * Màn hình nhận deep-link đem nguyên chuỗi đó gọi API. `ContractBillingCalendar
+ * .parsePeriod` chỉ nhận `yyyy-MM`, `MM/yyyy` hoặc `yyyy/M`, gặp chuỗi kia thì trả rỗng
+ * và **lặng lẽ rơi về `YearMonth.now()`** — hỏi kỳ tháng 9 trong khi thông báo nói về
+ * tháng 8. Danh sách rỗng, màn hình khoe "Đã chụp đủ" đúng lúc vừa báo phải đi chụp.
+ *
+ * Lấy tháng ở mốc ĐẦU kỳ, không phải cuối: chu kỳ chốt số thật của EVN vắt qua hai
+ * tháng (`07/08/2026 – 06/09/2026`) nhưng admin lưu bản ghi vào tháng 8 — mốc đầu mới
+ * là cái khớp với `bill.month`. Năm thì lấy ở mốc cuối, vì đầu kỳ hay được lược năm.
+ */
+export const toPeriodKey = (raw?: string | null, now: Date = serverNow()): string => {
+  const s = (raw ?? '').trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+
+  const monthOnly = s.match(/^tháng\s*(\d{1,2})\s*\/\s*(\d{4})$/i);
+  if (monthOnly) return `${monthOnly[2]}-${monthOnly[1].padStart(2, '0')}`;
+
+  // Mốc đầu kỳ có thể lược năm ("01/08 – 31/08/2026") → mượn năm của mốc cuối.
+  const start = s.match(/(\d{1,2})\/(\d{1,2})/);
+  const year = s.match(/\d{4}/g)?.slice(-1)[0];
+  if (start && year) return `${year}-${start[2].padStart(2, '0')}`;
+
+  return currentPeriodIso(now);
+};
 
 /**
  * Còn gửi được hoá đơn điện/nước không.

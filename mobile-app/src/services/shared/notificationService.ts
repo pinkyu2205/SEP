@@ -112,6 +112,28 @@ const normalizeType = (row: BeNotificationRow): string => {
       case 'MAINTENANCE_CANCELLED': return 'maintenance_cancelled';
       case 'MAINTENANCE_REJECTED_BY_TENANT': return 'maintenance_rejected';
       case 'MAINTENANCE_AUTO_CONFIRMED': return 'maintenance_resolved';
+
+      /*
+       * ─── Luồng bảo trì dựng lại 01/09/2026 (nhánh Long) ────────────────────
+       * Năm type mới, KHÔNG cái nào có ở đây trước đó nên tất cả rơi xuống
+       * `default` → icon 👷 xanh "đã tiếp nhận". Nghĩa là hai tin nặng nhất của
+       * cả luồng — "lỗi do khách thuê" và "quá hạn tự sửa" — hiện ra dịu như một
+       * cập nhật trạng thái bình thường. Đúng cái bẫy mà `MAINTENANCE_COMPLETED`
+       * ngay trên đã phải tách riêng để tránh.
+       */
+      // Kết luận bất lợi: khách chịu lỗi và sẽ phải trả tiền sửa.
+      case 'MAINTENANCE_TENANT_FAULT': return 'maintenance_rejected';
+      // Khách PHẢI tự đi sửa, CÓ HẠN — cùng nhóm với "đã sửa xong, vui lòng xác
+      // nhận": việc đang chờ chính khách làm.
+      case 'MAINTENANCE_SELF_REPAIR_ASSIGNED': return 'maintenance_confirm';
+      // Đã quá hạn tự sửa. KHÔNG gộp vào `maintenance_rejected` (↩️ "bị từ chối") —
+      // hai chuyện khác hẳn nhau, đọc nhãn kia là hiểu sai việc phải làm.
+      case 'MAINTENANCE_SELF_REPAIR_OVERDUE': return 'maintenance_overdue';
+      // Khách đã nộp kết quả tự sửa, đang chờ duyệt — trạng thái trung tính.
+      case 'MAINTENANCE_SELF_REPAIR_SUBMITTED': return 'maintenance_accepted';
+      // Hoá đơn bồi thường đã phát hành — đúng việc `maintenance_cost` sinh ra.
+      case 'MAINTENANCE_CHARGE_ISSUED': return 'maintenance_cost';
+
       default: return 'maintenance_accepted'; // type bảo trì BE thêm sau — vẫn đúng tab
     }
   }
@@ -131,6 +153,39 @@ const normalizeType = (row: BeNotificationRow): string => {
    * BE sửa lại câu chữ một lần là thông báo rơi xuống nhóm "Hệ thống".
    */
   if (raw.startsWith('RECEPTION_')) return 'contract_assigned';
+  /**
+   * `CONTRACT_EXPIRING` (BE 01/09/2026) — cron nhắc D-30 / D-15 / D-7 / D-1 / D-0.
+   *
+   * PHẢI xét trước nhánh `raw.includes('CONTRACT')` bên dưới, nếu không nó rơi vào
+   * `contract_assigned` — nhóm "được giao đón khách MỚI", icon chào mừng. Tin báo hợp
+   * đồng sắp hết hạn mà nằm đó thì vừa sai nhóm khi lọc tab, vừa đọc ngược nghĩa: khách
+   * sắp phải dọn đi lại thấy một thông báo trông như vừa nhận nhà.
+   *
+   * Hai UI type `contract_expiring` / `contract_expired` đã có sẵn từ trước (đúng nhóm
+   * "Hợp đồng", màu vàng và đỏ) — chỉ là chưa có đường nào sinh ra chúng.
+   *
+   * BE dùng CHUNG một type cho cả 5 mốc, chỉ khác câu chữ, nên mốc D-0 phải nhận ra qua
+   * tiêu đề. Regex hỏng thì rơi về `contract_expiring` — vẫn đúng nhóm, chỉ mất sắc đỏ,
+   * nên không lặp lại được cái bẫy của nhánh `RECEPTION_` ngay trên.
+   */
+  /** `CONTRACT_EXTENDED` / `_MANAGER` — vừa gia hạn xong, thuộc nhóm Hợp đồng chứ không
+   *  phải "đón khách mới". Xét cùng chỗ với CONTRACT_EXPIRING, cùng lý do. */
+  if (raw.startsWith('CONTRACT_EXTENDED')) return 'contract_expiring';
+  /**
+   * `CONTRACT_ACTIVATED` — "🎉 Hợp đồng đã kích hoạt", BE gửi cho KHÁCH THUÊ sau khi đủ
+   * hai chữ ký OTP (luồng dual-OTP, `TenantOnboardingServiceImpl` ≈ dòng 977).
+   *
+   * Không có nhánh riêng thì nó rơi vào `contract_assigned` — mà đó là khái niệm của
+   * QUẢN LÝ ("bạn được giao đi đón khách"), màn thông báo của khách không khai báo type
+   * đó nên tin rớt xuống nhóm "Hệ thống" với icon 🔔. Tin vui nhất của cả luồng onboard
+   * lại là tin khó tìm nhất.
+   *
+   * `tenant_onboarded` (🏠 xanh · nhóm "Nhận phòng") mới đúng chỗ của nó.
+   */
+  if (raw === 'CONTRACT_ACTIVATED') return 'tenant_onboarded';
+  if (raw === 'CONTRACT_EXPIRING') {
+    return /hôm nay/i.test(row.title) ? 'contract_expired' : 'contract_expiring';
+  }
   // Gán đón khách / hợp đồng (assign-manager, duyệt giá...) → mở ResumeContract.
   if (raw.includes('CONTRACT') || raw.includes('ASSIGN') || raw.includes('ONBOARD') ||
       /đón khách|hợp đồng/i.test(row.title)) {

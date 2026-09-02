@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
+import { serverNow } from '@/utils/serverTime';
+import { PropertyPicker } from '@/pages/onboarding/PropertyPicker';
 import type { PropertyResponse, MaintenanceEquipmentResponse } from '@/types/api.types';
 
 /**
@@ -68,7 +70,9 @@ const warrantyInfo = (d?: string): { label: string; cls: string } | null => {
   if (!d) return null;
   const exp = new Date(d).getTime();
   if (isNaN(exp)) return null;
-  const days = Math.ceil((exp - Date.now()) / 86_400_000);
+  // Giờ SERVER, không phải giờ máy — máy lệch ngày là thiết bị còn bảo hành bị ghi
+  // "Hết bảo hành", mà đó là con số quyết định gọi bảo hành hay tự bỏ tiền sửa.
+  const days = Math.ceil((exp - serverNow().getTime()) / 86_400_000);
   if (days < 0) return { label: 'Hết bảo hành', cls: 'bg-slate-100 text-slate-500' };
   if (days <= 30) return { label: `BH còn ${days} ngày`, cls: 'bg-amber-100 text-amber-700' };
   return { label: 'Còn bảo hành', cls: 'bg-emerald-100 text-emerald-700' };
@@ -103,13 +107,13 @@ export const EquipmentCatalogPage = () => {
   // Tải danh sách bất động sản
   useEffect(() => {
     let active = true;
-    propertyService.getProperties(0, 200)
+    propertyService.getAllProperties()
       .then(page => {
         if (!active) return;
         // Admin quản trị toàn hệ thống nên KHÔNG lọc theo trạng thái duyệt của Host.
         // Bản dùng cho Host trước đây lọc `isHostApproved`, áp vào đây sẽ giấu mất các
         // căn đang PENDING_HOST_REVIEW / nháp — đúng thứ admin cần thao tác nhất.
-        const list = page.content ?? [];
+        const list = page ?? [];
         setProperties(list);
         if (list.length > 0) setPropertyId(list[0].id);
       })
@@ -143,6 +147,10 @@ export const EquipmentCatalogPage = () => {
   }, [equipments]);
 
   const disabledCount = useMemo(() => equipments.filter(isDisabled).length, [equipments]);
+
+  /** Số chip tình trạng THẬT SỰ dựng ra (không tính chip "Tất cả"). */
+  const statusChipCount =
+    STATUS_ORDER.filter(s => (statusCounts[s] ?? 0) > 0).length + (disabledCount > 0 ? 1 : 0);
 
   const filtered = useMemo(() => {
     const kw = search.toLowerCase();
@@ -189,6 +197,20 @@ export const EquipmentCatalogPage = () => {
     });
   const clearSelection = () => setSelected(new Set());
 
+  /** Toàn bộ thiết bị in được TRONG BỘ LỌC hiện tại — thiết bị đã gỡ không in tem. */
+  const printableAll = useMemo(() => filtered.filter(e => !isDisabled(e)), [filtered]);
+  const allPrintableSelected =
+    printableAll.length > 0 && printableAll.every(e => selected.has(e.id));
+  const toggleAll = () =>
+    setSelected(prev => {
+      if (allPrintableSelected) {
+        const next = new Set(prev);
+        printableAll.forEach(e => next.delete(e.id));
+        return next;
+      }
+      return new Set([...prev, ...printableAll.map(e => e.id)]);
+    });
+
   // Tem cần in: nếu có chọn -> in mục đã chọn; nếu không -> in toàn bộ đang lọc.
   // Luôn loại thiết bị đã gỡ (DISABLED) khỏi tem in.
   const toPrint = (selected.size > 0
@@ -228,24 +250,34 @@ export const EquipmentCatalogPage = () => {
               className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-primary-600 rounded-xl hover:bg-primary-700 disabled:opacity-40 transition-colors"
             >
               <Printer className="w-4 h-4" />
-              {selected.size > 0 ? `In tem đã chọn (${selected.size})` : `In tất cả tem QR (${filtered.length})`}
+              {/* Đếm theo `toPrint`, KHÔNG phải `filtered`/`selected.size`.
+                  Thiết bị đã gỡ luôn bị loại khỏi tem, nên hai con số kia nói thừa:
+                  nhà có 10 món mà 2 món đã gỡ thì nút ghi "In tất cả tem QR (10)"
+                  trong khi máy in ra 8 tờ. */}
+              {selected.size > 0 ? `In tem đã chọn (${toPrint.length})` : `In tất cả tem QR (${toPrint.length})`}
             </button>
           </div>
         </div>
 
         {/* Bộ chọn nhà + tìm kiếm */}
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 flex flex-col md:flex-row gap-3">
-          <select
-            value={propertyId ?? ''}
-            onChange={e => setPropertyId(Number(e.target.value))}
-            className="input-field text-sm md:min-w-[280px]"
-            disabled={loadingProps}
-          >
-            {loadingProps && <option>Đang tải danh sách nhà…</option>}
-            {properties.map(p => (
-              <option key={p.id} value={p.id}>{p.propertyName} — {p.shortAddress}</option>
-            ))}
-          </select>
+          {/* Ô chọn nhà có TÌM KIẾM. Bản cũ là `<select>` trần: hệ thống vài chục
+              tới hàng trăm căn thì phải kéo danh sách xổ tìm bằng mắt, gõ chữ trong
+              select chỉ nhảy theo ký tự đầu. Dùng lại `PropertyPicker` của màn tạo
+              hợp đồng — bỏ dấu, lọc theo cả tên/địa chỉ/khu vực, đi bằng phím được. */}
+          <div className="md:min-w-[320px]">
+            {loadingProps ? (
+              <div className="input-field flex items-center gap-2 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" /> Đang tải danh sách nhà…
+              </div>
+            ) : (
+              <PropertyPicker
+                properties={properties}
+                value={propertyId != null ? String(propertyId) : ''}
+                onChange={(id) => setPropertyId(id ? Number(id) : null)}
+              />
+            )}
+          </div>
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
@@ -258,8 +290,11 @@ export const EquipmentCatalogPage = () => {
           </div>
         </div>
 
-        {/* Bộ lọc tình trạng */}
-        {equipments.length > 0 && (
+        {/* Bộ lọc tình trạng.
+            Cả nhà cùng một tình trạng thì hàng này chỉ còn "Tất cả 10" và "Mới 10" —
+            hai chip cùng một tập, cùng một số, bấm cái nào cũng ra y hệt. Ẩn đi,
+            không mất chức năng nào. */}
+        {equipments.length > 0 && statusChipCount > 1 && (
           <div className="flex flex-wrap items-center gap-2">
             <FilterChip
               label="Tất cả" count={equipments.length}
@@ -287,15 +322,25 @@ export const EquipmentCatalogPage = () => {
           </div>
         )}
 
-        {/* Tổng quan nhanh */}
+        {/* Tổng quan nhanh + chọn tất cả.
+            Bỏ tên nhà ở cuối dòng — nó đang lặp lại đúng cái vừa đọc trong ô chọn nhà
+            ngay phía trên. Thay bằng nút chọn toàn bộ: trước đây muốn in tem lẻ cho
+            cả nhà phải đi tick "Chọn phòng" từng phòng một. */}
         {selectedProperty && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <Package className="w-4 h-4 text-slate-400" />
             <span><strong className="text-slate-800">{filtered.length}</strong> thiết bị</span>
             <span className="text-slate-300">·</span>
             <span>{grouped.length} phòng/khu vực</span>
-            <span className="text-slate-300">·</span>
-            <span className="inline-flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selectedProperty.propertyName}</span>
+            {printableAll.length > 0 && (
+              <button
+                onClick={toggleAll}
+                className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 transition hover:text-primary-600"
+              >
+                {allPrintableSelected ? <CheckSquare className="w-3.5 h-3.5 text-primary-600" /> : <Square className="w-3.5 h-3.5" />}
+                {allPrintableSelected ? 'Bỏ chọn tất cả' : `Chọn tất cả ${printableAll.length} tem`}
+              </button>
+            )}
           </div>
         )}
 
@@ -373,8 +418,12 @@ export const EquipmentCatalogPage = () => {
                             {isSel ? <CheckSquare className="w-5 h-5 text-primary-600" /> : <Square className="w-5 h-5" />}
                           </button>
                         )}
+                        {/* QR thu nhỏ còn 40px. Nó là thứ để IN và DÁN, không phải thứ
+                            quét trên màn hình — để 56px đứng trước tên thì mỗi hàng cao
+                            hơn hẳn và mắt đập vào một ô đen vô nghĩa trước khi đọc được
+                            tên thiết bị. Cần xem to thì có nút "QR lớn" ở cuối hàng. */}
                         <button onClick={() => setQrModal(e)} className={`flex-shrink-0 ${removed ? 'opacity-40' : ''}`} title="Xem QR lớn">
-                          <QRCodeSVG value={qrPayload(e)} size={56} level="M" className="rounded-lg border border-slate-200" />
+                          <QRCodeSVG value={qrPayload(e)} size={40} level="M" className="rounded border border-slate-200" />
                         </button>
                         <div className={`flex-1 min-w-0 ${removed ? 'opacity-70' : ''}`}>
                           <p className="font-semibold text-slate-900 truncate">{equipName(e)}</p>
@@ -417,6 +466,41 @@ export const EquipmentCatalogPage = () => {
               </div>
             );
           })
+        )}
+
+        {/* Thanh chọn nổi ở đáy.
+            Chọn tem là việc làm DỌC cả trang: tick vài món ở phòng 101, cuộn xuống
+            phòng 305 tick tiếp — rồi phải cuộn ngược lên tận đầu trang mới bấm In
+            được, mà trên đường về dễ bấm nhầm làm mất hết lựa chọn. */}
+        {selected.size > 0 && (
+          <>
+            {/* Chừa chỗ: thanh dưới là `fixed` nên sẽ đè lên đáy danh sách. */}
+            <div aria-hidden className="h-20" />
+            <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
+              <div className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white shadow-2xl">
+                <span className="flex items-center gap-2 text-sm font-bold">
+                  <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-white px-1.5 text-xs font-black text-slate-900">
+                    {toPrint.length}
+                  </span>
+                  tem đã chọn
+                </span>
+                <span className="h-5 w-px bg-slate-700" />
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-2 rounded-xl bg-primary-600 px-3.5 py-2 text-sm font-bold text-white transition hover:bg-primary-700"
+                >
+                  <Printer className="h-4 w-4" /> In tem đã chọn
+                </button>
+                <button
+                  onClick={clearSelection}
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+                  title="Bỏ chọn tất cả"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 

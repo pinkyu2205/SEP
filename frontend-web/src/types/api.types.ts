@@ -165,6 +165,14 @@ export interface PropertyDraftRequest {
 export interface PropertyResponse {
   id: number;
   propertyName: string;
+  /**
+   * Mã nhà DUY NHẤT (BE 01/09/2026) — vd "mtx#124". BE lưu ở dạng chữ thường.
+   *
+   * Không đổi khi sửa `propertyName`, nên đây mới là khoá đáng tin để khớp dữ liệu
+   * ngoài vào nhà (xem `utils/zipUtilityBills`). Optional vì bản ghi cũ chưa backfill
+   * xong vẫn có thể trả về rỗng.
+   */
+  propertyCode?: string;
   shortAddress: string;
   fullAddress: string;
   descriptions?: string;

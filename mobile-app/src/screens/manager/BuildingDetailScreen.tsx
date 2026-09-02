@@ -34,7 +34,7 @@ const QUICK_ACTIONS = [
   // (getBuildingOps/getPropertyById) nên mở ra là trắng trơn + "Tổng phải thu 0đ".
   // Màn thật là BuildingBilling — nối API và đã dùng ở nơi khác.
   { emoji: '🧾', label: 'Thu tiền', desc: 'Hoá đơn', route: 'BuildingBilling', color: '#F59E0B' },
-  { emoji: '⚡', label: 'Chốt số', desc: 'Điện nước', route: 'UtilityBilling', color: Colors.accent },
+  { emoji: '⚡', label: 'Ghi điện nước', desc: 'Chụp công tơ', route: 'UtilityBilling', color: Colors.accent },
   { emoji: '🔧', label: 'Bảo trì', desc: 'Sửa chữa', route: 'BuildingMaintenance', color: '#EF4444' },
   { emoji: '🏠', label: 'Phòng', desc: 'Quản lý', route: 'RoomManage', color: Colors.success },
   { emoji: '📋', label: 'Hợp đồng', desc: 'HĐ thuê', route: 'BuildingContract', color: Colors.info },

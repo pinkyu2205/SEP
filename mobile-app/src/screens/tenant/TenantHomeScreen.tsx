@@ -34,11 +34,20 @@ const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string
  *
  * Bỏ 4 ô trùng thì còn đúng 4 lối tắt thật, vừa một hàng, không cần đóng/mở gì nữa.
  */
+/*
+ * Ô "Bàn giao" đã BỎ 01/09/2026 cùng với màn `TenantOnboardingScreen`.
+ *
+ * Biên bản bàn giao nay nằm ngay trong màn nhập OTP lúc đón khách — khách xem chỉ số
+ * điện nước và ảnh hiện trạng RỒI mới tick, một lần ký thay vì hai. Trước đây phải xác
+ * nhận lần hai ở màn riêng, sau khi đã dọn vào ở, nên lần đó thành thủ tục cho có.
+ *
+ * Tra cứu lại về sau (đối chiếu chỉ số gốc trước lúc trả phòng) vẫn còn nguyên đường:
+ * màn CHI TIẾT HỢP ĐỒNG ở tab Hợp đồng cũng nạp và hiển thị đúng khối `handover` này.
+ */
 const QUICK_ACTIONS = [
-  { emoji: '📱', label: 'Thiết bị',   route: 'RoomEquipment',    color: '#0EA5E9'      },
-  { emoji: '📷', label: 'Quét QR',    route: 'Scan',             color: Colors.accent  },
-  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory',   color: Colors.success },
-  { emoji: '🏠', label: 'Bàn giao',   route: 'TenantOnboarding', color: Colors.info    },
+  { emoji: '📱', label: 'Thiết bị',   route: 'RoomEquipment',  color: '#0EA5E9'      },
+  { emoji: '📷', label: 'Quét QR',    route: 'Scan',           color: Colors.accent  },
+  { emoji: '💳', label: 'Lịch sử TT', route: 'PaymentHistory', color: Colors.success },
 ];
 
 // ── Component ──────────────────────────────────────────────

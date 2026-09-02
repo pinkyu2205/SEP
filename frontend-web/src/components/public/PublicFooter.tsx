@@ -4,6 +4,7 @@ import { BrandMark } from '@/components/common/BrandLogo';
 import { ROUTES } from '@/utils/routes';
 import { COMPANY, CONTACT } from '@/utils/constants';
 import { telHref } from '@/utils/helpers';
+import { serverNow } from '@/utils/serverTime';
 
 const QUICK_LINKS = [
   { label: 'Trang chủ', to: ROUTES.HOME },
@@ -70,7 +71,7 @@ export const PublicFooter = () => {
         </div>
 
         <div className="mt-12 border-t border-white/10 pt-6 text-center text-xs text-slate-500">
-          © {new Date().getFullYear()} {COMPANY.name}. Bảo lưu mọi quyền.
+          © {serverNow().getFullYear()} {COMPANY.name}. Bảo lưu mọi quyền.
         </div>
       </div>
     </footer>

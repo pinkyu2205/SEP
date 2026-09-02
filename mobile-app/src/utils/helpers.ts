@@ -18,9 +18,21 @@ import { serverNow } from './serverTime';
  * của khách thuê. Chỗ ép kiểu dữ liệu về số nằm ở `toSharedBill` (billingService.ts);
  * hàm này là lưới an toàn cuối cùng cho những đường chưa đi qua mapper đó.
  */
+/**
+ * Tiền VND — LUÔN làm tròn về đồng, không bao giờ hiện phần thập phân.
+ *
+ * BUG 02/09/2026: `toLocaleString('vi-VN')` giữ tới 3 chữ số thập phân, nên một khoản
+ * nợ ra `428.300,66 đ`. Đồng Việt Nam không có đơn vị nhỏ hơn — con số đó không tồn tại
+ * ngoài đời, và dấu phẩy còn dễ bị đọc nhầm thành dấu phân nhóm nghìn.
+ *
+ * Số lẻ tới từ đơn giá điện/nước: máy chủ giữ đơn giá ở scale 8 (3126.2822…) để nhân
+ * cho chính xác, nên `tiêu thụ × đơn giá` gần như luôn ra số lẻ. Làm tròn ở ĐÂY thay vì
+ * đi sửa từng chỗ cộng dồn: chỗ hiển thị chỉ có một, còn chỗ tính thì rải khắp nơi và
+ * sót một chỗ là lại lòi ra xu.
+ */
 export const formatCurrency = (amount: number | null | undefined): string => {
   const n = Number(amount);
-  return (Number.isFinite(n) ? n : 0).toLocaleString('vi-VN') + ' đ';
+  return Math.round(Number.isFinite(n) ? n : 0).toLocaleString('vi-VN') + ' đ';
 };
 
 /**

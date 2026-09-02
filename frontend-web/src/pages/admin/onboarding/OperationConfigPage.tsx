@@ -859,8 +859,8 @@ export const CauHinhKhaiThacPage = () => {
   const fetchList = async () => {
     setLoading(true);
     try {
-      const res = await propertyService.getProperties(0, 100);
-      setBuildings(res.content);
+      const res = await propertyService.getAllProperties();
+      setBuildings(res);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

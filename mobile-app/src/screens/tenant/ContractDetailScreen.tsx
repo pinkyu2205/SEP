@@ -48,7 +48,7 @@ export const ContractDetailScreen: React.FC = () => {
 
   // Ảnh chỉ số điện/nước + hiện trạng nhà lúc đón khách — chỉ áp dụng cho HĐ đang
   // ACTIVE (BE trả lỗi cho HĐ draft/pending/terminated), nên bỏ qua lỗi lặng lẽ
-  // (ẩn section) thay vì Alert như biên bản bàn giao đầy đủ (TenantOnboardingScreen).
+  // (ẩn section) thay vì Alert — mục này là phụ, không chặn việc xem hợp đồng.
   useEffect(() => {
     if (!contract || (contract.status !== 'active' && contract.status !== 'expiring_soon')) {
       setHandover(null);

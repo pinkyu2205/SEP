@@ -17,11 +17,21 @@ const HOME_ROUTE = 'ManagerHome';
 const PROFILE_ROUTE = 'ManagerProfile';
 const FEATURE_ROUTES = ['BuildingList', 'ManagerBilling', 'ManagerMaintenance'];
 
+/**
+ * ─── Badge đã BỎ 01/09/2026 ──────────────────────────────────────────────────
+ * Ba tab từng mang số CỨNG (`badge: 6 / 7 / 4`) — không đếm gì, mọi quản lý đều thấy
+ * đúng ba con số đó mãi mãi. Và chúng chỉ hiện khi `focused`, tức chỉ thấy sau khi đã
+ * bấm vào tab: badge sinh ra để bảo người ta đi đâu, hiện lúc đã tới nơi thì vô nghĩa.
+ *
+ * Bỏ hẳn thay vì nối số thật: hai tab "Hoá đơn"/"Bảo trì" của quản lý gom việc của
+ * NHIỀU nhà, "cần xử lý" là bao nhiêu thì phải chốt nghiệp vụ trước — số bịa còn tệ
+ * hơn không có số. Cần thì dựng lại theo kiểu `useTenantTabBadges`.
+ */
 const TAB_META: Record<string, { label: string; icon: string; badge?: number }> = {
-  ManagerHome: { label: 'Tổng quan', icon: '📊', badge: 6 },
+  ManagerHome: { label: 'Tổng quan', icon: '📊' },
   BuildingList: { label: 'Tòa nhà', icon: '🏢' },
-  ManagerBilling: { label: 'Hóa đơn', icon: '🧾', badge: 7 },
-  ManagerMaintenance: { label: 'Bảo trì', icon: '🔧', badge: 4 },
+  ManagerBilling: { label: 'Hóa đơn', icon: '🧾' },
+  ManagerMaintenance: { label: 'Bảo trì', icon: '🔧' },
   ManagerProfile: { label: 'Tài khoản', icon: '👤' },
 };
 

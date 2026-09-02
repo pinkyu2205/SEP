@@ -39,7 +39,6 @@ import { ContractConfirmScreen } from '@/screens/tenant/ContractConfirmScreen';
 import { MaintenanceCreateScreen } from '@/screens/tenant/MaintenanceCreateScreen';
 import { MaintenanceDetailScreen } from '@/screens/tenant/MaintenanceDetailScreen';
 import { PaymentHistoryScreen } from '@/screens/tenant/PaymentHistoryScreen';
-import { TenantOnboardingScreen } from '@/screens/tenant/TenantOnboardingScreen';
 import { TenantNotificationScreen } from '@/screens/tenant/TenantNotificationScreen';
 import { ScanScreen } from '@/screens/tenant/ScanScreen';
 import { MaintenanceHistoryScreen } from '@/screens/tenant/MaintenanceHistoryScreen';
@@ -174,11 +173,6 @@ export const RootNavigator: React.FC = () => {
               name="PaymentHistory"
               component={PaymentHistoryScreen}
               options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="TenantOnboarding"
-              component={TenantOnboardingScreen}
-              options={{ animation: 'slide_from_bottom' }}
             />
             <Stack.Screen
               name="TenantNotifications"

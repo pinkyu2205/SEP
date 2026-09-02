@@ -45,14 +45,14 @@ const QUICK_ACTIONS = [
   { emoji: '🚪', label: 'Tiễn khách',     route: 'CheckoutRequests',      color: Colors.error   },
   // Mọi khoản thu ngoài tiền nhà (cọc, bảo trì, điện nước) — tách khỏi tab Hoá đơn để
   // hai việc không lẫn vào nhau.
-  { emoji: '💳', label: 'Thu & Đối soát', route: 'ManagerPaymentHistory', color: Colors.info    },
+  { emoji: '💳', label: 'Tiền khách đã trả', route: 'ManagerPaymentHistory', color: Colors.info    },
   // "Cần chụp số" từng ở đây, nay chuyển xuống "Cần xử lý": nó là một VIỆC có hạn và có
   // số lượng, không phải một nơi để đi tới. Ở lưới này nó chiếm chỗ cố định dù hầu hết
   // thời gian đếm bằng 0; ở dưới kia nó chỉ hiện khi thật sự còn phòng chưa chụp, và hiện
   // kèm số — nên khó lỡ hơn hẳn.
 
   // — Hàng 2: định kỳ và tra cứu —
-  { emoji: '⚡', label: 'Chốt số',        route: 'UtilityBilling',        color: Colors.accent  },
+  { emoji: '⚡', label: 'Ghi điện nước',    route: 'UtilityBilling',        color: Colors.accent  },
   { emoji: '👥', label: 'Khách thuê',     route: 'TenantList',            color: Colors.primary },
   { emoji: '📋', label: 'Hợp đồng',       route: 'ManagerContracts',      color: Colors.info    },
   { emoji: '📦', label: 'Thiết bị',       route: 'Equipment',             color: Colors.textSecondary },
@@ -830,7 +830,7 @@ const s = StyleSheet.create({
   /**
    * Nhãn chừa sẵn chỗ cho ĐÚNG 2 dòng (`minHeight = 2 × lineHeight`).
    *
-   * Ép 1 dòng thì "Thu & Đối soát" bị cắt thành "Thu & Đối so…" — ô rộng khoảng 78px, ở
+   * Ép 1 dòng thì nhãn dài như "Tiền khách đã trả" bị cắt cụt — ô rộng khoảng 78px, ở
    * cỡ 11px chỉ chứa nổi ~11 ký tự. Còn để 2 dòng mà không khoá chiều cao thì ô nào nhãn
    * dài sẽ cao hơn hẳn các ô cùng hàng, lưới xô lệch.
    */

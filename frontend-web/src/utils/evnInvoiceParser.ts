@@ -122,3 +122,69 @@ export const monthPeriod = (offset = 0, base = serverNow()) => {
   const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
   return `01/${mm} – ${lastDay}/${mm}/${d.getFullYear()}`;
 };
+
+/**
+ * KỲ TIÊU THỤ mặc định của hoá đơn điện/nước = THÁNG TRƯỚC.
+ *
+ * Hai loại tiền trong hệ thống chạy ngược chiều nhau:
+ *   • Tiền nhà/phòng **trả trước** — tháng 9 khách đóng là đóng cho tháng 9.
+ *   • Điện/nước **trả sau**  — tháng 9 khách đóng là đóng cho tháng 8, vì phải hết tháng
+ *     8 công tơ mới chốt được và nhà cung cấp mới ra giấy.
+ *
+ * Nên màn phát hành điện/nước mở ra giữa tháng 9 thì kỳ đang làm là **tháng 8**. Mặc định
+ * vào tháng hiện tại là mời admin dán số của tháng 8 vào một bản ghi mang nhãn tháng 9:
+ * `month`/`year` là khoá máy chủ chặn trùng kỳ, nên tháng 8 thật sau đó không phát hành
+ * được nữa, còn hoá đơn khách nhận thì ghi sai kỳ.
+ */
+export const arrearsPeriod = (base = serverNow()): { month: number; year: number } => {
+  const d = new Date(base.getFullYear(), base.getMonth() - 1, 1);
+  return { month: d.getMonth() + 1, year: d.getFullYear() };
+};
+
+const daysInMonth = (month: number, year: number) => new Date(year, month, 0).getDate();
+
+/**
+ * KỲ HOÁ ĐƠN CÓ ĐỌC ĐƯỢC KHÔNG. Trả câu báo lỗi, hoặc `null` khi hợp lệ.
+ *
+ * Ô kỳ là chữ tự do vì kỳ thật của điện/nước là chu kỳ chốt số (07/08 – 06/09), không
+ * trùng tháng dương lịch — nên không ép được thành hai ô ngày. Nhưng chữ tự do nghĩa là
+ * gõ thừa một số cũng không ai chặn: `30/09/20226` trông gần đúng, mà đó là khoá quản lý
+ * đối chiếu và khoá máy chủ chặn trùng kỳ. Sai thì phải thu hồi hoá đơn đã gửi cho khách.
+ *
+ * Nhận đúng ba dạng đang có thật trong hệ thống:
+ *   • `01/09 – 30/09/2026`            — kỳ trọn tháng (`monthPeriod`)
+ *   • `07/04/2022 – 06/05/2022`       — chu kỳ chốt số, cả hai đầu đủ năm (OCR đọc ra)
+ *   • `Tháng 5/2022`                  — đường lui của parser khi giấy không in dải ngày
+ */
+export const periodProblem = (raw: string): string | null => {
+  const s = (raw || '').trim().replace(/[–—-]/g, '–').replace(/\s+/g, ' ');
+  if (!s) return 'Chưa có kỳ';
+
+  const monthOnly = s.match(/^tháng\s*(\d{1,2})\s*\/\s*(\d{4})$/i);
+  if (monthOnly) {
+    return Number(monthOnly[1]) >= 1 && Number(monthOnly[1]) <= 12
+      ? null : 'Tháng phải từ 1 đến 12';
+  }
+
+  const range = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*–\s*(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!range) return 'Định dạng lạ — cần dạng "01/09 – 30/09/2026"';
+
+  const [, d1, m1, y1, d2, m2, y2] = range;
+  // Đầu kỳ được phép lược năm ("01/09 – 30/09/2026") → mượn năm của cuối kỳ.
+  const start = { d: Number(d1), m: Number(m1), y: Number(y1 ?? y2) };
+  const end = { d: Number(d2), m: Number(m2), y: Number(y2) };
+
+  for (const p of [start, end]) {
+    if (p.m < 1 || p.m > 12) return 'Tháng phải từ 1 đến 12';
+    if (p.d < 1 || p.d > daysInMonth(p.m, p.y)) {
+      return `Ngày ${p.d}/${p.m} không có thật`;
+    }
+  }
+
+  const a = new Date(start.y, start.m - 1, start.d).getTime();
+  const b = new Date(end.y, end.m - 1, end.d).getTime();
+  if (b <= a) return 'Cuối kỳ phải sau đầu kỳ';
+  // Kỳ điện/nước dài nhất cũng chỉ hơn một tháng — dài hơn nghĩa là gõ nhầm năm.
+  if (b - a > 70 * 86_400_000) return 'Kỳ dài bất thường — kiểm lại năm';
+  return null;
+};

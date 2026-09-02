@@ -53,9 +53,48 @@ export const propertyService = {
     return api.get(`${BASE}/${id}`);
   },
 
-  /** GET /properties — Phân trang */
+  /** GET /properties — Phân trang. Cần LẤY HẾT thì dùng `getAllProperties()`. */
   getProperties: (page: number = 0, size: number = 10): Promise<Page<PropertyResponse>> => {
     return api.get(BASE, { params: { page, size } });
+  },
+
+  /**
+   * TẤT CẢ bất động sản — tự lật hết trang, không cắt cụt.
+   *
+   * ─── Vì sao cần (30/08/2026) ─────────────────────────────────────────────
+   * Trước đây mỗi màn tự gọi `getProperties(0, N)` với N mỗi nơi một kiểu: 100 ở
+   * trang Bất động sản và Quản lý vận hành, 200 ở Hợp đồng / Khách thuê / Tài chính /
+   * Báo cáo / Khu vực, 500 ở Bảng điều hành admin / Lương quản lý / Cấu hình giá.
+   *
+   * Con số N là một PHỎNG ĐOÁN về việc hệ thống sẽ có bao nhiêu nhà, và phỏng đoán đó
+   * không có gì bảo vệ: vượt ngưỡng thì danh sách thiếu nhà mà màn hình vẫn vẽ bình
+   * thường, không cảnh báo, không dấu hiệu. Tệ hơn là mỗi trang đoán một số khác nhau
+   * nên cùng một căn có thể "tồn tại" ở trang này và "không tồn tại" ở trang kia —
+   * đúng loại lỗi vừa làm hỏng lối đi giữa Khách thuê và Hợp đồng (xem
+   * `hostService.listAllContracts`).
+   *
+   * Giống `listAllContracts`: lấy trang đầu để biết tổng số trang, phần còn lại gọi
+   * song song, chặn ở `MAX_PAGES` phòng khi BE trả `totalPages` sai.
+   */
+  getAllProperties: async (): Promise<PropertyResponse[]> => {
+    const MAX_PAGES = 10;
+    const SIZE = 500;
+
+    const first = await propertyService.getProperties(0, SIZE);
+    const out = [...(first.content ?? [])];
+    const pages = Math.min(first.totalPages ?? 1, MAX_PAGES);
+    if (pages <= 1) return out;
+
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) =>
+        propertyService.getProperties(i + 1, SIZE)
+          .then((r) => r.content ?? [])
+          // Hỏng một trang thì thiếu phần đó còn hơn hỏng cả màn hình.
+          .catch(() => [] as PropertyResponse[]),
+      ),
+    );
+    rest.forEach((chunk) => out.push(...chunk));
+    return out;
   },
 
   /** PUT /properties/{id} — Cập nhật thông tin cơ bản */

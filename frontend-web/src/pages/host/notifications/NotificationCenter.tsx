@@ -10,6 +10,16 @@ import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
   APPROVAL_NEEDED: 'approval_needed',
   CONTRACT_EXPIRY: 'contract_expiry',
+  /**
+   * `CONTRACT_EXPIRING` — cron nhắc HĐ KHÁCH THUÊ sắp hết hạn (BE 01/09/2026); host nhận
+   * ở mốc D-30 và D-0.
+   *
+   * Khác đúng một chữ G so với `CONTRACT_EXPIRY` ngay trên, mà tra map là tra CHÍNH XÁC
+   * khoá — nên nó rơi vào fallback `approval_needed`, hiện thành "Chờ phê duyệt" với icon
+   * bảng kiểm. Host đọc vào tưởng có hồ sơ đang chờ mình duyệt, trong khi thực tế là một
+   * căn sắp trống cần đi tìm khách mới.
+   */
+  CONTRACT_EXPIRING: 'contract_expiry',
   MASTER_LEASE_EXPIRY: 'contract_expiry',
   UNPAID_INVOICE: 'unpaid_invoice',
   MAINTENANCE_DELAY: 'maintenance_delay',

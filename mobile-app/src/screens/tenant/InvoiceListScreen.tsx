@@ -572,8 +572,22 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg, paddingBottom: Spacing.sm,
   },
   groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginRight: 6 },
-  groupTotal:   { fontSize: 13, fontWeight: '800', color: Colors.textSecondary },
-  groupPaidOff: { fontSize: 12, fontWeight: '700', color: Colors.success },
+  /*
+    SỐ CÒN NỢ là thứ khách mở màn này ra để tìm, nên nó phải là chỗ sáng nhất của dòng.
+    Trước đó nó dùng `textSecondary` — cùng tông xám với số đếm bên trái, tức là chìm
+    ngang với thông tin phụ. Cho vào viên nền đỏ nhạt: nổi mà không hét như chữ đỏ trần.
+  */
+  groupTotal: {
+    fontSize: 13, fontWeight: '900', color: '#B91C1C',
+    backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA',
+    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 3,
+    overflow: 'hidden',
+  },
+  groupPaidOff: {
+    fontSize: 12, fontWeight: '800', color: '#047857',
+    backgroundColor: '#ECFDF5', borderRadius: BorderRadius.full,
+    paddingHorizontal: 10, paddingVertical: 3, overflow: 'hidden',
+  },
   groupCount: {
     fontSize: 12, fontWeight: '700', color: Colors.textSecondary,
     backgroundColor: Colors.background, borderRadius: BorderRadius.full,

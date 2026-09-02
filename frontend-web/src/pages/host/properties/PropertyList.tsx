@@ -1,15 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, Building2, DoorOpen, Home, RefreshCw, Wallet,
+  AlertCircle, Building2, DoorClosed, Home, KeyRound, RefreshCw, Wallet,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
+import { monthLabel } from '@/utils/period';
+import { useServerPeriod } from '../shared';
 import {
   usePropertyListFilters, isHostApproved, formatVnd, type RoomPriceRange,
 } from './propertyListState';
+import { useHostPropertyStatus } from './propertyOperationStatus';
 import {
-  StatTile, PendingApprovalPanel, FilterToolbar, ResultBar,
+  StatTile, PendingApprovalPanel, FilterToolbar, ResultBar, BillSourceNote,
   PropertyCard, PropertyTable, ListPagination,
 } from './PropertyListParts';
 
@@ -26,12 +29,12 @@ export const PropertyList = () => {
     setLoadError(false);
     try {
       const [res, mgrs] = await Promise.all([
-        propertyService.getProperties(0, 100),
+        propertyService.getAllProperties(),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
       ]);
       // Patch operationManagerName nếu BE chưa trả (mục 6 NOTE-CHO-TEAM-BE.md)
       const mgrsMap = new Map(mgrs.map(m => [m.id, m.fullName || m.username]));
-      const content = res.content.map(p =>
+      const content = res.map(p =>
         p.operationManagerId && !p.operationManagerName
           ? { ...p, operationManagerName: mgrsMap.get(p.operationManagerId) }
           : p
@@ -54,27 +57,74 @@ export const PropertyList = () => {
   // Chỉ hiện nhà Host đã duyệt thành công — xem isHostApproved().
   const active = useMemo(() => properties.filter(isHostApproved), [properties]);
 
-  const f = usePropertyListFilters(active);
+  /** Kỳ đang xem cho phần thu tiền. Khai thác không phụ thuộc kỳ (luôn là hiện tại). */
+  /**
+   * Danh sách LUÔN xem kỳ hiện tại — ô chọn tháng đã bỏ khỏi trang này (31/08/2026).
+   *
+   * Trang danh sách trả lời câu "hôm nay còn căn nào chưa thu"; lật về tháng cũ ở đây
+   * chỉ tạo ra một trạng thái dễ quên: cột "Hoá đơn kỳ này" đổi số mà tiêu đề trang thì
+   * không, nên nhìn tưởng số hiện tại. Muốn soi lịch sử thì vào chi tiết từng căn —
+   * ở đó ô chọn kỳ vẫn còn và đứng ngay cạnh bảng hoá đơn nó chi phối.
+   *
+   * Vẫn dùng `useServerPeriod` (không phải `currentMonth()` một lần) vì kỳ phải bám
+   * giờ SERVER: lần render đầu chưa có response nào để suy ra giờ server.
+   */
+  const [period] = useServerPeriod();
+  const { status: opStatus, billSource, loading: opLoading, reload: reloadStatus } =
+    useHostPropertyStatus(active, period);
+
+  const f = usePropertyListFilters(active, opStatus);
 
   // Số liệu tổng quan
-  const kpi = useMemo(() => active.reduce(
-    (acc, p) => ({
-      total: acc.total + 1,
-      whole: acc.whole + (p.wholeHouse === true ? 1 : 0),
-      room: acc.room + (p.wholeHouse === false ? 1 : 0),
-      noMgr: acc.noMgr + (p.operationManagerId ? 0 : 1),
-      rooms: acc.rooms + (p.totalRooms || 0),
-      // Nhà chia phòng không đặt giá ở cấp toà nhà thì lấy giá phòng đã suy ra, để tổng
-      // ở tiêu đề khớp với con số từng card đang hiện.
-      revenue: acc.revenue + (p.price ?? roomPrices[p.id]?.min ?? 0),
-    }),
-    { total: 0, whole: 0, room: 0, noMgr: 0, rooms: 0, revenue: 0 }
-  ), [active, roomPrices]);
+  const kpi = useMemo(() => {
+    const acc = {
+      total: 0, noMgr: 0, rooms: 0,
+      /** Tổng giá NIÊM YẾT của cả danh mục — giá chào, không phải tiền về. */
+      revenue: 0,
+      /** Tổng tiền THẬT đang thu mỗi tháng từ các hợp đồng đang chạy. */
+      earning: 0,
+      /** Đang ra tiền: đã kín khách hoặc mới có vài phòng. */
+      occupied: 0,
+      vacant: 0,
+      /** Phòng thật đang có khách / tổng phòng thật — khác `totalRooms` khai báo. */
+      rentedRooms: 0, realRooms: 0,
+      /** Căn còn hoá đơn chưa thu trong kỳ, và tổng tiền còn thiếu. */
+      unpaidProperties: 0, outstanding: 0,
+    };
+    for (const p of active) {
+      acc.total += 1;
+      acc.noMgr += p.operationManagerId ? 0 : 1;
+      acc.rooms += p.totalRooms || 0;
+      // Nhà chia phòng không đặt giá ở cấp toà nhà thì lấy giá phòng đã suy ra. Dùng
+      // `max` chứ không phải `min`: card và bảng đều hiện giá phòng CAO NHẤT
+      // (`formatRoomPriceTop`), cộng bằng `min` là tổng ở tiêu đề không khớp với chính
+      // những con số đang hiện bên dưới.
+      acc.revenue += p.price ?? roomPrices[p.id]?.max ?? 0;
 
-  // BE list không trả imageUrls → lấy thêm ảnh cho các căn đang hiển thị.
+      const op = opStatus.get(p.id);
+      if (!op) continue;
+      // Tiền THẬT đang về mỗi tháng — tổng hợp đồng đang chạy, không phải giá niêm yết.
+      acc.earning += op.activeRent;
+      if (op.rental === 'RENTED' || op.rental === 'PARTIAL') acc.occupied += 1;
+      if (op.rental === 'VACANT') acc.vacant += 1;
+      acc.rentedRooms += op.occ.rented;
+      acc.realRooms += op.occ.wholeHouse ? 1 : op.occ.roomCount;
+      if (op.bills.pending + op.bills.overdue > 0) acc.unpaidProperties += 1;
+      acc.outstanding += op.bills.outstanding;
+    }
+    return acc;
+  }, [active, roomPrices, opStatus]);
+
+  /*
+    BE list không trả imageUrls → lấy thêm ảnh cho các căn đang hiển thị.
+
+    Chỉ lấy cho khối "chờ duyệt" và cho chế độ BẢNG. Card ở chế độ lưới đã bỏ hẳn ảnh
+    (30/08/2026), nên nếu vẫn nạp thì mỗi lần lật trang lưới là bắn thêm 9 request
+    `GET /properties/{id}` chỉ để lấy thứ không ai nhìn.
+  */
   const fetchedImagesRef = useRef<Set<number>>(new Set());
   useEffect(() => {
-    const all = [...pending, ...f.paged];
+    const all = [...pending, ...(f.view === 'table' ? f.paged : [])];
     const needImages = all.filter(p => !p.imageUrls?.length && !fetchedImagesRef.current.has(p.id));
     if (!needImages.length) return;
     needImages.forEach(p => fetchedImagesRef.current.add(p.id));
@@ -87,7 +137,7 @@ export const PropertyList = () => {
           }).catch(() => {})
       )
     );
-  }, [f.paged, pending]);
+  }, [f.paged, f.view, pending]);
 
   /**
    * Nhà CHIA PHÒNG không có giá ở cấp toà nhà — giá nằm trên từng phòng (`rooms[].price`),
@@ -127,37 +177,88 @@ export const PropertyList = () => {
           <div>
             <p className="text-[11px] font-black uppercase tracking-[0.15em] text-indigo-500">Vận hành</p>
             <h1 className="mt-0.5 text-2xl font-black leading-tight text-slate-900">Bất động sản</h1>
+            {/*
+              Tiền ĐANG THU đứng trước, giá niêm yết lùi về sau và ghi rõ là "cả danh
+              mục nếu cho thuê hết".
+
+              Bản cũ chỉ có một số duy nhất — "tổng giá niêm yết 594.719.716 đ/tháng".
+              Với 2/51 căn có khách thì tiền thật về chỉ khoảng 29tr, nhưng câu chữ đó
+              đọc lướt qua rất giống doanh thu. Một con số đứng cạnh chữ "/tháng" ở
+              ngay dưới tiêu đề thì mặc định được hiểu là tiền vào túi.
+            */}
             <p className="mt-1 text-sm font-medium text-slate-500">
               {kpi.total} tòa nhà đang quản lý · {kpi.rooms} phòng
-              {kpi.revenue > 0 && <> · tổng giá niêm yết <b className="text-slate-700">{formatVnd(kpi.revenue)}</b>/tháng</>}
+              {kpi.earning > 0 && (
+                <> · đang thu <b className="text-emerald-600">{formatVnd(kpi.earning)}</b>/tháng</>
+              )}
+              {kpi.revenue > 0 && (
+                <span className="text-slate-400">
+                  {' '}· niêm yết cả danh mục {formatVnd(kpi.revenue)}/tháng
+                </span>
+              )}
             </p>
           </div>
         </div>
-        <button onClick={fetchProperties} disabled={loading}
-          className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Làm mới
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {/*
+            Hợp đồng + hoá đơn về SAU danh sách nhà, nên nói rõ đang tính: khoảng lặng
+            giữa lúc card hiện ra và lúc có badge khai thác dễ bị đọc thành "hệ thống
+            không có dữ liệu đó".
+          */}
+          {opLoading && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-500">
+              <RefreshCw className="h-3 w-3 animate-spin" /> Đang tính tình trạng…
+            </span>
+          )}
+          <button onClick={() => { fetchProperties(); reloadStatus(); }} disabled={loading}
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Làm mới
+          </button>
+        </div>
       </div>
 
       {/* ── Hồ sơ chờ phê duyệt ── */}
       <PendingApprovalPanel items={pending} onOpen={p => navigate(`/host/review/${p.id}`)} />
 
-      {/* ── Số liệu: bấm để lọc nhanh ── */}
+      {/*
+        ── Số liệu: bấm để lọc nhanh ──
+        Trước 30/08/2026 hai ô giữa là "Nhà nguyên căn / Nhà chia phòng" — thông tin
+        TĨNH, host xem một lần lúc nhận nhà rồi thôi, mà lại chiếm đúng chỗ dễ nhìn
+        nhất. Nay thay bằng hai câu hỏi host hỏi mỗi ngày: căn nào đang ra tiền, căn
+        nào chưa. Lọc theo loại hình chuyển vào "Bộ lọc" (vẫn còn nguyên).
+      */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile icon={Building2} label="Tổng tòa nhà" value={kpi.total} tone="indigo"
           helper="đã được bạn duyệt giá"
           onClick={() => { f.reset(); }} active={f.activeCount === 0} />
-        <StatTile icon={Home} label="Nhà nguyên căn" value={kpi.whole} tone="emerald"
-          helper="trên tổng số nhà" progress={kpi.total ? kpi.whole / kpi.total : 0}
-          onClick={() => f.setType(f.type === 'whole' ? 'all' : 'whole')} active={f.type === 'whole'} />
-        <StatTile icon={DoorOpen} label="Nhà chia phòng" value={kpi.room} tone="blue"
-          helper="trên tổng số nhà" progress={kpi.total ? kpi.room / kpi.total : 0}
-          onClick={() => f.setType(f.type === 'room' ? 'all' : 'room')} active={f.type === 'room'} />
-        <StatTile icon={AlertCircle} label="Chưa có quản lý" value={kpi.noMgr} tone="rose"
-          helper="khu vực chưa được gán quản lý" progress={kpi.total ? kpi.noMgr / kpi.total : 0}
-          onClick={() => f.setManager(f.manager === 'unassigned' ? 'all' : 'unassigned')}
-          active={f.manager === 'unassigned'} />
+        <StatTile icon={KeyRound} label="Đang có khách" value={kpi.occupied} tone="emerald"
+          helper={kpi.realRooms > 0 ? `${kpi.rentedRooms}/${kpi.realRooms} chỗ đã có người` : 'trên tổng số nhà'}
+          progress={kpi.total ? kpi.occupied / kpi.total : 0}
+          onClick={() => f.setRental(f.rental === 'rented' ? 'all' : 'rented')} active={f.rental === 'rented'} />
+        <StatTile icon={DoorClosed} label="Đang để trống" value={kpi.vacant} tone="rose"
+          helper="chưa có khách nào" progress={kpi.total ? kpi.vacant / kpi.total : 0}
+          onClick={() => f.setRental(f.rental === 'vacant' ? 'all' : 'vacant')} active={f.rental === 'vacant'} />
+        <StatTile icon={Wallet} label={`Chưa thu đủ ${monthLabel(period).toLowerCase()}`}
+          value={billSource === 'none' ? '—' : kpi.unpaidProperties} tone="amber"
+          helper={kpi.outstanding > 0 ? `còn ${formatVnd(kpi.outstanding)} chưa vào` : 'không còn khoản nào'}
+          progress={kpi.total ? kpi.unpaidProperties / kpi.total : 0}
+          onClick={() => f.setBill(f.bill === 'debt' ? 'all' : 'debt')} active={f.bill === 'debt'} />
       </div>
+
+      {/*
+        "Chưa có quản lý" từng là một ô số liệu riêng, nhưng hầu như luôn bằng 0 —
+        chiếm một ô cố định để hiện số 0 là lãng phí chỗ. Nay chỉ hiện khi thật sự có
+        vấn đề; bộ lọc theo quản lý vẫn nằm trong "Bộ lọc".
+      */}
+      {kpi.noMgr > 0 && (
+        <button onClick={() => f.setManager(f.manager === 'unassigned' ? 'all' : 'unassigned')}
+          className="flex w-full items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-left text-xs font-bold text-rose-700 transition hover:bg-rose-100">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {kpi.noMgr} tòa nhà nằm ở khu vực chưa được gán quản lý vận hành — bấm để xem.
+        </button>
+      )}
+
+      <BillSourceNote source={billSource} loading={opLoading} />
 
       {/* ── Tìm kiếm & bộ lọc ── */}
       <FilterToolbar f={f} />
@@ -200,11 +301,14 @@ export const PropertyList = () => {
           <ResultBar f={f} />
 
           {f.view === 'table' ? (
-            <PropertyTable rows={f.paged} roomPrices={roomPrices} onRowClick={p => navigate(`/host/properties/${p.id}`)} />
+            <PropertyTable rows={f.paged} roomPrices={roomPrices}
+              opStatus={opStatus} billSource={billSource}
+              onRowClick={p => navigate(`/host/properties/${p.id}`)} />
           ) : (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
               {f.paged.map(p => (
                 <PropertyCard key={p.id} p={p} roomPrice={roomPrices[p.id]}
+                  op={opStatus.get(p.id)} billSource={billSource}
                   onClick={() => navigate(`/host/properties/${p.id}`)} />
               ))}
             </div>

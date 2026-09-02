@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PropertyResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
+import type { PropertyOperationStatus } from './propertyOperationStatus';
 
 export const formatVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + ' đ';
 
@@ -16,13 +17,32 @@ export const formatVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v)
  */
 export interface RoomPriceRange { min: number; max: number; rooms: number }
 
-/** "8.200.000 đ" nếu mọi phòng cùng giá, "7.000.000 – 9.000.000 đ" nếu khác nhau. */
-export const formatRoomPriceRange = (r: RoomPriceRange) =>
-  r.min === r.max ? formatVnd(r.min) : `${formatVnd(r.min)} – ${formatVnd(r.max)}`;
+/**
+ * MỘT con số duy nhất: giá phòng CAO NHẤT của căn.
+ *
+ * ─── Vì sao bỏ cách hiện khoảng giá (30/08/2026) ─────────────────────────────
+ * Bản trước in "min – max" khi các phòng lệch giá. Nhưng BE chia đều diện tích sàn cho
+ * số phòng nên giá phòng hay lệch nhau đúng vài ĐỒNG do làm tròn — ra những dòng như
+ * "3.946.759 đ – 3.946.760 đ": dài gấp đôi, chiếm hết chiều ngang ô giá, mà hai đầu
+ * khoảng thì lệch nhau 1 đồng. Người đọc phải nhìn kỹ mới thấy đó thực chất là một giá.
+ *
+ * Lấy CAO NHẤT chứ không phải thấp nhất hay trung bình: đây là giá niêm yết dùng để
+ * chào khách, lấy mức cao nhất là cách nói an toàn — không hứa hẹn mức rẻ hơn mức nhà
+ * thực sự có. Số phòng đi kèm ở nhãn phụ để không ai tưởng đó là giá cả căn.
+ */
+export const formatRoomPriceTop = (r: RoomPriceRange) => formatVnd(r.max);
 
 export const typeLabel = (p: PropertyResponse) =>
   p.wholeHouse === null ? 'Chưa xác định' : p.wholeHouse ? 'Nguyên căn' : 'Chia phòng';
 
+/**
+ * Nhãn cho `PropertyStatus` — VÒNG ĐỜI HỒ SƠ nhà, KHÔNG phải tình trạng cho thuê.
+ *
+ * ⚠️ `RENTED` ("Đã cho thuê") là NHÁNH CHẾT: không chỗ nào trong BE gán trạng thái đó
+ * (xem `services/useOccupiedProperties.ts`). Giữ lại để không vỡ nếu BE sau này có
+ * gán, nhưng ĐỪNG dựa vào nó để biết căn nào đang có khách — dùng `RentalState` của
+ * `propertyOperationStatus.ts`, suy từ số phòng và hợp đồng đang chạy.
+ */
 export const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> = {
   PENDING_HOST_REVIEW:       { label: 'Chờ phê duyệt',   cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-400' },
   PENDING_OPERATION_MANAGER: { label: 'Chờ gán quản lý', cls: 'bg-violet-100 text-violet-700',   dot: 'bg-violet-500' },
@@ -67,7 +87,7 @@ export const isHostApproved = (p: PropertyResponse): boolean => {
 
 export type SortKey =
   | 'newest' | 'oldest' | 'name' | 'name_desc'
-  | 'price_desc' | 'price_asc' | 'rooms_desc';
+  | 'price_desc' | 'price_asc' | 'rooms_desc' | 'debt_desc';
 
 export const SORT_LABEL: Record<SortKey, string> = {
   newest: 'Mới thêm gần nhất',
@@ -77,6 +97,36 @@ export const SORT_LABEL: Record<SortKey, string> = {
   price_desc: 'Giá thuê cao nhất',
   price_asc: 'Giá thuê thấp nhất',
   rooms_desc: 'Nhiều phòng nhất',
+  debt_desc: 'Nợ nhiều nhất kỳ này',
+};
+
+/**
+ * Lọc theo TÌNH TRẠNG KHAI THÁC — khác hẳn lọc theo `status` (vòng đời hồ sơ nhà).
+ *
+ * Hai thứ này dễ nhầm nên để cạnh nhau cho thấy rõ: một căn `ACTIVE` ("Hoạt động")
+ * hoàn toàn có thể đang để trống không ra đồng nào. Chip "Hoạt động" trả lời "hồ sơ
+ * đã xong chưa", chip ở đây trả lời "có khách chưa".
+ */
+export type RentalFilter = 'all' | 'rented' | 'partial' | 'vacant' | 'incoming' | 'setup';
+
+export const RENTAL_FILTER_LABEL: Record<RentalFilter, string> = {
+  all: 'Tất cả',
+  /** Gồm cả căn đã kín và căn mới có vài phòng — miễn là đang ra tiền. */
+  rented: 'Đang có khách',
+  partial: 'Còn phòng trống',
+  vacant: 'Đang để trống',
+  incoming: 'Chờ đón khách',
+  setup: 'Chưa mở cho thuê',
+};
+
+/** Lọc theo kết quả thu tiền của KỲ ĐANG CHỌN. */
+export type BillFilter = 'all' | 'debt' | 'overdue' | 'clear';
+
+export const BILL_FILTER_LABEL: Record<BillFilter, string> = {
+  all: 'Tất cả',
+  debt: 'Còn hoá đơn chưa trả',
+  overdue: 'Có hoá đơn quá hạn',
+  clear: 'Đã thu đủ',
 };
 
 export type TypeFilter = 'all' | 'whole' | 'room';
@@ -106,6 +156,8 @@ export interface PropertyListFilters {
   zone: string; setZone: (v: string) => void;
   type: TypeFilter; setType: (v: TypeFilter) => void;
   manager: ManagerFilter; setManager: (v: ManagerFilter) => void;
+  rental: RentalFilter; setRental: (v: RentalFilter) => void;
+  bill: BillFilter; setBill: (v: BillFilter) => void;
   sortBy: SortKey; setSortBy: (v: SortKey) => void;
   view: ViewMode; setView: (v: ViewMode) => void;
   perPage: number; setPerPage: (v: number) => void;
@@ -120,12 +172,23 @@ export interface PropertyListFilters {
   total: number;
 }
 
-export const usePropertyListFilters = (items: PropertyResponse[]): PropertyListFilters => {
+/**
+ * @param opStatus id nhà → tình trạng khai thác & thu tiền. Truyền `undefined` (hoặc
+ *   map rỗng lúc đang tải) thì hai bộ lọc `rental`/`bill` KHÔNG lọc gì cả — không
+ *   được lọc bằng dữ liệu chưa về, vì như thế danh sách sẽ trống trơn rồi tự đầy lại,
+ *   host tưởng mất nhà.
+ */
+export const usePropertyListFilters = (
+  items: PropertyResponse[],
+  opStatus?: Map<number, PropertyOperationStatus>,
+): PropertyListFilters => {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [zone, setZone] = useState('all');
   const [type, setType] = useState<TypeFilter>('all');
   const [manager, setManager] = useState<ManagerFilter>('all');
+  const [rental, setRental] = useState<RentalFilter>('all');
+  const [bill, setBill] = useState<BillFilter>('all');
   const [sortBy, setSortBy] = useState<SortKey>('newest');
   const [view, setViewRaw] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_KEY) as ViewMode) || 'grid'
@@ -159,6 +222,30 @@ export const usePropertyListFilters = (items: PropertyResponse[]): PropertyListF
       if (type === 'room' && p.wholeHouse !== false) return false;
       if (manager === 'assigned' && !p.operationManagerId) return false;
       if (manager === 'unassigned' && p.operationManagerId) return false;
+
+      const op = opStatus?.get(p.id);
+      if (rental !== 'all') {
+        // Chưa biết tình trạng thì GIỮ LẠI: ẩn đi là nói dối "căn này không thuộc nhóm".
+        if (op) {
+          // "Đang có khách" gồm cả căn đã kín (RENTED) lẫn căn mới có vài phòng (PARTIAL).
+          if (rental === 'rented' && op.rental !== 'RENTED' && op.rental !== 'PARTIAL') return false;
+          if (rental === 'partial' && op.rental !== 'PARTIAL') return false;
+          // "Để trống" KHÔNG gom căn đã có hồ sơ chờ đón khách: nhãn nói "để trống" mà
+          // trả về cả căn sắp có khách thì con số trên ô KPI không khớp danh sách bên
+          // dưới. Nhóm đó có chip riêng `incoming`.
+          if (rental === 'vacant'   && op.rental !== 'VACANT') return false;
+          if (rental === 'incoming' && op.rental !== 'INCOMING') return false;
+          if (rental === 'setup'    && op.rental !== 'SETUP') return false;
+        }
+      }
+      if (bill !== 'all' && op) {
+        if (bill === 'debt' && op.bills.pending + op.bills.overdue === 0) return false;
+        if (bill === 'overdue' && op.bills.overdue === 0) return false;
+        // "Đã thu đủ" chỉ tính căn CÓ hoá đơn kỳ này — căn không phát sinh hoá đơn nào
+        // không phải là căn đã thu xong.
+        if (bill === 'clear' && op.billState !== 'CLEAR') return false;
+      }
+
       if (kw) {
         const hay = [p.propertyName, p.shortAddress, p.fullAddress, p.zoneName, p.operationManagerName]
           .filter(Boolean).map(v => normalizeVi(String(v))).join(' ');
@@ -175,29 +262,34 @@ export const usePropertyListFilters = (items: PropertyResponse[]): PropertyListF
         case 'price_desc': return (b.price ?? 0) - (a.price ?? 0);
         case 'price_asc':  return (a.price ?? 0) - (b.price ?? 0);
         case 'rooms_desc': return (b.totalRooms || 0) - (a.totalRooms || 0);
+        case 'debt_desc':
+          return (opStatus?.get(b.id)?.bills.outstanding ?? 0)
+               - (opStatus?.get(a.id)?.bills.outstanding ?? 0);
         case 'oldest':     return a.id - b.id;
         default:           return b.id - a.id;
       }
     });
-  }, [items, search, status, zone, type, manager, sortBy]);
+  }, [items, search, status, zone, type, manager, rental, bill, sortBy, opStatus]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
-  useEffect(() => { setPage(1); }, [search, status, zone, type, manager, sortBy, perPage]);
+  useEffect(() => { setPage(1); }, [search, status, zone, type, manager, rental, bill, sortBy, perPage]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
 
   const activeCount =
     (search.trim() ? 1 : 0) + (status !== 'all' ? 1 : 0) + (zone !== 'all' ? 1 : 0) +
-    (type !== 'all' ? 1 : 0) + (manager !== 'all' ? 1 : 0);
+    (type !== 'all' ? 1 : 0) + (manager !== 'all' ? 1 : 0) +
+    (rental !== 'all' ? 1 : 0) + (bill !== 'all' ? 1 : 0);
 
   const reset = () => {
     setSearch(''); setStatus('all'); setZone('all');
-    setType('all'); setManager('all'); setSortBy('newest');
+    setType('all'); setManager('all'); setRental('all'); setBill('all');
+    setSortBy('newest');
   };
 
   return {
     search, setSearch, status, setStatus, zone, setZone, type, setType,
-    manager, setManager, sortBy, setSortBy, view, setView,
+    manager, setManager, rental, setRental, bill, setBill, sortBy, setSortBy, view, setView,
     perPage, setPerPage, page, setPage, totalPages,
     filtered, paged, statusCounts, zoneOptions, activeCount, reset,
     total: items.length,

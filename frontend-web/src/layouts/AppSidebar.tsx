@@ -43,7 +43,14 @@ export interface SidebarNavItem {
 }
 
 export interface SidebarSection {
-  label: string;
+  /**
+   * Bỏ trống = nhóm KHÔNG có tiêu đề.
+   *
+   * Dành cho nhóm mở đầu chỉ chứa mục trang chủ: một tiêu đề "Tổng quan" đặt trên
+   * đúng một dòng "Bảng điều hành" không phân loại thêm được gì, mà vẫn tốn nguyên
+   * một khoảng cao bằng một mục menu.
+   */
+  label?: string;
   items: SidebarNavItem[];
 }
 
@@ -111,7 +118,7 @@ export const AppSidebar = ({
     if (!collapsible) return;
     try { localStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch { /* private mode */ }
   }, [collapsed, collapsible, storageKey]);
-
+
 
   return (
     <div
@@ -145,14 +152,14 @@ export const AppSidebar = ({
       {/* Menu */}
       <nav className="scrollbar-thin relative flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-3">
         {sections.map((section, sIdx) => (
-          <div key={section.label} className={sIdx > 0 ? 'mt-4' : ''}>
+          <div key={section.label ?? `s${sIdx}`} className={sIdx > 0 ? 'mt-3' : ''}>
             {collapsed ? (
-              sIdx > 0 && <div className="mx-2 mb-3 border-t border-white/5" />
-            ) : (
-              <p className="mb-1.5 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-slate-600">
+              sIdx > 0 && <div className="mx-2 mb-2 border-t border-white/5" />
+            ) : section.label ? (
+              <p className="mb-1 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
                 {section.label}
               </p>
-            )}
+            ) : null}
 
             <div className="space-y-0.5">
               {section.items.map(item => {
@@ -164,8 +171,11 @@ export const AppSidebar = ({
                     end={item.end}
                     onClick={onNavigate}
                     className={({ isActive }) => clsx(
+                      // py-2 (không phải py-2.5): với 15 mục thì mỗi 4px dư trên một
+                      // dòng cộng lại thành đúng chỗ chênh giữa "thấy hết menu" và
+                      // "phải cuộn" trên màn 1080p.
                       'group relative flex items-center rounded-xl text-sm font-medium transition-colors duration-150',
-                      collapsed ? 'justify-center px-0 py-2.5' : 'gap-3 px-3 py-2.5',
+                      collapsed ? 'justify-center px-0 py-2' : 'gap-3 px-3 py-2',
                       isActive ? clsx(a.activeBg, a.activeText, 'font-semibold') : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
                     )}
                   >

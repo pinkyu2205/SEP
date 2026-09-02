@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import api from '@/services/api';
+import { resetInvoiceAccessProbe } from '@/services/invoiceAccess';
 
 // Web chỉ phục vụ host (ROLE_OWNER) và admin (ROLE_ADMIN).
 // Manager là mobile-only — không có không gian làm việc trên web.
@@ -118,6 +119,10 @@ export const WebAuthProvider = ({ children }: { children: React.ReactNode }) => 
     logout: () => {
       storage.removeItem(STORAGE_KEY);
       localStorage.removeItem('access_token'); // Xóa JWT Token khi đăng xuất
+      // Kết quả dò quyền xem hoá đơn sống ở module (xuyên suốt phiên trình duyệt), mà
+      // quyền thì gắn với NGƯỜI DÙNG. Không xoá thì đăng nhập tài khoản khác vẫn chạy
+      // theo quyền của người trước.
+      resetInvoiceAccessProbe();
       setUser(null);
     },
   }), [user]);
