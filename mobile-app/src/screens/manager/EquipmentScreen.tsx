@@ -48,10 +48,38 @@ const STATUS_ICON: Record<EquipmentLifecycleStatus, string> = {
   NEW: '🆕', GOOD: '✅', MAINTENANCE: '🔧', DAMAGED: '⚠️', BROKEN: '❌', DISPOSED: '♻️',
 };
 
-/** Chip lọc nhanh — không liệt kê đủ 6 trạng thái cho đỡ rối, phần còn lại nằm ở "Tất cả". */
-const QUICK_FILTERS: (EquipmentLifecycleStatus | 'all')[] = [
-  'all', 'GOOD', 'MAINTENANCE', 'BROKEN', 'DISPOSED',
-];
+/**
+ * Chip lọc — ĐỦ 6 trạng thái, nhưng chỉ vẽ chip nào thật sự có thiết bị.
+ *
+ * ─── Vì sao đổi (30/08/2026) ─────────────────────────────────────────────────
+ * Bản cũ cố định 5 chip `['all','GOOD','MAINTENANCE','BROKEN','DISPOSED']` và bỏ hẳn
+ * `NEW` + `DAMAGED` "cho đỡ rối". Nhưng một nhà vừa tiếp nhận thì THIẾT BỊ NÀO CŨNG
+ * `NEW` — kết quả: 4 chip cùng hiện "(0)" chiếm hai dòng, còn 10 thiết bị đang có thì
+ * không chip nào lọc ra được. Giấu trạng thái đi không làm màn gọn hơn, chỉ làm bộ lọc
+ * nói dối về những gì đang có.
+ *
+ * Nay lấy đủ 6 và lọc theo dữ liệu thật ở `visibleFilters`: nhà toàn đồ mới thì chỉ
+ * thấy "Tất cả · Mới lắp đặt" — hai chip, một dòng, và bấm được.
+ */
+const QUICK_FILTERS: (EquipmentLifecycleStatus | 'all')[] = ['all', ...STATUS_ORDER];
+
+/** Bảo hành còn dưới ngần này ngày thì mới đáng báo. */
+const WARRANTY_WARN_DAYS = 60;
+
+/**
+ * Nhãn bảo hành — trả `null` khi CÒN HẠN DÀI, tức phần lớn thiết bị sẽ không hiện gì.
+ * Chỉ hai tình huống đáng chiếm chỗ trên dòng: sắp hết hạn, và đã hết.
+ */
+const warrantyFlag = (end?: string | null): { label: string; color: string } | null => {
+  if (!end) return null;
+  const d = new Date(`${String(end).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (days < 0) return { label: 'Hết bảo hành', color: Colors.textMuted };
+  if (days <= WARRANTY_WARN_DAYS) return { label: `BH còn ${days} ngày`, color: Colors.warning };
+  return null;
+};
 
 const SOURCE_LABEL: Record<string, string> = {
   INITIAL_HANDOVER: 'Có sẵn khi nhận nhà',
@@ -524,6 +552,29 @@ export const EquipmentScreen: React.FC = () => {
     return counts;
   }, [equipments]);
 
+  /**
+   * Chỉ vẽ chip có thiết bị — cộng chip đang chọn (để còn thấy đường bỏ chọn khi lọc
+   * ra rỗng). Xem chú thích ở `QUICK_FILTERS`.
+   */
+  const visibleFilters = useMemo(
+    () => QUICK_FILTERS.filter(k => k === 'all' || (statusCounts[k] ?? 0) > 0 || selectedStatus === k),
+    [statusCounts, selectedStatus],
+  );
+
+  /**
+   * Phân bổ tình trạng — trả lời "kho này có gì phải xử lý không" ngay trên đầu màn.
+   *
+   * Bản cũ chỉ ghi "Tổng: 10 thiết bị". Con số đó không cho biết điều duy nhất manager
+   * cần biết khi mở màn: có cái nào đang hỏng hay chờ bảo trì không. Phải cuộn hết
+   * danh sách hoặc bấm thử từng chip mới biết.
+   */
+  const health = useMemo(() => {
+    const need = (statusCounts.MAINTENANCE ?? 0) + (statusCounts.DAMAGED ?? 0) + (statusCounts.BROKEN ?? 0);
+    const fine = (statusCounts.NEW ?? 0) + (statusCounts.GOOD ?? 0);
+    const gone = statusCounts.DISPOSED ?? 0;
+    return { need, fine, gone, total: equipments.length };
+  }, [statusCounts, equipments.length]);
+
   const handleStatusChange = async (id: number, status: EquipmentLifecycleStatus) => {
     try {
       const updated = await realEquipmentService.updateStatus(id, status);
@@ -568,9 +619,23 @@ export const EquipmentScreen: React.FC = () => {
               <Text style={styles.backBtnText}>‹</Text>
             </TouchableOpacity>
           )}
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={styles.title}>Trang thiết bị</Text>
-            <Text style={styles.subtitle}>Tổng: {equipments.length} thiết bị</Text>
+            {/*
+              Câu này thay cho "Tổng: N thiết bị" — xem chú thích ở `health`.
+              Có cái cần xử lý thì nói ngay và tô cảnh báo; không thì nói gọn là ổn.
+            */}
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {health.total === 0 ? 'Chưa có thiết bị nào' : (
+                <>
+                  {health.total} thiết bị
+                  {health.need > 0
+                    ? <Text style={styles.subtitleWarn}> · ⚠️ {health.need} cần xử lý</Text>
+                    : <Text style={styles.subtitleOk}> · ✅ tất cả đang tốt</Text>}
+                  {health.gone > 0 && <Text style={styles.subtitleMuted}> · {health.gone} đã thanh lý</Text>}
+                </>
+              )}
+            </Text>
           </View>
         </View>
       </View>
@@ -613,7 +678,7 @@ export const EquipmentScreen: React.FC = () => {
       <View style={styles.filterGroup}>
         <Text style={styles.filterGroupLabel}>Trạng thái</Text>
         <View style={styles.chipWrap}>
-          {QUICK_FILTERS.map((key) => {
+          {visibleFilters.map((key) => {
             const label = key === 'all' ? 'Tất cả' : getEquipmentLifecycleLabel(key);
             const active = selectedStatus === key;
             const c = key === 'all' ? null : getEquipmentLifecycleColor(key);
@@ -729,9 +794,22 @@ export const EquipmentScreen: React.FC = () => {
                             {getEquipmentLifecycleLabel(eq.status)}
                           </Text>
                         </View>
-                        {warranty ? (
-                          <Text style={styles.eqWarranty}>🛡 {formatDate(warranty)}</Text>
-                        ) : null}
+                        {/*
+                          Bảo hành CHỈ hiện khi sắp hết hoặc đã hết.
+                          Trước đây in ngày bảo hành trên MỌI dòng — cả nhà tiếp nhận cùng
+                          đợt thì mọi thiết bị cùng một ngày, lặp y hệt nhau xuống hết màn
+                          mà không phân biệt được gì. Còn hạn dài thì đó không phải việc
+                          cần làm; hết hạn tới nơi mới là việc.
+                        */}
+                        {(() => {
+                          const w = warrantyFlag(warranty);
+                          if (!w) return null;
+                          return (
+                            <Text style={[styles.eqWarranty, { color: w.color }]}>
+                              🛡 {w.label}
+                            </Text>
+                          );
+                        })()}
                       </View>
                     </TouchableOpacity>
                   );
@@ -808,6 +886,9 @@ const styles = StyleSheet.create({
   backBtnText: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  subtitleWarn:  { color: Colors.error, fontWeight: '800' },
+  subtitleOk:    { color: Colors.success, fontWeight: '700' },
+  subtitleMuted: { color: Colors.textMuted },
   houseEmoji: { fontSize: 16 },
 
   // ── Chọn nhà ────────────────────────────────────────────────────────────

@@ -20,7 +20,8 @@ export const normalizeVi = (s: string): string =>
 
 export type SortKey =
   | 'newest' | 'oldest' | 'name' | 'name_desc'
-  | 'rooms_desc' | 'rooms_asc' | 'area_desc';
+  | 'rooms_desc' | 'rooms_asc' | 'area_desc'
+  | 'lease_soon';
 
 export const SORT_LABEL: Record<SortKey, string> = {
   newest: 'Mới thêm gần nhất',
@@ -30,6 +31,7 @@ export const SORT_LABEL: Record<SortKey, string> = {
   rooms_desc: 'Nhiều phòng nhất',
   rooms_asc: 'Ít phòng nhất',
   area_desc: 'Diện tích lớn nhất',
+  lease_soon: 'HĐ chủ nhà sắp hết hạn',
 };
 
 export type TypeFilter = 'all' | 'whole' | 'rooms' | 'unset';
@@ -60,6 +62,10 @@ export const TABLE_SIZES = [10, 25, 50];
 export interface BuildingFilters {
   search: string; setSearch: (v: string) => void;
   status: string; setStatus: (v: string) => void;
+  /** Bật = chỉ hiện các tòa nhà `needsAttention` trả true. */
+  attention: boolean; setAttention: (v: boolean) => void;
+  /** Số tòa nhà đang cần xử lý (tính trên TOÀN danh sách, không theo bộ lọc). */
+  attentionCount: number;
   zone: string; setZone: (v: string) => void;
   type: TypeFilter; setType: (v: TypeFilter) => void;
   renovation: RenovationFilter; setRenovation: (v: RenovationFilter) => void;
@@ -85,16 +91,25 @@ export interface BuildingFilters {
  * @param effectiveStatus map 1 tòa nhà → mã trạng thái dùng để lọc.
  *        Mặc định là `b.status`; màn "Khởi tạo nhà" override để tách
  *        nhóm INITIALIZED (đánh dấu FE-side).
+ * @param needsAttention "căn này còn việc phải làm". Tách khỏi `status` vì hai
+ *        thứ CẮT NHAU chứ không loại trừ nhau: một căn vừa "Đã khởi tạo" vừa
+ *        sắp hết hạn HĐ chủ nhà — nhét vào cùng một ô trạng thái thì mất một
+ *        trong hai thông tin. Không truyền → bộ lọc này tắt hẳn.
  */
 export const useBuildingFilters = (
   buildings: PropertyResponse[],
-  opts: { storageKey: string; effectiveStatus?: (b: PropertyResponse) => string },
+  opts: {
+    storageKey: string;
+    effectiveStatus?: (b: PropertyResponse) => string;
+    needsAttention?: (b: PropertyResponse) => boolean;
+  },
 ): BuildingFilters => {
-  const { storageKey, effectiveStatus } = opts;
+  const { storageKey, effectiveStatus, needsAttention } = opts;
   const statusOf = effectiveStatus ?? ((b: PropertyResponse) => b.status);
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
+  const [attention, setAttention] = useState(false);
   const [zone, setZone] = useState('all');
   const [type, setType] = useState<TypeFilter>('all');
   const [renovation, setRenovation] = useState<RenovationFilter>('all');
@@ -122,6 +137,11 @@ export const useBuildingFilters = (
     return acc;
   }, [buildings, effectiveStatus]);
 
+  const attentionCount = useMemo(
+    () => (needsAttention ? buildings.filter(needsAttention).length : 0),
+    [buildings, needsAttention]
+  );
+
   const zoneOptions = useMemo(
     () => [...new Set(buildings.map(b => b.zoneName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi')),
     [buildings]
@@ -131,6 +151,7 @@ export const useBuildingFilters = (
     const kw = normalizeVi(search.trim());
     const list = buildings.filter(b => {
       if (status !== 'all' && statusOf(b) !== status) return false;
+      if (attention && needsAttention && !needsAttention(b)) return false;
       if (zone !== 'all' && b.zoneName !== zone) return false;
 
       if (type === 'whole' && b.wholeHouse !== true) return false;
@@ -160,28 +181,37 @@ export const useBuildingFilters = (
         case 'rooms_desc': return (b.totalRooms || 0) - (a.totalRooms || 0);
         case 'rooms_asc':  return (a.totalRooms || 0) - (b.totalRooms || 0);
         case 'area_desc':  return (b.areaSize || 0) - (a.areaSize || 0);
+        // Hết hạn gần nhất lên đầu; căn CHƯA có HĐ chủ nhà đứng trên cùng vì
+        // đó mới là căn tắc nhất, không phải căn "hạn xa nhất".
+        case 'lease_soon': {
+          const k = (x: PropertyResponse) => x.leaseEndDate ?? '';
+          if (!k(a) !== !k(b)) return k(a) ? 1 : -1;
+          return k(a).localeCompare(k(b));
+        }
         case 'oldest':     return a.id - b.id;
         default:           return b.id - a.id;
       }
     });
-  }, [buildings, search, status, zone, type, renovation, manager, sortBy, effectiveStatus]);
+  }, [buildings, search, status, attention, zone, type, renovation, manager, sortBy, effectiveStatus, needsAttention]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
-  useEffect(() => { setPage(1); }, [search, status, zone, type, renovation, manager, sortBy, perPage]);
+  useEffect(() => { setPage(1); }, [search, status, attention, zone, type, renovation, manager, sortBy, perPage]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [totalPages, page]);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
 
   const activeCount =
-    (search.trim() ? 1 : 0) + (status !== 'all' ? 1 : 0) + (zone !== 'all' ? 1 : 0) +
-    (type !== 'all' ? 1 : 0) + (renovation !== 'all' ? 1 : 0) + (manager !== 'all' ? 1 : 0);
+    (search.trim() ? 1 : 0) + (status !== 'all' ? 1 : 0) + (attention ? 1 : 0) +
+    (zone !== 'all' ? 1 : 0) + (type !== 'all' ? 1 : 0) +
+    (renovation !== 'all' ? 1 : 0) + (manager !== 'all' ? 1 : 0);
 
   const reset = () => {
-    setSearch(''); setStatus('all'); setZone('all');
+    setSearch(''); setStatus('all'); setAttention(false); setZone('all');
     setType('all'); setRenovation('all'); setManager('all'); setSortBy('newest');
   };
 
   return {
-    search, setSearch, status, setStatus, zone, setZone, type, setType,
+    search, setSearch, status, setStatus, attention, setAttention, attentionCount,
+    zone, setZone, type, setType,
     renovation, setRenovation, manager, setManager, sortBy, setSortBy,
     view, setView, perPage, setPerPage, page, setPage, totalPages,
     filtered, paged, statusCounts, zoneOptions, activeCount, reset,

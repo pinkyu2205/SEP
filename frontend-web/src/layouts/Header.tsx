@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Home, Search } from 'lucide-react';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
+import { serverNow } from '@/utils/serverTime';
 import { UserMenu } from './UserMenu';
 
 const initialsOf = (name?: string) =>
@@ -40,10 +41,21 @@ const formatVNDate = (date: Date) => {
 export const Header = () => {
   const location = useLocation();
   const { user, logout } = useWebAuth();
-  const [currentTime, setCurrentTime] = useState(new Date());
+  /*
+    Đồng hồ chạy theo GIỜ SERVER, không phải đồng hồ máy.
+
+    Đây là cái đồng hồ duy nhất người dùng nhìn thấy trên toàn hệ thống, nên nó phải
+    nói cùng một giờ với thứ quyết định trạng thái hoá đơn (cron trên VPS). Máy người
+    dùng lệch ngày là header ghi một đằng, hạn hoá đơn tính một nẻo, mà không có chỗ
+    nào để đối chiếu.
+
+    `serverNow()` chưa đồng bộ được thì tự rơi về giờ máy — y hệt hành vi cũ, đồng hồ
+    không bao giờ đứng.
+  */
+  const [currentTime, setCurrentTime] = useState(serverNow);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => setCurrentTime(serverNow()), 1000);
     return () => clearInterval(timer);
   }, []);
 

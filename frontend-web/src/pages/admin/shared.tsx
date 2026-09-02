@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Filter, MapPin, UserRound, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileSignature, Filter, MapPin, UserRound, type LucideIcon } from 'lucide-react';
 import type { PlatformAccountStatus, PlatformBillStatus, PlatformRole } from '@/types';
 
 
@@ -300,7 +300,7 @@ const BUILDING_RENO_CHIP: Record<Exclude<BuildingRenovationState, 'none'>, { lab
 
 export const BuildingCard = ({
   name, address, zoneName, typeLabel, areaSize, totalRooms, floors,
-  renovation = 'none', badge, managerName, overlay, onClick, children,
+  renovation = 'none', badge, managerName, lease, overlay, onClick, children,
   selected, onSelectChange,
 }: {
   name: string;
@@ -313,6 +313,11 @@ export const BuildingCard = ({
   renovation?: BuildingRenovationState;
   badge?: { label: string; cls: string } | null;
   managerName?: string;
+  /**
+   * Thời hạn HĐ với chủ nhà gốc. `range` là khoảng ngày, `label` là chip
+   * "còn bao lâu" — xem `onboarding/leaseTerm.ts`.
+   */
+  lease?: { range: string; label: string; cls: string } | null;
   /** Nút hành động nổi ở góc trên (hiện khi hover) */
   overlay?: ReactNode;
   onClick?: () => void;
@@ -368,6 +373,19 @@ export const BuildingCard = ({
         </span>
       )}
     </div>
+
+    {/* HĐ với chủ nhà gốc — phần việc chính của bước khởi tạo, và là trần
+        thời hạn cho mọi HĐ khách thuê sau này nên phải thấy ngay ở danh sách. */}
+    {lease && (
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-slate-100 bg-slate-50/60 px-2.5 py-2">
+        <FileSignature className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">HĐ chủ nhà</span>
+        <span className="text-xs font-semibold tabular-nums text-slate-700">{lease.range}</span>
+        <span className={`ml-auto shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold ${lease.cls}`}>
+          {lease.label}
+        </span>
+      </div>
+    )}
 
     {/* Quản lý vận hành (nếu có) */}
     {managerName && (

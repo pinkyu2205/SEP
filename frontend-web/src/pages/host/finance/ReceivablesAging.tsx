@@ -12,7 +12,7 @@ import { hostService, type ReceivablesAging as ReceivablesData, type InvoiceDto 
 import { notificationService, HOST_OVERDUE_TYPES, type AppNotificationDto } from '@/services/notification.service';
 import { exportToExcel } from '@/utils/exportExcel';
 import {
-  CURRENT_MONTH, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
+  currentMonth, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
   cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion, matchVi, monthLabel, pageSlice,
 } from '../shared';
 
@@ -102,7 +102,7 @@ export const ReceivablesAging = () => {
     const [agingRes, invoicePage, notifyPage] = await Promise.all([
       hostService.getReceivablesAging().catch(() => null),
       // size lớn: BE phân trang mặc định 20 → lấy trọn kỳ để tổng hợp KPI không bị hụt.
-      hostService.getInvoices({ month: CURRENT_MONTH, size: 500 }).catch(() => null),
+      hostService.getInvoices({ month: currentMonth(), size: 500 }).catch(() => null),
       // Cảnh báo quá hạn do cron nghiệp vụ bắn — nằm ở bảng thông báo chung.
       // BE chưa lọc được theo type nên lấy 100 cái gần nhất rồi lọc phía FE.
       notificationService.list({ size: 100 }).catch(() => null),
@@ -221,7 +221,7 @@ export const ReceivablesAging = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Công nợ phải thu</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Tiền khách thuê đang nợ kỳ {monthLabel(CURRENT_MONTH)} — phân nhóm theo tuổi nợ để ưu tiên thu hồi
+            Tiền khách thuê đang nợ kỳ {monthLabel(currentMonth())} — phân nhóm theo tuổi nợ để ưu tiên thu hồi
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -3,6 +3,7 @@ import { SESSION_KEYS } from '@/services/core/session';
 import { realPropertyService, ApiProperty, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { ManagedProperty, WholeHouseRentalStatus } from '@/types/managedProperty';
+import { serverNow } from '@/utils/serverTime';
 
 /**
  * Adapter nối màn "Quản lý toà nhà" (BuildingListScreen) với backend Spring THẬT.
@@ -42,7 +43,9 @@ const mapToManaged = (p: ApiProperty, rooms: ApiRoom[], contracts: TenantContrac
   if (isWhole) {
     const active = contracts.find(c => (c.status || '').toUpperCase() === 'ACTIVE');
     const daysLeft = active?.endDate
-      ? Math.ceil((new Date(active.endDate).getTime() - Date.now()) / 86400000)
+      // Giờ SERVER, không phải giờ máy: điện thoại lệch ngày là căn sắp hết hạn
+      // rơi nhầm nhóm, mà đó đúng nhóm quản lý phải đi gia hạn trước tiên.
+      ? Math.ceil((new Date(active.endDate).getTime() - serverNow().getTime()) / 86400000)
       : null;
     const rentalStatus: WholeHouseRentalStatus = active
       ? (daysLeft != null && daysLeft >= 0 && daysLeft <= 30 ? 'expiring' : 'rented')

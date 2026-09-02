@@ -76,8 +76,8 @@ export const ZoneManagement = () => {
   // Nhà chỉ dùng để hiển thị số liệu — hỏng thì bảng vẫn chạy, chỉ thiếu cột thống kê.
   const fetchProperties = async () => {
     try {
-      const res = await propertyService.getProperties(0, 200);
-      setProperties(res.content);
+      const res = await propertyService.getAllProperties();
+      setProperties(res);
     } catch { /* bỏ qua */ }
   };
 

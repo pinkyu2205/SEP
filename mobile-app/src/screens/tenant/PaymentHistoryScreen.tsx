@@ -434,6 +434,13 @@ export const PaymentHistoryScreen: React.FC = () => {
         title: monthLabel(key),
         pinned: false,
         total: sumReal(items),
+        /*
+          Đếm SẴN ở đây, đừng để tiêu đề tự đếm `section.data`.
+          Nhóm đang gập có `data` rỗng (xem `visibleSections`) — tiêu đề mà đếm mảng đó
+          thì mọi tháng gập đều hiện "0 giao dịch" bên cạnh tổng tiền khác 0, tự mâu
+          thuẫn ngay trên một dòng. Tổng tiền không dính lỗi này vì nó vốn tính sẵn.
+        */
+        count: countTxns(items),
         data: items.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
       }));
 
@@ -442,9 +449,11 @@ export const PaymentHistoryScreen: React.FC = () => {
     return [
       {
         key: '__deposit__',
-        title: '🔐 Tiền cọc',
+        // Emoji chuyển vào ô biểu tượng bên trái, không dính vào chuỗi tiêu đề nữa.
+        title: 'Tiền cọc',
         pinned: true,
         total: sumReal(deposits),
+        count: countTxns(deposits),
         data: deposits.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
       },
       ...monthSections,
@@ -452,6 +461,43 @@ export const PaymentHistoryScreen: React.FC = () => {
   }, [filtered]);
 
   const hasFilter = typeFilter !== 'all' || methodFilter !== 'all' || !!query.trim();
+
+  /**
+   * ── NHÓM THÁNG GẬP LẠI ĐƯỢC ──────────────────────────────────────────────
+   *
+   * Mỗi giao dịch là một thẻ cao ~180px với đủ hình thức · thời gian · mã CK. Khách ở
+   * một năm là hơn ba chục thẻ nối đuôi nhau: muốn xem tháng 3 phải cuộn qua toàn bộ
+   * tháng 4→12, mà nhìn màn hình chỉ thấy hai thẻ một lúc nên không có cách nào định vị
+   * mình đang ở đâu. Gập lại thì cả năm nằm gọn trong một màn, chọn tháng rồi mới mở.
+   *
+   * `null` = chưa ai bấm gì → dùng mặc định: mở tháng mới nhất (và mục Tiền cọc đã ghim
+   * — ghim để thấy ngay mà lại gập kín thì ghim làm gì). Bấm một cái là chốt lựa chọn
+   * của khách, từ đó không tự mở/đóng sau lưng họ nữa.
+   */
+  const [openKeys, setOpenKeys] = useState<Set<string> | null>(null);
+
+  const defaultOpen = useMemo(() => {
+    const keys = new Set<string>();
+    sections.forEach(s => { if (s.pinned) keys.add(s.key); });
+    const newestMonth = sections.find(s => !s.pinned);
+    if (newestMonth) keys.add(newestMonth.key);
+    return keys;
+  }, [sections]);
+
+  /**
+   * Đang lọc/tìm thì MỞ HẾT, bất kể khách đã gập gì.
+   *
+   * Gõ từ khoá xong mà kết quả nằm trong một tháng đang gập thì màn hình hiện ra y như
+   * "không tìm thấy gì" — chỉ khác là có một dòng tiêu đề tháng nào đó. Lọc là hành động
+   * nói rõ "tôi muốn thấy thứ khớp", nên không có lý do gì giấu nó đi.
+   */
+  const isOpen = (key: string) => hasFilter || (openKeys ?? defaultOpen).has(key);
+
+  const toggleSection = (key: string) => setOpenKeys(prev => {
+    const next = new Set(prev ?? defaultOpen);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const renderTransaction = ({ item }: { item: Txn }) => {
     const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
@@ -571,6 +617,31 @@ export const PaymentHistoryScreen: React.FC = () => {
     );
   };
 
+  /**
+   * Thẻ giao dịch nằm TRONG khung của tháng.
+   *
+   * Hai viền hai bên do lớp bọc này vẽ, nối liền với nắp trên (tiêu đề tháng) và nắp
+   * dưới (footer) thành một cái khung khép kín — nhìn là biết mấy hoá đơn này thuộc về
+   * tháng nào, thay vì một dãy thẻ trôi tự do dưới một dòng chữ.
+   */
+  const renderInsideMonth = ({ item, index }: { item: Txn; index: number }) => (
+    <View style={styles.sectionBody}>
+      {/* Vạch ngăn mảnh giữa các giao dịch, KHÔNG phải mỗi giao dịch một thẻ nổi. */}
+      {index > 0 && <View style={styles.rowDivider} />}
+      {renderTransaction({ item })}
+    </View>
+  );
+
+  /**
+   * Tháng đang gập thì `data` rỗng — SectionList không dựng thẻ nào của tháng đó.
+   * Dựng hết rồi ẩn bằng style thì vẫn trả đủ giá, mà đây có thể là hàng chục giao dịch.
+   */
+  const visibleSections = useMemo(
+    () => sections.map(s => (isOpen(s.key) ? s : { ...s, data: [] as Txn[] })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sections, openKeys, defaultOpen, hasFilter],
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
@@ -582,9 +653,9 @@ export const PaymentHistoryScreen: React.FC = () => {
       </View>
 
       <SectionList
-        sections={sections}
+        sections={visibleSections}
         keyExtractor={t => t.id}
-        renderItem={renderTransaction}
+        renderItem={renderInsideMonth}
         stickySectionHeadersEnabled={false}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -688,21 +759,66 @@ export const PaymentHistoryScreen: React.FC = () => {
             )}
           </>
         }
-        renderSectionHeader={({ section }) => (
-          <View style={[styles.sectionHeader, section.pinned && styles.sectionHeaderPinned]}>
-            <Text style={[styles.sectionTitle, section.pinned && styles.sectionTitlePinned]}>
-              {section.title}
-            </Text>
-            <Text style={[styles.sectionMeta, section.pinned && styles.sectionMetaPinned]}>
-              {/* Cọc nói rõ "được hoàn khi trả phòng" — khách hay tưởng đây là khoản mất hẳn. */}
-              {section.pinned
-                ? `${formatCurrency(section.total)} · hoàn lại khi trả phòng`
-                : `${countTxns(section.data)} giao dịch · ${formatCurrency(section.total)}`}
-            </Text>
-          </View>
+        renderSectionHeader={({ section }) => {
+          const open = isOpen(section.key);
+          return (
+            /*
+              Tiêu đề là NÚT GẬP, và cũng là nắp trên của khung bọc cả nhóm: bo góc trên
+              khi đang mở, bo cả bốn góc khi đã gập (lúc đó nó là toàn bộ cái thẻ).
+            */
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => toggleSection(section.key)}
+              style={[
+                styles.sectionHeader,
+                open ? styles.sectionHeaderOpen : styles.sectionHeaderClosed,
+                section.pinned && styles.sectionHeaderPinned,
+              ]}
+            >
+              {/*
+                Ô biểu tượng bên trái — thẻ giao dịch bên trong đều mở đầu bằng một ô
+                vuông bo tròn có nền nhạt (⚡ điện, 💧 nước). Thanh tháng không có gì ở
+                đó nên nhìn như một cái gạch ngang lạc loài giữa dãy thẻ; thêm vào là nó
+                thành anh em cùng một họ.
+              */}
+              <View style={[styles.sectionIcon, section.pinned && styles.sectionIconPinned]}>
+                <Text style={styles.sectionIconGlyph}>{section.pinned ? '🔐' : '📅'}</Text>
+              </View>
+              <View style={styles.sectionHeaderText}>
+                <Text style={[styles.sectionTitle, section.pinned && styles.sectionTitlePinned]}>
+                  {section.title}
+                </Text>
+                <Text style={[styles.sectionMeta, section.pinned && styles.sectionMetaPinned]}>
+                  {/* Cọc nói rõ "được hoàn khi trả phòng" — khách hay tưởng đây là khoản mất hẳn. */}
+                  {section.pinned ? 'hoàn lại khi trả phòng' : `${section.count} giao dịch`}
+                </Text>
+              </View>
+              {/*
+                SỐ TIỀN tách ra khỏi dòng chữ nhỏ và cho đứng riêng.
+                Gập lại rồi thì cả tháng chỉ còn đúng dòng này, mà thứ khách quét mắt tìm
+                là con số — chôn nó giữa "1 giao dịch · 2.000.000 đ" cỡ 11px thì phải đọc
+                cả dòng mới lọc ra được.
+              */}
+              <Text style={[styles.sectionTotal, section.pinned && styles.sectionTotalPinned]}>
+                {formatCurrency(section.total)}
+              </Text>
+              {/* Mũi tên trong nền tròn — dấu hiệu quy ước cho "bấm được, còn nội dung bên trong". */}
+              <View style={[styles.chevronWrap, section.pinned && styles.chevronWrapPinned]}>
+                <Text style={[styles.chevron, section.pinned && styles.chevronPinned]}>
+                  {open ? '⌃' : '⌄'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        /*
+          Gập = KHÔNG dựng thẻ nào của tháng đó. Không dùng cách ẩn bằng style: danh sách
+          này có thể hàng chục giao dịch, dựng hết rồi giấu đi thì vẫn trả giá đủ.
+        */
+        renderSectionFooter={({ section }) => (
+          isOpen(section.key) ? <View style={styles.sectionFooterOpen} /> : null
         )}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        SectionSeparatorComponent={() => <View style={{ height: Spacing.xs }} />}
+        SectionSeparatorComponent={() => <View style={{ height: 0 }} />}
         ListEmptyComponent={
           loading ? (
             <View style={styles.empty}><ActivityIndicator size="large" color={Colors.primary} /></View>
@@ -787,27 +903,107 @@ const styles = StyleSheet.create({
   filterSummaryText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterReset: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 
-  // Tiêu đề nhóm tháng
+  /*
+    ── KHUNG BỌC MỘT THÁNG ────────────────────────────────────────────────────
+    Ba mảnh ghép lại thành một khung khép kín: `sectionHeader` là nắp trên (cũng là nút
+    gập), `sectionBody` vẽ hai viền hai bên quanh từng thẻ giao dịch, `sectionFooterOpen`
+    là nắp dưới. Phải tách làm ba vì SectionList dựng header / item / footer thành ba
+    khối anh em, không có chỗ nào bọc chung được cả nhóm.
+
+    Nền của thân khung là `background` (xám) chứ không phải trắng: thẻ giao dịch màu
+    trắng, để trắng trên trắng thì mất đường viền của từng thẻ.
+  */
+  /*
+    Mềm hơn = ba thứ cùng lúc: bo góc rộng (xl thay vì lg), viền nhạt hơn hẳn màu
+    `border` mặc định, và bỏ nét đậm 900. Một hình chữ nhật góc nhọn + chữ đậm nhất +
+    màu bão hoà nhất đứng cạnh nhau là công thức chắc chắn ra "thô".
+  */
+  /*
+    KHÔNG có bóng đổ ở đây.
+
+    Bóng đổ chỉ vẽ được quanh MỘT view, mà khung tháng là ba view ghép lại (nắp trên /
+    thân / nắp dưới). Đặt bóng lên nắp trên thì lúc mở ra nắp có bóng còn thân không —
+    nắp trông như nổi hẳn lên trên phần thân, đúng cái cảm giác "đóng một kiểu mở một
+    kiểu". Cả khung đi bằng viền, phẳng, giống hệt nhau ở cả hai trạng thái.
+  */
   sectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: Spacing.lg, marginBottom: Spacing.sm,
+    flexDirection: 'row', alignItems: 'center',
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm + 2,
+    backgroundColor: Colors.white,
+    borderWidth: 1, borderColor: '#EFF2F7',
   },
-  sectionTitle: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
-  sectionMeta: { fontSize: 11, fontWeight: '600', color: Colors.textMuted },
+  sectionHeaderText: { flex: 1 },
+  /** Đang mở: chỉ bo góc trên, viền dưới để `sectionBody` nối tiếp xuống. */
+  sectionHeaderOpen: {
+    borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
+    borderBottomWidth: 0,
+  },
+  /** Đã gập: cả nhóm chỉ còn đúng dòng này, nên bo đủ bốn góc. */
+  sectionHeaderClosed: { borderRadius: BorderRadius.xl },
+
+  sectionIcon: {
+    width: 36, height: 36, borderRadius: BorderRadius.md,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.primaryBg, marginRight: Spacing.sm + 2,
+  },
+  sectionIconPinned: { backgroundColor: '#CFFAFE' },
+  sectionIconGlyph: { fontSize: 17 },
+  /*
+    Khoảng cách giữa các thẻ nằm TRONG lớp bọc (paddingTop), không dùng
+    `ItemSeparatorComponent`: dải cách của SectionList là một View anh em nằm NGOÀI lớp
+    bọc, nên hai viền hai bên sẽ đứt một đoạn ở mỗi khe — khung hở thành từng khúc.
+  */
+  /*
+    Thân khung dùng CHUNG nền trắng với nắp trên, không phải một máng xám lồng bên trong.
+
+    Bản trước để nền xám rồi thả thẻ trắng có bóng đổ vào giữa: bấm mở ra là màu nền đổi,
+    xuất hiện thêm một lớp thẻ nữa, và một cái viền nữa — nhìn ra hai vật thể khác nhau
+    chứ không phải cùng một thẻ vừa cao lên. Giờ mở hay đóng cũng chỉ là một thẻ trắng,
+    các giao dịch nằm trong đó như những DÒNG ngăn bằng vạch mảnh.
+  */
+  sectionBody: {
+    backgroundColor: Colors.white,
+    borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#EFF2F7',
+    paddingHorizontal: Spacing.base,
+  },
+  rowDivider: { height: 1, backgroundColor: '#F1F5F9' },
+  sectionFooterOpen: {
+    height: Spacing.sm,
+    backgroundColor: Colors.white,
+    borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#EFF2F7',
+    borderBottomLeftRadius: BorderRadius.xl, borderBottomRightRadius: BorderRadius.xl,
+  },
+  /* Mũi tên để màu XÁM, không phải primary: nó là nút phụ, tô cùng màu với con số tiền
+     là hai thứ cùng giành sự chú ý trên một dòng chỉ có bốn phần tử. */
+  chevronWrap: {
+    width: 28, height: 28, borderRadius: 14, marginLeft: Spacing.sm,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+  },
+  chevron: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary, lineHeight: 17 },
+
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, letterSpacing: 0.1 },
+  sectionMeta: { fontSize: 12, fontWeight: '500', color: Colors.textMuted, marginTop: 1 },
+  sectionTotal: { fontSize: 15, fontWeight: '800', color: Colors.primary, marginLeft: Spacing.sm },
 
   // Mục Tiền cọc ghim đầu — nền riêng để tách khỏi dãy nhóm-theo-tháng bên dưới,
   // nếu không nó trông như "một tháng nào đó" và mất luôn ý nghĩa ghim.
-  sectionHeaderPinned: {
-    backgroundColor: '#ECFEFF', borderWidth: 1, borderColor: '#A5F3FC',
-    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs,
-    marginTop: Spacing.sm,
-  },
+  sectionHeaderPinned: { backgroundColor: '#F0FDFF', borderColor: '#CFF3F8' },
   sectionTitlePinned: { color: '#0E7490' },
   sectionMetaPinned:  { color: '#0891B2' },
+  sectionTotalPinned: { color: '#0E7490' },
+  chevronWrapPinned:  { backgroundColor: '#DFF7FB' },
+  chevronPinned:      { color: '#0891B2' },
 
   // Thẻ giao dịch
-  card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm },
-  cardDuplicate: { borderWidth: 1, borderColor: Colors.warning + '66', backgroundColor: '#FFFDF5' },
+  /* Giao dịch là DÒNG trong thẻ tháng, không còn là thẻ nổi riêng: bỏ nền trắng, bỏ bóng
+     đổ, bỏ bo góc — ba thứ đó chỉ có nghĩa khi nó tự đứng trên nền xám. */
+  card: { paddingVertical: Spacing.base },
+  cardDuplicate: {
+    borderWidth: 1, borderColor: Colors.warning + '66', backgroundColor: '#FFFDF5',
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, marginVertical: Spacing.xs,
+  },
   amountMuted: { color: Colors.textMuted, textDecorationLine: 'line-through' },
   dupNote: {
     backgroundColor: Colors.warningLight, borderRadius: BorderRadius.md,

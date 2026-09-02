@@ -7,6 +7,7 @@
  * cùng một màu. Trước đây mỗi trang tự khai một bảng map nên "TERMINATED" chỗ thì
  * "Đã chấm dứt", chỗ lại "Đã thanh lý" — cùng dữ liệu mà đọc ra hai nghĩa khác nhau.
  */
+import { serverNow } from '@/utils/serverTime';
 
 export interface Badge {
   label: string;
@@ -49,10 +50,22 @@ const TERMINATION_TYPE_LABEL: Record<string, string> = {
 export const terminationTypeLabel = (type?: string): string =>
   type ? TERMINATION_TYPE_LABEL[type] ?? 'Khác' : 'Khác';
 
-/** Điều khoản tăng giá theo năm (rentEscalationType). */
+/**
+ * Điều khoản tăng giá theo năm (`rentEscalationType`).
+ *
+ * ⚠️ Thiếu một giá trị là UI in thẳng tên enum ra cho người dùng đọc — đúng chuyện đã
+ * xảy ra với `ANNUAL_CALENDAR` (mặc định của hệ thống, nên là loại gặp nhiều nhất).
+ * Thêm giá trị mới ở BE thì thêm luôn vào đây.
+ *
+ * Hai loại tăng theo % khác nhau ở MỐC ÁP GIÁ, không phải ở công thức — nói rõ mốc
+ * trong nhãn, vì đó mới là thứ khách hỏi:
+ *   ANNUAL_CALENDAR — 01/01 mỗi năm dương lịch (mặc định)
+ *   PERCENT         — năm kỷ niệm hợp đồng: tháng 13, 25… tính từ ngày vào ở (legacy)
+ */
 export const ESCALATION_LABEL: Record<string, string> = {
   NONE: 'Không tăng giá',
-  PERCENT: 'Tăng theo phần trăm/năm',
+  ANNUAL_CALENDAR: 'Tăng mỗi đầu năm (01/01)',
+  PERCENT: 'Tăng theo năm hợp đồng',
   SCHEDULE: 'Tăng theo lịch thoả thuận',
 };
 
@@ -103,7 +116,10 @@ export const daysLeft = (endDate?: string): number | null => {
   if (!endDate) return null;
   const end = new Date(endDate.slice(0, 10));
   if (Number.isNaN(end.getTime())) return null;
-  const today = new Date();
+  // Giờ SERVER: "còn mấy ngày tới hạn" phải khớp với cron trên VPS — nó mới là thứ
+  // thật sự chuyển hợp đồng sang hết hạn. Đồng hồ máy lệch một ngày là nhãn "sắp hết
+  // hạn" bật/tắt sai một ngày so với trạng thái thật.
+  const today = serverNow();
   today.setHours(0, 0, 0, 0);
   return Math.round((end.getTime() - today.getTime()) / 86_400_000);
 };

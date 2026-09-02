@@ -7,6 +7,7 @@ import { MaintenanceListScreen } from '@/screens/tenant/MaintenanceListScreen';
 import { TenantContractScreen } from '@/screens/tenant/TenantContractScreen';
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
 import { Colors } from '@/constants';
+import { useTenantTabBadges } from '@/hooks/useTenantTabBadges';
 
 const Tab = createBottomTabNavigator();
 
@@ -32,6 +33,9 @@ const tabStyles = StyleSheet.create({
 });
 
 export const TenantTabNavigator: React.FC = () => {
+  // Số THẬT, không phải số cứng — xem `useTenantTabBadges` để biết đếm cái gì.
+  const badges = useTenantTabBadges();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -61,7 +65,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={InvoiceListScreen}
         options={{
           tabBarLabel: 'Hóa đơn',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🧾" focused={focused} badge={1} />,
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🧾" focused={focused} badge={badges.invoices} />,
         }}
       />
       <Tab.Screen
@@ -69,7 +73,7 @@ export const TenantTabNavigator: React.FC = () => {
         component={MaintenanceListScreen}
         options={{
           tabBarLabel: 'Sửa chữa',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} badge={1} />,
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🔧" focused={focused} badge={badges.maintenance} />,
         }}
       />
       <Tab.Screen

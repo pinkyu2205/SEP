@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { notificationService, type AppNotificationDto } from '@/services/notification.service';
+import { hostService } from '@/services/host.service';
 
 /**
  * THÔNG BÁO REALTIME — dùng chung cho cổng Admin và cổng Host.
@@ -58,10 +59,50 @@ export const useRealtimeNotifications = (
   const typesRef = useRef(types);
   typesRef.current = types;
 
+  /**
+   * Đọc CẢ HAI nguồn, giống hệt badge và trang "Xem tất cả".
+   *
+   * ─── Vì sao ──────────────────────────────────────────────────────────────
+   * Hệ thống có hai bảng thông báo: `notifications` (sự kiện gửi cho một người) và
+   * `host_notifications` (hàng việc còn tồn: căn chờ duyệt giá, HĐ chờ duyệt…).
+   *
+   * Badge lấy TỔNG hai nguồn (`UnreadNotificationsContext` = appUnread + hostUnread) và
+   * trang "Xem tất cả" cũng gộp cả hai. Riêng khay chuông trước đây chỉ đọc nguồn thứ
+   * nhất — nên chuông báo "9+" mà mở ra thì "Chưa có thông báo nào". Đúng cái hiểu nhầm
+   * mà việc gộp badge sinh ra để tránh, chỉ là lộn ngược đầu.
+   *
+   * Một nguồn hỏng thì vẫn hiện nguồn kia (`allSettled`) — thà thiếu còn hơn trống trơn.
+   */
   const load = useCallback(async () => {
     try {
-      const page = await notificationService.list({ size: PAGE_SIZE });
-      const rows = page?.content ?? [];
+      const [appRes, hostRes] = await Promise.allSettled([
+        notificationService.list({ size: PAGE_SIZE }),
+        hostService.listNotifications({ page: 0, size: PAGE_SIZE }),
+      ]);
+
+      const appRows: AppNotificationDto[] =
+        appRes.status === 'fulfilled' ? (appRes.value?.content ?? []) : [];
+
+      // `host_notifications` khác tên field — quy về cùng một shape để khay chỉ có
+      // một đường vẽ. `id` để âm: hai bảng đánh số độc lập nên id trùng nhau là
+      // chuyện thường, đụng id là bấm đọc cái này lại xoá chấm đỏ của cái kia.
+      const hostRows: AppNotificationDto[] =
+        hostRes.status === 'fulfilled'
+          ? (hostRes.value?.content ?? []).map(h => ({
+              id: -Math.abs(Number(h.id) || 0),
+              title: h.title,
+              content: h.message,
+              type: h.type,
+              read: h.isRead,
+              createdAt: h.createdAt,
+            }))
+          : [];
+
+      // Cả hai nguồn cùng hỏng → GIỮ danh sách cũ, đừng xoá trắng khay.
+      if (appRes.status === 'rejected' && hostRes.status === 'rejected') return;
+
+      const rows = [...appRows, ...hostRows]
+        .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
       const filtered = typesRef.current?.length
         ? rows.filter(n => typesRef.current!.includes(n.type))
         : rows;
@@ -134,7 +175,11 @@ export const useRealtimeNotifications = (
     setItems(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
     setUnreadCount(c => Math.max(0, c - 1));
     try {
-      await notificationService.markRead(id);
+      // id âm = dòng của `host_notifications` (xem `load`) — phải gọi đúng endpoint
+      // của bảng đó, gọi nhầm sang `/notifications/{id}` là 404 hoặc tệ hơn: đánh dấu
+      // đã đọc nhầm một thông báo khác cùng số.
+      if (id < 0) await hostService.markNotificationRead(String(Math.abs(id)));
+      else await notificationService.markRead(id);
     } catch {
       load(); // hỏng thì lấy lại sự thật từ server
     }
@@ -144,7 +189,11 @@ export const useRealtimeNotifications = (
     setItems(prev => prev.map(n => ({ ...n, read: true })));
     setUnreadCount(0);
     try {
-      await notificationService.markAllRead();
+      // Đánh dấu ở CẢ HAI bảng, không thì "Đọc hết" xong badge vẫn còn số của bảng kia.
+      await Promise.allSettled([
+        notificationService.markAllRead(),
+        hostService.markAllNotificationsRead(),
+      ]);
     } catch {
       load();
     }

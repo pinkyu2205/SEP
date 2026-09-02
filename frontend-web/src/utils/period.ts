@@ -9,17 +9,24 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export const ymOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 
 /**
- * Tháng vận hành hiện tại THẬT của hệ thống (BE mặc định về tháng này khi thiếu param).
+ * Tháng vận hành hiện tại theo GIỜ SERVER, đọc tại THỜI ĐIỂM GỌI.
  *
- * ⚠️ Đây là hằng số tính MỘT LẦN lúc nạp module — thời điểm đó chưa có response API nào
- * nên chưa biết giờ server, đành lấy giờ máy. Chấp nhận được vì nó chỉ chính xác tới
- * THÁNG: máy phải sai cả tuần mới ra sai tháng.
- * Chỗ nào cần đúng tới NGÀY thì dùng `currentMonthIso()`/`todayIso()` của
- * @/utils/serverTime, đừng suy từ hằng này.
+ * Đây là thứ BE dùng làm mặc định khi thiếu param `month`, nên FE phải hỏi đúng kỳ đó.
+ * Chưa đồng bộ được giờ server thì tự rơi về giờ máy — không bao giờ ném lỗi.
+ *
+ * ─── Đừng thay bằng một hằng số (bài học 30/08/2026) ─────────────────────────
+ * Ở đây từng có `export const CURRENT_MONTH = ymOf(new Date())` và hơn 40 nơi dùng nó.
+ * Lập luận biện hộ khi đó là "chỉ chính xác tới THÁNG, máy phải sai cả tuần mới ra sai
+ * tháng" — sai ở chỗ coi lệch đồng hồ là chuyện hiếm. Máy thật gặp ngoài đời lệch tới
+ * HAI THÁNG (máy tháng 8, server tháng 10), và hậu quả là:
+ *   • mọi trang gọi API kèm hằng đó đều xin số liệu SAI KỲ — bảng điều hành, báo cáo,
+ *     công nợ vẽ tháng 8 trong khi hệ thống đã sang tháng 10, không báo gì;
+ *   • `MonthPicker` lấy nó làm trần nên khoá luôn nút "kỳ sau" — host lùi về tháng
+ *     trước rồi không quay lại được.
+ *
+ * Hằng số còn hỏng thêm một kiểu nữa kể cả khi đồng hồ máy đúng: nó tính MỘT LẦN lúc
+ * nạp module, nên tab mở qua đêm giao tháng vẫn đứng ở tháng cũ cho tới khi F5.
  */
-export const CURRENT_MONTH = ymOf(new Date());
-
-/** Như `CURRENT_MONTH` nhưng đọc tại thời điểm gọi, theo giờ server. */
 export const currentMonth = (): string => currentMonthIso();
 
 export const shiftMonth = (ym: string, delta: number) => {

@@ -569,7 +569,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           <Text style={s.backBtnText}>‹</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.title}>Thu & Đối soát</Text>
+          <Text style={s.title}>Tiền khách đã trả</Text>
           {/* Không rao "không hiển thị tiền thuê & tiền cọc" nữa (13/08/2026): nói ra
               chính là chỉ cho manager biết có thứ đang bị giấu, mà chẳng giúp họ làm
               việc gì. Chỗ nào thật sự cần giải thích thì đã có câu trong ô chi tiết. */}

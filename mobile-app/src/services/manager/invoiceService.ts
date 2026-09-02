@@ -98,6 +98,17 @@ export interface UtilityInvoiceLite {
   amount?: number;
   status?: string;
   createdAt?: string;
+  /** Lúc hệ thống chuyển hoá đơn cho khách. */
+  sentAt?: string | null;
+  /**
+   * Khách đã MỞ thông báo hoá đơn này chưa (BE 30/08/2026).
+   *
+   * `null` = KHÔNG BIẾT, không phải "chưa xem". BE suy từ cờ `read` của bản ghi thông báo
+   * tra theo `dedupeKey = utility-invoice:{id}:created`; hoá đơn phát hành TRƯỚC khi BE
+   * đặt khoá đó thì tra ra rỗng. Nơi hiển thị phải để "—" cho nhóm này, đừng gộp vào
+   * "chưa xem" — báo sai là quản lý đi đôi co với khách bằng dữ liệu không có thật.
+   */
+  tenantViewed?: boolean | null;
 }
 
 export type ManagerPaymentStatus = 'PENDING_VERIFY' | 'VERIFIED' | 'REJECTED';
@@ -299,4 +310,46 @@ export const realManagerInvoiceService = {
    * QR thật: `createPaymentQr` ở trên.
    */
 
+};
+
+// ─── Helper hiển thị hoá đơn — DÙNG CHUNG cho mọi màn của quản lý ────────────
+//
+// Đặt cạnh kiểu dữ liệu chứ không để mỗi màn tự chế: hai màn "Nhà nguyên căn" và
+// "Sổ hoá đơn của khách" từng cùng in ra "0đ" và cùng gọi sai tên hoá đơn đón
+// khách, vì mỗi bên tự viết lại một bản. Sửa một chỗ thì cả hai cùng đúng.
+
+/**
+ * Hoá đơn lúc đón khách là một PHONG BÌ gộp (tiền cọc + tiền nhà chu kỳ đầu),
+ * không phải hoá đơn tiền nhà thường. Không tách ra thì màn hình ghi "Tiền nhà ·
+ * T08" y hệt hoá đơn tháng 8 thật — đọc thành thu hai lần trong một tháng.
+ */
+export const isOnboardEnvelope = (inv: Pick<ManagerInvoice, 'code'>): boolean =>
+  (inv.code || '').includes('ONBOARD');
+
+/** Nhãn + icon theo loại, đã tách riêng hoá đơn đón khách. */
+export const invoiceKind = (
+  inv: Pick<ManagerInvoice, 'code' | 'type'>,
+): { icon: string; label: string } => {
+  if (isOnboardEnvelope(inv)) return { icon: '🔑', label: 'Cọc + tiền nhà kỳ đầu' };
+  switch (inv.type) {
+    case 'RENT':        return { icon: '🏠', label: 'Tiền nhà' };
+    case 'ELECTRICITY': return { icon: '⚡', label: 'Tiền điện' };
+    case 'WATER':       return { icon: '💧', label: 'Tiền nước' };
+    case 'SERVICE':     return { icon: '🧾', label: 'Phí dịch vụ' };
+    default:            return { icon: '📄', label: 'Khoản khác' };
+  }
+};
+
+/**
+ * Số tiền để hiển thị, hoặc `null` khi BỊ ẨN với quản lý.
+ *
+ * BE mask `amount` về `null` cho hoá đơn tiền nhà (`ManagerBillingServiceImpl`:
+ * `if (!isAdmin && type == RENT) setAmount(null)`). Đưa thẳng vào một hàm format
+ * kiểu `(n || 0).toLocaleString()` là in ra **"0đ"** — đọc thành "hoá đơn không
+ * đồng", sai hẳn nghĩa và tệ hơn việc không hiện gì. Gọi hàm này rồi tự xử lý
+ * nhánh `null` (xem `HIDDEN_AMOUNT_TEXT`).
+ */
+export const invoiceAmountText = (inv: Pick<ManagerInvoice, 'amount'>): string | null => {
+  const v = inv.amount as number | null | undefined;
+  return v == null ? null : v.toLocaleString('vi-VN') + 'đ';
 };

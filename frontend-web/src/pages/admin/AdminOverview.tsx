@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Building2, CreditCard, ServerCog, ShieldCheck, TrendingUp, Users, Wrench, UserCog,
+  Building2, CreditCard, ShieldCheck, TrendingUp, Users, Wrench, UserCog,
   AlertTriangle, ArrowRight, BadgeCheck, BarChart3, Clock, Download, Home, PiggyBank,
   RefreshCw, Receipt, Wallet, Tag,
 } from 'lucide-react';
@@ -21,7 +21,7 @@ import { maintenanceService } from '@/services/maintenance.service';
 import { hostService, type PropertyPerformanceRow } from '@/services/host.service';
 import { exportToExcel } from '@/utils/exportExcel';
 import {
-  CURRENT_MONTH, cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion,
+  currentMonth, cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion,
   monthLabel, monthShort, safePct, shiftMonth,
 } from '@/utils/period';
 import type { PropertyResponse, UserResponse, MaintenanceDashboardResponse } from '@/types/api.types';
@@ -224,16 +224,16 @@ export const SuperAdminOverview = () => {
       adminService.listPayments().catch(() => []),
       adminService.listDeposits().catch(() => []),
       adminService.getHosts().catch(() => null),
-      propertyService.getProperties(0, 500).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
       userService.getAllUsers().catch(() => null),
       maintenanceService.getDashboard().catch(() => null),
-      hostService.getPropertyPerformance(CURRENT_MONTH).catch(() => null),
+      hostService.getPropertyPerformance(currentMonth()).catch(() => null),
     ]);
     setInvoices(inv);
     setPayments(pay);
     setDeposits(dep);
     setHosts(hostList);
-    setProperties(propPage?.content ?? null);
+    setProperties(propPage ?? null);
     setUsers(userList);
     setMtn(mtnRes);
     setPerf(perfRes ?? []);
@@ -278,7 +278,7 @@ export const SuperAdminOverview = () => {
   /** Xu hướng 12 kỳ gần nhất — gom hoá đơn theo kỳ, kỳ trống vẫn giữ cột. */
   const trend = useMemo(() => {
     const buckets = new Map<string, { paid: number; open: number }>();
-    for (let i = TREND_MONTHS - 1; i >= 0; i--) buckets.set(shiftMonth(CURRENT_MONTH, -i), { paid: 0, open: 0 });
+    for (let i = TREND_MONTHS - 1; i >= 0; i--) buckets.set(shiftMonth(currentMonth(), -i), { paid: 0, open: 0 });
     for (const inv of moneyInvoices) {
       const ym = periodOf(inv);
       const b = ym ? buckets.get(ym) : undefined;
@@ -421,11 +421,11 @@ export const SuperAdminOverview = () => {
   );
 
   const handleExport = () => {
-    exportToExcel(`QuanTriHeThong_HoangBinhLand_${CURRENT_MONTH}`, [
+    exportToExcel(`QuanTriHeThong_HoangBinhLand_${currentMonth()}`, [
       {
         name: 'Tổng quan',
         rows: [{
-          'Thời điểm': monthLabel(CURRENT_MONTH),
+          'Thời điểm': monthLabel(currentMonth()),
           'Host': hosts?.length ?? userComp.hosts, 'Quản lý vận hành': userComp.managers, 'Khách thuê': userComp.tenants,
           'Toà nhà': properties?.length ?? 0, 'Tổng phòng': rooms.total,
           'Phòng đang thuê': rooms.occupied, 'Tỷ lệ lấp đầy (%)': rooms.rate ?? '',
@@ -475,7 +475,7 @@ export const SuperAdminOverview = () => {
             <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">Quản trị toàn hệ thống Hoàng Bình Land</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               Giám sát Host, người dùng, toà nhà, dòng tiền & bảo trì toàn nền tảng — số liệu trực tiếp từ hệ thống,
-              cập nhật tới {monthLabel(CURRENT_MONTH).toLowerCase()}.
+              cập nhật tới {monthLabel(currentMonth()).toLowerCase()}.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -487,7 +487,6 @@ export const SuperAdminOverview = () => {
               <Download className="h-4 w-4" /> Xuất Excel
             </button>
             <Link to="/admin/users" className="btn-primary flex items-center gap-2"><Users className="h-4 w-4" /> Tạo tài khoản</Link>
-            <Link to="/admin/settings" className="btn-secondary flex items-center gap-2"><ServerCog className="h-4 w-4" /> Cấu hình</Link>
           </div>
         </div>
 

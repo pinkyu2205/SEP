@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
+import { X, ShieldAlert, Loader2, FileText, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
   PropertyResponse,
@@ -13,10 +13,10 @@ import type {
 import { propertyService } from '../../services/property.service';
 import { tenantService, isTenantEligibleRole } from '../../services/tenant.service';
 import { uploadToCloudinary } from '../../services/upload.service';
-import { extractTenantContractData } from '../../utils/pdfExtract';
 import { draftBlobToFile, openContractBlob } from '../../utils/contractFile';
 import { todayIso } from '@/utils/serverTime';
-import { buildOccupancyMap, occupancyChip, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
+import { buildOccupancyMap, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
+import { PropertyPicker } from './PropertyPicker';
 import {
   CapacityStat, RoomSquares, CapacityBreakdown,
   RoomCountMismatchNote, RoomsNotOpenedNote, capacityTone, TONE_CARD,
@@ -69,93 +69,26 @@ const DOB_MIN = '1930-01-01';
 const DOB_MAX = addYearsIso(todayIso(), -18);
 
 /**
- * Modal tạo HỢP ĐỒNG NHÁP (DRAFT) cho luồng đón khách v2.
- * - Tab "Upload file": chọn file HĐ đã điền (DOCX/PDF) → tự bóc tách + upload lưu link → admin review/chỉnh.
- * - Tab "Nhập tay": admin nhập trực tiếp → sau khi lưu, BE fill dữ liệu vào template và
- *   render PDF (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload
- *   Cloudinary → lưu draftContractFileUrl.
+ * Modal tạo HỢP ĐỒNG NHÁP (DRAFT) cho luồng đón khách v2 — NHẬP TAY.
+ *
+ * Admin nhập trực tiếp; sau khi lưu, BE fill dữ liệu vào template và render PDF
+ * (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload Cloudinary →
+ * lưu `draftContractFileUrl`.
+ *
+ * ─── Đã BỎ tab "Upload file (auto-điền)" 01/09/2026 ──────────────────────────
+ * Nhánh đó cho admin tải file HĐ đã điền (DOCX/PDF) rồi OCR bóc tên/CCCD/SĐT/giá/cọc
+ * và đoán nhà theo địa chỉ trong file. Bỏ theo yêu cầu chủ sản phẩm.
+ *
+ * Kéo theo xoá luôn bộ so khớp địa chỉ mờ (`suggestPropertyByAddress`, `tokenize`,
+ * `editDistanceAtMost`) — chúng chỉ tồn tại để đoán nhà từ text bóc trong file, nay
+ * admin chọn nhà bằng `PropertyPicker` nên không còn ai gọi. Cần nhập nhiều hồ sơ một
+ * lúc thì dùng "Import từ Excel", đường đó vẫn còn.
+ *
  * Quản lý phụ trách LUÔN LÀ operationManagerId có sẵn của nhà (BE tự set) — không cho
  * chọn tay ở đây nữa. Nhà chưa có quản lý phụ trách thì KHÔNG cho tạo hợp đồng (phải
  * gán quản lý cho nhà trước, ở trang Zone/Quản lý).
  */
-// Bỏ dấu tiếng Việt + hạ chữ thường + gom khoảng trắng, phục vụ so khớp địa chỉ.
-const normalizeText = (s: string): string =>
-  s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 
-// Giữ token số dù chỉ 1 ký tự — "Quận 1" và "Quận 3" phải phân biệt được, không thì
-// mọi quận trong cùng thành phố sẽ trùng điểm nhau. Chỉ bỏ token CHỮ 1 ký tự (rác).
-const tokenize = (s: string): string[] =>
-  normalizeText(s)
-    .split(' ')
-    .filter((t) => t.length > 1 || /^[0-9]$/.test(t));
-
-// Khoảng cách sửa đổi (Levenshtein) có trần cắt sớm — chỉ cần biết "≤ max hay không".
-const editDistanceAtMost = (a: string, b: string, max: number): boolean => {
-  if (Math.abs(a.length - b.length) > max) return false;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let rowMin = i;
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      rowMin = Math.min(rowMin, cur[j]);
-    }
-    if (rowMin > max) return false;
-    prev = cur;
-  }
-  return prev[b.length] <= max;
-};
-
-/**
- * "Kiểm tra chính tả" cho tên nhà/địa chỉ bóc từ file: token khớp khi trùng tuyệt đối,
- * HOẶC lệch tối đa 1 ký tự với token đủ dài (≥4) — chống gõ sai/OCR sai kiểu
- * "Le Lloi" ~ "Le Loi". Token ngắn và token số phải khớp tuyệt đối ("Quận 1" ≠ "Quận 3").
- */
-const tokenMatches = (t: string, candidates: Set<string>): boolean => {
-  if (candidates.has(t)) return true;
-  if (t.length < 4 || /\d/.test(t)) return false;
-  for (const c of candidates) {
-    if (c.length >= 4 && !/\d/.test(c) && editDistanceAtMost(t, c, 1)) return true;
-  }
-  return false;
-};
-
-/**
- * Gợi ý property khớp với địa chỉ bóc từ file HĐ (đoạn text tự do, không chuẩn hoá).
- * So khớp kiểu token-overlap trên propertyName + 2 field địa chỉ — đủ dùng cho danh
- * sách BĐS đã đăng ký sẵn trong hệ thống (không phải geocoding địa chỉ tự do ngoài đời).
- * Nếu địa chỉ quá chung chung (chỉ quận/thành phố — nhiều nhà cùng khớp điểm cao ngang
- * nhau) thì CHỦ ĐỘNG TỪ CHỐI gợi ý thay vì đoán liều 1 nhà — admin tự chọn tay an toàn hơn.
- */
-const suggestPropertyByAddress = (
-  address: string,
-  list: PropertyResponse[],
-): { property: PropertyResponse; score: number } | null => {
-  const targetTokens = new Set(tokenize(address));
-  if (targetTokens.size === 0) return null;
-
-  const scored = list
-    .map((p) => {
-      const candidateTokens = new Set(tokenize(`${p.propertyName} ${p.fullAddress} ${p.shortAddress}`));
-      let overlap = 0;
-      targetTokens.forEach((t) => { if (tokenMatches(t, candidateTokens)) overlap += 1; });
-      return { property: p, score: overlap / targetTokens.size };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const best = scored[0];
-  const runnerUp = scored[1];
-  const tooClose = runnerUp && best.score - runnerUp.score < 0.15;
-  if (!best || best.score < 0.4 || tooClose) return null;
-  return best;
-};
 
 const ROOM_STATUS_LABEL: Record<string, string> = {
   RENTED: 'đang có khách',
@@ -174,20 +107,6 @@ const EQUIPMENT_CONDITION_LABEL: Record<string, string> = {
   BROKEN: 'Hỏng',
 };
 
-const PROPERTY_STATUS_LABEL: Record<string, string> = {
-  RENTED: 'đã cho thuê nguyên căn',
-  MAINTENANCE: 'đang bảo trì',
-  DISABLED: 'ngưng khai thác',
-  UNDER_RENOVATION: 'đang cải tạo',
-  DRAFT: 'chưa hoàn thiện onboarding',
-  PENDING: 'chưa hoàn thiện onboarding',
-  PENDING_EQUIPMENT_INSTALLATION: 'chưa hoàn thiện onboarding',
-  RENOVATION_COMPLETED: 'chưa hoàn thiện onboarding',
-  PENDING_HOST_REVIEW: 'chưa hoàn thiện onboarding',
-  PENDING_OPERATION_MANAGER: 'chưa hoàn thiện onboarding',
-  INACTIVE: 'ngưng hoạt động',
-};
-
 export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Props) => {
   const isEditMode = !!editContract;
 
@@ -198,12 +117,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const [allRoomsInProperty, setAllRoomsInProperty] = useState<RoomResponse[]>([]);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
-  const [addressSuggestion, setAddressSuggestion] = useState('');
-
-  const [mode, setMode] = useState<'upload' | 'manual'>('upload');
-  const [extracting, setExtracting] = useState(false);
-  const [fileName, setFileName] = useState('');
-  const [draftFileUrl, setDraftFileUrl] = useState('');
 
   // Thành viên ở cùng (householdMembers) — trước đây chỉ mobile walk-in thu được,
   // nhánh admin-tạo-draft mất hẳn dữ liệu này (ResumeContract cũng không thu).
@@ -261,6 +174,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     deposit: editContract.deposit != null ? String(editContract.deposit) : '',
     depositMonths: editContract.depositMonths != null ? String(editContract.depositMonths) : '1',
     expectedReceptionDate: editContract.expectedReceptionDate || '',
+    moveInDate: editContract.moveInDate || '',
     endDate: editContract.endDate || '',
   } : {
     propertyId: '',
@@ -276,6 +190,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     deposit: '',
     depositMonths: '1',
     expectedReceptionDate: '',
+    moveInDate: '',
     endDate: '',
   });
 
@@ -323,10 +238,10 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     (async () => {
       try {
         const [propPage, drafts] = await Promise.all([
-          propertyService.getProperties(0, 200),
+          propertyService.getAllProperties(),
           tenantService.listDrafts().catch(() => [] as TenantContractResponse[]),
         ]);
-        setAllProperties(propPage.content);
+        setAllProperties(propPage);
         const draftPropertyIds = new Set<number>();
         const roomIds = new Set<number>();
         drafts.forEach((d) => {
@@ -346,7 +261,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
           Gộp về một chỗ cũng bỏ được trùng lặp: `capacityTone` đã coi nguyên căn có hồ
           sơ nháp là `full` rồi (`wholeHouseTaken`).
         */
-        const activeProperties = propPage.content.filter((p) => p.status === 'ACTIVE');
+        const activeProperties = propPage.filter((p) => p.status === 'ACTIVE');
         setProperties(activeProperties);
         // Đồng bộ, không request nào — BE trả sẵn số phòng trong `PropertyResponse`.
         setOccupancy(buildOccupancyMap(activeProperties, drafts));
@@ -390,6 +305,72 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const isWholeHouse = selectedProperty?.wholeHouse === true;
 
   /**
+   * TRẦN của ô "Ngày kết thúc" — ngày muộn nhất còn hợp lệ.
+   *
+   * Là ngày SỚM HƠN trong hai mốc:
+   *   • hôm nay + 5 năm      — Rule 4 của BE (`endDate.isAfter(today.plusYears(5))`)
+   *   • `leaseEndDate`       — hạn hợp đồng công ty ký với CHỦ NHÀ GỐC
+   *
+   * ─── Vì sao phải chặn ngay ở ô chọn (30/08/2026) ────────────────────────────
+   * Trước đây `max` chỉ có mốc 5 năm, còn hạn chủ nhà thì để `leaseWindowError` bắt
+   * lúc bấm Lưu. Nghĩa là lịch vẫn cho bấm chọn 08/05/2031, admin điền tiếp cả form,
+   * rồi mới ăn toast báo sai và phải quay lại sửa. Chặn ở ô chọn thì ngày sai KHÔNG
+   * bấm được ngay từ đầu — trình duyệt tự làm mờ phần vượt trần trong lịch.
+   *
+   * `leaseWindowError` vẫn giữ làm lớp sau: nó bắt cả trường hợp trần chưa biết (nhà
+   * chưa chọn, hoặc BE bản cũ không trả `leaseEndDate`) và cả mốc `leaseStartDate`.
+   */
+  const contractEndMax = useMemo(() => {
+    const ruleCap = addYearsIso(todayIso(), 5);
+    /*
+      CHỈ áp trần khi tạo mới. Hợp đồng nháp cũ hoàn toàn có thể đã có `endDate` vượt
+      trần hiện tại (hạn chủ nhà được sửa ngắn lại sau khi nháp được tạo). Ép `max` lúc
+      đó khiến HTML5 coi giá trị đang có là invalid và chặn submit dù admin không hề
+      đụng vào ô ngày — cùng cái bẫy đã ghi chú ở `min` bên dưới.
+    */
+    if (isEditMode) return ruleCap;
+    const leaseEnd = selectedProperty?.leaseEndDate;
+    return leaseEnd && leaseEnd < ruleCap ? leaseEnd : ruleCap;
+  }, [isEditMode, selectedProperty]);
+
+  /**
+   * SÀN của ô "Ngày bắt đầu hợp đồng" — mốc muộn hơn giữa hôm nay và ngày hợp đồng
+   * với chủ nhà gốc có hiệu lực. Vế đối xứng của `contractEndMax`.
+   */
+  const contractStartMin = useMemo(() => {
+    const today = todayIso();
+    const leaseStart = selectedProperty?.leaseStartDate;
+    return leaseStart && leaseStart > today ? leaseStart : today;
+  }, [selectedProperty]);
+
+  /** Trần đang bị hạn chủ nhà siết (không phải mốc 5 năm) → nói rõ lý do cho admin. */
+  const cappedByLease = !isEditMode
+    && !!selectedProperty?.leaseEndDate
+    && contractEndMax === selectedProperty.leaseEndDate;
+
+  /**
+   * Đổi nhà sau khi đã chọn ngày kết thúc → xoá ngày nếu nó vượt trần của nhà mới.
+   *
+   * Thuộc tính `max` chỉ chặn lúc CHỌN, không đụng tới giá trị đã nằm sẵn trong ô. Nên
+   * nếu không có chỗ này: admin chọn 08/05/2031 cho một căn hạn dài, đổi sang căn hạn
+   * tới 2027, ngày cũ đứng yên và trình duyệt chặn submit bằng một câu báo chung chung
+   * ("Value must be ... or earlier") — không nói vì sao, cũng không chỉ được là do vừa
+   * đổi nhà.
+   *
+   * XOÁ chứ không kẹp về đúng trần: kẹp là tự chọn hộ một ngày admin chưa từng đồng ý,
+   * mà đây là ngày kết thúc hợp đồng.
+   */
+  useEffect(() => {
+    if (isEditMode || !form.endDate || form.endDate <= contractEndMax) return;
+    setForm((prev) => ({ ...prev, endDate: '' }));
+    toast(
+      `Đã xoá ngày kết thúc: nhà này chỉ cho thuê tới ${formatDateDisplay(contractEndMax)} `
+      + '(hạn hợp đồng với chủ nhà). Vui lòng chọn lại.',
+      { icon: '📅', duration: 6000 },
+    );
+  }, [contractEndMax, form.endDate, isEditMode]);
+
+  /**
    * Hợp đồng khách phải nằm TRỌN trong hợp đồng thuê nhà ký với chủ nhà gốc.
    *
    *   • Vào ở trước ngày HĐ chủ nhà hiệu lực ⇒ cho thuê căn công ty chưa có quyền quản lý.
@@ -405,9 +386,17 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     if (!p?.leaseStartDate && !p?.leaseEndDate) return null; // BE bản cũ chưa trả — để BE tự chặn
 
     const fmt = (d: string) => d.split('-').reverse().join('/');
-    const moveIn = form.expectedReceptionDate || todayIso();
-    if (p.leaseStartDate && moveIn < p.leaseStartDate) {
-      return `Ngày đón khách (${fmt(moveIn)}) sớm hơn ngày hợp đồng với chủ nhà có hiệu lực `
+    /*
+      So bằng NGÀY BẮT ĐẦU HỢP ĐỒNG, không phải ngày dự kiến đón khách.
+
+      Cửa sổ mà BE kiểm (`assertOccupancyWindow`) là khoảng khách CHIẾM DỤNG căn nhà,
+      tức từ `moveInDate`. Ngày đón khách chỉ là lịch hẹn của quản lý — hai ngày đó
+      được phép lệch nhau, và khi lệch thì lớp chặn sớm này so sai mốc: hoặc báo lỗi
+      oan, hoặc cho qua rồi để BE trả 400 đúng thứ mà nó đáng lẽ phải chặn từ đây.
+    */
+    const moveIn = form.moveInDate;
+    if (p.leaseStartDate && moveIn && moveIn < p.leaseStartDate) {
+      return `Ngày bắt đầu hợp đồng (${fmt(moveIn)}) sớm hơn ngày hợp đồng với chủ nhà có hiệu lực `
         + `(${fmt(p.leaseStartDate)}). Công ty chưa có quyền quản lý căn này trước ngày đó.`;
     }
     if (p.leaseEndDate && form.endDate && form.endDate > p.leaseEndDate) {
@@ -415,7 +404,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         + `chủ nhà (${fmt(p.leaseEndDate)}). Tới ngày trả nhà sẽ vẫn còn khách bên trong.`;
     }
     return null;
-  }, [allProperties, form.expectedReceptionDate, form.endDate]);
+  }, [allProperties, form.moveInDate, form.endDate]);
 
   // Khi đổi property: nạp phòng (nếu chia phòng). Quản lý phụ trách LUÔN LÀ
   // operationManagerId có sẵn của nhà — nhà đã đi vào hoạt động thì admin đã gán quản
@@ -544,83 +533,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setExtracting(true);
-    const isOldDoc = file.name.toLowerCase().endsWith('.doc') && !file.name.toLowerCase().endsWith('.docx');
-    try {
-      if (isOldDoc) {
-        const url = await uploadToCloudinary(file, 'raw');
-        setDraftFileUrl(url);
-        toast('File .doc cũ chỉ lưu được, không tự bóc tách. Vui lòng nhập tay.', { icon: 'ℹ️' });
-      } else {
-        const [extracted, url] = await Promise.all([
-          extractTenantContractData(file),
-          uploadToCloudinary(file, 'raw'),
-        ]);
-        setDraftFileUrl(url);
-        setForm((prev) => ({
-          ...prev,
-          fullName: extracted.tenantName || prev.fullName,
-          cccd: extracted.tenantCccd || prev.cccd,
-          phoneNumber: extracted.tenantPhone || prev.phoneNumber,
-          rentAmount: extracted.rentAmount > 0 ? String(extracted.rentAmount) : prev.rentAmount,
-          deposit: extracted.deposit > 0 ? String(extracted.deposit) : prev.deposit,
-          expectedReceptionDate: extracted.startDate || prev.expectedReceptionDate,
-          endDate: extracted.endDate || prev.endDate,
-        }));
-
-        // Gợi ý nhà theo TÊN NHÀ + địa chỉ bóc từ file (so khớp mờ, chịu được sai
-        // chính tả 1 ký tự) — chỉ tự chọn nếu admin CHƯA chọn tay, và chỉ khớp trong
-        // danh sách nhà đang ACTIVE (sẵn sàng cho thuê).
-        const propertyHint = `${extracted.propertyName} ${extracted.address}`.trim();
-        if (propertyHint) {
-          const match = suggestPropertyByAddress(propertyHint, properties);
-          if (match) {
-            setForm((prev) => ({ ...prev, propertyId: prev.propertyId || String(match.property.id) }));
-            const exact =
-              extracted.propertyName &&
-              normalizeText(extracted.propertyName) === normalizeText(match.property.propertyName);
-            setAddressSuggestion(
-              exact
-                ? `Đã chọn nhà "${match.property.propertyName}" đúng theo tên ghi trong file.`
-                : `Đã gợi ý nhà "${match.property.propertyName}" theo tên/địa chỉ trong file (khớp gần đúng — có thể file ghi sai chính tả). Vui lòng kiểm tra lại.`,
-            );
-          } else {
-            // Không khớp nhà nào đang sẵn sàng — thử tìm trong TOÀN BỘ danh sách để
-            // báo rõ nguyên nhân (vd nhà đúng địa chỉ nhưng đang bảo trì/hết hạn).
-            const blocked = suggestPropertyByAddress(propertyHint, allProperties);
-            setAddressSuggestion(
-              blocked
-                ? `Tên/địa chỉ trong file khớp với nhà "${blocked.property.propertyName}" nhưng nhà này hiện KHÔNG sẵn sàng cho thuê (${PROPERTY_STATUS_LABEL[blocked.property.status] ?? blocked.property.status}). Vui lòng chọn nhà khác hoặc kiểm tra lại.`
-                : 'Không tự tìm được nhà khớp với tên/địa chỉ trong file — vui lòng chọn tay.',
-            );
-          }
-        } else {
-          setAddressSuggestion('');
-        }
-        // Đếm field chính bóc được — bóc rỗng mà vẫn toast success làm admin tưởng
-        // đã đủ dữ liệu rồi lưu thiếu.
-        const gotCount = [
-          extracted.tenantName, extracted.tenantCccd, extracted.tenantPhone,
-          extracted.rentAmount > 0 ? 'x' : '', extracted.deposit > 0 ? 'x' : '',
-        ].filter(Boolean).length;
-        if (gotCount === 0) {
-          toast('Đã lưu file nhưng KHÔNG bóc tách được thông tin nào — vui lòng nhập tay.', { icon: '⚠️' });
-        } else if (gotCount < 3) {
-          toast(`Chỉ bóc tách được ${gotCount}/5 thông tin chính — kiểm tra và bổ sung phần còn thiếu.`, { icon: '⚠️' });
-        } else {
-          toast.success('Đã bóc tách thông tin từ file — vui lòng kiểm tra lại.');
-        }
-      }
-    } catch {
-      toast.error('Không xử lý được file — kiểm tra lại định dạng (nên dùng DOCX/PDF số hoá).');
-    } finally {
-      setExtracting(false);
-    }
-  };
 
   // Ưu tiên cờ `eligible` do BE trả; nếu BE không trả thì tự suy từ role.
   const roleWarning =
@@ -719,7 +631,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         cccdIssueDate: form.cccdIssueDate || undefined,
         cccdIssuePlace: form.cccdIssuePlace.trim() || undefined,
         permanentAddress: form.permanentAddress.trim() || undefined,
-        moveInDate: form.expectedReceptionDate || undefined,
+        moveInDate: form.moveInDate || undefined,
         rentAmount: Number(form.rentAmount),
         deposit: Number(form.deposit),
         depositMonths: Number(form.depositMonths) || 1,
@@ -772,6 +684,12 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       if (!selectedProperty.operationManagerId) {
         return toast.error('Nhà này chưa có quản lý phụ trách — vui lòng gán quản lý cho nhà trước khi tạo hợp đồng.');
       }
+      // Chặn ở đây thay cho nhánh `|| todayIso()` cũ: thiếu ngày bắt đầu thì phải HỎI,
+      // không được tự chọn hộ rồi ghi vào hợp đồng.
+      if (!form.moveInDate) return toast.error('Vui lòng chọn ngày bắt đầu hợp đồng.');
+    }
+    if (form.moveInDate && form.endDate && form.endDate <= form.moveInDate) {
+      return toast.error('Ngày kết thúc phải sau ngày bắt đầu hợp đồng.');
     }
 
     // Không được cho thuê ngoài phạm vi hợp đồng với chủ nhà gốc. BE đã chặn cứng
@@ -790,7 +708,9 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     if (isEditMode) return handleUpdateSubmit();
     if (!selectedProperty) return;
 
-    const moveInDate = form.expectedReceptionDate || todayIso();
+    // KHÔNG còn nhánh `|| todayIso()`: ngày bắt đầu nay là trường bắt buộc, đã chặn ở
+    // handleSubmit. Nhánh cũ khiến hợp đồng khởi đầu vào một ngày không ai chọn.
+    const moveInDate = form.moveInDate;
     const payload: OnboardTenantRequest = {
       fullName: form.fullName.trim(),
       cccd: form.cccd.trim(),
@@ -805,7 +725,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       depositMonths: Number(form.depositMonths) || 1,
       endDate: form.endDate || undefined,
       expectedReceptionDate: form.expectedReceptionDate || undefined,
-      draftContractFileUrl: draftFileUrl || undefined,
       householdMembers: membersPayload().length > 0 ? membersPayload() : undefined,
       // Nội thất có sẵn: BE tự gắn toàn bộ ACTIVE trong phạm vi HĐ — không gửi gì.
     };
@@ -823,22 +742,25 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       // BE luôn tự gán quản lý phụ trách nhà cho hợp đồng — không cần gọi API riêng.
       const managerName = selectedProperty.operationManagerName || 'quản lý phụ trách';
 
-      // Tạo tay (không phải import file có sẵn) → BE render PDF từ dữ liệu vừa
-      // nhập, upload Cloudinary, lưu URL — admin có thể xem lại ngay. Import file thì
-      // đã có draftFileUrl từ bước upload trong handleFileUpload, không sinh lại.
-      let finalFileUrl = draftFileUrl || null;
-      if (mode === 'manual') {
-        setSubmitStage('Đang tạo file hợp đồng...');
-        try {
-          const blob = await tenantService.generateDraftDocument(draft.id);
-          const pdfFile = await draftBlobToFile(blob, draft.contractCode);
-          setSubmitStage('Đang tải file lên...');
-          const url = await uploadToCloudinary(pdfFile, 'raw');
-          await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
-          finalFileUrl = url;
-        } catch {
-          toast.error('Đã tạo hợp đồng nháp nhưng KHÔNG sinh được file — có thể tạo lại ở danh sách nháp.');
-        }
+      /*
+       * BE render PDF từ dữ liệu vừa nhập, FE upload Cloudinary rồi lưu URL — admin xem
+       * lại được ngay.
+       *
+       * Trước đây bước này chỉ chạy khi `mode === 'manual'`, vì nhánh "Upload file" đã có
+       * sẵn URL của chính file admin tải lên. Bỏ nhánh upload (01/09/2026) thì đây là
+       * đường DUY NHẤT sinh file, nên chạy vô điều kiện.
+       */
+      let finalFileUrl: string | null = null;
+      setSubmitStage('Đang tạo file hợp đồng...');
+      try {
+        const blob = await tenantService.generateDraftDocument(draft.id);
+        const pdfFile = await draftBlobToFile(blob, draft.contractCode);
+        setSubmitStage('Đang tải file lên...');
+        const url = await uploadToCloudinary(pdfFile, 'raw');
+        await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
+        finalFileUrl = url;
+      } catch {
+        toast.error('Đã tạo hợp đồng nháp nhưng KHÔNG sinh được file — có thể tạo lại ở danh sách nháp.');
       }
 
       toast.success(`Đã tạo hợp đồng nháp & gửi thông báo cho ${managerName}.`);
@@ -950,8 +872,14 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               </dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-slate-500">Đón khách</dt>
+              <dt className="text-slate-500">Dự kiến đón khách</dt>
               <dd className="text-right font-medium text-slate-800">{formatDateDisplay(form.expectedReceptionDate)}</dd>
+            </div>
+            {/* Ngày bắt đầu là mốc tính tiền — phải nằm trong bảng xác nhận cuối cùng,
+                không thể để admin bấm "Tạo" mà chưa từng thấy nó một lần. */}
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Bắt đầu HĐ</dt>
+              <dd className="text-right font-medium text-slate-800">{formatDateDisplay(form.moveInDate)}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-slate-500">Kết thúc HĐ</dt>
@@ -1005,61 +933,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 p-6">
-          {/* Tabs — chỉ khi tạo mới; sửa thì luôn nhập tay trực tiếp */}
-          {!isEditMode && <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setMode('upload')}
-              className={`flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${
-                mode === 'upload' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <UploadCloud className="h-4 w-4" /> Upload file (auto-điền)
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('manual')}
-              className={`flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${
-                mode === 'manual' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <Keyboard className="h-4 w-4" /> Nhập tay
-            </button>
-          </div>}
-
-          {!isEditMode && mode === 'upload' && (
-            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center hover:border-indigo-400">
-              {extracting ? (
-                <>
-                  <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
-                  <span className="text-sm text-slate-500">Đang bóc tách & tải file...</span>
-                </>
-              ) : draftFileUrl || fileName ? (
-                <>
-                  <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    <FileText className="h-4 w-4" /> {fileName || 'Đã tải file'}
-                  </span>
-                  <span className="text-xs text-slate-400">Kiểm tra lại các trường bên dưới trước khi lưu.</span>
-                </>
-              ) : (
-                <>
-                  <UploadCloud className="h-6 w-6 text-slate-400" />
-                  <span className="text-sm font-medium text-slate-600">Chọn file hợp đồng (DOCX/PDF) đã điền thông tin khách</span>
-                  <span className="text-xs text-slate-400">Hệ thống tự bóc tách tên, CCCD, SĐT, giá, cọc, thời hạn.</span>
-                </>
-              )}
-              <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={handleFileUpload} disabled={extracting} />
-            </label>
-          )}
-
-          {!isEditMode && mode === 'upload' && addressSuggestion && (
-            <div className="flex gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-700">
-              <FileText className="h-4 w-4 flex-shrink-0" />
-              <p>{addressSuggestion}</p>
-            </div>
-          )}
-
           {/* Chọn BĐS + phòng — sửa thì hiện read-only (không đổi phòng/nhà của HĐ nháp) */}
           {isEditMode ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -1072,27 +945,18 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 Bất động sản <span className="text-rose-500">*</span>
               </label>
-              <select name="propertyId" value={form.propertyId} onChange={handleChange} className="input-field" required>
-                {/* "Chọn nhà đang cho thuê" đọc ngược nghĩa — nghe như đang tìm nhà ĐÃ
-                    có khách, trong khi đây là chỗ tìm nhà CÒN CHỖ. */}
-                <option value="">Chọn nhà còn chỗ...</option>
-                {visibleProperties.map((p) => {
-                  // Nhét luôn "còn 2/5 phòng" vào nhãn: quyết định chọn nhà nào diễn ra
-                  // NGAY TẠI ĐÂY, thông tin nằm ở dòng chú thích bên dưới là đã muộn.
-                  const occ = occupancy.get(p.id);
-                  const chip = occupancyChip(occ);
-                  // Nhà chưa mở phòng thì có hiện cũng không chọn được — khoá lại kèm lý
-                  // do, thay vì để admin bấm vào rồi mới thấy ô "Phòng" trống trơn.
-                  const blocked = !!occ?.loaded && capacityTone(occ) === 'setup';
-                  return (
-                    <option key={p.id} value={p.id} disabled={blocked}>
-                      {p.propertyName} — {p.shortAddress || p.fullAddress}
-                      {p.wholeHouse ? ' (nguyên căn)' : ''}
-                      {chip ? ` · ${chip}` : ''}
-                    </option>
-                  );
-                })}
-              </select>
+              {/*
+                Ô chọn có TÌM KIẾM (`PropertyPicker`), thay cho `<select>` gốc.
+                Với hơn 100 căn mà mọi tên đều bắt đầu bằng "MTX#", `<select>` gốc là ngõ
+                cụt: nó chỉ nhảy theo ký tự đầu của nhãn nên gõ gì cũng vô ích, admin
+                buộc phải cuộn tay để dò. Xem chú thích đầu `PropertyPicker.tsx`.
+              */}
+              <PropertyPicker
+                properties={visibleProperties}
+                occupancy={occupancy}
+                value={form.propertyId}
+                onChange={(id) => setForm((prev) => ({ ...prev, propertyId: id, roomId: '' }))}
+              />
 
               {/* Nói rõ đã giấu bớt. Im lặng thì admin tìm một căn quen thuộc, không
                   thấy, tưởng nhà bị xoá khỏi hệ thống. */}
@@ -1434,17 +1298,56 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
               draft cũ có thể đã qua ngày dự kiến, ép min=hôm nay sẽ khiến HTML5 coi
               value hiện tại là invalid và chặn submit dù field không required). Kết
               thúc tối đa 5 năm kể từ hôm nay (khớp Rule 4 BE: endDate.isAfter(today.plusYears(5))). */}
-          <div className="grid grid-cols-2 gap-4">
+          {/*
+            BA ngày, không phải hai — xem chú thích `moveInDate` ở phần payload.
+
+            "Ngày dự kiến đón khách" là KẾ HOẠCH (manager cần có mặt hôm nào).
+            "Ngày bắt đầu hợp đồng" là MỐC PHÁP LÝ + mốc tính tiền, và là thứ BE bắt
+            buộc phải có. Trước 30/08/2026 form chỉ có ô đầu rồi lặng lẽ chép sang ô
+            sau, thiếu thì lấy HÔM NAY — hợp đồng khởi đầu vào một ngày không ai chọn.
+          */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">Ngày dự kiến đón khách</label>
               <input
                 type="date"
                 name="expectedReceptionDate"
                 value={form.expectedReceptionDate}
-                onChange={handleChange}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    expectedReceptionDate: v,
+                    // Điền hộ ngày bắt đầu khi admin chưa tự đặt — hai ngày này trùng
+                    // nhau trong đa số hợp đồng. Đã tự sửa rồi thì KHÔNG ghi đè.
+                    moveInDate: prev.moveInDate ? prev.moveInDate : v,
+                  }));
+                }}
                 min={isEditMode ? undefined : todayIso()}
                 className="input-field"
               />
+              <p className="mt-1 text-xs text-slate-400">Hôm nào quản lý ra bàn giao nhà.</p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                Ngày bắt đầu hợp đồng {!isEditMode && <span className="text-rose-500">*</span>}
+              </label>
+              {/*
+                Sàn = mốc MUỘN HƠN giữa "hôm nay" và ngày HĐ chủ nhà có hiệu lực — vế
+                đối xứng với trần ở ô Ngày kết thúc. Trước ngày đó công ty chưa có
+                quyền quản lý căn nhà nên không cho thuê được.
+              */}
+              <input
+                type="date"
+                name="moveInDate"
+                value={form.moveInDate}
+                onChange={handleChange}
+                min={isEditMode ? undefined : contractStartMin}
+                max={contractEndMax}
+                className="input-field"
+                required={!isEditMode}
+              />
+              <p className="mt-1 text-xs text-slate-400">Mốc khách vào ở và bắt đầu tính tiền.</p>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -1455,32 +1358,58 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
                 name="endDate"
                 value={form.endDate}
                 onChange={handleChange}
-                min={form.expectedReceptionDate || (isEditMode ? undefined : todayIso())}
-                max={addYearsIso(todayIso(), 5)}
+                min={form.moveInDate || (isEditMode ? undefined : todayIso())}
+                max={contractEndMax}
                 className="input-field"
                 required={!isEditMode}
               />
-              {/* Chip chọn nhanh — tính từ ngày dự kiến đón khách (hoặc hôm nay nếu chưa chọn). */}
+              {/* Chip chọn nhanh — tính từ NGÀY BẮT ĐẦU (mốc tính kỳ hạn), không phải
+                  ngày đón khách: "1 năm" nghĩa là một năm kể từ lúc khách vào ở. */}
               <div className="mt-1.5 flex gap-1.5">
                 {[
-                  { label: '6 tháng', endDate: addMonthsIso(form.expectedReceptionDate || todayIso(), 6) },
-                  { label: '1 năm', endDate: addYearsIso(form.expectedReceptionDate || todayIso(), 1) },
-                  { label: '2 năm', endDate: addYearsIso(form.expectedReceptionDate || todayIso(), 2) },
-                ].map((chip) => (
-                  <button
-                    key={chip.label}
-                    type="button"
-                    onClick={() => setForm((prev) => ({ ...prev, endDate: chip.endDate }))}
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                      form.endDate === chip.endDate
-                        ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                    }`}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
+                  { label: '6 tháng', endDate: addMonthsIso(form.moveInDate || todayIso(), 6) },
+                  { label: '1 năm', endDate: addYearsIso(form.moveInDate || todayIso(), 1) },
+                  { label: '2 năm', endDate: addYearsIso(form.moveInDate || todayIso(), 2) },
+                ].map((chip) => {
+                  /*
+                    Chip vượt trần thì KHOÁ chứ không ẩn.
+
+                    Ẩn đi thì admin thấy chỗ này lúc có 3 chip lúc có 1, tưởng giao diện
+                    lỗi. Khoá kèm lý do thì họ đọc được ngay vì sao căn này không ký
+                    được 2 năm — và đó chính là thông tin họ cần để đi thương lượng lại
+                    hạn với chủ nhà.
+                  */
+                  const over = chip.endDate > contractEndMax;
+                  return (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      disabled={over}
+                      title={over
+                        ? `Vượt hạn hợp đồng với chủ nhà (${formatDateDisplay(contractEndMax)})`
+                        : undefined}
+                      onClick={() => setForm((prev) => ({ ...prev, endDate: chip.endDate }))}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                        over
+                          ? 'cursor-not-allowed border-slate-100 text-slate-300'
+                          : form.endDate === chip.endDate
+                            ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Nói rõ trần đến từ đâu — "không chọn được" mà không giải thích thì
+                  admin tưởng lịch bị lỗi. */}
+              {cappedByLease && (
+                <p className="mt-1 text-xs text-amber-600">
+                  Tối đa {formatDateDisplay(contractEndMax)} — hạn hợp đồng với chủ nhà gốc.
+                </p>
+              )}
             </div>
           </div>
 
@@ -1600,7 +1529,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
 
           <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" onClick={onClose} className="btn-secondary">Hủy</button>
-            <button type="submit" className="btn-primary" disabled={submitting || extracting}>
+            <button type="submit" className="btn-primary" disabled={submitting}>
               Xem lại & Lưu
             </button>
           </div>

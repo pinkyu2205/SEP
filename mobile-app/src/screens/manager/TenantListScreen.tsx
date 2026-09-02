@@ -632,8 +632,18 @@ export const TenantListScreen: React.FC = () => {
             <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
         </View>
+        {/*
+          "Khách chờ đón", KHÔNG phải "+ Đón khách".
+
+          Dấu `+` nghĩa là TẠO MỚI, mà quản lý không tạo ra khách nào cả: hồ sơ đón khách
+          do admin soạn, quản lý chỉ nhận việc rồi đi bàn giao. Nút này mở DANH SÁCH hồ sơ
+          đang chờ (`ResumeContract`) — là chỗ xem việc, không phải chỗ thêm bản ghi.
+
+          Biểu tượng đổi sang 🤝 cho khớp mục cùng đường dẫn ở Trang chủ — cùng một nơi
+          đến thì không nên mỗi chỗ một icon.
+        */}
         <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('ResumeContract')}>
-          <Text style={styles.addBtnText}>+ Đón khách</Text>
+          <Text style={styles.addBtnText}>🤝  Khách chờ đón</Text>
         </TouchableOpacity>
       </View>
 

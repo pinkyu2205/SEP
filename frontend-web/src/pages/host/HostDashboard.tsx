@@ -20,7 +20,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import {
-  CURRENT_MONTH, daysSince, fmtMillion, monthLabel, monthShort, shiftMonth,
+  currentMonth, daysSince, fmtMillion, monthLabel, monthShort, shiftMonth,
 } from './shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -148,16 +148,16 @@ export const Dashboard = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const from = shiftMonth(CURRENT_MONTH, -(CHART_MONTHS - 1));
+    const from = shiftMonth(currentMonth(), -(CHART_MONTHS - 1));
     const [sum, cashflow, perf, mgr, propPage, pnl, invoicePage, notify] = await Promise.all([
-      hostService.getDashboardSummary(CURRENT_MONTH).catch(() => null),
-      hostService.getCashflow(from, CURRENT_MONTH).catch(() => null),
-      hostService.getPropertyPerformance(CURRENT_MONTH).catch(() => null),
-      hostService.getManagerPerformance(CURRENT_MONTH).catch(() => null),
-      propertyService.getProperties(0, 200).catch(() => null),
-      hostService.getPropertyPnl(CURRENT_MONTH).catch(() => null),
+      hostService.getDashboardSummary(currentMonth()).catch(() => null),
+      hostService.getCashflow(from, currentMonth()).catch(() => null),
+      hostService.getPropertyPerformance(currentMonth()).catch(() => null),
+      hostService.getManagerPerformance(currentMonth()).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
+      hostService.getPropertyPnl(currentMonth()).catch(() => null),
       // size lớn: BE mặc định 20/trang — cần trọn kỳ để đếm quá hạn cho đúng.
-      hostService.getInvoices({ month: CURRENT_MONTH, size: 500 }).catch(() => null),
+      hostService.getInvoices({ month: currentMonth(), size: 500 }).catch(() => null),
       hostService.listNotifications({ unreadOnly: true, size: 6 }).catch(() => null),
     ]);
 
@@ -168,7 +168,7 @@ export const Dashboard = () => {
       .map(p => ({ label: monthShort(p.month), revenue: p.revenue, expense: p.expense, net: p.revenue - p.expense })));
     setPropPerf(perf ?? []);
     setMgrPerf(mgr ?? []);
-    setApiProps(propPage?.content ?? []);
+    setApiProps(propPage ?? []);
 
     const map: Record<string, Fin> = {};
     for (const r of pnl?.rows ?? []) {
@@ -249,7 +249,7 @@ export const Dashboard = () => {
 
   // ── Biểu đồ: kỳ hiện tại lấy theo nhà đã duyệt giá để khớp KPI ──
   const chart = useMemo<ChartPoint[]>(() => {
-    const label = monthShort(CURRENT_MONTH);
+    const label = monthShort(currentMonth());
     const current: ChartPoint = { label, revenue: agg.revenue, expense: agg.expense, net: agg.net };
     let found = false;
     const out = series.map(p => (p.label === label ? ((found = true), current) : p));
@@ -325,11 +325,11 @@ export const Dashboard = () => {
   ];
 
   const handleExport = () => {
-    exportToExcel(`BangDieuHanh_HoangBinhLand_${CURRENT_MONTH}`, [
+    exportToExcel(`BangDieuHanh_HoangBinhLand_${currentMonth()}`, [
       {
         name: 'Tổng quan',
         rows: [{
-          'Kỳ': monthLabel(CURRENT_MONTH),
+          'Kỳ': monthLabel(currentMonth()),
           'Nhà đã duyệt giá': agg.count, 'Nhà chờ duyệt giá': pending.length,
           'Tổng phòng': agg.totalRooms, 'Phòng đang thuê': agg.occupied, 'Phòng còn trống': agg.vacant,
           'Tỷ lệ lấp đầy (%)': agg.occupancyRate,
@@ -367,7 +367,7 @@ export const Dashboard = () => {
             <h1 className="text-xl font-bold text-slate-900">Trang tổng quan</h1>
           </div>
           <p className="ml-3.5 text-sm text-slate-500">
-            Bảng điều hành vận hành bất động sản Hoàng Bình Land — {monthLabel(CURRENT_MONTH)}
+            Bảng điều hành vận hành bất động sản Hoàng Bình Land — {monthLabel(currentMonth())}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -439,7 +439,7 @@ export const Dashboard = () => {
         <div className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm lg:col-span-2">
           <SectionHeader
             title="Tổng quan tài chính"
-            subtitle={`Dòng tiền ${CHART_MONTHS} kỳ gần nhất · ${monthLabel(CURRENT_MONTH)}: nhà đã duyệt giá`}
+            subtitle={`Dòng tiền ${CHART_MONTHS} kỳ gần nhất · ${monthLabel(currentMonth())}: nhà đã duyệt giá`}
             icon={BarChart3}
             action={<QuickLink to="/host/financial">Chi tiết</QuickLink>}
           />
@@ -470,7 +470,7 @@ export const Dashboard = () => {
         </div>
 
         <div className="flex flex-col rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
-          <SectionHeader title="Cơ cấu chi phí" subtitle={`${monthLabel(CURRENT_MONTH)} · nhà đã duyệt giá`} icon={DollarSign} />
+          <SectionHeader title="Cơ cấu chi phí" subtitle={`${monthLabel(currentMonth())} · nhà đã duyệt giá`} icon={DollarSign} />
           {pieData.length === 0 ? (
             <div className="flex flex-1 items-center justify-center py-10 text-center text-sm text-slate-400">
               {loading ? 'Đang tải…' : 'Kỳ này chưa ghi nhận chi phí nào'}

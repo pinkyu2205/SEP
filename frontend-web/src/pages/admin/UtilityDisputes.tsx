@@ -437,17 +437,66 @@ const ResolveDialog = ({ row, onClose, onDone }: {
   const [outcome, setOutcome] = useState<InvoiceDisputeOutcome | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * Số ĐÚNG admin nhập khi công nhận khách đúng — điền sẵn số cũ để chỉ phải sửa ô sai.
+   * Chuỗi chứ không phải number: ô rỗng trong lúc gõ mà ép về 0 thì thành tiền nhảy loạn.
+   */
+  const [fix, setFix] = useState({
+    prev: String(row.prevReading ?? ''),
+    next: String(row.newReading ?? ''),
+  });
+
+  const num = (s: string) => Number(String(s).replace(/[^\d.]/g, ''));
+  const fixPrev = num(fix.prev), fixNext = num(fix.next);
+  /**
+   * ĐƠN GIÁ KHÔNG SỬA ĐƯỢC Ở ĐÂY — lấy nguyên số của hoá đơn, không qua ô nhập.
+   *
+   * Hai lý do, cái nào cũng đủ:
+   *
+   * 1. Đơn giá là của CẢ CĂN, không phải của phòng này: nó = tổng tiền EVN ÷ tổng kWh
+   *    trên tờ hoá đơn admin đã chốt, và mọi phòng trong nhà đều nhân với đúng con số
+   *    đó. Sửa riêng ở một khiếu nại là phòng này lặng lẽ tính theo giá khác hàng xóm
+   *    cùng kỳ — về sau không ai giải thích nổi vì sao. Đơn giá sai thì cả tờ hoá đơn
+   *    sai, phải thu hồi và phát hành lại, không vá từng phòng.
+   *
+   * 2. Nó là số THẬP PHÂN scale 8 (3126.2822…). Ô nhập bày ra số đó thì admin gõ lại
+   *    "3126" cho gọn là lệch ~25đ/kWh, và máy chủ ném `AMOUNT_MISMATCH` vì
+   *    `validateInvoiceAmounts` chỉ cho lệch tối đa 1đ. Một ô mà mọi thao tác sửa đều
+   *    dẫn tới lỗi thì nó không phải ô nhập.
+   *
+   * Khiếu nại ở đây là về CHỈ SỐ, và chỉ số mới là thứ admin đối chiếu được với ảnh.
+   */
+  const fixUnit = Number(row.unitPrice ?? 0);
+  const fixConsumption = fixNext - fixPrev;
+  const fixAmount = fixConsumption > 0 && fixUnit > 0 ? Math.round(fixConsumption * fixUnit) : 0;
+  /** Có đủ ba số và hợp lệ thì mới gửi kèm — xem `DisputeCorrection`. */
+  const fixValid = fixPrev >= 0 && fixNext > fixPrev && fixUnit > 0;
+  /** Không đổi gì so với hoá đơn hiện tại → khỏi gửi, tránh ghi đè bằng chính nó. */
+  const fixChanged = fixValid && fixAmount !== Math.round(row.amount ?? 0);
 
   const submit = async () => {
     if (!outcome) return toast.error('Chọn kết luận trước.');
     if (note.trim().length < 10) {
       return toast.error('Ghi rõ căn cứ (ít nhất 10 ký tự) — khách sẽ đọc được nội dung này.');
     }
+    if (outcome === 'ACCEPTED' && !fixValid) {
+      return toast.error(fixUnit > 0
+        ? 'Nhập đủ chỉ số cũ và chỉ số mới, chỉ số mới phải lớn hơn chỉ số cũ.'
+        : 'Hoá đơn này chưa có đơn giá — không sửa được ở đây, phải thu hồi và phát hành lại.');
+    }
     setBusy(true);
     try {
-      await invoiceDisputeService.resolve(row.id, { outcome, note: note.trim() });
+      await invoiceDisputeService.resolve(row.id, {
+        outcome,
+        note: note.trim(),
+        // BE chỉ áp dụng khi có ĐỦ cụm ba số — gửi thiếu là nó bỏ qua lặng lẽ.
+        ...(outcome === 'ACCEPTED' && fixChanged
+          ? { correctedPrevReading: fixPrev, correctedNewReading: fixNext, correctedUnitPrice: fixUnit }
+          : {}),
+      });
       toast.success(outcome === 'ACCEPTED'
-        ? 'Đã huỷ hoá đơn sai và báo cho khách. Nhớ phát hành lại bản đúng.'
+        ? (fixChanged ? 'Đã sửa lại hoá đơn theo số đúng và báo cho khách.'
+                      : 'Đã công nhận khiếu nại và báo cho khách.')
         : 'Đã bác khiếu nại và báo cho khách.');
       onDone();
     } catch (e: unknown) {
@@ -459,6 +508,7 @@ const ResolveDialog = ({ row, onClose, onDone }: {
   };
 
   const electric = isElectric(row);
+  const unitLabel = electric ? 'kWh' : 'm³';
 
   return (
     <Overlay>
@@ -484,11 +534,10 @@ const ResolveDialog = ({ row, onClose, onDone }: {
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Khách đúng — hoá đơn sai
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                  Hoá đơn bị <b>huỷ</b>, khách hết nợ khoản này. Bạn phải vào{' '}
-                  <b>{electric ? 'Hoá đơn điện EVN' : 'Hoá đơn nước'}</b> phát hành lại bản
-                  đúng — hệ thống không tự tính lại hộ.
+                  Nhập số đúng ở dưới, hệ thống <b>sửa thẳng hoá đơn này</b> — giữ nguyên mã,
+                  không phát hành bản khác.
                   {row.invoiceStatus === 'PAID' && (
-                    <> Khách <b>đã thanh toán</b>, nên còn phải hoàn tiền hoặc trừ vào kỳ sau.</>
+                    <> Khách <b>đã thanh toán</b>, phần chênh sẽ tự trừ vào kỳ sau.</>
                   )}
                 </p>
               </button>
@@ -506,6 +555,83 @@ const ResolveDialog = ({ row, onClose, onDone }: {
               </button>
             </div>
 
+            {/* Ô nhập số ĐÚNG — chỉ hiện khi công nhận khách đúng.
+                Không có ô "thành tiền": để admin gõ tay thành tiền là mở đường cho con số
+                không khớp với chỉ số ngay cạnh nó, đúng loại mâu thuẫn khiếu nại này sinh
+                ra để sửa. Hệ thống tự nhân, hiện ngay bên dưới để đối chiếu. */}
+            {outcome === 'ACCEPTED' && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-800">
+                  Số đúng của hoá đơn này
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'prev' as const, label: 'Chỉ số cũ' },
+                    { key: 'next' as const, label: 'Chỉ số mới' },
+                  ]).map(f => (
+                    <label key={f.key} className="block">
+                      <span className="mb-1 block text-[11px] font-semibold text-slate-500">{f.label}</span>
+                      <div className="relative">
+                        <input
+                          inputMode="numeric"
+                          value={fix[f.key]}
+                          onChange={e => setFix(s => ({ ...s, [f.key]: e.target.value }))}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 pr-9 text-sm font-bold tabular-nums outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                        />
+                        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
+                          {unitLabel}
+                        </span>
+                      </div>
+                    </label>
+                  ))}
+                  {/* Ô CHỈ ĐỌC — xem `fixUnit`. Làm tròn để đọc được, số đầy đủ nằm ở
+                      `title` vì đó mới là số đem đi tính. */}
+                  <div>
+                    <span className="mb-1 block text-[11px] font-semibold text-slate-500">Đơn giá</span>
+                    <div
+                      className="rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-2 text-sm font-bold tabular-nums text-slate-600"
+                      title={`Đơn giá chốt trên hoá đơn của cả căn: ${fixUnit}₫/${unitLabel}. Dùng chung cho mọi phòng trong kỳ nên không sửa riêng ở đây được.`}
+                    >
+                      {Math.round(fixUnit).toLocaleString('vi-VN')}
+                      <span className="ml-1 text-[11px] font-semibold text-slate-400">₫/{unitLabel}</span>
+                    </div>
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Đơn giá lấy theo hoá đơn của cả căn, dùng chung cho mọi phòng trong kỳ — sai đơn
+                  giá thì phải thu hồi cả tờ hoá đơn, không sửa riêng ở đây.
+                </p>
+
+                <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-emerald-200 pt-2.5">
+                  <span className="text-xs font-semibold text-slate-600">
+                    {/* KHÔNG viết thành phép nhân "87 × 3.126 = 271.987": đơn giá hiển thị
+                        đã làm tròn nên phép đó không ra đúng tổng, và một phép tính sai
+                        ngay cạnh con số tiền là thứ khiến người đọc mất tin vào cả bảng. */}
+                    {fixValid
+                      ? <>Tiêu thụ <b className="tabular-nums">{fixConsumption.toLocaleString('vi-VN')}</b> {unitLabel}</>
+                      : <span className="text-rose-600">Chỉ số mới phải lớn hơn chỉ số cũ</span>}
+                  </span>
+                  {fixValid && (
+                    <span className="text-sm font-black tabular-nums text-emerald-700">
+                      {formatCurrency(fixAmount)}
+                    </span>
+                  )}
+                </div>
+
+                {fixValid && (
+                  <p className="mt-2 text-xs font-semibold text-slate-600">
+                    {!fixChanged
+                      ? 'Bằng đúng số cũ — hoá đơn giữ nguyên, chỉ ghi nhận khách khiếu nại đúng.'
+                      : fixAmount < Math.round(row.amount ?? 0)
+                        ? <>Giảm <b className="text-emerald-700">{formatCurrency(Math.round(row.amount ?? 0) - fixAmount)}</b> so với hoá đơn hiện tại
+                            {row.invoiceStatus === 'PAID' && ' — phần này trừ vào kỳ sau.'}</>
+                        : <>Tăng <b className="text-amber-700">{formatCurrency(fixAmount - Math.round(row.amount ?? 0))}</b> so với hoá đơn hiện tại
+                            {row.invoiceStatus === 'PAID' && ' — khách còn thiếu phần chênh, hạn thu được gia hạn.'}</>}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">
                 Căn cứ kết luận <span className="text-rose-500">*</span>
@@ -514,7 +640,7 @@ const ResolveDialog = ({ row, onClose, onDone }: {
               <textarea value={note} onChange={e => setNote(e.target.value)} rows={4}
                 className="mt-2 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
                 placeholder={outcome === 'ACCEPTED'
-                  ? 'VD: Đã phóng to ảnh đồng hồ, chỉ số thật là 1250 chứ không phải 1750 như đã ghi. Huỷ hoá đơn, phát hành lại theo số đúng.'
+                  ? 'VD: Đã phóng to ảnh đồng hồ, chỉ số thật là 1250 chứ không phải 1750 như đã ghi. Đã sửa lại hoá đơn theo số đúng.'
                   : 'VD: Ảnh đồng hồ chụp ngày 05/08 đọc rõ 1750, khớp với chỉ số cuối kỳ trên hoá đơn. Địa chỉ trên hoá đơn EVN đúng là căn khách đang thuê.'} />
               <p className="mt-1.5 flex items-start gap-1.5 text-xs text-slate-400">
                 <Camera className="mt-0.5 h-3 w-3 shrink-0" />

@@ -487,7 +487,19 @@ export const ResumeContractScreen: React.FC = () => {
   if (selected) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Header onBack={() => setSelected(null)} title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'} />
+        {/*
+          Back PHẢI nạp lại danh sách, y như nhánh `onDone` bên dưới.
+
+          Đây là MỘT màn với hai chế độ (`selected` null hay không), không phải hai màn —
+          nên Back chỉ đổi state cục bộ, màn không mất focus, `useFocusEffect` không chạy
+          lại. Quản lý tạo mã thanh toán / ký OTP xong rồi bấm Back là danh sách vẫn hiện
+          trạng thái cũ ("Chờ đón khách" thay vì "Chờ khách nhập OTP"), phải kéo xuống
+          làm mới mới thấy — mà đúng lúc đó họ đang cần biết còn ai chưa xong.
+        */}
+        <Header
+          onBack={() => { setSelected(null); load() }}
+          title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'}
+        />
         {selected.contractFileAvailable ? (
           <TouchableOpacity
             style={styles.viewContractBar}

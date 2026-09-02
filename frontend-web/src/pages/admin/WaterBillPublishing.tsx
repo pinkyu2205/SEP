@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Droplets, FileUp, Loader2, RefreshCw, Search, Send, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, Droplets, FileArchive, FileUp, Loader2, RefreshCw, Search, Send, Trash2 } from 'lucide-react';
 import {
   waterBillService, waterUnitPrice, type WaterBill,
 } from '@/services/waterBill.service';
@@ -7,15 +7,15 @@ import { uploadToCloudinary } from '@/services/upload.service';
 import { propertyService } from '@/services/property.service';
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
 import {
-  meterReadingService, resolvePrevReading, type ResolvedPrevReading,
-} from '@/services/meterReading.service';
-import { tenantService } from '@/services/tenant.service';
+  loadUtilityCycle, continuityGap, firstPeriodNote, type UtilityCycle,
+} from '@/services/utilityCycle';
 import type { PropertyResponse } from '@/types/api.types';
-import { monthPeriod, onlyDigits } from '@/utils/evnInvoiceParser';
+import { monthPeriod, onlyDigits, periodProblem, arrearsPeriod } from '@/utils/evnInvoiceParser';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
 import { PropertyCombobox } from './EvnBillPublishing';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
+import { UtilityBillZipImport } from './UtilityBillZipImport';
 import { useOccupiedProperties } from '@/services/useOccupiedProperties';
 import { groupThousands } from '@/utils';import { normalizeVi } from '@/utils/helpers';
 import { serverNow } from '@/utils/serverTime';
@@ -48,23 +48,31 @@ interface BillForm {
    */
   prevReading: string;
   newReading: string;
+  /**
+   * Chỉ số cũ IN TRÊN GIẤY, giữ RIÊNG với `prevReading` — xem chú thích cùng tên ở
+   * `EvnBillPublishing`. Từ kỳ 2, `prevReading` khoá theo sổ nên không giữ lại số của giấy
+   * thì hai con số đáng lẽ phải bằng nhau không bao giờ được đem ra so.
+   */
+  paperPrev: string;
 }
 const EMPTY_FORM: BillForm = {
   totalQuantity: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
+  paperPrev: '',
 };
-
-const PROPERTY_PAGE_SIZE = 200;
 
 export const WaterBillPublishing = () => {
   const now = serverNow();
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const [year, setYear] = useState(now.getFullYear());
+  // Điện/nước TRẢ SAU: mở màn giữa tháng 9 thì kỳ đang làm là tháng 8 — xem `arrearsPeriod`.
+  const [month, setMonth] = useState(() => arrearsPeriod(now).month);
+  const [year, setYear] = useState(() => arrearsPeriod(now).year);
 
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [loadingProps, setLoadingProps] = useState(true);
   const [propertyId, setPropertyId] = useState<number | null>(null);
 
   const [bills, setBills] = useState<WaterBill[]>([]);
+  /** Mở hộp nhập lô từ file .zip. */
+  const [zipOpen, setZipOpen] = useState(false);
   const [loadingBills, setLoadingBills] = useState(false);
   const [billsError, setBillsError] = useState<string | null>(null);
 
@@ -145,8 +153,8 @@ export const WaterBillPublishing = () => {
   const loadProperties = useCallback(async () => {
     setLoadingProps(true);
     try {
-      const page = await propertyService.getProperties(0, PROPERTY_PAGE_SIZE);
-      setProperties(page?.content ?? []);
+      const page = await propertyService.getAllProperties();
+      setProperties(page ?? []);
     } catch {
       setProperties([]);
     } finally {
@@ -210,9 +218,7 @@ export const WaterBillPublishing = () => {
     && !!form.prevReading && !!form.newReading
     && newReadingNum - prevReadingNum !== quantity;
 
-  const formReady = !!propertyId && quantity > 0 && amount > 0
-    && !!form.billingPeriod.trim() && !existingBill
-    && (!isWholeHouse || (!!form.prevReading && !!form.newReading && !readingMismatch));
+  const periodIssue = periodProblem(form.billingPeriod);
 
   /** Chỉ số mới tự tính = chỉ số cũ + lượng tiêu thụ trên giấy. `null` = chưa đủ dữ kiện. */
   const autoNewReading = isWholeHouse && prevReadingNum > 0 && quantity > 0
@@ -220,48 +226,53 @@ export const WaterBillPublishing = () => {
     : null;
 
   /**
-   * Chỉ số kỳ trước nạp từ máy chủ và KHOÁ lại — xem chú thích cùng khối ở
-   * `EvnBillPublishing`. Lý do y hệt: đó là số đã chốt và đã thu tiền ở kỳ trước, cho sửa
-   * là cho phép hai kỳ liền nhau không nối tiếp, phần chênh biến mất khỏi mọi hoá đơn.
+   * Bối cảnh chỉ số của căn đang chọn — kỳ đầu hay kỳ tiếp. Xem khối cùng tên ở
+   * `EvnBillPublishing` để biết đầy đủ lý do; nước đi đúng luồng đó, chỉ khác đơn vị.
    */
-  const [prevReadingInfo, setPrevReadingInfo] = useState<ResolvedPrevReading | null>(null);
-  /** Chỉ số lúc đón khách khi nó mới hơn chốt kỳ trước — chỉ để cảnh báo, xem EvnBillPublishing. */
-  const [handoverPrev, setHandoverPrev] = useState<ResolvedPrevReading | null>(null);
+  const [cycle, setCycle] = useState<UtilityCycle | null>(null);
   const [loadingPrev, setLoadingPrev] = useState(false);
-  const prevLocked = isWholeHouse && prevReadingInfo != null;
+  const prevLocked = isWholeHouse && !!cycle?.prevClose;
 
   useEffect(() => {
     if (!propertyId || !isWholeHouse) {
-      setPrevReadingInfo(null);
+      setCycle(null);
       return;
     }
     let alive = true;
     setLoadingPrev(true);
-    Promise.all([
-      meterReadingService.latestForProperty(propertyId, 'WATER'),
-      tenantService.listByProperty(propertyId, { silent: true }).catch(() => []),
-    ])
-      .then(([latest, contracts]) => {
+    loadUtilityCycle(propertyId, 'WATER', month, year)
+      .then((c) => {
         if (!alive) return;
-        const active = contracts.find((c) => c.status === 'ACTIVE' && !c.roomId)
-          ?? contracts.find((c) => c.status === 'ACTIVE');
-        const resolved = resolvePrevReading(latest, active, 'WATER');
-        // Vẫn đi theo giấy nước để máy chủ không chặn CONSUMPTION_MISMATCH — lý do đầy đủ
-        // ghi ở khối cùng tên trong EvnBillPublishing.
-        setPrevReadingInfo(latest
-          ? { reading: Number(latest.reading), source: 'meter', at: latest.recordedAt || latest.period }
-          : null);
-        setHandoverPrev(resolved?.source === 'handover' ? resolved : null);
-        if (latest) setForm((f) => ({ ...f, prevReading: String(Math.round(Number(latest.reading))) }));
+        setCycle(c);
+        if (c.prevClose) setForm((f) => ({ ...f, prevReading: String(c.prevClose!.reading) }));
       })
+      .catch(() => { if (alive) setCycle(null); })
       .finally(() => { if (alive) setLoadingPrev(false); });
     return () => { alive = false; };
-  }, [propertyId, isWholeHouse]);
+  }, [propertyId, isWholeHouse, month, year]);
 
-  // Đủ chỉ số cũ + tổng m³ → điền sẵn chỉ số mới. Chỉ điền khi ô còn trống.
+  /** Kỳ trước chốt ở đâu, giấy kỳ này bắt đầu từ đâu — xem `continuityGap`. */
+  const paperPrevNum = form.paperPrev === '' ? null : Number(onlyDigits(form.paperPrev));
+  const readingGap = continuityGap(cycle, paperPrevNum);
+  const needsPaperPrev = isWholeHouse && !!cycle?.prevClose;
+  const continuityBlocked = needsPaperPrev && (paperPrevNum == null || !!readingGap);
+  /** Đối chiếu đầu kỳ trên giấy với mốc đón khách — chỉ có nghĩa ở kỳ đầu. */
+  const firstNote = firstPeriodNote(cycle, prevReadingNum > 0 ? prevReadingNum : null, quantity);
+
+  // Đặt SAU khối chỉ số: `continuityBlocked` phải khai báo xong mới đọc được (TDZ).
+  const formReady = !!propertyId && quantity > 0 && amount > 0
+    && !periodIssue && !existingBill && !continuityBlocked && firstNote?.kind !== 'bad-prev'
+    && (!isWholeHouse || (!!form.prevReading && !!form.newReading && !readingMismatch));
+
+  /**
+   * Chỉ số mới là số DẪN XUẤT: cũ + tổng m³. Tính lại mỗi lần một trong hai đầu vào đổi.
+   * Bản trước chỉ điền khi ô còn trống, nên OCR điền sẵn xong là sửa tổng m³ không ăn thua
+   * — xem chú thích đầy đủ ở effect cùng tên trong `EvnBillPublishing`.
+   */
   useEffect(() => {
     if (autoNewReading == null) return;
-    setForm((f) => (f.newReading ? f : { ...f, newReading: String(autoNewReading) }));
+    const next = String(autoNewReading);
+    setForm((f) => (f.newReading === next ? f : { ...f, newReading: next }));
   }, [autoNewReading]);
 
   /**
@@ -414,6 +425,22 @@ export const WaterBillPublishing = () => {
         subtitle="Admin chốt hoá đơn nước của từng nhà, hệ thống tính đơn giá rồi đẩy xuống cho quản lý."
         action={(
           <div className="flex items-center gap-2">
+            {/* Nhập lô — một .zip cho cả danh mục, thay vì lặp 5 thao tác × N nhà. */}
+            <button
+              type="button"
+              onClick={() => setZipOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-700"
+            >
+              <FileArchive className="h-4 w-4" /> Nhập từ .zip
+            </button>
+            {/* Nhãn này KHÔNG thừa: hai ô chọn dưới đây là kỳ TIÊU THỤ, không phải tháng
+                đang phát hành — điện/nước trả sau nên hai thứ đó lệch nhau một tháng. */}
+            <span
+              className="text-[11px] font-black uppercase tracking-wider text-slate-400"
+              title="Điện/nước trả sau: giữa tháng 9 thì hoá đơn đang phát hành là của kỳ tháng 8."
+            >
+              Kỳ tiêu thụ
+            </span>
             <select
               className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
               value={month}
@@ -544,9 +571,6 @@ export const WaterBillPublishing = () => {
               {!!scanNote && (
                 <p className="mt-1.5 text-xs font-semibold text-sky-700">{scanNote}</p>
               )}
-              <p className="mt-1.5 text-xs text-slate-400">
-                Không có ảnh vẫn phát hành được — ảnh chỉ để quản lý đối chiếu khi khách thắc mắc.
-              </p>
             </div>
           </div>
 
@@ -589,11 +613,16 @@ export const WaterBillPublishing = () => {
                 Kỳ thanh toán <span className="text-rose-500">*</span>
               </label>
               <input
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm ${
+                  periodIssue ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200'}`}
                 placeholder="01/09 – 30/09/2026"
                 value={form.billingPeriod}
                 onChange={(e) => setForm((f) => ({ ...f, billingPeriod: e.target.value }))}
               />
+              {/* Ô chữ tự do nhưng KHÔNG phải muốn gõ gì cũng được — xem `periodProblem`. */}
+              {periodIssue && (
+                <p className="mt-1 text-xs font-bold text-rose-600">⚠ {periodIssue}</p>
+              )}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-400">Điền nhanh:</span>
                 <button
@@ -666,62 +695,124 @@ export const WaterBillPublishing = () => {
                     onChange={(e) => setForm((f) => ({ ...f, prevReading: e.target.value }))}
                   />
                   {prevLocked ? (
-                    <p className="mt-1 text-xs text-slate-500">
-                      🔒 Số cuối kỳ trước hệ thống đã lưu
-                      {prevReadingInfo?.at ? ` (${prevReadingInfo.at.slice(0, 7)})` : ''} — không sửa được.
+                    <p className="mt-1 text-xs text-slate-500"
+                      title="Số đã chốt với khách ở kỳ trước và đã thu tiền theo nó. Sửa được nghĩa là cho phép hai kỳ không nối tiếp, phần chênh biến mất khỏi mọi hoá đơn.">
+                      🔒 Chốt kỳ trước{cycle?.prevClose?.at ? ` (${cycle.prevClose.at.slice(0, 7)})` : ''}
+                    </p>
+                  ) : !loadingPrev && propertyId && cycle?.firstPeriod ? (
+                    <p className="mt-1 text-xs font-semibold text-indigo-600"
+                      title="Chưa có kỳ trước để nối nên ô này mở. Từ kỳ sau hệ thống tự điền và khoá lại.">
+                      Kỳ đầu — nhập số đầu kỳ trên giấy
                     </p>
                   ) : !loadingPrev && propertyId ? (
-                    <p className="mt-1 text-xs text-amber-600">
-                      Nhà này chưa có chỉ số kỳ nào — nhập số đầu kỳ, các kỳ sau hệ thống tự điền.
-                    </p>
+                    <p className="mt-1 text-xs text-amber-600">Chưa có chỉ số kỳ nào — nhập số đầu kỳ</p>
                   ) : null}
                 </div>
                 <div>
                   <label className="mb-1.5 block text-sm font-bold text-slate-700">
                     Chỉ số mới (m³) <span className="text-rose-500">*</span>
                   </label>
+                  {/* Ô DẪN XUẤT, không cho gõ — máy chủ ép `mới − cũ = tổng m³`. */}
                   <input
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm tabular-nums"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2.5 text-sm tabular-nums text-slate-600"
                     inputMode="numeric"
-                    placeholder="Số cuối kỳ trên giấy"
+                    readOnly
+                    placeholder={prevReadingNum > 0 ? 'Nhập tổng m³ để tự tính' : 'Cần chỉ số cũ + tổng m³'}
                     value={form.newReading}
                     onChange={(e) => setForm((f) => ({ ...f, newReading: e.target.value }))}
                   />
-                  {autoNewReading != null && (
-                    <p className="mt-1 text-xs text-slate-500">
-                      Tự tính: {prevReadingNum.toLocaleString('vi-VN')} + {quantity.toLocaleString('vi-VN')} m³
-                      {' = '}<b className="text-slate-700">{autoNewReading.toLocaleString('vi-VN')}</b>. Sửa được nếu
-                      giấy ghi khác.
-                    </p>
-                  )}
+                  {/* Chỉ nêu PHÉP TÍNH, phần dặn dò vào `title` — xem trang điện. */}
+                  <p className="mt-1 text-xs text-slate-400" title="Giấy nước ghi khác thì sửa ô tổng m³, không sửa ở đây — máy chủ ép hiệu hai chỉ số phải bằng đúng tổng m³.">
+                    {autoNewReading != null
+                      ? <>= {prevReadingNum.toLocaleString('vi-VN')} + {quantity.toLocaleString('vi-VN')} m³</>
+                      : 'Tự tính = chỉ số cũ + tổng m³'}
+                  </p>
                 </div>
-                {/* Khách dọn vào giữa kỳ — xem khối cùng tên ở EvnBillPublishing. */}
-                {handoverPrev && (
-                  <div className="sm:col-span-2 flex gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-indigo-600" />
-                    <div className="text-xs leading-relaxed text-indigo-900">
-                      <p className="font-bold">
-                        Khách dọn vào giữa kỳ — hoá đơn khách sẽ tính từ mốc đón khách, không tính
-                        trọn tháng.
+
+                {/* KỲ ĐẦU: bày đủ hai mốc — xem khối cùng tên ở `EvnBillPublishing`. */}
+                {cycle?.firstPeriod && (
+                  <div className="sm:col-span-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                    {/* Không in lại số cũ / số mới — chúng nằm ngay trong hai ô phía trên. */}
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <p className="text-sm font-bold text-indigo-800">
+                        Kỳ đầu tiên của khách này
+                        <span className="ml-1.5 font-normal text-indigo-600">
+                          · đồng hồ lúc đón khách
+                          {cycle.handover?.at
+                            ? ` ${cycle.handover.at.slice(0, 10).split('-').reverse().join('/')}`
+                            : ''}
+                        </span>
                       </p>
-                      <p className="mt-0.5">
-                        Đồng hồ lúc đón khách: <b>{Math.round(handoverPrev.reading).toLocaleString('vi-VN')} m³</b>
-                        {handoverPrev.at
-                          ? ` (${handoverPrev.at.slice(0, 10).split('-').reverse().join('/')})`
-                          : ''}
-                        {newReadingNum > 0 && (
-                          <> → khách trả{' '}
-                            <b>{(newReadingNum - Math.round(handoverPrev.reading)).toLocaleString('vi-VN')} m³</b>
-                            {', '}phần{' '}
-                            <b>{(Math.round(handoverPrev.reading) - prevReadingNum).toLocaleString('vi-VN')} m³</b>
-                            {' '}trước khi họ dọn tới là chi phí công ty.
-                          </>
-                        )}
-                      </p>
-                      <p className="mt-0.5 text-indigo-700">
-                        Hai ô chỉ số trên giữ nguyên số trên giấy — đó là chi phí công ty trả nhà nước.
+                      <p className="text-lg font-black tabular-nums text-indigo-800">
+                        {cycle.handover
+                          ? `${Math.round(cycle.handover.reading).toLocaleString('vi-VN')} m³`
+                          : <span className="text-sm font-semibold text-indigo-500">hợp đồng không ghi</span>}
                       </p>
                     </div>
+                    {firstNote?.kind === 'pre-move-in' && newReadingNum > 0 && (
+                      <p className="mt-2 flex gap-2 rounded-lg bg-white/70 p-2 text-xs leading-relaxed text-indigo-900">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                        <span>
+                          Giấy nước tính trọn tháng nhưng khách dọn vào giữa kỳ: khách trả{' '}
+                          <b>{(newReadingNum - firstNote.handover).toLocaleString('vi-VN')} m³</b>,
+                          còn <b>{firstNote.amount.toLocaleString('vi-VN')} m³</b> trước khi họ dọn tới là
+                          chi phí công ty. Máy chủ tự cắt phần này khi lập hoá đơn cho khách.
+                        </span>
+                      </p>
+                    )}
+                    {/* Chênh lớn hơn cả lượng tiêu thụ của kỳ → đọc sai ô đầu kỳ. */}
+                    {firstNote?.kind === 'bad-prev' && (
+                      <p className="mt-2 flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs leading-relaxed text-rose-800">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600" />
+                        <span>
+                          Chỉ số cũ đang nhỏ hơn mốc đón khách tới{' '}
+                          <b>{(firstNote.handover - prevReadingNum).toLocaleString('vi-VN')} m³</b> — nhiều hơn
+                          cả lượng tiêu thụ của kỳ này. Gần như chắc chắn ô <b>chỉ số cũ</b> đọc sai; mở ảnh
+                          soi lại số đầu kỳ trên giấy.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* KỲ 2 TRỞ ĐI: đối chiếu giấy với sổ — xem `continuityGap`. */}
+                {needsPaperPrev && (
+                  <div className={`sm:col-span-2 rounded-xl border p-3 ${
+                    readingGap ? 'border-rose-200 bg-rose-50'
+                      : paperPrevNum == null ? 'border-amber-200 bg-amber-50'
+                      : 'border-emerald-200 bg-emerald-50'}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-xs font-bold text-slate-700">
+                        Số cũ IN TRÊN GIẤY nước kỳ này <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        className="w-32 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-xs font-bold tabular-nums outline-none focus:border-indigo-400"
+                        inputMode="numeric"
+                        placeholder="—"
+                        value={form.paperPrev}
+                        onChange={(e) => setForm((f) => ({ ...f, paperPrev: onlyDigits(e.target.value) }))}
+                      />
+                      {readingGap ? (
+                        <span className="text-xs font-black text-rose-700">
+                          ⚠ lệch {Math.abs(readingGap.diff).toLocaleString('vi-VN')} m³
+                        </span>
+                      ) : paperPrevNum != null ? (
+                        <span className="text-xs font-black text-emerald-700">✓ nối liền kỳ trước</span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                      {readingGap ? (
+                        <>
+                          Kỳ trước chốt <b>{readingGap.expected.toLocaleString('vi-VN')}</b>, giấy kỳ này bắt
+                          đầu từ <b>{readingGap.found.toLocaleString('vi-VN')}</b> — phần ở giữa không nằm
+                          trên hoá đơn nào. <b>Chưa phát hành được.</b>
+                        </>
+                      ) : paperPrevNum == null ? (
+                        <>Phải bằng chốt kỳ trước ({cycle?.prevClose?.reading.toLocaleString('vi-VN')}) mới phát hành được.</>
+                      ) : (
+                        <>Hai kỳ nối liền nhau.</>
+                      )}
+                    </p>
                   </div>
                 )}
                 {readingMismatch ? (
@@ -730,21 +821,20 @@ export const WaterBillPublishing = () => {
                     không khớp tổng {quantity.toLocaleString('vi-VN')} m³ ở trên. Sửa cho khớp rồi mới
                     phát hành được.
                   </p>
-                ) : (
-                  <p className="sm:col-span-2 text-xs text-slate-400">
-                    Hai số này in trên hoá đơn khách nhận. Hiệu của chúng phải bằng đúng tổng m³.
-                  </p>
-                )}
+                ) : null}
               </div>
             )}
 
             <div className={`rounded-xl border p-4 ${unitPrice > 0 ? 'border-sky-200 bg-sky-50' : 'border-slate-200 bg-slate-50'}`}>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Đơn giá hệ thống sẽ dùng</p>
+              {/* Câu giải thích chuyển vào `title` — luôn đúng, không đổi theo lần bấm nào. */}
+              <p
+                className="text-xs font-bold uppercase tracking-wide text-slate-500"
+                title="= tổng tiền ÷ tổng m³. Số đem đi tính giữ nguyên phần thập phân, chỉ chỗ hiển thị mới làm tròn. Quản lý dựng hoá đơn từng phòng trên chính con số này."
+              >
+                Đơn giá hệ thống sẽ dùng
+              </p>
               <p className={`mt-1 text-3xl font-black tabular-nums ${unitPrice > 0 ? 'text-sky-700' : 'text-slate-300'}`}>
                 {unitPrice > 0 ? `${formatVnd(Math.round(unitPrice))}/m³` : '—'}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                = tổng tiền ÷ tổng m³. Số đem đi tính giữ nguyên phần thập phân, chỉ chỗ hiển thị mới làm tròn.
               </p>
               {/* Số này cao hơn đơn giá in trên hoá đơn (vd 29.000đ/m³) vì giá in là giá
                   trước thuế, còn đây đã gánh VAT + phí BVMT để thu đủ tổng. Cũng không
@@ -906,6 +996,19 @@ export const WaterBillPublishing = () => {
           </div>
         )}
       </SectionShell>
+
+      {zipOpen && (
+        <UtilityBillZipImport
+          kind="WATER"
+          properties={properties}
+          month={month}
+          year={year}
+          defaultPeriod={selectedMonthPeriod}
+          existing={bills}
+          onClose={() => setZipOpen(false)}
+          onDone={loadBills}
+        />
+      )}
     </div>
   );
 };

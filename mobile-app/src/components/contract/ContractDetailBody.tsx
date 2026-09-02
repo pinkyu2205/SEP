@@ -104,6 +104,22 @@ interface Props {
   onImagePress: (url: string) => void;
 }
 
+/**
+ * Tình trạng thiết bị lúc bàn giao — enum BE → tiếng Việt.
+ *
+ * Trước đây khối này in THẲNG `eq.condition`, nên khách đọc được đúng chữ "NEW" / "GOOD"
+ * trên biên bản bàn giao của chính mình. Bản đồ tương ứng vẫn luôn tồn tại, nhưng nằm
+ * trong `TenantOnboardingScreen` (đã bỏ 01/09/2026) và màn đó không dùng chung component
+ * này — nên chỗ nào dùng bản đồ thì hiện tiếng Việt, chỗ này thì không.
+ *
+ * Giá trị lạ thì trả về nguyên văn: thà hiện mã BE còn hơn nuốt mất thông tin.
+ */
+const CONDITION_LABEL: Record<string, string> = {
+  NEW: 'Mới', GOOD: 'Tốt', DAMAGED: 'Hư hại', BROKEN: 'Hỏng',
+};
+const conditionLabel = (c?: string): string =>
+  (c ? CONDITION_LABEL[c.toUpperCase()] ?? c : '—');
+
 export const ContractDetailBody: React.FC<Props> = ({
   contract, detailDto, handover, onImagePress,
 }) => {
@@ -179,7 +195,7 @@ export const ContractDetailBody: React.FC<Props> = ({
             <View key={eq.id} style={[styles.assetRow, i < contract.equipmentList.length - 1 && styles.assetRowBorder]}>
               <View style={styles.assetInfo}>
                 <Text style={styles.assetName}>{eq.name}</Text>
-                <Text style={styles.assetCondition}>Tình trạng: {eq.condition}</Text>
+                <Text style={styles.assetCondition}>Tình trạng: {conditionLabel(eq.condition)}</Text>
               </View>
               <Text style={styles.assetQty}>x{eq.quantity}</Text>
             </View>

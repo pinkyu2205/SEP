@@ -160,13 +160,13 @@ export const HandoverMonitoring = () => {
         // `handover-status` không trả `wholeHouse` nên phải ghép với hồ sơ nhà. Hai lời
         // gọi này là danh sách, mỗi cái đúng 1 request — phần tốn kém là vòng phòng dưới.
         const [propPage, draftList] = await Promise.all([
-          propertyService.getProperties(0, 500),
+          propertyService.getAllProperties(),
           tenantService.listDrafts().catch(() => []),
         ]);
         if (cancelled) return;
         setDrafts(draftList);
 
-        const byId = new Map((propPage.content ?? []).map((p) => [p.id, p]));
+        const byId = new Map((propPage ?? []).map((p) => [p.id, p]));
         const involved = rows
           .map((r) => byId.get(r.propertyId))
           .filter((p): p is NonNullable<typeof p> => !!p);

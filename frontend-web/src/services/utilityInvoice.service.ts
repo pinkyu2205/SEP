@@ -65,6 +65,19 @@ export const utilityInvoiceService = {
   createForWholeHouse: (
     propertyId: number,
     input: CreateUtilityInvoiceInput,
+    /**
+     * Tắt toast lỗi toàn cục — dành cho màn NHẬP LÔ.
+     *
+     * Ở đó mỗi nhà là một dòng và dòng đó đã tự báo kết quả của chính nó. Để toast bật
+     * thì phát hành 30 nhà mà lỗi 3 là ba hộp đỏ chồng lên nhau ở góc màn hình, nói lại
+     * đúng thứ bảng đang nói, lại nói bằng câu thô của máy chủ ("Nhà nguyên căn đã nhận
+     * hoá đơn điện của kỳ…") — nghe như hỏng trong khi việc đã xong.
+     */
+    opts?: { silent?: boolean },
   ): Promise<UtilityInvoiceResult> =>
-    api.post(`/api/v1/properties/${propertyId}/utility-invoices`, input),
+    api.post(
+      `/api/v1/properties/${propertyId}/utility-invoices`,
+      input,
+      opts?.silent ? ({ skipErrorToast: true } as object) : undefined,
+    ),
 };

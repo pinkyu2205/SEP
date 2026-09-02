@@ -111,14 +111,32 @@ export interface AdminInvoiceDispute {
 }
 
 /**
- * `ACCEPTED` — khách đúng. BE phải HUỶ hoá đơn (status → CANCELLED) và gỡ nợ khỏi
- * khách trong cùng transaction. Kết luận mà không huỷ thì khách vẫn thấy mình đang
- * nợ một hoá đơn hệ thống vừa công nhận là sai.
+ * `ACCEPTED` — khách đúng. BE **SỬA hoá đơn tại chỗ**, giữ nguyên mã (BE 01/09/2026).
+ *
+ * Trước đó BE huỷ hoá đơn rồi chờ admin phát hành một bản khác — khách có hai mã cho
+ * một kỳ, và admin quên bước phát hành lại thì kỳ đó không còn hoá đơn nào.
  *
  * `REJECTED` — hoá đơn đúng. BE cho hạn thanh toán chạy lại, cộng thêm 3 ngày
  * (`DISPUTE_REJECT_GRACE_DAYS`) — khách không được phạt vì đã đi hỏi.
  */
 export type InvoiceDisputeOutcome = 'ACCEPTED' | 'REJECTED';
+
+/**
+ * Số liệu đúng admin nhập khi kết luận ACCEPTED.
+ *
+ * ⚠️ BE chỉ áp dụng khi có ĐỦ `correctedNewReading` **và** `correctedUnitPrice`
+ * (`InvoiceDisputeServiceImpl` ≈ dòng 167) — gửi thiếu một cái là nó bỏ qua lặng lẽ,
+ * khiếu nại vẫn ACCEPTED mà số tiền không đổi. Nên FE gửi cả cụm hoặc không gửi gì.
+ *
+ * Không có `amount`: BE tự tính `(new − prev) × unitPrice`. Cho gõ tay thành tiền là mở
+ * đường cho con số không khớp với chỉ số ngay cạnh nó — đúng loại mâu thuẫn mà khiếu
+ * nại này sinh ra để sửa.
+ */
+export interface DisputeCorrection {
+  correctedPrevReading: number;
+  correctedNewReading: number;
+  correctedUnitPrice: number;
+}
 
 export const invoiceDisputeService = {
   /**
@@ -141,7 +159,7 @@ export const invoiceDisputeService = {
    */
   resolve: (
     id: number,
-    body: { outcome: InvoiceDisputeOutcome; note: string },
+    body: { outcome: InvoiceDisputeOutcome; note: string } & Partial<DisputeCorrection>,
   ): Promise<AdminInvoiceDispute> =>
     api.post(`${BASE}/${id}/resolve`, body),
 };

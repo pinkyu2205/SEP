@@ -15,7 +15,7 @@ import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import type { Expense, ExpenseCategory } from '@/types/expense';
 import {
-  CURRENT_MONTH, ChipFilter, FilterBar, MonthPicker, Pagination, SearchBox, SelectFilter, TableState,
+  currentMonth, ChipFilter, FilterBar, MonthPicker, Pagination, SearchBox, SelectFilter, TableState,
   fmtDateTime, fmtMillion, matchVi, monthLabel, monthShort, pageSlice, shiftMonth,
 } from '../shared';
 
@@ -117,7 +117,7 @@ const EXP_SORT_OPTIONS: { key: ExpSortKey; label: string }[] = [
 
 // ── Component ────────────────────────────────────────────────────────────────────
 export const FinancialManagement = () => {
-  const [month, setMonth] = useState(CURRENT_MONTH);
+  const [month, setMonth] = useState(currentMonth());
   const [period, setPeriod] = useState<Period>('month');
   const [loading, setLoading] = useState(true);
 
@@ -151,7 +151,7 @@ export const FinancialManagement = () => {
       hostService.getCashflow(shiftMonth(month, -23), month).catch(() => null),
       // size lớn: BE mặc định 20/trang — lấy trọn kỳ để tổng "chưa thu" không bị hụt.
       hostService.getInvoices({ month, size: 500 }).catch(() => null),
-      propertyService.getProperties(0, 200).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
       hostService.getPropertyPnl(month).catch(() => null),
       hostService.getPropertyPerformance(month).catch(() => null),
       hostService.listExpensesPage({ month, size: 500 }).catch(() => null),
@@ -164,7 +164,7 @@ export const FinancialManagement = () => {
     const open = (invoicePage?.content ?? []).filter(i => i.status !== 'PAID');
     setUnpaid({ count: open.length, amount: open.reduce((s, i) => s + i.amount, 0) });
 
-    if (propPage?.content) setApiProps(propPage.content);
+    if (propPage) setApiProps(propPage);
 
     const fin: Record<string, Financials> = {};
     for (const r of pnl?.rows ?? []) {

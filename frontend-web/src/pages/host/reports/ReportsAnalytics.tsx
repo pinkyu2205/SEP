@@ -17,7 +17,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import type { PropertyResponse } from '@/types/api.types';
 import {
-  CURRENT_MONTH, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
+  currentMonth, ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
   fmtMillion, matchVi, monthLabel, monthShort, pageSlice, safePct, shiftMonth,
 } from '../shared';
 
@@ -30,7 +30,7 @@ import {
 //
 // Bản cũ trộn dữ liệu mock với API và chốt cứng khoảng '2025-12' → '2026-05',
 // nên bảng hiện sai kỳ, đánh dấu "Hiện tại" nhầm tháng và chia cho doanh thu 0
-// → NaN% / -Infinity%. Nay CURRENT_MONTH lấy theo giờ server (utils/period.ts).
+// → NaN% / -Infinity%. Nay currentMonth() lấy theo giờ server (utils/period.ts).
 // Ở đây mọi tỷ lệ đều đi qua safePct(): doanh thu 0 thì hiện "—", không chia.
 //
 // ⚠ Giới hạn BE đã biết (docs/BE-NEED-host-finance-modules-2026-08-09.md):
@@ -114,16 +114,16 @@ export const ReportsAnalytics = () => {
   const [apiProps, setApiProps] = useState<PropertyResponse[]>([]);
 
   const months = Number(range);
-  const from = shiftMonth(CURRENT_MONTH, -(months - 1));
+  const from = shiftMonth(currentMonth(), -(months - 1));
 
   const load = useCallback(async () => {
     setLoading(true);
     const [summary, managers, performance, pnlRes, propPage] = await Promise.all([
-      hostService.getFinancialSummary(from, CURRENT_MONTH).catch(() => null),
-      hostService.getManagerPerformance(CURRENT_MONTH).catch(() => null),
-      hostService.getPropertyPerformance(CURRENT_MONTH).catch(() => null),
-      hostService.getPropertyPnl(CURRENT_MONTH).catch(() => null),
-      propertyService.getProperties(0, 200).catch(() => null),
+      hostService.getFinancialSummary(from, currentMonth()).catch(() => null),
+      hostService.getManagerPerformance(currentMonth()).catch(() => null),
+      hostService.getPropertyPerformance(currentMonth()).catch(() => null),
+      hostService.getPropertyPnl(currentMonth()).catch(() => null),
+      propertyService.getAllProperties().catch(() => null),
     ]);
 
     setFinRows((summary ?? []).map((r: FinancialSummaryRow) => {
@@ -150,7 +150,7 @@ export const ReportsAnalytics = () => {
       };
     }
     setPnl(map);
-    setApiProps(propPage?.content ?? []);
+    setApiProps(propPage ?? []);
     setLoading(false);
   }, [from]);
   useEffect(() => { load(); }, [load]);
@@ -243,7 +243,7 @@ export const ReportsAnalytics = () => {
   }, [mgrRows, mgrQ, mgrSort]);
 
   const handleExport = () => {
-    exportToExcel(`BaoCao_HoangBinhLand_${CURRENT_MONTH}`, [
+    exportToExcel(`BaoCao_HoangBinhLand_${currentMonth()}`, [
       {
         name: `Tài chính ${months} kỳ`,
         rows: finRows.map(r => ({
@@ -276,7 +276,7 @@ export const ReportsAnalytics = () => {
     {
       label: `Doanh thu ${months} kỳ`, value: formatCurrency(totals.revenue), icon: TrendingUp,
       bg: 'bg-emerald-50', color: 'text-emerald-600', border: 'border-l-emerald-500',
-      delta: totals.revenueDelta, sub: `${finRows.length} kỳ · tính tới ${monthLabel(CURRENT_MONTH).toLowerCase()}`,
+      delta: totals.revenueDelta, sub: `${finRows.length} kỳ · tính tới ${monthLabel(currentMonth()).toLowerCase()}`,
     },
     {
       label: `Chi phí ${months} kỳ`, value: formatCurrency(totals.expense), icon: TrendingDown,
@@ -302,7 +302,7 @@ export const ReportsAnalytics = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Báo cáo & Phân tích</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Hiệu suất vận hành và tài chính Hoàng Bình Land — {monthLabel(from)} đến {monthLabel(CURRENT_MONTH)}
+            Hiệu suất vận hành và tài chính Hoàng Bình Land — {monthLabel(from)} đến {monthLabel(currentMonth())}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -401,7 +401,7 @@ export const ReportsAnalytics = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {finRows.map(r => {
-                const isCurrent = r.ym === CURRENT_MONTH;
+                const isCurrent = r.ym === currentMonth();
                 return (
                   <tr key={r.ym} className={`transition-colors hover:bg-slate-50 ${isCurrent ? 'bg-indigo-50/40' : ''}`}>
                     <td className="px-5 py-3.5 font-medium text-slate-900">
@@ -458,7 +458,7 @@ export const ReportsAnalytics = () => {
           <Users className="h-5 w-5 text-indigo-600" />
           <div>
             <h2 className="text-base font-semibold text-slate-900">Hiệu suất quản lý vận hành</h2>
-            <p className="text-xs text-slate-500">{filteredMgr.length} quản lý đang hoạt động · số liệu tại {monthLabel(CURRENT_MONTH).toLowerCase()}</p>
+            <p className="text-xs text-slate-500">{filteredMgr.length} quản lý đang hoạt động · số liệu tại {monthLabel(currentMonth()).toLowerCase()}</p>
           </div>
         </div>
         <FilterBar>

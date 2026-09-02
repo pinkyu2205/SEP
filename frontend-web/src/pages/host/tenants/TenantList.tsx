@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Building2, CalendarClock, ChevronRight, DoorOpen, FileText, History, Home, LayoutGrid,
   Loader2, RefreshCw, Search, UserRound, Users, X,
@@ -138,6 +138,7 @@ const groupByTenant = (contracts: HostContractDto[]) => {
 type ViewTab = 'current' | 'rooms' | 'past';
 
 export const TenantList = () => {
+  const navigate = useNavigate();
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [contracts, setContracts] = useState<HostContractDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,11 +165,11 @@ export const TenantList = () => {
     try {
       const [propList, contractList] = await Promise.all([
         // Chỉ giữ nhà đã duyệt khai thác — căn còn nháp/chờ duyệt chưa thể có khách.
-        propertyService.getProperties(0, 200).then((p) => p.content.filter(isHostApproved)).catch(() => {
+        propertyService.getAllProperties().then((p) => p.filter(isHostApproved)).catch(() => {
           toast.error('Không tải được danh sách bất động sản');
           return [] as PropertyResponse[];
         }),
-        hostService.listContracts({ size: 500 }).then((p) => p.content ?? []).catch(() => {
+        hostService.listAllContracts().catch(() => {
           toast.error('Không tải được dữ liệu khách thuê');
           return [] as HostContractDto[];
         }),
@@ -775,7 +776,14 @@ export const TenantList = () => {
 
       {/* Lịch sử thuê — gom HĐ của khách trên TẤT CẢ bất động sản, không chỉ căn đang chọn */}
       {timelineOf && (
-        <TenantTimelineDrawer who={timelineOf} contracts={contracts} onClose={() => setTimelineOf(null)} />
+        <TenantTimelineDrawer
+          who={timelineOf}
+          contracts={contracts}
+          onClose={() => setTimelineOf(null)}
+          // Mở hợp đồng đầy đủ ở trang Hợp đồng, mã HĐ đi kèm qua query để trang đó
+          // bung sẵn đúng hồ sơ — host khỏi phải tự tìm lại mã vừa đọc được ở đây.
+          onOpenContract={(c) => navigate(`/host/contracts?contract=${encodeURIComponent(c.code)}`)}
+        />
       )}
     </div>
   );
