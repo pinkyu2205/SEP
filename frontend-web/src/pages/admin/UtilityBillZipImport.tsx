@@ -23,18 +23,19 @@
  */
 import { useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, FileArchive, Loader2, RotateCcw, Upload, X,
+  CheckCircle2, FileArchive, Loader2, RotateCcw, Upload, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { uploadToCloudinary } from '@/services/upload.service';
 import { evnBillService, evnUnitPrice } from '@/services/evnBill.service';
 import { waterBillService, waterUnitPrice } from '@/services/waterBill.service';
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
-import { parseEvnInvoice, onlyDigits } from '@/utils/evnInvoiceParser';
+import { parseEvnInvoice, onlyDigits, periodProblem } from '@/utils/evnInvoiceParser';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
 import { groupThousands } from '@/utils';
 import { formatCurrency } from '@/utils';
 import { inspectZipBills, type ZipBillPreview } from '@/utils/zipUtilityBills';
+import { loadUtilityCycle, continuityGap, firstPeriodNote, type UtilityCycle } from '@/services/utilityCycle';
 import type { PropertyResponse } from '@/types/api.types';
 
 type Stage = 'pick' | 'preview' | 'reading' | 'review';
@@ -68,6 +69,9 @@ const KIND: Record<UtilityKind, {
   /** Slug không dấu, dùng trong tên file mẫu. */
   slug: string;
   unit: string;
+  /** Khoảng đơn giá bình quân còn coi là hợp lệ — xem `isOutlier`. */
+  priceFloor: number;
+  priceCeil: number;
   qtyLabel: string;
   readingLabel: string;
   parse: (ocr: { rawText?: string; numbers?: string[] }) => ParsedBill;
@@ -84,6 +88,8 @@ const KIND: Record<UtilityKind, {
     noun: 'điện',
     slug: 'dien',
     unit: 'kWh',
+    // Bậc 1 khoảng 1.900đ, bậc 6 khoảng 3.300đ, cộng VAT 8%. Nới rộng hai đầu.
+    priceFloor: 1_000, priceCeil: 5_000,
     qtyLabel: 'Tổng kWh',
     readingLabel: 'Chỉ số công tơ',
     parse: (ocr) => {
@@ -103,6 +109,8 @@ const KIND: Record<UtilityKind, {
     noun: 'nước',
     slug: 'nuoc',
     unit: 'm³',
+    // Nước sinh hoạt bậc thang khoảng 6.000–16.000đ/m³ đã gồm thuế + phí BVMT.
+    priceFloor: 3_000, priceCeil: 30_000,
     qtyLabel: 'Tổng m³',
     readingLabel: 'Chỉ số đồng hồ',
     parse: (ocr) => {
@@ -130,17 +138,43 @@ interface Row {
   totalAmount: string;
   billingPeriod: string;
   /**
-   * Kỳ này ĐỌC ĐƯỢC từ tờ hoá đơn, hay rơi về kỳ mặc định của tháng đang chọn.
+   * Kỳ trên dòng này TỪ ĐÂU RA. Ba nguồn, độ tin cậy khác hẳn nhau:
    *
-   * Phải phân biệt: kỳ là khoá mà quản lý đối chiếu, và kỳ EVN/nước thật là chu kỳ
-   * chốt số (vd 07/08 – 06/09) chứ không trùng tháng dương lịch. Rơi về mặc định
-   * nghĩa là con số đó do hệ thống ĐOÁN, không phải in trên giấy — admin cần biết
-   * để đối chiếu lại, chứ nhìn vào thì hai trường hợp giống hệt nhau.
+   * - `ocr`     — in trên chính tờ giấy. Đáng tin nhất, và là dòng DUY NHẤT đáng nhìn kỹ:
+   *               kỳ EVN/nước thật là chu kỳ chốt số (vd 07/08 – 06/09) nên nó hay khác
+   *               tháng dương lịch, khác một cách hợp lệ.
+   * - `manual`  — admin gõ tay, đè lên hai loại kia.
+   * - `default` — hệ thống ĐOÁN theo tháng đang chọn vì không đọc được gì. Đa số rơi vào
+   *               đây, nên KHÔNG cảnh báo từng dòng (ba chục dòng cùng một câu thì thành
+   *               nhiễu, không ai đọc) — đếm gộp một lần ở thanh kỳ chung phía trên.
+   *
+   * Trước đây chỉ có cờ `periodFromOcr`, và ô nhập tay cũng bật cờ đó lên — nghĩa là dòng
+   * admin tự gõ bị ghi nhận là "đọc từ ảnh". Tách ba nguồn để nhãn nói đúng sự thật.
    */
-  periodFromOcr?: boolean;
+  periodSource: 'ocr' | 'manual' | 'default';
   /** Chỉ nhà nguyên căn mới dùng — cần để phát hành thẳng cho khách. */
   prevReading: string;
   newReading: string;
+  /**
+   * Chỉ số cũ lấy từ SỔ CỦA HỆ THỐNG (số chốt cuối kỳ trước), không phải từ OCR.
+   *
+   * Khoá lại y như luồng phát hành lẻ. Chỉ số cũ phải nối liền với kỳ trước, còn OCR
+   * chỉ đọc được những gì in trên tờ giấy đang cầm — `findReadingTriple` từng trả về
+   * `1` cho một căn có chỉ số thật là 18.610. Cho sửa tay thì mỗi kỳ một mốc khác nhau,
+   * hoá đơn khách nhận in ra một cặp số vô nghĩa và kỳ sau kế thừa luôn cái sai đó.
+   */
+  prevLocked?: boolean;
+  /**
+   * Chỉ số cũ ĐỌC ĐƯỢC TRÊN GIẤY — giữ RIÊNG, không để `prevReading` nuốt mất.
+   *
+   * Từ kỳ thứ 2, `prevReading` bị ghi đè bằng chốt của sổ hệ thống. Bản trước làm đúng
+   * thế rồi vứt luôn số OCR vừa đọc — nghĩa là hai con số đáng lẽ phải bằng nhau thì
+   * không bao giờ được đem ra so. Giấy ghi 18.616 trong khi kỳ trước chốt 18.610 thì 6
+   * đơn vị ở giữa biến mất khỏi mọi hoá đơn, và màn hình hiện y như lúc mọi thứ đều đúng.
+   */
+  paperPrev: string;
+  /** Kỳ đầu hay kỳ tiếp, chốt kỳ trước, mốc đón khách — xem `loadUtilityCycle`. */
+  cycle?: UtilityCycle;
   /** Ghi chú của bước đọc: OCR hỏng, không ra số… */
   note?: string;
   /** Kỳ này nhà đó đã có hoá đơn PUBLISHED — bỏ qua để khỏi phát hành trùng. */
@@ -149,22 +183,141 @@ interface Row {
   error?: string;
 }
 
+/**
+ * Số nhà đọc song song ở chặng OCR.
+ *
+ * Ba là chỗ đứng giữa: nhanh gần gấp ba so với chạy tuần tự, mà không lúc nào có quá 3
+ * request bay tới dịch vụ đọc hoá đơn — thứ đã khiến bản đầu chọn chạy từng cái một.
+ * Nâng nữa thì rủi ro bị chặn hoặc timeout cả loạt, mà lúc đó không phân biệt được nhà
+ * nào hỏng thật với nhà nào chỉ là nạn nhân của việc bắn quá tay.
+ */
+const READ_CONCURRENCY = 3;
+
+/**
+ * Chạy song song CÓ GIỚI HẠN, giữ NGUYÊN thứ tự kết quả.
+ *
+ * Giữ thứ tự là bắt buộc: bảng duyệt phải xếp đúng như bảng đối chiếu ở bước trước, không
+ * thì nhà nào đọc xong sớm lại nhảy lên đầu và admin mất dấu mình đang xem tới đâu.
+ */
+async function mapWithLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 const isWhole = (p: PropertyResponse) => p.wholeHouse === true;
 
 /**
- * Dòng đã đủ dữ liệu để phát hành chưa.
- * Nguyên căn cần thêm cặp chỉ số, và chỉ số mới phải lớn hơn chỉ số cũ.
+ * NGUYÊN CĂN: chỉ số mới = chỉ số cũ + tổng sản lượng.
+ *
+ * Không phải quy ước cho tiện, mà là ràng buộc máy chủ ép: `validateInvoiceAmounts` bắt
+ * `mới − cũ` phải bằng đúng sản lượng, lệch một đơn vị là `CONSUMPTION_MISMATCH`.
+ *
+ * BUG 01/09/2026 — vì sao phải tách ra thành hàm riêng: phép tính này trước đây chỉ nằm
+ * trong `patch`, tức chỉ chạy khi admin ĐỘNG VÀO dòng đó. Dòng nào admin không sửa gì thì
+ * giữ nguyên chỉ số mới OCR đọc được, mà OCR hay đọc năm "2025" thành chỉ số — ra cặp
+ * `18.615 → 2.025`, mới nhỏ hơn cũ, dòng bị gắn "Thiếu dữ liệu" mà không nói vì sao. Sửa
+ * bừa một ô bất kỳ (kể cả ô kỳ hoá đơn) là nó tự đúng lại — triệu chứng vô lý tới mức
+ * không ai đoán được nguyên nhân. Giờ dựng dòng xong là tính luôn, không đợi ai chạm vào.
  */
-const rowReady = (r: Row): boolean => {
-  if (r.already || r.state === 'done') return false;
-  if (!(Number(onlyDigits(r.totalQty)) > 0)) return false;
-  if (!(Number(onlyDigits(r.totalAmount)) > 0)) return false;
-  if (!r.billingPeriod.trim()) return false;
-  if (!isWhole(r.property)) return true;
+const withAutoNewReading = (r: Row): Row => {
+  if (!isWhole(r.property)) return r;
+  const prev = Number(onlyDigits(r.prevReading));
+  const qty = Number(onlyDigits(r.totalQty));
+  // `onlyDigits('')` → `Number('')` → 0, vẫn là số hữu hạn. Không chặn ô rỗng ở đây thì
+  // nhà chưa có chỉ số cũ sẽ nhận chỉ số mới = đúng sản lượng, trông như số thật.
+  if (r.prevReading === '' || !(qty > 0) || !Number.isFinite(prev)) return r;
+  return { ...r, newReading: String(prev + qty) };
+};
+
+/**
+ * VÌ SAO dòng này chưa phát hành được — câu trả lời hiển thị được, `null` là sẵn sàng.
+ *
+ * Trước đây hàm này trả true/false và bảng in đúng một chữ "Thiếu dữ liệu" cho mọi lý do:
+ * thiếu tổng tiền, kỳ sai định dạng, chỉ số mới nhỏ hơn chỉ số cũ — nhìn giống hệt nhau,
+ * mà ba thứ đó sửa ở ba chỗ khác nhau. Admin đứng trước bảng ba chục dòng và không biết
+ * phải chạm vào ô nào. Nói thẳng ra thì mất thêm một cột chữ, và tiết kiệm cả một vòng dò.
+ */
+const rowBlocker = (r: Row, unit: string): string | null => {
+  if (!(Number(onlyDigits(r.totalQty)) > 0)) return `Chưa có tổng ${unit}`;
+  if (!(Number(onlyDigits(r.totalAmount)) > 0)) return 'Chưa có tổng tiền';
+  // Kỳ sai định dạng cũng là chưa sẵn sàng — nó là khoá đối chiếu, không phải nhãn hiển thị.
+  const period = periodProblem(r.billingPeriod);
+  if (period) return `Kỳ hoá đơn: ${period}`;
+  if (!isWhole(r.property)) return null;
+  if (r.prevReading === '') return 'Chưa có chỉ số cũ';
+  if (r.newReading === '') return 'Chưa có chỉ số mới';
   const prev = Number(onlyDigits(r.prevReading));
   const next = Number(onlyDigits(r.newReading));
-  return r.prevReading !== '' && r.newReading !== '' && next > prev;
+  if (!(next > prev)) return 'Chỉ số mới phải lớn hơn chỉ số cũ';
+
+  /*
+   * TỪ KỲ THỨ 2: chỉ số mới của kỳ trước PHẢI bằng chỉ số cũ của kỳ này.
+   *
+   * Đây là ràng buộc cứng, không phải gợi ý. Hai kỳ liền nhau không nối được nghĩa là
+   * phần tiêu thụ giữa hai mốc rơi ra ngoài mọi hoá đơn: không ai thu, và về sau cũng
+   * không truy ngược được nó thuộc kỳ nào. Nên lệch thì CHẶN phát hành, để admin mở ảnh
+   * ra soi lại — hoặc số trên giấy đọc nhầm, hoặc sổ đang sai và phải sửa trước đã.
+   *
+   * `prevClose` rỗng = kỳ đầu (chưa có gì để nối) hoặc không tra được — cả hai đều không
+   * có cơ sở để so, nên bỏ qua chứ không chặn oan.
+   */
+  /*
+   * KỲ ĐẦU: chỉ số đầu kỳ thấp hơn mốc đón khách nhiều hơn cả lượng tiêu thụ của kỳ là
+   * chuyện không thể xảy ra ngoài đời — chỉ có thể do OCR đọc nhầm. Chặn luôn, vì nhìn
+   * cặp `1 → 2.025` thì không có gì báo cho admin biết là nó sai.
+   */
+  if (firstPeriodNote(r.cycle, prev, Number(onlyDigits(r.totalQty)))?.kind === 'bad-prev') {
+    return 'Chỉ số đầu kỳ đọc sai — thấp hơn mốc đón khách';
+  }
+
+  if (r.cycle?.prevClose) {
+    if (r.paperPrev === '') return 'Nhập chỉ số cũ in trên giấy để đối chiếu với sổ';
+    const gap = continuityGap(r.cycle, Number(onlyDigits(r.paperPrev)));
+    if (gap) {
+      return `Giấy ghi ${groupThousands(String(gap.found))}, kỳ trước chốt `
+        + `${groupThousands(String(gap.expected))} — lệch ${groupThousands(String(Math.abs(gap.diff)))} ${unit}`;
+    }
+  }
+  return null;
 };
+
+/** Dòng đã đủ dữ liệu để phát hành chưa. Dòng đã xong / đã có kỳ này thì không tính. */
+const rowReady = (r: Row, unit: string): boolean =>
+  !r.already && r.state !== 'done' && rowBlocker(r, unit) === null;
+
+type FilterKey = 'all' | 'issue' | 'ready' | 'skip';
+
+/**
+ * Lọc bảng duyệt. Một lô có thể 50–100 nhà, và cái admin thật sự cần làm là tìm mấy dòng
+ * CÓ VẤN ĐỀ giữa hàng chục dòng đã đúng sẵn — cuộn tay dò từng dòng thì vừa lâu vừa sót.
+ */
+const FILTERS: {
+  key: FilterKey; label: string; on: string; match: (r: Row, unit: string) => boolean;
+}[] = [
+  { key: 'all', label: 'Tất cả', on: 'bg-slate-800 text-white', match: () => true },
+  {
+    key: 'issue', label: 'Cần sửa', on: 'bg-amber-500 text-white',
+    match: (r, unit) => !r.already && r.state !== 'done' && rowBlocker(r, unit) !== null,
+  },
+  { key: 'ready', label: 'Sẵn sàng', on: 'bg-emerald-600 text-white', match: rowReady },
+  {
+    key: 'skip', label: 'Bỏ qua', on: 'bg-slate-500 text-white',
+    match: r => !!r.already || r.state === 'done',
+  },
+];
 
 export const UtilityBillZipImport = ({
   kind, properties, month, year, defaultPeriod, existing, onClose, onDone,
@@ -190,6 +343,20 @@ export const UtilityBillZipImport = ({
   const [preview, setPreview] = useState<ZipBillPreview | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  /**
+   * Kỳ dùng chung cho cả lô — sửa MỘT chỗ thay vì sửa từng dòng.
+   *
+   * Hoá đơn nước và phần lớn hoá đơn điện không in kỳ ở dạng máy đọc được, nên gần như cả
+   * lô cùng rơi về kỳ đoán theo tháng. Bản đầu để mỗi dòng một ô nhập: ba chục ô giống hệt
+   * nhau, kèm ba chục lần một câu cảnh báo — mà muốn đổi kỳ thật thì phải sửa đủ ba chục
+   * lần, không sót cái nào, nếu không là hai kỳ khác nhau nằm lẫn trong cùng một tháng và
+   * quản lý đối chiếu không ra.
+   *
+   * Sửa ở đây chảy xuống MỌI dòng chưa có kỳ riêng. Dòng đọc được kỳ trên giấy hoặc admin
+   * đã gõ tay thì giữ nguyên — đó mới là ngoại lệ thật, không được ghi đè lặng lẽ.
+   */
+  const [batchPeriod, setBatchPeriod] = useState(defaultPeriod);
+  const [filter, setFilter] = useState<FilterKey>('all');
   const [busy, setBusy] = useState(false);
   const [zipError, setZipError] = useState<string | null>(null);
   /**
@@ -220,26 +387,40 @@ export const UtilityBillZipImport = ({
     }
   };
 
-  // ── Chặng 2: tải ảnh + OCR TUẦN TỰ từng nhà ───────────────────────────────
-  //
-  // Cố tình KHÔNG bắn song song: OCR là dịch vụ ngoài, hai chục request cùng lúc dễ bị
-  // chặn hoặc timeout cả loạt, mà lúc đó không phân biệt được nhà nào hỏng thật.
+  /**
+   * ── Chặng 2: tải ảnh + OCR, chạy SONG SONG CÓ GIỚI HẠN ────────────────────
+   *
+   * Bản đầu chạy tuần tự hoàn toàn với lý do "OCR là dịch vụ ngoài, bắn cùng lúc dễ bị
+   * chặn". Lý lẽ đó đúng với HAI CHỤC request, không đúng với ba — mà cái giá phải trả
+   * là mỗi nhà hai lượt gọi mạng nối đuôi nhau, 20 nhà là 40 lượt xếp hàng.
+   *
+   * Nay chạy `READ_CONCURRENCY` nhà một lúc: nhanh gần gấp ba mà vẫn không có lúc nào
+   * quá 3 request đang bay, nên vẫn giữ được điều đã hứa với dịch vụ OCR.
+   *
+   * Nhà nào KỲ NÀY ĐÃ CÓ hoá đơn thì bỏ qua hẳn cả upload lẫn OCR — trước đây vẫn tải
+   * ảnh lên rồi đọc đầy đủ, xong chỉ để hiện nhãn "Kỳ này đã có" và bị loại lúc phát
+   * hành. Tốn tiền Cloudinary lẫn quota OCR cho một kết quả không ai dùng.
+   */
   const runReading = async () => {
     if (!preview) return;
     setStage('reading');
     setProgress({ done: 0, total: preview.matched.length });
-    const out: Row[] = [];
 
-    for (const m of preview.matched) {
+    const readOne = async (m: ZipBillPreview['matched'][number]): Promise<Row> => {
       const base: Row = {
         property: m.property,
         folder: m.folder,
         file: m.file,
-        totalQty: '', totalAmount: '', billingPeriod: defaultPeriod,
-        prevReading: '', newReading: '',
+        totalQty: '', totalAmount: '', billingPeriod: batchPeriod, periodSource: 'default',
+        prevReading: '', newReading: '', paperPrev: '',
         already: publishedIds.has(m.property.id),
         state: 'idle',
       };
+      if (base.already) {
+        base.note = 'Kỳ này đã có hoá đơn — bỏ qua';
+        setProgress(p => ({ ...p, done: p.done + 1 }));
+        return base;
+      }
       try {
         const url = await uploadToCloudinary(m.file, 'image');
         base.imageUrl = url;
@@ -252,31 +433,89 @@ export const UtilityBillZipImport = ({
           base.totalAmount = parsed.amount
             || (Number(ocr?.totalAmount) > 0 ? String(ocr.totalAmount) : '');
           const readPeriod = parsed.period || ocr?.billingPeriod || '';
-          base.billingPeriod = readPeriod || defaultPeriod;
-          base.periodFromOcr = !!readPeriod;
+          base.billingPeriod = readPeriod || batchPeriod;
+          base.periodSource = readPeriod ? 'ocr' : 'default';
           base.prevReading = parsed.prevReading;
           base.newReading = parsed.newReading;
+          // Giữ bản gốc của giấy — `prevReading` bên dưới có thể bị sổ hệ thống ghi đè.
+          base.paperPrev = parsed.prevReading;
           if (!base.totalQty && !base.totalAmount) base.note = 'Không đọc được số — nhập tay';
         } catch {
           base.note = 'Dịch vụ đọc hoá đơn lỗi — nhập tay';
         }
+
+        /*
+         * NGUYÊN CĂN: hai kỳ, hai cách lấy chỉ số cũ — xem `loadUtilityCycle`.
+         *
+         *  • KỲ THỨ 2 TRỞ ĐI → lấy chốt của SỔ HỆ THỐNG và KHOÁ ô lại. Chỉ số cũ phải nối
+         *    liền kỳ trước, còn OCR chỉ đọc được những gì in trên tờ giấy đang cầm
+         *    (`findReadingTriple` từng trả `1` cho căn có chỉ số thật 18.610). Số của giấy
+         *    không bị vứt đi mà chuyển sang `paperPrev` để đối chiếu.
+         *
+         *  • KỲ ĐẦU → không có gì để nối, nên đi theo giấy và MỞ ô cho sửa. Cố ý không
+         *    điền mốc đón khách vào đây dù đó mới là điểm đúng để bắt đầu tính tiền: máy
+         *    chủ ép `mới − cũ = sản lượng trên giấy`, điền mốc đón khách vào là hiệu ra
+         *    nhỏ hơn và KHÔNG phát hành được. Phần khách bị tính dư bày ra ở cột chỉ số.
+         */
+        if (isWhole(m.property)) {
+          const cycle = await loadUtilityCycle(m.property.id, kind, month, year)
+            .catch(() => null);
+          if (cycle) {
+            base.cycle = cycle;
+            if (cycle.prevClose) {
+              base.prevReading = String(cycle.prevClose.reading);
+              base.prevLocked = true;
+            }
+          }
+        }
       } catch {
         base.note = 'Không tải được ảnh lên';
       }
-      out.push(base);
       setProgress(p => ({ ...p, done: p.done + 1 }));
-    }
+      // Tính chỉ số mới NGAY, đừng đợi admin chạm vào dòng — xem `withAutoNewReading`.
+      return withAutoNewReading(base);
+    };
 
+    // Giữ nguyên thứ tự nhà như bảng đối chiếu, dù chúng chạy xong không theo thứ tự.
+    const out = await mapWithLimit(preview.matched, READ_CONCURRENCY, readOne);
     setRows(out);
     setStage('review');
   };
 
+  /**
+   * Sửa một dòng, và tính lại chỉ số mới cho nhà nguyên căn (xem `withAutoNewReading`).
+   *
+   * Phải tính lại ở MỖI lần sửa, không phải điền một lần rồi thôi như luồng phát hành lẻ:
+   * admin duyệt hàng chục dòng, sửa tổng kWh ở dòng thứ mười rồi quên, mà hiệu số không
+   * còn khớp thì lỗi chỉ lộ ra lúc bấm phát hành cả lô.
+   */
   const patch = (idx: number, next: Partial<Row>) =>
-    setRows(rs => rs.map((r, i) => (i === idx ? { ...r, ...next } : r)));
+    setRows(rs => rs.map((r, i) => (i === idx ? withAutoNewReading({ ...r, ...next }) : r)));
+
+  /**
+   * Đổi kỳ chung → chảy xuống mọi dòng còn đang dùng kỳ đoán.
+   *
+   * Chừa lại đúng ba loại: dòng đọc được kỳ trên giấy, dòng admin đã gõ tay, và dòng đã
+   * phát hành xong (`done`) hay bị bỏ qua (`already`) — sửa kỳ của chúng chẳng đổi được gì
+   * ngoài việc làm sai thứ đang hiển thị.
+   */
+  const changeBatchPeriod = (value: string) => {
+    setBatchPeriod(value);
+    setRows(rs => rs.map(r =>
+      r.periodSource === 'default' && !r.already && r.state !== 'done'
+        ? { ...r, billingPeriod: value }
+        : r));
+  };
+
+  /** Số dòng còn ăn theo kỳ chung — để nói rõ "đổi ở đây là đổi cho mấy nhà". */
+  const followingBatch = rows.filter(
+    r => r.periodSource === 'default' && !r.already && r.state !== 'done').length;
+  const onPaperCount = rows.filter(r => r.periodSource === 'ocr').length;
+  const batchIssue = periodProblem(batchPeriod);
 
   // ── Chặng 3: phát hành TUẦN TỰ, giữ lại dòng lỗi ──────────────────────────
   const publishAll = async () => {
-    const targets = rows.map((r, i) => ({ r, i })).filter(({ r }) => rowReady(r));
+    const targets = rows.map((r, i) => ({ r, i })).filter(({ r }) => rowReady(r, cfg.unit));
     if (targets.length === 0) return;
     setConfirmOpen(false);
     setBusy(true);
@@ -316,10 +555,22 @@ export const UtilityBillZipImport = ({
               unitPrice: created.unitPrice ?? cfg.unitPrice(totalAmount, qty),
               amount: totalAmount,
               meterImageUrl: r.imageUrl || undefined,
-            });
+            }, { silent: true });
           } catch (e: any) {
-            const code = e?.response?.data?.error || '';
-            // BE bản 2 luồng đã tự phát hành trong cùng transaction → lệnh này thành dư.
+            /*
+             * MÃ LỖI nằm ở `data.code`, KHÔNG phải `data.error`.
+             *
+             * `GlobalExceptionHandler.handleBusiness` dựng `ErrorResponse` với
+             * `error = ex.getMessage()` (câu tiếng Việt) và `code = ex.getCode()`. Bản
+             * trước đọc `data.error` rồi đem so với 'INVOICE_ALREADY_EXISTS' — vế trái
+             * luôn là một câu văn nên điều kiện KHÔNG BAO GIỜ khớp.
+             *
+             * Hậu quả: ca lành nhất (BE bản 2 luồng đã tự phát hành cho khách trong cùng
+             * transaction, nên lệnh này thành dư) bị tính là thất bại. Bảng báo đỏ "chưa
+             * gửi được cho khách", chân hộp đếm "lỗi 3", trong khi hoá đơn đã tới tay
+             * khách đầy đủ — admin đọc xong tưởng hỏng, đi làm lại một việc đã xong.
+             */
+            const code = e?.response?.data?.code || '';
             if (code !== 'INVOICE_ALREADY_EXISTS') {
               patch(i, {
                 state: 'error',
@@ -334,7 +585,8 @@ export const UtilityBillZipImport = ({
         patch(i, { state: 'done' });
         ok += 1;
       } catch (e: any) {
-        const msg = e?.response?.data?.error === 'BILL_ALREADY_EXISTS'
+        // Cùng lỗi đọc nhầm trường như trên — mã ở `data.code`, không phải `data.error`.
+        const msg = e?.response?.data?.code === 'BILL_ALREADY_EXISTS'
           ? 'Kỳ này nhà đã có hoá đơn rồi'
           : (e?.response?.data?.message || e?.message || 'Phát hành thất bại');
         patch(i, { state: 'error', error: msg });
@@ -350,26 +602,33 @@ export const UtilityBillZipImport = ({
   };
 
   /**
-   * Đơn giá "bình thường" của cả lô = TRUNG VỊ, không phải trung bình.
+   * Đơn giá có thể là giá điện/nước thật không.
    *
-   * Chính con số bị OCR đọc nhầm là con số lệch nhất, mà trung bình thì bị nó kéo theo —
-   * một dòng đọc mã công tơ thành sản lượng là đủ làm mốc so sánh vô dụng. Trung vị
-   * không nhúc nhích vì vài dòng hỏng.
+   * ─── Vì sao KHÔNG so nhà này với nhà khác ─────────────────────────────────
+   * Bản đầu lấy trung vị đơn giá cả lô rồi báo đỏ dòng nào lệch quá 50%. Sai về bản
+   * chất: điện Việt Nam tính BẬC THANG, mà con số ở đây là giá BÌNH QUÂN
+   * (`tổng tiền ÷ tổng sản lượng`) — nên nó phụ thuộc vào chính lượng dùng. Nhà dùng
+   * 80 kWh chỉ chạm bậc 1–2, nhà dùng 600 kWh leo tới bậc 6; bình quân chênh nhau
+   * tới ~1,6 lần mà CẢ HAI ĐỀU ĐÚNG. Cách so đó báo động giả đúng vào những nhà dùng
+   * nhiều hoặc dùng rất ít — và cảnh báo sai vài lần là lần sau không ai đọc nữa.
+   *
+   * Nay hỏi một câu khác, không dính tới nhà khác: "con số này có thể là giá điện
+   * không?". Lỗi OCR thật sự gây ra đều lệch cả chục tới cả nghìn lần — đọc mã công tơ
+   * 18.006.996 thành kWh làm giá tụt còn vài đồng, đọc mã số thuế thành tiền làm giá
+   * vọt lên hàng chục nghìn. Khoảng hợp lệ để rộng rãi nên chênh lệch do bậc thang
+   * không bao giờ chạm tới.
+   *
+   * ⚠️ Đây là số VIẾT CỨNG theo giá điện/nước Việt Nam hiện hành. Nhà nước tăng giá
+   * nhiều đợt thì phải nới lại — nếu thấy cảnh báo này nổi lên hàng loạt trên hoá đơn
+   * thật thì kiểm chỗ này trước, đừng đi sửa số liệu.
    */
-  const medianPrice = (() => {
-    const xs = rows.map(rowUnitPrice).filter(p => p > 0).sort((a, b) => a - b);
-    if (xs.length < 3) return 0; // quá ít dòng thì không có "mặt bằng chung" để so
-    return xs[Math.floor(xs.length / 2)];
-  })();
-
-  /** Lệch quá nửa so với mặt bằng chung → gần như chắc chắn đọc nhầm một trong hai số. */
   const isOutlier = (r: Row): boolean => {
     const p = rowUnitPrice(r);
-    if (p <= 0 || medianPrice <= 0) return false;
-    return Math.abs(p - medianPrice) / medianPrice > 0.5;
+    if (p <= 0) return false;
+    return p < cfg.priceFloor || p > cfg.priceCeil;
   };
 
-  const readyCount = rows.filter(rowReady).length;
+  const readyCount = rows.filter(r => rowReady(r, cfg.unit)).length;
   const doneCount = rows.filter(r => r.state === 'done').length;
   const errCount = rows.filter(r => r.state === 'error').length;
 
@@ -377,7 +636,7 @@ export const UtilityBillZipImport = ({
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm" aria-hidden />
       <div className="relative flex min-h-full items-start justify-center p-4 sm:py-10">
-        <div className="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl">
+        <div className="relative w-full max-w-6xl rounded-2xl bg-white shadow-2xl">
           {/* Header */}
           <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-6 py-5">
             <div>
@@ -499,7 +758,7 @@ MTX#125/
                   Đang tải ảnh & đọc hoá đơn… {progress.done}/{progress.total}
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Chạy tuần tự từng nhà để dịch vụ đọc hoá đơn không bị quá tải.
+                  Đọc {READ_CONCURRENCY} nhà một lượt — nhanh hơn mà dịch vụ đọc hoá đơn không quá tải.
                 </p>
                 <div className="mx-auto mt-4 h-1.5 w-64 overflow-hidden rounded-full bg-slate-100">
                   <div className="h-full rounded-full bg-indigo-500 transition-all"
@@ -511,48 +770,151 @@ MTX#125/
             {/* ── Chặng 4: bảng duyệt ── */}
             {stage === 'review' && (
               <>
-                <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                  <p className="text-xs leading-relaxed text-amber-800">
-                    Số liệu do máy đọc từ ảnh nên <b>phải kiểm lại trước khi phát hành</b>. Sai tổng
-                    {cfg.unit} là sai đơn giá, mà quản lý dựng hoá đơn từng phòng trên chính đơn giá đó.
-                    Đối chiếu nhanh bằng cột <b>đơn giá</b> — lệch xa các nhà khác là dấu hiệu đọc nhầm.
-                  </p>
+                {/*
+                  THANH ĐIỀU KHIỂN CỦA CẢ LÔ — gộp kỳ chung + bộ lọc vào MỘT hàng.
+                  Bản trước xếp ba khối chồng lên nhau (cảnh báo dài + kỳ chung + bảng), ăn
+                  gần nửa màn hình trước khi thấy dòng đầu tiên. Với lô 50–100 nhà thì thứ
+                  admin cần là vào bảng càng nhanh càng tốt và nhảy thẳng tới dòng có vấn đề.
+                */}
+                <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      Kỳ cả lô
+                    </span>
+                    <input
+                      value={batchPeriod}
+                      onChange={e => changeBatchPeriod(e.target.value)}
+                      placeholder="01/09 – 30/09/2026"
+                      title={`Áp cho ${followingBatch} nhà không đọc được kỳ trên giấy.`
+                        + (onPaperCount > 0 ? ` ${onPaperCount} nhà có kỳ in trên giấy giữ nguyên, không bị đè.` : '')}
+                      className={`w-40 rounded-lg border bg-white px-2 py-1.5 text-xs font-bold tabular-nums outline-none transition focus:ring-2 ${
+                        batchIssue
+                          ? 'border-rose-300 text-rose-700 focus:border-rose-400 focus:ring-rose-100'
+                          : 'border-slate-300 text-slate-800 focus:border-indigo-400 focus:ring-indigo-100'}`}
+                    />
+                    <span className="text-xs text-slate-500">
+                      {batchIssue
+                        ? <b className="text-rose-600">⚠ {batchIssue}</b>
+                        : <>áp cho <b className="text-slate-700">{followingBatch}</b>/{rows.length} nhà</>}
+                    </span>
+                  </div>
+
+                  {/* Bộ lọc — với 100 dòng, cuộn tay tìm dòng đỏ là không khả thi. */}
+                  <div className="ml-auto flex items-center gap-1">
+                    {FILTERS.map(f => {
+                      const n = rows.filter(r => f.match(r, cfg.unit)).length;
+                      const on = filter === f.key;
+                      return (
+                        <button
+                          key={f.key}
+                          onClick={() => setFilter(f.key)}
+                          disabled={n === 0 && !on}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-30 ${
+                            on ? f.on : 'text-slate-500 hover:bg-white'}`}
+                        >
+                          {f.label} {n}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div className="overflow-x-auto rounded-xl border border-slate-200">
-                  <table className="w-full min-w-[1060px] text-sm">
-                    <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <p className="mb-2 text-xs leading-relaxed text-slate-400">
+                  Số liệu do máy đọc từ ảnh — <b className="text-slate-500">phải kiểm lại trước khi phát hành</b>.
+                  Sai tổng {cfg.unit} là sai đơn giá, mà quản lý dựng hoá đơn từng phòng trên chính đơn giá đó.
+                </p>
+
+                <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[900px] text-sm">
+                    {/* `sticky` là bắt buộc ở lô lớn: cuộn tới dòng thứ 60 mà mất tiêu đề thì
+                        không còn biết ô số đang nhìn là tổng tiền hay chỉ số. */}
+                    <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[11px] font-black uppercase tracking-wider text-slate-400 shadow-[0_1px_0_0_rgb(226_232_240)]">
                       <tr>
-                        <th className="px-3 py-2">Nhà</th>
-                        <th className="px-3 py-2">Kỳ hoá đơn</th>
-                        <th className="px-3 py-2 text-right">{cfg.qtyLabel}</th>
-                        <th className="px-3 py-2 text-right">Tổng tiền</th>
-                        <th className="px-3 py-2 text-right">Đơn giá</th>
-                        <th className="px-3 py-2">{cfg.readingLabel} (nguyên căn)</th>
-                        <th className="px-3 py-2">Trạng thái</th>
+                        {/*
+                          NĂM cột, không phải bảy. Bảy cột không vừa bề ngang nào cả — bản
+                          trước phải hạ chữ xuống 9–10px mà vẫn tràn, cột Trạng thái nằm hẳn
+                          ngoài màn hình. Hai cột bị gộp lại vì chúng không phải thông tin
+                          độc lập: KỲ gần như giống nhau ở mọi dòng (đã có thanh kỳ chung ở
+                          trên) nên xuống dòng phụ của cột Nhà, còn ĐƠN GIÁ là số dẫn xuất từ
+                          chính ô tổng tiền nên nằm ngay dưới nó.
+                        */}
+                        <th className="px-4 py-2.5">Nhà · kỳ hoá đơn</th>
+                        <th className="px-4 py-2.5 text-right">{cfg.qtyLabel}</th>
+                        <th className="px-4 py-2.5 text-right">Tổng tiền · đơn giá</th>
+                        <th className="px-4 py-2.5">
+                          {cfg.readingLabel}
+                          <span className="mt-0.5 block text-[10px] font-bold normal-case tracking-normal text-slate-400">
+                            đầu kỳ → cuối kỳ
+                          </span>
+                        </th>
+                        <th className="px-4 py-2.5">Trạng thái</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {rows.map((r, i) => {
+                      {/* Giữ chỉ số GỐC `i` qua bộ lọc — `patch(i, …)` sửa theo vị trí trong
+                          `rows`, lọc xong mà đánh số lại thì mỗi lần lọc sẽ sửa nhầm dòng. */}
+                      {rows.map((r, i) => ({ r, i }))
+                        .filter(({ r }) => FILTERS.find(f => f.key === filter)!.match(r, cfg.unit))
+                        .map(({ r, i }) => {
                         const whole = isWhole(r.property);
                         const price = rowUnitPrice(r);
                         const skip = r.already || r.state === 'done';
+                        const periodIssue = skip ? null : periodProblem(r.billingPeriod);
+                        const blocker = skip ? null : rowBlocker(r, cfg.unit);
                         return (
                           <tr key={r.property.id} className={
                             r.state === 'done' ? 'bg-emerald-50/50'
                             : r.state === 'error' ? 'bg-rose-50/50'
                             : r.already ? 'bg-slate-50' : undefined}>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-2">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2.5">
                                 {r.imageUrl && (
-                                  <a href={r.imageUrl} target="_blank" rel="noreferrer" className="shrink-0">
-                                    <img src={r.imageUrl} alt="" className="h-9 w-9 rounded border border-slate-200 object-cover" />
+                                  <a href={r.imageUrl} target="_blank" rel="noreferrer" className="shrink-0"
+                                    title="Mở ảnh hoá đơn gốc">
+                                    <img src={r.imageUrl} alt="" className="h-10 w-10 rounded border border-slate-200 object-cover" />
                                   </a>
                                 )}
                                 <div className="min-w-0">
-                                  <p className="truncate text-xs font-bold text-slate-800">{r.property.propertyName}</p>
-                                  <p className="truncate text-[11px] text-slate-400">
+                                  <p className="truncate text-sm font-bold text-slate-800">{r.property.propertyName}</p>
+                                  <div className="flex items-center gap-1.5">
+                                    {/*
+                                      Kỳ nằm ở dòng phụ của cột Nhà, không chiếm cột riêng: cả
+                                      lô gần như cùng một kỳ (thanh kỳ chung ở trên đã nói),
+                                      nên một cột rộng lặp lại đúng chuỗi đó ba chục lần là
+                                      lãng phí đúng thứ đang thiếu — bề ngang.
+
+                                      Dòng ăn theo kỳ chung để chữ xám không viền, nhìn là biết
+                                      "giống thanh trên kia". Chỉ dòng có kỳ RIÊNG mới được tô.
+
+                                      KHÔNG dán ✓ lên chuỗi admin vừa gõ: dấu tích đọc ra là
+                                      "đã kiểm, đúng rồi", trong khi cái duy nhất nó biết là ô
+                                      này có kỳ riêng — gõ thừa một số thành `30/09/20226` vẫn
+                                      được khen đúng. ✓ chỉ dành cho kỳ IN TRÊN GIẤY.
+                                    */}
+                                    <input
+                                      value={r.billingPeriod}
+                                      disabled={skip}
+                                      placeholder="Chưa có kỳ"
+                                      title={
+                                        periodIssue ? `Kỳ hoá đơn: ${periodIssue}`
+                                        : r.periodSource === 'ocr' ? 'Kỳ in trên tờ hoá đơn — không bị kỳ chung ghi đè'
+                                        : r.periodSource === 'manual' ? 'Bạn đã tự nhập kỳ cho nhà này — không bị kỳ chung ghi đè'
+                                        : 'Đang theo kỳ chung của cả lô. Gõ vào đây để đặt kỳ riêng cho nhà này.'
+                                      }
+                                      onChange={e => patch(i, { billingPeriod: e.target.value, periodSource: 'manual' })}
+                                      className={`w-36 rounded border px-1.5 py-0.5 text-xs font-semibold tabular-nums outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100 disabled:text-slate-300 ${
+                                        periodIssue ? 'border-rose-300 bg-rose-50 text-rose-700'
+                                        : r.periodSource === 'default'
+                                          ? 'border-transparent bg-transparent text-slate-400 hover:border-slate-200 hover:bg-white'
+                                          : 'border-emerald-200 bg-emerald-50/60 text-emerald-900'}`}
+                                    />
+                                    {periodIssue ? (
+                                      <span className="shrink-0 text-xs font-bold text-rose-600">⚠</span>
+                                    ) : r.periodSource === 'ocr' ? (
+                                      <span className="shrink-0 text-xs font-bold text-emerald-600" title="Kỳ in trên giấy">✓</span>
+                                    ) : null}
+                                  </div>
+                                  <p className="truncate text-xs text-slate-400">
                                     {whole ? 'Nguyên căn' : 'Chia phòng'}
                                     {/* Tên folder — đường lần ngược về đúng file trong zip khi
                                         thấy số liệu lạ, khỏi phải mở lại cả file đi dò. */}
@@ -562,67 +924,71 @@ MTX#125/
                                 </div>
                               </div>
                             </td>
-                            {/* Kỳ hoá đơn — khoá mà quản lý đối chiếu, và kỳ thật của EVN/nước
-                                là chu kỳ chốt số (07/08 – 06/09) chứ không trùng tháng dương
-                                lịch. Cho sửa được vì OCR đọc kỳ hay trượt nhất. */}
-                            <td className="px-3 py-2">
-                              <input
-                                value={r.billingPeriod}
-                                disabled={skip}
-                                placeholder="Chưa có kỳ"
-                                onChange={e => patch(i, { billingPeriod: e.target.value, periodFromOcr: true })}
-                                className="w-40 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
-                              />
-                              <span className={`mt-1 block text-[10px] font-bold ${
-                                r.periodFromOcr ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {r.periodFromOcr ? '✓ đọc từ ảnh' : '⚠ mặc định — không có trên giấy'}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              <NumCell value={r.totalQty} disabled={skip}
+                            <td className="px-4 py-2.5 text-right">
+                              <NumCell value={r.totalQty} disabled={skip} width="w-24"
+                                title={`Tổng ${cfg.unit} in trên giấy`}
                                 onChange={v => patch(i, { totalQty: v })} />
                             </td>
-                            <td className="px-3 py-2">
-                              <NumCell value={r.totalAmount} disabled={skip}
+                            <td className="px-4 py-2.5 text-right">
+                              <NumCell value={r.totalAmount} disabled={skip} width="w-32"
+                                title="Tổng tiền phải trả in trên giấy"
                                 onChange={v => patch(i, { totalAmount: v })} />
+                              {/* Đơn giá = tiền ÷ sản lượng, không phải số nhập — nên nằm ngay
+                                  dưới ô sinh ra nó chứ không đứng thành một cột riêng. */}
+                              <p
+                                className={`mt-1 cursor-help whitespace-nowrap text-xs font-bold tabular-nums underline decoration-dotted underline-offset-2 ${
+                                  isOutlier(r)
+                                    ? 'text-rose-600 decoration-rose-300'
+                                    : 'text-slate-400 decoration-slate-300'}`}
+                                title={isOutlier(r)
+                                  ? `Giá ${cfg.noun} thực tế nằm trong khoảng ${formatCurrency(cfg.priceFloor)} – ${formatCurrency(cfg.priceCeil)}/${cfg.unit}, con số này ra ngoài khoảng đó. Gần như chắc chắn là đọc nhầm tổng ${cfg.unit} hoặc tổng tiền.`
+                                  : `Đơn giá = tổng tiền ÷ tổng ${cfg.unit}. Quản lý dựng hoá đơn từng phòng trên chính con số này.`}
+                              >
+                                {price > 0 ? `${formatCurrency(price)}/${cfg.unit}` : '—'}
+                                {isOutlier(r) && ' ⚠'}
+                                <InfoDot />
+                              </p>
                             </td>
-                            <td className="px-3 py-2 text-right">
-                              <span className={`text-xs font-black tabular-nums ${
-                                isOutlier(r) ? 'text-rose-600' : 'text-indigo-700'}`}>
-                                {price > 0 ? formatCurrency(price) : '—'}
-                              </span>
-                              {isOutlier(r) && (
-                                <span className="mt-0.5 block text-[10px] font-bold text-rose-600">
-                                  lệch mặt bằng
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
+                            <td className="px-4 py-2.5">
                               {whole ? (
-                                <div className="flex items-center gap-1">
-                                  <NumCell value={r.prevReading} disabled={skip} width="w-20"
-                                    onChange={v => patch(i, { prevReading: v })} />
-                                  <span className="text-slate-300">→</span>
-                                  <NumCell value={r.newReading} disabled={skip} width="w-20"
-                                    onChange={v => patch(i, { newReading: v })} />
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    {/* Chỉ số cũ KHOÁ khi lấy được từ sổ hệ thống — xem `prevLocked`. */}
+                                    <NumCell value={r.prevReading} disabled={skip || !!r.prevLocked} width="w-24"
+                                      title={r.prevLocked
+                                        ? `Chỉ số ĐẦU KỲ (${cfg.unit}) — lấy đúng số chốt cuối kỳ trước hệ thống đã lưu, không sửa được.`
+                                        : `Chỉ số ĐẦU KỲ (${cfg.unit}) — số ghi trên mặt công tơ lúc bắt đầu kỳ này.`}
+                                      onChange={v => patch(i, { prevReading: v })} />
+                                    <span className="text-slate-300">→</span>
+                                    {/* Chỉ số mới là số DẪN XUẤT (cũ + sản lượng), không cho gõ —
+                                        xem `withAutoNewReading`. Gõ số khác máy chủ cũng từ chối. */}
+                                    <NumCell value={r.newReading} disabled width="w-24"
+                                      title={`Chỉ số CUỐI KỲ (${cfg.unit}) — tự tính = đầu kỳ + tổng ${cfg.unit}. Sửa ô tổng bên trái thì số này đổi theo.`}
+                                      onChange={() => { /* dẫn xuất */ }} />
+                                  </div>
+                                  {!skip && (
+                                    <ReadingContext row={r} unit={cfg.unit}
+                                      onPaperPrev={v => patch(i, { paperPrev: v })} />
+                                  )}
                                 </div>
                               ) : (
-                                <span className="text-[11px] text-slate-300">quản lý ghi từng phòng</span>
+                                <span className="text-xs text-slate-300">quản lý ghi từng phòng</span>
                               )}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-4 py-2.5">
                               {r.already ? (
-                                <span className="whitespace-nowrap text-[11px] font-bold text-slate-500">Kỳ này đã có</span>
+                                <span className="whitespace-nowrap text-xs font-bold text-slate-500">Kỳ này đã có</span>
                               ) : r.state === 'done' ? (
-                                <span className="whitespace-nowrap text-[11px] font-bold text-emerald-600">✓ Đã phát hành</span>
+                                <span className="whitespace-nowrap text-xs font-bold text-emerald-600">✓ Đã phát hành</span>
                               ) : r.state === 'publishing' ? (
                                 <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
                               ) : r.state === 'error' ? (
-                                <span className="text-[11px] font-semibold text-rose-600">{r.error}</span>
-                              ) : rowReady(r) ? (
-                                <span className="whitespace-nowrap text-[11px] font-bold text-slate-500">Sẵn sàng</span>
+                                <span className="text-xs font-semibold text-rose-600">{r.error}</span>
+                              ) : blocker ? (
+                                // Nói ĐÚNG ô cần sửa, không phải "Thiếu dữ liệu" chung chung.
+                                <span className="text-xs font-bold text-amber-600">{blocker}</span>
                               ) : (
-                                <span className="whitespace-nowrap text-[11px] font-bold text-amber-600">Thiếu dữ liệu</span>
+                                <span className="whitespace-nowrap text-xs font-bold text-emerald-600">Sẵn sàng</span>
                               )}
                             </td>
                           </tr>
@@ -659,14 +1025,14 @@ MTX#125/
           {confirmOpen && (
             <ConfirmPublish
               noun={cfg.noun}
-              rows={rows.filter(rowReady).map(r => ({
+              rows={rows.filter(r => rowReady(r, cfg.unit)).map(r => ({
                 name: r.property.propertyName,
                 period: r.billingPeriod,
                 whole: isWhole(r.property),
                 outlier: isOutlier(r),
-                defaultPeriod: !r.periodFromOcr,
+                defaultPeriod: r.periodSource === 'default',
               }))}
-              skipped={rows.filter(r => !rowReady(r) && !r.already && r.state !== 'done').length}
+              skipped={rows.filter(r => !rowReady(r, cfg.unit) && !r.already && r.state !== 'done').length}
               onCancel={() => setConfirmOpen(false)}
               onConfirm={publishAll}
             />
@@ -682,7 +1048,7 @@ MTX#125/
  *
  * Chỉ nhắc lại đúng những thứ SAI THÌ KHÓ GỠ, không kể lể lại cả bảng: nhà nào sẽ được
  * phát hành, kỳ nào, và hai loại rủi ro mà bảng trên dễ lướt qua — kỳ do hệ thống đoán,
- * và đơn giá lệch mặt bằng.
+ * và đơn giá không thể là giá điện/nước thật.
  */
 const ConfirmPublish = ({ noun, rows, skipped, onCancel, onConfirm }: {
   noun: string;
@@ -696,6 +1062,21 @@ const ConfirmPublish = ({ noun, rows, skipped, onCancel, onConfirm }: {
   const outliers = rows.filter(r => r.outlier);
   const guessed = rows.filter(r => r.defaultPeriod);
 
+  /**
+   * Kỳ chiếm đa số — in MỘT lần ở tiêu đề, rồi từng dòng chỉ hiện kỳ khi nó khác.
+   *
+   * Cả lô gần như luôn cùng một kỳ, nên in kỳ ở đủ ba chục dòng là ba chục lần cùng một
+   * chuỗi số: mắt lướt qua hết, và đúng một hai dòng có kỳ LỆCH — thứ duy nhất cần soi
+   * trước khi phát hành — thì chìm lẫn vào giữa. Bỏ phần lặp đi thì dòng lệch tự nổi lên.
+   */
+  const mainPeriod = (() => {
+    const tally = new Map<string, number>();
+    rows.forEach(r => tally.set(r.period, (tally.get(r.period) ?? 0) + 1));
+    let best = '', top = 0;
+    tally.forEach((count, period) => { if (count > top) { top = count; best = period; } });
+    return top > 1 ? best : '';
+  })();
+
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-slate-950/40 p-4"
       onClick={onCancel}>
@@ -704,6 +1085,11 @@ const ConfirmPublish = ({ noun, rows, skipped, onCancel, onConfirm }: {
           <h3 className="text-base font-black text-slate-950">
             Phát hành hoá đơn {noun} cho {rows.length} nhà?
           </h3>
+          {mainPeriod && (
+            <p className="mt-0.5 text-xs font-semibold tabular-nums text-slate-500">
+              Kỳ {mainPeriod}
+            </p>
+          )}
         </div>
 
         <div className="max-h-[46vh] space-y-3 overflow-y-auto px-5 py-4">
@@ -711,22 +1097,28 @@ const ConfirmPublish = ({ noun, rows, skipped, onCancel, onConfirm }: {
             {rows.map(r => (
               <div key={r.name} className="flex items-center gap-2 px-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">{r.name}</span>
-                <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{r.period}</span>
+                {r.period !== mainPeriod && (
+                  <span className="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-amber-700">
+                    {r.period || 'chưa có kỳ'}
+                  </span>
+                )}
               </div>
             ))}
           </div>
 
           {outliers.length > 0 && (
             <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-800">
-              <b>{outliers.length} nhà có đơn giá lệch mặt bằng</b> ({outliers.map(r => r.name.split(/\s+/)[0]).join(', ')}).
-              Thường là do đọc nhầm một trong hai số — nên xem lại trước khi gửi.
+              <b>{outliers.length} nhà có đơn giá bất thường</b> ({outliers.map(r => r.name.split(/\s+/)[0]).join(', ')}) —
+              ra ngoài khoảng giá {noun} thực tế. Gần như chắc chắn là đọc nhầm tổng sản lượng hoặc
+              tổng tiền, nên xem lại trước khi gửi.
             </p>
           )}
 
           {guessed.length > 0 && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-              <b>{guessed.length} nhà dùng kỳ mặc định</b> — không đọc được kỳ trên giấy. Kỳ là khoá
-              quản lý đối chiếu, sai thì phải thu hồi hoá đơn.
+              <b>{guessed.length} nhà đang theo kỳ chung</b> — không đọc được kỳ in trên giấy nên
+              lấy theo tháng đang chọn. Kỳ là khoá quản lý đối chiếu, sai thì phải thu hồi hoá đơn:
+              nếu kỳ thật của nhà cung cấp không trùng tháng dương lịch, sửa ô kỳ chung rồi hãy gửi.
             </p>
           )}
 
@@ -787,15 +1179,126 @@ const ListBlock = ({ title, tone, children }: {
 );
 
 /** Ô nhập số có phân cách nghìn — cùng cách gõ với màn phát hành lẻ. */
-const NumCell = ({ value, onChange, disabled, width = 'w-28' }: {
-  value: string; onChange: (v: string) => void; disabled?: boolean; width?: string;
+/**
+ * Dòng phụ dưới cặp chỉ số — nói cho admin biết cặp số đó ĐANG DỰA VÀO ĐÂU.
+ *
+ * Hai kỳ cần hai thứ khác hẳn nhau, nên đây là hai giao diện chứ không phải một:
+ *
+ *  • KỲ ĐẦU — chưa có gì để nối, cặp số đi thẳng theo giấy. Thứ admin cần thấy là mốc
+ *    ĐỒNG HỒ LÚC ĐÓN KHÁCH, vì giấy tính trọn tháng còn khách có thể dọn vào ngày 15:
+ *    quãng từ đầu kỳ tới lúc đón là của công ty, không phải của khách. Không bày ra thì
+ *    khách nhận hoá đơn gồm cả phần chưa ở, mà không ai trong quy trình biết.
+ *
+ *  • KỲ THỨ 2 TRỞ ĐI — chỉ số cũ đã khoá theo sổ, nên việc duy nhất còn lại là ĐỐI CHIẾU
+ *    với con số in trên giấy. Khớp thì một dòng xanh gọn; lệch thì hiện đủ hai số và
+ *    chặn phát hành ở cột trạng thái.
+ *
+ * Kỳ đầu thì KHÔNG hiện ô đối chiếu, đúng như quy trình: chưa có kỳ trước để mà nối.
+ */
+/**
+ * Dấu hiệu "rê chuột vào còn nội dung".
+ *
+ * Bảng này đẩy phần lớn lời giải thích vào `title` để 100 dòng không thành bức tường chữ.
+ * Nhưng `title` mà không có gì trên mặt chữ báo là nó tồn tại thì coi như KHÔNG tồn tại —
+ * không ai đi rê chuột lên một dòng trông y hệt chữ thường. Nên chỗ nào giấu chữ, chỗ đó
+ * phải đeo dấu: gạch chân chấm + con trỏ `?` (quy ước sẵn của web) và thêm ⓘ cho rõ.
+ */
+const InfoDot = () => (
+  <span className="ml-0.5 shrink-0 select-none text-[11px] font-black text-slate-300" aria-hidden>ⓘ</span>
+);
+
+const ReadingContext = ({ row, unit, onPaperPrev }: {
+  row: Row; unit: string; onPaperPrev: (v: string) => void;
+}) => {
+  const cycle = row.cycle;
+  if (!cycle || cycle.unknown) return null;
+  const n = (v: number) => groupThousands(String(v));
+
+  // ── KỲ ĐẦU: một dòng, không có ô nhập (chưa có kỳ trước để đối chiếu) ──
+  if (!cycle.prevClose) {
+    const paperPrev = row.prevReading === '' ? null : Number(onlyDigits(row.prevReading));
+    const note = firstPeriodNote(cycle, paperPrev, Number(onlyDigits(row.totalQty)));
+    const handoverAt = cycle.handover?.at
+      ? ` ngày ${cycle.handover.at.slice(0, 10).split('-').reverse().join('/')}`
+      : '';
+    return (
+      <p
+        className="cursor-help truncate text-xs underline decoration-slate-300 decoration-dotted underline-offset-2"
+        title={cycle.handover
+          ? `Kỳ đầu tiên của khách này. Đồng hồ lúc đón khách${handoverAt}: ${n(cycle.handover.reading)} ${unit}.`
+            + (note?.kind === 'pre-move-in'
+              ? ` Giấy tính trọn tháng nên ${n(note.amount)} ${unit} trước ngày khách dọn tới là chi phí công ty — máy chủ tự cắt khi lập hoá đơn cho khách.`
+              : note?.kind === 'bad-prev'
+              ? ` Chỉ số đầu kỳ đang nhỏ hơn mốc đón khách tới ${n(note.handover - (paperPrev ?? 0))} ${unit}, nhiều hơn cả lượng tiêu thụ của kỳ — gần như chắc chắn đọc sai, mở ảnh soi lại ô đầu kỳ.`
+              : '')
+          : 'Kỳ đầu tiên của khách này. Hợp đồng không ghi chỉ số đồng hồ lúc đón khách.'}
+      >
+        {/* ⓘ đứng NGAY SAU nhãn chứ không ở cuối dòng: cuối dòng thì `truncate` cắt mất
+            đúng cái dấu hiệu, và cắt đúng lúc dòng dài — tức lúc cần nó nhất. */}
+        <span className="font-black uppercase text-indigo-500">Kỳ đầu</span>
+        <InfoDot />
+        {cycle.handover ? (
+          <>
+            <span className="text-slate-400"> · đón khách </span>
+            <b className="tabular-nums text-slate-600">{n(cycle.handover.reading)}</b>
+            {note?.kind === 'pre-move-in' && (
+              <span className="font-bold text-amber-600"> · dư {n(note.amount)}</span>
+            )}
+            {note?.kind === 'bad-prev' && (
+              <span className="font-bold text-rose-600"> · đầu kỳ đọc sai?</span>
+            )}
+          </>
+        ) : (
+          <span className="text-slate-400"> · HĐ không ghi mốc đón khách</span>
+        )}
+      </p>
+    );
+  }
+
+  // ── KỲ 2 TRỞ ĐI: ô đối chiếu + đúng một ký hiệu ──
+  const gap = continuityGap(cycle, row.paperPrev === '' ? null : Number(onlyDigits(row.paperPrev)));
+  return (
+    <div
+      className="flex cursor-help items-center gap-1.5 text-xs"
+      title={gap
+        ? `Kỳ trước chốt ${n(gap.expected)} nhưng giấy kỳ này bắt đầu từ ${n(gap.found)}. Phần ${n(Math.abs(gap.diff))} ${unit} ở giữa sẽ không nằm trên hoá đơn nào — chưa phát hành được.`
+        : `Chỉ số đầu kỳ IN TRÊN GIẤY. Phải bằng đúng số chốt kỳ trước (${n(cycle.prevClose.reading)}) thì hai kỳ mới nối liền nhau.`}
+    >
+      <span className="shrink-0 text-slate-400 underline decoration-slate-300 decoration-dotted underline-offset-2">
+        giấy:
+      </span>
+      <InfoDot />
+      <input
+        inputMode="numeric"
+        value={row.paperPrev ? groupThousands(row.paperPrev) : ''}
+        placeholder="—"
+        onChange={e => onPaperPrev(onlyDigits(e.target.value))}
+        className={`w-20 shrink-0 rounded border px-1.5 py-1 text-right text-xs font-bold tabular-nums outline-none transition focus:ring-1 ${
+          gap ? 'border-rose-300 bg-rose-50 text-rose-700 focus:ring-rose-200'
+            : row.paperPrev ? 'border-emerald-200 bg-emerald-50 text-emerald-800 focus:ring-emerald-200'
+            : 'border-amber-300 bg-amber-50 focus:ring-amber-200'}`}
+      />
+      {/* Chữ giải thích nằm trong `title` và ở cột Trạng thái. Ở đây chỉ cần một ký hiệu:
+          100 dòng × một câu = một bức tường chữ, và bức tường thì không ai đọc. */}
+      {gap ? (
+        <span className="font-bold text-rose-600">lệch {n(Math.abs(gap.diff))}</span>
+      ) : row.paperPrev ? (
+        <span className="font-bold text-emerald-600">✓</span>
+      ) : null}
+    </div>
+  );
+};
+
+const NumCell = ({ value, onChange, disabled, width = 'w-28', title }: {
+  value: string; onChange: (v: string) => void; disabled?: boolean; width?: string; title?: string;
 }) => (
   <input
+    title={title}
     inputMode="numeric"
     value={value ? groupThousands(value) : ''}
     disabled={disabled}
     placeholder="—"
     onChange={e => onChange(onlyDigits(e.target.value))}
-    className={`${width} rounded-lg border border-slate-200 px-2 py-1.5 text-right text-xs font-bold tabular-nums outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400`}
+    className={`${width} rounded-lg border border-slate-200 px-2.5 py-2 text-right text-sm font-bold tabular-nums outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400`}
   />
 );

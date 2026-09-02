@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, currentPeriodIso, toPeriodKey } from '@/constants';
 import { serverNow } from '@/utils/serverTime';
 import {
   meterReadingService,
@@ -25,11 +25,13 @@ import {
  * Bấm một dòng → sang màn Ghi điện nước của đúng nhà đó để chụp và ghi chỉ số.
  */
 
-/** `yyyy-MM` của tháng hiện tại — khớp mặc định phía BE (Asia/Ho_Chi_Minh). */
-const currentPeriod = (): string => {
-  const d = serverNow();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
+/*
+ * Kỳ mặc định lấy từ `constants/utilityCycle`, KHÔNG tự tính tại chỗ nữa.
+ *
+ * Bản trước tự dựng `yyyy-MM` của tháng dương lịch hiện tại. Điện/nước trả sau nên kỳ
+ * đang làm là THÁNG TRƯỚC — màn này đi hỏi tháng 9 trong khi admin vừa phát hành kỳ
+ * tháng 8, ra danh sách rỗng kèm câu "Đã chụp đủ" dù quản lý chưa chụp gì.
+ */
 
 const utilityLabel = (t: string): string =>
   t === 'WATER' ? 'Nước' : t === 'ELECTRICITY' ? 'Điện' : t;
@@ -94,8 +96,16 @@ const groupByRoom = (items: PendingMeterReadingItem[]): Group[] => {
 export const MeterReadingPendingScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  // Deep-link từ thông báo có thể kèm `period`; không có thì lấy tháng hiện tại.
-  const [period] = useState<string>(route.params?.period || currentPeriod());
+  /*
+    HAI dạng kỳ, đừng lẫn:
+      • `periodKey`   — `yyyy-MM`, thứ DUY NHẤT gửi lên máy chủ.
+      • `periodLabel` — chuỗi cho người đọc, giữ nguyên chữ BE gắn vào thông báo.
+
+    Deep-link mang chuỗi hiển thị ("01/08 – 31/08/2026") chứ không phải `yyyy-MM` — gửi
+    thẳng lên thì máy chủ không đọc được và âm thầm rơi về tháng hiện tại. Xem `toPeriodKey`.
+  */
+  const [periodLabel] = useState<string>(route.params?.period || currentPeriodIso());
+  const periodKey = useMemo(() => toPeriodKey(periodLabel), [periodLabel]);
 
   const [items, setItems] = useState<PendingMeterReadingItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,7 +114,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      setItems(await meterReadingService.listPending(period));
+      setItems(await meterReadingService.listPending(periodKey));
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -112,7 +122,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [period]);
+  }, [periodKey]);
 
   // Nạp lại mỗi lần quay về màn: manager vừa đi chụp xong ở màn Ghi điện nước thì dòng đó
   // phải biến mất, không bắt họ tự kéo refresh để biết mình đã làm gì.
@@ -134,7 +144,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
     navigation.navigate('UtilityBilling', {
       propertyId: g.propertyId,
       roomId: g.roomId ?? undefined,
-      period,
+      period: periodKey,
     });
 
   return (
@@ -150,7 +160,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
       </View>
 
       <View style={s.periodBar}>
-        <Text style={s.periodText}>Kỳ {period.replace('-', '/')}</Text>
+        <Text style={s.periodText}>Kỳ {periodLabel.replace('-', '/')}</Text>
         <Text style={s.periodHint}>
           Chưa có ảnh thì không phát hành được hoá đơn điện/nước.
         </Text>
@@ -184,7 +194,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
               <Text style={s.emptyIcon}>✅</Text>
               <Text style={s.emptyTitle}>Đã chụp đủ</Text>
               <Text style={s.emptyText}>
-                Không còn công tơ nào thiếu ảnh trong kỳ {period.replace('-', '/')}.
+                Không còn công tơ nào thiếu ảnh trong kỳ {periodLabel.replace('-', '/')}.
               </Text>
             </View>
           ) : (

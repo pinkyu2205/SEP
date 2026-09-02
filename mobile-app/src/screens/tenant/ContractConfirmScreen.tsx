@@ -88,8 +88,16 @@ export const ContractConfirmScreen: React.FC = () => {
     return () => { active = false; };
   }, [contractId]);
 
-  // Ảnh hiện trạng/đồng hồ lúc bàn giao. BE chỉ trả cho HĐ đã ACTIVE nên ở màn này
-  // (HĐ còn PENDING) gần như luôn hỏng — nuốt lỗi, ẩn mục, KHÔNG chặn việc xác nhận.
+  /**
+   * Chỉ số điện/nước + ảnh hiện trạng lúc bàn giao.
+   *
+   * BE mở cho HĐ `PENDING` đọc được từ 01/09/2026 (`TenantHandoverServiceImpl.READABLE`
+   * = ACTIVE + PENDING) — trước đó nó chỉ trả cho HĐ ACTIVE nên ở màn này luôn hỏng và
+   * cả mục bị ẩn. Đây chính là thứ khách cần soi TRƯỚC khi tick, vì chỉ số ghi ở đây là
+   * mốc tính tiền điện nước cho tới lúc trả phòng.
+   *
+   * Vẫn nuốt lỗi và ẩn mục nếu hỏng: KHÔNG chặn việc xác nhận hợp đồng vì một mục phụ.
+   */
   useEffect(() => {
     if (!contractId) return;
     let active = true;
@@ -190,7 +198,23 @@ export const ContractConfirmScreen: React.FC = () => {
       const s = await contractConfirmService.confirmAsTenant(contractId, otp.trim());
       setState(s);
       setOtp('');
-      if (!s.activated) {
+
+      /**
+       * Ghi luôn BIÊN BẢN BÀN GIAO — ô tick ở trên đã bao gồm "đã nhận phòng đúng hiện
+       * trạng ghi trên", nên đây là hệ quả trực tiếp của việc khách vừa xác nhận.
+       *
+       * Chỉ gọi khi HĐ đã `activated`: BE cố ý giữ `POST /handover/acknowledge` chỉ nhận
+       * HĐ ACTIVE (xem doc BE-NEED-cho-xem-bien-ban-ban-giao-khi-HD-con-PENDING). Gọi sớm
+       * là ghi biên bản "đã nhận phòng" cho một hợp đồng có thể không bao giờ có hiệu lực
+       * — quản lý chưa nhập mã của họ, hoặc bỏ ngang.
+       *
+       * Nuốt lỗi: hợp đồng ĐÃ có hiệu lực rồi, đó mới là việc chính. Hỏng bước này thì
+       * khách vẫn xác nhận lại được ở màn chi tiết hợp đồng, không đáng để hiện một hộp
+       * lỗi đỏ ngay sau tin vui.
+       */
+      if (s.activated) {
+        realTenantSelfService.acknowledgeHandover(contractId).catch(() => { /* xem chú thích */ });
+      } else {
         showAlert(
           'Đã ghi nhận xác nhận của bạn',
           'Còn chờ quản lý nhập mã của họ là hợp đồng có hiệu lực.',
@@ -329,8 +353,16 @@ export const ContractConfirmScreen: React.FC = () => {
                 <View style={[styles.checkbox, agreed && styles.checkboxOn]}>
                   {agreed && <Text style={styles.checkboxTick}>✓</Text>}
                 </View>
+                {/*
+                  Câu tick bao GỘP CẢ HAI việc (01/09/2026): đồng ý hợp đồng, và xác nhận
+                  hiện trạng lúc nhận phòng. Trước đây hiện trạng phải xác nhận riêng ở màn
+                  "Biên bản bàn giao" — sau khi khách đã dọn vào ở rồi mới được hỏi "phòng
+                  lúc nhận có đúng không", nên lần ký thứ hai đó thành thủ tục cho có.
+                  Ngoài đời chỉ có một thời điểm: quản lý bàn giao, khách kiểm tra rồi ký.
+                */}
                 <Text style={styles.agreeText}>
-                  Tôi đã đọc và đồng ý với toàn bộ nội dung hợp đồng ở trên.
+                  Tôi đã đọc và đồng ý với toàn bộ nội dung hợp đồng ở trên, và xác nhận
+                  đã nhận phòng đúng hiện trạng và chỉ số điện nước ghi trên.
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity

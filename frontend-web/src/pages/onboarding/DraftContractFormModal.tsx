@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { X, ShieldAlert, UploadCloud, Loader2, FileText, Keyboard, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
+import { X, ShieldAlert, Loader2, FileText, CheckCircle2, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type {
   PropertyResponse,
@@ -13,7 +13,6 @@ import type {
 import { propertyService } from '../../services/property.service';
 import { tenantService, isTenantEligibleRole } from '../../services/tenant.service';
 import { uploadToCloudinary } from '../../services/upload.service';
-import { extractTenantContractData } from '../../utils/pdfExtract';
 import { draftBlobToFile, openContractBlob } from '../../utils/contractFile';
 import { todayIso } from '@/utils/serverTime';
 import { buildOccupancyMap, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
@@ -70,93 +69,26 @@ const DOB_MIN = '1930-01-01';
 const DOB_MAX = addYearsIso(todayIso(), -18);
 
 /**
- * Modal tạo HỢP ĐỒNG NHÁP (DRAFT) cho luồng đón khách v2.
- * - Tab "Upload file": chọn file HĐ đã điền (DOCX/PDF) → tự bóc tách + upload lưu link → admin review/chỉnh.
- * - Tab "Nhập tay": admin nhập trực tiếp → sau khi lưu, BE fill dữ liệu vào template và
- *   render PDF (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload
- *   Cloudinary → lưu draftContractFileUrl.
+ * Modal tạo HỢP ĐỒNG NHÁP (DRAFT) cho luồng đón khách v2 — NHẬP TAY.
+ *
+ * Admin nhập trực tiếp; sau khi lưu, BE fill dữ liệu vào template và render PDF
+ * (POST .../draft-document, xem FE-draft-contract-pdf.md) → FE upload Cloudinary →
+ * lưu `draftContractFileUrl`.
+ *
+ * ─── Đã BỎ tab "Upload file (auto-điền)" 01/09/2026 ──────────────────────────
+ * Nhánh đó cho admin tải file HĐ đã điền (DOCX/PDF) rồi OCR bóc tên/CCCD/SĐT/giá/cọc
+ * và đoán nhà theo địa chỉ trong file. Bỏ theo yêu cầu chủ sản phẩm.
+ *
+ * Kéo theo xoá luôn bộ so khớp địa chỉ mờ (`suggestPropertyByAddress`, `tokenize`,
+ * `editDistanceAtMost`) — chúng chỉ tồn tại để đoán nhà từ text bóc trong file, nay
+ * admin chọn nhà bằng `PropertyPicker` nên không còn ai gọi. Cần nhập nhiều hồ sơ một
+ * lúc thì dùng "Import từ Excel", đường đó vẫn còn.
+ *
  * Quản lý phụ trách LUÔN LÀ operationManagerId có sẵn của nhà (BE tự set) — không cho
  * chọn tay ở đây nữa. Nhà chưa có quản lý phụ trách thì KHÔNG cho tạo hợp đồng (phải
  * gán quản lý cho nhà trước, ở trang Zone/Quản lý).
  */
-// Bỏ dấu tiếng Việt + hạ chữ thường + gom khoảng trắng, phục vụ so khớp địa chỉ.
-const normalizeText = (s: string): string =>
-  s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 
-// Giữ token số dù chỉ 1 ký tự — "Quận 1" và "Quận 3" phải phân biệt được, không thì
-// mọi quận trong cùng thành phố sẽ trùng điểm nhau. Chỉ bỏ token CHỮ 1 ký tự (rác).
-const tokenize = (s: string): string[] =>
-  normalizeText(s)
-    .split(' ')
-    .filter((t) => t.length > 1 || /^[0-9]$/.test(t));
-
-// Khoảng cách sửa đổi (Levenshtein) có trần cắt sớm — chỉ cần biết "≤ max hay không".
-const editDistanceAtMost = (a: string, b: string, max: number): boolean => {
-  if (Math.abs(a.length - b.length) > max) return false;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    let rowMin = i;
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-      rowMin = Math.min(rowMin, cur[j]);
-    }
-    if (rowMin > max) return false;
-    prev = cur;
-  }
-  return prev[b.length] <= max;
-};
-
-/**
- * "Kiểm tra chính tả" cho tên nhà/địa chỉ bóc từ file: token khớp khi trùng tuyệt đối,
- * HOẶC lệch tối đa 1 ký tự với token đủ dài (≥4) — chống gõ sai/OCR sai kiểu
- * "Le Lloi" ~ "Le Loi". Token ngắn và token số phải khớp tuyệt đối ("Quận 1" ≠ "Quận 3").
- */
-const tokenMatches = (t: string, candidates: Set<string>): boolean => {
-  if (candidates.has(t)) return true;
-  if (t.length < 4 || /\d/.test(t)) return false;
-  for (const c of candidates) {
-    if (c.length >= 4 && !/\d/.test(c) && editDistanceAtMost(t, c, 1)) return true;
-  }
-  return false;
-};
-
-/**
- * Gợi ý property khớp với địa chỉ bóc từ file HĐ (đoạn text tự do, không chuẩn hoá).
- * So khớp kiểu token-overlap trên propertyName + 2 field địa chỉ — đủ dùng cho danh
- * sách BĐS đã đăng ký sẵn trong hệ thống (không phải geocoding địa chỉ tự do ngoài đời).
- * Nếu địa chỉ quá chung chung (chỉ quận/thành phố — nhiều nhà cùng khớp điểm cao ngang
- * nhau) thì CHỦ ĐỘNG TỪ CHỐI gợi ý thay vì đoán liều 1 nhà — admin tự chọn tay an toàn hơn.
- */
-const suggestPropertyByAddress = (
-  address: string,
-  list: PropertyResponse[],
-): { property: PropertyResponse; score: number } | null => {
-  const targetTokens = new Set(tokenize(address));
-  if (targetTokens.size === 0) return null;
-
-  const scored = list
-    .map((p) => {
-      const candidateTokens = new Set(tokenize(`${p.propertyName} ${p.fullAddress} ${p.shortAddress}`));
-      let overlap = 0;
-      targetTokens.forEach((t) => { if (tokenMatches(t, candidateTokens)) overlap += 1; });
-      return { property: p, score: overlap / targetTokens.size };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  const best = scored[0];
-  const runnerUp = scored[1];
-  const tooClose = runnerUp && best.score - runnerUp.score < 0.15;
-  if (!best || best.score < 0.4 || tooClose) return null;
-  return best;
-};
 
 const ROOM_STATUS_LABEL: Record<string, string> = {
   RENTED: 'đang có khách',
@@ -175,20 +107,6 @@ const EQUIPMENT_CONDITION_LABEL: Record<string, string> = {
   BROKEN: 'Hỏng',
 };
 
-const PROPERTY_STATUS_LABEL: Record<string, string> = {
-  RENTED: 'đã cho thuê nguyên căn',
-  MAINTENANCE: 'đang bảo trì',
-  DISABLED: 'ngưng khai thác',
-  UNDER_RENOVATION: 'đang cải tạo',
-  DRAFT: 'chưa hoàn thiện onboarding',
-  PENDING: 'chưa hoàn thiện onboarding',
-  PENDING_EQUIPMENT_INSTALLATION: 'chưa hoàn thiện onboarding',
-  RENOVATION_COMPLETED: 'chưa hoàn thiện onboarding',
-  PENDING_HOST_REVIEW: 'chưa hoàn thiện onboarding',
-  PENDING_OPERATION_MANAGER: 'chưa hoàn thiện onboarding',
-  INACTIVE: 'ngưng hoạt động',
-};
-
 export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Props) => {
   const isEditMode = !!editContract;
 
@@ -199,12 +117,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
   const [allRoomsInProperty, setAllRoomsInProperty] = useState<RoomResponse[]>([]);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(false);
-  const [addressSuggestion, setAddressSuggestion] = useState('');
-
-  const [mode, setMode] = useState<'upload' | 'manual'>('upload');
-  const [extracting, setExtracting] = useState(false);
-  const [fileName, setFileName] = useState('');
-  const [draftFileUrl, setDraftFileUrl] = useState('');
 
   // Thành viên ở cùng (householdMembers) — trước đây chỉ mobile walk-in thu được,
   // nhánh admin-tạo-draft mất hẳn dữ liệu này (ResumeContract cũng không thu).
@@ -621,89 +533,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    setExtracting(true);
-    const isOldDoc = file.name.toLowerCase().endsWith('.doc') && !file.name.toLowerCase().endsWith('.docx');
-    try {
-      if (isOldDoc) {
-        const url = await uploadToCloudinary(file, 'raw');
-        setDraftFileUrl(url);
-        toast('File .doc cũ chỉ lưu được, không tự bóc tách. Vui lòng nhập tay.', { icon: 'ℹ️' });
-      } else {
-        const [extracted, url] = await Promise.all([
-          extractTenantContractData(file),
-          uploadToCloudinary(file, 'raw'),
-        ]);
-        setDraftFileUrl(url);
-        setForm((prev) => ({
-          ...prev,
-          fullName: extracted.tenantName || prev.fullName,
-          cccd: extracted.tenantCccd || prev.cccd,
-          phoneNumber: extracted.tenantPhone || prev.phoneNumber,
-          rentAmount: extracted.rentAmount > 0 ? String(extracted.rentAmount) : prev.rentAmount,
-          deposit: extracted.deposit > 0 ? String(extracted.deposit) : prev.deposit,
-          /*
-            `extracted.startDate` bóc từ file là NGÀY BẮT ĐẦU HỢP ĐỒNG in trên giấy —
-            nên đổ vào `moveInDate` trước hết. Vẫn điền luôn ô "dự kiến đón khách" vì
-            đa số hợp đồng hai ngày trùng nhau, và admin sửa lại được nếu lịch hẹn khác.
-          */
-          expectedReceptionDate: extracted.startDate || prev.expectedReceptionDate,
-          moveInDate: extracted.startDate || prev.moveInDate,
-          endDate: extracted.endDate || prev.endDate,
-        }));
-
-        // Gợi ý nhà theo TÊN NHÀ + địa chỉ bóc từ file (so khớp mờ, chịu được sai
-        // chính tả 1 ký tự) — chỉ tự chọn nếu admin CHƯA chọn tay, và chỉ khớp trong
-        // danh sách nhà đang ACTIVE (sẵn sàng cho thuê).
-        const propertyHint = `${extracted.propertyName} ${extracted.address}`.trim();
-        if (propertyHint) {
-          const match = suggestPropertyByAddress(propertyHint, properties);
-          if (match) {
-            setForm((prev) => ({ ...prev, propertyId: prev.propertyId || String(match.property.id) }));
-            const exact =
-              extracted.propertyName &&
-              normalizeText(extracted.propertyName) === normalizeText(match.property.propertyName);
-            setAddressSuggestion(
-              exact
-                ? `Đã chọn nhà "${match.property.propertyName}" đúng theo tên ghi trong file.`
-                : `Đã gợi ý nhà "${match.property.propertyName}" theo tên/địa chỉ trong file (khớp gần đúng — có thể file ghi sai chính tả). Vui lòng kiểm tra lại.`,
-            );
-          } else {
-            // Không khớp nhà nào đang sẵn sàng — thử tìm trong TOÀN BỘ danh sách để
-            // báo rõ nguyên nhân (vd nhà đúng địa chỉ nhưng đang bảo trì/hết hạn).
-            const blocked = suggestPropertyByAddress(propertyHint, allProperties);
-            setAddressSuggestion(
-              blocked
-                ? `Tên/địa chỉ trong file khớp với nhà "${blocked.property.propertyName}" nhưng nhà này hiện KHÔNG sẵn sàng cho thuê (${PROPERTY_STATUS_LABEL[blocked.property.status] ?? blocked.property.status}). Vui lòng chọn nhà khác hoặc kiểm tra lại.`
-                : 'Không tự tìm được nhà khớp với tên/địa chỉ trong file — vui lòng chọn tay.',
-            );
-          }
-        } else {
-          setAddressSuggestion('');
-        }
-        // Đếm field chính bóc được — bóc rỗng mà vẫn toast success làm admin tưởng
-        // đã đủ dữ liệu rồi lưu thiếu.
-        const gotCount = [
-          extracted.tenantName, extracted.tenantCccd, extracted.tenantPhone,
-          extracted.rentAmount > 0 ? 'x' : '', extracted.deposit > 0 ? 'x' : '',
-        ].filter(Boolean).length;
-        if (gotCount === 0) {
-          toast('Đã lưu file nhưng KHÔNG bóc tách được thông tin nào — vui lòng nhập tay.', { icon: '⚠️' });
-        } else if (gotCount < 3) {
-          toast(`Chỉ bóc tách được ${gotCount}/5 thông tin chính — kiểm tra và bổ sung phần còn thiếu.`, { icon: '⚠️' });
-        } else {
-          toast.success('Đã bóc tách thông tin từ file — vui lòng kiểm tra lại.');
-        }
-      }
-    } catch {
-      toast.error('Không xử lý được file — kiểm tra lại định dạng (nên dùng DOCX/PDF số hoá).');
-    } finally {
-      setExtracting(false);
-    }
-  };
 
   // Ưu tiên cờ `eligible` do BE trả; nếu BE không trả thì tự suy từ role.
   const roleWarning =
@@ -896,7 +725,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       depositMonths: Number(form.depositMonths) || 1,
       endDate: form.endDate || undefined,
       expectedReceptionDate: form.expectedReceptionDate || undefined,
-      draftContractFileUrl: draftFileUrl || undefined,
       householdMembers: membersPayload().length > 0 ? membersPayload() : undefined,
       // Nội thất có sẵn: BE tự gắn toàn bộ ACTIVE trong phạm vi HĐ — không gửi gì.
     };
@@ -914,22 +742,25 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
       // BE luôn tự gán quản lý phụ trách nhà cho hợp đồng — không cần gọi API riêng.
       const managerName = selectedProperty.operationManagerName || 'quản lý phụ trách';
 
-      // Tạo tay (không phải import file có sẵn) → BE render PDF từ dữ liệu vừa
-      // nhập, upload Cloudinary, lưu URL — admin có thể xem lại ngay. Import file thì
-      // đã có draftFileUrl từ bước upload trong handleFileUpload, không sinh lại.
-      let finalFileUrl = draftFileUrl || null;
-      if (mode === 'manual') {
-        setSubmitStage('Đang tạo file hợp đồng...');
-        try {
-          const blob = await tenantService.generateDraftDocument(draft.id);
-          const pdfFile = await draftBlobToFile(blob, draft.contractCode);
-          setSubmitStage('Đang tải file lên...');
-          const url = await uploadToCloudinary(pdfFile, 'raw');
-          await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
-          finalFileUrl = url;
-        } catch {
-          toast.error('Đã tạo hợp đồng nháp nhưng KHÔNG sinh được file — có thể tạo lại ở danh sách nháp.');
-        }
+      /*
+       * BE render PDF từ dữ liệu vừa nhập, FE upload Cloudinary rồi lưu URL — admin xem
+       * lại được ngay.
+       *
+       * Trước đây bước này chỉ chạy khi `mode === 'manual'`, vì nhánh "Upload file" đã có
+       * sẵn URL của chính file admin tải lên. Bỏ nhánh upload (01/09/2026) thì đây là
+       * đường DUY NHẤT sinh file, nên chạy vô điều kiện.
+       */
+      let finalFileUrl: string | null = null;
+      setSubmitStage('Đang tạo file hợp đồng...');
+      try {
+        const blob = await tenantService.generateDraftDocument(draft.id);
+        const pdfFile = await draftBlobToFile(blob, draft.contractCode);
+        setSubmitStage('Đang tải file lên...');
+        const url = await uploadToCloudinary(pdfFile, 'raw');
+        await tenantService.updateDraft(draft.id, { draftContractFileUrl: url });
+        finalFileUrl = url;
+      } catch {
+        toast.error('Đã tạo hợp đồng nháp nhưng KHÔNG sinh được file — có thể tạo lại ở danh sách nháp.');
       }
 
       toast.success(`Đã tạo hợp đồng nháp & gửi thông báo cho ${managerName}.`);
@@ -1102,61 +933,6 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 p-6">
-          {/* Tabs — chỉ khi tạo mới; sửa thì luôn nhập tay trực tiếp */}
-          {!isEditMode && <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setMode('upload')}
-              className={`flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${
-                mode === 'upload' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <UploadCloud className="h-4 w-4" /> Upload file (auto-điền)
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('manual')}
-              className={`flex items-center justify-center gap-2 rounded-lg py-2 text-sm font-semibold transition ${
-                mode === 'manual' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'
-              }`}
-            >
-              <Keyboard className="h-4 w-4" /> Nhập tay
-            </button>
-          </div>}
-
-          {!isEditMode && mode === 'upload' && (
-            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center hover:border-indigo-400">
-              {extracting ? (
-                <>
-                  <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
-                  <span className="text-sm text-slate-500">Đang bóc tách & tải file...</span>
-                </>
-              ) : draftFileUrl || fileName ? (
-                <>
-                  <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                    <FileText className="h-4 w-4" /> {fileName || 'Đã tải file'}
-                  </span>
-                  <span className="text-xs text-slate-400">Kiểm tra lại các trường bên dưới trước khi lưu.</span>
-                </>
-              ) : (
-                <>
-                  <UploadCloud className="h-6 w-6 text-slate-400" />
-                  <span className="text-sm font-medium text-slate-600">Chọn file hợp đồng (DOCX/PDF) đã điền thông tin khách</span>
-                  <span className="text-xs text-slate-400">Hệ thống tự bóc tách tên, CCCD, SĐT, giá, cọc, thời hạn.</span>
-                </>
-              )}
-              <input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={handleFileUpload} disabled={extracting} />
-            </label>
-          )}
-
-          {!isEditMode && mode === 'upload' && addressSuggestion && (
-            <div className="flex gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-700">
-              <FileText className="h-4 w-4 flex-shrink-0" />
-              <p>{addressSuggestion}</p>
-            </div>
-          )}
-
           {/* Chọn BĐS + phòng — sửa thì hiện read-only (không đổi phòng/nhà của HĐ nháp) */}
           {isEditMode ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -1753,7 +1529,7 @@ export const DraftContractFormModal = ({ onSuccess, onClose, editContract }: Pro
 
           <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
             <button type="button" onClick={onClose} className="btn-secondary">Hủy</button>
-            <button type="submit" className="btn-primary" disabled={submitting || extracting}>
+            <button type="submit" className="btn-primary" disabled={submitting}>
               Xem lại & Lưu
             </button>
           </div>

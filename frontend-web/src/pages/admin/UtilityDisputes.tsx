@@ -444,11 +444,29 @@ const ResolveDialog = ({ row, onClose, onDone }: {
   const [fix, setFix] = useState({
     prev: String(row.prevReading ?? ''),
     next: String(row.newReading ?? ''),
-    unit: String(row.unitPrice ?? ''),
   });
 
   const num = (s: string) => Number(String(s).replace(/[^\d.]/g, ''));
-  const fixPrev = num(fix.prev), fixNext = num(fix.next), fixUnit = num(fix.unit);
+  const fixPrev = num(fix.prev), fixNext = num(fix.next);
+  /**
+   * ĐƠN GIÁ KHÔNG SỬA ĐƯỢC Ở ĐÂY — lấy nguyên số của hoá đơn, không qua ô nhập.
+   *
+   * Hai lý do, cái nào cũng đủ:
+   *
+   * 1. Đơn giá là của CẢ CĂN, không phải của phòng này: nó = tổng tiền EVN ÷ tổng kWh
+   *    trên tờ hoá đơn admin đã chốt, và mọi phòng trong nhà đều nhân với đúng con số
+   *    đó. Sửa riêng ở một khiếu nại là phòng này lặng lẽ tính theo giá khác hàng xóm
+   *    cùng kỳ — về sau không ai giải thích nổi vì sao. Đơn giá sai thì cả tờ hoá đơn
+   *    sai, phải thu hồi và phát hành lại, không vá từng phòng.
+   *
+   * 2. Nó là số THẬP PHÂN scale 8 (3126.2822…). Ô nhập bày ra số đó thì admin gõ lại
+   *    "3126" cho gọn là lệch ~25đ/kWh, và máy chủ ném `AMOUNT_MISMATCH` vì
+   *    `validateInvoiceAmounts` chỉ cho lệch tối đa 1đ. Một ô mà mọi thao tác sửa đều
+   *    dẫn tới lỗi thì nó không phải ô nhập.
+   *
+   * Khiếu nại ở đây là về CHỈ SỐ, và chỉ số mới là thứ admin đối chiếu được với ảnh.
+   */
+  const fixUnit = Number(row.unitPrice ?? 0);
   const fixConsumption = fixNext - fixPrev;
   const fixAmount = fixConsumption > 0 && fixUnit > 0 ? Math.round(fixConsumption * fixUnit) : 0;
   /** Có đủ ba số và hợp lệ thì mới gửi kèm — xem `DisputeCorrection`. */
@@ -462,7 +480,9 @@ const ResolveDialog = ({ row, onClose, onDone }: {
       return toast.error('Ghi rõ căn cứ (ít nhất 10 ký tự) — khách sẽ đọc được nội dung này.');
     }
     if (outcome === 'ACCEPTED' && !fixValid) {
-      return toast.error('Nhập đủ chỉ số cũ / mới / đơn giá, và chỉ số mới phải lớn hơn chỉ số cũ.');
+      return toast.error(fixUnit > 0
+        ? 'Nhập đủ chỉ số cũ và chỉ số mới, chỉ số mới phải lớn hơn chỉ số cũ.'
+        : 'Hoá đơn này chưa có đơn giá — không sửa được ở đây, phải thu hồi và phát hành lại.');
     }
     setBusy(true);
     try {
@@ -546,32 +566,50 @@ const ResolveDialog = ({ row, onClose, onDone }: {
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   {([
-                    { key: 'prev' as const, label: 'Chỉ số cũ', suffix: unitLabel },
-                    { key: 'next' as const, label: 'Chỉ số mới', suffix: unitLabel },
-                    { key: 'unit' as const, label: 'Đơn giá', suffix: '₫' },
+                    { key: 'prev' as const, label: 'Chỉ số cũ' },
+                    { key: 'next' as const, label: 'Chỉ số mới' },
                   ]).map(f => (
                     <label key={f.key} className="block">
                       <span className="mb-1 block text-[11px] font-semibold text-slate-500">{f.label}</span>
                       <div className="relative">
                         <input
-                          inputMode="decimal"
+                          inputMode="numeric"
                           value={fix[f.key]}
                           onChange={e => setFix(s => ({ ...s, [f.key]: e.target.value }))}
                           className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 pr-9 text-sm font-bold tabular-nums outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                         />
                         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-slate-400">
-                          {f.suffix}
+                          {unitLabel}
                         </span>
                       </div>
                     </label>
                   ))}
+                  {/* Ô CHỈ ĐỌC — xem `fixUnit`. Làm tròn để đọc được, số đầy đủ nằm ở
+                      `title` vì đó mới là số đem đi tính. */}
+                  <div>
+                    <span className="mb-1 block text-[11px] font-semibold text-slate-500">Đơn giá</span>
+                    <div
+                      className="rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-2 text-sm font-bold tabular-nums text-slate-600"
+                      title={`Đơn giá chốt trên hoá đơn của cả căn: ${fixUnit}₫/${unitLabel}. Dùng chung cho mọi phòng trong kỳ nên không sửa riêng ở đây được.`}
+                    >
+                      {Math.round(fixUnit).toLocaleString('vi-VN')}
+                      <span className="ml-1 text-[11px] font-semibold text-slate-400">₫/{unitLabel}</span>
+                    </div>
+                  </div>
                 </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Đơn giá lấy theo hoá đơn của cả căn, dùng chung cho mọi phòng trong kỳ — sai đơn
+                  giá thì phải thu hồi cả tờ hoá đơn, không sửa riêng ở đây.
+                </p>
 
                 <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-emerald-200 pt-2.5">
                   <span className="text-xs font-semibold text-slate-600">
+                    {/* KHÔNG viết thành phép nhân "87 × 3.126 = 271.987": đơn giá hiển thị
+                        đã làm tròn nên phép đó không ra đúng tổng, và một phép tính sai
+                        ngay cạnh con số tiền là thứ khiến người đọc mất tin vào cả bảng. */}
                     {fixValid
-                      ? <>Tiêu thụ <b className="tabular-nums">{fixConsumption.toLocaleString('vi-VN')}</b> {unitLabel} × {fixUnit.toLocaleString('vi-VN')}₫</>
-                      : <span className="text-rose-600">Chỉ số mới phải lớn hơn chỉ số cũ, đơn giá phải &gt; 0</span>}
+                      ? <>Tiêu thụ <b className="tabular-nums">{fixConsumption.toLocaleString('vi-VN')}</b> {unitLabel}</>
+                      : <span className="text-rose-600">Chỉ số mới phải lớn hơn chỉ số cũ</span>}
                   </span>
                   {fixValid && (
                     <span className="text-sm font-black tabular-nums text-emerald-700">

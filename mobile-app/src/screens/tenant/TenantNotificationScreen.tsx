@@ -45,6 +45,7 @@ const TYPE_CATEGORY: Record<string, string> = {
   maintenance_cost: 'Sửa chữa',
   maintenance_cancelled: 'Sửa chữa',
   maintenance_rejected: 'Sửa chữa',
+  maintenance_overdue: 'Sửa chữa',
   equipment_damaged: 'Thiết bị',
   meter_reading_due: 'Đồng hồ',
   tenant_onboarded: 'Nhận phòng',
@@ -81,6 +82,9 @@ const TYPE_ACCENT: Record<string, { emoji: string; color: string; bg: string }> 
   maintenance_cost:       { emoji: '💵', color: Colors.accent,    bg: Colors.primaryBg },
   maintenance_cancelled:  { emoji: '🚫', color: Colors.textMuted, bg: '#F1F5F9' },
   maintenance_rejected:   { emoji: '↩️', color: Colors.error,     bg: Colors.errorLight },
+  // Quá hạn tự sửa — khách đã trễ deadline. Đỏ như `rejected` nhưng khác biểu tượng:
+  // "↩️ bị từ chối" và "⏰ quá hạn" là hai việc phải làm khác nhau.
+  maintenance_overdue:    { emoji: '⏰', color: Colors.error,     bg: Colors.errorLight },
   equipment_damaged:      { emoji: '⚙️', color: Colors.error,     bg: Colors.errorLight },
   meter_reading_due:      { emoji: '📊', color: Colors.warning,   bg: Colors.warningLight },
   tenant_onboarded:       { emoji: '🏠', color: Colors.success,   bg: Colors.successLight },

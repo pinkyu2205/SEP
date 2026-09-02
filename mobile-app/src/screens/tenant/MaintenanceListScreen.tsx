@@ -217,18 +217,17 @@ export const MaintenanceListScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* ── Helper card ── */}
-      <TouchableOpacity
-        style={styles.helperCard}
-        onPress={() => navigation.navigate('RoomEquipment')}
-        activeOpacity={0.8}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.helperTitle}>Muốn báo hỏng thiết bị?</Text>
-          <Text style={styles.helperDesc}>Vào mục Thiết bị phòng để quét QR hoặc báo hỏng thiết bị.</Text>
-        </View>
-        <Text style={styles.helperArrow}>Đi đến Thiết bị phòng →</Text>
-      </TouchableOpacity>
+      {/*
+        ── Thẻ "Đi đến Thiết bị phòng" đã BỎ 01/09/2026 ──────────────────────
+        Nó dẫn tới đúng `RoomEquipment` mà nút "Chọn thiết bị từ danh sách" trong FAB
+        đã dẫn tới. Cộng với nút QR ở trạng thái rỗng, màn này có BA lối vào cho cùng
+        một việc "báo hỏng" — và khi mở FAB trên danh sách rỗng thì nút QR của trạng
+        thái rỗng với mục QR trong FAB nằm ĐÈ LÊN NHAU trên màn hình.
+
+        Nay chỉ còn MỘT đường: menu của FAB. Nó là đường duy nhất phân loại đúng cả ba
+        tình huống (quét được QR · không quét được thì chọn từ danh sách · sự cố không
+        gắn thiết bị nào), nên giữ nó và bỏ hai lối tắt kia.
+      */}
 
       {/* ── Filter chips ── */}
       <ScrollView
@@ -279,17 +278,20 @@ export const MaintenanceListScreen: React.FC = () => {
               <Text style={styles.emptyEmoji}>🔧</Text>
               <Text style={styles.emptyTitle}>Không có yêu cầu nào đang hoạt động</Text>
               <Text style={styles.emptyDesc}>
-                Báo hỏng thiết bị trực tiếp từ màn hình{' '}
-                <Text style={{ color: Colors.primary, fontWeight: '700' }}>Thiết bị</Text>
-                {' '}hoặc quét{' '}
-                <Text style={{ color: Colors.primary, fontWeight: '700' }}>mã QR</Text>
-                {' '}dán trên thiết bị.
+                Có gì hỏng thì báo ở đây — quét mã QR dán trên thiết bị, chọn từ danh sách
+                thiết bị trong phòng, hoặc mô tả sự cố khác.
               </Text>
+              {/*
+                Mở ĐÚNG menu của FAB thay vì đi thẳng vào màn quét.
+                Nút cũ ghi "📷 Quét QR thiết bị" nên đẩy mọi người vào một lối duy nhất —
+                trong khi hỏng sàn, tường, cửa thì không có QR nào để quét, và thiết bị
+                mất tem cũng vậy. Một nút, ba lựa chọn, khách tự chọn đúng việc của mình.
+              */}
               <TouchableOpacity
                 style={styles.emptyScanBtn}
-                onPress={() => navigation.navigate('Scan')}
+                onPress={() => setFabOpen(true)}
               >
-                <Text style={styles.emptyScanText}>📷 Quét QR thiết bị</Text>
+                <Text style={styles.emptyScanText}>＋ Báo hỏng</Text>
               </TouchableOpacity>
             </View>
           )
@@ -413,17 +415,6 @@ const styles = StyleSheet.create({
 
   requestList: { flex: 1 },
   list: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl },
-
-  // ── Helper card ──
-  helperCard: {
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: Colors.primary + '30',
-    padding: Spacing.base, gap: Spacing.sm,
-  },
-  helperTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: 2 },
-  helperDesc:  { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
-  helperArrow: { fontSize: 12, fontWeight: '700', color: Colors.primary, alignSelf: 'flex-end' },
 
   // ── Card ──
   card: {

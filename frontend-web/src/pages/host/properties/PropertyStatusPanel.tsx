@@ -189,14 +189,25 @@ const LINE_STATUS: Record<string, { label: string; cls: string }> = {
 /** Bảng từng hoá đơn — mở ra khi host muốn biết đích xác đang chờ khoản nào của ai. */
 const BillLines = ({ lines }: { lines: BillLine[] }) => (
   <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
-    <table className="w-full min-w-[640px] text-sm">
+    {/*
+      BỐN cột, không phải sáu. Hai cột bị gộp vì chúng không đứng riêng nổi:
+
+      • MÃ HOÁ ĐƠN — chuỗi dài nhất bảng (`HD-RENT-50-2026-09`) nhưng host chỉ dùng khi
+        cần đối chiếu một dòng cụ thể. Xuống dòng phụ dưới tên khoản thu: vẫn sao chép
+        được, mà không còn ngốn một cột rộng ở mọi dòng.
+
+      • HẠN — chỉ có nghĩa khi CHƯA thu. Dòng "Đã thu" mà vẫn in hạn thì đó là một ngày
+        không dùng để làm gì, và ở bảng này đa số dòng đều đã thu. Gộp vào ô trạng thái,
+        chỉ hiện khi còn nợ.
+
+      Bỏ hai cột đó là bảng vừa bề ngang, hết cuộn ngang.
+    */}
+    <table className="w-full text-sm">
       <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
         <tr>
           <th className="px-3 py-2">Khoản thu</th>
-          <th className="px-3 py-2">Mã hoá đơn</th>
           <th className="px-3 py-2">Phòng / khách</th>
           <th className="px-3 py-2 text-right">Số tiền</th>
-          <th className="px-3 py-2">Hạn</th>
           <th className="px-3 py-2">Trạng thái</th>
         </tr>
       </thead>
@@ -204,26 +215,31 @@ const BillLines = ({ lines }: { lines: BillLine[] }) => (
         {lines.map(l => {
           const meta = INVOICE_TYPE_META[l.type];
           const st = LINE_STATUS[l.status] ?? LINE_STATUS.PENDING;
+          const settled = l.status === 'PAID' || l.status === 'CANCELLED';
           return (
             <tr key={l.id} className={l.envelope ? 'bg-slate-50/60' : undefined}>
-              <td className="whitespace-nowrap px-3 py-2 font-bold text-slate-800">
-                {meta.icon} {l.envelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
+              <td className="px-3 py-1.5">
+                <p className="whitespace-nowrap font-bold text-slate-800">
+                  {meta.icon} {l.envelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
+                </p>
+                <p className="font-mono text-[11px] text-slate-400">{l.code}</p>
               </td>
-              <td className="px-3 py-2 font-mono text-xs text-slate-500">{l.code}</td>
-              <td className="px-3 py-2 text-xs text-slate-600">
+              <td className="px-3 py-1.5 text-xs text-slate-600">
                 {l.roomNumber ? <b className="text-slate-800">P.{l.roomNumber}</b> : 'Cả căn'}
                 {l.tenantName && <span className="text-slate-400"> · {l.tenantName}</span>}
               </td>
-              <td className="whitespace-nowrap px-3 py-2 text-right font-black tabular-nums text-slate-900">
+              <td className="whitespace-nowrap px-3 py-1.5 text-right font-black tabular-nums text-slate-900">
                 {formatCurrency(l.amount)}
               </td>
-              <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500 tabular-nums">
-                {l.dueDate ? fmtDate(l.dueDate) : '—'}
-              </td>
-              <td className="px-3 py-2">
+              <td className="px-3 py-1.5">
                 <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-black ${st.cls}`}>
                   {st.label}
                 </span>
+                {!settled && l.dueDate && (
+                  <span className="ml-1.5 whitespace-nowrap text-[11px] tabular-nums text-slate-400">
+                    hạn {fmtDate(l.dueDate)}
+                  </span>
+                )}
               </td>
             </tr>
           );
@@ -231,9 +247,9 @@ const BillLines = ({ lines }: { lines: BillLine[] }) => (
       </tbody>
     </table>
     {lines.some(l => l.envelope) && (
-      <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 text-[11px] font-semibold text-slate-500">
-        Dòng nền xám là phiếu thu gộp lúc đón khách (cọc + tiền nhà kỳ đầu) — liệt kê cho
-        đủ, nhưng không cộng vào tổng vì hai phần đó đã được ghi riêng ở nơi khác.
+      <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11px] font-semibold text-slate-500">
+        Dòng nền xám là phiếu thu gộp lúc đón khách — không cộng vào tổng, vì cọc và tiền
+        nhà kỳ đầu đã được ghi riêng ở nơi khác.
       </p>
     )}
   </div>

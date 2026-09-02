@@ -15,6 +15,7 @@ type NotifType =
   | 'contract_expiring' | 'contract_expired'
   | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
   | 'maintenance_confirm' | 'maintenance_cost' | 'maintenance_cancelled' | 'maintenance_rejected'
+  | 'maintenance_overdue'
   | 'contract_assigned' | 'checkout_request'
   | 'equipment_damaged' | 'tenant_onboarded' | 'meter_reading_due' | 'system';
 
@@ -54,6 +55,8 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   maintenance_cost: { icon: '💵', color: Colors.accent, bg: Colors.primaryBg, category: 'Bảo trì' },
   maintenance_cancelled: { icon: '🚫', color: Colors.textSecondary, bg: Colors.divider, category: 'Bảo trì' },
   maintenance_rejected: { icon: '↩️', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
+  // Khách quá hạn tự sửa — quản lý phải đi nhắc. Khác biểu tượng với "bị từ chối".
+  maintenance_overdue: { icon: '⏰', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
   contract_assigned: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
   checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Tiễn khách' },
   equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
