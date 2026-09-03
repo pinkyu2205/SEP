@@ -7,6 +7,7 @@ import { HostLayout } from '@/layouts/HostLayout';
 import { AdminLayout } from '@/layouts/AdminLayout';
 import { WebLogin } from '@/pages/auth/LoginPage';
 import { ContractList } from '@/pages/host/contracts/ContractList';
+import ExtensionRequestsHost from '@/pages/host/contracts/ExtensionRequestsHost';
 import { Dashboard } from '@/pages/host/HostDashboard';
 import { EquipmentCatalogPage } from '@/pages/admin/EquipmentCatalogPage';
 import { FinancialManagement } from '@/pages/host/finance/FinancialManagement';
@@ -149,6 +150,7 @@ function App() {
             <Route path="/host/zones" element={<HostZoneOverview />} />
             <Route path="/host/tenants" element={<TenantList />} />
             <Route path="/host/contracts" element={<ContractList />} />
+            <Route path="/host/extension-requests" element={<ExtensionRequestsHost />} />
             <Route path="/host/maintenance" element={<MaintenanceList />} />
             <Route path="/host/financial" element={<FinancialManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}

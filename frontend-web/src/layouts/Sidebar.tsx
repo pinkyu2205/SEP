@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Building2, UserCog, Users, FileText,
+  LayoutDashboard, Building2, UserCog, Users, FileText, CalendarPlus,
   DollarSign, BarChart3, Bell, Settings,
   Coins, PiggyBank, CreditCard, MapPin, SlidersHorizontal, Banknote,
 } from 'lucide-react';
@@ -49,6 +49,9 @@ const SECTIONS: SidebarSection[] = [
       { label: 'Bất động sản', path: '/host/properties', icon: Building2 },
       { label: 'Khách thuê', path: '/host/tenants', icon: Users },
       { label: 'Hợp đồng', path: '/host/contracts', icon: FileText },
+      // Đơn gia hạn: host CHỈ XEM — quản trị viên duyệt. Đặt cạnh "Hợp đồng" vì cùng một
+      // hồ sơ, và host cần thấy để còn chủ động gia hạn hợp đồng với chủ nhà.
+      { label: 'Đơn gia hạn', path: '/host/extension-requests', icon: CalendarPlus },
     ],
   },
   {

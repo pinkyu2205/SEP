@@ -325,6 +325,20 @@ export interface CheckoutRequestDto {
   tenantPhone?: string;
   expectedMoveOutDate?: string; // yyyy-MM-dd
   reason?: string;
+  /**
+   * Phiếu này TỪ ĐÂU RA (BE 02/09/2026).
+   *
+   * - `TENANT_REQUEST`   — khách tự gửi. Huỷ được khi còn `PENDING`.
+   * - `CONTRACT_EXPIRED` — hệ thống tự tạo lúc 00:00 ngày cuối hợp đồng. **KHÔNG huỷ
+   *   được**: huỷ nó cũng chẳng làm hợp đồng hết-hạn-ngược-lại, chỉ xoá mất việc phải làm.
+   *
+   * Bản ghi cũ trả `null`/thiếu → coi như `TENANT_REQUEST`, giữ nguyên hành vi cũ.
+   *
+   * Dùng để ẨN nút huỷ, không chỉ để hiện chữ: máy chủ đã chặn rồi, nhưng một nút bấm vào
+   * chắc chắn hỏng thì không nên bày ra — người dùng học được rằng app hay báo lỗi, chứ
+   * không học được luật.
+   */
+  origin?: 'TENANT_REQUEST' | 'CONTRACT_EXPIRED' | null;
   note?: string;
   status: CheckoutRequestStatus | string;
   createdAt?: string;

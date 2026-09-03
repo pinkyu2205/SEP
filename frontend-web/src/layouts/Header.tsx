@@ -19,6 +19,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/host/managers': 'Quản lý vận hành',
   '/host/tenants': 'Khách thuê',
   '/host/contracts': 'Quản lý hợp đồng',
+  '/host/extension-requests': 'Đơn xin gia hạn',
   '/host/maintenance': 'Giám sát bảo trì',
   '/host/financial': 'Quản lý tài chính',
   '/host/billing': 'Hoá đơn & Thanh toán',
