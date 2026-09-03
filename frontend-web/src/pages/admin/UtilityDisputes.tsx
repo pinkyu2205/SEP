@@ -5,6 +5,10 @@ import {
 } from 'lucide-react';
 import { Overlay } from '@/components/Overlay';
 import { formatCurrency } from '@/utils';
+import { HistoryList } from './HistoryList';
+import { evnBillService, type EvnBill } from '@/services/evnBill.service';
+import { waterBillService } from '@/services/waterBill.service';
+import { periodMonthYear } from '@/utils/evnInvoiceParser';
 import {
   invoiceDisputeService,
   REASON_LABEL, REASON_CHECK,
@@ -23,6 +27,117 @@ import {
 //
 // Vì sao admin xử chứ không phải quản lý: xem đầu `services/invoiceDispute.service.ts`.
 // ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * TỜ HOÁ ĐƠN GỐC admin đã tải lên cho cả nhà, ở đúng kỳ đang bị khiếu nại.
+ *
+ * ─── Vì sao phải có ở đây ──────────────────────────────────────────────────────
+ * Mọi con số trên hoá đơn của khách đều DẪN XUẤT từ tờ này: đơn giá = tổng tiền ÷ tổng
+ * sản lượng của cả nhà, rồi nhân với lượng tiêu thụ của phòng. Nhưng thẻ khiếu nại
+ * trước đây chỉ bày số của khách — admin muốn kiểm "đơn giá này lấy ở đâu ra" thì phải
+ * mở tab khác, sang trang phát hành, chọn lại đúng nhà và đúng kỳ, rồi nhớ con số mà
+ * quay về. Giữa chừng đó là chỗ để quên và để kết luận theo cảm tính.
+ *
+ * Khối này còn tự làm một phép đối chiếu mà mắt người hay bỏ sót: đơn giá ghi trên hoá
+ * đơn của khách có bằng đơn giá của tờ hoá đơn tổng không. Lệch nghĩa là hoá đơn được
+ * dựng từ một tờ khác — đúng thứ khiếu nại "không phải hoá đơn của nhà tôi" nói tới.
+ *
+ * Tải LƯỜI (chỉ khi thẻ được dựng) và nuốt mọi lỗi: đây là dữ liệu phụ trợ, hỏng thì ẩn
+ * khối đi chứ không được chặn admin kết luận.
+ */
+const SourceBillPanel = ({ d, unit, electric, onZoom }: {
+  d: AdminInvoiceDispute; unit: string; electric: boolean;
+  onZoom: (url: string, caption: string) => void;
+}) => {
+  const [bill, setBill] = useState<EvnBill | null>(null);
+  const [state, setState] = useState<'loading' | 'done' | 'none'>('loading');
+
+  useEffect(() => {
+    const at = periodMonthYear(d.billingPeriod);
+    if (!at) { setState('none'); return; }
+    let alive = true;
+    const req = electric
+      ? evnBillService.list({ propertyId: d.propertyId, month: at.month, year: at.year })
+      : waterBillService.list({ propertyId: d.propertyId, month: at.month, year: at.year })
+          .then(rows => rows.map(r => ({ ...r, totalKwh: r.totalQuantity } as unknown as EvnBill)));
+
+    req
+      .then(rows => {
+        if (!alive) return;
+        // Bản đã thu hồi không còn là nguồn của hoá đơn nào — bỏ qua.
+        const live = rows.find(r => r.status !== 'REVOKED') ?? rows[0] ?? null;
+        setBill(live);
+        setState(live ? 'done' : 'none');
+      })
+      .catch(() => { if (alive) setState('none'); });
+    return () => { alive = false; };
+  }, [d.propertyId, d.billingPeriod, electric]);
+
+  if (state === 'none') return null;
+
+  const billUnitPrice = bill?.unitPrice ?? 0;
+  // So ở mức ĐỒNG: đơn giá máy chủ giữ scale 8 nên so bằng số thực luôn lệch.
+  const priceMismatch = bill != null && d.unitPrice != null && billUnitPrice > 0
+    && Math.round(billUnitPrice) !== Math.round(d.unitPrice);
+
+  return (
+    <div className="border-t border-slate-100 px-6 py-4">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        Hoá đơn {electric ? 'EVN' : 'nước'} gốc admin đã tải lên
+      </p>
+
+      {state === 'loading' ? (
+        <p className="mt-2 text-sm text-slate-400">Đang tra hoá đơn gốc của kỳ này…</p>
+      ) : bill && (
+        <div className="mt-2 flex flex-wrap items-start gap-4">
+          {bill.imageUrl && (
+            <button
+              onClick={() => onZoom(bill.imageUrl!, `Hoá đơn ${electric ? 'EVN' : 'nước'} gốc · ${bill.billingPeriod}`)}
+              className="shrink-0 overflow-hidden rounded-lg border border-slate-200 transition hover:border-indigo-400"
+            >
+              <img src={bill.imageUrl} alt="" className="h-24 w-24 object-cover" />
+            </button>
+          )}
+          <dl className="min-w-[220px] flex-1 space-y-1 text-sm">
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Kỳ trên tờ gốc</dt>
+              <dd className="font-semibold text-slate-900">{bill.billingPeriod || '—'}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Tổng cả nhà</dt>
+              <dd className="font-mono font-bold text-slate-900">
+                {bill.totalKwh?.toLocaleString('vi-VN')} {unit}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Tổng tiền cả nhà</dt>
+              <dd className="font-mono font-bold text-slate-900">{formatCurrency(bill.totalAmount)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-500">Đơn giá tờ gốc</dt>
+              <dd className={`font-mono font-bold ${priceMismatch ? 'text-rose-600' : 'text-slate-900'}`}>
+                {billUnitPrice > 0 ? `${Math.round(billUnitPrice).toLocaleString('vi-VN')}đ/${unit}` : '—'}
+              </dd>
+            </div>
+            {bill.status === 'REVOKED' && (
+              <p className="rounded bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700">
+                Tờ gốc này đã bị thu hồi
+              </p>
+            )}
+          </dl>
+        </div>
+      )}
+
+      {priceMismatch && (
+        <p className="mt-2 rounded-lg bg-rose-100 px-3 py-2 text-xs font-bold leading-relaxed text-rose-700">
+          ⚠️ Đơn giá trên hoá đơn của khách ({Math.round(d.unitPrice!).toLocaleString('vi-VN')}đ)
+          KHÔNG khớp đơn giá tờ gốc ({Math.round(billUnitPrice).toLocaleString('vi-VN')}đ) — hoá đơn
+          này nhiều khả năng dựng từ một tờ khác, hoặc tờ gốc đã bị sửa sau khi phát hành.
+        </p>
+      )}
+    </div>
+  );
+};
 
 const fmtDate = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString('vi-VN') : '—';
@@ -95,7 +210,22 @@ const UtilityDisputes = () => {
       .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
     [rows],
   );
-  const list = tab === 'open' ? openList : closedList;
+  /**
+   * Lọc theo loại tiện ích.
+   *
+   * Điện và nước là hai vụ điều tra khác nhau: điện soi đơn giá bậc thang và chỉ số công
+   * tơ, nước soi tờ hoá đơn có hai con số tiền. Trộn chung một danh sách thì admin phải
+   * tự chuyển ngữ cảnh ở từng dòng — mà một kỳ có thể vài chục vụ mỗi loại.
+   */
+  const [kind, setKind] = useState<'all' | 'ELECTRIC' | 'WATER'>('all');
+
+  const tabList = tab === 'open' ? openList : closedList;
+  const list = useMemo(
+    () => (kind === 'all'
+      ? tabList
+      : tabList.filter(d => (isElectric(d) ? 'ELECTRIC' : 'WATER') === kind)),
+    [tabList, kind],
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
@@ -127,6 +257,29 @@ const UtilityDisputes = () => {
             {label} <span className={tab === k ? 'text-white/70' : 'text-slate-400'}>{n}</span>
           </button>
         ))}
+
+        {/* Lọc loại tiện ích — đếm TRONG tab đang mở, không phải trên toàn bộ dữ liệu:
+            số đếm phải nói đúng "bấm vào thì thấy bao nhiêu dòng". */}
+        <div className="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 p-1">
+          {([
+            ['all', 'Tất cả', null],
+            ['ELECTRIC', 'Điện', <Zap key="e" className="h-3.5 w-3.5" />],
+            ['WATER', 'Nước', <Droplets key="w" className="h-3.5 w-3.5" />],
+          ] as const).map(([k, label, icon]) => {
+            const n = k === 'all'
+              ? tabList.length
+              : tabList.filter(d => (isElectric(d) ? 'ELECTRIC' : 'WATER') === k).length;
+            const on = kind === k;
+            return (
+              <button key={k} onClick={() => setKind(k)} disabled={n === 0 && !on}
+                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-40 ${
+                  on ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>
+                {icon}{label}
+                <span className={on ? 'text-white/60' : 'text-slate-400'}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {loading ? (
@@ -140,28 +293,86 @@ const UtilityDisputes = () => {
       ) : list.length === 0 ? (
         <div className="mt-8 rounded-2xl border border-slate-200 bg-white py-16 text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
+          {/* Rỗng vì BỘ LỌC và rỗng vì KHÔNG CÓ VỤ NÀO là hai chuyện khác hẳn. Nói nhầm
+              thì admin đóng trang và tin rằng chẳng có khiếu nại nào, trong khi vẫn còn
+              vụ đang chờ ở loại tiện ích kia. */}
           <p className="mt-3 font-bold text-slate-700">
-            {tab === 'open' ? 'Không có khiếu nại nào đang chờ' : 'Chưa có khiếu nại nào từng xảy ra'}
+            {kind !== 'all'
+              ? `Không có khiếu nại ${kind === 'ELECTRIC' ? 'điện' : 'nước'} nào ở tab này`
+              : tab === 'open' ? 'Không có khiếu nại nào đang chờ' : 'Chưa có khiếu nại nào từng xảy ra'}
           </p>
           <p className="mt-1 text-sm text-slate-400">
-            {tab === 'open'
-              ? 'Mọi hoá đơn điện/nước đều đang được khách chấp nhận.'
-              : 'Khiếu nại đã kết luận sẽ được lưu lại ở đây để tra cứu.'}
+            {kind !== 'all'
+              ? <>Đang lọc theo <b>{kind === 'ELECTRIC' ? 'Điện' : 'Nước'}</b> — tab này còn{' '}
+                  <b>{tabList.length}</b> vụ ở loại khác.</>
+              : tab === 'open'
+                ? 'Mọi hoá đơn điện/nước đều đang được khách chấp nhận.'
+                : 'Khiếu nại đã kết luận sẽ được lưu lại ở đây để tra cứu.'}
           </p>
+          {kind !== 'all' && (
+            <button onClick={() => setKind('all')}
+              className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50">
+              Bỏ lọc, xem tất cả
+            </button>
+          )}
           <p className="mt-4 text-xs text-slate-400">Đã quét <b>{rows.length}</b> khiếu nại</p>
         </div>
-      ) : (
+      ) : tab === 'open' ? (
+        // Đang chờ: vài vụ, mỗi vụ là một việc phải làm → bày hết chi tiết.
         <div className="mt-6 space-y-4">
           {list.map(d => (
             <DisputeCard
               key={d.id}
               d={d}
-              open={tab === 'open'}
+              open
               onResolve={() => setTarget(d)}
               onZoom={(url, caption) => setZoom({ url, caption })}
             />
           ))}
         </div>
+      ) : (
+        /*
+          Lịch sử: kho tra cứu chỉ tăng, không giảm → mỗi vụ MỘT DÒNG, bấm mới mở thẻ chi
+          tiết. Xem `HistoryList` để biết vì sao hai tab phải khác nhau.
+        */
+        <HistoryList
+          searchPlaceholder="Tìm theo tên khách, SĐT, mã hoá đơn, tên nhà…"
+          emptyText="Không có vụ nào khớp từ khoá."
+          rows={list.map(d => ({
+            key: d.id,
+            icon: isElectric(d)
+              ? <Zap className="h-4 w-4 text-amber-500" />
+              : <Droplets className="h-4 w-4 text-sky-500" />,
+            title: d.tenantName ?? '(chưa có tên)',
+            subtitle: [
+              d.propertyName,
+              d.roomNumber ? `P.${d.roomNumber}` : null,
+              d.invoiceCode,
+              d.billingPeriod ? `kỳ ${d.billingPeriod}` : null,
+            ].filter(Boolean).join(' · '),
+            status: d.status === 'ACCEPTED'
+              ? { label: 'Công nhận sai', cls: 'bg-emerald-100 text-emerald-700' }
+              : d.status === 'REJECTED'
+                ? { label: 'Bác khiếu nại', cls: 'bg-slate-200 text-slate-600' }
+                : { label: 'Khách tự rút', cls: 'bg-slate-100 text-slate-500' },
+            amount: d.amount,
+            date: d.resolvedAt ? fmtDate(d.resolvedAt) : undefined,
+            search: [
+              d.tenantName, d.tenantPhone, d.invoiceCode,
+              d.propertyName, d.roomNumber, d.billingPeriod,
+            ].filter(Boolean).join(' '),
+            detail: () => (
+              <div className="p-3">
+                <DisputeCard
+                  d={d}
+                  open={false}
+                  onResolve={() => setTarget(d)}
+                  onZoom={(url, caption) => setZoom({ url, caption })}
+                />
+              </div>
+            ),
+          }))}
+        />
       )}
 
       {target && (
@@ -324,6 +535,9 @@ const DisputeCard = ({ d, open, onResolve, onZoom }: {
           )}
         </div>
       </div>
+
+      {/* Tờ hoá đơn GỐC admin đã tải lên cho cả nhà — nguồn của mọi con số phía trên. */}
+      <SourceBillPanel d={d} unit={unit} electric={electric} onZoom={onZoom} />
 
       {/* ── Ảnh: hệ thống vs khách, đặt cạnh nhau để so ── */}
       {(!!d.meterImageUrl || !!d.utilityBillImageUrl || !!d.photos?.length) && (

@@ -248,7 +248,29 @@ export const BillingPaymentMonitoring = () => {
 
   // Hoá đơn: BE đã trả mới nhất trước — chỉ cắt trang, KHÔNG sort lại.
   // Cọc: BE `findAll()` không sort nên service đã tự xếp theo ngày thu cọc giảm dần.
-  const rows = tab === 'invoices' ? filtered : filteredDeposits;
+  /**
+   * SẮP XẾP danh sách hoá đơn.
+   *
+   * Không có nó thì thứ tự do máy chủ quyết (mới phát hành trước), và admin muốn biết
+   * "khoản nào quá hạn lâu nhất" hay "khoản nào to nhất chưa thu" thì phải tự cuộn cả
+   * danh sách để so bằng mắt — đúng việc mà máy làm trong một phần nghìn giây.
+   *
+   * Trang hoá đơn bên host đã có ô này từ đầu; đây là chỗ admin bị thiếu so với host,
+   * dù admin mới là người đi đối soát.
+   */
+  const [sort, setSort] = useState<'newest' | 'dueSoon' | 'amountDesc'>('newest');
+
+  const sortedInvoices = useMemo(() => {
+    const rows = [...filtered];
+    if (sort === 'amountDesc') return rows.sort((a, b) => b.amount - a.amount);
+    if (sort === 'dueSoon') {
+      // Thiếu hạn thu thì đẩy xuống cuối, đừng cho lên đầu như thể sắp tới hạn.
+      return rows.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
+    }
+    return rows.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  }, [filtered, sort]);
+
+  const rows = tab === 'invoices' ? sortedInvoices : filteredDeposits;
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pageDeposits = filteredDeposits.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -355,6 +377,13 @@ export const BillingPaymentMonitoring = () => {
           <option value="all">Tất cả toà nhà</option>
           {properties.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
+        {tab === 'invoices' && (
+          <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className="input-field">
+            <option value="newest">Mới phát hành nhất</option>
+            <option value="dueSoon">Hạn thu gần nhất</option>
+            <option value="amountDesc">Số tiền lớn nhất</option>
+          </select>
+        )}
       </div>
 
       {tab === 'invoices' ? (
@@ -492,12 +521,34 @@ export const BillingPaymentMonitoring = () => {
                           </div>
 
                           <div>
-                            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                              Giao dịch khách đã báo ({claims.length})
+                            <p
+                              className="text-[11px] font-black uppercase tracking-wider text-slate-400"
+                              title="Chỉ gồm những lần khách TỰ BÁO đã chuyển khoản để người khác xác nhận bằng tay. Trả qua QR/PayOS được đối soát tự động nên không xuất hiện ở đây."
+                            >
+                              Khách tự báo đã chuyển khoản ({claims.length})
                             </p>
+                            {/*
+                              Ô này KHÔNG phải lịch sử thu tiền — nó là hàng chờ ĐỐI SOÁT.
+
+                              Nguồn là `GET /manager/payments`, mà chính BE ghi chú là
+                              "hàng chờ đối soát claim"; lịch sử thu thật nằm ở endpoint
+                              khác (`/manager/payments/history`). Bản ghi ở đây chỉ sinh ra
+                              khi khách TỰ BÁO "tôi đã chuyển khoản" để người khác vào xác
+                              nhận bằng tay.
+
+                              Khách trả qua QR/PayOS thì hệ thống đối soát tự động, hoá đơn
+                              thành PAID mà không đẻ ra claim nào. Nên rỗng ở đây là chuyện
+                              BÌNH THƯỜNG, thậm chí là dấu hiệu tốt.
+
+                              Câu cũ "Chưa có giao dịch nào cho hoá đơn này" nói ngược lại
+                              điều đó: đứng dưới một hoá đơn đã thu đủ, nó đọc thành "tiền
+                              chưa về". Nên câu chữ phải rẽ theo trạng thái hoá đơn.
+                            */}
                             {claims.length === 0 ? (
-                              <p className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
-                                Chưa có giao dịch nào cho hoá đơn này.
+                              <p className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs leading-relaxed text-slate-400">
+                                {inv.status === 'PAID'
+                                  ? 'Khách trả qua QR/PayOS — hệ thống tự đối soát, không cần báo tay.'
+                                  : 'Khách chưa báo đã chuyển khoản. Trả qua QR/PayOS thì cũng không cần báo.'}
                               </p>
                             ) : (
                               <ul className="mt-2 space-y-2">

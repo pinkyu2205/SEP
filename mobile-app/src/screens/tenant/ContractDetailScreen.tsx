@@ -13,6 +13,7 @@ import {
 import {
   ContractDetailBody, ImageViewerModal, mapDetail, contractBodyStyles as styles,
 } from '@/components/contract/ContractDetailBody';
+import { ExtensionRequestCard } from '@/components/contract/ExtensionRequestCard';
 
 /**
  * Xem chi tiết một hợp đồng của khách thuê.
@@ -78,11 +79,22 @@ export const ContractDetailScreen: React.FC = () => {
     );
   }
 
-  // Tenant KHÔNG tự ký/gia hạn/chấm dứt hợp đồng qua app — mọi action đó chỉ
-  // MANAGER/ADMIN gọi được (verify BE 27/07/2026, TenantContractActionController).
-  // Màn này chỉ XEM; hành động thật duy nhất là "Yêu cầu trả phòng" (RequestCheckout,
-  // có API tenant thật riêng — TenantCheckoutServiceImpl).
+  /*
+   * Tenant KHÔNG tự ký / chấm dứt hợp đồng qua app — hai việc đó chỉ MANAGER/ADMIN gọi
+   * được (verify BE 27/07/2026, `TenantContractActionController`).
+   *
+   * Khách có đúng HAI hành động thật ở màn này:
+   *   • "Yêu cầu trả phòng"  → `RequestCheckout`, API tenant riêng.
+   *   • "Xin gia hạn"        → ĐƠN, không phải lệnh gia hạn (BE 02/09/2026). Khách chỉ
+   *     đề nghị; người bấm `extend` là ADMIN. Xem `ExtensionRequestCard`.
+   */
   const canTerminate = contract.status === 'active';
+  /*
+   * Gia hạn mở cho cả `expiring_soon` — đó chính là quãng 30 ngày cuối, tức đúng lúc
+   * khách cần xin nhất. Chặn ở đây theo trạng thái thì mất cả cửa; trần thật do máy chủ
+   * quyết bằng `maxMonths`, và bằng 0 thì thẻ tự ẩn.
+   */
+  const canRequestExtension = contract.status === 'active' || contract.status === 'expiring_soon';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -101,6 +113,13 @@ export const ContractDetailScreen: React.FC = () => {
           handover={handover}
           onImagePress={setViewerImage}
         />
+
+        {/* Đặt TRƯỚC khối hành động: xin ở tiếp là quyết định lớn hơn tải PDF, và phải
+            nằm trên nút "Yêu cầu trả phòng" — hai lựa chọn trái ngược, cái tích cực đứng
+            trước thì khách không vô tình đọc thấy mỗi đường ra. */}
+        <View style={styles.actionSection}>
+          <ExtensionRequestCard contractId={Number(contract.id)} active={canRequestExtension} />
+        </View>
 
         <View style={styles.actionSection}>
           {contract.pdfUrl && (

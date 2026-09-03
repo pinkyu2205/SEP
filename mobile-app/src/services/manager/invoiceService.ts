@@ -95,6 +95,16 @@ export interface UtilityInvoiceLite {
   prevReading?: number;
   newReading?: number;
   consumption?: number;
+  /**
+   * Đơn giá BE đã chốt (scale 8) và ẢNH MẶT ĐỒNG HỒ quản lý chụp lúc ghi chỉ số.
+   *
+   * BE trả sẵn hai field này trong `UtilityInvoiceResponse` từ đầu; kiểu FE trước đây
+   * không khai nên dữ liệu về tới nơi rồi bị vứt — đó là lý do quản lý gửi hoá đơn xong
+   * không mở lại xem được mình đã chụp cái gì.
+   */
+  unitPrice?: number;
+  meterImageUrl?: string | null;
+  tenantFullName?: string | null;
   amount?: number;
   status?: string;
   createdAt?: string;

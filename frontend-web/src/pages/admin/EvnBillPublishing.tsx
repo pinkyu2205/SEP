@@ -40,6 +40,78 @@ import { serverNow } from '@/utils/serverTime';
 /** Số dòng mỗi trang ở bảng "Đã phát hành". */
 const BILLS_PER_PAGE = 10;
 
+/**
+ * TIẾN ĐỘ GHI CHỈ SỐ của một tờ hoá đơn tổng đã phát hành.
+ *
+ * ─── Vì sao cột này quan trọng hơn mọi cột khác ────────────────────────────────
+ * Bảng "đã phát hành" cũ chỉ lặp lại thứ admin vừa gõ: tổng kWh, tổng tiền, đơn giá.
+ * Phát hành cả lô thì mọi dòng mang cùng một kỳ và số liệu na ná nhau — nhìn xuống là
+ * một bức tường số giống hệt, không dòng nào đáng dừng lại.
+ *
+ * Nhưng phát hành hoá đơn tổng mới chỉ là ĐẦU VÀO. Với nhà chia phòng, tiền chỉ thật sự
+ * tới khách sau khi quản lý đi đọc đủ đồng hồ từng phòng — và đó là bước hay tắc. Cột
+ * này là chỗ duy nhất trong bảng thật sự KHÁC NHAU giữa các dòng, nên nó trả lời được
+ * câu admin cần: nhà nào đang kẹt.
+ *
+ * Nhà nguyên căn (`roomsTotal = 0`) không có gì phải chờ — hoá đơn đi thẳng tới khách.
+ */
+export const ReadingProgress = ({ bill }: { bill: ProgressBill; unit?: string }) => {
+  const total = bill.roomsTotal ?? 0;
+  const done = bill.roomsDone ?? 0;
+
+  // BE cũ chưa trả hai field này → đừng bịa ra "0/0 phòng", nói thẳng là không biết.
+  if (bill.roomsTotal == null) return <span className="text-xs text-slate-300">—</span>;
+
+  if (total === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">
+        Nguyên căn · đã tới khách
+      </span>
+    );
+  }
+
+  const full = done >= total;
+  const pct = Math.min(100, Math.round((done / total) * 100));
+  return (
+    <div className="min-w-[132px]">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={`text-xs font-black tabular-nums ${
+          full ? 'text-emerald-600' : bill.overdue ? 'text-rose-600' : 'text-amber-600'}`}>
+          {done}/{total} phòng
+        </span>
+        {full
+          ? <span className="text-[11px] font-bold text-emerald-600">xong</span>
+          : bill.overdue
+            ? <span className="text-[11px] font-bold text-rose-600">quá hạn</span>
+            : bill.readingDeadline
+              ? <span className="text-[11px] text-slate-400">hạn {fmtDate(bill.readingDeadline)}</span>
+              : null}
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all ${
+            full ? 'bg-emerald-500' : bill.overdue ? 'bg-rose-500' : 'bg-amber-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Chỗ giao nhau giữa `EvnBill` và `WaterBill` mà `ReadingProgress` cần.
+ *
+ * Cố ý KHÔNG nhận nguyên kiểu của bên nào: hai kiểu đó khác nhau ở tên trường sản lượng
+ * (`totalKwh` vs `totalQuantity`), mà thanh tiến độ không quan tâm tới sản lượng.
+ */
+export type ProgressBill = {
+  roomsTotal?: number; roomsDone?: number;
+  readingDeadline?: string | null; overdue?: boolean;
+};
+
+const fmtDate = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—';
+
 const fmtDateTime = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
@@ -1392,11 +1464,12 @@ export const EvnBillPublishing = () => {
             <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="pb-2 pr-3 font-bold">Nhà</th>
-                  <th className="pb-2 pr-3 font-bold">Kỳ</th>
-                  <th className="pb-2 pr-3 text-right font-bold">Tổng kWh</th>
-                  <th className="pb-2 pr-3 text-right font-bold">Tổng tiền</th>
-                  <th className="pb-2 pr-3 text-right font-bold">Đơn giá</th>
+                  {/* Gộp tổng kWh · tổng tiền · đơn giá vào MỘT cột: ba con số đó là một
+                      phép chia, tách ra ba cột thì mắt phải ghép lại. Chỗ tiết kiệm được
+                      dành cho cột TIẾN ĐỘ — thứ duy nhất khác nhau giữa các dòng. */}
+                  <th className="pb-2 pr-3 font-bold">Nhà · kỳ</th>
+                  <th className="pb-2 pr-3 text-right font-bold">Số liệu tờ hoá đơn</th>
+                  <th className="pb-2 pr-3 font-bold">Tiến độ ghi chỉ số</th>
                   <th className="pb-2 pr-3 font-bold">Phát hành</th>
                   <th className="pb-2 font-bold" />
                 </tr>
@@ -1411,34 +1484,50 @@ export const EvnBillPublishing = () => {
                       className={`cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 ${revoked ? 'opacity-50' : ''}`}
                       title="Bấm để xem chi tiết"
                     >
-                      <td className="py-3 pr-3 font-semibold text-slate-800">
-                        {b.propertyName ?? `#${b.propertyId}`}
-                        {revoked && (
-                          <span className="ml-2 align-middle">
-                            <StatusPill label="Đã thu hồi" color="bg-slate-200 text-slate-600" />
+                      <td className="py-3 pr-3">
+                        <div className="flex items-center gap-2.5">
+                          {b.imageUrl && (
+                            <img src={b.imageUrl} alt="" className="h-9 w-9 shrink-0 rounded border border-slate-200 object-cover" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-slate-800">
+                              {b.propertyName ?? `#${b.propertyId}`}
+                              {revoked && (
+                                <span className="ml-2 align-middle">
+                                  <StatusPill label="Đã thu hồi" color="bg-slate-200 text-slate-600" />
+                                </span>
+                              )}
+                            </p>
+                            <p className="truncate text-xs text-slate-400">{b.billingPeriod}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap py-3 pr-3 text-right">
+                        <p className="font-bold tabular-nums text-slate-800">{formatVnd(b.totalAmount)}</p>
+                        <p className="text-xs tabular-nums text-slate-400">
+                          {b.totalKwh.toLocaleString('vi-VN')} kWh ·{' '}
+                          <span className="font-bold text-indigo-600">
+                            {formatVnd(b.unitPrice ?? evnUnitPrice(b.totalAmount, b.totalKwh))}/kWh
                           </span>
-                        )}
+                        </p>
                       </td>
-                      <td className="py-3 pr-3 text-slate-600">{b.billingPeriod}</td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-slate-700">
-                        {b.totalKwh.toLocaleString('vi-VN')}
-                      </td>
-                      <td className="py-3 pr-3 text-right tabular-nums text-slate-700">{formatVnd(b.totalAmount)}</td>
-                      <td className="py-3 pr-3 text-right font-bold tabular-nums text-indigo-700">
-                        {formatVnd(b.unitPrice ?? evnUnitPrice(b.totalAmount, b.totalKwh))}
-                      </td>
+                      <td className="py-3 pr-3"><ReadingProgress bill={b} /></td>
                       <td className="py-3 pr-3 text-xs text-slate-500">
                         {fmtDateTime(b.createdAt)}
                         {b.createdBy ? ` · ${b.createdBy}` : ''}
                       </td>
                       <td className="py-3 text-right">
+                        {/* Thu hồi là hành động MỘT CHIỀU và hiếm khi đúng — để nó thành nút
+                            viền đỏ to bằng mọi dòng là mời bấm nhầm. Thu về đúng một icon,
+                            hiện rõ khi rê chuột vào dòng. */}
                         {!revoked && (
                           <button
                             type="button"
+                            title="Thu hồi hoá đơn này"
                             onClick={(e) => { e.stopPropagation(); setRevokeTarget(b); setRevokeError(null); }}
-                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                            className="rounded-lg p-2 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
                           >
-                            <Trash2 className="h-3.5 w-3.5" /> Thu hồi
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         )}
                       </td>

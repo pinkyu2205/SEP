@@ -17,7 +17,7 @@ import {
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realPropertyService } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
+import { realManagerInvoiceService, ManagerInvoice, type UtilityInvoiceLite } from '@/services/manager/invoiceService';
 import { managerEvnBillService, evnUnitPrice, type EvnBill } from '@/services/manager/evnBillService';
 import { managerWaterBillService, waterUnitPrice, type WaterBill } from '@/services/manager/waterBillService';
 import { MeterTaskBanner } from '@/components/manager/MeterTaskBanner';
@@ -108,13 +108,121 @@ interface DeliveryState {
  * chỉ nói được "đã gửi" — tức chỉ là lời của hệ thống, không đối chất được. Nay phân biệt
  * rõ khách đã MỞ hay chưa.
  */
+/**
+ * Đường mở lại hoá đơn ĐÃ GỬI của một phòng.
+ *
+ * Trước đây gửi xong là hết đường quay lại: thẻ phòng đổi sang "✓ Đã gửi" kèm một dòng
+ * tóm tắt, và mọi thứ quản lý vừa làm — chỉ số đã ghi, ảnh mặt đồng hồ vừa chụp — biến
+ * mất khỏi màn hình. Khách gọi lên hỏi "sao tháng này cao thế" thì quản lý không có gì
+ * trong tay để trả lời, dù chính họ là người chụp tấm ảnh đó.
+ *
+ * Ẩn khi chưa tra được hoá đơn (mất mạng lúc nạp lịch sử) — một nút bấm vào không ra gì
+ * còn tệ hơn không có nút.
+ */
+const ViewIssuedButton = ({ invoice, unit, onOpen }: {
+  invoice?: UtilityInvoiceLite;
+  unit: string;
+  onOpen: (v: { invoice: UtilityInvoiceLite; unit: string }) => void;
+}) => {
+  if (!invoice) return null;
+  return (
+    <TouchableOpacity
+      style={styles.viewIssuedBtn}
+      onPress={() => onOpen({ invoice, unit })}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.viewIssuedText}>Xem lại hoá đơn đã gửi →</Text>
+    </TouchableOpacity>
+  );
+};
+
+/**
+ * Hộp xem lại hoá đơn đã gửi: đủ số liệu đã chốt + ẢNH ĐỒNG HỒ quản lý đã chụp.
+ *
+ * Chỉ ĐỌC, không có nút sửa: hoá đơn đã tới tay khách thì sửa ở đây là sửa sau lưng họ.
+ * Sai số thì đi đường khiếu nại để admin phân xử — có dấu vết, có người chịu trách nhiệm.
+ */
+const IssuedInvoiceSheet = ({ view, onClose, onZoom }: {
+  view: { invoice: UtilityInvoiceLite; unit: string };
+  onClose: () => void;
+  onZoom: (url: string) => void;
+}) => {
+  const inv = view.invoice;
+  const u = view.unit;
+  const line = (label: string, value: string) => (
+    <View style={styles.issuedRow}>
+      <Text style={styles.issuedLabel}>{label}</Text>
+      <Text style={styles.issuedValue}>{value}</Text>
+    </View>
+  );
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.issuedOverlay}>
+        <View style={styles.issuedSheet}>
+          <View style={styles.issuedHead}>
+            <Text style={styles.issuedTitle}>
+              Hoá đơn đã gửi{inv.roomNumber ? ` · Phòng ${inv.roomNumber}` : ''}
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.issuedClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: Spacing.lg }}>
+            {!!inv.meterImageUrl && (
+              <>
+                <Text style={styles.issuedSectionLabel}>Ảnh đồng hồ đã chụp</Text>
+                <TouchableOpacity onPress={() => onZoom(inv.meterImageUrl!)} activeOpacity={0.85}>
+                  <Image source={{ uri: inv.meterImageUrl }} style={styles.issuedPhoto} resizeMode="cover" />
+                  <Text style={styles.issuedPhotoHint}>Chạm để phóng to</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <Text style={styles.issuedSectionLabel}>Số liệu đã chốt</Text>
+            {!!inv.billingPeriod && line('Kỳ', inv.billingPeriod)}
+            {inv.prevReading != null && inv.newReading != null
+              && line('Chỉ số', `${inv.prevReading} → ${inv.newReading} ${u}`)}
+            {inv.consumption != null && line('Tiêu thụ', `${inv.consumption} ${u}`)}
+            {inv.unitPrice != null && inv.unitPrice > 0
+              && line('Đơn giá', `${Math.round(inv.unitPrice).toLocaleString('vi-VN')} đ/${u}`)}
+            {inv.amount != null && line('Thành tiền', fmt(inv.amount))}
+            {!!inv.tenantFullName && line('Khách thuê', inv.tenantFullName)}
+            {!!inv.sentAt && line('Gửi lúc', new Date(inv.sentAt).toLocaleString('vi-VN'))}
+
+            <Text style={styles.issuedNote}>
+              Chỉ xem lại. Số liệu đã tới tay khách nên không sửa được ở đây — sai thì để
+              khách khiếu nại để quản trị viên phân xử.
+            </Text>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 const DeliveryLine = ({ state }: { state?: DeliveryState }) => {
   if (!state) return null;
   const { paid, viewed } = state;
+  /*
+    `viewed` giờ ĐO ĐÚNG LƯỢT MỞ HOÁ ĐƠN (BE 02/09/2026).
+
+    Trước đó nó chỉ là cờ `read` của một bản ghi thông báo, nên khách vào thẳng tab Hoá
+    đơn đọc kỹ rồi gửi cả khiếu nại mà app quản lý vẫn ghi "chưa xem" — ca đã gặp thật.
+    BE thêm cột `utility_invoices.tenant_viewed_at`, đặt lần đầu khách gọi endpoint chi
+    tiết hoá đơn; FE app khách thuê gọi endpoint đó ngay khi mở màn (`InvoiceDetailScreen`).
+    Cờ thông báo cũ vẫn được dùng làm đường lui.
+
+    Nên câu chữ nói thẳng "hoá đơn" được. Riêng hoá đơn phát hành TRƯỚC bản vá thì cột mốc
+    rỗng và rơi về cờ thông báo — có thể báo "chưa xem" dù khách đã xem. Đó là vết của
+    chuyện chuyển đổi, sẽ tự hết theo các kỳ sau.
+
+    Xem doc-be/BE-NEED-tenant-viewed-theo-luot-mo-hoa-don-2026-09-02.md.
+  */
   const text = paid ? '✓ Khách đã thanh toán'
-    : viewed === true ? '👁 Khách đã xem — chưa thanh toán'
-      : viewed === false ? '📬 Đã chuyển — khách chưa mở'
-        : '📬 Đã chuyển'; // viewed == null: không tra được, đừng đoán
+    : viewed === true ? '👁 Khách đã xem hoá đơn — chưa trả tiền'
+      : viewed === false ? '📬 Đã gửi — khách chưa mở xem'
+        : '📬 Đã gửi vào app khách'; // viewed == null: không tra được, đừng đoán
   const color = paid ? Colors.success : viewed === true ? Colors.info : Colors.textMuted;
   return <Text style={[styles.deliveryLine, { color }]}>{text}</Text>;
 };
@@ -157,9 +265,16 @@ const ROOM_STATUS_RENTED = 'RENTED';
 // Chịu được null/undefined: số tiền ở đây đến từ BE (hoá đơn EVN admin đẩy, hoá đơn đã
 // phát hành) nên không đảm bảo là số — cùng lỗi đã làm ngã màn Lịch sử hoá đơn của khách
 // thuê ngày 13/08/2026. Xem `formatCurrency` trong @/utils/helpers.
+/**
+ * Tiền VND — LUÔN làm tròn về đồng.
+ *
+ * Đơn giá điện/nước máy chủ giữ ở scale 8 nên `tiêu thụ × đơn giá` gần như luôn ra số lẻ;
+ * không làm tròn thì màn hình hiện "428.300,66đ" — con số không tồn tại ngoài đời, mà dấu
+ * phẩy còn dễ bị đọc nhầm thành dấu phân nhóm nghìn.
+ */
 const fmt = (n: number | null | undefined) => {
   const v = Number(n);
-  return (Number.isFinite(v) ? v : 0).toLocaleString('vi-VN') + 'đ';
+  return Math.round(Number.isFinite(v) ? v : 0).toLocaleString('vi-VN') + 'đ';
 };
 const onlyDigits = (s: string) => (s || '').replace(/[^\d]/g, '');
 /**
@@ -344,6 +459,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [cameraTarget,       setCameraTarget]       = useState<CameraTarget | null>(null);
   /** Ảnh đang xem phóng to (null = đóng). */
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  /** Hoá đơn đã gửi đang mở xem lại — xem `IssuedInvoiceSheet`. */
+  const [issuedView, setIssuedView] = useState<{ invoice: UtilityInvoiceLite; unit: string } | null>(null);
 
   /**
    * Hoá đơn EVN của kỳ này do ADMIN phát hành (chỉ đọc). null = admin chưa đẩy.
@@ -382,10 +499,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    */
   const [elecSentKeys,  setElecSentKeys]  = useState<Set<string>>(new Set());
   const [elecDelivery,  setElecDelivery]  = useState<Map<string, DeliveryState>>(new Map());
+  /** Hoá đơn ĐÃ PHÁT HÀNH kỳ này theo phòng — để mở lại xem, xem `issued` trong fetchRoomHistory. */
+  const [elecIssued,   setElecIssued]   = useState<Map<string, UtilityInvoiceLite>>(new Map());
   /** Nhà nguyên căn đã gửi hoá đơn điện kỳ này — xem chú thích chỗ setElecHouseSent. */
   const [elecHouseSent, setElecHouseSent] = useState(false);
   const [waterSentKeys, setWaterSentKeys] = useState<Set<string>>(new Set());
   const [waterDelivery, setWaterDelivery] = useState<Map<string, DeliveryState>>(new Map());
+  const [waterIssued,  setWaterIssued]  = useState<Map<string, UtilityInvoiceLite>>(new Map());
 
   // ── Water state ────────────────────────────────────────────────────────────
   const [waterPropertyId,  setWaterPropertyId]  = useState<string | null>(null);
@@ -535,10 +655,20 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
      * Không có nó thì quản lý chỉ biết "hệ thống báo đã gửi", không đối chất được.
      */
     delivery: Map<string, DeliveryState>;
+    /**
+     * HOÁ ĐƠN ĐÃ PHÁT HÀNH của kỳ này, giữ nguyên vẹn theo từng phòng.
+     *
+     * Bản trước đọc danh sách này rồi chỉ giữ lại đúng hai thứ: "đã gửi chưa" và "khách
+     * xem chưa" — mọi số liệu còn lại (chỉ số, đơn giá, thành tiền, ẢNH ĐỒNG HỒ) bị vứt
+     * ngay tại vòng lặp. Nên gửi xong là quản lý không còn đường nào xem lại mình đã
+     * chụp cái gì và gửi số bao nhiêu, kể cả khi khách gọi lên hỏi.
+     */
+    issued: Map<string, UtilityInvoiceLite>;
   }> => {
     const lastReadings = new Map<string, number>();
     const sentKeys = new Set<string>();
     const delivery = new Map<string, DeliveryState>();
+    const issued = new Map<string, UtilityInvoiceLite>();
     let issuedQty = 0;
     /** Nhà nguyên căn đã có hoá đơn kỳ này chưa — cờ riêng, không phụ thuộc khoá chuỗi. */
     let houseSent = false;
@@ -581,6 +711,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
             paid: (inv.status || '').toUpperCase() === 'PAID',
             viewed: inv.tenantViewed ?? null,
           });
+          // Cùng điều kiện "bản ghi đầu tiên" với `delivery` — mảng đã sắp mới-nhất-trước.
+          issued.set(key, inv);
         }
         if (isHouse) houseSent = true;
         // Chỉ cộng hoá đơn PHÒNG: hạn mức là để so tổng các phòng với giấy của cả toà.
@@ -590,7 +722,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
       // Không lấy được lịch sử → rơi về mốc lúc đón khách, manager vẫn sửa tay được.
       // Cố tình KHÔNG chặn gửi khi lỗi mạng: chặn nhầm còn tệ hơn, vì BE vẫn chặn trùng.
     }
-    return { lastReadings, sentKeys, houseSent, issuedQty, delivery };
+    return { lastReadings, sentKeys, houseSent, issuedQty, delivery, issued };
   };
 
   // ── Ảnh + OCR ──────────────────────────────────────────────────────────────
@@ -657,13 +789,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
 
     const prop = properties.find(p => p.id === propId);
-    const { lastReadings, sentKeys, houseSent, issuedQty, delivery } = await fetchRoomHistory(
+    const { lastReadings, sentKeys, houseSent, issuedQty, delivery, issued } = await fetchRoomHistory(
       propId, 'ELECTRICITY', bill?.billingPeriod,
     );
     // Nhà nguyên căn: hoá đơn của BE không mang roomId nên khoá chuỗi có thể lệch với id
     // phòng ảo FE tự dựng. Dùng thẳng cờ `houseSent` để nút "đã gửi" không phụ thuộc vào
     // việc hai bên đặt tên khoá giống nhau.
     setElecDelivery(delivery);
+    setElecIssued(issued);
     setElecHouseSent(houseSent);
     setElecSentKeys(sentKeys);
     setElecIssuedQty(issuedQty);
@@ -880,8 +1013,9 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const initRoomWaterReadings = async (propId: string, period: string) => {
     const prop = properties.find(p => p.id === propId);
     if (!prop) return;
-    const { lastReadings, sentKeys, issuedQty, delivery } = await fetchRoomHistory(propId, 'WATER', period);
+    const { lastReadings, sentKeys, issuedQty, delivery, issued } = await fetchRoomHistory(propId, 'WATER', period);
     setWaterDelivery(delivery);
+    setWaterIssued(issued);
     setWaterIssuedQty(issuedQty);
     setWaterSentKeys(sentKeys);
     const rows: RoomWaterReading[] = prop.rooms.map(r => ({
@@ -1326,7 +1460,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 {r.sent && <Text style={styles.prevReading}>Chỉ số cũ: {r.prevReading} kWh</Text>}
 
                 {r.sent ? (
-                  /* Phòng đã gửi kỳ này: chỉ hiện tóm tắt, không cho gửi lần hai. */
+                  /* Phòng đã gửi kỳ này: tóm tắt + đường mở lại xem, không cho gửi lần hai. */
                   <View style={styles.sentSummary}>
                     <Text style={styles.sentSummaryText}>
                       {r.consumption != null
@@ -1334,6 +1468,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         : 'Đã gửi hóa đơn điện của kỳ này'}
                     </Text>
                     <DeliveryLine state={elecDelivery.get(r.roomId)} />
+                    <ViewIssuedButton
+                      invoice={elecIssued.get(r.roomId)}
+                      unit="kWh"
+                      onOpen={setIssuedView}
+                    />
                   </View>
                 ) : (
                   /* Phòng chưa gửi: nhập chỉ số (chụp OCR hoặc nhập tay) + nút gửi */
@@ -1646,6 +1785,11 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                         : 'Đã gửi hóa đơn nước của kỳ này'}
                     </Text>
                     <DeliveryLine state={waterDelivery.get(r.roomId)} />
+                    <ViewIssuedButton
+                      invoice={waterIssued.get(r.roomId)}
+                      unit="m³"
+                      onOpen={setIssuedView}
+                    />
                   </View>
                 ) : (
                   <>
@@ -1898,6 +2042,14 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {issuedView && (
+        <IssuedInvoiceSheet
+          view={issuedView}
+          onClose={() => setIssuedView(null)}
+          onZoom={(url) => { setIssuedView(null); setZoomImage(url); }}
+        />
+      )}
 
       <CameraCaptureModal
         visible={cameraTarget !== null}
@@ -2588,6 +2740,48 @@ const styles = StyleSheet.create({
     padding: Spacing.sm, marginTop: Spacing.xs,
   },
   sentSummaryText: { fontSize: 13, color: Colors.success, fontWeight: '600' },
+
+  // ── Xem lại hoá đơn đã gửi ──
+  viewIssuedBtn: { marginTop: Spacing.sm, alignSelf: 'flex-start' },
+  viewIssuedText: {
+    fontSize: 13, fontWeight: '700', color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  issuedOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
+  issuedSheet: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
+    maxHeight: '88%',
+  },
+  issuedHead: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.base,
+    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  },
+  issuedTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  issuedClose: { fontSize: 16, color: Colors.textMuted, paddingLeft: Spacing.md },
+  issuedSectionLabel: {
+    fontSize: 11, fontWeight: '800', color: Colors.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: Spacing.sm,
+    marginTop: Spacing.base,
+  },
+  issuedPhoto: {
+    width: '100%', height: 220, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.background,
+  },
+  issuedPhotoHint: {
+    fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.xs,
+  },
+  issuedRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
+  },
+  issuedLabel: { fontSize: 13, color: Colors.textSecondary },
+  issuedValue: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  issuedNote: {
+    marginTop: Spacing.base, fontSize: 12, lineHeight: 18, color: Colors.textMuted,
+  },
   changePropBtn: {
     backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.base, paddingVertical: 10, marginBottom: Spacing.sm,

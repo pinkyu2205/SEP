@@ -31,6 +31,7 @@ import { CheckoutInspectionScreen } from '@/screens/manager/CheckoutInspectionSc
 import { CheckoutSettlementScreen } from '@/screens/manager/CheckoutSettlementScreen';
 import { ResumeContractScreen } from '@/screens/manager/ResumeContractScreen';
 import { CheckoutRequestsScreen } from '@/screens/manager/CheckoutRequestsScreen';
+import { ExtensionRequestsScreen } from '@/screens/manager/ExtensionRequestsScreen';
 
 // Tenant-specific screens
 import { ProfileScreen } from '@/screens/shared/ProfileScreen';
@@ -129,6 +130,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="TenantMaintenance" component={TenantMaintenanceScreen} />
             <Stack.Screen name="ResumeContract" component={ResumeContractScreen} />
             <Stack.Screen name="CheckoutRequests" component={CheckoutRequestsScreen} />
+            <Stack.Screen name="ExtensionRequests" component={ExtensionRequestsScreen} />
             <Stack.Screen name="CheckoutInspection" component={CheckoutInspectionScreen} />
             <Stack.Screen name="CheckoutSettlement" component={CheckoutSettlementScreen} />
           </Stack.Group>
