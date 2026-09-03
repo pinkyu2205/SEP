@@ -4,7 +4,7 @@ import {
 
   BarChart3,
   CreditCard, ShieldAlert,
-  FileText,
+  FileText, CalendarPlus,
   FilePlus,
   MapPin,
   Menu,
@@ -100,6 +100,9 @@ const buildSections = (openMaintenance: number): SidebarSection[] => [
     items: [
       { label: 'Thanh toán', path: '/admin/billing', icon: CreditCard },
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
+      // Đơn xin gia hạn: khách đề nghị, ADMIN duyệt — quản lý chỉ góp ý. Xem
+      // services/extensionRequest.service.ts để biết vì sao không để quản lý duyệt.
+      { label: 'Đơn gia hạn', path: '/admin/extension-requests', icon: CalendarPlus },
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
       { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },

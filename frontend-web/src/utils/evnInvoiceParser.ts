@@ -141,6 +141,25 @@ export const arrearsPeriod = (base = serverNow()): { month: number; year: number
   return { month: d.getMonth() + 1, year: d.getFullYear() };
 };
 
+/**
+ * Chuỗi kỳ hiển thị → `{ month, year }`, để tra lại bản ghi hoá đơn tổng của kỳ đó.
+ *
+ * Lấy tháng ở mốc ĐẦU kỳ: chu kỳ chốt số thật của EVN vắt qua hai tháng
+ * (`07/08/2026 – 06/09/2026`) nhưng admin lưu bản ghi vào tháng 8 — mốc đầu mới là cái
+ * khớp với `bill.month`. Năm lấy ở mốc cuối, vì đầu kỳ hay được lược năm.
+ */
+export const periodMonthYear = (raw?: string | null): { month: number; year: number } | null => {
+  const s = (raw ?? '').trim();
+  const monthOnly = s.match(/^tháng\s*(\d{1,2})\s*\/\s*(\d{4})$/i);
+  if (monthOnly) return { month: Number(monthOnly[1]), year: Number(monthOnly[2]) };
+
+  const start = s.match(/(\d{1,2})\/(\d{1,2})/);
+  const year = s.match(/\d{4}/g)?.slice(-1)[0];
+  if (!start || !year) return null;
+  const month = Number(start[2]);
+  return month >= 1 && month <= 12 ? { month, year: Number(year) } : null;
+};
+
 const daysInMonth = (month: number, year: number) => new Date(year, month, 0).getDate();
 
 /**

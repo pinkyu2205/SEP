@@ -1,5 +1,5 @@
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Modal,
 } from 'react-native';
@@ -10,6 +10,7 @@ import {
 } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines, showAlert } from '@/utils';
 import { tenantInvoiceDisputeService } from '@/services/tenant/invoiceDisputeService';
+import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 import { UtilityEvidenceCard } from '@/components/invoice/UtilityEvidenceCard';
@@ -81,6 +82,40 @@ export const InvoiceDetailScreen: React.FC = () => {
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+
+  /**
+   * NẠP LẠI hoá đơn từ endpoint CHI TIẾT khi mở màn.
+   *
+   * ─── Vì sao cần, dù danh sách đã có sẵn đủ dữ liệu ────────────────────────
+   * `GET /tenant/me/invoices/{id}` là nơi máy chủ ĐÁNH DẤU khách đã mở hoá đơn
+   * (`markUtilityInvoiceViewedIfAbsent` → `utility_invoices.tenant_viewed_at`, BE
+   * 02/09/2026). Màn này trước đây dựng hoàn toàn từ `route.params.invoice` — object
+   * lấy từ danh sách — nên không gọi endpoint đó lần nào.
+   *
+   * Hậu quả đã gặp thật: khách mở hoá đơn ra đọc, gửi cả khiếu nại, mà app quản lý vẫn
+   * ghi "khách chưa xem" — vì mốc duy nhất máy chủ có là cờ đã-đọc của bản ghi thông
+   * báo, và khách vào thẳng tab Hoá đơn thì bản ghi đó nằm im. BE đã thêm cột mốc thật;
+   * nếu FE không gọi endpoint chi tiết thì cột đó vĩnh viễn rỗng và việc BE làm thành vô ích.
+   *
+   * Tiện thể lấy luôn dữ liệu mới: danh sách có thể đã cũ vài phút.
+   *
+   * Nuốt lỗi: mất mạng thì vẫn hiển thị dữ liệu từ danh sách, không chặn khách xem hoá đơn.
+   */
+  useEffect(() => {
+    let alive = true;
+    realTenantBillingService.getInvoice(initialInvoice.id)
+      .then(fresh => {
+        if (!alive) return;
+        /*
+         * GIỮ trạng thái `paid` đã set tại chỗ.
+         * Sự kiện realtime INVOICE_PAID có thể tới TRƯỚC khi lệnh gọi này trả về; đè bằng
+         * bản chụp cũ hơn của máy chủ là màn hình nhảy ngược từ "đã trả" về "chờ trả".
+         */
+        setInvoice(prev => (prev.status === 'paid' ? prev : toSharedBill(fresh)));
+      })
+      .catch(() => { /* giữ nguyên dữ liệu từ danh sách */ });
+    return () => { alive = false; };
+  }, [initialInvoice.id]);
 
   /**
    * Đây là màn khách đang mở mã QR ngồi chờ, nên realtime đáng giá nhất ở đây: BE ghi

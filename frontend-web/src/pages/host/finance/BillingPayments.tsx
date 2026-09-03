@@ -410,7 +410,7 @@ export const BillingPayments = () => {
             <h2 className="text-base font-semibold text-slate-900">Danh sách hoá đơn</h2>
             <p className="text-xs text-slate-500">
               {filtered.length} hoá đơn · tổng {formatCurrency(sumMoney(filtered))}
-              {fullAccess && ' · bấm vào dòng để xem giao dịch khách đã báo'}
+              {fullAccess && ' · bấm vào dòng để xem chi tiết'}
             </p>
           </div>
         </div>
@@ -439,7 +439,16 @@ export const BillingPayments = () => {
               { key: 'all' as StatusKey, label: 'Tất cả', count: statusCounts.all },
               { key: 'OVERDUE' as StatusKey, label: 'Quá hạn', count: statusCounts.OVERDUE },
               { key: 'PENDING' as StatusKey, label: 'Chờ thanh toán', count: statusCounts.PENDING },
-              ...(fullAccess ? [{ key: 'PARTIAL' as StatusKey, label: 'Trả 1 phần', count: statusCounts.PARTIAL }] : []),
+              /*
+                KHÔNG có chip "Trả 1 phần".
+                Hệ thống chỉ có hai kết cục cho một hoá đơn: thu ĐỦ 100%, hoặc chấm dứt
+                hợp đồng. `TenantInvoiceStatus.PARTIAL` tồn tại trong enum của BE nhưng
+                không luồng nào gán nó, nên chip này vĩnh viễn đếm 0 — một bộ lọc không
+                bao giờ lọc ra gì chỉ dạy người dùng bỏ qua cả hàng chip.
+
+                Nhãn PARTIAL trong `STATUS_META` thì GIỮ: nếu có bản ghi cũ lỡ mang trạng
+                thái đó, nó vẫn phải hiện ra tử tế thay vì phơi tên enum.
+              */
               { key: 'PAID' as StatusKey, label: 'Đã thanh toán', count: statusCounts.PAID },
               ...(fullAccess ? [{ key: 'CANCELLED' as StatusKey, label: 'Đã huỷ', count: statusCounts.CANCELLED }] : []),
             ]}
@@ -555,10 +564,19 @@ export const BillingPayments = () => {
                               )}
                             </div>
                             <div>
-                              <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Giao dịch khách đã báo ({claims.length})</p>
+                              {/* Hàng chờ ĐỐI SOÁT, không phải lịch sử thu tiền — xem chú
+                                  thích đầy đủ ở khối cùng tên trong `BillingPaymentMonitoring`. */}
+                              <p
+                                className="text-[11px] font-black uppercase tracking-wider text-slate-400"
+                                title="Chỉ gồm những lần khách TỰ BÁO đã chuyển khoản để người khác xác nhận bằng tay. Trả qua QR/PayOS được đối soát tự động nên không xuất hiện ở đây."
+                              >
+                                Khách tự báo đã chuyển khoản ({claims.length})
+                              </p>
                               {claims.length === 0 ? (
-                                <p className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
-                                  Chưa có giao dịch nào cho hoá đơn này.
+                                <p className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs leading-relaxed text-slate-400">
+                                  {r.status === 'PAID'
+                                    ? 'Khách trả qua QR/PayOS — hệ thống tự đối soát, không cần báo tay.'
+                                    : 'Khách chưa báo đã chuyển khoản. Trả qua QR/PayOS thì cũng không cần báo.'}
                                 </p>
                               ) : (
                                 <ul className="mt-2 space-y-2">

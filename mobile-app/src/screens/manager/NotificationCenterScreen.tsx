@@ -13,6 +13,7 @@ import { serverNow } from '@/utils/serverTime';
 type NotifType =
   | 'new_bill' | 'bill_overdue' | 'payment_success' | 'payment_pending_verify'
   | 'contract_expiring' | 'contract_expired'
+  | 'extension_requested' | 'extension_approved' | 'extension_closed'
   | 'maintenance_new' | 'maintenance_resolved' | 'maintenance_accepted'
   | 'maintenance_confirm' | 'maintenance_cost' | 'maintenance_cancelled' | 'maintenance_rejected'
   | 'maintenance_overdue'
@@ -46,6 +47,11 @@ const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; 
   // D-0: hôm nay hết hạn, hệ thống vừa mở phiếu trả phòng — quản lý phải đi nhận phòng.
   // Không dùng chung màu xanh của `contract_expiring` (mốc nhắc trước, chưa phải làm gì).
   contract_expired: { icon: '📕', color: Colors.error, bg: Colors.errorLight, category: 'Hợp đồng' },
+  // Đơn gia hạn (BE 02/09/2026). Cùng category 'Hợp đồng' để tab lọc gom chung, nhưng
+  // tách icon/màu: "đơn mới về" là việc phải xem, "đã duyệt" là tin đã xong.
+  extension_requested: { icon: '📝', color: Colors.warning, bg: Colors.warningLight, category: 'Hợp đồng' },
+  extension_approved:  { icon: '📗', color: Colors.success, bg: Colors.successLight, category: 'Hợp đồng' },
+  extension_closed:    { icon: '📄', color: Colors.textMuted, bg: Colors.background, category: 'Hợp đồng' },
   maintenance_new: { icon: '🔧', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
   maintenance_resolved: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
   maintenance_accepted: { icon: '🔧', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },

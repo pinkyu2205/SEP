@@ -21,6 +21,7 @@ import { BillingPaymentMonitoring } from '@/pages/admin/BillingPaymentMonitoring
 import { NhaThueLanding } from '@/pages/admin/onboarding/OnboardingLanding';
 import { ContractMonitoring } from '@/pages/admin/ContractMonitoring';
 import RefundDisputes from '@/pages/admin/RefundDisputes';
+import ExtensionRequests from '@/pages/admin/ExtensionRequests';
 import UtilityDisputes from '@/pages/admin/UtilityDisputes';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
@@ -119,6 +120,7 @@ function App() {
             <Route path="/admin/onboarding" element={<DraftOnboardingList />} />
             <Route path="/admin/billing" element={<BillingPaymentMonitoring />} />
             <Route path="/admin/contracts" element={<ContractMonitoring />} />
+            <Route path="/admin/extension-requests" element={<ExtensionRequests />} />
             <Route path="/admin/refund-disputes" element={<RefundDisputes />} />
             <Route path="/admin/utility-disputes" element={<UtilityDisputes />} />
             <Route path="/admin/handover" element={<HandoverMonitoring />} />

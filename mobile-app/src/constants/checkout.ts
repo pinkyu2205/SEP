@@ -19,7 +19,12 @@
  * Nguyên tắc:
  *   • Người đối trọng của manager là KHÁCH, không phải admin — admin không nằm trong luồng.
  *   • Số tiền quyết toán do BE tính, FE chỉ hiển thị.
- *   • Nợ hoá đơn trừ thẳng vào cọc; dư thì hoàn, thiếu thì khách đóng thêm.
+ *   • **CỌC KHÔNG TRỪ NỢ.** Khách phải thanh toán ĐỦ mọi hoá đơn trước, cọc hoàn lại
+ *     nguyên vẹn sau. Máy chủ chặn cứng: còn khoản nào chưa PAID thì lệnh ghi nhận hoàn
+ *     cọc ném `CHARGES_NOT_SETTLED` ("Thu đủ rồi mới hoàn cọc được") — xem
+ *     `CheckoutProcessServiceImpl` ≈ dòng 534.
+ *     (Dòng cũ ở đây ghi "nợ hoá đơn trừ thẳng vào cọc" — đó là bản kế hoạch 03/08/2026,
+ *     chính sách đã đổi sau đó mà chú thích chưa sửa theo. Sửa 02/09/2026.)
  *   • `complete` terminate hợp đồng NGAY nên chỉ mở khi đã quyết toán xong.
  */
 
