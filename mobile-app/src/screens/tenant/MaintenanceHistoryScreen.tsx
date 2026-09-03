@@ -9,6 +9,7 @@ import { formatDate, getMaintenanceCategoryLabel } from '@/utils';
 import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
+import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
 // Lịch sử = ticket đã kết thúc (flow mới: closed hoặc cancelled).
 const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
@@ -46,6 +47,7 @@ export const MaintenanceHistoryScreen: React.FC = () => {
     }
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  useMaintenanceRealtime({ onRefresh: load });
 
   // Mới nhất trước — trước đây giữ nguyên thứ tự API trả về (không đảm bảo theo thời
   // gian), "lịch sử" mà không sắp theo mốc gần đây nhất thì rất khó dò.

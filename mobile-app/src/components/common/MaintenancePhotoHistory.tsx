@@ -1,8 +1,9 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatDate } from '@/utils';
 import type { MaintenancePhotoHistoryDto } from '@/types';
+import { PhotoLightbox, type LightboxState } from './PhotoLightbox';
 
 const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: string }[] = [
   { type: 'BEFORE',         label: '📸 Hiện trạng ban đầu', color: Colors.warning },
@@ -18,6 +19,7 @@ const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: 
  * chiếu khi có tranh chấp. Dùng chung cho cả tenant và manager.
  */
 export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistoryDto[] }> = ({ photos }) => {
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   if (!photos || photos.length === 0) return null;
   const sorted = [...photos].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -27,20 +29,25 @@ export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistor
       {GROUPS.map(g => {
         const items = sorted.filter(p => p.type === g.type);
         if (items.length === 0) return null;
+        const uris = items.map(p => p.url);
         return (
           <View key={g.type} style={s.group}>
             <Text style={[s.groupLabel, { color: g.color }]}>{g.label} ({items.length})</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {items.map((p, i) => (
-                <View key={`${p.url}-${i}`} style={[s.item, { borderColor: g.color + '50' }]}>
+                <TouchableOpacity key={`${p.url}-${i}`} activeOpacity={0.85}
+                  style={[s.item, { borderColor: g.color + '50' }]}
+                  onPress={() => setLightbox({ uris, index: i })}
+                >
                   <Image source={{ uri: p.url }} style={s.thumb} />
                   <Text style={s.date}>{formatDate(p.createdAt)}</Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
         );
       })}
+      <PhotoLightbox state={lightbox} onChange={setLightbox} />
     </View>
   );
 };

@@ -6,8 +6,10 @@ import {
 } from 'lucide-react';
 import { Overlay } from '@/components/Overlay';
 import { maintenanceService } from '@/services/maintenance.service';
+import { useMaintenanceRealtime } from '@/hooks/useMaintenanceRealtime';
 import { serverNow } from '@/utils/serverTime';
 import type { MaintenanceRequestResponse } from '@/types/api.types';
+import { RealtimeBadge } from './shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Báo lỗi do khách — Admin duyệt. Redesign 01/09/2026: manager chỉ gửi mô tả +
@@ -92,6 +94,9 @@ export const MaintenanceFaultReview = () => {
   }, [nextPage]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Realtime: BE ship 03/09/2026 — báo mới nhất tự hiện, không cần bấm "Làm mới" nữa.
+  const { connected: liveOn } = useMaintenanceRealtime({ onRefresh: load });
 
   // faultResolutionPath có giá trị = phiếu thuộc luồng reject-fault cũ (mobile tự xử lý,
   // không qua admin) — không hiện ở đây dù cùng status TENANT_FAULT.
@@ -182,6 +187,7 @@ export const MaintenanceFaultReview = () => {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <RealtimeBadge connected={liveOn} />
           {tab === 'reviewed' && reviewedList.length > 0 && (
             <button onClick={exportCsv}
               title="Xuất CSV danh sách đang hiển thị (đã áp tìm kiếm/lọc)"

@@ -16,7 +16,9 @@ import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
+import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
 import { serverNow } from '@/utils/serverTime';
+import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
@@ -74,12 +76,21 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const apiErrMsg = (e: any, fallback: string) =>
     e?.response?.data?.error || e?.response?.data?.message || fallback;
 
+  // Tự nạp lại khi phiếu ĐÚNG NÀY có cập nhật (manager duyệt/báo sửa xong, admin duyệt
+  // lỗi do khách...) — không cần thoát vào lại màn.
+  useMaintenanceRealtime({
+    enabled: isRealId,
+    filter: e => e.requestId === idNum,
+    onRefresh: () => { void refreshReal(); },
+  });
+
   // Nộp ảnh đã tự sửa (Luồng B — status pending_tenant_repair, chưa nộp ảnh).
   const [selfRepairNote, setSelfRepairNote] = useState('');
   const [selfRepairUris, setSelfRepairUris] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   // `request` chưa có ở lần render đầu khi vào bằng deep-link (chỉ có `requestId`).
   const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.open;
@@ -237,9 +248,14 @@ export const MaintenanceDetailScreen: React.FC = () => {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>🖼️ Ảnh hiện trạng</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
-              {(request.beforeImages?.length ? request.beforeImages : request.images).map((uri, i) => (
-                <Image key={i} source={{ uri }} style={styles.attachmentImage} />
-              ))}
+              {(() => {
+                const uris = request.beforeImages?.length ? request.beforeImages : request.images;
+                return uris.map((uri, i) => (
+                  <TouchableOpacity key={i} activeOpacity={0.85} onPress={() => setLightbox({ uris, index: i })}>
+                    <Image source={{ uri }} style={styles.attachmentImage} />
+                  </TouchableOpacity>
+                ));
+              })()}
             </ScrollView>
           </View>
         )}
@@ -258,7 +274,10 @@ export const MaintenanceDetailScreen: React.FC = () => {
             {(request.faultEvidenceImages?.length ?? 0) > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
                 {request.faultEvidenceImages!.map((uri, i) => (
-                  <Image key={i} source={{ uri }} style={styles.attachmentImage} />
+                  <TouchableOpacity key={i} activeOpacity={0.85}
+                    onPress={() => setLightbox({ uris: request.faultEvidenceImages!, index: i })}>
+                    <Image source={{ uri }} style={styles.attachmentImage} />
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
@@ -271,7 +290,10 @@ export const MaintenanceDetailScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>🛠 Ảnh sau sửa chữa</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
               {request.afterImages!.map((uri, i) => (
-                <Image key={i} source={{ uri }} style={styles.attachmentImage} />
+                <TouchableOpacity key={i} activeOpacity={0.85}
+                  onPress={() => setLightbox({ uris: request.afterImages!, index: i })}>
+                  <Image source={{ uri }} style={styles.attachmentImage} />
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
@@ -300,7 +322,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
             <View style={styles.rejectImagesRow}>
               {selfRepairUris.map((uri, i) => (
                 <View key={`${uri}-${i}`} style={styles.rejectThumbWrap}>
-                  <Image source={{ uri }} style={styles.rejectThumb} />
+                  <TouchableOpacity onPress={() => setLightbox({ uris: selfRepairUris, index: i })}>
+                    <Image source={{ uri }} style={styles.rejectThumb} />
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.rejectThumbRemove}
                     onPress={() => setSelfRepairUris(prev => prev.filter((_, idx) => idx !== i))}
@@ -400,6 +424,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </Pressable>
         </Pressable>
       </Modal>
+      <PhotoLightbox state={lightbox} onChange={setLightbox} />
     </SafeAreaView>
   );
 };
