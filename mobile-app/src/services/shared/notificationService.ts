@@ -193,6 +193,26 @@ const normalizeType = (row: BeNotificationRow): string => {
   if (raw === 'CONTRACT_EXPIRING') {
     return /hôm nay/i.test(row.title) ? 'contract_expired' : 'contract_expiring';
   }
+  /*
+   * ĐƠN GIA HẠN (BE 02/09/2026) — sáu loại, phải bắt TRƯỚC nhánh `includes('CONTRACT')`
+   * bên dưới, nếu không mọi tin gia hạn đều rơi vào `contract_assigned` và bấm vào lại mở
+   * màn đón khách.
+   *
+   * Hai loại `*_MGR` là bản gửi cho quản lý của cùng sự kiện — nội dung khác, nhưng cùng
+   * thuộc nhóm hợp đồng nên gộp chung nhãn.
+   */
+  if (raw.startsWith('EXTENSION_')) {
+    // Được duyệt là tin vui và là thứ khách chờ nhất — cho nhãn riêng, đừng để lẫn.
+    if (raw === 'EXTENSION_APPROVED' || raw === 'EXTENSION_APPROVED_MGR') {
+      return 'extension_approved';
+    }
+    // Từ chối / quá hạn / khách rút: đều là "đơn khép lại", cùng một nhãn.
+    if (raw === 'EXTENSION_REJECTED' || raw === 'EXTENSION_REJECTED_MGR'
+        || raw === 'EXTENSION_EXPIRED' || raw === 'EXTENSION_WITHDRAWN') {
+      return 'extension_closed';
+    }
+    return 'extension_requested';
+  }
   // Gán đón khách / hợp đồng (assign-manager, duyệt giá...) → mở ResumeContract.
   if (raw.includes('CONTRACT') || raw.includes('ASSIGN') || raw.includes('ONBOARD') ||
       /đón khách|hợp đồng/i.test(row.title)) {

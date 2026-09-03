@@ -12,7 +12,7 @@ import {
 import type { PropertyResponse } from '@/types/api.types';
 import { monthPeriod, onlyDigits, periodProblem, arrearsPeriod } from '@/utils/evnInvoiceParser';
 import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
-import { PropertyCombobox } from './EvnBillPublishing';
+import { PropertyCombobox, ReadingProgress } from './EvnBillPublishing';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
 import { UtilityBillZipImport } from './UtilityBillZipImport';
@@ -960,32 +960,54 @@ export const WaterBillPublishing = () => {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="py-2 pr-3">Nhà</th>
-                  <th className="py-2 pr-3">Kỳ</th>
-                  <th className="py-2 pr-3 text-right">Tổng m³</th>
-                  <th className="py-2 pr-3 text-right">Tổng tiền</th>
+                  {/* Cùng bố cục với trang điện — xem chú thích ở `EvnBillPublishing`. */}
+                  <th className="py-2 pr-3">Nhà · kỳ</th>
+                  <th className="py-2 pr-3 text-right">Số liệu tờ hoá đơn</th>
+                  <th className="py-2 pr-3">Tiến độ ghi chỉ số</th>
                   <th className="py-2 pr-3">Trạng thái</th>
                   <th className="py-2" />
                 </tr>
               </thead>
               <tbody>
                 {visibleBills.map((b) => (
-                  <tr key={b.id} className="border-b border-slate-100">
-                    <td className="py-3 pr-3 font-semibold text-slate-700">{b.propertyName ?? `#${b.propertyId}`}</td>
-                    <td className="py-3 pr-3 text-slate-600">{b.billingPeriod}</td>
-                    <td className="py-3 pr-3 text-right tabular-nums">{b.totalQuantity?.toLocaleString('vi-VN')}</td>
-                    <td className="py-3 pr-3 text-right tabular-nums">{formatVnd(b.totalAmount)}</td>
+                  <tr key={b.id} className={`border-b border-slate-100 ${
+                    b.status === 'REVOKED' ? 'opacity-50' : ''}`}>
+                    <td className="py-3 pr-3">
+                      <div className="flex items-center gap-2.5">
+                        {b.imageUrl && (
+                          <img src={b.imageUrl} alt="" className="h-9 w-9 shrink-0 rounded border border-slate-200 object-cover" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-800">
+                            {b.propertyName ?? `#${b.propertyId}`}
+                          </p>
+                          <p className="truncate text-xs text-slate-400">{b.billingPeriod}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap py-3 pr-3 text-right">
+                      <p className="font-bold tabular-nums text-slate-800">{formatVnd(b.totalAmount)}</p>
+                      <p className="text-xs tabular-nums text-slate-400">
+                        {b.totalQuantity?.toLocaleString('vi-VN')} m³ ·{' '}
+                        <span className="font-bold text-sky-600">
+                          {formatVnd(Math.round(b.unitPrice ?? waterUnitPrice(b.totalAmount, b.totalQuantity)))}/m³
+                        </span>
+                      </p>
+                    </td>
+                    <td className="py-3 pr-3"><ReadingProgress bill={b} unit="m³" /></td>
                     <td className="py-3 pr-3">
                       <StatusPill label={b.status === 'REVOKED' ? 'Đã thu hồi' : 'Đang hiệu lực'} color={b.status === 'REVOKED' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'} />
                     </td>
                     <td className="py-3 text-right">
+                      {/* Icon thay vì nút viền đỏ — xem lý do ở trang điện. */}
                       {b.status !== 'REVOKED' && (
                         <button
                           type="button"
+                          title="Thu hồi hoá đơn này"
                           onClick={() => revoke(b.id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                          className="rounded-lg p-2 text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
                         >
-                          <Trash2 className="h-3.5 w-3.5" /> Thu hồi
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       )}
                     </td>

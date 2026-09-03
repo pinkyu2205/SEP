@@ -811,16 +811,38 @@ export const CheckoutDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Actions */}
+        {/*
+          Actions.
+
+          Phiếu do HỆ THỐNG tạo (hợp đồng hết hạn) thì KHÔNG hiện nút huỷ — máy chủ đã
+          chặn (`CheckoutOrigin.CONTRACT_EXPIRED`), và huỷ nó cũng chẳng làm hợp đồng
+          hết-hạn-ngược-lại được, chỉ xoá mất việc phải làm.
+
+          Bày nút rồi để khách bấm vào mới nhận lỗi thì họ học được là "app hay báo lỗi",
+          chứ không học được luật. Thay bằng một dòng nói thẳng.
+        */}
         {status === 'PENDING' && (
-          <TouchableOpacity
-            style={[styles.cancelBtn, cancelling && { opacity: 0.6 }]}
-            onPress={handleCancel}
-            disabled={cancelling}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.cancelBtnText}>{cancelling ? 'Đang hủy...' : '🚫 Hủy yêu cầu trả phòng'}</Text>
-          </TouchableOpacity>
+          checkout.origin === 'CONTRACT_EXPIRED' ? (
+            <View style={[styles.banner, { backgroundColor: Colors.background }]}>
+              <Text style={styles.bannerIcon}>📋</Text>
+              <Text style={[styles.bannerTitle, { color: Colors.textPrimary }]}>
+                Phiếu này do hệ thống tạo
+              </Text>
+              <Text style={styles.bannerDesc}>
+                Hợp đồng của bạn đã tới hạn nên hệ thống tự mở phiếu trả phòng. Quản lý sẽ
+                liên hệ để hẹn ngày kiểm phòng. Cần hỗ trợ thì liên hệ quản lý.
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.cancelBtn, cancelling && { opacity: 0.6 }]}
+              onPress={handleCancel}
+              disabled={cancelling}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.cancelBtnText}>{cancelling ? 'Đang hủy...' : '🚫 Hủy yêu cầu trả phòng'}</Text>
+            </TouchableOpacity>
+          )
         )}
         {(isCancelled || isRejected) && (
           <TouchableOpacity

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { AlertTriangle, RefreshCw, ShieldAlert, CheckCircle2, XCircle } from 'lucide-react';
 import { Overlay } from '@/components/Overlay';
+import { HistoryList } from './HistoryList';
 import { formatCurrency } from '@/utils';
 import {
   checkoutAdminService,
@@ -51,6 +52,120 @@ const daysSince = (iso?: string): number | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
   return Number.isNaN(t) ? null : Math.floor((Date.now() - t) / 86_400_000);
+};
+
+/**
+ * Thẻ chi tiết một hồ sơ hoàn cọc.
+ *
+ * Tách khỏi vòng lặp để tab LỊCH SỬ dùng lại được: ở đó mỗi hồ sơ là một dòng gọn,
+ * bấm mới dựng thẻ này ra. Xem `HistoryList` để biết vì sao hai tab phải khác nhau.
+ */
+const RefundCard = ({ r, open, onResolve }: {
+  r: AdminCheckoutRequest; open: boolean; onResolve: () => void;
+}) => {
+  const s = r.settlement!;
+  const days = daysSince(s.refundDisputedAt);
+  return (
+  <div className={`rounded-2xl border bg-white shadow-sm ${
+    open ? 'border-rose-200' : 'border-slate-200'}`}>
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-4">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className={`h-4 w-4 shrink-0 ${
+            open ? 'text-rose-500' : 'text-slate-400'}`} />
+          <p className="font-bold text-slate-900">{r.tenantFullName ?? '(chưa có tên)'}</p>
+          {/* Số ngày treo: khiếu nại càng lâu càng dễ thành tranh chấp thật. */}
+          {open ? (days !== null && (
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+              days >= 3 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+              treo {days} ngày
+            </span>
+          )) : (
+            /* Đã khép: nhãn nói KẾT QUẢ, vì đó mới là thứ người tra cứu cần thấy. */
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+              s.refundConfirmedAt
+                ? 'bg-emerald-100 text-emerald-700'
+                : s.refundDisputeOutcome === 'RETRANSFERRED'
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'bg-slate-200 text-slate-600'}`}>
+              {s.refundConfirmedAt
+                ? 'Khách đã xác nhận nhận đủ'
+                : s.refundDisputeOutcome === 'RETRANSFERRED'
+                  ? 'Đã chuyển lại'
+                  : 'Đã bác khiếu nại'}
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-slate-500">
+          {r.propertyName}{r.roomNumber ? ` · Phòng ${r.roomNumber}` : ''} · {r.contractCode}
+          {r.tenantPhone ? ` · ${r.tenantPhone}` : ''}
+        </p>
+      </div>
+      <div className="text-right">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tiền cọc</p>
+        <p className="text-xl font-extrabold text-slate-900">
+          {formatCurrency(s.depositAmount ?? 0)}
+        </p>
+      </div>
+    </div>
+
+    <div className="grid gap-4 px-6 py-4 md:grid-cols-2">
+      {/* Lời khách — đặt trước, vì đây là thứ cần xác minh. */}
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">
+          Khách phản ánh · {fmtDate(s.refundDisputedAt)}
+        </p>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-rose-900">
+          {s.refundDisputeReason || '(không ghi nội dung)'}
+        </p>
+      </div>
+
+      {/* Bằng chứng phía host — số tài khoản khách khai + biên lai đã tải. */}
+      <div className="rounded-xl border border-slate-200 p-4">
+        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+          Chủ nhà khai đã chuyển · {fmtDate(s.refundPaidAt)}
+        </p>
+        <div className="mt-2 space-y-1 text-sm">
+          <p className="text-slate-600">
+            Tài khoản khách khai:{' '}
+            <span className="font-mono font-bold text-slate-900">
+              {[r.refundBankName, r.refundBankAccount, r.refundAccountHolder]
+                .filter(Boolean).join(' — ') || '(khách không điền)'}
+            </span>
+          </p>
+          {s.refundProofUrl ? (
+            <a href={s.refundProofUrl} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:underline">
+              📎 Xem ảnh biên lai
+            </a>
+          ) : (
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-700">
+              <AlertTriangle className="h-3.5 w-3.5" /> Không có ảnh biên lai
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+
+    {open ? (
+      <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+        <button onClick={() => onResolve()}
+          className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+          Kết luận khiếu nại
+        </button>
+      </div>
+    ) : (
+      /* Đã khép thì KHÔNG có nút — tránh mở lại một vụ đã kết luận. */
+      <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
+        {s.refundDisputeResolvedAt
+          ? `Quản trị viên kết luận ngày ${fmtDate(s.refundDisputeResolvedAt)}`
+          : s.refundConfirmedAt
+            ? `Khách tự xác nhận đã nhận đủ ngày ${fmtDate(s.refundConfirmedAt)} — không cần phân xử`
+            : 'Đã khép'}
+      </p>
+    )}
+  </div>
+  );
 };
 
 const RefundDisputes = () => {
@@ -155,114 +270,41 @@ const RefundDisputes = () => {
             {rows.filter(r => !!r.settlement).length} hồ sơ có bảng quyết toán
           </p>
         </div>
-      ) : (
+      ) : tab === 'open' ? (
+        // Đang chờ: vài hồ sơ, mỗi hồ sơ là một việc phải làm → bày hết chi tiết.
         <div className="mt-6 space-y-4">
-          {disputes.map(r => {
-            const s = r.settlement!;
-            const days = daysSince(s.refundDisputedAt);
-            return (
-              <div key={r.id} className={`rounded-2xl border bg-white shadow-sm ${
-                tab === 'open' ? 'border-rose-200' : 'border-slate-200'}`}>
-                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-4">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <ShieldAlert className={`h-4 w-4 shrink-0 ${
-                        tab === 'open' ? 'text-rose-500' : 'text-slate-400'}`} />
-                      <p className="font-bold text-slate-900">{r.tenantFullName ?? '(chưa có tên)'}</p>
-                      {/* Số ngày treo: khiếu nại càng lâu càng dễ thành tranh chấp thật. */}
-                      {tab === 'open' ? (days !== null && (
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                          days >= 3 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                          treo {days} ngày
-                        </span>
-                      )) : (
-                        /* Đã khép: nhãn nói KẾT QUẢ, vì đó mới là thứ người tra cứu cần thấy. */
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                          s.refundConfirmedAt
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : s.refundDisputeOutcome === 'RETRANSFERRED'
-                              ? 'bg-indigo-100 text-indigo-700'
-                              : 'bg-slate-200 text-slate-600'}`}>
-                          {s.refundConfirmedAt
-                            ? 'Khách đã xác nhận nhận đủ'
-                            : s.refundDisputeOutcome === 'RETRANSFERRED'
-                              ? 'Đã chuyển lại'
-                              : 'Đã bác khiếu nại'}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      {r.propertyName}{r.roomNumber ? ` · Phòng ${r.roomNumber}` : ''} · {r.contractCode}
-                      {r.tenantPhone ? ` · ${r.tenantPhone}` : ''}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Tiền cọc</p>
-                    <p className="text-xl font-extrabold text-slate-900">
-                      {formatCurrency(s.depositAmount ?? 0)}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 px-6 py-4 md:grid-cols-2">
-                  {/* Lời khách — đặt trước, vì đây là thứ cần xác minh. */}
-                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">
-                      Khách phản ánh · {fmtDate(s.refundDisputedAt)}
-                    </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-rose-900">
-                      {s.refundDisputeReason || '(không ghi nội dung)'}
-                    </p>
-                  </div>
-
-                  {/* Bằng chứng phía host — số tài khoản khách khai + biên lai đã tải. */}
-                  <div className="rounded-xl border border-slate-200 p-4">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Chủ nhà khai đã chuyển · {fmtDate(s.refundPaidAt)}
-                    </p>
-                    <div className="mt-2 space-y-1 text-sm">
-                      <p className="text-slate-600">
-                        Tài khoản khách khai:{' '}
-                        <span className="font-mono font-bold text-slate-900">
-                          {[r.refundBankName, r.refundBankAccount, r.refundAccountHolder]
-                            .filter(Boolean).join(' — ') || '(khách không điền)'}
-                        </span>
-                      </p>
-                      {s.refundProofUrl ? (
-                        <a href={s.refundProofUrl} target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:underline">
-                          📎 Xem ảnh biên lai
-                        </a>
-                      ) : (
-                        <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-700">
-                          <AlertTriangle className="h-3.5 w-3.5" /> Không có ảnh biên lai
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {tab === 'open' ? (
-                  <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
-                    <button onClick={() => setTarget(r)}
-                      className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-                      Kết luận khiếu nại
-                    </button>
-                  </div>
-                ) : (
-                  /* Đã khép thì KHÔNG có nút — tránh mở lại một vụ đã kết luận. */
-                  <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
-                    {s.refundDisputeResolvedAt
-                      ? `Quản trị viên kết luận ngày ${fmtDate(s.refundDisputeResolvedAt)}`
-                      : s.refundConfirmedAt
-                        ? `Khách tự xác nhận đã nhận đủ ngày ${fmtDate(s.refundConfirmedAt)} — không cần phân xử`
-                        : 'Đã khép'}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+          {disputes.map(r => (
+            <RefundCard key={r.id} r={r} open onResolve={() => setTarget(r)} />
+          ))}
         </div>
+      ) : (
+        /* Lịch sử: kho tra cứu chỉ tăng → mỗi hồ sơ MỘT DÒNG, bấm mới mở thẻ. */
+        <HistoryList
+          searchPlaceholder="Tìm theo tên khách, SĐT, tên nhà…"
+          emptyText="Không có hồ sơ nào khớp từ khoá."
+          rows={disputes.map(r => {
+            const s = r.settlement!;
+            return {
+              key: r.id,
+              icon: <ShieldAlert className="h-4 w-4 text-slate-400" />,
+              title: r.tenantFullName ?? '(chưa có tên)',
+              subtitle: [r.propertyName, r.roomNumber ? `P.${r.roomNumber}` : null]
+                .filter(Boolean).join(' · '),
+              status: s.refundDisputeResolvedAt
+                ? { label: 'Đã phân xử', cls: 'bg-slate-200 text-slate-600' }
+                : { label: 'Khách tự xác nhận', cls: 'bg-emerald-100 text-emerald-700' },
+              amount: s.depositAmount ?? 0,
+              date: fmtDate(s.refundDisputeResolvedAt ?? s.refundConfirmedAt),
+              search: [r.tenantFullName, r.tenantPhone, r.propertyName, r.roomNumber]
+                .filter(Boolean).join(' '),
+              detail: () => (
+                <div className="p-3">
+                  <RefundCard r={r} open={false} onResolve={() => setTarget(r)} />
+                </div>
+              ),
+            };
+          })}
+        />
       )}
 
       {target && (

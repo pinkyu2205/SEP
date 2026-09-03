@@ -57,6 +57,22 @@ export interface EvnBill {
   imageUrl?: string | null;
   /** PUBLISHED = manager thấy và dùng được; REVOKED = admin đã thu hồi. */
   status?: 'PUBLISHED' | 'REVOKED';
+  /**
+   * TIẾN ĐỘ GHI CHỈ SỐ của nhà chia phòng — BE trả sẵn trong `UtilityBillResponse` từ
+   * 17/08/2026, FE trước đây không khai nên dữ liệu về rồi bị bỏ.
+   *
+   * Đây mới là thứ admin cần sau khi phát hành: hoá đơn tổng chỉ là ĐẦU VÀO, tiền chỉ
+   * thật sự tới khách khi quản lý đi đọc đủ đồng hồ từng phòng. Không có hai con số này
+   * thì bảng "đã phát hành" chỉ nói được "tôi đã bấm gửi", không nói được việc đã xong.
+   *
+   * Nhà nguyên căn: `roomsTotal = 0` — hoá đơn đi thẳng tới khách, không có gì phải chờ.
+   */
+  roomsTotal?: number;
+  roomsDone?: number;
+  /** Hạn quản lý phải chụp xong trong ngày (`yyyy-MM-dd`). Null với nguyên căn. */
+  readingDeadline?: string | null;
+  /** Quá hạn mà chưa ghi đủ phòng. */
+  overdue?: boolean;
   createdBy?: string;
   createdAt?: string;
 }
@@ -68,7 +84,7 @@ export interface CreateEvnBillInput {
   year: number;
   totalKwh: number;
   totalAmount: number;
-  imageUrl?: string;
+  imageUrl?: string;
   /**
    * Chỉ số công tơ CŨ / MỚI in trên giấy EVN — chỉ có nghĩa với NHÀ NGUYÊN CĂN.
    *

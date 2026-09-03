@@ -43,6 +43,11 @@ export interface WaterBill {
   unitPrice?: number;
   imageUrl?: string | null;
   status?: 'PUBLISHED' | 'REVOKED';
+  /** Tiến độ ghi chỉ số từng phòng — xem chú thích cùng tên ở `evnBill.service.ts`. */
+  roomsTotal?: number;
+  roomsDone?: number;
+  readingDeadline?: string | null;
+  overdue?: boolean;
   createdBy?: string;
   createdAt?: string;
 }
@@ -54,7 +59,7 @@ export interface CreateWaterBillInput {
   year: number;
   totalQuantity: number;
   totalAmount: number;
-  imageUrl?: string;
+  imageUrl?: string;
   /** Chỉ số đồng hồ CŨ / MỚI — chỉ có nghĩa với nhà nguyên căn. Xem CreateEvnBillInput. */
   prevReading?: number;
   newReading?: number;

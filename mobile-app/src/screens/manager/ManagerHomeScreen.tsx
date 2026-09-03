@@ -43,6 +43,10 @@ const QUICK_ACTIONS = [
   // Đối xứng với 'Đón khách' — hai đầu vòng đời khách thuê, cùng nhìn từ phía manager.
   // Không đặt 'Trả phòng': đó là hành động của KHÁCH, manager chỉ tiếp nhận và xử lý hồ sơ.
   { emoji: '🚪', label: 'Tiễn khách',     route: 'CheckoutRequests',      color: Colors.error   },
+  // Đơn xin gia hạn (BE 02/09/2026). Đặt CẠNH 'Tiễn khách' vì hai thứ là hai ngã rẽ của
+  // cùng một thời điểm: 30 ngày cuối hợp đồng, khách hoặc xin ở tiếp hoặc dọn đi.
+  // Quản lý KHÔNG duyệt ở đây — chỉ xem và ghi ý kiến cho quản trị viên.
+  { emoji: '📝', label: 'Đơn gia hạn',    route: 'ExtensionRequests',     color: Colors.warning },
   // Mọi khoản thu ngoài tiền nhà (cọc, bảo trì, điện nước) — tách khỏi tab Hoá đơn để
   // hai việc không lẫn vào nhau.
   { emoji: '💳', label: 'Tiền khách đã trả', route: 'ManagerPaymentHistory', color: Colors.info    },
