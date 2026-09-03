@@ -80,6 +80,30 @@ export interface BillingRealtimeEvent {
   paymentStatus?: string;
 }
 
+/**
+ * Event bảo trì — BE ship 03/09/2026 (commit `3381711`, xem
+ * `docs/maintenance-realtime-socket-spec.md` bên repo BE). Đẩy qua queue RIÊNG
+ * `/user/queue/maintenance`, nhưng CHUNG một kết nối STOMP với billing — đúng lý do
+ * `client`/`startClient` ở dưới là singleton toàn app.
+ */
+export interface MaintenanceRealtimeEvent {
+  event: 'MAINTENANCE_CREATED' | 'MAINTENANCE_APPROVED' | 'MAINTENANCE_REJECT_FAULT'
+    | 'MAINTENANCE_FAULT_REPORTED' | 'MAINTENANCE_ADMIN_REVIEWED'
+    | 'MAINTENANCE_SELF_REPAIR_SUBMITTED' | 'MAINTENANCE_VERIFY_REPAIR'
+    | 'MAINTENANCE_COMPLETED' | 'MAINTENANCE_CANCELLED_BY_TENANT'
+    | 'MAINTENANCE_CANCELLED_BY_MANAGER' | string;
+  requestId: number;
+  requestCode?: string;
+  status?: string;
+  propertyId?: number;
+  propertyName?: string;
+  roomId?: number;
+  roomNumber?: string;
+  tenantUserId?: string;
+  assignedManagerId?: string;
+  adminApproved?: boolean | null;
+}
+
 /** Base URL là http(s) → đổi sang ws(s). Web (Metro proxy) để trống thì lấy origin. */
 const resolveWsUrl = (): string => {
   const base = API_CONFIG.REAL_BASE_URL
@@ -99,10 +123,15 @@ const resolveWsUrl = (): string => {
  * realtime hay không, không phải chờ nối lại từ đầu.
  */
 type EventListener = (event: BillingRealtimeEvent) => void;
+type MaintenanceEventListener = (event: MaintenanceRealtimeEvent) => void;
 type ConnListener = (connected: boolean) => void;
 
 const eventListeners = new Set<EventListener>();
+const maintenanceEventListeners = new Set<MaintenanceEventListener>();
 const connListeners = new Set<ConnListener>();
+
+/** Còn ai đang cần kết nối (billing HOẶC maintenance) không — dùng để mở/đóng client. */
+const hasListeners = () => eventListeners.size > 0 || maintenanceEventListeners.size > 0;
 
 let client: Client | null = null;
 /** Đang đọc token để dựng client — chặn 2 màn mount cùng lúc tạo 2 kết nối. */
@@ -121,8 +150,8 @@ const startClient = async () => {
   starting = true;
   try {
     const token = await AsyncStorage.getItem(SESSION_KEYS.accessToken);
-    // Chưa đăng nhập thì thôi; size === 0 = màn cuối đã unmount trong lúc chờ đọc token.
-    if (!token || eventListeners.size === 0) return;
+    // Chưa đăng nhập thì thôi; không còn ai nghe = màn cuối đã unmount trong lúc chờ đọc token.
+    if (!token || !hasListeners()) return;
 
     const url = resolveWsUrl();
     const c = new Client({
@@ -143,6 +172,15 @@ const startClient = async () => {
           try {
             const event = JSON.parse(message.body) as BillingRealtimeEvent;
             eventListeners.forEach((l) => l(event));
+          } catch {
+            // Frame lỗi định dạng — bỏ qua, đừng để một message hỏng giết cả kết nối.
+          }
+        });
+        // Queue riêng, CÙNG kết nối — xem MaintenanceRealtimeEvent ở trên.
+        c.subscribe('/user/queue/maintenance', (message: IMessage) => {
+          try {
+            const event = JSON.parse(message.body) as MaintenanceRealtimeEvent;
+            maintenanceEventListeners.forEach((l) => l(event));
           } catch {
             // Frame lỗi định dạng — bỏ qua, đừng để một message hỏng giết cả kết nối.
           }
@@ -311,7 +349,7 @@ export const useBillingRealtime = (
     return () => {
       eventListeners.delete(onEvent);
       connListeners.delete(onConn);
-      if (eventListeners.size === 0) stopClient();
+      if (!hasListeners()) stopClient();
     };
   }, [enabled, refreshWithSettle]);
 
@@ -321,6 +359,113 @@ export const useBillingRealtime = (
     if (!onRefreshRef.current) return;
     const t = setInterval(() => {
       // App ở nền thì không hỏi — lớp 3 lo lúc quay lại.
+      if (AppState.currentState === 'active') onRefreshRef.current?.();
+    }, pollMs);
+    return () => clearInterval(t);
+  }, [enabled, connected, pollMs, focused]);
+
+  // ── Lớp 3: app quay lại foreground ──
+  useEffect(() => {
+    if (!enabled) return;
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active' && focusedRef.current) onRefreshRef.current?.();
+    });
+    return () => sub.remove();
+  }, [enabled]);
+
+  return { connected };
+};
+
+export interface UseMaintenanceRealtimeOptions {
+  /** Gọi khi CẦN NẠP LẠI: có event thật, hết nhịp poll, vừa nối lại, hoặc app trở lại. */
+  onRefresh?: () => void;
+  /** Gọi riêng khi có event thật — cho toast / vá thẳng một dòng; poll không có event. */
+  onEvent?: (event: MaintenanceRealtimeEvent) => void;
+  /** Lọc event trước khi xử lý, vd chỉ quan tâm đúng requestId đang mở. Không truyền = nhận hết. */
+  filter?: (event: MaintenanceRealtimeEvent) => boolean;
+  /** false (vd chưa đăng nhập, màn chưa cần) thì không kết nối, không poll. */
+  enabled?: boolean;
+  /** Nhịp poll khi WS chưa nối được. 0 = tắt hẳn lớp dự phòng. */
+  pollMs?: number;
+}
+
+export interface MaintenanceRealtimeState {
+  connected: boolean;
+}
+
+/**
+ * Bản mảnh bảo trì của `useBillingRealtime` — CÙNG kết nối STOMP singleton (đúng
+ * doc/BE-YEUCAU: "không mở new Client() thứ hai"), chỉ khác queue nghe
+ * (`/user/queue/maintenance`) và tập listener. Dùng ở màn hàng đợi manager, chi tiết
+ * ticket, danh sách/chi tiết/lịch sử bảo trì bên tenant — refetch đúng màn khi có event
+ * liên quan (xem bảng "Ai nhận WS" trong docs/BE-YEUCAU-realtime-socket-luong-bao-tri-2026-09-03.md).
+ */
+export const useMaintenanceRealtime = (
+  opts: UseMaintenanceRealtimeOptions = {},
+): MaintenanceRealtimeState => {
+  const enabled = opts.enabled ?? true;
+  const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
+
+  const focused = useIsFocused();
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
+
+  const [connected, setConnected] = useState(socketConnected);
+
+  const onEventRef = useRef(opts.onEvent);
+  const onRefreshRef = useRef(opts.onRefresh);
+  const filterRef = useRef(opts.filter);
+  onEventRef.current = opts.onEvent;
+  onRefreshRef.current = opts.onRefresh;
+  filterRef.current = opts.filter;
+
+  const settleTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => {
+    settleTimers.current.forEach(clearTimeout);
+    settleTimers.current = [];
+  }, []);
+
+  const refreshWithSettle = useCallback(() => {
+    if (!focusedRef.current || !onRefreshRef.current) return;
+    onRefreshRef.current();
+    SETTLE_DELAYS_MS.forEach((ms) => {
+      settleTimers.current.push(setTimeout(() => {
+        if (focusedRef.current) onRefreshRef.current?.();
+      }, ms));
+    });
+  }, []);
+
+  // ── Lớp 1: WebSocket (kết nối dùng chung với billing, xem startClient) ──
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onEvent: MaintenanceEventListener = (event) => {
+      if (filterRef.current && !filterRef.current(event)) return;
+      onEventRef.current?.(event);
+      refreshWithSettle();
+    };
+    const onConn: ConnListener = (value) => {
+      setConnected(value);
+      if (value) refreshWithSettle();
+    };
+
+    maintenanceEventListeners.add(onEvent);
+    connListeners.add(onConn);
+    setConnected(socketConnected);
+    void startClient();
+
+    return () => {
+      maintenanceEventListeners.delete(onEvent);
+      connListeners.delete(onConn);
+      if (!hasListeners()) stopClient();
+    };
+  }, [enabled, refreshWithSettle]);
+
+  // ── Lớp 2: poll dự phòng, CHỈ khi WS chưa nối và màn đang hiển thị ──
+  useEffect(() => {
+    if (!enabled || connected || pollMs <= 0 || !focused) return;
+    if (!onRefreshRef.current) return;
+    const t = setInterval(() => {
       if (AppState.currentState === 'active') onRefreshRef.current?.();
     }, pollMs);
     return () => clearInterval(t);

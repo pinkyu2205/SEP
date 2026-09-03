@@ -18,6 +18,7 @@ import { realTenantSelfService } from '@/services/tenant/selfService';
 import { visionService } from '@/services/shared/visionService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
+import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
@@ -62,6 +63,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const [images, setImages] = useState<PickedImage[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   /** Đang tải ảnh lên + đọc tem để đối chiếu thiết bị. */
   const [checking, setChecking] = useState(false);
   /** Kết quả đối chiếu của ảnh vừa thêm, hiện ngay dưới khu vực ảnh. */
@@ -412,7 +414,12 @@ export const MaintenanceCreateScreen: React.FC = () => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagePreviewRow}>
               {images.map((img, idx) => (
                 <View key={idx} style={styles.imagePreviewWrap}>
-                  <Image source={{ uri: img.uri }} style={styles.imagePreview} />
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setLightbox({ uris: images.map(i => i.uri), index: idx })}
+                  >
+                    <Image source={{ uri: img.uri }} style={styles.imagePreview} />
+                  </TouchableOpacity>
                   {/* Chỉ gắn nhãn khi THỰC SỰ đã đối chiếu được — 'unchecked' thì không
                       nói gì, đỡ hiểu nhầm là app đã xác nhận. */}
                   {needsVerifiedPhoto && img.check !== 'unchecked' && (
@@ -467,6 +474,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
         onCapture={(uri) => { void addImage(uri); }}
         onClose={() => setCameraOpen(false)}
       />
+      <PhotoLightbox state={lightbox} onChange={setLightbox} />
     </SafeAreaView>
   );
 };

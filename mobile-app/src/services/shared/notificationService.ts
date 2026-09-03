@@ -113,14 +113,6 @@ const normalizeType = (row: BeNotificationRow): string => {
       case 'MAINTENANCE_REJECTED_BY_TENANT': return 'maintenance_rejected';
       case 'MAINTENANCE_AUTO_CONFIRMED': return 'maintenance_resolved';
 
-      /*
-       * ─── Luồng bảo trì dựng lại 01/09/2026 (nhánh Long) ────────────────────
-       * Năm type mới, KHÔNG cái nào có ở đây trước đó nên tất cả rơi xuống
-       * `default` → icon 👷 xanh "đã tiếp nhận". Nghĩa là hai tin nặng nhất của
-       * cả luồng — "lỗi do khách thuê" và "quá hạn tự sửa" — hiện ra dịu như một
-       * cập nhật trạng thái bình thường. Đúng cái bẫy mà `MAINTENANCE_COMPLETED`
-       * ngay trên đã phải tách riêng để tránh.
-       */
       // Kết luận bất lợi: khách chịu lỗi và sẽ phải trả tiền sửa.
       case 'MAINTENANCE_TENANT_FAULT': return 'maintenance_rejected';
       // Khách PHẢI tự đi sửa, CÓ HẠN — cùng nhóm với "đã sửa xong, vui lòng xác
@@ -133,6 +125,21 @@ const normalizeType = (row: BeNotificationRow): string => {
       case 'MAINTENANCE_SELF_REPAIR_SUBMITTED': return 'maintenance_accepted';
       // Hoá đơn bồi thường đã phát hành — đúng việc `maintenance_cost` sinh ra.
       case 'MAINTENANCE_CHARGE_ISSUED': return 'maintenance_cost';
+      /**
+       * BE ship 03/09/2026 (commit `3381711`) — luồng "lỗi do khách" mới gửi thẳng
+       * admin duyệt trên web (report-fault) thay vì manager tự chọn hướng xử lý.
+       * Gửi cho TENANT: manager vừa cáo buộc là lỗi của mình, đang chờ admin duyệt —
+       * chưa phải kết luận cuối nhưng là tin bất lợi, tô dịu là sai (giống lý do
+       * MAINTENANCE_TENANT_FAULT ở trên tách riêng, không rơi default).
+       */
+      case 'MAINTENANCE_FAULT_REPORTED': return 'maintenance_rejected';
+      /**
+       * Gửi cho MANAGER: admin đã ra quyết định (duyệt/không duyệt) — BE dùng CHUNG
+       * một type cho cả 2 kết luận, không tách message riêng, nên phải đọc title để
+       * phân biệt (đúng cách nhánh legacy `MAINTENANCE` phía dưới đã làm với "mới").
+       */
+      case 'MAINTENANCE_ADMIN_REVIEWED':
+        return /không duyệt/i.test(row.title) ? 'maintenance_rejected' : 'maintenance_resolved';
 
       default: return 'maintenance_accepted'; // type bảo trì BE thêm sau — vẫn đúng tab
     }

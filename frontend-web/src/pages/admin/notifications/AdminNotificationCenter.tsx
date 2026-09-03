@@ -58,6 +58,9 @@ const TYPE_LABEL: Record<string, string> = {
   UTILITY_INVOICE_CREATED: 'Hoá đơn điện/nước mới',
   MAINTENANCE_CREATED: 'Yêu cầu bảo trì mới',
   MAINTENANCE_COMPLETED: 'Bảo trì chờ xác nhận',
+  // BE ship 03/09/2026 (commit 3381711) — duy nhất loại admin thực sự nhận trong luồng
+  // bảo trì mới (report-fault); MAINTENANCE_ADMIN_REVIEWED đi cho manager, không tới đây.
+  MAINTENANCE_FAULT_REPORTED: 'Báo lỗi do khách — cần duyệt',
   MAINTENANCE_COST_RESOLVED: 'Chốt chi phí bảo trì',
   MAINTENANCE_AUTO_CONFIRMED: 'Bảo trì tự xác nhận',
   // host_notifications
@@ -72,7 +75,7 @@ const toneOf = (type?: string): string => {
   if (!type) return 'bg-slate-100 text-slate-600';
   if (type.includes('OVERDUE') || type.includes('ESCALATION')) return 'bg-rose-100 text-rose-700';
   if (type.includes('DUE') || type.includes('REMINDER') || type.includes('PENDING')
-    || type.includes('REVIEW') || type.includes('EXPIRING')) return 'bg-amber-100 text-amber-700';
+    || type.includes('REVIEW') || type.includes('EXPIRING') || type.includes('FAULT_REPORTED')) return 'bg-amber-100 text-amber-700';
   if (type.includes('PAID') || type.includes('PAYMENT_RECEIVED')) return 'bg-emerald-100 text-emerald-700';
   return 'bg-slate-100 text-slate-600';
 };

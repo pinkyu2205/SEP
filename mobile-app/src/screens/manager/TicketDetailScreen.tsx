@@ -18,6 +18,8 @@ import { realEquipmentService } from '@/services/manager/equipmentService';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
+import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 import { showAlert } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import {
@@ -89,10 +91,20 @@ const PhotoEvidenceRow: React.FC<{
   photos: PhotoEvidence[];
   onAdd: () => void;
   disabled?: boolean;
-}> = ({ type, urls = [], photos, onAdd, disabled }) => {
+  /** Bấm vào 1 ảnh (server hoặc local) để xem toàn màn hình. */
+  onView?: (uris: string[], index: number) => void;
+  /**
+   * Xoá 1 ảnh LOCAL (chưa/đang upload hoặc upload lỗi) để chụp/chọn lại — CHỈ áp dụng
+   * ảnh local, KHÔNG áp dụng ảnh đã lên server (`urls`): BE chưa có endpoint xoá ảnh đã
+   * lưu (chỉ có POST /{id}/photos, không có DELETE), nên với ảnh đã confirm phải nhờ
+   * admin/BE xử lý ngoài luồng — không giả vờ xoá được ở đây.
+   */
+  onRemoveLocal?: (localId: string) => void;
+}> = ({ type, urls = [], photos, onAdd, disabled, onView, onRemoveLocal }) => {
   const filtered = photos.filter(p => p.type === type);
   const meta     = PHOTO_KIND_META[type];
   const isEmpty  = urls.length === 0 && filtered.length === 0;
+  const allUris  = [...urls, ...filtered.map(p => p.uri).filter((u): u is string => !!u)];
   return (
     <View style={phs.container}>
       <View style={phs.header}>
@@ -111,12 +123,21 @@ const PhotoEvidenceRow: React.FC<{
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={phs.scrollRow}>
           {urls.map((uri, i) => (
-            <View key={`url-${i}`} style={[phs.photoCard, { borderColor: meta.color + '50' }]}>
+            <TouchableOpacity key={`url-${i}`} activeOpacity={0.85}
+              style={[phs.photoCard, { borderColor: meta.color + '50' }]}
+              onPress={() => onView?.(allUris, i)}
+            >
               <Image source={{ uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
-            </View>
+            </TouchableOpacity>
           ))}
-          {filtered.map(photo => (
-            <View key={photo.id} style={[phs.photoCard, { borderColor: meta.color + '50' }]}>
+          {filtered.map((photo, i) => (
+            <TouchableOpacity key={photo.id} activeOpacity={0.85}
+              style={[phs.photoCard, { borderColor: meta.color + '50' }]}
+              // Đừng cộng urls.length + i làm chỉ số: nếu có ảnh local nào trước đó
+              // thiếu uri (đang chờ đọc file) thì allUris ngắn hơn filtered, cộng dồn
+              // sẽ lệch chỉ số/mở nhầm ảnh — tìm đúng vị trí thật bằng indexOf.
+              onPress={() => photo.uri && onView?.(allUris, allUris.indexOf(photo.uri))}
+            >
               {photo.uri ? (
                 <Image source={{ uri: photo.uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
               ) : (
@@ -125,7 +146,12 @@ const PhotoEvidenceRow: React.FC<{
                 </View>
               )}
               <Text style={phs.photoDate}>{photo.capturedAt.split(' ')[0]}</Text>
-            </View>
+              {onRemoveLocal && (
+                <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveLocal(photo.id)}>
+                  <Text style={phs.photoRemoveBtnText}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
           ))}
         </ScrollView>
       )}
@@ -147,6 +173,11 @@ const phs = StyleSheet.create({
   photoPlaceholder:     { height: 72, alignItems: 'center', justifyContent: 'center' },
   photoPlaceholderIcon: { fontSize: 28 },
   photoDate:            { fontSize: 9, color: Colors.textMuted, paddingHorizontal: 4, paddingVertical: 4 },
+  photoRemoveBtn: {
+    position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9,
+    backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',
+  },
+  photoRemoveBtnText: { color: Colors.white, fontSize: 10, fontWeight: '900' },
 });
 
 // ── Screen ──────────────────────────────────────────────────────────────────
@@ -183,12 +214,21 @@ export const TicketDetailScreen: React.FC = () => {
     } catch { /* bỏ qua */ }
   };
 
+  // Tự nạp lại khi ticket ĐÚNG NÀY có cập nhật (khách báo lỗi/tự sửa xong, admin duyệt,
+  // bên kia huỷ...) — không cần thoát vào lại màn mới thấy.
+  useMaintenanceRealtime({
+    enabled: isRealId,
+    filter: e => e.requestId === idNum,
+    onRefresh: () => { void refreshReal(); },
+  });
+
   const [noteInput, setNoteInput] = useState('');
   const [photos,    setPhotos]    = useState<PhotoEvidence[]>(ticket?.photos || []);
   const [busy,      setBusy]      = useState(false);
   // Camera in-app cho web (launchCameraAsync trên web chỉ mở file picker)
   const [cameraFor, setCameraFor] = useState<PhotoKind | null>(null);
   const [photoMenuFor, setPhotoMenuFor] = useState<PhotoKind | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   // Manager BẮT BUỘC gán category khi duyệt (Luồng A), priority tùy chọn. Tenant có thể
   // đã tự chọn category lúc tạo (báo hỏng không gắn thiết bị) — prefill sẵn, đổi được.
   const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(ticket?.category ?? null);
@@ -337,6 +377,15 @@ export const TicketDetailScreen: React.FC = () => {
       }
     }
   };
+
+  /**
+   * Xoá 1 ảnh LOCAL để chụp/chọn lại ảnh khác. Chỉ tác động state cục bộ `photos` —
+   * ảnh đã upload thành công đã bị `addLocalPhoto` gỡ khỏi `photos` ngay sau khi
+   * `refreshReal()` xong (xem trên), nên nút xoá thực tế chỉ còn gặp 2 trường hợp:
+   * đang trong lúc chờ upload, hoặc upload lỗi (showAlert nhưng KHÔNG tự gỡ khỏi
+   * `photos` — giữ lại đúng để người dùng còn thấy mà xoá/chụp lại, xem addLocalPhoto).
+   */
+  const removeLocalPhoto = (localId: string) => setPhotos(prev => prev.filter(p => p.id !== localId));
 
   // Menu "Thêm ảnh" trong UI (không dùng Alert.alert 3 nút) — Alert.alert là no-op
   // trên react-native-web nên menu Chụp ảnh/Thư viện trước đây không bấm được trên web.
@@ -522,7 +571,8 @@ export const TicketDetailScreen: React.FC = () => {
           <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Ảnh hiện trạng</Text>
           {/* Ảnh TRƯỚC sửa chữa là bằng chứng hiện trạng do TENANT chụp lúc tạo yêu cầu —
               manager không được thêm/sửa để tránh có ý đồ xấu (ngụy tạo hiện trạng). */}
-          <PhotoEvidenceRow type="before" urls={beforeUrls} photos={photos} onAdd={() => {}} disabled />
+          <PhotoEvidenceRow type="before" urls={beforeUrls} photos={photos} onAdd={() => {}} disabled
+            onView={(uris, i) => setLightbox({ uris, index: i })} />
         </View>
 
         {/* ── Cảnh báo vòng đời thiết bị ───────────────────────────── */}
@@ -541,6 +591,8 @@ export const TicketDetailScreen: React.FC = () => {
             <PhotoEvidenceRow
               type="after" urls={ticket.afterImages} photos={photos}
               onAdd={() => setPhotoMenuFor('after')}
+              onView={(uris, i) => setLightbox({ uris, index: i })}
+              onRemoveLocal={removeLocalPhoto}
             />
             <View style={s.sectionDivider} />
             <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Ghi chú</Text>
@@ -557,7 +609,8 @@ export const TicketDetailScreen: React.FC = () => {
         {!canComplete && (ticket.afterImages?.length ?? 0) > 0 && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
-            <PhotoEvidenceRow type="after" urls={ticket.afterImages} photos={photos} onAdd={() => {}} disabled />
+            <PhotoEvidenceRow type="after" urls={ticket.afterImages} photos={photos} onAdd={() => {}} disabled
+              onView={(uris, i) => setLightbox({ uris, index: i })} />
             {!!ticket.resolutionNote && (
               <Text style={[s.descText, { marginTop: Spacing.sm }]}>{ticket.resolutionNote}</Text>
             )}
@@ -571,6 +624,8 @@ export const TicketDetailScreen: React.FC = () => {
             <PhotoEvidenceRow
               type="invoice" urls={ticket.invoiceImages} photos={photos}
               onAdd={() => setPhotoMenuFor('invoice')}
+              onView={(uris, i) => setLightbox({ uris, index: i })}
+              onRemoveLocal={removeLocalPhoto}
             />
             <TextInput
               style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
@@ -588,7 +643,8 @@ export const TicketDetailScreen: React.FC = () => {
         {!canComplete && (ticket.invoiceImages?.length ?? 0) > 0 && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
-            <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled />
+            <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled
+              onView={(uris, i) => setLightbox({ uris, index: i })} />
             {ticket.invoiceAmount != null && (
               <Text style={[s.descText, s.moneyReadout]}>{fmt(ticket.invoiceAmount)}</Text>
             )}
@@ -606,7 +662,10 @@ export const TicketDetailScreen: React.FC = () => {
             {(ticket.faultEvidenceImages?.length ?? 0) > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
                 {ticket.faultEvidenceImages!.map((uri, i) => (
-                  <Image key={i} source={{ uri }} style={s.rejectImage} />
+                  <TouchableOpacity key={i}
+                    onPress={() => setLightbox({ uris: ticket.faultEvidenceImages!, index: i })}>
+                    <Image source={{ uri }} style={s.rejectImage} />
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
@@ -744,6 +803,8 @@ export const TicketDetailScreen: React.FC = () => {
               <PhotoEvidenceRow
                 type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}
                 onAdd={() => setPhotoMenuFor('fault_evidence')}
+                onView={(uris, i) => setLightbox({ uris, index: i })}
+                onRemoveLocal={removeLocalPhoto}
               />
             </View>
             <Text style={s.pickHint}>
@@ -798,7 +859,10 @@ export const TicketDetailScreen: React.FC = () => {
             <Text style={s.cardSectionTitle}>🛠 Khách đã nộp ảnh tự sửa</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {(ticket.selfRepairImages ?? []).map((uri, i) => (
-                <Image key={i} source={{ uri }} style={s.rejectImage} />
+                <TouchableOpacity key={i}
+                  onPress={() => setLightbox({ uris: ticket.selfRepairImages ?? [], index: i })}>
+                  <Image source={{ uri }} style={s.rejectImage} />
+                </TouchableOpacity>
               ))}
             </ScrollView>
             <TextInput
@@ -912,6 +976,7 @@ export const TicketDetailScreen: React.FC = () => {
           </Pressable>
         </Pressable>
       </Modal>
+      <PhotoLightbox state={lightbox} onChange={setLightbox} />
     </SafeAreaView>
   );
 };

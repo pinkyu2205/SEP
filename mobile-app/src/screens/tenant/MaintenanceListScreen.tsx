@@ -14,6 +14,7 @@ import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_CATEGORY_LABEL,
 } from '@/constants/maintenance';
+import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
 // ─── Filter tabs (redesign 01/09: open → in_repair → closed, nhánh lỗi khách) ───
 type FilterKey = 'active' | 'completed' | MaintenanceStatus;
@@ -146,26 +147,26 @@ export const MaintenanceListScreen: React.FC = () => {
   // ticket của mình biến mất / thấy ticket "Nguyễn Văn A" lạ hoắc.
   const [loadError, setLoadError] = useState(false);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      let active = true;
-      realMaintenanceService.getMyRequests()
-        .then(page => {
-          if (!active) return;
-          setRemote(page.content.map(dtoToTenantRequest));
-          setLoadError(false);
-        })
-        .catch(() => {
-          if (!active) return;
-          // Chỉ báo lỗi khi chưa từng tải được gì — đã có dữ liệu thì giữ nguyên.
-          setRemote(prev => {
-            if (prev == null) setLoadError(true);
-            return prev;
-          });
+  const silentLoad = React.useCallback(() => {
+    let active = true;
+    realMaintenanceService.getMyRequests()
+      .then(page => {
+        if (!active) return;
+        setRemote(page.content.map(dtoToTenantRequest));
+        setLoadError(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        // Chỉ báo lỗi khi chưa từng tải được gì — đã có dữ liệu thì giữ nguyên.
+        setRemote(prev => {
+          if (prev == null) setLoadError(true);
+          return prev;
         });
-      return () => { active = false; };
-    }, []),
-  );
+      });
+    return () => { active = false; };
+  }, []);
+
+  useFocusEffect(React.useCallback(() => silentLoad(), [silentLoad]));
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
@@ -174,6 +175,10 @@ export const MaintenanceListScreen: React.FC = () => {
       .catch(() => { /* giữ dữ liệu hiện tại */ })
       .finally(() => setRefreshing(false));
   }, []);
+
+  // Danh sách tự cập nhật khi có ticket đổi trạng thái (manager duyệt/báo sửa xong...)
+  // — không kéo-làm-mới lộ liễu như onRefresh, chỉ nạp ngầm.
+  useMaintenanceRealtime({ onRefresh: silentLoad });
 
   const all = remote ?? [];
 

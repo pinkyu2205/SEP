@@ -6,6 +6,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import type { MaintenanceTicket } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
+import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS,
   type MaintenanceStatusKey,
@@ -34,14 +35,20 @@ const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, 
 
 const TERMINAL = ['closed', 'cancelled'];
 const WORKING = ['in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+// 'tenant_fault' đã được admin duyệt/không duyệt trên web là ĐIỂM DỪNG của app — BE
+// không đổi status (vẫn giữ nguyên 'tenant_fault' vĩnh viễn, xem TicketDetailScreen),
+// nên phải tự loại khỏi "đang xử lý" bằng adminReviewedAt, không thì ticket nằm lì
+// trong hàng đợi mãi dù admin đã kết luận xong, không còn việc gì để manager làm nữa.
+const isDone = (t: { status: string; adminReviewedAt?: string }) =>
+  TERMINAL.includes(t.status) || (t.status === 'tenant_fault' && !!t.adminReviewedAt);
 // Trạng thái có thể xuất hiện trong "Hàng đợi xử lý" (mọi thứ trừ closed/cancelled),
 // theo đúng thứ tự luồng — dùng để dựng chip lọc theo trạng thái.
 const QUEUE_STATUSES: MaintenanceStatusKey[] = ['open', ...WORKING] as MaintenanceStatusKey[];
 const QUEUE_PAGE_SIZE = 8;
 // Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
 // Ticket chưa duyệt (priority null) tính theo ngưỡng mặc định 7 ngày.
-const isOverdue = (t: { status: string; priority?: string; createdAt: string }) =>
-  !TERMINAL.includes(t.status)
+const isOverdue = (t: { status: string; priority?: string; createdAt: string; adminReviewedAt?: string }) =>
+  !isDone(t)
   && daysBetween(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
 
 const monthLabel = () => {
@@ -68,26 +75,30 @@ export const MaintenanceManagerScreen: React.FC = () => {
    */
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      let active = true;
-      realMaintenanceService.listForManager()
-        .then(page => {
-          if (!active) return;
-          setRemote(page.content.map(dtoToTicket));
-          setLoadError(null);
-        })
-        .catch((err) => {
-          if (!active) return;
-          const msg = readApiError(err, 'Không tải được danh sách ticket.');
-          setRemote(prev => {
-            if (prev == null) setLoadError(msg);
-            return prev;
-          });
+  const load = React.useCallback(() => {
+    let active = true;
+    realMaintenanceService.listForManager()
+      .then(page => {
+        if (!active) return;
+        setRemote(page.content.map(dtoToTicket));
+        setLoadError(null);
+      })
+      .catch((err) => {
+        if (!active) return;
+        const msg = readApiError(err, 'Không tải được danh sách ticket.');
+        setRemote(prev => {
+          if (prev == null) setLoadError(msg);
+          return prev;
         });
-      return () => { active = false; };
-    }, []),
-  );
+      });
+    return () => { active = false; };
+  }, []);
+
+  useFocusEffect(React.useCallback(() => load(), [load]));
+
+  // Hàng đợi tự cập nhật khi có ticket mới/đổi trạng thái, không cần thoát vào lại màn
+  // — BE ship 03/09/2026 (docs/BE-YEUCAU-realtime-socket-luong-bao-tri-2026-09-03.md).
+  useMaintenanceRealtime({ onRefresh: load });
 
   const tickets = remote ?? [];
 
@@ -97,7 +108,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
   };
 
   const stats = useMemo(() => {
-    const open = tickets.filter(t => !TERMINAL.includes(t.status));
+    const open = tickets.filter(t => !isDone(t));
     const now = serverNow();
     const isThisMonth = (iso: string) => {
       const d = new Date(iso);
@@ -106,15 +117,16 @@ export const MaintenanceManagerScreen: React.FC = () => {
     return {
       urgentOpen:   open.filter(t => t.priority === 'urgent').length,
       pendingNew:   tickets.filter(t => t.status === 'open').length,
-      inProgress:   tickets.filter(t => WORKING.includes(t.status)).length,
+      inProgress:   tickets.filter(t => WORKING.includes(t.status) && !isDone(t)).length,
       resolvedMonth:tickets.filter(t => t.status === 'closed' && isThisMonth(t.updatedAt)).length,
       slaAtRisk:    tickets.filter(isOverdue).length,
       totalOpen:    open.length,
     };
   }, [tickets]);
 
-  // Ticket đang mở (chưa closed/cancelled) — nền cho cả chip lọc lẫn hàng đợi.
-  const openTickets = useMemo(() => tickets.filter(t => !TERMINAL.includes(t.status)), [tickets]);
+  // Ticket đang mở (chưa closed/cancelled, và chưa phải "lỗi do khách" admin đã kết
+  // luận xong) — nền cho cả chip lọc lẫn hàng đợi.
+  const openTickets = useMemo(() => tickets.filter(t => !isDone(t)), [tickets]);
 
   // Số lượng theo từng trạng thái trong tập đang mở — hiện trên chip lọc, tính TRƯỚC
   // khi áp search để chip vẫn phản ánh đúng toàn bộ hàng đợi chứ không phải phần đã lọc.
@@ -128,13 +140,17 @@ export const MaintenanceManagerScreen: React.FC = () => {
   // rồi theo thời gian.
   const openQueue = useMemo(() => {
     const q = search.trim().toLowerCase();
+    // Nhà nguyên căn (WHOLE_HOUSE) không có roomName — BE trả null, mapper gán thẳng
+    // không có fallback (dtoToTicket) nên field này CÓ THỂ undefined dù type khai báo
+    // là string. Gõ tìm kiếm mà thiếu `?? ''` ở đây → .toLowerCase() ném TypeError,
+    // crash cả app (không phải lỗi cú pháp nên tsc không bắt được).
     return openTickets
       .filter(t => statusFilter === 'all' || t.status === statusFilter)
       .filter(t => !q
-        || t.title.toLowerCase().includes(q)
-        || t.ticketCode.toLowerCase().includes(q)
-        || t.propertyName.toLowerCase().includes(q)
-        || t.roomName.toLowerCase().includes(q)
+        || (t.title ?? '').toLowerCase().includes(q)
+        || (t.ticketCode ?? '').toLowerCase().includes(q)
+        || (t.propertyName ?? '').toLowerCase().includes(q)
+        || (t.roomName ?? '').toLowerCase().includes(q)
         || (t.tenantName ?? '').toLowerCase().includes(q))
       .sort((a, b) => {
         const p = (a.priority ? PRIORITY_ORDER[a.priority] ?? 9 : 9)
@@ -172,11 +188,18 @@ export const MaintenanceManagerScreen: React.FC = () => {
       map.get(t.propertyId)!.tickets.push(t);
     });
     return Array.from(map.values()).sort((a, b) => {
-      const aU = a.tickets.filter(t => t.priority === 'urgent' && !TERMINAL.includes(t.status)).length;
-      const bU = b.tickets.filter(t => t.priority === 'urgent' && !TERMINAL.includes(t.status)).length;
+      const aU = a.tickets.filter(t => t.priority === 'urgent' && !isDone(t)).length;
+      const bU = b.tickets.filter(t => t.priority === 'urgent' && !isDone(t)).length;
       return bU - aU;
     });
   }, [tickets]);
+
+  // Lỗi khách đang thực sự cần theo dõi — loại luôn ticket 'tenant_fault' admin đã
+  // kết luận xong (isDone), không thì mục này không bao giờ trống dù chẳng còn gì làm.
+  const faultQueue = useMemo(
+    () => tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair' && !isDone(t)),
+    [tickets],
+  );
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -229,16 +252,16 @@ export const MaintenanceManagerScreen: React.FC = () => {
         )}
 
         {/* ── Ticket lỗi khách đang chờ xử lý (tenant_fault / tự sửa / chờ trừ cọc) ── */}
-        {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').length > 0 && (
+        {faultQueue.length > 0 && (
           <View style={s.section}>
             <View style={s.sectionHeaderRow}>
               <Text style={s.sectionTitle}>⚠️ Lỗi khách đang xử lý</Text>
               <Text style={s.sectionCount}>
-                {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').length} ticket
+                {faultQueue.length} ticket
               </Text>
             </View>
             <View style={s.activityCard}>
-              {tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair').map((t, i, arr) => (
+              {faultQueue.map((t, i, arr) => (
                 <TouchableOpacity
                   key={t.id}
                   style={[s.activityRow, i !== arr.length - 1 && s.activityRowBorder]}
@@ -406,9 +429,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
           </View>
 
           {buildingGroups.map(group => {
-            const open      = group.tickets.filter(t => !TERMINAL.includes(t.status));
+            const open      = group.tickets.filter(t => !isDone(t));
             const urgent    = open.filter(t => t.priority === 'urgent');
-            const inProg    = group.tickets.filter(t => WORKING.includes(t.status));
+            const inProg    = group.tickets.filter(t => WORKING.includes(t.status) && !isDone(t));
             const resolved  = group.tickets.filter(t => t.status === 'closed');
             const pending   = group.tickets.filter(t => t.status === 'open');
             const slaRisk   = open.filter(isOverdue);
