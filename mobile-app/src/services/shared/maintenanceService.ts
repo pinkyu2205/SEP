@@ -10,14 +10,23 @@ import type {
   VerifyRepairRequestDto,
   OutstandingDamageDto,
   MaintenanceDashboardDto,
+  RescheduleVisitRequestDto,
+  RescheduleRepairRequestDto,
+  ManagerAvailabilitySlotDto,
 } from '@/types';
 
 /**
- * Maintenance service — redesign 01/09/2026 (BE commit 8ddbc3e/28b177b, as-built):
- *   Luồng A: OPEN → approve → IN_REPAIR → complete → CLOSED
- *   Luồng B: OPEN → reject-fault → TENANT_FAULT → complete → CLOSED (tự tạo charge)
+ * Maintenance service — redesign 01/09/2026 (BE commit 8ddbc3e/28b177b) + lịch hẹn/quét
+ * QR 05/09/2026 (BE commit e0b1d2d, xem docs/maintenance-appointment-implementation-spec.md):
+ *   Luồng A: OPEN(+visitAppointmentAt) → confirm-arrival → approve
+ *            → [REPAIR_SCHEDULED → start-repair →] IN_REPAIR → complete → CLOSED
+ *   Luồng B: OPEN → confirm-arrival → reject-fault
+ *            → [REPAIR_SCHEDULED → start-repair →] TENANT_FAULT → complete → CLOSED
  *                  → reject-fault → PENDING_TENANT_REPAIR → submit-self-repair
  *                    → verify-repair → CLOSED | OUTSTANDING_DAMAGE
+ * REPAIR_SCHEDULED chỉ xuất hiện khi manager chọn "đặt lịch sửa sau" lúc approve/
+ * reject-fault thay vì sửa ngay. Gate quét QR (confirm-arrival/start-repair) chỉ chặn
+ * phía app — BE không validate việc quét, chỉ ghi mốc thời gian khi được gọi.
  * Không còn tenant confirm/reject nghiệm thu, không còn reopen — tạo phiếu mới kèm
  * previousRequestId. Base path /api/v1/maintenance, JWT tự inject qua realApiClient.
  */
@@ -62,11 +71,38 @@ export const realMaintenanceService = {
 
   /**
    * POST / — tenant tạo yêu cầu: title + ≥1 ảnh BEFORE (URL) + category (nếu không có
-   * equipmentId). Gửi kèm previousRequestId khi tạo lại vì phiếu trước chưa ổn. → OPEN.
+   * equipmentId) + visitAppointmentAt BẮT BUỘC (giờ hành chính 07:00–18:00, không trùng
+   * lịch manager phụ trách nhà — 409 nếu trùng). Gửi kèm previousRequestId khi tạo lại
+   * vì phiếu trước chưa ổn. → OPEN.
    */
   createRequest: async (body: CreateMaintenanceRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.post<MaintenanceRequestDto>(BASE, body);
     return data;
+  },
+
+  /**
+   * PUT /{id}/reschedule-visit — tenant hoặc manager đổi lịch hẹn xem. Chỉ khi OPEN,
+   * chưa confirm-arrival, và còn TRƯỚC ngày hẹn hiện tại (đúng ngày hẹn trở đi chỉ được
+   * huỷ, không đổi được nữa).
+   */
+  rescheduleVisit: async (
+    id: number, body: RescheduleVisitRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reschedule-visit`, body);
+    return data;
+  },
+
+  /**
+   * GET /manager-availability — khung giờ VISIT/REPAIR đã bận của 1 manager (hoặc theo
+   * propertyId), dùng để tô xám ô giờ đã bận lúc tenant/manager chọn lịch hẹn.
+   */
+  getManagerAvailability: async (
+    params: { propertyId?: number; managerId?: string; from: string; to: string },
+  ): Promise<ManagerAvailabilitySlotDto[]> => {
+    const { data } = await realApiClient.get<ManagerAvailabilitySlotDto[]>(
+      `${BASE}/manager-availability`, { params },
+    );
+    return data ?? [];
   },
 
   getMyRequests: async (
@@ -113,8 +149,20 @@ export const realMaintenanceService = {
   },
 
   /**
+   * PUT /{id}/confirm-arrival — manager quét QR đúng thiết bị (app tự chặn, BE không
+   * validate) xác nhận đã có mặt tại hiện trường. OPEN → OPEN, chỉ ghi mốc thời gian —
+   * BẮT BUỘC gọi trước approve/reject-fault (trừ phiếu cũ không có visitAppointmentAt).
+   */
+  confirmArrival: async (id: number): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm-arrival`);
+    return data;
+  },
+
+  /**
    * PUT /{id}/approve — manager duyệt (Luồng A: hao mòn/lỗi chủ), BẮT BUỘC gán
-   * category, priority tùy chọn. OPEN → IN_REPAIR (phòng → MAINTENANCE).
+   * category, priority tùy chọn. Không kèm repairAppointmentAt → sửa ngay, OPEN →
+   * IN_REPAIR (phòng → MAINTENANCE). Kèm repairAppointmentAt → đặt lịch sửa sau,
+   * OPEN → REPAIR_SCHEDULED (chờ startRepair()).
    */
   approve: async (id: number, body: ApproveMaintenanceRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/approve`, body);
@@ -123,11 +171,33 @@ export const realMaintenanceService = {
 
   /**
    * PUT /{id}/reject-fault — manager xác định lỗi do tenant (Luồng B). resolutionPath
-   * MANAGER_REPAIR → TENANT_FAULT; TENANT_SELF_REPAIR → PENDING_TENANT_REPAIR (bắt buộc
-   * kèm selfRepairDeadline + estimatedDamageAmount — BE không tự default).
+   * MANAGER_REPAIR → TENANT_FAULT (hoặc REPAIR_SCHEDULED nếu kèm repairAppointmentAt);
+   * TENANT_SELF_REPAIR → PENDING_TENANT_REPAIR (bắt buộc kèm selfRepairDeadline +
+   * estimatedDamageAmount — BE không tự default).
    */
   rejectFault: async (id: number, body: RejectFaultRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject-fault`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/reschedule-repair — manager-only, đổi lịch sửa. Chỉ khi REPAIR_SCHEDULED
+   * và còn trước ngày hẹn (tenant không tự đổi lịch sửa — liên hệ qua manager).
+   */
+  rescheduleRepair: async (
+    id: number, body: RescheduleRepairRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reschedule-repair`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/start-repair — manager quét QR (lần 2, app tự chặn) bắt đầu sửa từ
+   * REPAIR_SCHEDULED. Chuyển IN_REPAIR (Luồng A) hoặc TENANT_FAULT (Luồng B) tuỳ
+   * flowType đã lưu sẵn — không cần truyền lại.
+   */
+  startRepair: async (id: number): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/start-repair`);
     return data;
   },
 
@@ -169,7 +239,7 @@ export const realMaintenanceService = {
     return data ?? [];
   },
 
-  /** PUT /{id}/cancel — hủy (tenant chỉ khi OPEN; manager khi OPEN/IN_REPAIR). */
+  /** PUT /{id}/cancel — hủy (tenant chỉ khi OPEN; manager mọi trạng thái trừ CLOSED/CANCELLED, kể cả REPAIR_SCHEDULED). */
   cancel: async (id: number, reason?: string): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/cancel`, null, {
       params: reason ? { reason } : {},

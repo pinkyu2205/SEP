@@ -17,3 +17,4 @@ export { AlertHost } from './AlertHost';
 export { NotificationToast } from './NotificationToast';
 export { BackgroundWatcher } from './BackgroundWatcher';
 export { RealtimeBadge } from './RealtimeBadge';
+export { AppointmentSlotPicker } from './AppointmentSlotPicker';

@@ -20,6 +20,9 @@ const STATUS_CONFIG: Record<string, StatusMeta> = MAINTENANCE_STATUS_META;
  */
 const NEXT_PLACEHOLDERS: Record<string, string[]> = {
   open:                   [],
+  // repair_scheduled đi tiếp in_repair hoặc tenant_fault tuỳ flowType đã chốt từ trước —
+  // component này chỉ nhận currentStatus, không có flowType, nên không đoán bừa.
+  repair_scheduled:        [],
   in_repair:               ['closed'],
   tenant_fault:            ['closed'],
   // Có thể rẽ sang outstanding_damage (quá hạn/không đạt) thay vì closed — không đoán

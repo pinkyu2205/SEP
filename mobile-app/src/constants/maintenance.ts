@@ -4,11 +4,12 @@
  * Nguồn sự thật duy nhất cho trạng thái / mức ưu tiên / loại sự cố, tránh mỗi
  * màn hình tự định nghĩa lại (lệch màu, lệch nhãn).
  *
- * REDESIGN 01/09/2026 (BE commit 8ddbc3e/28b177b, as-built —
- * xem docs/maintenance-implementation-spec.md):
- *   Luồng A (hao mòn/lỗi chủ): open → in_repair → closed
- *   Luồng B (lỗi tenant):      open → tenant_fault → closed (manager sửa hộ, tự charge)
+ * REDESIGN 01/09/2026 (BE commit 8ddbc3e/28b177b) + LỊCH HẸN/QUÉT QR 05/09/2026
+ * (BE commit e0b1d2d, as-built — xem docs/maintenance-appointment-implementation-spec.md):
+ *   Luồng A (hao mòn/lỗi chủ): open → [repair_scheduled →] in_repair → closed
+ *   Luồng B (lỗi tenant):      open → [repair_scheduled →] tenant_fault → closed (manager sửa hộ, tự charge)
  *                              open → pending_tenant_repair → closed | outstanding_damage
+ * repair_scheduled chỉ xuất hiện khi manager chọn "đặt lịch sửa sau" thay vì sửa ngay.
  * Không còn tenant confirm/reject nghiệm thu, không còn reopen cùng phiếu, không còn
  * cost-dispute trong module này (chuyển sang billingHint tự động).
  *
@@ -16,7 +17,8 @@
  */
 
 export type MaintenanceStatusKey =
-  | 'open'                   // chờ manager check
+  | 'open'                   // chờ manager tới xem (đã có lịch hẹn)
+  | 'repair_scheduled'        // đã duyệt/báo lỗi, chọn đặt lịch sửa sau thay vì sửa ngay
   | 'in_repair'                // đang sửa
   | 'tenant_fault'              // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'    // giao tenant tự sửa trước deadline
@@ -48,6 +50,7 @@ export interface StatusMeta {
 
 export const MAINTENANCE_STATUS_META: Record<MaintenanceStatusKey, StatusMeta> = {
   open:                   { label: 'Chờ kiểm tra',      color: '#F59E0B', bg: '#FFFBEB', icon: '⏳', step: 0 },
+  repair_scheduled:        { label: 'Đã đặt lịch sửa',   color: '#2563EB', bg: '#EFF6FF', icon: '📅', step: -1 },
   in_repair:               { label: 'Đang sửa chữa',     color: '#8B5CF6', bg: '#F5F3FF', icon: '🔧', step: 1 },
   tenant_fault:            { label: 'Lỗi do khách',      color: '#DC2626', bg: '#FEF2F2', icon: '⚠️', step: -1 },
   pending_tenant_repair:  { label: 'Khách tự sửa',      color: '#F97316', bg: '#FFF7ED', icon: '🛠', step: -1 },
@@ -93,7 +96,7 @@ export const MAINTENANCE_BILLING_HINT_META: Record<MaintenanceBillingHintKey, Bi
   },
   tenant_charge_pending: {
     label: 'Cần thanh toán', color: '#B45309', bg: '#FFFBEB',
-    detail: 'Chi phí sửa chữa do lỗi của bạn — hoá đơn đã được tạo, xem ở tab Hoá đơn.',
+    detail: 'Chi phí sửa chữa do lỗi của khách — quét mã QR bên dưới để thanh toán.',
   },
   deposit_deduction_pending: {
     label: 'Sẽ trừ vào tiền cọc', color: '#B91C1C', bg: '#FEF2F2',
@@ -104,7 +107,8 @@ export const MAINTENANCE_BILLING_HINT_META: Record<MaintenanceBillingHintKey, Bi
 
 /** Bước kế tiếp trong Luồng A (happy path). Luồng B rẽ nhánh — không đoán trước. */
 export const MAINTENANCE_NEXT_STATUS: Record<MaintenanceStatusKey, MaintenanceStatusKey | null> = {
-  open:                   'in_repair',   // manager duyệt (hao mòn) — hoặc reject-fault sang Luồng B
+  open:                   'in_repair',   // manager duyệt (hao mòn) — hoặc reject-fault sang Luồng B, hoặc repair_scheduled nếu đặt lịch sau
+  repair_scheduled:        'in_repair',   // manager quét QR bắt đầu sửa (start-repair) — hoặc tenant_fault tuỳ flowType
   in_repair:               'closed',      // manager báo sửa xong (kèm ảnh AFTER + hoá đơn)
   tenant_fault:            'closed',      // manager sửa hộ xong (complete — tự tạo charge)
   pending_tenant_repair:  'closed',      // verify-repair accepted — hoặc outstanding_damage nếu reject/quá hạn
@@ -130,3 +134,14 @@ export const EQUIPMENT_REPLACE_SUGGEST_COUNT = 3;
 /** Gợi ý FE prefill deadline tự sửa (BE config maintenance.self-repair-default-days —
  * BE KHÔNG tự áp dụng, reject-fault sẽ 422 nếu FE không tự gửi selfRepairDeadline). */
 export const MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS = 14;
+
+/**
+ * Lịch hẹn bảo trì (05/09/2026) — khớp đúng hằng số phía BE (`MaintenanceServiceImpl`):
+ * giờ hành chính 07:00–18:00 (kể cả giờ kết thúc slot), slot cố định 30p cho lịch xem
+ * (VISIT), 60p cho lịch sửa (REPAIR). Đổi 3 số này ở đây thì BE vẫn validate theo số
+ * riêng của BE — chỉ để FE tô lưới giờ/tính giờ kết thúc khớp, không phải nguồn sự thật.
+ */
+export const MAINTENANCE_BUSINESS_START_HOUR = 7;
+export const MAINTENANCE_BUSINESS_END_HOUR = 18;
+export const MAINTENANCE_VISIT_SLOT_MINUTES = 30;
+export const MAINTENANCE_REPAIR_SLOT_MINUTES = 60;
