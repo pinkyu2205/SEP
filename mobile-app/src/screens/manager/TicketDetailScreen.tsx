@@ -19,15 +19,29 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { EquipmentQrScanModal } from '../../components/common/EquipmentQrScanModal';
+import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
-import { showAlert } from '@/utils';
+import { showAlert, formatDateTime } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
+import { toLocalDateTime, toApiDateTime, isBeforeAppointmentDay } from '@/utils/maintenanceAppointment';
 import {
   MAINTENANCE_STATUS_META, StatusMeta, MAINTENANCE_BILLING_HINT_META,
-  EQUIPMENT_REPLACE_SUGGEST_COUNT,
+  EQUIPMENT_REPLACE_SUGGEST_COUNT, MAINTENANCE_REPAIR_SLOT_MINUTES,
 } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
+
+/**
+ * TẠM ẨN (05/09/2026) — Luồng B (lỗi do khách) đang bị chặn ở khâu report-fault/
+ * admin-review chưa hỗ trợ đặt lịch sửa như Luồng A (xem
+ * docs/maintenance-appointment-implementation-spec.md). Ẩn nút để manager không tạo
+ * thêm phiếu TENANT_FAULT trong lúc chờ xin BE mở rộng report-fault/admin-review.
+ * Bật lại: đổi thành true (đồng thời hiện lại nút "Xem xét & duyệt" phía
+ * frontend-web/src/pages/admin/MaintenanceFaultReview.tsx).
+ */
+const TENANT_FAULT_FLOW_ENABLED = false;
 
 const STATUS_CONFIG: Record<TicketStatus, StatusMeta> = MAINTENANCE_STATUS_META;
 
@@ -232,9 +246,17 @@ export const TicketDetailScreen: React.FC = () => {
   // Manager BẮT BUỘC gán category khi duyệt (Luồng A), priority tùy chọn. Tenant có thể
   // đã tự chọn category lúc tạo (báo hỏng không gắn thiết bị) — prefill sẵn, đổi được.
   const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(ticket?.category ?? null);
-  const [approvePriority, setApprovePriority] = useState<TicketPriority | null>(null);
+  // Mặc định "Thấp" thay vì để trống — manager vẫn đổi được trước khi duyệt, chỉ đỡ
+  // phải bấm dropdown cho trường hợp phổ biến nhất (đa số ticket không khẩn cấp).
+  const [approvePriority, setApprovePriority] = useState<TicketPriority | null>(ticket?.priority ?? 'low');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  // Duyệt (Luồng A) — sửa ngay (mặc định, giữ đúng hành vi cũ) hoặc đặt lịch sửa sau
+  // (05/09/2026, chỉ Luồng A — Luồng B/report-fault chưa có repairAppointmentAt, xem
+  // docs/maintenance-appointment-implementation-spec.md).
+  const [approveRepairLater, setApproveRepairLater] = useState(false);
+  const [approveRepairDate, setApproveRepairDate] = useState('');
+  const [approveRepairTime, setApproveRepairTime] = useState<string | null>(null);
   // Ticket tạo qua QR/chọn thiết bị luôn gắn equipmentId nhưng BE để category=null (tenant
   // không được chọn category khi có equipment). 90%+ ticket có equipmentId là hư trang
   // thiết bị, nên tự gợi ý sẵn 'appliance' — vẫn đổi được trước khi duyệt.
@@ -322,6 +344,51 @@ export const TicketDetailScreen: React.FC = () => {
   const repairCount = ticket?.maintenanceCount ?? equipRepairCount;
   const lastRepairDate = ticket?.lastRepairDate ?? equipLastRepair;
 
+  // ── Gate quét QR xác nhận có mặt (05/09/2026) — chặn phía app, BE chỉ ghi mốc thời
+  // gian khi gọi confirm-arrival, không tự validate việc quét. Phiếu cũ không có
+  // visitAppointmentAt bỏ qua gate này (khớp đúng bypass phía BE).
+  const [arrivalScanOpen, setArrivalScanOpen] = useState(false);
+  const [arrivalBusy, setArrivalBusy] = useState(false);
+
+  // ── Gate quét QR bắt đầu sửa (REPAIR_SCHEDULED → start-repair) — cùng cơ chế, chỉ
+  // áp dụng nhánh "đặt lịch sửa sau" (Luồng A). Đổi lịch sửa cũng đặt ở đây, manager-only.
+  const [startRepairScanOpen, setStartRepairScanOpen] = useState(false);
+  const [startRepairBusy, setStartRepairBusy] = useState(false);
+  const [rescheduleRepairOpen, setRescheduleRepairOpen] = useState(false);
+  const [rescheduleRepairDate, setRescheduleRepairDate] = useState('');
+  const [rescheduleRepairTime, setRescheduleRepairTime] = useState<string | null>(null);
+  const [rescheduleRepairBusy, setRescheduleRepairBusy] = useState(false);
+
+  const doConfirmArrival = async () => {
+    if (arrivalBusy) return;
+    try {
+      setArrivalBusy(true);
+      await realMaintenanceService.confirmArrival(idNum);
+      await refreshReal();
+    } catch (e: any) {
+      showAlert('Không thể xác nhận', e?.response?.data?.error || e?.response?.data?.message || 'Vui lòng thử lại.');
+    } finally {
+      setArrivalBusy(false);
+    }
+  };
+
+  const handleArrivalScan = (raw: string) => {
+    setArrivalScanOpen(false);
+    const scannedId = extractEquipmentIdFromQr(raw);
+    if (!scannedId || !realEquipmentId || Number(scannedId) !== realEquipmentId) {
+      showAlert(
+        'QR không khớp thiết bị',
+        'Mã QR quét được không khớp với thiết bị của phiếu này. Vui lòng quét lại đúng thiết bị.',
+        [
+          { text: 'Đóng', style: 'cancel' },
+          { text: 'Quét lại', onPress: () => setArrivalScanOpen(true) },
+        ],
+      );
+      return;
+    }
+    void doConfirmArrival();
+  };
+
   if (!ticket) {
     return (
       <SafeAreaView style={s.safe}>
@@ -331,6 +398,61 @@ export const TicketDetailScreen: React.FC = () => {
           </TouchableOpacity>
           <Text style={s.headerTitle}>Không tìm thấy ticket</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Phiếu OPEN có hẹn xem nhưng CHƯA xác nhận có mặt → chặn hẳn màn xử lý, thay bằng
+  // gate quét QR (phiếu cũ visitAppointmentAt=null bỏ qua, khớp bypass phía BE).
+  if (ticket.status === 'open' && ticket.visitAppointmentAt && !ticket.visitArrivalConfirmedAt) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.header}>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.backIcon}>‹</Text>
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Xác nhận có mặt</Text>
+        </View>
+        <View style={arrivalGateStyles.container}>
+          <Text style={arrivalGateStyles.emoji}>📍</Text>
+          <Text style={arrivalGateStyles.title}>{ticket.title}</Text>
+          <Text style={arrivalGateStyles.meta}>{ticket.ticketCode} · {ticket.roomName}</Text>
+          <Text style={arrivalGateStyles.appointment}>
+            Lịch hẹn: {formatDateTime(ticket.visitAppointmentAt)}
+          </Text>
+          {realEquipmentId ? (
+            <>
+              <Text style={arrivalGateStyles.hint}>
+                Quét đúng mã QR trên thiết bị{ticket.equipmentName ? ` "${ticket.equipmentName}"` : ''} để xác
+                nhận đã có mặt tại hiện trường trước khi xử lý phiếu này.
+              </Text>
+              <TouchableOpacity
+                style={arrivalGateStyles.btn}
+                onPress={() => setArrivalScanOpen(true)}
+                disabled={arrivalBusy}
+              >
+                <Text style={arrivalGateStyles.btnText}>📷 Quét QR xác nhận có mặt</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={arrivalGateStyles.hint}>
+                Phiếu này không gắn thiết bị cụ thể — xác nhận đã có mặt tại hiện trường để tiếp tục xử lý.
+              </Text>
+              <TouchableOpacity style={arrivalGateStyles.btn} onPress={doConfirmArrival} disabled={arrivalBusy}>
+                <Text style={arrivalGateStyles.btnText}>
+                  {arrivalBusy ? 'Đang xác nhận...' : '✅ Xác nhận đã đến'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+        <EquipmentQrScanModal
+          visible={arrivalScanOpen}
+          title="Quét QR xác nhận có mặt"
+          onClose={() => setArrivalScanOpen(false)}
+          onScan={handleArrivalScan}
+        />
       </SafeAreaView>
     );
   }
@@ -412,15 +534,31 @@ export const TicketDetailScreen: React.FC = () => {
       showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
       return;
     }
+    let repairAppointmentAt: string | undefined;
+    if (approveRepairLater) {
+      const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
+      if (!dt) { showAlert('Thiếu lịch sửa', 'Vui lòng chọn ngày và giờ hẹn sửa.'); return; }
+      if (dt.getTime() <= serverNow().getTime()) {
+        showAlert('Lịch sửa không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+        return;
+      }
+      repairAppointmentAt = toApiDateTime(dt);
+    }
     if (isReal) {
       try {
         setBusy(true);
         await realMaintenanceService.approve(idNum, {
           category: approveCategory.toUpperCase() as MaintenanceReqCategory,
           priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
+          repairAppointmentAt,
         });
         await refreshReal();
-        showAlert('✅ Đã duyệt', 'Yêu cầu đã được duyệt — sửa xong thì bấm "Báo sửa xong".');
+        showAlert(
+          '✅ Đã duyệt',
+          repairAppointmentAt
+            ? 'Đã đặt lịch sửa — quét QR bắt đầu sửa đúng ngày hẹn.'
+            : 'Yêu cầu đã được duyệt — sửa xong thì bấm "Báo sửa xong".',
+        );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
@@ -487,6 +625,153 @@ export const TicketDetailScreen: React.FC = () => {
       }},
     ]);
   };
+
+  const doStartRepair = async () => {
+    if (startRepairBusy) return;
+    try {
+      setStartRepairBusy(true);
+      await realMaintenanceService.startRepair(idNum);
+      await refreshReal();
+    } catch (e: any) {
+      showAlert('Không thể bắt đầu sửa', apiErrMsg(e, 'Vui lòng thử lại.'));
+    } finally {
+      setStartRepairBusy(false);
+    }
+  };
+
+  const handleStartRepairScan = (raw: string) => {
+    setStartRepairScanOpen(false);
+    const scannedId = extractEquipmentIdFromQr(raw);
+    if (!scannedId || !realEquipmentId || Number(scannedId) !== realEquipmentId) {
+      showAlert(
+        'QR không khớp thiết bị',
+        'Mã QR quét được không khớp với thiết bị của phiếu này. Vui lòng quét lại đúng thiết bị.',
+        [
+          { text: 'Đóng', style: 'cancel' },
+          { text: 'Quét lại', onPress: () => setStartRepairScanOpen(true) },
+        ],
+      );
+      return;
+    }
+    void doStartRepair();
+  };
+
+  const openRescheduleRepair = () => {
+    setRescheduleRepairDate('');
+    setRescheduleRepairTime(null);
+    setRescheduleRepairOpen(true);
+  };
+
+  const confirmRescheduleRepair = async () => {
+    if (rescheduleRepairBusy) return;
+    const dt = rescheduleRepairTime ? toLocalDateTime(rescheduleRepairDate, rescheduleRepairTime) : null;
+    if (!dt) { showAlert('Thiếu lịch sửa', 'Vui lòng chọn ngày và giờ sửa mới.'); return; }
+    if (dt.getTime() <= serverNow().getTime()) {
+      showAlert('Lịch sửa không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+      return;
+    }
+    try {
+      setRescheduleRepairBusy(true);
+      await realMaintenanceService.rescheduleRepair(idNum, { repairAppointmentAt: toApiDateTime(dt) });
+      await refreshReal();
+      setRescheduleRepairOpen(false);
+    } catch (e: any) {
+      showAlert('Không thể đổi lịch', apiErrMsg(e, 'Vui lòng thử lại.'));
+    } finally {
+      setRescheduleRepairBusy(false);
+    }
+  };
+
+  // Phiếu đã đặt lịch sửa sau (Luồng A, chọn "Đặt lịch sửa sau" lúc duyệt) — chặn xử lý
+  // tiếp cho tới khi quét QR bắt đầu sửa, hoặc xác nhận thường nếu không gắn thiết bị.
+  if (ticket.status === 'repair_scheduled') {
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.header}>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.backIcon}>‹</Text>
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Bắt đầu sửa chữa</Text>
+        </View>
+        <View style={arrivalGateStyles.container}>
+          <Text style={arrivalGateStyles.emoji}>🔧</Text>
+          <Text style={arrivalGateStyles.title}>{ticket.title}</Text>
+          <Text style={arrivalGateStyles.meta}>{ticket.ticketCode} · {ticket.roomName}</Text>
+          <Text style={arrivalGateStyles.appointment}>
+            Lịch sửa: {formatDateTime(ticket.repairAppointmentAt)}
+          </Text>
+          {realEquipmentId ? (
+            <>
+              <Text style={arrivalGateStyles.hint}>
+                Quét đúng mã QR trên thiết bị{ticket.equipmentName ? ` "${ticket.equipmentName}"` : ''} để bắt
+                đầu sửa chữa.
+              </Text>
+              <TouchableOpacity
+                style={arrivalGateStyles.btn}
+                onPress={() => setStartRepairScanOpen(true)}
+                disabled={startRepairBusy}
+              >
+                <Text style={arrivalGateStyles.btnText}>📷 Quét QR bắt đầu sửa</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={arrivalGateStyles.hint}>
+                Phiếu này không gắn thiết bị cụ thể — xác nhận để bắt đầu sửa chữa.
+              </Text>
+              <TouchableOpacity style={arrivalGateStyles.btn} onPress={doStartRepair} disabled={startRepairBusy}>
+                <Text style={arrivalGateStyles.btnText}>
+                  {startRepairBusy ? 'Đang xác nhận...' : '✅ Bắt đầu sửa'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+          <View style={{ flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg }}>
+            {ticket.repairAppointmentAt && isBeforeAppointmentDay(ticket.repairAppointmentAt) && (
+              <TouchableOpacity style={s.reviewBtn} onPress={openRescheduleRepair}>
+                <Text style={s.reviewBtnText}>🗓 Đổi lịch sửa</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={s.reviewBtn} onPress={handleCancel}>
+              <Text style={[s.reviewBtnText, { color: '#DC2626' }]}>✕ Huỷ yêu cầu</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <EquipmentQrScanModal
+          visible={startRepairScanOpen}
+          title="Quét QR bắt đầu sửa"
+          onClose={() => setStartRepairScanOpen(false)}
+          onScan={handleStartRepairScan}
+        />
+        <Modal visible={rescheduleRepairOpen} transparent animationType="fade" onRequestClose={() => setRescheduleRepairOpen(false)}>
+          <Pressable style={s.photoMenuBackdrop} onPress={() => setRescheduleRepairOpen(false)}>
+            <Pressable style={s.photoMenuCard} onPress={() => {}}>
+              <Text style={s.photoMenuTitle}>Đổi lịch sửa</Text>
+              <AppointmentSlotPicker
+                propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+                slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+                excludeRequestId={idNum}
+                date={rescheduleRepairDate}
+                onDateChange={setRescheduleRepairDate}
+                time={rescheduleRepairTime}
+                onTimeChange={setRescheduleRepairTime}
+              />
+              <TouchableOpacity
+                style={[s.advanceBtn, { marginTop: Spacing.md }, (!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy) && s.btnDisabled]}
+                onPress={confirmRescheduleRepair}
+                disabled={!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy}
+              >
+                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.photoMenuCancel} onPress={() => setRescheduleRepairOpen(false)}>
+                <Text style={s.photoMenuCancelText}>Đóng</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
 
   const selfRepairRemainingDays = daysLeft(ticket.selfRepairDeadline);
   const tenantSubmittedSelfRepair = (ticket.selfRepairImages?.length ?? 0) > 0;
@@ -784,6 +1069,37 @@ export const TicketDetailScreen: React.FC = () => {
                 })}
               </View>
             )}
+
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Thời điểm sửa</Text>
+            <View style={s.repairChoiceRow}>
+              <TouchableOpacity
+                style={[s.repairChoiceBtn, !approveRepairLater && s.repairChoiceBtnActive]}
+                onPress={() => setApproveRepairLater(false)}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.repairChoiceText, !approveRepairLater && s.repairChoiceTextActive]}>🔧 Sửa ngay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.repairChoiceBtn, approveRepairLater && s.repairChoiceBtnActive]}
+                onPress={() => setApproveRepairLater(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.repairChoiceText, approveRepairLater && s.repairChoiceTextActive]}>📅 Đặt lịch sửa sau</Text>
+              </TouchableOpacity>
+            </View>
+            {approveRepairLater && (
+              <View style={{ marginTop: Spacing.md }}>
+                <AppointmentSlotPicker
+                  propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+                  slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+                  excludeRequestId={idNum}
+                  date={approveRepairDate}
+                  onDateChange={setApproveRepairDate}
+                  time={approveRepairTime}
+                  onTimeChange={setApproveRepairTime}
+                />
+              </View>
+            )}
           </View>
         )}
 
@@ -911,21 +1227,24 @@ export const TicketDetailScreen: React.FC = () => {
         {ticket.status === 'open' && !faultFormOpen && (
           <>
             <TouchableOpacity
-              style={[s.advanceBtn, !approveCategory && s.btnDisabled]}
+              style={[s.advanceBtn, (!approveCategory || (approveRepairLater && !approveRepairTime)) && s.btnDisabled]}
               onPress={handleApprove}
               disabled={busy}
             >
               <Text style={s.advanceBtnText}>
-                ✅ Duyệt (hao mòn/lỗi chủ){!approveCategory ? ' — chọn danh mục trước' : ''}
+                ✅ Duyệt (hao mòn/lỗi chủ){!approveCategory ? ' — chọn danh mục trước'
+                  : approveRepairLater && !approveRepairTime ? ' — chọn lịch sửa trước' : ''}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.advanceBtn, { backgroundColor: Colors.white, borderWidth: 1.5, borderColor: '#DC2626', marginBottom: Spacing.md }]}
-              onPress={() => setFaultFormOpen(true)}
-              disabled={busy}
-            >
-              <Text style={[s.advanceBtnText, { color: '#DC2626' }]}>⚠️ Báo lỗi do khách</Text>
-            </TouchableOpacity>
+            {TENANT_FAULT_FLOW_ENABLED && (
+              <TouchableOpacity
+                style={[s.advanceBtn, { backgroundColor: Colors.white, borderWidth: 1.5, borderColor: '#DC2626', marginBottom: Spacing.md }]}
+                onPress={() => setFaultFormOpen(true)}
+                disabled={busy}
+              >
+                <Text style={[s.advanceBtnText, { color: '#DC2626' }]}>⚠️ Báo lỗi do khách</Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
         {canComplete && (
@@ -980,6 +1299,17 @@ export const TicketDetailScreen: React.FC = () => {
     </SafeAreaView>
   );
 };
+
+const arrivalGateStyles = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
+  emoji: { fontSize: 48, marginBottom: Spacing.base },
+  title: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary, textAlign: 'center' },
+  meta: { fontSize: 13, color: Colors.textMuted, marginTop: 4 },
+  appointment: { fontSize: 15, fontWeight: '700', color: Colors.primary, marginTop: Spacing.md },
+  hint: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: Spacing.lg, marginBottom: Spacing.xl },
+  btn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm },
+  btnText: { fontSize: 15, fontWeight: '700', color: Colors.white },
+});
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 
@@ -1052,6 +1382,15 @@ const s = StyleSheet.create({
   dropdownItemActive:     { backgroundColor: Colors.primaryBg },
   dropdownItemText:       { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
   dropdownItemTextActive: { color: Colors.primary, fontWeight: '700' },
+
+  repairChoiceRow: { flexDirection: 'row', gap: Spacing.sm },
+  repairChoiceBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: BorderRadius.md,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  repairChoiceBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  repairChoiceText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  repairChoiceTextActive: { color: Colors.primary, fontWeight: '700' },
 
   reviewRow:     { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   reviewBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },

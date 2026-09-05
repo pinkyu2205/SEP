@@ -34,7 +34,7 @@ const daysBetween = (from: string) => {
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 const TERMINAL = ['closed', 'cancelled'];
-const WORKING = ['in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+const WORKING = ['repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 // 'tenant_fault' đã được admin duyệt/không duyệt trên web là ĐIỂM DỪNG của app — BE
 // không đổi status (vẫn giữ nguyên 'tenant_fault' vĩnh viễn, xem TicketDetailScreen),
 // nên phải tự loại khỏi "đang xử lý" bằng adminReviewedAt, không thì ticket nằm lì
@@ -197,7 +197,8 @@ export const MaintenanceManagerScreen: React.FC = () => {
   // Lỗi khách đang thực sự cần theo dõi — loại luôn ticket 'tenant_fault' admin đã
   // kết luận xong (isDone), không thì mục này không bao giờ trống dù chẳng còn gì làm.
   const faultQueue = useMemo(
-    () => tickets.filter(t => WORKING.includes(t.status) && t.status !== 'in_repair' && !isDone(t)),
+    () => tickets.filter(t =>
+      WORKING.includes(t.status) && t.status !== 'in_repair' && t.status !== 'repair_scheduled' && !isDone(t)),
     [tickets],
   );
 

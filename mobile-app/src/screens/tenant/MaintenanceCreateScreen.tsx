@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
   Image, Platform,
@@ -12,6 +12,8 @@ import {
   formatDate, showAlert, readApiError,
   validateEquipmentPhoto, classifyEquipment, requireLiveCapture,
 } from '@/utils';
+import { serverNow } from '@/utils/serverTime';
+import { toLocalDateTime, toApiDateTime } from '@/utils/maintenanceAppointment';
 import { useTenantContract } from '@/hooks';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
@@ -19,6 +21,8 @@ import { visionService } from '@/services/shared/visionService';
 import { uploadImageToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
+import { MAINTENANCE_VISIT_SLOT_MINUTES } from '@/constants/maintenance';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
@@ -68,6 +72,16 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const [checking, setChecking] = useState(false);
   /** Kết quả đối chiếu của ảnh vừa thêm, hiện ngay dưới khu vực ảnh. */
   const [photoNote, setPhotoNote] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
+  // Lịch hẹn manager tới xem — BẮT BUỘC từ 05/09/2026 (xem
+  // docs/maintenance-appointment-implementation-spec.md). Ngày dạng DD/MM/YYYY
+  // (khớp DatePickerField), giờ chọn từ lưới slot cố định 30 phút.
+  const [visitDate, setVisitDate] = useState('');
+  const [visitTime, setVisitTime] = useState<string | null>(null);
+  // propertyId chỉ để TÔ XÁM slot đã bận — không tìm được thì lưới vẫn hiện đủ, BE tự
+  // chặn trùng lịch lúc submit (409) nên không tô xám không làm mất tính đúng đắn.
+  const [availabilityPropertyId, setAvailabilityPropertyId] = useState<number | undefined>(
+    equipment?.propertyId,
+  );
   // Báo hỏng ĐÚNG một thiết bị (vào từ QR / danh sách thiết bị) thì ảnh phải cho thấy
   // đúng thiết bị đó — không thì chụp đại một tấm gì cũng gửi được yêu cầu.
   const equipmentName = equipment ? equipName(equipment) : undefined;
@@ -76,6 +90,24 @@ export const MaintenanceCreateScreen: React.FC = () => {
   const liveOnly = !!equipment && requireLiveCapture(equipmentName);
   /** Có gắn thiết bị = có căn cứ để đối chiếu ảnh. */
   const needsVerifiedPhoto = !!equipment;
+
+  // Không gắn thiết bị (Sự cố khác) → chưa có propertyId ngay, thử lấy từ dashboard chỉ
+  // để tô xám slot bận — best-effort, submit thật vẫn tự dò lại roomId/propertyId riêng.
+  useEffect(() => {
+    if (equipment?.propertyId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const dash = await realTenantSelfService.getDashboard(selectedContractId ?? undefined);
+        const pid = Number(dash.building?.propertyId ?? dash.contract?.propertyId ?? NaN);
+        if (!cancelled && Number.isFinite(pid) && pid > 0) setAvailabilityPropertyId(pid);
+      } catch {
+        // Best-effort — lưới giờ vẫn dùng được, chỉ là không tô xám được slot bận.
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedCategory = NON_EQUIPMENT_CATEGORIES.find(c => c.value === category);
   const titlePlaceholder = equipment
@@ -164,6 +196,13 @@ export const MaintenanceCreateScreen: React.FC = () => {
     if (needsCategory && !category) { showAlert('Lỗi', 'Vui lòng chọn danh mục hư hỏng.'); return; }
     // Flow mới: BE bắt buộc ≥1 ảnh hiện trạng (BEFORE) khi tạo yêu cầu.
     if (images.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hiện trạng để tạo yêu cầu.'); return; }
+    // Lịch hẹn manager tới xem — BẮT BUỘC (05/09/2026), giờ hành chính, không trùng lịch.
+    const visitDateTime = visitTime ? toLocalDateTime(visitDate, visitTime) : null;
+    if (!visitDateTime) { showAlert('Thiếu lịch hẹn', 'Vui lòng chọn ngày và giờ hẹn để quản lý tới xem.'); return; }
+    if (visitDateTime.getTime() <= serverNow().getTime()) {
+      showAlert('Lịch hẹn không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+      return;
+    }
     // Báo hỏng đích danh 1 thiết bị thì phải có ảnh CHỨNG MINH đúng thiết bị đó, không
     // thì chụp bừa tấm nào cũng gửi được và thợ tới nơi mới biết là báo sai.
     // Chỉ chặn khi CÓ BẰNG CHỨNG ảnh là thiết bị khác (đọc ra thông số của loại khác)
@@ -245,6 +284,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
         description: description.trim() || undefined,
         category: category ?? undefined,
         images: uploaded,
+        visitAppointmentAt: toApiDateTime(visitDateTime),
       };
       await realMaintenanceService.createRequest(body);
       setSubmitting(false);
@@ -261,7 +301,8 @@ export const MaintenanceCreateScreen: React.FC = () => {
     }
   };
 
-  const isValid = !!title.trim() && images.length > 0 && (!needsCategory || !!category);
+  const isValid = !!title.trim() && images.length > 0 && (!needsCategory || !!category)
+    && !!visitDate && !!visitTime;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -446,6 +487,19 @@ export const MaintenanceCreateScreen: React.FC = () => {
               ? `Chụp trực tiếp tại phòng · Tối đa 5 ảnh · ${images.length}/5`
               : `Bắt buộc ít nhất 1 ảnh · Tối đa 5 ảnh · ${images.length}/5`}
           </Text>
+        </View>
+
+        {/* Lịch hẹn manager tới xem — bắt buộc (05/09/2026) */}
+        <View style={styles.field}>
+          <Text style={styles.fieldLabel}>Hẹn ngày quản lý tới xem <Text style={styles.required}>*</Text></Text>
+          <AppointmentSlotPicker
+            propertyId={availabilityPropertyId}
+            slotMinutes={MAINTENANCE_VISIT_SLOT_MINUTES}
+            date={visitDate}
+            onDateChange={setVisitDate}
+            time={visitTime}
+            onTimeChange={setVisitTime}
+          />
         </View>
 
         {/* Lưu ý */}

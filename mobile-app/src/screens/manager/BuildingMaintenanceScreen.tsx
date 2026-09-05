@@ -34,6 +34,7 @@ const CATEGORY_CONFIG: Record<TicketCategory, { label: string; icon: string }> =
 // category, hoặc báo lỗi khách — không xử lý nhanh ngay trên card được).
 const QUICK_ACTION_LABEL: Partial<Record<TicketStatus, string>> = {
   open: '✅ Xử lý yêu cầu',
+  repair_scheduled: '🔧 Bắt đầu sửa',
 };
 
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
