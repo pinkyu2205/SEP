@@ -2,9 +2,12 @@
  * Mapper: DTO real API (redesign 01/09/2026) -> model FE, để các màn hình giữ
  * nguyên UI mà chỉ đổi nguồn dữ liệu.
  */
-import type { MaintenanceRequestDto, MaintenanceTimelineDto } from '@/types';
+import type { MaintenanceRequestDto, MaintenanceTimelineDto, MaintenanceIssuedInvoiceDto } from '@/types';
 import type { MaintenanceRequest, MaintenanceStatus, MaintenanceCategory, MaintenancePriority } from '@/types';
 import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority, TimelineEntry } from '@/store/maintenanceStore';
+import type { TenantInvoice } from '@/services/tenant/billingService';
+import { toSharedBill } from '@/services/tenant/billingService';
+import type { SharedBill } from '@/types/bill';
 
 // Bộ 7 status chính thức. Legacy (trước migrate 01/09) quy về status mới gần nhất
 // để timeline cũ vẫn hiển thị đúng — REJECTED cũ không map thẳng sang trạng thái lỗi
@@ -12,8 +15,9 @@ import type { MaintenanceTicket, TicketStatus, TicketCategory, TicketPriority, T
 // crash UI; WAITING_TENANT_CONFIRM cũ (chờ nghiệm thu) cũng không còn ý nghĩa, coi
 // như đang sửa. Status lạ không có trong bảng → mặc định 'in_repair', không throw.
 const BE_STATUS_MAP: Record<string, MaintenanceStatus> = {
-  // Bộ chính thức (redesign 01/09/2026)
+  // Bộ chính thức (redesign 01/09/2026 + lịch hẹn 05/09/2026)
   OPEN: 'open',
+  REPAIR_SCHEDULED: 'repair_scheduled',
   IN_REPAIR: 'in_repair',
   TENANT_FAULT: 'tenant_fault',
   PENDING_TENANT_REPAIR: 'pending_tenant_repair',
@@ -118,6 +122,10 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   updatedAt: dto.updatedAt,
   issuedInvoice: dto.issuedInvoice,
   photoHistory: dto.photoHistory,
+  visitAppointmentAt: dto.visitAppointmentAt,
+  visitArrivalConfirmedAt: dto.visitArrivalConfirmedAt,
+  repairAppointmentAt: dto.repairAppointmentAt,
+  repairStartedAt: dto.repairStartedAt,
 });
 
 /** DTO -> MaintenanceTicket (manager model) */
@@ -169,4 +177,18 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   updatedAt: dto.updatedAt,
   issuedInvoice: dto.issuedInvoice,
   photoHistory: dto.photoHistory,
+  visitAppointmentAt: dto.visitAppointmentAt,
+  visitArrivalConfirmedAt: dto.visitArrivalConfirmedAt,
+  repairAppointmentAt: dto.repairAppointmentAt,
+  repairStartedAt: dto.repairStartedAt,
 });
+
+/**
+ * `MaintenanceIssuedInvoiceDto` (hoá đơn bồi thường bảo trì, tạo lúc manager complete()
+ * Luồng B) khớp field-cho-field với `TenantInvoice` (kể cả PayOS: payosQrCode/
+ * payosCheckoutUrl/payosOrderCode) — dùng lại thẳng `toSharedBill()` để tenant thanh
+ * toán bằng đúng `InvoicePaymentModal` đang dùng cho hoá đơn tiền phòng/điện/nước,
+ * không viết lại QR renderer riêng cho bảo trì.
+ */
+export const toMaintenanceSharedBill = (inv: MaintenanceIssuedInvoiceDto): SharedBill =>
+  toSharedBill(inv as unknown as TenantInvoice);

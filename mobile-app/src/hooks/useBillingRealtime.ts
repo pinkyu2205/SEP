@@ -91,7 +91,7 @@ export interface MaintenanceRealtimeEvent {
     | 'MAINTENANCE_FAULT_REPORTED' | 'MAINTENANCE_ADMIN_REVIEWED'
     | 'MAINTENANCE_SELF_REPAIR_SUBMITTED' | 'MAINTENANCE_VERIFY_REPAIR'
     | 'MAINTENANCE_COMPLETED' | 'MAINTENANCE_CANCELLED_BY_TENANT'
-    | 'MAINTENANCE_CANCELLED_BY_MANAGER' | string;
+    | 'MAINTENANCE_CANCELLED_BY_MANAGER' | 'MAINTENANCE_SCHEDULE_CHANGED' | string;
   requestId: number;
   requestCode?: string;
   status?: string;
@@ -102,6 +102,9 @@ export interface MaintenanceRealtimeEvent {
   tenantUserId?: string;
   assignedManagerId?: string;
   adminApproved?: boolean | null;
+  /** Bắn cùng MAINTENANCE_SCHEDULE_CHANGED (tạo có hẹn, đổi lịch, confirm-arrival, start-repair, cron no-show). */
+  visitAppointmentAt?: string;
+  repairAppointmentAt?: string;
 }
 
 /** Base URL là http(s) → đổi sang ws(s). Web (Metro proxy) để trống thì lấy origin. */

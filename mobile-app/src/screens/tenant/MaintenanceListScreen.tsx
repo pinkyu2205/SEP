@@ -38,7 +38,7 @@ const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot:
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
 
 const ACTIVE: MaintenanceStatus[] =
-  ['open', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+  ['open', 'repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
 
 // ─── Card ──────────────────────────────────────────────────

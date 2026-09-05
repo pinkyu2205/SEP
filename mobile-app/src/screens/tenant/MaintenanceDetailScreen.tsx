@@ -6,18 +6,24 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { MaintenanceRequest } from '@/types';
 import {
-  formatDate, getMaintenanceCategoryLabel,
+  formatDate, formatDateTime, formatCurrency, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor, showAlert,
 } from '@/utils';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
+import {
+  MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
+  MAINTENANCE_VISIT_SLOT_MINUTES,
+} from '@/constants/maintenance';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
-import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
-import { toSharedBill, TenantInvoice } from '@/services/tenant/billingService';
+import { dtoToTenantRequest, toMaintenanceSharedBill } from '@/services/shared/maintenanceMappers';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
+import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
+import type { SharedBill } from '@/types/bill';
 import { serverNow } from '@/utils/serverTime';
+import { isBeforeAppointmentDay, toLocalDateTime, toApiDateTime } from '@/utils/maintenanceAppointment';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
 const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
@@ -92,6 +98,17 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
+  // Thanh toán chi phí bảo trì (Luồng B, lỗi do khách) — hoá đơn PayOS đã có sẵn từ
+  // lúc manager complete(), chỉ cần tái dùng InvoicePaymentModal như hoá đơn thường.
+  const [payModalOpen, setPayModalOpen] = useState(false);
+  const [payBill, setPayBill] = useState<SharedBill | null>(null);
+
+  // Đổi lịch hẹn xem (05/09/2026) — chỉ khi OPEN, chưa confirm-arrival, còn trước ngày hẹn.
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState<string | null>(null);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+
   // `request` chưa có ở lần render đầu khi vào bằng deep-link (chỉ có `requestId`).
   const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.open;
   const priorityColor = getMaintenancePriorityColor(request?.priority ?? 'medium');
@@ -136,6 +153,49 @@ export const MaintenanceDetailScreen: React.FC = () => {
     });
   };
 
+  const openReschedule = () => {
+    setRescheduleDate('');
+    setRescheduleTime(null);
+    setRescheduleOpen(true);
+  };
+
+  /** Đổi lịch hẹn xem — chỉ gọi được khi OPEN, chưa confirm-arrival, còn trước ngày hẹn (BE tự chặn lại). */
+  const confirmReschedule = async () => {
+    if (rescheduleBusy) return;
+    const dt = rescheduleTime ? toLocalDateTime(rescheduleDate, rescheduleTime) : null;
+    if (!dt) { showAlert('Thiếu lịch hẹn', 'Vui lòng chọn ngày và giờ hẹn mới.'); return; }
+    if (dt.getTime() <= serverNow().getTime()) {
+      showAlert('Lịch hẹn không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+      return;
+    }
+    try {
+      setRescheduleBusy(true);
+      await realMaintenanceService.rescheduleVisit(idNum, { visitAppointmentAt: toApiDateTime(dt) });
+      await refreshReal();
+      setRescheduleOpen(false);
+      showAlert('✅ Đã đổi lịch hẹn', 'Lịch hẹn xem đã được cập nhật.');
+    } catch (e: any) {
+      showAlert('Không thể đổi lịch', apiErrMsg(e, 'Vui lòng thử lại.'));
+    } finally {
+      setRescheduleBusy(false);
+    }
+  };
+
+  /** Huỷ yêu cầu — tenant chỉ huỷ được khi còn OPEN. */
+  const handleCancelRequest = () => {
+    showAlert('Huỷ yêu cầu?', 'Bạn có chắc muốn huỷ yêu cầu sửa chữa này?', [
+      { text: 'Không', style: 'cancel' },
+      { text: 'Huỷ yêu cầu', style: 'destructive', onPress: async () => {
+        try {
+          await realMaintenanceService.cancel(idNum);
+          await refreshReal();
+        } catch (e: any) {
+          showAlert('Không thể huỷ', apiErrMsg(e, 'Vui lòng thử lại.'));
+        }
+      } },
+    ]);
+  };
+
   // Vào bằng deep-link (chỉ có `requestId`) thì lần render đầu chưa có dữ liệu — hiện
   // trạng thái chờ thay vì để phần bên dưới đọc `request.xxx` rồi crash. Đặt SAU toàn
   // bộ hook để không đổi số lượng hook giữa các lần render.
@@ -158,6 +218,16 @@ export const MaintenanceDetailScreen: React.FC = () => {
 
   const remainingDays = daysLeft(request.selfRepairDeadline);
   const hasSelfRepairPhotos = (request.selfRepairImages?.length ?? 0) > 0;
+
+  // Chỉ hiện thẻ thanh toán khi tenant THỰC SỰ bị tính phí (lỗi do khách, manager sửa
+  // hộ) — trường hợp chủ nhà tự trả (hao mòn) vẫn ẩn hoá đơn/chi phí như yêu cầu cũ.
+  const hasTenantCharge = request.billingHint === 'tenant_charge_pending' && !!request.issuedInvoice;
+  const billingHintMeta = MAINTENANCE_BILLING_HINT_META.tenant_charge_pending;
+  const openPayModal = () => {
+    if (!request.issuedInvoice) return;
+    setPayBill(toMaintenanceSharedBill(request.issuedInvoice));
+    setPayModalOpen(true);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -243,6 +313,31 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         </View>
 
+        {/* Lịch hẹn xem — chỉ còn ý nghĩa lúc OPEN (05/09/2026) */}
+        {request.status === 'open' && request.visitAppointmentAt && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📅 Lịch hẹn quản lý tới xem</Text>
+            <View style={styles.infoCard}>
+              <Text style={styles.appointmentTime}>{formatDateTime(request.visitAppointmentAt)}</Text>
+              <Text style={styles.appointmentStatus}>
+                {request.visitArrivalConfirmedAt
+                  ? `✓ Quản lý đã xác nhận có mặt lúc ${formatDateTime(request.visitArrivalConfirmedAt)}`
+                  : '⏳ Quản lý chưa xác nhận có mặt'}
+              </Text>
+              <View style={styles.appointmentActions}>
+                {!request.visitArrivalConfirmedAt && isBeforeAppointmentDay(request.visitAppointmentAt) && (
+                  <TouchableOpacity style={styles.appointmentBtnOutline} onPress={openReschedule}>
+                    <Text style={styles.appointmentBtnOutlineText}>🗓 Đổi lịch hẹn</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.appointmentBtnDanger} onPress={handleCancelRequest}>
+                  <Text style={styles.appointmentBtnDangerText}>✕ Huỷ yêu cầu</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Ảnh hiện trạng (BEFORE) */}
         {(request.beforeImages?.length ?? request.images.length) > 0 && (
           <View style={styles.section}>
@@ -299,11 +394,43 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Cần thanh toán — DUY NHẤT trường hợp hiện hoá đơn/chi phí cho tenant (lỗi do
+            khách, manager đã sửa hộ và complete() phát sinh hoá đơn PayOS). */}
+        {hasTenantCharge && (
+          <View style={styles.section}>
+            <View style={[styles.payCard, { backgroundColor: billingHintMeta.bg, borderColor: billingHintMeta.color + '40' }]}>
+              <Text style={[styles.payCardTitle, { color: billingHintMeta.color }]}>
+                💳 {billingHintMeta.label}
+              </Text>
+              <Text style={[styles.payCardAmount, { color: billingHintMeta.color }]}>
+                {formatCurrency(request.issuedInvoice!.grandTotal)}
+              </Text>
+              <Text style={[styles.payCardDetail, { color: billingHintMeta.color }]}>
+                {billingHintMeta.detail}
+              </Text>
+              {(request.invoiceImages?.length ?? 0) > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
+                  {request.invoiceImages!.map((uri, i) => (
+                    <TouchableOpacity key={i} activeOpacity={0.85}
+                      onPress={() => setLightbox({ uris: request.invoiceImages!, index: i })}>
+                      <Image source={{ uri }} style={styles.attachmentImage} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              <TouchableOpacity style={styles.payCardBtn} onPress={openPayModal}>
+                <Text style={styles.payCardBtnText}>📱 Quét QR thanh toán</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Hoá đơn/chi phí sửa chữa CHỦ ĐỘNG ẨN với tenant (yêu cầu 02/09/2026) — đây là
             giấy tờ nội bộ giữa manager/host/admin (ảnh hoá đơn, mô tả sửa, số tiền chi
             trả), tenant không cần biết. Khoản tenant THỰC SỰ phải trả (billingHint =
-            tenant_charge_pending/deposit_deduction_pending) đã có kênh riêng ở tab Hoá
-            đơn/khi trừ cọc — không mất thông tin gì tenant cần hành động. */}
+            tenant_charge_pending — thẻ ngay trên — hoặc deposit_deduction_pending, xử
+            lý khi trừ cọc) đã có kênh riêng — không mất thông tin gì tenant cần hành
+            động. */}
 
         <MaintenancePhotoHistory photos={request.photoHistory?.filter(p => p.type !== 'INVOICE')} />
 
@@ -376,15 +503,18 @@ export const MaintenanceDetailScreen: React.FC = () => {
         )}
 
         {/* Nút liên hệ nếu đang xử lý */}
-        {(request.status === 'open' || request.status === 'in_repair' || request.status === 'tenant_fault') && (
+        {(request.status === 'open' || request.status === 'repair_scheduled'
+          || request.status === 'in_repair' || request.status === 'tenant_fault') && (
           <View style={styles.actionSection}>
             <View style={styles.helpCard}>
               <Text style={styles.helpText}>
                 {request.status === 'open'
                   ? '⏳ Yêu cầu đang chờ quản lý kiểm tra. Cần hỗ trợ gấp? Liên hệ quản lý.'
-                  : request.status === 'tenant_fault'
-                    ? '🔧 Quản lý sẽ sửa hộ — bạn sẽ nhận hoá đơn sau khi hoàn tất.'
-                    : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
+                  : request.status === 'repair_scheduled'
+                    ? `📅 Đã lên lịch sửa${request.repairAppointmentAt ? `: ${formatDateTime(request.repairAppointmentAt)}` : ''}.`
+                    : request.status === 'tenant_fault'
+                      ? '🔧 Quản lý sẽ sửa hộ — bạn sẽ nhận hoá đơn sau khi hoàn tất.'
+                      : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
               </Text>
             </View>
           </View>
@@ -425,6 +555,41 @@ export const MaintenanceDetailScreen: React.FC = () => {
         </Pressable>
       </Modal>
       <PhotoLightbox state={lightbox} onChange={setLightbox} />
+
+      <InvoicePaymentModal
+        visible={payModalOpen}
+        invoice={payBill}
+        onUpdate={setPayBill}
+        onClose={() => { setPayModalOpen(false); void refreshReal(); }}
+      />
+
+      {/* Đổi lịch hẹn xem */}
+      <Modal visible={rescheduleOpen} transparent animationType="fade" onRequestClose={() => setRescheduleOpen(false)}>
+        <Pressable style={styles.photoMenuBackdrop} onPress={() => setRescheduleOpen(false)}>
+          <Pressable style={styles.photoMenuCard} onPress={() => {}}>
+            <Text style={styles.photoMenuTitle}>Đổi lịch hẹn xem</Text>
+            <AppointmentSlotPicker
+              propertyId={request.propertyId ? Number(request.propertyId) : undefined}
+              slotMinutes={MAINTENANCE_VISIT_SLOT_MINUTES}
+              excludeRequestId={idNum}
+              date={rescheduleDate}
+              onDateChange={setRescheduleDate}
+              time={rescheduleTime}
+              onTimeChange={setRescheduleTime}
+            />
+            <TouchableOpacity
+              style={[styles.confirmBtn, (!rescheduleDate || !rescheduleTime || rescheduleBusy) && { opacity: 0.5 }]}
+              onPress={confirmReschedule}
+              disabled={!rescheduleDate || !rescheduleTime || rescheduleBusy}
+            >
+              <Text style={styles.confirmBtnText}>{rescheduleBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.photoMenuCancel} onPress={() => setRescheduleOpen(false)}>
+              <Text style={styles.photoMenuCancelText}>Đóng</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -480,6 +645,30 @@ const styles = StyleSheet.create({
 
   imagesRow: { marginTop: Spacing.sm },
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+
+  appointmentTime: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  appointmentStatus: { fontSize: 13, color: Colors.textMuted, marginTop: 4 },
+  appointmentActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
+  appointmentBtnOutline: {
+    flex: 1, borderWidth: 1.5, borderColor: Colors.primary, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center',
+  },
+  appointmentBtnOutlineText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  appointmentBtnDanger: {
+    flex: 1, borderWidth: 1.5, borderColor: Colors.error, borderRadius: BorderRadius.md,
+    paddingVertical: Spacing.sm, alignItems: 'center',
+  },
+  appointmentBtnDangerText: { fontSize: 13, fontWeight: '700', color: Colors.error },
+
+  payCard: { borderRadius: BorderRadius.lg, borderWidth: 1.5, padding: Spacing.base, ...Shadow.sm },
+  payCardTitle: { fontSize: 14, fontWeight: '800' },
+  payCardAmount: { fontSize: 24, fontWeight: '800', marginTop: 4 },
+  payCardDetail: { fontSize: 13, lineHeight: 19, marginTop: 4 },
+  payCardBtn: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, borderWidth: 1.5, borderColor: Colors.warning,
+    paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md,
+  },
+  payCardBtnText: { fontSize: 15, fontWeight: '700', color: Colors.warning },
 
   actionSection: { paddingHorizontal: Spacing.base, paddingBottom: 40 },
   helpCard: { backgroundColor: Colors.infoLight, borderRadius: BorderRadius.md, padding: Spacing.md },

@@ -127,7 +127,8 @@ export interface PaymentTransaction {
 // này — HOST_PAID chỉ hiển thị tham khảo, TENANT_CHARGE_PENDING/DEPOSIT_DEDUCTION_PENDING
 // tự động qua billing/checkout.
 export type MaintenanceStatus =
-  | 'open'                    // chờ manager check
+  | 'open'                    // chờ manager tới xem (đã có visitAppointmentAt)
+  | 'repair_scheduled'         // đã duyệt/báo lỗi, chọn đặt lịch sửa sau thay vì sửa ngay
   | 'in_repair'                // đang sửa (Luồng A, hoặc Luồng B nhánh manager sửa hộ)
   | 'tenant_fault'              // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'    // giao tenant tự sửa trước deadline
@@ -205,6 +206,14 @@ export interface MaintenanceRequest {
   issuedInvoice?: MaintenanceIssuedInvoiceDto;
   /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
+  /** Lịch hẹn manager tới xem sự cố — tenant đặt lúc tạo / đổi qua reschedule-visit. */
+  visitAppointmentAt?: string;
+  /** Manager quét QR xác nhận có mặt — không đổi status, chỉ ghi mốc thời gian. */
+  visitArrivalConfirmedAt?: string;
+  /** Lịch hẹn sửa (status = repair_scheduled) — đặt lúc duyệt/báo lỗi hoặc đổi qua reschedule-repair. */
+  repairAppointmentAt?: string;
+  /** Manager quét QR bắt đầu sửa (repair_scheduled → in_repair/tenant_fault). */
+  repairStartedAt?: string;
 }
 
 export interface CreateMaintenanceRequest {
@@ -216,7 +225,7 @@ export interface CreateMaintenanceRequest {
 
 // ===== Real API DTOs (redesign 01/09/2026) — enum UPPERCASE khớp BE =====
 export type MaintenanceReqStatus =
-  | 'OPEN' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
+  | 'OPEN' | 'REPAIR_SCHEDULED' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
   | 'OUTSTANDING_DAMAGE' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceReqCategory = 'APPLIANCE' | 'FURNITURE' | 'PLUMBING' | 'ELECTRICAL';
@@ -300,8 +309,16 @@ export interface MaintenanceRequestDto {
   timeline: MaintenanceTimelineDto[];
   createdAt: string;
   updatedAt: string;
-  /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
+  /** Luôn có khi billingHint=TENANT_CHARGE_PENDING và hoá đơn chưa PAID/CANCELLED (mọi GET, không chỉ ngay sau complete()). */
   issuedInvoice?: MaintenanceIssuedInvoiceDto;
+  /** Lịch hẹn manager tới xem sự cố (bắt buộc lúc tạo). */
+  visitAppointmentAt?: string;
+  /** Manager quét QR xác nhận có mặt — không đổi status, chỉ ghi mốc thời gian. */
+  visitArrivalConfirmedAt?: string;
+  /** Lịch hẹn sửa (status = REPAIR_SCHEDULED). */
+  repairAppointmentAt?: string;
+  /** Manager quét QR bắt đầu sửa. */
+  repairStartedAt?: string;
 }
 
 /** Khớp `TenantInvoiceResponse` (BE) — subset field FE cần để hiện hoá đơn/QR ngay sau confirm(). */
@@ -341,12 +358,16 @@ export interface CreateMaintenanceRequestDto {
   /** Bắt buộc khi KHÔNG có equipmentId — APPLIANCE | FURNITURE | PLUMBING | ELECTRICAL. */
   category?: string;
   images: string[];
+  /** Bắt buộc — lịch hẹn manager tới xem (giờ hành chính 07:00–18:00, không trùng lịch manager). */
+  visitAppointmentAt: string;
 }
 
 /** PUT /{id}/approve — manager duyệt (Luồng A): BẮT BUỘC gán category, priority tùy chọn. */
 export interface ApproveMaintenanceRequestDto {
   category: MaintenanceReqCategory;
   priority?: MaintenanceReqPriority;
+  /** Tùy chọn — có thì chuyển REPAIR_SCHEDULED thay vì sửa ngay (IN_REPAIR). */
+  repairAppointmentAt?: string;
 }
 
 /**
@@ -378,6 +399,30 @@ export interface RejectFaultRequestDto {
   resolutionPath: MaintenanceReqFaultResolutionPath;
   selfRepairDeadline?: string;
   estimatedDamageAmount?: number;
+  /** Tùy chọn, chỉ có ý nghĩa khi resolutionPath=MANAGER_REPAIR — có thì chuyển REPAIR_SCHEDULED thay vì TENANT_FAULT ngay. */
+  repairAppointmentAt?: string;
+}
+
+/** PUT /{id}/reschedule-visit — đổi lịch hẹn xem. Chỉ khi OPEN, chưa confirm-arrival, còn trước ngày hẹn. */
+export interface RescheduleVisitRequestDto {
+  visitAppointmentAt: string;
+}
+
+/** PUT /{id}/reschedule-repair — manager-only, đổi lịch sửa. Chỉ khi REPAIR_SCHEDULED, còn trước ngày hẹn. */
+export interface RescheduleRepairRequestDto {
+  repairAppointmentAt: string;
+}
+
+/** GET /manager-availability — khung giờ đã bận của manager, để FE tô xám khi chọn giờ hẹn. */
+export interface ManagerAvailabilitySlotDto {
+  requestId: number;
+  requestCode: string;
+  /** VISIT (30 phút) | REPAIR (60 phút) */
+  type: 'VISIT' | 'REPAIR';
+  start: string;
+  end: string;
+  propertyName?: string;
+  roomNumber?: string;
 }
 
 /**

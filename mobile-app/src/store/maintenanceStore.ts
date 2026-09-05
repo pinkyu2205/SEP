@@ -4,7 +4,7 @@ import { MaintenanceRequest, MaintenanceStatus, MaintenanceBillingHint, Maintena
 // ===================== TENANT MAINTENANCE REQUESTS =====================
 
 const ACTIVE_STATUSES: MaintenanceStatus[] =
-  ['open', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+  ['open', 'repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
 const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
 
 /**
@@ -45,7 +45,8 @@ export const useTenantRequests = () => {
 // ===================== TYPES =====================
 // Redesign 01/09/2026 — khớp MaintenanceStatus bên types/index.ts.
 export type TicketStatus =
-  | 'open'                  // chờ manager check
+  | 'open'                  // chờ manager tới xem (đã có lịch hẹn)
+  | 'repair_scheduled'       // đã duyệt/báo lỗi, chọn đặt lịch sửa sau thay vì sửa ngay
   | 'in_repair'              // đang sửa (Luồng A hoặc Luồng B nhánh manager sửa hộ)
   | 'tenant_fault'            // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'  // giao tenant tự sửa trước deadline
@@ -135,6 +136,14 @@ export interface MaintenanceTicket {
   issuedInvoice?: MaintenanceRequest['issuedInvoice'];
   /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
+  /** Lịch hẹn manager tới xem sự cố — tenant đặt lúc tạo / đổi qua reschedule-visit. */
+  visitAppointmentAt?: string;
+  /** Manager quét QR xác nhận có mặt — không đổi status, chỉ ghi mốc thời gian. */
+  visitArrivalConfirmedAt?: string;
+  /** Lịch hẹn sửa (status = repair_scheduled). */
+  repairAppointmentAt?: string;
+  /** Manager quét QR bắt đầu sửa. */
+  repairStartedAt?: string;
 }
 
 

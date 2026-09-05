@@ -35,6 +35,16 @@ const waitingDays = (iso?: string): number | null => {
 
 const norm = (s?: string) => (s ?? '').toLowerCase();
 
+/**
+ * TẠM ẨN (05/09/2026) — Luồng B (lỗi do khách) đang bị chặn ở khâu report-fault/
+ * admin-review chưa hỗ trợ đặt lịch sửa như Luồng A bên mobile (xem
+ * mobile-app/docs/maintenance-appointment-implementation-spec.md). Ẩn nút duyệt để
+ * admin không tạo thêm kết luận trong lúc chờ xin BE mở rộng report-fault/admin-review.
+ * Bật lại: đổi thành true (đồng thời hiện lại nút "Báo lỗi do khách" phía
+ * mobile-app/src/screens/manager/TicketDetailScreen.tsx).
+ */
+const TENANT_FAULT_REVIEW_ENABLED = false;
+
 /** Cỡ trang khi gọi BE — vừa là trang đầu vừa là bước nhảy mỗi lần "Tải thêm". */
 const PAGE_SIZE = 200;
 
@@ -357,12 +367,18 @@ export const MaintenanceFaultReview = () => {
               </div>
 
               {tab === 'pending' ? (
-                <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
-                  <button onClick={() => setTarget(r)}
-                    className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-                    Xem xét & duyệt
-                  </button>
-                </div>
+                TENANT_FAULT_REVIEW_ENABLED ? (
+                  <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+                    <button onClick={() => setTarget(r)}
+                      className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+                      Xem xét & duyệt
+                    </button>
+                  </div>
+                ) : (
+                  <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
+                    Tạm khoá duyệt — đang chờ mở rộng report-fault/admin-review cho lịch sửa.
+                  </p>
+                )
               ) : (
                 <p className="border-t border-slate-100 px-6 py-3 text-xs text-slate-400">
                   {r.adminReviewedByName ?? 'Quản trị viên'} kết luận lúc {fmtDate(r.adminReviewedAt)}
