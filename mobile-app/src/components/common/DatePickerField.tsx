@@ -243,46 +243,58 @@ export const DatePickerField: React.FC<Props> = ({
             </View>
           )}
 
-          {/* Grid ngày */}
+          {/*
+            Grid ngày — render theo TỪNG HÀNG 7 ô (`flex:1` mỗi ô) thay vì 1 mảng phẳng
+            42 ô dùng `width:'${100/7}%'` + `flexWrap:'wrap'`. 100/7 = 14.2857...%, làm
+            tròn số theo hàng khiến tổng 7 ô có lúc vượt/thiếu 100% — Yoga bèn đẩy ô cuối
+            (thứ 7 = cột T7/Thứ Bảy, đứng cuối hàng vì tuần bắt đầu từ CN) rớt xuống dòng
+            kế, đè lên hàng dưới nên bấm vào ngày Thứ Bảy trúng nhầm ô khác. Chia hàng rõ
+            ràng bằng `flex:1` thì không còn phụ thuộc số lẻ nào cả.
+          */}
           {mode === 'days' && (
             <View style={styles.grid}>
-              {cells.map((day, i) => {
-                if (!day) return <View key={i} style={styles.cell} />;
-                const sel = isSelected(day);
-                const dis = isDisabled(day);
-                const tod = isToday(day);
-                const isSun = i % 7 === 0;
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    style={styles.cell}
-                    onPress={() => handleSelect(day)}
-                    activeOpacity={dis ? 1 : 0.7}
-                  >
-                    {/*
-                      Vòng tròn là một View CON có kích thước cố định, không phải nền của
-                      cả ô. Bản cũ bôi `borderRadius` lên chính `cell` — mà cell rộng 1/7
-                      màn hình và `aspectRatio: 1`, nên vòng tròn to bằng cả ô (~50px) và
-                      hai ngày cạnh nhau dính sát vào nhau, không còn khoảng thở.
-                    */}
-                    <View style={[
-                      styles.dayCircle,
-                      sel && styles.dayCircleSelected,
-                      tod && !sel && styles.dayCircleToday,
-                    ]}>
-                      <Text style={[
-                        styles.cellText,
-                        isSun && styles.cellSun,
-                        sel && styles.cellTextSelected,
-                        dis && styles.cellDisabled,
-                        tod && !sel && styles.cellTextToday,
-                      ]}>
-                        {day}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {Array.from({ length: cells.length / 7 }, (_, row) => (
+                <View key={row} style={styles.gridRow}>
+                  {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
+                    const i = row * 7 + col;
+                    if (!day) return <View key={i} style={styles.cell} />;
+                    const sel = isSelected(day);
+                    const dis = isDisabled(day);
+                    const tod = isToday(day);
+                    const isSun = col === 0;
+                    return (
+                      <TouchableOpacity
+                        key={i}
+                        style={styles.cell}
+                        onPress={() => handleSelect(day)}
+                        activeOpacity={dis ? 1 : 0.7}
+                      >
+                        {/*
+                          Vòng tròn là một View CON có kích thước cố định, không phải nền của
+                          cả ô. Bản cũ bôi `borderRadius` lên chính `cell` — mà cell rộng 1/7
+                          màn hình và `aspectRatio: 1`, nên vòng tròn to bằng cả ô (~50px) và
+                          hai ngày cạnh nhau dính sát vào nhau, không còn khoảng thở.
+                        */}
+                        <View style={[
+                          styles.dayCircle,
+                          sel && styles.dayCircleSelected,
+                          tod && !sel && styles.dayCircleToday,
+                        ]}>
+                          <Text style={[
+                            styles.cellText,
+                            isSun && styles.cellSun,
+                            sel && styles.cellTextSelected,
+                            dis && styles.cellDisabled,
+                            tod && !sel && styles.cellTextToday,
+                          ]}>
+                            {day}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
           )}
 
@@ -346,13 +358,15 @@ const styles = StyleSheet.create({
   },
   dayName: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '800', color: Colors.textMuted },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  grid: {},
+  gridRow: { flexDirection: 'row' },
   /**
    * Ô chỉ lo VỊ TRÍ; phần nhìn thấy nằm ở `dayCircle` bên trong.
    * Bỏ `aspectRatio: 1` (ô cao ~50px trên máy thường) đổi sang chiều cao cố định 42 —
-   * lịch 6 hàng gọn lại ~50px mà vẫn thừa vùng chạm.
+   * lịch 6 hàng gọn lại ~50px mà vẫn thừa vùng chạm. `flex:1` thay vì width % — xem
+   * comment ở chỗ render phía trên.
    */
-  cell: { width: `${100 / 7}%`, height: 42, alignItems: 'center', justifyContent: 'center' },
+  cell: { flex: 1, height: 42, alignItems: 'center', justifyContent: 'center' },
   /** 34px trong ô cao 42 → còn 8px thở giữa các ngày, hết cảnh hai vòng tròn dính nhau. */
   dayCircle: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   dayCircleSelected: { backgroundColor: Colors.primary },

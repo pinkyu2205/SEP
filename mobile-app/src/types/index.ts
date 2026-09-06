@@ -385,6 +385,16 @@ export interface CompleteMaintenanceRequestDto {
   invoiceNumber?: string;
   invoiceDate?: string;
   invoiceAmount?: number;
+  /**
+   * Luồng A (NORMAL_WEAR): manager chọn thu tiền tenant thay vì công ty trả.
+   * false/undefined = giữ hành vi cũ (công ty trả). Luồng B (lỗi khách, manager sửa
+   * hộ) BE luôn tự thu bất kể field này (06/09/2026).
+   */
+  chargeToTenant?: boolean;
+  /** Thiết bị hỏng không sửa được, phải thay mới — BE tự đền theo Equipment.penaltyFee. */
+  equipmentNeedsReplacement?: boolean;
+  /** Số tiền đền bù khi thay thiết bị — bỏ trống thì BE tự lấy Equipment.penaltyFee. */
+  estimatedDamageAmount?: number;
 }
 
 /**

@@ -251,10 +251,11 @@ export const TicketDetailScreen: React.FC = () => {
   const [approvePriority, setApprovePriority] = useState<TicketPriority | null>(ticket?.priority ?? 'low');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
-  // Duyệt (Luồng A) — sửa ngay (mặc định, giữ đúng hành vi cũ) hoặc đặt lịch sửa sau
-  // (05/09/2026, chỉ Luồng A — Luồng B/report-fault chưa có repairAppointmentAt, xem
-  // docs/maintenance-appointment-implementation-spec.md).
-  const [approveRepairLater, setApproveRepairLater] = useState(false);
+  // Duyệt (Luồng A) — LUÔN phải chọn lịch hẹn sửa, kể cả sửa ngay lúc đó (chọn hôm nay +
+  // giờ còn trống sau giờ hiện tại) — bỏ lựa chọn "sửa ngay" riêng (06/09/2026): ngoài
+  // đời manager muốn sửa ngay thì cứ chọn đúng khung giờ hôm nay là được, không cần một
+  // đường tắt bỏ qua bước đặt lịch. Chỉ Luồng A — Luồng B/report-fault chưa có
+  // repairAppointmentAt, xem docs/maintenance-appointment-implementation-spec.md.
   const [approveRepairDate, setApproveRepairDate] = useState('');
   const [approveRepairTime, setApproveRepairTime] = useState<string | null>(null);
   // Ticket tạo qua QR/chọn thiết bị luôn gắn equipmentId nhưng BE để category=null (tenant
@@ -291,6 +292,26 @@ export const TicketDetailScreen: React.FC = () => {
   // Chỉ còn ảnh + số tiền trên UI — vendor/date/mô tả tự điền ngầm (BE vẫn bắt buộc
   // non-blank) từ ô "Ghi chú" dùng chung, không hỏi lại manager.
   const [invoiceAmountText, setInvoiceAmountText] = useState('');
+  // "Ai chịu phí" (06/09/2026) — chỉ có ý nghĩa chọn ở Luồng A (IN_REPAIR); Luồng B
+  // (TENANT_FAULT + MANAGER_REPAIR) BE luôn tự thu bất kể field này, không cần hỏi lại.
+  const [chargeToTenant, setChargeToTenant] = useState(false);
+  const [needsReplacement, setNeedsReplacement] = useState(false);
+  const [damageAmountText, setDamageAmountText] = useState('');
+  const [equipmentPenaltyFee, setEquipmentPenaltyFee] = useState<number | null>(null);
+  useEffect(() => {
+    if (realEquipmentId == null) return;
+    let active = true;
+    realEquipmentService.getById(realEquipmentId)
+      .then(eq => { if (active) setEquipmentPenaltyFee(eq.penaltyFee ?? null); })
+      .catch(() => { /* không có thì manager tự gõ số đền bù */ });
+    return () => { active = false; };
+  }, [realEquipmentId]);
+  // Bật "cần thay mới" thì tự điền mức đền cố định của thiết bị — manager vẫn sửa lại được.
+  useEffect(() => {
+    if (needsReplacement && !damageAmountText && equipmentPenaltyFee) {
+      setDamageAmountText(equipmentPenaltyFee.toLocaleString('vi-VN'));
+    }
+  }, [needsReplacement, equipmentPenaltyFee]);
 
   // ── Verify-repair (Luồng B — tenant đã tự sửa) ──────────────────────
   const [verifyNote, setVerifyNote] = useState('');
@@ -534,16 +555,13 @@ export const TicketDetailScreen: React.FC = () => {
       showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
       return;
     }
-    let repairAppointmentAt: string | undefined;
-    if (approveRepairLater) {
-      const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
-      if (!dt) { showAlert('Thiếu lịch sửa', 'Vui lòng chọn ngày và giờ hẹn sửa.'); return; }
-      if (dt.getTime() <= serverNow().getTime()) {
-        showAlert('Lịch sửa không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
-        return;
-      }
-      repairAppointmentAt = toApiDateTime(dt);
+    const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
+    if (!dt) { showAlert('Thiếu lịch sửa', 'Vui lòng chọn ngày và giờ hẹn sửa (chọn hôm nay nếu muốn sửa ngay).'); return; }
+    if (dt.getTime() <= serverNow().getTime()) {
+      showAlert('Lịch sửa không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+      return;
     }
+    const repairAppointmentAt = toApiDateTime(dt);
     if (isReal) {
       try {
         setBusy(true);
@@ -552,13 +570,13 @@ export const TicketDetailScreen: React.FC = () => {
           priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
           repairAppointmentAt,
         });
-        await refreshReal();
-        showAlert(
-          '✅ Đã duyệt',
-          repairAppointmentAt
-            ? 'Đã đặt lịch sửa — quét QR bắt đầu sửa đúng ngày hẹn.'
-            : 'Yêu cầu đã được duyệt — sửa xong thì bấm "Báo sửa xong".',
-        );
+        // Gửi xong quay về danh sách thiết bị — manager muốn xử lý tiếp (quét QR bắt
+        // đầu sửa) thì bấm lại vào phiếu từ đó, không giữ nguyên màn chi tiết này nữa
+        // (yêu cầu 06/09/2026 — đỡ manager phải tự back thủ công sau mỗi lượt duyệt).
+        navigation.navigate('Equipment', {
+          propertyId: ticket.propertyId ? Number(ticket.propertyId) : undefined,
+          roomCode: ticket.roomName,
+        });
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
@@ -577,6 +595,14 @@ export const TicketDetailScreen: React.FC = () => {
     if (!hasInvoicePhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hoá đơn.'); return; }
     const amount = Number(invoiceAmountText.replace(/[^0-9]/g, ''));
     if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).'); return; }
+    let damageAmount: number | undefined;
+    if (needsReplacement) {
+      damageAmount = Number(damageAmountText.replace(/[^0-9]/g, ''));
+      if (!Number.isFinite(damageAmount) || damageAmount <= 0) {
+        showAlert('Thiếu mức đền bù', 'Thiết bị cần thay mới nhưng chưa có mức đền bù hợp lệ (> 0).');
+        return;
+      }
+    }
     if (isReal) {
       try {
         setBusy(true);
@@ -586,13 +612,19 @@ export const TicketDetailScreen: React.FC = () => {
           invoiceVendor: DEFAULT_INVOICE_VENDOR,
           invoiceDate: today(),
           invoiceAmount: amount,
+          // Luồng B (tenant_fault) BE luôn tự thu — chỉ Luồng A mới thật sự cần cờ này.
+          chargeToTenant: ticket.status === 'in_repair' ? chargeToTenant : undefined,
+          equipmentNeedsReplacement: needsReplacement || undefined,
+          estimatedDamageAmount: damageAmount,
         });
         await refreshReal();
         setNoteInput(''); setInvoiceAmountText('');
+        setChargeToTenant(false); setNeedsReplacement(false); setDamageAmountText('');
+        const willCharge = ticket.status === 'tenant_fault' || chargeToTenant;
         showAlert(
           '🛠 Đã báo sửa xong',
-          ticket.status === 'tenant_fault'
-            ? 'Hệ thống đã tự tạo hoá đơn — khách thanh toán trong tab Hoá đơn.'
+          willCharge
+            ? 'Hệ thống đã tự tạo hoá đơn — khách thanh toán trong màn chi tiết yêu cầu.'
             : 'Phiếu đã hoàn tất.',
         );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
@@ -921,10 +953,79 @@ export const TicketDetailScreen: React.FC = () => {
               keyboardType="numeric"
             />
             {ticket.status === 'tenant_fault' && (
-              <Text style={s.costHint}>Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.</Text>
+              <Text style={s.costHint}>
+                {needsReplacement
+                  ? 'Thiết bị thay mới — khách sẽ trả theo SỐ TIỀN ĐỀN BÙ ở khối bên dưới (không phải số tiền hoá đơn).'
+                  : 'Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.'}
+              </Text>
             )}
           </View>
         )}
+
+        {/* ── Ai chịu phí (chỉ Luồng A — Luồng B lỗi khách BE luôn tự thu) ── */}
+        {canComplete && ticket.status === 'in_repair' && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>Ai chịu phí sửa chữa?</Text>
+            <View style={s.payChoiceRow}>
+              <TouchableOpacity
+                style={[s.payChoiceBtn, !chargeToTenant && s.payChoiceBtnActive]}
+                onPress={() => setChargeToTenant(false)}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.payChoiceText, !chargeToTenant && s.payChoiceTextActive]}>🏢 Công ty trả</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.payChoiceBtn, chargeToTenant && s.payChoiceBtnActive]}
+                onPress={() => setChargeToTenant(true)}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.payChoiceText, chargeToTenant && s.payChoiceTextActive]}>🧑 Khách trả</Text>
+              </TouchableOpacity>
+            </View>
+            {chargeToTenant && (
+              <Text style={s.costHint}>
+                {needsReplacement
+                  ? 'Thiết bị thay mới — khách sẽ trả theo SỐ TIỀN ĐỀN BÙ ở khối bên dưới (không phải số tiền hoá đơn), có 3 ngày để thanh toán.'
+                  : 'Hoàn tất sẽ tạo hoá đơn thu khách theo số tiền hoá đơn ở trên — khách có 3 ngày để thanh toán.'}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Thiết bị hỏng hoàn toàn, phải thay mới ─────────────────── */}
+        {canComplete && !!realEquipmentId && (
+          <View style={s.card}>
+            <TouchableOpacity
+              style={s.replaceToggleRow}
+              onPress={() => setNeedsReplacement(v => !v)}
+              activeOpacity={0.75}
+            >
+              <View style={[s.checkbox, needsReplacement && s.checkboxChecked]}>
+                {needsReplacement && <Text style={s.checkboxMark}>✓</Text>}
+              </View>
+              <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
+            </TouchableOpacity>
+            {needsReplacement && (
+              <>
+                <TextInput
+                  style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
+                  value={damageAmountText}
+                  onChangeText={t => setDamageAmountText(formatMoneyInput(t))}
+                  placeholder="Số tiền đền bù (VNĐ)"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="numeric"
+                />
+                <Text style={s.costHint}>
+                  {equipmentPenaltyFee
+                    ? `Mức đền cố định của thiết bị: ${fmt(equipmentPenaltyFee)} — có thể sửa lại số trên.`
+                    : 'Thiết bị chưa có mức đền cố định — nhập tay số tiền đền bù.'}
+                  {' '}Đã tự cập nhật lại thiết bị (thay mới) khi bấm "Báo sửa xong".
+                </Text>
+              </>
+            )}
+          </View>
+        )}
+
         {!canComplete && (ticket.invoiceImages?.length ?? 0) > 0 && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
@@ -1070,36 +1171,21 @@ export const TicketDetailScreen: React.FC = () => {
               </View>
             )}
 
-            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Thời điểm sửa</Text>
-            <View style={s.repairChoiceRow}>
-              <TouchableOpacity
-                style={[s.repairChoiceBtn, !approveRepairLater && s.repairChoiceBtnActive]}
-                onPress={() => setApproveRepairLater(false)}
-                activeOpacity={0.75}
-              >
-                <Text style={[s.repairChoiceText, !approveRepairLater && s.repairChoiceTextActive]}>🔧 Sửa ngay</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.repairChoiceBtn, approveRepairLater && s.repairChoiceBtnActive]}
-                onPress={() => setApproveRepairLater(true)}
-                activeOpacity={0.75}
-              >
-                <Text style={[s.repairChoiceText, approveRepairLater && s.repairChoiceTextActive]}>📅 Đặt lịch sửa sau</Text>
-              </TouchableOpacity>
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Hẹn lịch sửa</Text>
+            <Text style={s.pickHint}>
+              Muốn sửa ngay thì chọn hôm nay và khung giờ còn trống gần nhất.
+            </Text>
+            <View style={{ marginTop: Spacing.sm }}>
+              <AppointmentSlotPicker
+                propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+                slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+                excludeRequestId={idNum}
+                date={approveRepairDate}
+                onDateChange={setApproveRepairDate}
+                time={approveRepairTime}
+                onTimeChange={setApproveRepairTime}
+              />
             </View>
-            {approveRepairLater && (
-              <View style={{ marginTop: Spacing.md }}>
-                <AppointmentSlotPicker
-                  propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
-                  slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
-                  excludeRequestId={idNum}
-                  date={approveRepairDate}
-                  onDateChange={setApproveRepairDate}
-                  time={approveRepairTime}
-                  onTimeChange={setApproveRepairTime}
-                />
-              </View>
-            )}
           </View>
         )}
 
@@ -1227,13 +1313,13 @@ export const TicketDetailScreen: React.FC = () => {
         {ticket.status === 'open' && !faultFormOpen && (
           <>
             <TouchableOpacity
-              style={[s.advanceBtn, (!approveCategory || (approveRepairLater && !approveRepairTime)) && s.btnDisabled]}
+              style={[s.advanceBtn, { backgroundColor: '#65A30D' }, (!approveCategory || !approveRepairTime) && s.btnDisabled]}
               onPress={handleApprove}
               disabled={busy}
             >
               <Text style={s.advanceBtnText}>
-                ✅ Duyệt (hao mòn/lỗi chủ){!approveCategory ? ' — chọn danh mục trước'
-                  : approveRepairLater && !approveRepairTime ? ' — chọn lịch sửa trước' : ''}
+                Duyệt{!approveCategory ? ' — chọn danh mục trước'
+                  : !approveRepairTime ? ' — chọn lịch sửa trước' : ''}
               </Text>
             </TouchableOpacity>
             {TENANT_FAULT_FLOW_ENABLED && (
@@ -1383,20 +1469,28 @@ const s = StyleSheet.create({
   dropdownItemText:       { fontSize: 14, fontWeight: '600', color: Colors.textSecondary },
   dropdownItemTextActive: { color: Colors.primary, fontWeight: '700' },
 
-  repairChoiceRow: { flexDirection: 'row', gap: Spacing.sm },
-  repairChoiceBtn: {
-    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: BorderRadius.md,
-    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white,
-  },
-  repairChoiceBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
-  repairChoiceText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  repairChoiceTextActive: { color: Colors.primary, fontWeight: '700' },
-
   reviewRow:     { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
   reviewBtn:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: BorderRadius.md, borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white },
   reviewBtnText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
 
   costHint: { fontSize: 12, color: Colors.textMuted, marginTop: Spacing.sm, lineHeight: 17 },
+
+  payChoiceRow: { flexDirection: 'row', gap: Spacing.sm },
+  payChoiceBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: BorderRadius.md,
+    borderWidth: 1.5, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  payChoiceBtnActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
+  payChoiceText: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  payChoiceTextActive: { color: Colors.primary, fontWeight: '700' },
+
+  replaceToggleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxChecked: { backgroundColor: '#DC2626', borderColor: '#DC2626' },
+  checkboxMark: { color: Colors.white, fontSize: 13, fontWeight: '800' },
 
   advanceBtn:    { backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, paddingVertical: 14, alignItems: 'center', marginBottom: Spacing.md, ...Shadow.md },
   advanceBtnText:{ fontSize: 15, fontWeight: '700', color: Colors.white },

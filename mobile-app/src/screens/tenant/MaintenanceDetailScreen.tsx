@@ -408,6 +408,11 @@ export const MaintenanceDetailScreen: React.FC = () => {
               <Text style={[styles.payCardDetail, { color: billingHintMeta.color }]}>
                 {billingHintMeta.detail}
               </Text>
+              {!!request.issuedInvoice!.dueDate && (
+                <Text style={[styles.payCardDetail, { color: billingHintMeta.color, fontWeight: '700' }]}>
+                  ⏰ Hạn thanh toán: {formatDate(request.issuedInvoice!.dueDate)}
+                </Text>
+              )}
               {(request.invoiceImages?.length ?? 0) > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
                   {request.invoiceImages!.map((uri, i) => (

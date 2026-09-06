@@ -17,7 +17,12 @@ import {
 } from './shared';
 
 const norm = (s?: string) => (s ?? '').toLowerCase();
-const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
+const fmtDate = (iso?: string) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('vi-VN')} ${d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+};
 
 /** Thứ tự chip trạng thái — theo đúng luồng xử lý, không theo alphabet. */
 const STATUS_ORDER = [
