@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Colors } from '@/constants';
+import { formatDateTime } from '@/utils';
 import { MAINTENANCE_STATUS_META, StatusMeta } from '@/constants/maintenance';
 
 /** Dùng chung cho tenant (MaintenanceTimeline) và manager (TimelineEntry) — 2 shape giống hệt nhau. */
@@ -54,8 +55,12 @@ export const MaintenanceProgressTimeline: React.FC<{
   return (
     <View style={s.container}>
       {steps.map((step, i) => {
-        const isCompleted = !step.isPlaceholder && i < lastRealIndex;
-        const isActive    = !step.isPlaceholder && i === lastRealIndex;
+        // "closed" (Hoàn tất) là điểm dừng cuối cùng, không phải bước "đang diễn ra" như
+        // các trạng thái active khác — hiện xanh lá + dấu ✓ giống các bước đã xong phía
+        // trên thay vì xanh dương/tím của "đang xử lý" (yêu cầu 06/09/2026).
+        const isDone      = !step.isPlaceholder && step.status === 'closed';
+        const isCompleted = !step.isPlaceholder && (i < lastRealIndex || (i === lastRealIndex && isDone));
+        const isActive    = !step.isPlaceholder && i === lastRealIndex && !isDone;
         return (
           <View key={`${step.status}-${i}`} style={s.step}>
             <View style={s.stepLeft}>
@@ -75,7 +80,7 @@ export const MaintenanceProgressTimeline: React.FC<{
               {step.entry && (
                 <>
                   <Text style={s.stepNote}>{step.entry.note}</Text>
-                  <Text style={s.stepMeta}>{step.entry.updatedBy} · {step.entry.updatedAt}</Text>
+                  <Text style={s.stepMeta}>{step.entry.updatedBy} · {formatDateTime(step.entry.updatedAt)}</Text>
                 </>
               )}
             </View>

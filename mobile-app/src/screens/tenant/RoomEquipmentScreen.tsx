@@ -54,9 +54,16 @@ export const RoomEquipmentScreen: React.FC = () => {
     needsMaint: equipment.filter(e => equipmentNeedsAttention(e.status)).length,
   };
 
+  // Nhà nguyên căn có nhiều phòng khác nhau trong CÙNG 1 danh sách thiết bị — hiện thêm
+  // tên phòng trên từng thẻ để khách biết thiết bị nằm ở đâu. Khách thuê theo phòng thì
+  // mọi thiết bị đều chung 1 phòng của họ — hiện lại chỉ thừa, nên chỉ bật khi danh sách
+  // thực sự trải ra hơn 1 phòng (06/09/2026).
+  const isMultiRoom = new Set(equipment.map(e => e.roomName || e.roomNumber || '')).size > 1;
+
   const renderItem = ({ item }: { item: EquipmentDto }) => {
     const statusStyle = getEquipmentLifecycleColor(item.status);
     const icon = getIcon(item);
+    const roomLabel = item.roomName || item.roomNumber;
 
     return (
       <TouchableOpacity
@@ -80,7 +87,14 @@ export const RoomEquipmentScreen: React.FC = () => {
             </View>
           </View>
 
-          <Text style={styles.equipCode}>{item.qrCode}</Text>
+          <View style={styles.codeRow}>
+            <Text style={styles.equipCode}>{item.qrCode}</Text>
+            {isMultiRoom && !!roomLabel && (
+              <View style={styles.roomChip}>
+                <Text style={styles.roomChipText}>🚪 {roomLabel}</Text>
+              </View>
+            )}
+          </View>
 
           <View style={styles.cardMeta}>
             <Text style={styles.metaText}>
@@ -208,7 +222,10 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full, flexShrink: 0 },
   statusText: { fontSize: 10, fontWeight: '700' },
 
-  equipCode: { fontSize: 12, color: Colors.textMuted, marginTop: 2, fontFamily: 'monospace' },
+  codeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginTop: 2 },
+  equipCode: { fontSize: 12, color: Colors.textMuted, fontFamily: 'monospace' },
+  roomChip: { backgroundColor: Colors.background, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.sm, paddingVertical: 1, borderWidth: 1, borderColor: Colors.border },
+  roomChipText: { fontSize: 10, fontWeight: '700', color: Colors.textSecondary },
 
   cardMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.sm },
   metaText: { fontSize: 12, color: Colors.textSecondary },

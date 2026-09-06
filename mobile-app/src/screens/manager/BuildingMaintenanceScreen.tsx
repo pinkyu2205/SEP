@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { formatDateTime } from '@/utils';
 import type { MaintenanceTicket, TicketStatus, TicketCategory } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
@@ -50,6 +51,7 @@ const bucketOf = (st: TicketStatus): StatusBucket =>
 
 type StatusFilter   = 'all' | StatusBucket;
 type CategoryFilter = 'all' | TicketCategory;
+type PriorityFilter = 'all' | 'urgent' | 'high' | 'medium' | 'low';
 
 // ── Ticket Card ──────────────────────────────────────────────────────────────
 
@@ -104,7 +106,7 @@ const TicketCard: React.FC<{
 
       {/* Row 4: Date + assigned */}
       <View style={s.cardFooter}>
-        <Text style={s.cardDate}>📅 {ticket.createdAt}</Text>
+        <Text style={s.cardDate}>📅 {formatDateTime(ticket.createdAt)}</Text>
         {ticket.assignedTo && (
           <Text style={s.cardAssigned} numberOfLines={1}>🔧 {ticket.assignedTo.split(' ')[0]}</Text>
         )}
@@ -178,11 +180,13 @@ export const BuildingMaintenanceScreen: React.FC = () => {
   const [search,         setSearch]         = useState('');
   const [statusFilter,   setStatusFilter]   = useState<StatusFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
 
   const filteredTickets = useMemo(() => {
     let list = allTickets;
     if (statusFilter !== 'all')   list = list.filter(t => bucketOf(t.status) === statusFilter);
     if (categoryFilter !== 'all') list = list.filter(t => t.category === categoryFilter);
+    if (priorityFilter !== 'all') list = list.filter(t => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(t =>
@@ -195,7 +199,7 @@ export const BuildingMaintenanceScreen: React.FC = () => {
     // Ticket chưa duyệt (priority null) xếp cuối nhóm ưu tiên (9).
     return [...list].sort((a, b) =>
       (a.priority ? PRIORITY_ORDER[a.priority] : 9) - (b.priority ? PRIORITY_ORDER[b.priority] : 9));
-  }, [allTickets, statusFilter, categoryFilter, search]);
+  }, [allTickets, statusFilter, categoryFilter, priorityFilter, search]);
 
   const stats = useMemo(() => {
     const open = allTickets.filter(t => bucketOf(t.status) === 'pending' || bucketOf(t.status) === 'in_progress');
@@ -232,6 +236,14 @@ export const BuildingMaintenanceScreen: React.FC = () => {
     { id: 'furniture',  label: '🪑 Nội thất' },
     { id: 'plumbing',   label: '🚰 Nước' },
     { id: 'electrical', label: '⚡ Điện' },
+  ];
+
+  const PRIO_FILTERS: { id: PriorityFilter; label: string }[] = [
+    { id: 'all',    label: 'Mọi mức độ' },
+    { id: 'urgent', label: '🚨 Khẩn cấp' },
+    { id: 'high',   label: '🔴 Cao' },
+    { id: 'medium', label: '🟡 Trung bình' },
+    { id: 'low',    label: '🟢 Thấp' },
   ];
 
   return (
@@ -315,6 +327,20 @@ export const BuildingMaintenanceScreen: React.FC = () => {
             onPress={() => setCategoryFilter(f.id)}
           >
             <Text style={[s.chipSmText, categoryFilter === f.id && s.chipSmTextActive]}>{f.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* ── Priority filter chips ────────────────────────────────── */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}
+        style={s.filterRow2} contentContainerStyle={s.filterContent}>
+        {PRIO_FILTERS.map(f => (
+          <TouchableOpacity
+            key={f.id}
+            style={[s.chipSm, priorityFilter === f.id && s.chipSmActive]}
+            onPress={() => setPriorityFilter(f.id)}
+          >
+            <Text style={[s.chipSmText, priorityFilter === f.id && s.chipSmTextActive]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { formatDateTime } from '@/utils';
 import type { MaintenanceTicket } from '@/store/maintenanceStore';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
@@ -411,7 +412,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
                       </View>
                     </View>
                     <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
-                    <Text style={s.activityMeta}>{t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : t.roomName} · {t.updatedAt}</Text>
+                    <Text style={s.activityMeta}>{t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : t.roomName} · {formatDateTime(t.updatedAt)}</Text>
                   </View>
                   <View style={[s.activityStatus, { backgroundColor: cfg.bg }]}>
                     <Text style={[s.activityStatusText, { color: cfg.color }]}>{cfg.label}</Text>

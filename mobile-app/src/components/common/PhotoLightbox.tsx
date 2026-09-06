@@ -1,6 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, Image, TouchableOpacity, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Modal, Image, TouchableOpacity, Pressable, Dimensions } from 'react-native';
 import { Colors } from '@/constants';
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 /**
  * Xem ảnh toàn màn hình — dùng chung cho mọi nơi có ảnh bảo trì (tenant lẫn manager):
@@ -26,7 +28,7 @@ export const PhotoLightbox: React.FC<{
         <TouchableOpacity style={ls.closeBtn} onPress={() => onChange(null)}>
           <Text style={ls.closeBtnText}>✕</Text>
         </TouchableOpacity>
-        <Pressable onPress={() => {}}>
+        <Pressable style={ls.imageWrap} onPress={() => {}}>
           <Image source={{ uri: uris[index] }} style={ls.image} resizeMode="contain" />
         </Pressable>
         {uris.length > 1 && (
@@ -49,7 +51,15 @@ export const PhotoLightbox: React.FC<{
 
 const ls = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
-  image: { width: '94%', height: '80%' },
+  /**
+   * `Pressable`/`Image` con dùng % chiều cao trước đây (`height:'80%'`) nhưng cha
+   * (`Pressable` không có style) lại không có kích thước cố định — % của 1 kích thước
+   * chưa xác định bị Yoga coi là 0, ảnh co về 0px và "biến mất" dù thumbnail vẫn hiện
+   * bình thường. Đổi sang kích thước px tuyệt đối (tính từ Dimensions) để tránh vòng
+   * lặp phụ thuộc kích thước cha-con.
+   */
+  imageWrap: { width: SCREEN_W * 0.94, height: SCREEN_H * 0.8 },
+  image: { width: '100%', height: '100%' },
   closeBtn: {
     position: 'absolute', top: 48, right: 20, width: 36, height: 36, borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 2,

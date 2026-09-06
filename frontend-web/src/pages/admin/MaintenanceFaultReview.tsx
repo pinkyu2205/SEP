@@ -23,7 +23,12 @@ import { RealtimeBadge } from './shared';
 // Xem docs/BE-YEUCAU-luong-loi-do-khach-admin-duyet-2026-09-01.md.
 // ══════════════════════════════════════════════════════════════════════════════
 
-const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—');
+const fmtDate = (iso?: string) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('vi-VN')} ${d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`;
+};
 
 // Giờ SERVER, không phải giờ máy — chỉ là gợi ý mức độ khẩn (không phải hạn xử lý cứng)
 // nên lệch vài phút không sao, nhưng dùng chung tiện ích đã có cho nhất quán.
