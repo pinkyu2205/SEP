@@ -7,7 +7,7 @@ import {
 } from '@/constants';
 import { useAuth, useTenantContract } from '@/hooks';
 import {
-  billMonthLabel, formatCurrency, formatDate, getDaysSince, getDaysUntil, isToday, onboardChargeLines,
+  billMonthLabel, formatCurrency, formatDate, getDaysUntil, isToday, onboardChargeLines,
 } from '@/utils';
 import { serverNow } from '@/utils/serverTime';
 import { SharedBill, InvoiceType } from '@/types/bill';
@@ -16,6 +16,7 @@ import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { checkoutMeta } from '@/constants';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
+import { TenureCard } from '@/components/tenant';
 
 const TYPE_CFG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
@@ -167,10 +168,10 @@ export const TenantHomeScreen: React.FC = () => {
   // Có hợp đồng/phòng đang hiệu lực hay không (BE trả null khi chưa có)
   const hasRoom = !!dash?.contract;
 
-  // "Bạn đã đồng hành cùng chúng tôi bao nhiêu ngày" — ưu tiên ngày dọn vào ở thật
-  // (moveInDate), lùi về ngày hợp đồng có hiệu lực (startDate) nếu BE chưa trả
-  // moveInDate ở endpoint dashboard (xem ghi chú BE-YEUCAU 07/09/2026).
-  const daysWithUs = getDaysSince(dash?.contract?.moveInDate || dash?.contract?.startDate);
+  // Mốc "bạn đã ở đây bao lâu" — ưu tiên ngày dọn vào ở thật (moveInDate), lùi về
+  // ngày hợp đồng có hiệu lực (startDate) nếu BE chưa trả moveInDate ở endpoint
+  // dashboard (xem ghi chú BE-YEUCAU 07/09/2026). Cách tính nằm trong TenureCard.
+  const moveInDate = dash?.contract?.moveInDate || dash?.contract?.startDate;
 
   // Phân biệt 2 dạng thuê: toàn nhà (WHOLE_HOUSE) hay theo phòng (ROOM)
   // Ưu tiên type từ hợp đồng; fallback: không có roomNumber → coi như thuê toàn nhà
@@ -278,7 +279,10 @@ export const TenantHomeScreen: React.FC = () => {
   const alerts = [
     hasOverdue       && { id: 'overdue',  icon: '🚨', text: `${overdueInvoices.length} hóa đơn quá hạn — ${formatCurrency(overdueTotal)}`, route: 'InvoiceList', color: Colors.error   },
     hasMaintenance    && { id: 'maint',    icon: '🔧', text: `${data.maintenance.pending} chờ xử lý · ${data.maintenance.inProgress} đang sửa`, route: 'MaintenanceList', color: Colors.warning },
-    contractExpiringSoon && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`,                               route: 'TenantContracts', color: Colors.info    },
+    // Chỉ 60→31 ngày: từ ngày thứ 30 trở đi TenureCard ở đầu màn tiếp quản, nói
+    // rõ hơn (còn mấy ngày + xin gia hạn được không). Để cả hai là lặp.
+    contractExpiringSoon && data.contract.daysLeft > 30
+      && { id: 'contract', icon: '📋', text: `Hợp đồng còn ${data.contract.daysLeft} ngày`, route: 'TenantContracts', color: Colors.info },
   ].filter(Boolean) as { id: string; icon: string; text: string; route: string; color: string }[];
 
   if (loading) {
@@ -361,6 +365,15 @@ export const TenantHomeScreen: React.FC = () => {
           )
         ) : (
         <>
+        {/* Mốc thời gian ở — đặt trên cùng, trước cả hero card, vì đây là điều đầu
+            tiên khách nên thấy mỗi lần mở app. Cùng thẻ này có ở mục Tài khoản. */}
+        <TenureCard
+          moveInDate={moveInDate}
+          daysLeft={hasRoom ? data.contract.daysLeft : null}
+          hasCheckout={!!checkout}
+          style={styles.tenureSpacing}
+        />
+
         {/* ── Hero: gộp phòng + toà nhà làm MỘT card ──
             Trước đây tách 2 card nên tên phòng và địa chỉ bị lặp y hệt nhau. */}
         <View style={styles.heroCard}>
@@ -393,24 +406,6 @@ export const TenantHomeScreen: React.FC = () => {
                 {formatCurrency(data.depositAmount).replace(' đ', 'đ')}
               </Text>
               <Text style={styles.heroStatLabel}>Tiền cọc</Text>
-            </View>
-          </View>
-
-          {/* ── "Bạn đã đồng hành X ngày" + "Còn X ngày đến khi hết hạn" — gộp vào
-              đúng khối hợp đồng của hero card, ngay trên dòng "Hợp đồng {code}" thay
-              vì tách card riêng ở đầu trang / nhét vào pill góc trên (07/09/2026). */}
-          <View style={styles.heroInfoStack}>
-            <View style={styles.heroInfoRow}>
-              <Text style={styles.heroInfoIcon}>🎉</Text>
-              <Text style={styles.heroInfoText} numberOfLines={1}>
-                Bạn đã đồng hành cùng chúng tôi <Text style={styles.heroInfoBold}>{daysWithUs} ngày</Text>
-              </Text>
-            </View>
-            <View style={styles.heroInfoRow}>
-              <Text style={styles.heroInfoIcon}>{contractExpiringSoon ? '⚠️' : '⏳'}</Text>
-              <Text style={styles.heroInfoText} numberOfLines={1}>
-                Còn <Text style={styles.heroInfoBold}>{data.contract.daysLeft} ngày</Text> đến khi hết hạn hợp đồng
-              </Text>
             </View>
           </View>
 
@@ -769,6 +764,9 @@ const styles = StyleSheet.create({
   },
   notifBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
 
+  // ── Mốc thời gian ở (phần còn lại nằm trong TenureCard) ──
+  tenureSpacing: { marginTop: Spacing.md, marginBottom: Spacing.md },
+
   // ── Hero card: phòng + toà nhà + số liệu gộp làm một ──
   // Thang chữ cố định: nhãn 10.5 · phụ 12 · thân 13 · tiêu đề 22.
   heroCard: {
@@ -790,16 +788,6 @@ const styles = StyleSheet.create({
   heroStatValue: { fontSize: 14, fontWeight: '800', color: Colors.white },
   heroStatLabel: { fontSize: 10.5, fontWeight: '600', color: 'rgba(255,255,255,0.65)', marginTop: 3 },
   heroStatDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.2)' },
-
-  // ── "Đồng hành X ngày" + "Còn X ngày hết hạn" — 2 dòng gộp trong khối hợp đồng ──
-  heroInfoStack: {
-    marginTop: Spacing.base, paddingTop: Spacing.sm, gap: 5,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.16)',
-  },
-  heroInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  heroInfoIcon: { fontSize: 13 },
-  heroInfoText: { flex: 1, fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.85)' },
-  heroInfoBold: { fontWeight: '800', color: Colors.white },
 
   heroContract: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
   heroContractText: { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
