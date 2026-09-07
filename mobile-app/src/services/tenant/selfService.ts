@@ -43,6 +43,13 @@ export interface DashboardContract {
   code: string;
   type?: 'ROOM' | 'WHOLE_HOUSE';
   startDate: string;
+  /**
+   * Ngày khách THỰC SỰ dọn vào ở — có thể khác `startDate` (ngày hợp đồng có hiệu lực).
+   * BE CHƯA trả field này ở endpoint dashboard (chỉ có ở `MyContractListItem`/
+   * `ContractDetailDto`) — xem ghi chú BE-YEUCAU 07/09/2026. Optional, luôn đọc qua
+   * fallback `moveInDate || startDate` giống mọi màn hợp đồng khác trong app.
+   */
+  moveInDate?: string;
   endDate: string;
   daysLeft: number;
   status: string;

@@ -389,6 +389,22 @@ export const getDaysUntil = (dateStr: string): number => {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
+/**
+ * Số ngày đã trôi qua kể từ một mốc trong quá khứ (vd. ngày dọn vào ở), tính theo NGÀY
+ * lịch — bỏ giờ/phút — không phải theo mili-giây, tránh lệch 1 ngày do giờ trong ngày
+ * (23h hôm qua so với 1h hôm nay chỉ cách 2 tiếng đồng hồ nhưng vẫn là hai ngày khác
+ * nhau). Dọn vào đúng hôm nay tính là "ngày thứ 1", không phải 0.
+ */
+export const getDaysSince = (dateStr?: string | null): number => {
+  const d = safeDate(dateStr);
+  if (!d) return 0;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const today = serverNow();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffDays = Math.round((todayOnly.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(1, diffDays + 1);
+};
+
 export const formatRelativeTime = (dateStr: string): string => {
   const date = new Date(dateStr);
   const now = serverNow();
