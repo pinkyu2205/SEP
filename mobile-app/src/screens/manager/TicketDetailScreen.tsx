@@ -1084,6 +1084,7 @@ export const TicketDetailScreen: React.FC = () => {
               onAdd={() => setPhotoMenuFor('invoice')}
               onView={(uris, i) => setLightbox({ uris, index: i })}
               onRemoveLocal={removeLocalPhoto}
+              onRemoveServer={(url) => removeServerPhoto('INVOICE', url)}
             />
             <TextInput
               style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
@@ -1357,6 +1358,7 @@ export const TicketDetailScreen: React.FC = () => {
                 onAdd={() => setPhotoMenuFor('fault_evidence')}
                 onView={(uris, i) => setLightbox({ uris, index: i })}
                 onRemoveLocal={removeLocalPhoto}
+                onRemoveServer={(url) => removeServerPhoto('FAULT_EVIDENCE', url)}
               />
             </View>
             <Text style={s.pickHint}>
