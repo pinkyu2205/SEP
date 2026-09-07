@@ -264,6 +264,20 @@ export const realMaintenanceService = {
     return data;
   },
 
+  /**
+   * DELETE /{id}/photos?type=&url= — gỡ 1 ảnh ĐÃ upload (BE ship 07/09/2026, xem
+   * docs/BE-YEUCAU-xoa-anh-va-gop-tien-den-bu-2026-09-07.md). Chỉ được khi phiếu chưa
+   * CLOSED/CANCELLED — dùng để đổi ảnh chọn nhầm mà không cần liên hệ ngoài luồng.
+   */
+  deletePhoto: async (
+    id: number, type: MaintenancePhotoType, url: string,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.delete<MaintenanceRequestDto>(`${BASE}/${id}/photos`, {
+      params: { type, url },
+    });
+    return data;
+  },
+
   /** GET /dashboard — open / inProgress / resolved / cancelled / totalRepairCost. */
   getDashboard: async (propertyId?: number): Promise<MaintenanceDashboardDto> => {
     const { data } = await realApiClient.get<MaintenanceDashboardDto>(`${BASE}/dashboard`, {

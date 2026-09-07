@@ -6,12 +6,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, TicketCategory, TicketPriority, PhotoEvidence, TimelineEntry,
 } from '@/store/maintenanceStore';
-import type { MaintenanceReqCategory, MaintenanceReqPriority } from '@/types';
+import type { MaintenanceReqCategory, MaintenanceReqPriority, EquipmentDto } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { realEquipmentService } from '@/services/manager/equipmentService';
@@ -42,6 +43,18 @@ import {
  * frontend-web/src/pages/admin/MaintenanceFaultReview.tsx).
  */
 const TENANT_FAULT_FLOW_ENABLED = false;
+
+/**
+ * Quét QR xác nhận có mặt rồi mà quá 30' chưa nộp bước tiếp theo (duyệt/báo lỗi do
+ * khách) thì bắt quét lại (07/09/2026). BE `confirmArrival()` là no-op khi
+ * `visitArrivalConfirmedAt` đã có sẵn (không cập nhật lại mốc giờ), nên không thể dựa
+ * vào mốc giờ CỦA BE để tính "mới quét" — phải tự lưu mốc quét THẬT trên máy (key theo
+ * ticket id) và so sánh cục bộ. Chỉ áp dụng cho gate "Xác nhận có mặt": gate "Bắt đầu
+ * sửa" (start-repair) quét xong là chuyển trạng thái ngay lập tức, không có bước lơ
+ * lửng nào ở giữa để tính hạn 30 phút.
+ */
+const ARRIVAL_CONFIRM_TTL_MS = 30 * 60 * 1000;
+const arrivalConfirmStorageKey = (id: number) => `maint_arrival_confirmed_at_${id}`;
 
 const STATUS_CONFIG: Record<TicketStatus, StatusMeta> = MAINTENANCE_STATUS_META;
 
@@ -79,6 +92,44 @@ const formatMoneyInput = (text: string): string => {
 /** Hoá đơn giờ chỉ cần ảnh + số tiền — BE vẫn bắt buộc non-blank nên tự điền ngầm. */
 const DEFAULT_INVOICE_VENDOR = 'Nội bộ';
 
+/**
+ * Số tiền đền bù khi thiết bị hỏng hoàn toàn — LUÔN tự động, manager không được thêm/
+ * xoá/sửa tay trong bất kỳ trường hợp nào (07/09/2026):
+ *  - Còn bảo hành (hôm nay < ngày hết hạn bảo hành) và có đủ giá + ngày bắt đầu bảo
+ *    hành: tính khấu hao còn lại theo đường thẳng — giá × (số ngày còn lại / tổng số
+ *    ngày bảo hành).
+ *  - Hết bảo hành, hoặc thiếu dữ liệu bảo hành/giá để tính khấu hao: dùng
+ *    Equipment.penaltyFee (mức phạt cố định — theo đúng comment ở entity BE: "Không
+ *    tính từ đơn giá hay khấu hao").
+ * Trả về null khi thiết bị không có cả 2 nguồn trên — không có gì để tự điền, và
+ * KHÔNG được để manager gõ tay thay thế (chặn thu phí ở nơi gọi).
+ */
+const computeAutoDamageAmount = (eq: EquipmentDto | null): number | null => {
+  if (!eq) return null;
+  const now = serverNow().getTime();
+  const endStr = eq.warrantyEndDate || eq.warrantyExpiredDate;
+  const end = endStr ? new Date(endStr).getTime() : null;
+  const start = eq.warrantyStartDate ? new Date(eq.warrantyStartDate).getTime() : null;
+  const stillUnderWarranty = end != null && !Number.isNaN(end) && now < end;
+  if (stillUnderWarranty && start != null && !Number.isNaN(start) && eq.price) {
+    const totalMs = end! - start;
+    if (totalMs > 0) {
+      const remainingMs = Math.max(0, end! - now);
+      return Math.round(eq.price * (remainingMs / totalMs));
+    }
+  }
+  return eq.penaltyFee ?? null;
+};
+
+/** Thiết bị còn trong hạn bảo hành hay không — dùng để chọn nhãn hiển thị đúng nguồn số tiền. */
+const isUnderWarranty = (eq: EquipmentDto | null): boolean => {
+  if (!eq) return false;
+  const endStr = eq.warrantyEndDate || eq.warrantyExpiredDate;
+  if (!endStr) return false;
+  const end = new Date(endStr).getTime();
+  return !Number.isNaN(end) && serverNow().getTime() < end;
+};
+
 const daysLeft = (deadline?: string): number | null => {
   if (!deadline) return null;
   const end = new Date(deadline).getTime();
@@ -110,11 +161,15 @@ const PhotoEvidenceRow: React.FC<{
   /**
    * Xoá 1 ảnh LOCAL (chưa/đang upload hoặc upload lỗi) để chụp/chọn lại — CHỈ áp dụng
    * ảnh local, KHÔNG áp dụng ảnh đã lên server (`urls`): BE chưa có endpoint xoá ảnh đã
-   * lưu (chỉ có POST /{id}/photos, không có DELETE), nên với ảnh đã confirm phải nhờ
-   * admin/BE xử lý ngoài luồng — không giả vờ xoá được ở đây.
+   * lưu — nay BE ĐÃ có `DELETE /{id}/photos` (07/09/2026), xem `onRemoveServer`.
    */
   onRemoveLocal?: (localId: string) => void;
-}> = ({ type, urls = [], photos, onAdd, disabled, onView, onRemoveLocal }) => {
+  /**
+   * Xoá 1 ảnh ĐÃ lên server (url nằm trong `urls`, không phải `photos` local) — chỉ
+   * truyền prop này ở những chỗ được phép đổi ảnh (phiếu còn mở, đúng loại ảnh).
+   */
+  onRemoveServer?: (url: string) => void;
+}> = ({ type, urls = [], photos, onAdd, disabled, onView, onRemoveLocal, onRemoveServer }) => {
   const filtered = photos.filter(p => p.type === type);
   const meta     = PHOTO_KIND_META[type];
   const isEmpty  = urls.length === 0 && filtered.length === 0;
@@ -142,6 +197,11 @@ const PhotoEvidenceRow: React.FC<{
               onPress={() => onView?.(allUris, i)}
             >
               <Image source={{ uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
+              {onRemoveServer && (
+                <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveServer(uri)}>
+                  <Text style={phs.photoRemoveBtnText}>✕</Text>
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           ))}
           {filtered.map((photo, i) => (
@@ -274,6 +334,7 @@ export const TicketDetailScreen: React.FC = () => {
 
   const submitRejectFault = async () => {
     if (rejectingFault) return;
+    if (blockIfArrivalStale()) return;
     const reason = faultReason.trim();
     if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
     const evidenceUrls = ticket?.faultEvidenceImages ?? [];
@@ -296,22 +357,15 @@ export const TicketDetailScreen: React.FC = () => {
   // (TENANT_FAULT + MANAGER_REPAIR) BE luôn tự thu bất kể field này, không cần hỏi lại.
   const [chargeToTenant, setChargeToTenant] = useState(false);
   const [needsReplacement, setNeedsReplacement] = useState(false);
-  const [damageAmountText, setDamageAmountText] = useState('');
-  const [equipmentPenaltyFee, setEquipmentPenaltyFee] = useState<number | null>(null);
+  const [replacementEquipment, setReplacementEquipment] = useState<EquipmentDto | null>(null);
   useEffect(() => {
     if (realEquipmentId == null) return;
     let active = true;
     realEquipmentService.getById(realEquipmentId)
-      .then(eq => { if (active) setEquipmentPenaltyFee(eq.penaltyFee ?? null); })
-      .catch(() => { /* không có thì manager tự gõ số đền bù */ });
+      .then(eq => { if (active) setReplacementEquipment(eq); })
+      .catch(() => { /* không tải được → autoDamageAmount ra null, chặn thu phí (xem dưới) */ });
     return () => { active = false; };
   }, [realEquipmentId]);
-  // Bật "cần thay mới" thì tự điền mức đền cố định của thiết bị — manager vẫn sửa lại được.
-  useEffect(() => {
-    if (needsReplacement && !damageAmountText && equipmentPenaltyFee) {
-      setDamageAmountText(equipmentPenaltyFee.toLocaleString('vi-VN'));
-    }
-  }, [needsReplacement, equipmentPenaltyFee]);
 
   // ── Verify-repair (Luồng B — tenant đã tự sửa) ──────────────────────
   const [verifyNote, setVerifyNote] = useState('');
@@ -370,6 +424,42 @@ export const TicketDetailScreen: React.FC = () => {
   // visitAppointmentAt bỏ qua gate này (khớp đúng bypass phía BE).
   const [arrivalScanOpen, setArrivalScanOpen] = useState(false);
   const [arrivalBusy, setArrivalBusy] = useState(false);
+  // Mốc quét THẬT lưu cục bộ (xem ARRIVAL_CONFIRM_TTL_MS) — null = chưa quét lần nào
+  // trên máy này, hoặc chưa đọc xong storage.
+  const [arrivalConfirmedAtLocal, setArrivalConfirmedAtLocal] = useState<number | null>(null);
+  const [arrivalCheckLoaded, setArrivalCheckLoaded] = useState(false);
+  const [, forceRerenderForGate] = useState(0);
+
+  useEffect(() => {
+    if (!isRealId) { setArrivalCheckLoaded(true); return; }
+    let active = true;
+    AsyncStorage.getItem(arrivalConfirmStorageKey(idNum)).then((v) => {
+      if (!active) return;
+      setArrivalConfirmedAtLocal(v ? Number(v) : null);
+      setArrivalCheckLoaded(true);
+    });
+    return () => { active = false; };
+  }, [idNum, isRealId]);
+
+  // Chưa đọc xong storage → tạm coi là còn mới (tránh nháy màn gate 1 khung hình đầu).
+  const isArrivalFresh = !arrivalCheckLoaded
+    || (arrivalConfirmedAtLocal != null && serverNow().getTime() - arrivalConfirmedAtLocal < ARRIVAL_CONFIRM_TTL_MS);
+  const arrivalNeedsRescan = arrivalCheckLoaded && !!ticket?.visitArrivalConfirmedAt && !isArrivalFresh;
+
+  /** Chặn nộp bước tiếp theo (duyệt/báo lỗi) nếu mốc quét cục bộ đã quá hạn — tính lại
+   * NGAY LÚC BẤM, không dựa vào state render trước đó (người dùng có thể ngồi yên
+   * >30' trên form mà không có gì khiến màn tự render lại). rescanTick chỉ để ép
+   * component render lại, cho gate ở trên hiện ra thay vì đứng yên ở form cũ. */
+  const blockIfArrivalStale = (): boolean => {
+    if (!ticket?.visitArrivalConfirmedAt) return false; // phiếu cũ không có gate này
+    const stale = arrivalConfirmedAtLocal == null
+      || serverNow().getTime() - arrivalConfirmedAtLocal >= ARRIVAL_CONFIRM_TTL_MS;
+    if (stale) {
+      showAlert('Đã quá 30 phút', 'Vui lòng quét lại QR xác nhận có mặt để tiếp tục xử lý phiếu này.');
+      forceRerenderForGate(t => t + 1);
+    }
+    return stale;
+  };
 
   // ── Gate quét QR bắt đầu sửa (REPAIR_SCHEDULED → start-repair) — cùng cơ chế, chỉ
   // áp dụng nhánh "đặt lịch sửa sau" (Luồng A). Đổi lịch sửa cũng đặt ở đây, manager-only.
@@ -385,6 +475,11 @@ export const TicketDetailScreen: React.FC = () => {
     try {
       setArrivalBusy(true);
       await realMaintenanceService.confirmArrival(idNum);
+      // BE no-op nếu đã confirm trước đó (không cập nhật lại mốc giờ) — mốc "mới quét"
+      // thật sự nằm ở đây, lưu cục bộ để tính hạn 30' (xem ARRIVAL_CONFIRM_TTL_MS).
+      const now = serverNow().getTime();
+      await AsyncStorage.setItem(arrivalConfirmStorageKey(idNum), String(now));
+      setArrivalConfirmedAtLocal(now);
       await refreshReal();
     } catch (e: any) {
       showAlert('Không thể xác nhận', e?.response?.data?.error || e?.response?.data?.message || 'Vui lòng thử lại.');
@@ -425,7 +520,7 @@ export const TicketDetailScreen: React.FC = () => {
 
   // Phiếu OPEN có hẹn xem nhưng CHƯA xác nhận có mặt → chặn hẳn màn xử lý, thay bằng
   // gate quét QR (phiếu cũ visitAppointmentAt=null bỏ qua, khớp bypass phía BE).
-  if (ticket.status === 'open' && ticket.visitAppointmentAt && !ticket.visitArrivalConfirmedAt) {
+  if (ticket.status === 'open' && ticket.visitAppointmentAt && (!ticket.visitArrivalConfirmedAt || arrivalNeedsRescan)) {
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
@@ -441,6 +536,12 @@ export const TicketDetailScreen: React.FC = () => {
           <Text style={arrivalGateStyles.appointment}>
             Lịch hẹn: {formatDateTime(ticket.visitAppointmentAt)}
           </Text>
+          {arrivalNeedsRescan && (
+            <Text style={[arrivalGateStyles.hint, { color: '#B45309', fontWeight: '700' }]}>
+              ⏱ Đã quá 30 phút kể từ lúc quét xác nhận có mặt mà chưa duyệt/báo lỗi xong —
+              vui lòng quét lại để tiếp tục.
+            </Text>
+          )}
           {realEquipmentId ? (
             <>
               <Text style={arrivalGateStyles.hint}>
@@ -494,6 +595,15 @@ export const TicketDetailScreen: React.FC = () => {
   const canComplete = ['in_repair', 'tenant_fault'].includes(ticket.status)
     && (ticket.status !== 'tenant_fault' || ticket.faultResolutionPath === 'manager_repair');
 
+  // "Ai chịu phí" chỉ thật sự là lựa chọn ở Luồng A (in_repair) — Luồng B (tenant_fault,
+  // manager sửa hộ) BE luôn tự thu bất kể cờ FE gửi, nên coi như true để tính UI/validate.
+  const effectiveChargeToTenant = ticket.status === 'tenant_fault' ? true : chargeToTenant;
+  // Chỉ cần tự tính số đền bù khi VỪA cần thay mới VỪA thu phí khách — công ty trả thì
+  // không hiện/không cần số này (07/09/2026, xem computeAutoDamageAmount).
+  const autoDamageAmount = (needsReplacement && effectiveChargeToTenant)
+    ? computeAutoDamageAmount(replacementEquipment) : null;
+  const replacementUnderWarranty = isUnderWarranty(replacementEquipment);
+
   // Cập nhật store + append timeline (đường mock).
   const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
     maintenanceStore.updateTicket(ticket.id, {
@@ -530,6 +640,25 @@ export const TicketDetailScreen: React.FC = () => {
    */
   const removeLocalPhoto = (localId: string) => setPhotos(prev => prev.filter(p => p.id !== localId));
 
+  /**
+   * Xoá 1 ảnh ĐÃ upload lên server (BE ship `DELETE /{id}/photos` 07/09/2026) — dùng khi
+   * manager thêm nhầm ảnh (mờ, sai thiết bị...) và muốn thay ảnh khác mà không phải nhờ
+   * admin xử lý ngoài luồng như trước.
+   */
+  const removeServerPhoto = (beType: 'BEFORE' | 'AFTER' | 'INVOICE' | 'FAULT_EVIDENCE' | 'SELF_REPAIR', url: string) => {
+    showAlert('Xoá ảnh này?', 'Ảnh sẽ bị gỡ khỏi phiếu — không khôi phục lại được, chỉ có thể thêm ảnh khác.', [
+      { text: 'Không', style: 'cancel' },
+      { text: 'Xoá ảnh', style: 'destructive', onPress: async () => {
+        try {
+          await realMaintenanceService.deletePhoto(idNum, beType, url);
+          await refreshReal();
+        } catch (e: any) {
+          showAlert('Không thể xoá', apiErrMsg(e, 'Vui lòng thử lại.'));
+        }
+      }},
+    ]);
+  };
+
   // Menu "Thêm ảnh" trong UI (không dùng Alert.alert 3 nút) — Alert.alert là no-op
   // trên react-native-web nên menu Chụp ảnh/Thư viện trước đây không bấm được trên web.
   const pickPhotoFromCamera = async (type: PhotoKind) => {
@@ -551,6 +680,7 @@ export const TicketDetailScreen: React.FC = () => {
   /** OPEN → IN_REPAIR: manager duyệt (Luồng A) — BẮT BUỘC chọn category. */
   const handleApprove = async () => {
     if (busy) return;
+    if (blockIfArrivalStale()) return;
     if (!approveCategory) {
       showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
       return;
@@ -570,13 +700,12 @@ export const TicketDetailScreen: React.FC = () => {
           priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
           repairAppointmentAt,
         });
-        // Gửi xong quay về danh sách thiết bị — manager muốn xử lý tiếp (quét QR bắt
-        // đầu sửa) thì bấm lại vào phiếu từ đó, không giữ nguyên màn chi tiết này nữa
-        // (yêu cầu 06/09/2026 — đỡ manager phải tự back thủ công sau mỗi lượt duyệt).
-        navigation.navigate('Equipment', {
-          propertyId: ticket.propertyId ? Number(ticket.propertyId) : undefined,
-          roomCode: ticket.roomName,
-        });
+        // Gửi xong quay về màn "Bảo trì & Sửa chữa" — trước đây trỏ nhầm sang 'Equipment'
+        // (danh sách thiết bị theo nhà), một stack screen độc lập không nhận
+        // propertyId/roomCode kiểu này nên rơi vào "Chưa được giao nhà nào" (07/09/2026).
+        // 'ManagerMaintenance' là tab lồng trong 'ManagerTabs', phải điều hướng qua đúng
+        // navigator cha (xem navigationRef.ts — MANAGER_TAB_ROUTES).
+        navigation.navigate('ManagerTabs', { screen: 'ManagerMaintenance' });
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
       finally { setBusy(false); }
       return;
@@ -593,15 +722,26 @@ export const TicketDetailScreen: React.FC = () => {
     if (busy) return;
     if (!hasAfterPhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa.'); return; }
     if (!hasInvoicePhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hoá đơn.'); return; }
-    const amount = Number(invoiceAmountText.replace(/[^0-9]/g, ''));
-    if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).'); return; }
+    const invoiceAmountRaw = invoiceAmountText.replace(/[^0-9]/g, '');
+    const amount = invoiceAmountRaw ? Number(invoiceAmountRaw) : 0;
+    // BE (commit afd2f17, 07/09/2026): số tiền hoá đơn chỉ bắt buộc >0 khi KHÔNG thay
+    // thiết bị — thay mới thì có thể để trống/0, tiền đền bù tự tính đứng một mình đủ.
+    if (!needsReplacement && (!Number.isFinite(amount) || amount <= 0)) {
+      showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).');
+      return;
+    }
     let damageAmount: number | undefined;
-    if (needsReplacement) {
-      damageAmount = Number(damageAmountText.replace(/[^0-9]/g, ''));
-      if (!Number.isFinite(damageAmount) || damageAmount <= 0) {
-        showAlert('Thiếu mức đền bù', 'Thiết bị cần thay mới nhưng chưa có mức đền bù hợp lệ (> 0).');
+    if (needsReplacement && effectiveChargeToTenant) {
+      // Số này LUÔN tự tính (khấu hao còn lại nếu còn bảo hành, penaltyFee nếu hết) —
+      // không có nguồn nào để thu tay, không cho phép nhập tay thay thế (07/09/2026).
+      if (!autoDamageAmount || autoDamageAmount <= 0) {
+        showAlert(
+          'Thiếu dữ liệu thiết bị',
+          'Thiết bị chưa có dữ liệu giá + ngày bảo hành, cũng chưa có mức phạt cố định (penaltyFee) để tự tính số tiền đền bù — không thể thu phí khách cho thiết bị này. Vui lòng bổ sung thông tin thiết bị trước khi hoàn tất.',
+        );
         return;
       }
+      damageAmount = autoDamageAmount;
     }
     if (isReal) {
       try {
@@ -619,7 +759,7 @@ export const TicketDetailScreen: React.FC = () => {
         });
         await refreshReal();
         setNoteInput(''); setInvoiceAmountText('');
-        setChargeToTenant(false); setNeedsReplacement(false); setDamageAmountText('');
+        setChargeToTenant(false); setNeedsReplacement(false);
         const willCharge = ticket.status === 'tenant_fault' || chargeToTenant;
         showAlert(
           '🛠 Đã báo sửa xong',
@@ -910,6 +1050,7 @@ export const TicketDetailScreen: React.FC = () => {
               onAdd={() => setPhotoMenuFor('after')}
               onView={(uris, i) => setLightbox({ uris, index: i })}
               onRemoveLocal={removeLocalPhoto}
+              onRemoveServer={(url) => removeServerPhoto('AFTER', url)}
             />
             <View style={s.sectionDivider} />
             <Text style={[s.cardSectionTitle, { marginTop: 0 }]}>Ghi chú</Text>
@@ -948,14 +1089,14 @@ export const TicketDetailScreen: React.FC = () => {
               style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
               value={invoiceAmountText}
               onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
-              placeholder="Số tiền hoá đơn (VNĐ)"
+              placeholder={needsReplacement ? 'Số tiền hoá đơn (VNĐ) — để trống nếu không có' : 'Số tiền hoá đơn (VNĐ)'}
               placeholderTextColor={Colors.textMuted}
               keyboardType="numeric"
             />
             {ticket.status === 'tenant_fault' && (
               <Text style={s.costHint}>
                 {needsReplacement
-                  ? 'Thiết bị thay mới — khách sẽ trả theo SỐ TIỀN ĐỀN BÙ ở khối bên dưới (không phải số tiền hoá đơn).'
+                  ? 'Thiết bị thay mới — khách trả tiền đền bù ở khối bên dưới; chỉ cộng thêm số tiền hoá đơn nếu bạn có nhập (để trống nếu không phát sinh chi phí nào khác).'
                   : 'Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.'}
               </Text>
             )}
@@ -985,7 +1126,7 @@ export const TicketDetailScreen: React.FC = () => {
             {chargeToTenant && (
               <Text style={s.costHint}>
                 {needsReplacement
-                  ? 'Thiết bị thay mới — khách sẽ trả theo SỐ TIỀN ĐỀN BÙ ở khối bên dưới (không phải số tiền hoá đơn), có 3 ngày để thanh toán.'
+                  ? 'Thiết bị thay mới — khách trả tiền đền bù ở khối bên dưới; chỉ cộng thêm số tiền hoá đơn nếu bạn có nhập (để trống nếu không phát sinh chi phí nào khác), có 3 ngày để thanh toán.'
                   : 'Hoàn tất sẽ tạo hoá đơn thu khách theo số tiền hoá đơn ở trên — khách có 3 ngày để thanh toán.'}
               </Text>
             )}
@@ -1005,23 +1146,32 @@ export const TicketDetailScreen: React.FC = () => {
               </View>
               <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
             </TouchableOpacity>
-            {needsReplacement && (
+            {/* Số tiền đền bù chỉ có ý nghĩa khi THU PHÍ KHÁCH — công ty trả thì không
+                cần biết số này, chỉ cần đánh dấu thay mới + lưu hoá đơn (07/09/2026). */}
+            {needsReplacement && effectiveChargeToTenant && (
               <>
-                <TextInput
-                  style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
-                  value={damageAmountText}
-                  onChangeText={t => setDamageAmountText(formatMoneyInput(t))}
-                  placeholder="Số tiền đền bù (VNĐ)"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="numeric"
-                />
+                {/* Luôn tự động — manager KHÔNG được thêm/xoá/sửa số này trong bất kỳ
+                    trường hợp nào, nên hiển thị dạng đọc (không phải TextInput). */}
+                <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
+                  <Text style={s.readonlyAmountText}>
+                    {autoDamageAmount ? fmt(autoDamageAmount) : '— Chưa có dữ liệu —'}
+                  </Text>
+                </View>
                 <Text style={s.costHint}>
-                  {equipmentPenaltyFee
-                    ? `Mức đền cố định của thiết bị: ${fmt(equipmentPenaltyFee)} — có thể sửa lại số trên.`
-                    : 'Thiết bị chưa có mức đền cố định — nhập tay số tiền đền bù.'}
+                  {autoDamageAmount
+                    ? replacementUnderWarranty
+                      ? 'Còn bảo hành — số tiền này là phần khấu hao còn lại của thiết bị, tự tính, không thể sửa.'
+                      : 'Đã hết bảo hành — số tiền này là mức phạt cố định của thiết bị (penaltyFee), tự tính, không thể sửa.'
+                    : 'Thiết bị chưa có dữ liệu giá/bảo hành, cũng chưa có mức phạt cố định — không thể thu phí khách cho thiết bị này (không được nhập tay).'}
                   {' '}Đã tự cập nhật lại thiết bị (thay mới) khi bấm "Báo sửa xong".
                 </Text>
               </>
+            )}
+            {needsReplacement && !effectiveChargeToTenant && (
+              <Text style={[s.costHint, { marginTop: Spacing.sm }]}>
+                Công ty trả — không cần số tiền đền bù, chỉ lưu lại hoá đơn/số tiền hoá đơn (nếu có) và đánh dấu
+                thiết bị đã được thay mới.
+              </Text>
             )}
           </View>
         )}
@@ -1441,6 +1591,9 @@ const s = StyleSheet.create({
   noteInput:  { minHeight: 80, textAlignVertical: 'top' },
   moneyInput: { textAlign: 'right', fontWeight: '700' },
   moneyReadout: { textAlign: 'right', fontWeight: '800', fontSize: 18, marginTop: Spacing.sm },
+  // Số tiền đền bù tự động — hộp hiển thị, KHÔNG phải ô nhập (manager không được sửa).
+  readonlyAmountBox: { backgroundColor: Colors.background, justifyContent: 'center' },
+  readonlyAmountText: { textAlign: 'right', fontWeight: '700', fontSize: 14, color: Colors.textPrimary },
 
   replaceAlert:     { backgroundColor: '#FEF2F2', borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.md, borderWidth: 1, borderColor: '#FECACA' },
   replaceAlertText: { fontSize: 13, color: '#B91C1C', lineHeight: 19 },

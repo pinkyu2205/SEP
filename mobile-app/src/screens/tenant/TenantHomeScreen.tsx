@@ -361,28 +361,11 @@ export const TenantHomeScreen: React.FC = () => {
           )
         ) : (
         <>
-        {/* ── "Bạn đã đồng hành cùng chúng tôi X ngày" — đặt ngay trên cùng, trước cả
-            hero card, vì đây là điều đầu tiên khách nên thấy mỗi lần mở app. */}
-        <View style={styles.anniversaryCard}>
-          <View style={styles.anniversaryIconWrap}>
-            <Text style={styles.anniversaryEmoji}>🎉</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.anniversaryValue}>{daysWithUs} ngày</Text>
-            <Text style={styles.anniversaryLabel}>Bạn đã đồng hành cùng chúng tôi</Text>
-          </View>
-        </View>
-
         {/* ── Hero: gộp phòng + toà nhà làm MỘT card ──
             Trước đây tách 2 card nên tên phòng và địa chỉ bị lặp y hệt nhau. */}
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <Text style={styles.heroLabel}>{isWholeHouse ? 'NHÀ CỦA BẠN' : 'PHÒNG CỦA BẠN'}</Text>
-            <View style={[styles.heroDaysPill, contractExpiringSoon && styles.heroDaysPillWarn]}>
-              <Text style={styles.heroDaysText}>
-                {contractExpiringSoon ? '⚠️ ' : ''}Còn {data.contract.daysLeft} ngày
-              </Text>
-            </View>
           </View>
 
           <Text style={styles.heroName} numberOfLines={2}>{data.room.name}</Text>
@@ -410,6 +393,24 @@ export const TenantHomeScreen: React.FC = () => {
                 {formatCurrency(data.depositAmount).replace(' đ', 'đ')}
               </Text>
               <Text style={styles.heroStatLabel}>Tiền cọc</Text>
+            </View>
+          </View>
+
+          {/* ── "Bạn đã đồng hành X ngày" + "Còn X ngày đến khi hết hạn" — gộp vào
+              đúng khối hợp đồng của hero card, ngay trên dòng "Hợp đồng {code}" thay
+              vì tách card riêng ở đầu trang / nhét vào pill góc trên (07/09/2026). */}
+          <View style={styles.heroInfoStack}>
+            <View style={styles.heroInfoRow}>
+              <Text style={styles.heroInfoIcon}>🎉</Text>
+              <Text style={styles.heroInfoText} numberOfLines={1}>
+                Bạn đã đồng hành cùng chúng tôi <Text style={styles.heroInfoBold}>{daysWithUs} ngày</Text>
+              </Text>
+            </View>
+            <View style={styles.heroInfoRow}>
+              <Text style={styles.heroInfoIcon}>{contractExpiringSoon ? '⚠️' : '⏳'}</Text>
+              <Text style={styles.heroInfoText} numberOfLines={1}>
+                Còn <Text style={styles.heroInfoBold}>{data.contract.daysLeft} ngày</Text> đến khi hết hạn hợp đồng
+              </Text>
             </View>
           </View>
 
@@ -768,23 +769,6 @@ const styles = StyleSheet.create({
   },
   notifBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
 
-  // ── "Bạn đã đồng hành cùng chúng tôi X ngày" ──
-  anniversaryCard: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.accentLight + '33', borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: Colors.accentLight,
-    paddingVertical: Spacing.sm + 2, paddingHorizontal: Spacing.base,
-    marginTop: Spacing.md, marginBottom: Spacing.md,
-  },
-  anniversaryIconWrap: {
-    width: 38, height: 38, borderRadius: 19,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.white,
-  },
-  anniversaryEmoji: { fontSize: 18 },
-  anniversaryValue: { fontSize: 16, fontWeight: '800', color: Colors.accentDark },
-  anniversaryLabel: { fontSize: 12, fontWeight: '600', color: Colors.accentDark, marginTop: 1 },
-
   // ── Hero card: phòng + toà nhà + số liệu gộp làm một ──
   // Thang chữ cố định: nhãn 10.5 · phụ 12 · thân 13 · tiêu đề 22.
   heroCard: {
@@ -793,9 +777,6 @@ const styles = StyleSheet.create({
   },
   heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
   heroLabel: { fontSize: 10.5, fontWeight: '800', color: 'rgba(255,255,255,0.65)', letterSpacing: 1.2 },
-  heroDaysPill: { backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 4 },
-  heroDaysPillWarn: { backgroundColor: 'rgba(252,211,77,0.25)' },
-  heroDaysText: { fontSize: 11, fontWeight: '700', color: Colors.white },
   heroName: { fontSize: 22, fontWeight: '800', color: Colors.white, lineHeight: 28, marginTop: 6 },
   heroBuilding: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)', marginTop: 2 },
   heroAddress: { fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.7)', lineHeight: 17, marginTop: 4 },
@@ -809,6 +790,16 @@ const styles = StyleSheet.create({
   heroStatValue: { fontSize: 14, fontWeight: '800', color: Colors.white },
   heroStatLabel: { fontSize: 10.5, fontWeight: '600', color: 'rgba(255,255,255,0.65)', marginTop: 3 },
   heroStatDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.2)' },
+
+  // ── "Đồng hành X ngày" + "Còn X ngày hết hạn" — 2 dòng gộp trong khối hợp đồng ──
+  heroInfoStack: {
+    marginTop: Spacing.base, paddingTop: Spacing.sm, gap: 5,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.16)',
+  },
+  heroInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroInfoIcon: { fontSize: 13 },
+  heroInfoText: { flex: 1, fontSize: 12, fontWeight: '500', color: 'rgba(255,255,255,0.85)' },
+  heroInfoBold: { fontWeight: '800', color: Colors.white },
 
   heroContract: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: Spacing.sm },
   heroContractText: { flex: 1, fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
