@@ -11,6 +11,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 // Đăng xuất / Hỗ trợ bấm trên web không ra gì cả.
 import { showAlert } from '@/utils';
 import { ConfirmDialog } from '@/components/common';
+import { TenureCard } from '@/components/tenant';
 import { useAuth } from '@/hooks';
 import { isClosedContract } from '@/utils';
 import { realTenantSelfService, TenantDashboard } from '@/services/tenant/selfService';
@@ -289,6 +290,16 @@ export const ProfileScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Cùng lời chào mốc thời gian ở như trang chủ — khách hay vào đây xem
+            "mình đã ở đây bao lâu rồi" hơn là cuộn về trang chủ. */}
+        {user?.role === 'tenant' && (
+          <TenureCard
+            moveInDate={dash?.contract?.moveInDate || dash?.contract?.startDate}
+            daysLeft={dash?.contract?.daysLeft ?? null}
+            style={styles.tenureSpacing}
+          />
+        )}
+
         {user?.role === 'tenant' && (
           <View style={styles.tenantInfoCard}>
             <View style={styles.tenantInfoRow}>
@@ -473,6 +484,7 @@ export const ProfileScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  tenureSpacing: { marginBottom: Spacing.md },
   safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing['3xl'] },
 
