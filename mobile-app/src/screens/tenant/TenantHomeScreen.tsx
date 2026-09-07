@@ -7,7 +7,7 @@ import {
 } from '@/constants';
 import { useAuth, useTenantContract } from '@/hooks';
 import {
-  billMonthLabel, formatCurrency, formatDate, getDaysUntil, isToday, onboardChargeLines,
+  billMonthLabel, formatCurrency, formatDate, getDaysSince, getDaysUntil, isToday, onboardChargeLines,
 } from '@/utils';
 import { serverNow } from '@/utils/serverTime';
 import { SharedBill, InvoiceType } from '@/types/bill';
@@ -166,6 +166,11 @@ export const TenantHomeScreen: React.FC = () => {
 
   // Có hợp đồng/phòng đang hiệu lực hay không (BE trả null khi chưa có)
   const hasRoom = !!dash?.contract;
+
+  // "Bạn đã đồng hành cùng chúng tôi bao nhiêu ngày" — ưu tiên ngày dọn vào ở thật
+  // (moveInDate), lùi về ngày hợp đồng có hiệu lực (startDate) nếu BE chưa trả
+  // moveInDate ở endpoint dashboard (xem ghi chú BE-YEUCAU 07/09/2026).
+  const daysWithUs = getDaysSince(dash?.contract?.moveInDate || dash?.contract?.startDate);
 
   // Phân biệt 2 dạng thuê: toàn nhà (WHOLE_HOUSE) hay theo phòng (ROOM)
   // Ưu tiên type từ hợp đồng; fallback: không có roomNumber → coi như thuê toàn nhà
@@ -356,6 +361,18 @@ export const TenantHomeScreen: React.FC = () => {
           )
         ) : (
         <>
+        {/* ── "Bạn đã đồng hành cùng chúng tôi X ngày" — đặt ngay trên cùng, trước cả
+            hero card, vì đây là điều đầu tiên khách nên thấy mỗi lần mở app. */}
+        <View style={styles.anniversaryCard}>
+          <View style={styles.anniversaryIconWrap}>
+            <Text style={styles.anniversaryEmoji}>🎉</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.anniversaryValue}>{daysWithUs} ngày</Text>
+            <Text style={styles.anniversaryLabel}>Bạn đã đồng hành cùng chúng tôi</Text>
+          </View>
+        </View>
+
         {/* ── Hero: gộp phòng + toà nhà làm MỘT card ──
             Trước đây tách 2 card nên tên phòng và địa chỉ bị lặp y hệt nhau. */}
         <View style={styles.heroCard}>
@@ -750,6 +767,23 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
   },
   notifBadgeText: { fontSize: 8, fontWeight: '800', color: Colors.white },
+
+  // ── "Bạn đã đồng hành cùng chúng tôi X ngày" ──
+  anniversaryCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.accentLight + '33', borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.accentLight,
+    paddingVertical: Spacing.sm + 2, paddingHorizontal: Spacing.base,
+    marginTop: Spacing.md, marginBottom: Spacing.md,
+  },
+  anniversaryIconWrap: {
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.white,
+  },
+  anniversaryEmoji: { fontSize: 18 },
+  anniversaryValue: { fontSize: 16, fontWeight: '800', color: Colors.accentDark },
+  anniversaryLabel: { fontSize: 12, fontWeight: '600', color: Colors.accentDark, marginTop: 1 },
 
   // ── Hero card: phòng + toà nhà + số liệu gộp làm một ──
   // Thang chữ cố định: nhãn 10.5 · phụ 12 · thân 13 · tiêu đề 22.
