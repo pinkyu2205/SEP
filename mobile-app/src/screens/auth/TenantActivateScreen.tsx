@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import {
+  View, Text, StyleSheet, KeyboardAvoidingView, ScrollView, Platform,
+  TouchableOpacity, ActivityIndicator, StatusBar,
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius } from '@/constants';
-import { Button, Input } from '@/components/common';
+import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
+import { BrandField } from '@/components/common';
 import { useAuth, useOtpCooldown, RESEND_COOLDOWN_SEC } from '@/hooks';
 import { realAuthService } from '@/services/auth/realAuthService';
 import { isAccountEndedError, TENANT_ACCOUNT_ENDED_TITLE } from '@/services/tenant/accountAccess';
@@ -16,13 +20,46 @@ const readErr = (err: any, fallback: string): string =>
  * Kích hoạt tài khoản khách thuê lần đầu: SĐT -> OTP -> tự đặt mật khẩu.
  * Thay cho mật khẩu mặc định cũ (BE giờ tạo password random, không phát cho khách).
  * Xem docs/FE-tenant-account-activation.md (repo BE) — 3 API dưới /auth/tenant-activate/**.
+ *
+ * ─── Thiết kế (làm lại 10/09/2026) ─────────────────────────────────────────────
+ * Đổi tông chàm sang bảng `Brand` cho khớp logo, cùng ngôn ngữ với màn Đăng nhập.
+ *
+ * Thêm THANH BƯỚC ở đầu màn. Đây là luồng ba bước nhưng bản trước không nói ra ở đâu cả:
+ * khách nhập số điện thoại xong bị nhảy sang ô OTP mà không biết còn mấy chặng nữa, và
+ * nút "← Quay lại" thì lúc lùi một bước, lúc thoát hẳn màn — cùng một nút, hai hành vi,
+ * không có gì báo trước. Có thanh bước thì cả hai chuyện đó tự sáng ra.
+ *
+ * Emoji 🔑 64px đổi thành ô biểu tượng bo tròn: emoji hiển thị mỗi hệ điều hành một kiểu
+ * (và trên Android hay rơi về bản vẽ khác hẳn), không phải thứ nên đặt làm hình chính.
  */
+
+const STEPS = ['Số điện thoại', 'Mã OTP', 'Mật khẩu'] as const;
+type Step = 'phone' | 'otp' | 'password';
+const STEP_INDEX: Record<Step, number> = { phone: 0, otp: 1, password: 2 };
+
+/** Ba vạch ngang: vạch đã qua và vạch đang đứng tô xanh, vạch chưa tới để xám. */
+const StepBar: React.FC<{ current: number }> = ({ current }) => (
+  <View style={s.stepWrap}>
+    <View style={s.stepBars}>
+      {STEPS.map((label, i) => (
+        <View
+          key={label}
+          style={[s.stepBar, i <= current ? s.stepBarOn : s.stepBarOff]}
+        />
+      ))}
+    </View>
+    <Text style={s.stepText}>
+      Bước {current + 1}/{STEPS.length} · {STEPS[current]}
+    </Text>
+  </View>
+);
+
 export const TenantActivateScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { activateTenant } = useAuth();
 
-  const [step, setStep] = useState<'phone' | 'otp' | 'password'>('phone');
+  const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState<string>(route.params?.phone ?? '');
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -116,120 +153,254 @@ export const TenantActivateScreen: React.FC = () => {
     else navigation.goBack();
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
-        <TouchableOpacity style={styles.backBtn} onPress={goBackStep}>
-          <Text style={styles.backText}>← Quay lại</Text>
-        </TouchableOpacity>
+  /** Nút chính đổi cả nhãn lẫn việc theo bước — gom một chỗ để phần JSX chỉ còn một nút. */
+  const primary: { label: string; onPress: () => void; busy: boolean } =
+    step === 'phone'
+      ? { label: 'Tiếp tục', onPress: handleCheckPhone, busy: loading }
+      : step === 'otp'
+        ? { label: 'Xác nhận mã', onPress: handleContinueOtp, busy: false }
+        : { label: 'Hoàn tất kích hoạt', onPress: handleActivate, busy: loading };
 
-        <View style={styles.header}>
-          <Text style={styles.emoji}>🔑</Text>
-          <Text style={styles.title}>Kích hoạt tài khoản</Text>
-          <Text style={styles.subtitle}>
-            {step === 'phone' && 'Nhập số điện thoại trên hợp đồng thuê để kích hoạt tài khoản lần đầu.'}
-            {step === 'otp' && `Mã OTP đã được gửi đi. Nhập mã 6 số để xác nhận số điện thoại ${phone}.`}
-            {step === 'password' && 'Tạo mật khẩu mới cho tài khoản của bạn.'}
-          </Text>
+  return (
+    <SafeAreaView style={s.safe}>
+      <StatusBar barStyle="dark-content" />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={s.flex}
+      >
+        <View style={s.topBar}>
+          <TouchableOpacity
+            style={s.backBtn}
+            onPress={goBackStep}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <MaterialIcons name="arrow-back" size={20} color={Brand.greenDark} />
+            <Text style={s.backText}>{step === 'phone' ? 'Đăng nhập' : 'Bước trước'}</Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.form}>
-          {step === 'phone' && (
-            <>
-              <Input
+        <ScrollView
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <StepBar current={STEP_INDEX[step]} />
+
+          <View style={s.header}>
+            <View style={s.iconTile}>
+              <MaterialIcons
+                name={step === 'phone' ? 'vpn-key' : step === 'otp' ? 'sms' : 'lock-reset'}
+                size={30}
+                color={Brand.greenDark}
+              />
+            </View>
+            <Text style={s.title}>
+              {step === 'phone' ? 'Kích hoạt tài khoản'
+                : step === 'otp' ? 'Nhập mã xác nhận'
+                  : 'Tạo mật khẩu'}
+            </Text>
+            <Text style={s.subtitle}>
+              {step === 'phone' && 'Nhập số điện thoại trên hợp đồng thuê để kích hoạt tài khoản lần đầu.'}
+              {step === 'otp' && `Mã 6 số đã gửi tới ${phone}. Nhập mã để xác nhận số điện thoại này là của bạn.`}
+              {step === 'password' && 'Đặt mật khẩu riêng cho tài khoản. Từ lần sau bạn đăng nhập bằng mật khẩu này.'}
+            </Text>
+          </View>
+
+          <View style={s.form}>
+            {step === 'phone' && (
+              <BrandField
                 label="Số điện thoại"
+                icon="phone-iphone"
                 placeholder="Ví dụ: 0901234567"
                 value={phone}
                 onChangeText={setPhone}
                 keyboardType="phone-pad"
                 maxLength={10}
+                hint="Đúng số đã ghi trên hợp đồng thuê."
               />
-              <Button title="Tiếp tục" onPress={handleCheckPhone} loading={loading} style={{ marginTop: Spacing.lg }} />
-            </>
-          )}
+            )}
 
-          {step === 'otp' && (
-            <>
-              <Input
-                label="Mã OTP"
-                placeholder="------"
-                value={otp}
-                onChangeText={setOtp}
-                keyboardType="number-pad"
-                maxLength={6}
-                style={{ textAlign: 'center', letterSpacing: 5, fontSize: 24 }}
-              />
-              <TouchableOpacity
-                style={styles.resendBtn}
-                onPress={handleResendOtp}
-                disabled={cooldown > 0 || loading}
-              >
-                <Text style={[styles.resendText, cooldown > 0 && styles.resendTextDisabled]}>
-                  {cooldown > 0 ? `Gửi lại mã sau ${cooldown}s` : 'Gửi lại mã OTP'}
-                </Text>
-              </TouchableOpacity>
-              <Button title="Tiếp tục" onPress={handleContinueOtp} style={{ marginTop: Spacing.lg }} />
-            </>
-          )}
+            {step === 'otp' && (
+              <>
+                <BrandField
+                  label="Mã OTP"
+                  placeholder="------"
+                  value={otp}
+                  onChangeText={setOtp}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  returnKeyType="done"
+                  onSubmitEditing={handleContinueOtp}
+                  // Ô này KHÔNG có biểu tượng bên trái: sáu chữ số phải nằm giữa ô mới đọc
+                  // ra được thành từng cặp, thêm icon là lệch tâm và mất luôn tác dụng đó.
+                  inputStyle={s.otpInput}
+                />
+                <TouchableOpacity
+                  style={s.resendBtn}
+                  onPress={handleResendOtp}
+                  disabled={cooldown > 0 || loading}
+                >
+                  <Text style={[s.resendText, cooldown > 0 && s.resendTextOff]}>
+                    {cooldown > 0 ? `Gửi lại mã sau ${cooldown}s` : 'Chưa nhận được mã? Gửi lại'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
 
-          {step === 'password' && (
-            <>
-              {/*
-                MỘT nút "Hiện" điều khiển cả hai ô, không phải mỗi ô một nút.
-                Việc của khách ở đây là đối chiếu hai ô có khớp nhau không — bật/tắt
-                riêng từng ô thì vẫn phải nhớ ô kia gõ gì, đúng cái mà nút này sinh ra
-                để khỏi phải làm. Cùng cách hiển thị với màn Đăng nhập.
-              */}
-              <Input
-                label="Mật khẩu mới"
-                placeholder="Ít nhất 6 ký tự"
-                value={newPassword}
-                onChangeText={setNewPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                rightIcon={
-                  <TouchableOpacity
-                    onPress={() => setShowPassword(v => !v)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.showPasswordText}>{showPassword ? 'Ẩn' : 'Hiện'}</Text>
-                  </TouchableOpacity>
-                }
-              />
-              <Input
-                label="Xác nhận mật khẩu"
-                placeholder="Nhập lại mật khẩu mới"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-              />
-              <Button
-                title="Hoàn tất kích hoạt"
-                onPress={handleActivate}
-                loading={loading}
-                style={{ marginTop: Spacing.lg }}
-              />
-            </>
-          )}
-        </View>
+            {step === 'password' && (
+              <>
+                {/*
+                  MỘT nút "Hiện" điều khiển cả hai ô, không phải mỗi ô một nút.
+                  Việc của khách ở đây là đối chiếu hai ô có khớp nhau không — bật/tắt
+                  riêng từng ô thì vẫn phải nhớ ô kia gõ gì, đúng cái mà nút này sinh ra
+                  để khỏi phải làm. Cùng cách hiển thị với màn Đăng nhập.
+                */}
+                <BrandField
+                  label="Mật khẩu mới"
+                  icon="lock-outline"
+                  placeholder="Ít nhất 6 ký tự"
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  right={(
+                    <TouchableOpacity
+                      onPress={() => setShowPassword(v => !v)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <MaterialIcons
+                        name={showPassword ? 'visibility-off' : 'visibility'}
+                        size={20}
+                        color={Colors.textMuted}
+                      />
+                    </TouchableOpacity>
+                  )}
+                />
+                <BrandField
+                  label="Xác nhận mật khẩu"
+                  icon="lock-outline"
+                  placeholder="Nhập lại mật khẩu mới"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  // Báo lệch NGAY khi đang gõ, đừng đợi bấm nút rồi bật hộp thoại: sai ở đây
+                  // gần như luôn là gõ nhầm một ký tự, thấy sớm thì sửa một ký tự là xong.
+                  error={
+                    confirmPassword.length > 0 && confirmPassword !== newPassword
+                      ? 'Hai mật khẩu chưa khớp'
+                      : undefined
+                  }
+                />
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[s.primaryBtn, primary.busy && s.primaryBtnBusy]}
+              onPress={primary.onPress}
+              disabled={primary.busy}
+              activeOpacity={0.85}
+            >
+              {primary.busy
+                ? <ActivityIndicator color={Colors.white} />
+                : <Text style={s.primaryBtnText}>{primary.label}</Text>}
+            </TouchableOpacity>
+
+            <Text style={s.help}>
+              Không kích hoạt được? <Text style={s.helpStrong}>Liên hệ quản lý toà nhà</Text> để được hỗ trợ.
+            </Text>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: Colors.white },
-  container: { flex: 1, padding: Spacing.xl },
-  backBtn: { marginBottom: Spacing.xl, alignSelf: 'flex-start' },
-  backText: { color: Colors.primary, fontWeight: '600', fontSize: 16 },
-  header: { alignItems: 'center', marginBottom: Spacing['2xl'] },
-  emoji: { fontSize: 64, marginBottom: Spacing.md },
-  title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  subtitle: { fontSize: 15, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: Spacing.md },
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: Colors.white },
+  flex: { flex: 1 },
+  scroll: { paddingHorizontal: Spacing.xl, paddingBottom: Spacing['3xl'] },
+
+  topBar: { paddingHorizontal: Spacing.xl, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
+  backText: { color: Brand.greenDark, fontWeight: '700', fontSize: 15 },
+
+  // ── Thanh bước ───────────────────────────────────────────────────────────
+  stepWrap: { marginTop: Spacing.sm, marginBottom: Spacing.xl },
+  stepBars: { flexDirection: 'row', gap: Spacing.sm },
+  stepBar: { flex: 1, height: 4, borderRadius: 2 },
+  stepBarOn: { backgroundColor: Brand.green },
+  stepBarOff: { backgroundColor: Colors.divider },
+  stepText: {
+    marginTop: Spacing.sm,
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    letterSpacing: 0.2,
+  },
+
+  // ── Đầu màn ──────────────────────────────────────────────────────────────
+  header: { alignItems: 'center', marginBottom: Spacing.xl },
+  iconTile: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    backgroundColor: Brand.greenTint,
+    borderWidth: 1,
+    borderColor: 'rgba(67, 182, 73, 0.30)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.base,
+  },
+  title: {
+    fontSize: 23,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    letterSpacing: -0.4,
+    textAlign: 'center',
+  },
+  subtitle: {
+    marginTop: Spacing.sm,
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+
+  // ── Form ─────────────────────────────────────────────────────────────────
   form: { width: '100%' },
-  resendBtn: { alignSelf: 'center', marginTop: Spacing.md, padding: Spacing.sm },
-  resendText: { color: Colors.primary, fontWeight: '600', fontSize: 14 },
-  resendTextDisabled: { color: Colors.textMuted },
-  showPasswordText: { fontSize: 14, color: Colors.primary, fontWeight: '600' },
+  otpInput: {
+    textAlign: 'center',
+    letterSpacing: 10,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  resendBtn: { alignSelf: 'center', paddingVertical: Spacing.sm, marginBottom: Spacing.xs },
+  resendText: { color: Brand.greenDark, fontWeight: '700', fontSize: 14 },
+  resendTextOff: { color: Colors.textMuted, fontWeight: '600' },
+
+  primaryBtn: {
+    marginTop: Spacing.md,
+    height: 54,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Brand.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Brand.greenDark,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  primaryBtnBusy: { opacity: 0.75 },
+  primaryBtnText: { fontSize: 16, fontWeight: '800', color: Colors.white, letterSpacing: 0.2 },
+
+  help: {
+    marginTop: Spacing.xl,
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 19,
+  },
+  helpStrong: { color: Colors.textPrimary, fontWeight: '700' },
 });

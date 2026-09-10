@@ -18,7 +18,7 @@ import {
 } from '@/services/manager/invoiceService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { checkoutService } from '@/services/manager/checkoutService';
-import { meterReadingService } from '@/services/manager/meterReadingService';
+import { meterReadingService, type PendingMeterReadingItem } from '@/services/manager/meterReadingService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { serverNow, todayIso } from '@/utils/serverTime';
 
@@ -56,7 +56,25 @@ const QUICK_ACTIONS = [
   // kèm số — nên khó lỡ hơn hẳn.
 
   // — Hàng 2: định kỳ và tra cứu —
-  { emoji: '⚡', label: 'Ghi điện nước',    route: 'UtilityBilling',        color: Colors.accent  },
+  /*
+    Ô này vẽ HAI biểu tượng, không phải emoji.
+
+    Trước đây là mỗi tia sét ⚡ — chỉ nói được một nửa việc, trong khi bấm vào là vào màn
+    có cả tab Điện lẫn tab Nước. Càng dễ nhầm từ 10/09/2026, khi hai luồng tách hẳn nhau:
+    điện chốt số cuối tháng, nước ghi theo ngày admin phát hành. Ai đang cần làm nước mà
+    nhìn thấy tia sét thì sẽ đi tìm ô khác.
+
+    Không ghép hai emoji "⚡💧": ở cỡ 17px trong ô 36px chúng chật và mỗi hệ điều hành vẽ
+    một kiểu. Dùng glyph có sẵn thì canh được cỡ, và tô đúng màu quy ước — vàng cho điện,
+    xanh nước biển cho nước — nên đọc ra nghĩa trước cả khi đọc nhãn.
+  */
+  {
+    icons: [
+      { name: 'bolt', color: '#F59E0B' },
+      { name: 'water-drop', color: '#0EA5E9' },
+    ],
+    label: 'Ghi điện nước', route: 'UtilityBilling', color: Colors.accent,
+  },
   { emoji: '👥', label: 'Khách thuê',     route: 'TenantList',            color: Colors.primary },
   { emoji: '📋', label: 'Hợp đồng',       route: 'ManagerContracts',      color: Colors.info    },
   { emoji: '📦', label: 'Thiết bị',       route: 'Equipment',             color: Colors.textSecondary },
@@ -90,20 +108,31 @@ export const ManagerHomeScreen: React.FC = () => {
   const [checkouts, setCheckouts] = useState<CheckoutRequestDto[]>([]);
   /** Số dòng phòng còn thiếu ảnh công tơ kỳ này (mỗi HĐ thiếu cả điện lẫn nước tính 2 dòng). */
   const [pendingMeterCount, setPendingMeterCount] = useState(0);
+  /** Việc điện của kỳ sắp tới — chưa tới hạn, dùng cho khối "Sắp tới" khi My Task rỗng. */
+  const [upcomingMeters, setUpcomingMeters] = useState<PendingMeterReadingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông: BE + thông báo trả phòng
 
   const load = useCallback(async () => {
     try {
-      const [props, inv, pay, drafts, checkoutList, pendingMeters] = await Promise.all([
+      const [props, inv, pay, drafts, checkoutList, pendingMeters, upcomingRows] = await Promise.all([
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
         realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
         checkoutService.list().catch(() => [] as CheckoutRequestDto[]),
-        // Phòng còn thiếu ảnh công tơ kỳ này — việc có hạn, đưa vào "Cần xử lý" bên dưới.
-        meterReadingService.listPending().catch(() => []),
+        /*
+          Phòng còn thiếu ảnh công tơ — việc có hạn, đưa vào "Cần xử lý" bên dưới.
+
+          Hỏi CẢ HAI kỳ (`listAllPending`), đừng chốt một kỳ: điện đi theo kỳ chốt số còn
+          nước đi theo hoá đơn admin vừa phát hành, hai lịch khác nhau. Chốt một kỳ là bỏ
+          sót nửa còn lại một cách im lặng — ô đếm hiện 0 trong khi vẫn còn phòng chưa ai
+          đụng tới. Màn "Cần chụp công tơ" hỏi đúng cùng hàm này nên hai bên luôn khớp số.
+        */
+        meterReadingService.listAllPending().catch(() => []),
+        // Việc điện của kỳ CHƯA tới hạn — chỉ để báo trước, xem `listUpcomingElectric`.
+        meterReadingService.listUpcomingElectric().catch(() => []),
       ]);
       setProperties(props);
       setInvoices(inv);
@@ -111,6 +140,7 @@ export const ManagerHomeScreen: React.FC = () => {
       setDraftContracts(drafts);
       setCheckouts(checkoutList);
       setPendingMeterCount(pendingMeters.length);
+      setUpcomingMeters(upcomingRows);
 
       // HĐ đang hiệu lực — để loại hoá đơn của khách ĐÃ chấm dứt khỏi "My Task".
       // Hỏi theo từng nhà (xem listActiveByProperties) nên phải đợi có `props` trước.
@@ -243,6 +273,20 @@ export const ManagerHomeScreen: React.FC = () => {
     { id: 'p6', icon: '📸', label: 'Phòng chưa chụp công tơ', count: pendingMeterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
   ];
 
+  /* Hạn + số ngày còn lại của việc chốt số điện kỳ sắp tới. Ngày lấy từ chính dòng BE
+     trả về, không tự tính — BE mới là nơi biết ngày cuối kỳ của kỳ đó. */
+  const upcomingMeterDue = upcomingMeters[0]?.meterDueDate
+    ? upcomingMeters[0].meterDueDate.split('-').reverse().join('/')
+    : null;
+  const upcomingDaysLeft = (() => {
+    const iso = upcomingMeters[0]?.meterDueDate;
+    if (!iso) return null;
+    const due = new Date(iso + 'T00:00:00').getTime();
+    if (Number.isNaN(due)) return null;
+    const today = serverNow(); today.setHours(0, 0, 0, 0);
+    return Math.round((due - today.getTime()) / 86400000);
+  })();
+
   const activeItems    = priorityItems.filter(p => p.count > 0);
   const criticalItems  = activeItems.filter(p => p.urgency === 'critical');
   const secondaryItems = activeItems.filter(p => p.urgency !== 'critical');
@@ -305,9 +349,43 @@ export const ManagerHomeScreen: React.FC = () => {
         </View>
 
         {activeItems.length === 0 ? (
-          /* ── All clear state ── */
+          /*
+            ── Hết việc gấp ──
+
+            Bản trước chỉ có đúng một dòng "Mọi thứ ổn định hôm nay". Nói thật thì đúng,
+            nhưng vô dụng: My Task là chỗ trả lời "hôm nay tôi làm gì", mà phần lớn ngày
+            trong tháng đều không có việc quá hạn nào — nên gần cả tháng quản lý mở app ra
+            chỉ thấy một dấu tích xanh, rồi tới ngày cuối tháng bỗng hiện ra cả đống phòng
+            phải chụp. Không ai sắp xếp được kiểu đó.
+
+            Nên khi rảnh thì nói VIỆC SẮP TỚI: còn mấy ngày, bao nhiêu phòng. Đây là việc
+            định kỳ lớn nhất của quản lý và trước đây nó vô hình cho tới đúng hạn.
+          */
           <View style={s.clearCard}>
-            <Text style={s.clearText}>✅  Mọi thứ ổn định hôm nay</Text>
+            {upcomingMeterDue ? (
+              <TouchableOpacity
+                style={s.upcomingRow}
+                onPress={() => navigation.navigate('UtilityBilling')}
+                activeOpacity={0.75}
+              >
+                <View style={[s.secondaryIconWrap, { backgroundColor: Colors.accent + '14' }]}>
+                  <MaterialIcons name="bolt" size={17} color="#F59E0B" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.upcomingTitle}>
+                    Chốt chỉ số điện · {upcomingMeters.length} phòng
+                  </Text>
+                  <Text style={s.upcomingSub}>
+                    Hạn {upcomingMeterDue}
+                    {upcomingDaysLeft != null && upcomingDaysLeft > 0 && ` · còn ${upcomingDaysLeft} ngày`}
+                  </Text>
+                </View>
+                <Text style={s.chevron}>›</Text>
+              </TouchableOpacity>
+            ) : null}
+            <Text style={[s.clearText, !!upcomingMeterDue && s.clearTextTight]}>
+              ✅  Không có việc nào quá hạn
+            </Text>
           </View>
         ) : (
           <>
@@ -488,7 +566,15 @@ export const ManagerHomeScreen: React.FC = () => {
                 activeOpacity={0.7}
               >
                 <View style={[s.actionIconWrap, { backgroundColor: a.color + '15' }]}>
-                  <Text style={s.actionEmoji}>{a.emoji}</Text>
+                  {'icons' in a ? (
+                    <View style={s.actionIconPair}>
+                      {a.icons.map((ic) => (
+                        <MaterialIcons key={ic.name} name={ic.name} size={15} color={ic.color} />
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={s.actionEmoji}>{a.emoji}</Text>
+                  )}
                 </View>
                 <Text style={s.actionLabel} numberOfLines={2}>{a.label}</Text>
               </TouchableOpacity>
@@ -755,6 +841,14 @@ const s = StyleSheet.create({
     paddingVertical: Spacing.md, alignItems: 'center',
     marginBottom: Spacing.xs,
   },
+  upcomingRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    paddingBottom: Spacing.md, marginBottom: Spacing.md,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
+  },
+  upcomingTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  upcomingSub:   { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  clearTextTight: { textAlign: 'left' },
   clearText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center' },
   homeLoading: { paddingVertical: Spacing.xl, alignItems: 'center' },
 
@@ -831,6 +925,8 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginBottom: 5,
   },
   actionEmoji:     { fontSize: 17 },
+  // Hai glyph sát nhau, khít trong ô 36px — xem chú thích ở ô "Ghi điện nước".
+  actionIconPair:  { flexDirection: 'row', alignItems: 'center', gap: 1 },
   /**
    * Nhãn chừa sẵn chỗ cho ĐÚNG 2 dòng (`minHeight = 2 × lineHeight`).
    *

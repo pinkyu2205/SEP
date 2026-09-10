@@ -83,7 +83,17 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
   const noDates = flat
     .replace(/\d{1,2}\/\d{1,2}\/\d{4}/g, ' ')
     .replace(/\d{1,2}\/\d{4}/g, ' ');
+  /*
+    Thứ tự dò đi từ nhãn RIÊNG NHẤT xuống nhãn chung nhất.
+
+    Hai mẫu đầu là của bản tổng kết EVN: "tong dien nang tieu thu (kwh) 327" và dòng
+    "tong: 327" ngay dưới bảng chỉ số. Chúng phải đứng trước vì mẫu `kwh <số>` chung chung
+    không bắt được chúng — sau chữ "kwh" là dấu ")" chứ không phải chữ số, nên regex trượt
+    và ô tổng kWh bỏ trống trên đúng những hoá đơn có đầy đủ phần tổng kết.
+  */
   const kwh =
+    noDates.match(/tong dien nang tieu thu[^\d]*([\d.,]+)/) ||
+    noDates.match(/tong\s*:\s*([\d.,]+)/) ||
     noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/) ||
     noDates.match(/([\d.,]+)\s*kwh/) ||
     noDates.match(/tieu thu[^\d]*?([\d.,]+)/);
@@ -101,7 +111,16 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
    * `findReadingTriple` tìm bộ ba tự khớp phép trừ (16.087 − 15.404 = 683) nên không bị
    * mã công tơ / hệ số nhân / tiền thuế lừa.
    */
-  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH);
+  /*
+    Đưa tổng kWh đọc từ nhãn vào làm ràng buộc — xem `expectedConsumption`.
+
+    Hai nguồn độc lập nhau: một bên là con số EVN in ở dòng tổng, một bên là hiệu của hai
+    chỉ số trong bảng. Bắt chúng khớp nhau thì kết quả chỉ sai khi CẢ HAI cùng sai theo
+    đúng một kiểu — gần như không xảy ra. Lệch nhau thì bỏ trống hai ô chỉ số, để người
+    nhập tay, chứ không đoán.
+  */
+  const labelKwh = out.totalKwh ? Number(out.totalKwh) : undefined;
+  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH, labelKwh);
   if (triple) {
     out.prevReading = String(triple.prevReading);
     out.newReading = String(triple.newReading);

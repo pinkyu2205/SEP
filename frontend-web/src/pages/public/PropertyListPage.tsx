@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search, SearchX, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Search, SearchX, SlidersHorizontal, X } from 'lucide-react';
 import { PropertyCard } from '@/components/public/PropertyCard';
 import { getProperties } from '@/services/public-property.service';
 import type { Paginated } from '@/types/common';
@@ -115,6 +115,68 @@ export const PropertyListPage = () => {
   // Thu gọn mặc định; tự mở nếu vào trang đã sẵn có bộ lọc (vd từ ô tìm ở trang chủ)
   const [expanded, setExpanded] = useState(activeCount > 0);
 
+  /**
+   * DẢI BỘ LỌC ĐANG ÁP DỤNG — mỗi điều kiện một thẻ, bấm chữ ✕ là gỡ riêng nó.
+   *
+   * Trước đây bảng lọc thu gọn mặc định, nên vào trang từ ô tìm ở trang chủ là thấy một
+   * danh sách đã bị lọc mà không có dấu hiệu nào nói đang lọc theo gì — chỉ có con số nhỏ
+   * trên nút "Bộ lọc". Muốn biết phải mở bảng ra đọc từng ô; muốn bỏ một điều kiện thì
+   * cũng phải mở bảng, tìm đúng ô, chọn lại "Tất cả".
+   *
+   * Nhãn lấy từ CHÍNH danh sách tuỳ chọn đang đổ vào các ô select, nên thẻ luôn đọc đúng
+   * chữ người dùng đã chọn ("Dưới 5 triệu"), không phải con số thô trong URL.
+   */
+  const optionLabel = (list: { label: string; value: number }[], raw: string) =>
+    list.find((o) => String(o.value) === raw)?.label;
+
+  const activeChips: { key: string; label: string; onRemove: () => void }[] = [];
+  const pushChip = (key: string, label?: string) => {
+    const raw = searchParams.get(key);
+    if (raw) activeChips.push({ key, label: label ?? raw, onRemove: () => setParam(key, '') });
+  };
+
+  if (filter.keyword) {
+    activeChips.push({
+      key: 'keyword',
+      label: `“${filter.keyword}”`,
+      onRemove: () => setParam('keyword', ''),
+    });
+  }
+  pushChip('district');
+  pushChip('type', filter.type ? PROPERTY_TYPE_LABEL[filter.type as PropertyType] : undefined);
+  pushChip('bedrooms', optionLabel(typeOptions.bedroomOptions, searchParams.get('bedrooms') ?? ''));
+  pushChip('minPrice', (() => {
+    const l = optionLabel(typeOptions.priceRanges, searchParams.get('minPrice') ?? '');
+    return l ? `Từ ${l.replace(/^(Dưới|Trên)\s+/, '')}` : undefined;
+  })());
+  pushChip('maxPrice', optionLabel(typeOptions.priceRanges, searchParams.get('maxPrice') ?? ''));
+  pushChip('minArea', optionLabel(typeOptions.areaRanges, searchParams.get('minArea') ?? ''));
+  for (const a of filter.amenities ?? []) {
+    activeChips.push({ key: `am-${a}`, label: AMENITY_LABEL[a], onRemove: () => toggleAmenity(a) });
+  }
+
+  /**
+   * Các số trang được vẽ ra: luôn có trang đầu, trang cuối, trang hiện tại và hai bên nó.
+   * `null` = dấu ba chấm.
+   *
+   * Bản trước vẽ `Array.from({ length: totalPages })` — tức MỌI trang. Sáu bất động sản một
+   * trang, nên chỉ cần vài trăm bản ghi là hàng nút số tràn ngang hết màn hình và đẩy vỡ
+   * bố cục. Danh sách bất động sản thì chỉ có tăng lên.
+   */
+  const pageItems = (current: number, total: number): (number | null)[] => {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const around = [current - 1, current, current + 1].filter((p) => p > 1 && p < total);
+    const pages = [1, ...around, total];
+    const out: (number | null)[] = [];
+    let prev = 0;
+    for (const p of pages) {
+      if (p - prev > 1) out.push(null);
+      out.push(p);
+      prev = p;
+    }
+    return out;
+  };
+
   return (
     <div className="bg-slate-50 min-h-screen">
       {/* Page heading */}
@@ -168,6 +230,29 @@ export const PropertyListPage = () => {
               <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             </button>
           </div>
+
+          {/* Bộ lọc đang áp dụng — hiện kể cả khi bảng nâng cao đang thu gọn. */}
+          {activeChips.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {activeChips.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={c.onRemove}
+                  className="group inline-flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 py-1.5 pl-3 pr-2 text-xs font-semibold text-green-700 transition-colors hover:border-green-300 hover:bg-green-100"
+                >
+                  {c.label}
+                  <X className="h-3.5 w-3.5 text-green-500 transition-colors group-hover:text-green-700" />
+                </button>
+              ))}
+              <button
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-semibold text-slate-400 transition-colors hover:text-rose-500"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Xoá hết
+              </button>
+            </div>
+          )}
 
           {/* Phần nâng cao - chỉ hiện khi mở rộng */}
           {expanded && (
@@ -262,14 +347,29 @@ export const PropertyListPage = () => {
             : data?.items.map((p) => <PropertyCard key={p.id} property={p} />)}
         </div>
 
-        {/* Empty state */}
+        {/*
+          Empty state — HAI câu cho hai tình huống khác nhau.
+
+          Trang này chỉ liệt kê nhà CÒN CHỖ, nên danh sách rỗng khi không có bộ lọc nào
+          nghĩa là hiện chưa có chỗ trống, không phải "bộ lọc quá chặt". Mời người ta đi
+          xoá bộ lọc mà họ chưa từng đặt là chỉ dẫn sai và làm họ tưởng trang hỏng.
+        */}
         {!loading && data && data.items.length === 0 && (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-20 text-center">
             <SearchX className="mx-auto h-12 w-12 text-slate-300" />
-            <p className="mt-4 font-bold text-slate-700">Không tìm thấy bất động sản phù hợp</p>
-            <p className="mt-1 text-sm text-slate-500">Hãy thử điều chỉnh hoặc xóa bớt bộ lọc.</p>
-            {hasActiveFilter && (
-              <button onClick={clearFilters} className="btn-primary mt-5">Xóa bộ lọc</button>
+            {hasActiveFilter ? (
+              <>
+                <p className="mt-4 font-bold text-slate-700">Không tìm thấy bất động sản phù hợp</p>
+                <p className="mt-1 text-sm text-slate-500">Hãy thử điều chỉnh hoặc xóa bớt bộ lọc.</p>
+                <button onClick={clearFilters} className="btn-primary mt-5">Xóa bộ lọc</button>
+              </>
+            ) : (
+              <>
+                <p className="mt-4 font-bold text-slate-700">Hiện chưa có chỗ trống</p>
+                <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
+                  Tất cả nhà và phòng đang có khách thuê. Gọi hotline để được báo ngay khi có chỗ trống.
+                </p>
+              </>
             )}
           </div>
         )}
@@ -285,20 +385,24 @@ export const PropertyListPage = () => {
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            {Array.from({ length: data.totalPages }).map((_, i) => {
-              const page = i + 1;
-              return (
+            {pageItems(data.page, data.totalPages).map((page, i) =>
+              page === null ? (
+                <span key={`gap-${i}`} className="px-1 text-sm font-bold text-slate-300" aria-hidden>
+                  …
+                </span>
+              ) : (
                 <button
                   key={page}
                   onClick={() => goToPage(page)}
+                  aria-current={page === data.page ? 'page' : undefined}
                   className={`h-10 w-10 rounded-lg text-sm font-bold transition-colors ${
                     page === data.page ? 'bg-green-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   {page}
                 </button>
-              );
-            })}
+              ),
+            )}
             <button
               onClick={() => goToPage(data.page + 1)}
               disabled={data.page >= data.totalPages}

@@ -4,6 +4,7 @@ import type { PublicProperty } from '@/types/property';
 import { PROPERTY_TYPE_LABEL, PROPERTY_STATUS_META } from '@/utils/constants';
 import { formatArea, formatMonthlyPrice } from '@/utils/helpers';
 import { propertyDetailPath } from '@/utils/routes';
+import { PropertyImage } from './PropertyImage';
 
 interface PropertyCardProps {
   property: PublicProperty;
@@ -17,10 +18,9 @@ export const PropertyCard = ({ property }: PropertyCardProps) => {
     >
       {/* Image */}
       <div className="relative aspect-[4/3] overflow-hidden">
-        <img
+        <PropertyImage
           src={property.images[0]}
           alt={property.title}
-          loading="lazy"
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/55 via-transparent to-transparent" />
@@ -30,9 +30,27 @@ export const PropertyCard = ({ property }: PropertyCardProps) => {
           {PROPERTY_TYPE_LABEL[property.type]}
         </span>
 
-        {property.status === 'RENTED' && (
+        {/*
+          Góc phải: CÒN MẤY CHỖ, thay cho nhãn "Đã thuê" trước đây.
+
+          Trang công khai từ 10/09/2026 chỉ liệt kê nhà còn chỗ, nên nhãn "Đã thuê" ở đây
+          gần như không bao giờ đúng nữa — và khi nó xuất hiện thì cũng chỉ nói được điều
+          người đọc không cần. Thứ họ cần là còn mấy phòng: "còn 1/4" và "còn 4/4" dẫn tới
+          hai quyết định khác hẳn nhau.
+
+          Không có số phòng (nhà nguyên căn, hoặc không tra được danh sách phòng) thì hiện
+          nhãn trung tính, đừng bịa ra con số.
+        */}
+        {property.status === 'RENTED' ? (
           <span className={`absolute right-3 top-3 rounded-full px-3 py-1 text-xs font-bold shadow-sm backdrop-blur ${PROPERTY_STATUS_META.RENTED.className}`}>
             {PROPERTY_STATUS_META.RENTED.label}
+          </span>
+        ) : (
+          <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/95 px-3 py-1 text-xs font-bold text-white shadow-sm backdrop-blur">
+            <span className="h-1.5 w-1.5 rounded-full bg-white" />
+            {property.availableRooms != null && (property.totalRooms ?? 0) > 1
+              ? `Còn ${property.availableRooms}/${property.totalRooms} phòng`
+              : 'Còn trống'}
           </span>
         )}
 

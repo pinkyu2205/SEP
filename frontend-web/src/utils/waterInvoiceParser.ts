@@ -116,7 +116,9 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
    * parser cũ trả về rỗng hoàn toàn, admin phải gõ tay cả 3 ô. `findReadingTriple` bắt
    * bộ ba tự khớp phép trừ nên đọc được bất kể nhãn viết tắt kiểu gì và cột nào in trước.
    */
-  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3);
+  // Đưa số m³ đọc từ nhãn vào làm ràng buộc, giống bên điện: bộ ba phải trừ ra đúng con
+  // số đó thì mới nhận. Chưa đọc được m³ thì bỏ trống và hàm quay về chấm điểm như cũ.
+  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3, out.totalQuantity);
   if (triple) {
     out.prevReading = triple.prevReading;
     out.newReading = triple.newReading;

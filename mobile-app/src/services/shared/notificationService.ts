@@ -42,7 +42,16 @@ const normalizeType = (row: BeNotificationRow): string => {
    *      tháng — không phải cố định 28 như ghi chú cũ)
    *   RENT_OVERDUE_MANAGER                — ngày 8, báo quản lý được chấm dứt HĐ
    *   UTILITY_INVOICE_CREATED             — manager vừa chốt số điện/nước
+   *   UTILITY_INVOICE_AUTO_ISSUED         — khách: hoá đơn điện kỳ này vừa phát hành
+   *   UTILITY_INVOICE_AUTO_ISSUED_MANAGER — quản lý: chỉ số đã chốt vừa thành hoá đơn
    * Gom hết về 2 nhóm UI để lọc theo tab "Hoá đơn" là thấy đủ.
+   *
+   * Hai type `AUTO_ISSUED` (BE 10/09/2026) là điểm kết của luồng điện mới: quản lý chốt
+   * chỉ số vào ngày cuối tháng, admin đẩy hoá đơn EVN sau, máy chủ tự nhân đơn giá rồi
+   * phát hành thẳng cho khách và báo cho cả hai bên. Cả hai đều chứa "UTILITY" nên rơi
+   * đúng nhánh chung bên dưới → `new_bill`, tab "Hoá đơn". Đó là chỗ đúng: với quản lý
+   * đây là tin hoá đơn đã đi, không phải việc phải làm — việc phải làm là
+   * `METER_READING_DUE` và nó nằm ở tab "Ghi điện nước" riêng.
    */
   /**
    * `RENT_UNPAID_MANAGER` (BE 26/08/2026) — cron báo quản lý từ ngày hạn tới ngày đủ điều
@@ -87,7 +96,13 @@ const normalizeType = (row: BeNotificationRow): string => {
    * thông báo quản lý cần thấy nhất lại là loại khó tìm nhất.
    */
   if (raw.startsWith('PAYMENT_RECEIVED')) return 'payment_success';
-  /** Tới kỳ ghi điện/nước mà chưa có ảnh công tơ — BE `METER_READING_DUE`. */
+  /**
+   * Tới kỳ ghi điện/nước mà chưa có ảnh công tơ — BE `METER_READING_DUE`.
+   *
+   * Từ 10/09/2026 tin này của ĐIỆN bắn vào NGÀY CUỐI THÁNG (và nhắc lại nếu còn phòng
+   * thiếu), thay cho mốc cũ là ngày admin phát hành hoá đơn EVN. Nước giữ mốc cũ. Type
+   * không đổi nên mapping giữ nguyên — chỉ ngày bắn đổi, xem `meterReadingPeriod`.
+   */
   if (raw.startsWith('METER_READING')) return 'meter_reading_due';
   // Host duyệt/từ chối giá → quản lý quay lại màn tiếp tục hợp đồng.
   if (raw.startsWith('PRICE_APPROVAL')) return 'contract_assigned';
