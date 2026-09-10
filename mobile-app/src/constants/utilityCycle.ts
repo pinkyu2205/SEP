@@ -171,3 +171,13 @@ export const meterReadingDeadline = (now: Date = serverNow()): string => {
 /** Câu luật hiện dưới thanh bước của tab Điện — thay `UTILITY_WINDOW_TEXT` (chỉ đúng cho nước). */
 export const METER_READING_RULE_TEXT =
   'Chốt số vào ngày cuối tháng · hoá đơn tự phát hành khi admin đẩy hoá đơn EVN';
+
+/**
+ * Câu luật hiện dưới thanh bước của tab NƯỚC (10/09/2026).
+ *
+ * Nước KHÔNG có mốc cố định như điện: người ghi nước bên công ty nước báo riêng cho quản
+ * lý hôm nay xuống nhà nào, ngày đó mỗi tháng một khác. Nên câu này nói mốc là "hôm người
+ * ghi nước xuống" chứ không nêu ngày — nêu một ngày cụ thể là hứa sai.
+ */
+export const WATER_READING_RULE_TEXT =
+  'Chốt số đúng hôm người ghi nước xuống · hoá đơn tự phát hành khi admin đẩy hoá đơn nước';
