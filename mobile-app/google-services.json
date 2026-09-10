@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "406655988442",
+    "project_id": "subleasingproject",
+    "storage_bucket": "subleasingproject.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:406655988442:android:134bbc1b56d5a9a5b82be3",
+        "android_client_info": {
+          "package_name": "com.pinkyusteam.sep"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBr2XizBXX7VbOxSYokYyiI-YNIUG6RIXo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
