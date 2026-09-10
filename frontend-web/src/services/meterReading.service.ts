@@ -84,7 +84,53 @@ export const resolvePrevReading = (
     : { ...meter, source: 'meter' };
 };
 
+/**
+ * Một phòng trong bảng chỉ số đã chốt của kỳ (BE 10/09/2026).
+ * `newReading = null` nghĩa là quản lý CHƯA đi chốt số phòng đó.
+ */
+export interface SavedMeterReading {
+  roomId: number | null;
+  roomNumber: string | null;
+  contractId: number | null;
+  tenantName?: string | null;
+  prevReading: number;
+  prevSource?: 'LAST_INVOICE' | 'LAST_READING' | 'HANDOVER';
+  newReading: number | null;
+  meterImageUrl?: string | null;
+  capturedAt?: string | null;
+  /** Đã thành hoá đơn gửi khách chưa. */
+  invoiceId?: number | null;
+  invoiceStatus?: string | null;
+}
+
 export const meterReadingService = {
+  /**
+   * GET /api/v1/manager/meter-readings — bảng chỉ số ĐÃ CHỐT của một nhà trong một kỳ.
+   * Quyền MANAGER + ADMIN, nên trang phát hành hoá đơn của admin gọi được.
+   *
+   * Vì sao admin cần: từ 10/09/2026 phát hành hoá đơn EVN của nhà chia phòng là lệnh
+   * PHÁT HÀNH THẲNG cho khách, tính từ chỉ số quản lý đã chốt. Phòng nào chưa chốt thì
+   * bị bỏ qua — không có bảng này thì admin bấm phát hành mà không biết mình vừa gửi cho
+   * mấy phòng, và máy chủ cũng không trả lại con số đó.
+   *
+   * Rỗng (kể cả khi lỗi) là trạng thái hợp lệ: nhà nguyên căn không có bảng này.
+   */
+  listSavedForPeriod: async (
+    propertyId: number,
+    period: string,
+    utilityType: 'ELECTRICITY' | 'WATER' = 'ELECTRICITY',
+  ): Promise<SavedMeterReading[]> => {
+    try {
+      const res = await api.get<unknown, { items?: SavedMeterReading[] } | SavedMeterReading[]>(
+        '/api/v1/manager/meter-readings',
+        { params: { propertyId, period, utilityType }, skipErrorToast: true } as object,
+      );
+      return Array.isArray(res) ? res : res?.items ?? [];
+    } catch {
+      return [];
+    }
+  },
+
   /**
    * GET /api/v1/properties/{id}/meter-readings/latest — chỉ số gần nhất của NHÀ NGUYÊN CĂN
    * (không gắn phòng). Quyền: MANAGER + ADMIN.

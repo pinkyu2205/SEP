@@ -2,6 +2,7 @@ export { Button } from './Button';
 export { Card } from './Card';
 export { StatusBadge } from './StatusBadge';
 export { Input } from './Input';
+export { BrandField } from './BrandField';
 export { DatePickerField } from './DatePickerField';
 export { SearchBar } from './SearchBar';
 export { PropertyCard } from './PropertyCard';
