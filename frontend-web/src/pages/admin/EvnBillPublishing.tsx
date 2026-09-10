@@ -138,11 +138,13 @@ interface BillForm {
    * màn hình hiện y như lúc mọi thứ đều đúng. Kỳ đầu không dùng ô này (chưa có gì để nối).
    */
   paperPrev: string;
+  /** Mã khách hàng EVN trên tờ giấy — OCR điền sẵn, admin soát lại rồi mới gửi. */
+  customerCode: string;
 }
 
 const EMPTY_FORM: BillForm = {
   totalKwh: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
-  paperPrev: '',
+  paperPrev: '', customerCode: '',
 };
 
 // Dải dấu thanh Unicode mà NFD tách ra. Viết bằng escape ASCII để dấu tổ hợp không nằm
@@ -366,6 +368,8 @@ export const EvnBillPublishing = () => {
    * Giữ rawText rồi tính lại bằng useMemo thì đổi nhà lúc nào cảnh báo cũng đúng lúc đó.
    */
   const [ocrRawText, setOcrRawText] = useState('');
+  /** Mã khách hàng EVN đọc được từ ảnh — xem chú thích ở nơi hiển thị. */
+  const [ocrCustomerCode, setOcrCustomerCode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [form, setForm] = useState<BillForm>(EMPTY_FORM);
@@ -715,6 +719,10 @@ export const EvnBillPublishing = () => {
         const ocr = await evnBillService.ocr(url);
         const parsed = parseEvnInvoice(ocr);
         setOcrRawText(ocr?.rawText ?? '');
+        // Tin mã của MÁY CHỦ trước parser của app: máy chủ đọc cùng tấm ảnh nhưng bằng
+        // Google Vision, và nó cũng là bên sẽ đối chiếu nên lấy đúng số nó thấy là khớp nhất.
+        const code = ocr?.customerCode || parsed.customerCode || '';
+        setOcrCustomerCode(code);
 
         // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên
         // với dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Số của BE chỉ dùng để bù
@@ -743,6 +751,9 @@ export const EvnBillPublishing = () => {
             admin một lần gõ.
           */
           paperPrev: f.paperPrev || parsed.prevReading || '',
+          // Đè lên ô mã: quét ảnh MỚI thì mã cũ không còn nghĩa gì. Khác các ô số ở trên,
+          // vốn giữ giá trị admin đã gõ tay.
+          customerCode: code || f.customerCode,
         }));
 
         /*
@@ -761,6 +772,7 @@ export const EvnBillPublishing = () => {
           parsed.totalKwh && `${Number(parsed.totalKwh).toLocaleString('vi-VN')} kWh`,
           parsed.totalAmount && `${Number(parsed.totalAmount).toLocaleString('vi-VN')}đ`,
           parsed.billingPeriod && `kỳ ${parsed.billingPeriod}`,
+          parsed.customerCode && `mã KH ${parsed.customerCode}`,
         ].filter(Boolean);
         setScanNote(
           readParts.length
@@ -773,6 +785,7 @@ export const EvnBillPublishing = () => {
         // OCR hỏng thì cũng mất luôn đường đối chiếu địa chỉ — xoá rawText cũ để không
         // đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
         setOcrRawText('');
+        setOcrCustomerCode('');
         setScanNote('Đã tải ảnh nhưng dịch vụ đọc hoá đơn đang lỗi. Vui lòng nhập tay số liệu.');
       }
     } catch (e: any) {
@@ -818,6 +831,16 @@ export const EvnBillPublishing = () => {
         // an toàn cho cả hai bản.
         prevReading: isWholeHouse ? Number(onlyDigits(form.prevReading)) : undefined,
         newReading: isWholeHouse ? Number(onlyDigits(form.newReading)) : undefined,
+        /*
+          MÃ KHÁCH HÀNG — bắt buộc gửi, không phải tuỳ chọn.
+
+          Máy chủ đối chiếu với mã đã lưu của căn nhà và CHẶN phát hành khi lệch
+          (`CUSTOMER_CODE_MISMATCH`) hoặc khi thiếu mà nhà đã có mã
+          (`CUSTOMER_CODE_REQUIRED`). Không gửi thì mọi căn đã khai mã đều không phát
+          hành được — mà lỗi lại hiện ra như một sự cố chứ không như một ô còn trống.
+        */
+        customerCode: form.customerCode.trim() || undefined,
+        ocrConfirmed: true,
       });
 
       /**
@@ -880,11 +903,45 @@ export const EvnBillPublishing = () => {
       setPropertyId(null);
       loadBills();
     } catch (e: any) {
-      setPublishError(
-        e?.response?.data?.message
-          || e?.message
-          || 'Không phát hành được hoá đơn.',
-      );
+      /*
+        HAI LỖI MÃ KHÁCH HÀNG có cách gỡ rõ ràng, nói thẳng ra thay vì để nguyên câu của
+        máy chủ rồi admin ngồi đoán.
+
+        Quan trọng nhất: KHÔNG mất dữ liệu đang nhập. Máy chủ chỉ định cách gỡ là "sửa mã
+        rồi gửi lại, không cần quét lại ảnh" — nên form phải giữ nguyên mọi ô, admin chỉ
+        cần đổi một chuỗi rồi bấm lại.
+      */
+      const code = e?.response?.data?.code;
+      const expected = e?.response?.data?.details?.expectedCustomerCode;
+      if (code === 'CUSTOMER_CODE_MISMATCH') {
+        /*
+          IN HAI MÃ THEO CÙNG MỘT DẠNG thì mới thấy chúng khác nhau ở đâu.
+
+          Máy chủ trả `expectedCustomerCode` đã chuẩn hoá (thường + bỏ hết khoảng trắng và
+          dấu gạch), còn ô nhập thì giữ nguyên chữ admin gõ. Đặt cạnh nhau thô thì
+          "PE 0500 0222239" và "pe05000222239" trông như hai thứ khác hẳn dù chỉ khác cách
+          gõ — người đọc sẽ đi sửa nhầm chỗ.
+        */
+        const norm = (s?: string) => (s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        setPublishError(
+          `Mã khách hàng không khớp. Trên giấy đọc được "${norm(form.customerCode)}", `
+          + `còn mã đã lưu của căn nhà này là "${norm(expected) || '—'}".\n\n`
+          + 'Hoặc OCR đọc lệch — sửa ô mã ở trên rồi bấm lại, không cần quét lại ảnh. '
+          + 'Hoặc đang chọn nhầm căn nhà — kiểm lại ô chọn nhà. '
+          + 'Hoặc mã lưu trong hệ thống sai từ lúc tiếp nhận nhà — vào hồ sơ căn nhà sửa mã ở đó.',
+        );
+      } else if (code === 'CUSTOMER_CODE_REQUIRED') {
+        setPublishError(
+          'Căn nhà này đã khai mã khách hàng, nên phải điền mã trên tờ giấy để đối chiếu. '
+          + 'Nhập vào ô "Mã khách hàng trên giấy" ở trên rồi bấm lại.',
+        );
+      } else {
+        setPublishError(
+          e?.response?.data?.message
+            || e?.message
+            || 'Không phát hành được hoá đơn.',
+        );
+      }
     } finally {
       setPublishing(false);
     }
@@ -1452,6 +1509,46 @@ export const EvnBillPublishing = () => {
                   <AlertTriangle className="h-4 w-4 shrink-0" /> Nên kiểm lại địa chỉ trên ảnh
                 </p>
                 <p className="mt-1 text-xs leading-relaxed text-amber-700">{billMatch.message}</p>
+              </div>
+            )}
+
+            {/*
+              MÃ KHÁCH HÀNG ĐỌC ĐƯỢC — đặt NGAY TRÊN khối đối chiếu địa chỉ, vì nó là bằng
+              chứng mạnh hơn hẳn.
+
+              Đối chiếu địa chỉ là so chữ mờ: địa chỉ hay viết tắt, phường vừa đổi tên hàng
+              loạt, OCR đọc rụng dấu — nên nó cảnh báo nhầm nhiều, mà cảnh báo nhầm nhiều thì
+              người ta bấm bỏ qua theo phản xạ. Mã khách hàng thì đúng-hoặc-sai, không có
+              vùng xám, và admin liếc một cái là so xong với tờ giấy đang cầm.
+
+              Chưa tự so được vì máy chủ chưa lưu mã của từng căn nhà (kiểm 11/09/2026:
+              `Property` và `InboundContract` đều không có trường nào). Nói thẳng chỗ đó ra
+              thay vì im lặng, để admin biết phần kiểm này vẫn đang do mắt người làm.
+            */}
+            {!!propertyId && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
+                  Mã khách hàng trên giấy
+                </label>
+                <input
+                  value={form.customerCode}
+                  onChange={(e) => setForm((f) => ({ ...f, customerCode: e.target.value }))}
+                  placeholder="VD: PE05000222239"
+                  className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 font-mono text-base font-extrabold tracking-wide text-indigo-900 outline-none focus:border-indigo-400"
+                />
+                <p className="mt-1.5 text-xs leading-relaxed text-indigo-700">
+                  {ocrCustomerCode
+                    ? 'Đã đọc từ ảnh. Soát lại với tờ giấy đang cầm rồi sửa nếu OCR đọc lệch — số 0 hay bị đọc thành chữ O.'
+                    : 'Không đọc được từ ảnh — gõ tay theo tờ giấy.'}
+                </p>
+                {/*
+                  Ô SỬA ĐƯỢC chứ không phải dòng chỉ đọc.
+
+                  Máy chủ CHẶN phát hành khi mã lệch mã đã lưu của căn nhà, và cách gỡ mà nó
+                  chỉ định là "sửa mã rồi gửi lại, không cần quét lại ảnh". Bày một dòng chỉ
+                  đọc thì admin gặp lỗi mà không có chỗ nào để sửa, chỉ còn nước quét lại ảnh
+                  và nhận đúng con số cũ.
+                */}
               </div>
             )}
 

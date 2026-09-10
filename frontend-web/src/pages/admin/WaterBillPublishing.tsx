@@ -54,10 +54,12 @@ interface BillForm {
    * thì hai con số đáng lẽ phải bằng nhau không bao giờ được đem ra so.
    */
   paperPrev: string;
+  /** Số danh bộ trên tờ giấy — OCR điền sẵn, admin soát lại rồi mới gửi. */
+  customerCode: string;
 }
 const EMPTY_FORM: BillForm = {
   totalQuantity: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
-  paperPrev: '',
+  paperPrev: '', customerCode: '',
 };
 
 export const WaterBillPublishing = () => {
@@ -136,6 +138,8 @@ export const WaterBillPublishing = () => {
    * được, kể cả sau khi đã tải ảnh; đó chính là cái nhầm cần bắt.
    */
   const [ocrRawText, setOcrRawText] = useState('');
+  /** Số danh bộ đọc được từ ảnh — xem chú thích ở nơi hiển thị. */
+  const [ocrCustomerCode, setOcrCustomerCode] = useState('');
 
   const selectedMonthPeriod = useMemo(
     () => monthPeriod(0, new Date(year, month - 1, 1)),
@@ -290,6 +294,9 @@ export const WaterBillPublishing = () => {
         const ocr = await waterBillService.ocr(url);
         setOcrRawText(ocr?.rawText ?? '');
         const parsed = parseWaterInvoice(ocr);
+        // Tin mã của MÁY CHỦ trước parser của app — nó cũng là bên sẽ đối chiếu.
+        const code = (ocr as { customerCode?: string })?.customerCode || parsed.customerCode || '';
+        setOcrCustomerCode(code);
         setForm((f) => ({
           ...f,
           totalQuantity: f.totalQuantity || (parsed.totalQuantity != null ? String(parsed.totalQuantity) : ''),
@@ -298,15 +305,28 @@ export const WaterBillPublishing = () => {
           // Chỉ số đồng hồ đọc từ bộ ba tự khớp phép trừ — chỉ điền ô còn trống.
           prevReading: f.prevReading || (parsed.prevReading != null ? String(parsed.prevReading) : ''),
           newReading: f.newReading || (parsed.newReading != null ? String(parsed.newReading) : ''),
+          // Quét ảnh MỚI thì mã cũ hết nghĩa — ô này đè, khác các ô số ở trên.
+          customerCode: code || f.customerCode,
         }));
-        const got = parsed.totalQuantity != null || parsed.totalAmount != null;
-        setScanNote(got
-          ? 'Đã đọc sơ bộ từ ảnh — KIỂM TRA lại tổng m³ / tổng tiền / kỳ trước khi gửi.'
+        // Liệt kê đúng số đọc được, thay câu chung chung — admin liếc một cái là so xong
+        // với tờ giấy, khỏi phải dò ngược từng ô.
+        const vn = (n: number) => n.toLocaleString('vi-VN');
+        const readParts = [
+          parsed.newReading != null && `chỉ số mới ${vn(parsed.newReading)}`,
+          parsed.prevReading != null && `chỉ số cũ ${vn(parsed.prevReading)}`,
+          parsed.totalQuantity != null && `${vn(parsed.totalQuantity)} m³`,
+          parsed.totalAmount != null && `${vn(parsed.totalAmount)}đ`,
+          parsed.billingPeriod && `kỳ ${parsed.billingPeriod}`,
+          parsed.customerCode && `danh bộ ${parsed.customerCode}`,
+        ].filter(Boolean);
+        setScanNote(readParts.length
+          ? `Đọc được: ${readParts.join(' · ')}. Đối chiếu lại với ảnh trước khi phát hành.`
           : 'Không đọc được số từ ảnh — nhập tay giúp mình.');
       } catch {
         // OCR hỏng không được làm hỏng luôn việc đính ảnh: ảnh đã lên rồi, admin gõ tay.
         // Nhưng phải xoá rawText cũ, kẻo đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
         setOcrRawText('');
+        setOcrCustomerCode('');
         setScanNote('Không đọc được ảnh — nhập tay giúp mình.');
       }
     } catch (e: any) {
@@ -334,6 +354,10 @@ export const WaterBillPublishing = () => {
         // khách trong cùng transaction. BE cũ bỏ qua field lạ nên gửi kèm là an toàn.
         prevReading: isWholeHouse ? prevReadingNum : undefined,
         newReading: isWholeHouse ? newReadingNum : undefined,
+        // Bắt buộc gửi — máy chủ CHẶN khi lệch mã đã lưu của căn nhà. Xem chú thích cùng
+        // tên bên EvnBillPublishing.
+        customerCode: form.customerCode.trim() || undefined,
+        ocrConfirmed: true,
       });
 
       /**
@@ -387,10 +411,32 @@ export const WaterBillPublishing = () => {
       setForm({ ...EMPTY_FORM, billingPeriod: selectedMonthPeriod });
       setImageUrl('');
       setOcrRawText('');
+      setOcrCustomerCode('');
       setPropertyId(null);
       await loadBills();
     } catch (e: any) {
-      setPublishError(e?.response?.data?.message || e?.message || 'Không phát hành được hoá đơn nước.');
+      // Hai lỗi mã khách hàng — nói thẳng cách gỡ, và KHÔNG xoá form: máy chủ chỉ định
+      // "sửa mã rồi gửi lại, không cần quét lại ảnh". Xem bản đầy đủ ở EvnBillPublishing.
+      const code = e?.response?.data?.code;
+      const expected = e?.response?.data?.details?.expectedCustomerCode;
+      if (code === 'CUSTOMER_CODE_MISMATCH') {
+        // In hai mã theo cùng một dạng thì mới thấy khác nhau ở đâu — xem chú thích đầy
+        // đủ ở EvnBillPublishing.
+        const norm = (s?: string) => (s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        setPublishError(
+          `Số danh bộ không khớp. Trên giấy đọc được "${norm(form.customerCode)}", `
+          + `còn số đã lưu của căn nhà này là "${norm(expected) || '—'}".\n\n`
+          + 'Sửa ô số danh bộ ở trên rồi bấm lại, không cần quét lại ảnh. '
+          + 'Nếu số trên giấy đúng thì kiểm lại xem có đang chọn nhầm căn nhà không.',
+        );
+      } else if (code === 'CUSTOMER_CODE_REQUIRED') {
+        setPublishError(
+          'Căn nhà này đã khai số danh bộ, nên phải điền số trên tờ giấy để đối chiếu. '
+          + 'Nhập vào ô "Số danh bộ trên giấy" ở trên rồi bấm lại.',
+        );
+      } else {
+        setPublishError(e?.response?.data?.message || e?.message || 'Không phát hành được hoá đơn nước.');
+      }
     } finally {
       setPublishing(false);
     }
@@ -538,6 +584,7 @@ export const WaterBillPublishing = () => {
                       onClick={() => {
                         setImageUrl('');
                         setOcrRawText('');
+                        setOcrCustomerCode('');
                         if (fileRef.current) fileRef.current.value = '';
                       }}
                       className="flex-1 rounded-lg border border-rose-200 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50"
@@ -885,6 +932,27 @@ export const WaterBillPublishing = () => {
               </div>
             )}
 
+            {/* Song sinh với khối mã khách hàng bên trang EVN — xem chú thích dài ở đó. */}
+            {/* Ô SỬA ĐƯỢC — song sinh với khối mã khách hàng bên trang EVN, xem chú thích ở đó. */}
+            {!!propertyId && (
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-sky-400">
+                  Số danh bộ trên giấy
+                </label>
+                <input
+                  value={form.customerCode}
+                  onChange={(e) => setForm((f) => ({ ...f, customerCode: e.target.value }))}
+                  placeholder="VD: 0123456789"
+                  className="mt-1 w-full rounded-lg border border-sky-200 bg-white px-3 py-2 font-mono text-base font-extrabold tracking-wide text-sky-900 outline-none focus:border-sky-400"
+                />
+                <p className="mt-1.5 text-xs leading-relaxed text-sky-700">
+                  {ocrCustomerCode
+                    ? 'Đã đọc từ ảnh. Soát lại với tờ giấy đang cầm rồi sửa nếu OCR đọc lệch.'
+                    : 'Không đọc được từ ảnh — gõ tay theo tờ giấy.'}
+                </p>
+              </div>
+            )}
+
             {billMatch.verdict === 'match' && (
               <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
                 <Check className="h-3.5 w-3.5" /> Địa chỉ trên ảnh khớp với căn nhà đang chọn.
@@ -898,7 +966,12 @@ export const WaterBillPublishing = () => {
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-bold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Gửi cho quản lý đọc đồng hồ'}
+              {/*
+                Nhãn cũ của nhà chia phòng là "Gửi cho quản lý đọc đồng hồ" — đúng luồng
+                TRƯỚC 10/09/2026, khi phát hành chỉ là giao việc. Nay quản lý đã chốt chỉ số
+                từ hôm người ghi nước xuống, nên bấm nút này là hoá đơn đi thẳng tới khách.
+              */}
+              {isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Phát hành & gửi cho khách các phòng đã chốt số'}
             </button>
           </div>
         </div>
