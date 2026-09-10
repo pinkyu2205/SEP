@@ -27,6 +27,22 @@ export interface ParsedEvnInvoice {
   /** Chỉ số công tơ đọc được — chỉ nhà nguyên căn mới cần (xem meterReadingExtract). */
   prevReading?: string;
   newReading?: string;
+  /**
+   * MÃ KHÁCH HÀNG EVN in trên hoá đơn, vd `PE05000222239`.
+   *
+   * Đây là khoá CHÍNH XÁC nối tờ giấy với căn nhà. Hiện màn phát hành đối chiếu bằng cách
+   * so ĐỊA CHỈ trên ảnh với địa chỉ căn nhà (`matchBillToProperty`) — so chữ mờ, mà địa chỉ
+   * thì hay viết tắt, phường vừa đổi tên hàng loạt, OCR lại đọc rụng dấu. Cảnh báo nhầm
+   * nhiều thì người dùng bấm bỏ qua theo phản xạ, tới lúc sai thật cũng bỏ qua nốt.
+   *
+   * Từ khi phát hành là tiền đi thẳng tới khách, gắn nhầm hoá đơn vào nhà khác là thu sai
+   * của cả một dãy phòng — nên cần một khoá đúng-hoặc-sai, không có vùng xám.
+   *
+   * Máy chủ CHƯA lưu mã này ở đâu (kiểm 11/09/2026: `Property` và `InboundContract` đều
+   * không có trường nào), nên bước một chỉ hiện ra cho admin đối chiếu bằng mắt với tờ
+   * giấy. Khi BE lưu được thì chỉ cần nối thêm phép so.
+   */
+  customerCode?: string;
 }
 
 // Dải dấu thanh/dấu phụ Unicode (U+0300–U+036F) mà NFD tách ra khỏi nguyên âm.
@@ -59,6 +75,25 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
     if (m) out.billingPeriod = `Tháng ${m[1]}/${m[2]}`;
   }
 
+  /*
+    ── Mã khách hàng EVN ──────────────────────────────────────────────────────
+    Ưu tiên tuyệt đối cho mẫu CÓ NHÃN. Mã EVN là chữ + số liền nhau nên nếu dò tự do trong
+    cả trang thì mã số thuế (`0300951119`) và số tài khoản (`1020102102`) cũng lọt — chúng
+    dài tương đương và nằm ngay khối đầu trang.
+
+    Mẫu chữ: hai chữ cái rồi tới dãy số (`PE05000222239`). Cho phép có khoảng trắng hoặc
+    gạch chen giữa vì OCR hay chèn — nhưng khi lưu thì bỏ hết, chỉ giữ phần chữ và số, để
+    hai lần đọc cùng một tấm giấy luôn ra cùng một chuỗi.
+  */
+  const codeMatch =
+    flat.match(/ma khach hang[^a-z0-9]*([a-z]{2}[\s.-]?[\d\s.-]{8,18})/)
+    || flat.match(/\b([a-z]{2}[\s.-]?\d{9,14})\b/);
+  if (codeMatch) {
+    const code = codeMatch[1].replace(/[^a-z0-9]/g, '').toUpperCase();
+    // Phải có cả chữ lẫn số, và đủ dài — chặn "tp" / "vn" dính vào một con số bên cạnh.
+    if (/^[A-Z]{2}\d{9,14}$/.test(code)) out.customerCode = code;
+  }
+
   // ── Tổng tiền: ưu tiên dòng "tổng cộng tiền thanh toán" / "total payment" ──
   const amt =
     flat.match(/tong cong tien thanh toan[^\d]*([\d.,]+)/) ||
@@ -83,7 +118,17 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
   const noDates = flat
     .replace(/\d{1,2}\/\d{1,2}\/\d{4}/g, ' ')
     .replace(/\d{1,2}\/\d{4}/g, ' ');
+  /*
+    Thứ tự dò đi từ nhãn RIÊNG NHẤT xuống nhãn chung nhất.
+
+    Hai mẫu đầu là của bản tổng kết EVN: "tong dien nang tieu thu (kwh) 327" và dòng
+    "tong: 327" ngay dưới bảng chỉ số. Chúng phải đứng trước vì mẫu `kwh <số>` chung chung
+    không bắt được chúng — sau chữ "kwh" là dấu ")" chứ không phải chữ số, nên regex trượt
+    và ô tổng kWh bỏ trống trên đúng những hoá đơn có đầy đủ phần tổng kết.
+  */
   const kwh =
+    noDates.match(/tong dien nang tieu thu[^\d]*([\d.,]+)/) ||
+    noDates.match(/tong\s*:\s*([\d.,]+)/) ||
     noDates.match(/kwh\s*[:\-]?\s*([\d.,]+)/) ||
     noDates.match(/([\d.,]+)\s*kwh/) ||
     noDates.match(/tieu thu[^\d]*?([\d.,]+)/);
@@ -101,7 +146,16 @@ export const parseEvnInvoice = (ocr: EvnOcrInput): ParsedEvnInvoice => {
    * `findReadingTriple` tìm bộ ba tự khớp phép trừ (16.087 − 15.404 = 683) nên không bị
    * mã công tơ / hệ số nhân / tiền thuế lừa.
    */
-  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH);
+  /*
+    Đưa tổng kWh đọc từ nhãn vào làm ràng buộc — xem `expectedConsumption`.
+
+    Hai nguồn độc lập nhau: một bên là con số EVN in ở dòng tổng, một bên là hiệu của hai
+    chỉ số trong bảng. Bắt chúng khớp nhau thì kết quả chỉ sai khi CẢ HAI cùng sai theo
+    đúng một kiểu — gần như không xảy ra. Lệch nhau thì bỏ trống hai ô chỉ số, để người
+    nhập tay, chứ không đoán.
+  */
+  const labelKwh = out.totalKwh ? Number(out.totalKwh) : undefined;
+  const triple = findReadingTriple(ocr.rawText || '', MAX_PLAUSIBLE_KWH, labelKwh);
   if (triple) {
     out.prevReading = String(triple.prevReading);
     out.newReading = String(triple.newReading);

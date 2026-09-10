@@ -46,13 +46,30 @@ const READING_LABELS = [
   'tieu thu', 'dien tieu thu', 'so luong tieu thu',
 ];
 
+/**
+ * Nhãn của các cột TIỀN. Số đứng ngay sau chúng là tiền, không đời nào là chỉ số công tơ.
+ *
+ * Vì sao phải loại hẳn: phần tổng kết hoá đơn EVN tự nó là một bộ ba khớp phép trừ hoàn
+ * hảo — `896.346 − 829.950 = 66.396` (tổng thanh toán − chưa thuế = thuế GTGT). Cả ba số
+ * đều có thật trong văn bản, và tiêu thụ 66.396 vẫn lọt ngưỡng kWh hợp lý. Khi OCR đọc
+ * hụt hàng chỉ số (ảnh mờ, bảng bị cắt) thì bộ ba tiền này là bộ ba DUY NHẤT còn lại và
+ * nó thắng — ô tiêu thụ điền 66.396 kWh, sai gấp hai trăm lần.
+ */
+const MONEY_LABELS = [
+  'tong cong tien thanh toan', 'so tien thanh toan', 'tong tien dien chua thue',
+  'tong cong', 'cong tien hang', 'thue gtgt', 'thanh tien', 'don gia', 'tien dien',
+];
+
+/** Chỉ số công tơ nhỏ hơn mức này là số rác (số thứ tự, số bậc, trục biểu đồ). */
+const MIN_PLAUSIBLE_READING = 100;
+
 /** Số nằm trong văn bản, kèm vị trí để xét "cùng một hàng bảng". */
 interface Token { value: number; at: number }
 
 /**
  * Bóc số khỏi văn bản, bỏ những thứ chắc chắn không phải chỉ số:
- * ngày/giờ, phần trăm, số điện thoại. Dấu `.`/`,` coi là phân cách nghìn — hoá đơn VN
- * không in phần thập phân cho chỉ số công tơ.
+ * ngày/giờ, phần trăm, số điện thoại, và các cột TIỀN. Dấu `.`/`,` coi là phân cách nghìn
+ * — hoá đơn VN không in phần thập phân cho chỉ số công tơ.
  */
 const tokenize = (flat: string): Token[] => {
   const cleaned = flat
@@ -64,14 +81,42 @@ const tokenize = (flat: string): Token[] => {
     // 8%, 5%, 10%
     .replace(/\d+\s*%/g, ' ')
     // 0902601953 · 0977 908 552 · (028) 37220191 — số điện thoại, không phải chỉ số
-    .replace(/\(?0\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{3,4}/g, ' ');
+    .replace(/\(?0\d{2}\)?[\s.-]?\d{3}[\s.-]?\d{3,4}/g, ' ')
+    ;
+
+  /*
+    CỐ Ý KHÔNG nối nhóm nghìn bị OCR đọc thành khoảng trắng ("11 195" → "11195").
+
+    Nghe thì hợp lý, làm thì hỏng: dãy `10 868 327` vừa có thể là 10.868 và 327, vừa có thể
+    là 10.868.327 — văn bản phẳng không mang thông tin cột nên không có cách nào phân biệt.
+    Bản thử nối đã biến `1 11 195 10 868 327` thành `1 11195 10868327` và nuốt luôn cả dãy
+    biểu đồ `327 354 305 325 327` thành một số.
+
+    Trường hợp đó nay được chặn bằng đường khác, an toàn hơn: bộ ba phải khớp với tổng tiêu
+    thụ đọc từ nhãn (`expectedConsumption`). Không khớp thì bỏ trống hai ô chỉ số cho người
+    nhập tay — bỏ trống thì admin thấy ngay, còn điền số sai thì không ai thấy.
+  */
+
+  // Vùng TIỀN: từ mỗi nhãn tiền kéo dài 40 ký tự — đủ ôm "(dong) 896.346" mà chưa chạm
+  // sang mục kế tiếp.
+  const moneyZones: Array<[number, number]> = [];
+  for (const label of MONEY_LABELS) {
+    let from = 0;
+    for (;;) {
+      const at = cleaned.indexOf(label, from);
+      if (at < 0) break;
+      moneyZones.push([at, at + label.length + 40]);
+      from = at + label.length;
+    }
+  }
+  const inMoneyZone = (at: number) => moneyZones.some(([a, b]) => at >= a && at <= b);
 
   const out: Token[] = [];
   const re = /\d{1,3}(?:[.,]\d{3})+|\d+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(cleaned)) !== null) {
     const value = Number(m[0].replace(/[^\d]/g, ''));
-    if (value > 0) out.push({ value, at: m.index });
+    if (value > 0 && !inMoneyZone(m.index)) out.push({ value, at: m.index });
   }
   return out;
 };
@@ -92,6 +137,16 @@ export interface ReadingTriple {
 export const findReadingTriple = (
   rawText: string,
   maxConsumption: number,
+  /**
+   * Lượng tiêu thụ đã đọc được từ NHÃN ("Tổng điện năng tiêu thụ (kWh) 327", "Tổng: 327").
+   *
+   * Có nó thì đây là ràng buộc mạnh nhất trong cả hàm: bộ ba phải trừ ra đúng con số này.
+   * Phép trừ một mình vẫn để lọt bộ ba tình cờ — dãy cột biểu đồ cho `354 − 327 = 27` và
+   * cả ba số đều có thật trong văn bản. Đối chiếu với tổng thì chúng rụng hết.
+   *
+   * Bỏ trống khi hoá đơn không in tổng ở đâu cả; khi đó hàm quay về chấm điểm như cũ.
+   */
+  expectedConsumption?: number,
 ): ReadingTriple | null => {
   const flat = normalizeForParse((rawText || '').replace(/\s+/g, ' '));
   const tokens = tokenize(flat);
@@ -115,6 +170,33 @@ export const findReadingTriple = (
       const lo = tokens[j];
       const diff = hi.value - lo.value;
       if (diff <= 0 || diff > maxConsumption) continue;
+      if (expectedConsumption != null && diff !== expectedConsumption) continue;
+
+      /**
+       * TIÊU THỤ PHẢI NHỎ HƠN CHỈ SỐ CŨ.
+       *
+       * Phép trừ một mình KHÔNG đủ để phân vai: với ba số 11.195 · 10.868 · 327 thì cả hai
+       * cách đọc đều đúng số học —
+       *     11.195 − 10.868 = 327   (đúng: tiêu thụ 327 kWh)
+       *     11.195 − 327 = 10.868   (sai: tiêu thụ 10.868 kWh)
+       * Bản trước chỉ dựa vào điểm "gần nhãn" để tách hai cách này, nên hoá đơn nào OCR đọc
+       * hụt tên cột là lật ngay sang cách sai.
+       *
+       * Ràng buộc vật lý gỡ được nút đó: công tơ cộng dồn từ lúc lắp, còn tiêu thụ chỉ là
+       * phần của MỘT kỳ. Phần luôn nhỏ hơn tổng. Cách đọc sai tự loại vì 10.868 > 327.
+       */
+      if (diff >= lo.value) continue;
+
+      /**
+       * Chỉ số công tơ không bao giờ là số một hai chữ số trên hoá đơn thật.
+       *
+       * Không có ngưỡng này thì mấy con số lặt vặt trong hoá đơn tự ghép thành bộ ba hợp
+       * lệ: trục hoành biểu đồ tiêu thụ 12 tháng cho `12 − 8 = 4`, cột "Bậc 1..5" cho
+       * `5 − 3 = 2`. Cả hai đều đúng phép trừ, đều có mặt trong văn bản, và khi OCR đọc
+       * hụt hàng chỉ số thật thì chúng là bộ ba duy nhất còn lại nên thắng tuyệt đối —
+       * ô tiêu thụ điền 2 kWh (đã đo được).
+       */
+      if (lo.value < MIN_PLAUSIBLE_READING) continue;
 
       // `c` phải xuất hiện thật trong văn bản — đây là phần "tự chứng minh".
       const cToken = tokens.find((t) => t.value === diff && t !== hi && t !== lo);

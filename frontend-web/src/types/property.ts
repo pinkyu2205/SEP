@@ -54,6 +54,18 @@ export interface PublicProperty {
   depositMonths?: number | null;
   /** Phí dịch vụ mỗi tháng (VND). */
   serviceFee?: number | null;
+  /**
+   * ─── CHỖ CÒN TRỐNG (10/09/2026) ────────────────────────────────────────────
+   * Nhà chia phòng: số phòng đang còn trống / tổng số phòng đã mở cho thuê.
+   * Nhà nguyên căn: 1/1 khi còn trống, 0/1 khi đã có khách.
+   *
+   * Trang công khai chỉ liệt kê nhà CÒN CHỖ, nên hai số này còn để nói với khách là còn
+   * mấy phòng — "còn 1/4 phòng" và "còn 4/4 phòng" là hai mức độ khẩn cấp khác hẳn nhau.
+   * `undefined` = không tra được danh sách phòng (lỗi mạng), khi đó đừng hiện gì cả thay
+   * vì hiện số 0 gây hiểu là hết chỗ.
+   */
+  availableRooms?: number;
+  totalRooms?: number;
   /** Hiển thị ở mục "nổi bật" trên trang chủ */
   featured?: boolean;
   createdAt: string;

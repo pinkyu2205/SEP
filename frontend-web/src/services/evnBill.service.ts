@@ -95,6 +95,16 @@ export interface CreateEvnBillInput {
    */
   prevReading?: number;
   newReading?: number;
+  /**
+   * MÃ KHÁCH HÀNG in trên tờ giấy, sau khi admin đã soát lại (BE 618f9dd + 3e8202f).
+   *
+   * BẮT BUỘC gửi khi căn nhà đã lưu mã: máy chủ đối chiếu rồi ném `CUSTOMER_CODE_REQUIRED`
+   * nếu thiếu, `CUSTOMER_CODE_MISMATCH` nếu lệch. Đây là CHẶN chứ không phải cảnh báo —
+   * gắn nhầm hoá đơn vào nhà khác là thu sai của cả một dãy phòng.
+   */
+  customerCode?: string;
+  /** Admin đã soát 3 field OCR (mã KH, chỉ số cũ, chỉ số mới). Chỉ đánh dấu đã review. */
+  ocrConfirmed?: boolean;
 }
 
 /** Kết quả OCR ảnh hoá đơn EVN (BE: OcrEvnBillResponse, endpoint đã có sẵn). */
@@ -104,6 +114,12 @@ export interface OcrEvnBillResponse {
   totalKwh?: number;
   totalAmount?: number;
   billingPeriod?: string;
+  /** Mã khách hàng máy chủ đọc được (BE 3e8202f). Tin số này trước parser của app. */
+  customerCode?: string;
+  prevReading?: number;
+  newReading?: number;
+  /** Máy chủ đề nghị admin luôn soát lại: customerCode, prevReading, newReading. */
+  fieldsToConfirm?: string[];
 }
 
 /**

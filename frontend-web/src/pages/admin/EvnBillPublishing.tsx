@@ -14,6 +14,7 @@ import { UtilityBillZipImport } from './UtilityBillZipImport';
 
 
 import { utilityInvoiceService } from '@/services/utilityInvoice.service';
+import { meterReadingService, type SavedMeterReading } from '@/services/meterReading.service';
 import {
   loadUtilityCycle, continuityGap, firstPeriodNote, type UtilityCycle,
 } from '@/services/utilityCycle';
@@ -137,11 +138,13 @@ interface BillForm {
    * màn hình hiện y như lúc mọi thứ đều đúng. Kỳ đầu không dùng ô này (chưa có gì để nối).
    */
   paperPrev: string;
+  /** Mã khách hàng EVN trên tờ giấy — OCR điền sẵn, admin soát lại rồi mới gửi. */
+  customerCode: string;
 }
 
 const EMPTY_FORM: BillForm = {
   totalKwh: '', totalAmount: '', billingPeriod: '', prevReading: '', newReading: '',
-  paperPrev: '',
+  paperPrev: '', customerCode: '',
 };
 
 // Dải dấu thanh Unicode mà NFD tách ra. Viết bằng escape ASCII để dấu tổ hợp không nằm
@@ -365,6 +368,8 @@ export const EvnBillPublishing = () => {
    * Giữ rawText rồi tính lại bằng useMemo thì đổi nhà lúc nào cảnh báo cũng đúng lúc đó.
    */
   const [ocrRawText, setOcrRawText] = useState('');
+  /** Mã khách hàng EVN đọc được từ ảnh — xem chú thích ở nơi hiển thị. */
+  const [ocrCustomerCode, setOcrCustomerCode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [form, setForm] = useState<BillForm>(EMPTY_FORM);
@@ -622,6 +627,42 @@ export const EvnBillPublishing = () => {
   }, [propertyId, isWholeHouse, month, year]);
 
   /**
+   * ── PHÒNG NÀO ĐÃ CHỐT CHỈ SỐ ĐIỆN (10/09/2026) ─────────────────────────────
+   *
+   * Luồng điện của nhà chia phòng đã đảo chiều: quản lý chốt chỉ số vào ngày cuối tháng,
+   * rồi admin đẩy giấy EVN lên và máy chủ TỰ tính tiền, TỰ gửi hoá đơn cho từng khách.
+   *
+   * Nghĩa là nút phát hành ở đây không còn là "giao việc cho quản lý" nữa — nó là lệnh
+   * gửi tiền tới tay khách. Phòng chưa chốt số thì bị bỏ qua, và máy chủ KHÔNG trả về con
+   * số đó trong phản hồi. Không có bảng này thì admin bấm xong không biết mình vừa gửi
+   * cho mấy phòng, cũng không biết còn ai chưa chốt để mà nhắc.
+   *
+   * Nhà nguyên căn không có bảng này: hoá đơn EVN chính là hoá đơn của căn đó.
+   */
+  const [savedReadings, setSavedReadings] = useState<SavedMeterReading[] | null>(null);
+  const [loadingReadings, setLoadingReadings] = useState(false);
+  /** Mở danh sách chỉ số từng phòng. Mặc định thu gọn — phần lớn lần vào chỉ cần con số đếm. */
+  const [readingsOpen, setReadingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!propertyId || isWholeHouse) {
+      setSavedReadings(null);
+      return;
+    }
+    let alive = true;
+    setLoadingReadings(true);
+    const period = `${year}-${String(month).padStart(2, '0')}`;
+    meterReadingService
+      .listSavedForPeriod(propertyId, period, 'ELECTRICITY')
+      .then((rows) => { if (alive) setSavedReadings(rows); })
+      .finally(() => { if (alive) setLoadingReadings(false); });
+    return () => { alive = false; };
+  }, [propertyId, isWholeHouse, month, year]);
+
+  const lockedRooms = savedReadings?.filter((r) => r.newReading != null) ?? [];
+  const missingRooms = savedReadings?.filter((r) => r.newReading == null) ?? [];
+
+  /**
    * ── Kỳ trước chốt ở đâu, giấy kỳ này bắt đầu từ đâu ─────────────────────────
    *
    * Hai số này PHẢI bằng nhau. Lệch nghĩa là phần tiêu thụ giữa hai mốc không nằm trên
@@ -678,6 +719,10 @@ export const EvnBillPublishing = () => {
         const ocr = await evnBillService.ocr(url);
         const parsed = parseEvnInvoice(ocr);
         setOcrRawText(ocr?.rawText ?? '');
+        // Tin mã của MÁY CHỦ trước parser của app: máy chủ đọc cùng tấm ảnh nhưng bằng
+        // Google Vision, và nó cũng là bên sẽ đối chiếu nên lấy đúng số nó thấy là khớp nhất.
+        const code = ocr?.customerCode || parsed.customerCode || '';
+        setOcrCustomerCode(code);
 
         // Ưu tiên parser FE trên rawText: BE lấy "số dài nhất trong 80 ký tự sau nhãn" nên
         // với dòng "kWh 199 - 369.986" nó trả 369.986 làm số kWh. Số của BE chỉ dùng để bù
@@ -695,18 +740,52 @@ export const EvnBillPublishing = () => {
           // còn trống — admin đã gõ tay thì không đè lên.
           prevReading: f.prevReading || parsed.prevReading || '',
           newReading: f.newReading || parsed.newReading || '',
+          /*
+            Ô "chỉ số cũ in trên giấy" cũng điền từ OCR — trước đây bỏ quên, admin phải tự
+            gõ lại đúng con số vừa đọc được khỏi chính tấm ảnh đó.
+
+            Nó KHÔNG trùng vai với `prevReading`: `prevReading` là số của sổ hệ thống (kỳ 2
+            trở đi bị khoá theo chốt kỳ trước), còn ô này là số của tờ giấy. Cả màn hình tồn
+            tại một phép so giữa hai số đó (`continuityGap`) để bắt phần kWh rơi ra ngoài
+            mọi hoá đơn — tự điền một bên thì phép so vẫn còn nguyên ý nghĩa, chỉ đỡ cho
+            admin một lần gõ.
+          */
+          paperPrev: f.paperPrev || parsed.prevReading || '',
+          // Đè lên ô mã: quét ảnh MỚI thì mã cũ không còn nghĩa gì. Khác các ô số ở trên,
+          // vốn giữ giá trị admin đã gõ tay.
+          customerCode: code || f.customerCode,
         }));
 
-        const got = parsed.totalKwh || parsed.totalAmount || parsed.billingPeriod;
+        /*
+          LIỆT KÊ ĐÚNG NHỮNG SỐ VỪA ĐỌC ĐƯỢC, thay cho câu chung chung cũ.
+
+          Câu cũ ("Đã đọc sơ bộ từ ảnh — KIỂM TRA lại...") không nói đọc được cái gì, nên
+          muốn kiểm thì phải tự dò từng ô rồi đối chiếu ngược lên ảnh. Ghi thẳng bốn con số
+          ra đây thì admin liếc một cái là so xong với tờ giấy.
+
+          Nêu cả thứ KHÔNG đọc được: hai ô chỉ số bỏ trống là có chủ ý (bộ ba không khớp
+          tổng kWh nên parser từ chối đoán), không phải app quên điền.
+        */
+        const readParts = [
+          parsed.newReading && `chỉ số mới ${Number(parsed.newReading).toLocaleString('vi-VN')}`,
+          parsed.prevReading && `chỉ số cũ ${Number(parsed.prevReading).toLocaleString('vi-VN')}`,
+          parsed.totalKwh && `${Number(parsed.totalKwh).toLocaleString('vi-VN')} kWh`,
+          parsed.totalAmount && `${Number(parsed.totalAmount).toLocaleString('vi-VN')}đ`,
+          parsed.billingPeriod && `kỳ ${parsed.billingPeriod}`,
+          parsed.customerCode && `mã KH ${parsed.customerCode}`,
+        ].filter(Boolean);
         setScanNote(
-          got
-            ? 'Đã đọc sơ bộ từ ảnh — KIỂM TRA lại tổng kWh / tổng tiền / kỳ trước khi gửi.'
+          readParts.length
+            ? `Đọc được: ${readParts.join(' · ')}.`
+              + (parsed.prevReading ? '' : ' Không đọc chắc được chỉ số công tơ — nhập tay giúp.')
+              + ' Đối chiếu lại với ảnh trước khi phát hành.'
             : 'Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay.',
         );
       } catch {
         // OCR hỏng thì cũng mất luôn đường đối chiếu địa chỉ — xoá rawText cũ để không
         // đem chữ của ẢNH TRƯỚC ra kết luận cho ảnh này.
         setOcrRawText('');
+        setOcrCustomerCode('');
         setScanNote('Đã tải ảnh nhưng dịch vụ đọc hoá đơn đang lỗi. Vui lòng nhập tay số liệu.');
       }
     } catch (e: any) {
@@ -752,6 +831,16 @@ export const EvnBillPublishing = () => {
         // an toàn cho cả hai bản.
         prevReading: isWholeHouse ? Number(onlyDigits(form.prevReading)) : undefined,
         newReading: isWholeHouse ? Number(onlyDigits(form.newReading)) : undefined,
+        /*
+          MÃ KHÁCH HÀNG — bắt buộc gửi, không phải tuỳ chọn.
+
+          Máy chủ đối chiếu với mã đã lưu của căn nhà và CHẶN phát hành khi lệch
+          (`CUSTOMER_CODE_MISMATCH`) hoặc khi thiếu mà nhà đã có mã
+          (`CUSTOMER_CODE_REQUIRED`). Không gửi thì mọi căn đã khai mã đều không phát
+          hành được — mà lỗi lại hiện ra như một sự cố chứ không như một ô còn trống.
+        */
+        customerCode: form.customerCode.trim() || undefined,
+        ocrConfirmed: true,
       });
 
       /**
@@ -814,11 +903,45 @@ export const EvnBillPublishing = () => {
       setPropertyId(null);
       loadBills();
     } catch (e: any) {
-      setPublishError(
-        e?.response?.data?.message
-          || e?.message
-          || 'Không phát hành được hoá đơn.',
-      );
+      /*
+        HAI LỖI MÃ KHÁCH HÀNG có cách gỡ rõ ràng, nói thẳng ra thay vì để nguyên câu của
+        máy chủ rồi admin ngồi đoán.
+
+        Quan trọng nhất: KHÔNG mất dữ liệu đang nhập. Máy chủ chỉ định cách gỡ là "sửa mã
+        rồi gửi lại, không cần quét lại ảnh" — nên form phải giữ nguyên mọi ô, admin chỉ
+        cần đổi một chuỗi rồi bấm lại.
+      */
+      const code = e?.response?.data?.code;
+      const expected = e?.response?.data?.details?.expectedCustomerCode;
+      if (code === 'CUSTOMER_CODE_MISMATCH') {
+        /*
+          IN HAI MÃ THEO CÙNG MỘT DẠNG thì mới thấy chúng khác nhau ở đâu.
+
+          Máy chủ trả `expectedCustomerCode` đã chuẩn hoá (thường + bỏ hết khoảng trắng và
+          dấu gạch), còn ô nhập thì giữ nguyên chữ admin gõ. Đặt cạnh nhau thô thì
+          "PE 0500 0222239" và "pe05000222239" trông như hai thứ khác hẳn dù chỉ khác cách
+          gõ — người đọc sẽ đi sửa nhầm chỗ.
+        */
+        const norm = (s?: string) => (s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        setPublishError(
+          `Mã khách hàng không khớp. Trên giấy đọc được "${norm(form.customerCode)}", `
+          + `còn mã đã lưu của căn nhà này là "${norm(expected) || '—'}".\n\n`
+          + 'Hoặc OCR đọc lệch — sửa ô mã ở trên rồi bấm lại, không cần quét lại ảnh. '
+          + 'Hoặc đang chọn nhầm căn nhà — kiểm lại ô chọn nhà. '
+          + 'Hoặc mã lưu trong hệ thống sai từ lúc tiếp nhận nhà — vào hồ sơ căn nhà sửa mã ở đó.',
+        );
+      } else if (code === 'CUSTOMER_CODE_REQUIRED') {
+        setPublishError(
+          'Căn nhà này đã khai mã khách hàng, nên phải điền mã trên tờ giấy để đối chiếu. '
+          + 'Nhập vào ô "Mã khách hàng trên giấy" ở trên rồi bấm lại.',
+        );
+      } else {
+        setPublishError(
+          e?.response?.data?.message
+            || e?.message
+            || 'Không phát hành được hoá đơn.',
+        );
+      }
     } finally {
       setPublishing(false);
     }
@@ -904,13 +1027,18 @@ export const EvnBillPublishing = () => {
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <div className="text-sm">
-              {/* Nói đúng việc đã xảy ra: nguyên căn thì khách đã có hoá đơn, nhà chia
-                  phòng thì mới chỉ giao việc cho quản lý. Trước đây câu nào cũng là
-                  "Đã gửi cho quản lý", đọc vào không biết khách đã nhận chưa. */}
+              {/*
+                Nói đúng việc VỪA XẢY RA. Câu cũ cho nhà chia phòng là "Đã giao cho quản lý
+                đọc đồng hồ" — đúng với luồng trước 10/09/2026, khi phát hành chỉ là giao
+                việc. Nay chỉ số đã được chốt từ cuối tháng, nên bấm phát hành là hoá đơn đi
+                thẳng tới khách của những phòng đã chốt.
+              */}
               <p className="font-bold text-emerald-800">
                 {issuedToTenant
                   ? 'Đã phát hành cho khách thuê'
-                  : 'Đã giao cho quản lý đọc đồng hồ'}
+                  : lockedRooms.length > 0
+                    ? `Đã phát hành cho ${lockedRooms.length} phòng`
+                    : 'Đã chốt đơn giá cho kỳ này'}
                 {' — '}{justPublished.propertyName ?? `nhà #${justPublished.propertyId}`}
               </p>
               <p className="text-emerald-700">
@@ -920,7 +1048,13 @@ export const EvnBillPublishing = () => {
               <p className="mt-1 text-xs text-emerald-700">
                 {issuedToTenant
                   ? 'Khách đã nhận hoá đơn và có thể thanh toán. Quản lý nhận thông báo để vào xem.'
-                  : 'Quản lý phải chụp đồng hồ và ghi số từng phòng trong hôm nay.'}
+                  : lockedRooms.length > 0
+                    ? `Khách của ${lockedRooms.length} phòng đã nhận hoá đơn và có thể thanh toán.`
+                      + (missingRooms.length > 0
+                        ? ` ${missingRooms.length} phòng chưa chốt số sẽ tự phát hành ngay khi quản lý chốt.`
+                        : '')
+                    : 'Chưa phòng nào chốt chỉ số nên chưa gửi được hoá đơn. Hoá đơn sẽ tự đi ngay khi '
+                      + 'quản lý chốt số, bạn không cần đẩy lại giấy.'}
               </p>
             </div>
             <button
@@ -974,7 +1108,7 @@ export const EvnBillPublishing = () => {
                   <Building2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {isWholeHouse
                     ? 'Nhà nguyên căn — quản lý sẽ gửi thẳng đúng tổng tiền hoá đơn này cho khách.'
-                    : 'Nhà cho thuê theo phòng — quản lý sẽ chụp đồng hồ từng phòng rồi nhân với đơn giá bên dưới.'}
+                    : 'Nhà cho thuê theo phòng — quản lý đã chốt chỉ số từ cuối tháng, hệ thống nhân với đơn giá bên dưới rồi gửi thẳng cho từng khách.'}
                 </p>
               )}
 
@@ -1147,11 +1281,11 @@ export const EvnBillPublishing = () => {
                     : 'border-violet-200 bg-violet-50 text-violet-800'}`}
                 title={isWholeHouse
                   ? 'Cả căn chỉ một khách thuê và giấy EVN đã ghi đủ chỉ số cũ · mới · tổng tiền của chính căn đó, không còn gì phải chia. Quản lý chỉ nhận thông báo để vào xem, không phải làm bước nào.'
-                  : 'Giấy EVN chỉ có tổng của cả nhà nên phải chia về từng phòng theo đồng hồ riêng. Hệ thống chốt đơn giá rồi giao việc cho quản lý; để qua ngày là số đọc lệch với kỳ hoá đơn.'}
+                  : 'Giấy EVN chỉ có tổng của cả nhà nên phải chia về từng phòng theo đồng hồ riêng. Quản lý đã chốt chỉ số vào ngày cuối tháng; phát hành là hệ thống nhân đơn giá rồi gửi hoá đơn cho từng khách. Phòng chốt muộn được phát hành ngay lúc chốt.'}
               >
                 {isWholeHouse
                   ? <>⚡ <b>Nguyên căn</b> — phát hành là hoá đơn tới tay khách ngay.</>
-                  : <>⚡ <b>Chia phòng</b> — phát hành là chốt đơn giá, quản lý đọc đồng hồ từng phòng trong ngày.</>}
+                  : <>⚡ <b>Chia phòng</b> — phát hành là tính tiền theo chỉ số quản lý đã chốt và gửi cho khách.</>}
               </p>
             )}
 
@@ -1378,12 +1512,180 @@ export const EvnBillPublishing = () => {
               </div>
             )}
 
+            {/*
+              MÃ KHÁCH HÀNG ĐỌC ĐƯỢC — đặt NGAY TRÊN khối đối chiếu địa chỉ, vì nó là bằng
+              chứng mạnh hơn hẳn.
+
+              Đối chiếu địa chỉ là so chữ mờ: địa chỉ hay viết tắt, phường vừa đổi tên hàng
+              loạt, OCR đọc rụng dấu — nên nó cảnh báo nhầm nhiều, mà cảnh báo nhầm nhiều thì
+              người ta bấm bỏ qua theo phản xạ. Mã khách hàng thì đúng-hoặc-sai, không có
+              vùng xám, và admin liếc một cái là so xong với tờ giấy đang cầm.
+
+              Chưa tự so được vì máy chủ chưa lưu mã của từng căn nhà (kiểm 11/09/2026:
+              `Property` và `InboundContract` đều không có trường nào). Nói thẳng chỗ đó ra
+              thay vì im lặng, để admin biết phần kiểm này vẫn đang do mắt người làm.
+            */}
+            {!!propertyId && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
+                  Mã khách hàng trên giấy
+                </label>
+                <input
+                  value={form.customerCode}
+                  onChange={(e) => setForm((f) => ({ ...f, customerCode: e.target.value }))}
+                  placeholder="VD: PE05000222239"
+                  className="mt-1 w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 font-mono text-base font-extrabold tracking-wide text-indigo-900 outline-none focus:border-indigo-400"
+                />
+                <p className="mt-1.5 text-xs leading-relaxed text-indigo-700">
+                  {ocrCustomerCode
+                    ? 'Đã đọc từ ảnh. Soát lại với tờ giấy đang cầm rồi sửa nếu OCR đọc lệch — số 0 hay bị đọc thành chữ O.'
+                    : 'Không đọc được từ ảnh — gõ tay theo tờ giấy.'}
+                </p>
+                {/*
+                  Ô SỬA ĐƯỢC chứ không phải dòng chỉ đọc.
+
+                  Máy chủ CHẶN phát hành khi mã lệch mã đã lưu của căn nhà, và cách gỡ mà nó
+                  chỉ định là "sửa mã rồi gửi lại, không cần quét lại ảnh". Bày một dòng chỉ
+                  đọc thì admin gặp lỗi mà không có chỗ nào để sửa, chỉ còn nước quét lại ảnh
+                  và nhận đúng con số cũ.
+                */}
+              </div>
+            )}
+
             {billMatch.verdict === 'match' && (
               /* Nói cả khi ĐÚNG: cảnh báo chỉ đáng tin khi người dùng thấy nó có chạy
                  thật. Im lặng lúc đúng thì lúc sai họ sẽ tưởng hệ thống lỗi. */
               <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
                 <Check className="h-3.5 w-3.5" /> Địa chỉ trên ảnh khớp với căn nhà đang chọn.
               </p>
+            )}
+
+            {/*
+              CHỈ SỐ TỪNG PHÒNG QUẢN LÝ ĐÃ CHỐT — chỉ nhà chia phòng.
+
+              Trước đây admin không có chỗ nào xem thứ này. Bấm phát hành là gửi tiền tới
+              tay khách, tính từ những con số admin chưa từng nhìn thấy: sai một chữ số là
+              hoá đơn lệch hàng trăm nghìn, và chỉ vỡ ra khi khách khiếu nại — lúc đó tiền
+              đã đòi rồi. Ảnh mặt đồng hồ nằm sẵn trong dữ liệu ngay từ đầu, chỉ là chưa có
+              màn nào bày nó ra trước lúc phát hành.
+
+              Hiện CẢ SAU khi đã phát hành (không còn chặn bằng `!existingBill`): lúc đó nó
+              là hồ sơ để đối chiếu khi khách gọi lên hỏi "sao tháng này cao thế".
+            */}
+            {!isWholeHouse && propertyId && (
+              loadingReadings ? (
+                <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang xem phòng nào đã chốt chỉ số...
+                </p>
+              ) : savedReadings && savedReadings.length > 0 ? (
+                <div
+                  className={`rounded-lg border ${
+                    lockedRooms.length === 0
+                      ? 'border-amber-300 bg-amber-50'
+                      : 'border-emerald-200 bg-emerald-50'
+                  }`}
+                >
+                  <div className="p-3">
+                    <p
+                      className={`flex items-center gap-1.5 text-sm font-bold ${
+                        lockedRooms.length === 0 ? 'text-amber-800' : 'text-emerald-800'
+                      }`}
+                    >
+                      {lockedRooms.length === 0
+                        ? <AlertTriangle className="h-4 w-4 shrink-0" />
+                        : <Check className="h-4 w-4 shrink-0" />}
+                      {lockedRooms.length}/{savedReadings.length} phòng đã chốt chỉ số kỳ {month}/{year}
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                      {existingBill
+                        ? `Đã phát hành hoá đơn cho ${lockedRooms.filter((r) => r.invoiceId != null).length} phòng. `
+                        : lockedRooms.length === 0
+                          ? 'Phát hành bây giờ sẽ không gửi được hoá đơn nào — chưa phòng nào có chỉ số. '
+                          : `Phát hành sẽ tính tiền và gửi hoá đơn cho ${lockedRooms.length} phòng này ngay. `}
+                      {missingRooms.length > 0
+                        ? `${missingRooms.length} phòng còn lại sẽ tự phát hành ngay khi quản lý chốt số, `
+                          + 'không cần bạn đẩy lại giấy.'
+                        : 'Cả nhà đã đủ chỉ số.'}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setReadingsOpen((v) => !v)}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-indigo-700 hover:text-indigo-900"
+                    >
+                      {readingsOpen ? 'Thu gọn' : 'Xem chỉ số & ảnh đồng hồ từng phòng'}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${readingsOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+
+                  {readingsOpen && (
+                    <div className="space-y-2 border-t border-white/60 bg-white/70 p-3">
+                      {savedReadings.map((r) => {
+                        const locked = r.newReading != null;
+                        const used = locked ? Number(r.newReading) - Number(r.prevReading) : null;
+                        return (
+                          <div
+                            key={r.roomId ?? r.roomNumber ?? Math.random()}
+                            className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-2.5"
+                          >
+                            {/* Ảnh là BẰNG CHỨNG của con số, nên đứng ngay cạnh con số chứ
+                                không nhét xuống cuối. Bấm để phóng to — chỉ số trên mặt
+                                đồng hồ không đọc nổi ở cỡ thumbnail. */}
+                            {r.meterImageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setZoomImage(r.meterImageUrl!)}
+                                className="shrink-0 overflow-hidden rounded-md border border-slate-200"
+                              >
+                                <img
+                                  src={r.meterImageUrl}
+                                  alt={`Đồng hồ phòng ${r.roomNumber ?? ''}`}
+                                  className="h-14 w-14 object-cover transition hover:scale-105"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-slate-300 text-[10px] font-semibold text-slate-400">
+                                {locked ? 'Mã admin' : 'Chưa có'}
+                              </div>
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-slate-800">
+                                {r.roomNumber ? `Phòng ${r.roomNumber}` : `#${r.roomId}`}
+                                {r.tenantName && (
+                                  <span className="text-xs font-medium text-slate-500">{r.tenantName}</span>
+                                )}
+                                {r.invoiceId != null && (
+                                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                    Đã gửi khách
+                                  </span>
+                                )}
+                              </p>
+                              {locked ? (
+                                <>
+                                  <p className="mt-0.5 text-xs text-slate-600">
+                                    {Number(r.prevReading).toLocaleString('vi-VN')} →{' '}
+                                    <b className="text-slate-900">{Number(r.newReading).toLocaleString('vi-VN')}</b>
+                                    {used != null && ` · ${used.toLocaleString('vi-VN')} kWh`}
+                                  </p>
+                                  <p className="mt-0.5 text-[11px] text-slate-400">
+                                    Chốt lúc {fmtDateTime(r.capturedAt)}
+                                    {r.prevSource === 'HANDOVER' && ' · chỉ số cũ lấy từ lúc đón khách'}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="mt-0.5 text-xs font-semibold text-amber-700">
+                                  Quản lý chưa chốt chỉ số phòng này.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null
             )}
 
             <button
@@ -1393,9 +1695,19 @@ export const EvnBillPublishing = () => {
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {/*
+                Nhãn cũ của nhà chia phòng là "Gửi cho quản lý đọc đồng hồ" — mô tả đúng
+                luồng TRƯỚC 10/09/2026, khi phát hành chỉ là giao việc. Nay bấm nút này là
+                tiền tới tay khách, nên nhãn phải nói ra điều đó, kèm số phòng để admin biết
+                mình đang gửi cho bao nhiêu người.
+              */}
               {existingBill
                 ? 'Kỳ này đã phát hành'
-                : isWholeHouse ? 'Phát hành & gửi cho khách thuê' : 'Gửi cho quản lý đọc đồng hồ'}
+                : isWholeHouse
+                  ? 'Phát hành & gửi cho khách thuê'
+                  : lockedRooms.length > 0
+                    ? `Phát hành & gửi cho ${lockedRooms.length} phòng`
+                    : 'Phát hành đơn giá cho kỳ này'}
             </button>
           </div>
         </div>
@@ -1404,7 +1716,7 @@ export const EvnBillPublishing = () => {
       {/* ── Bảng đã phát hành ── */}
       <SectionShell
         title={`Đã phát hành — kỳ ${month}/${year}`}
-        subtitle="Quản lý của các nhà dưới đây đã nhận được đơn giá điện và có thể gửi hoá đơn cho khách."
+        subtitle="Các nhà dưới đây đã có đơn giá điện của kỳ. Hoá đơn đã gửi tới khách của mọi phòng đã chốt chỉ số."
         icon={Zap}
         action={
           bills.length > 0 ? (

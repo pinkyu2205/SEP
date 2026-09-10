@@ -32,6 +32,17 @@ export interface ParsedWaterInvoice {
   /** Chỉ số đồng hồ đọc được — chỉ nhà nguyên căn mới cần. */
   prevReading?: number;
   newReading?: number;
+  /**
+   * SỐ DANH BỘ in trên hoá đơn nước — bản song sinh của mã khách hàng EVN.
+   *
+   * Cùng mục đích: một khoá chính xác nối tờ giấy với căn nhà, thay cho việc so địa chỉ
+   * bằng chữ. Xem chú thích dài ở `customerCode` trong `evnInvoiceParser`.
+   *
+   * Khác một điểm về hình dạng: danh bộ là TOÀN SỐ, không có tiền tố chữ như mã EVN. Nên
+   * ở đây bắt buộc phải có nhãn "danh bộ" đứng trước — dò tự do thì mã số thuế, số điện
+   * thoại, số tài khoản đều lọt hết.
+   */
+  customerCode?: string;
 }
 
 /** Bỏ dấu tiếng Việt + thường hoá để dò nhãn không phụ thuộc cách gõ dấu của OCR. */
@@ -97,6 +108,18 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
     if (goods) out.totalAmount = goods + (vat ?? 0) + (env ?? 0);
   }
 
+  /*
+    ── Số danh bộ ────────────────────────────────────────────────────────────
+    BẮT BUỘC có nhãn đứng trước, không dò tự do — xem chú thích ở `customerCode`.
+    Nhãn viết mỗi nơi một kiểu: "Danh bộ", "Danh bạ", "Mã KH", "Mã khách hàng".
+  */
+  const codeLine = lines.find((l) => /danh b[oa]|ma kh\b|ma khach hang/.test(norm(l)));
+  if (codeLine) {
+    const m = norm(codeLine).match(/(?:danh b[oa]|ma kh|ma khach hang)[^0-9a-z]*([0-9][\d\s.-]{6,18})/);
+    const digits = m?.[1].replace(/[^0-9]/g, '');
+    if (digits && digits.length >= 7) out.customerCode = digits;
+  }
+
   // ── Số m³ tiêu thụ ──
   out.totalQuantity = amountAfterLabel(lines, /so luong tieu thu/, { small: true });
   if (!out.totalQuantity) {
@@ -116,7 +139,9 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
    * parser cũ trả về rỗng hoàn toàn, admin phải gõ tay cả 3 ô. `findReadingTriple` bắt
    * bộ ba tự khớp phép trừ nên đọc được bất kể nhãn viết tắt kiểu gì và cột nào in trước.
    */
-  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3);
+  // Đưa số m³ đọc từ nhãn vào làm ràng buộc, giống bên điện: bộ ba phải trừ ra đúng con
+  // số đó thì mới nhận. Chưa đọc được m³ thì bỏ trống và hàm quay về chấm điểm như cũ.
+  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3, out.totalQuantity);
   if (triple) {
     out.prevReading = triple.prevReading;
     out.newReading = triple.newReading;

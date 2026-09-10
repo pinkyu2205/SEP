@@ -63,6 +63,12 @@ export interface CreateWaterBillInput {
   /** Chỉ số đồng hồ CŨ / MỚI — chỉ có nghĩa với nhà nguyên căn. Xem CreateEvnBillInput. */
   prevReading?: number;
   newReading?: number;
+  /**
+   * SỐ DANH BỘ in trên tờ giấy, sau khi admin đã soát lại (BE 618f9dd + 3e8202f).
+   * Bắt buộc khi căn nhà đã lưu mã — xem chú thích cùng tên ở `CreateEvnBillInput`.
+   */
+  customerCode?: string;
+  ocrConfirmed?: boolean;
 }
 
 /** Bóc danh sách khỏi mọi dạng bọc BE có thể trả — cùng lý do đã gặp ở evnBill.service. */
