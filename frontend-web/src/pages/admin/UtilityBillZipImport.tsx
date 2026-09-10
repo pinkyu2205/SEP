@@ -23,7 +23,7 @@
  */
 import { useState } from 'react';
 import {
-  CheckCircle2, FileArchive, Loader2, RotateCcw, Upload, X,
+  Check, CheckCircle2, FileArchive, Loader2, RotateCcw, Upload, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { uploadToCloudinary } from '@/services/upload.service';
@@ -50,9 +50,22 @@ interface ParsedBill {
   period: string;
   prevReading: string;
   newReading: string;
+  /** Chỉ điện dùng; nước để rỗng vì máy chủ không đối chiếu mã cho hoá đơn nước. */
+  customerCode: string;
 }
 
 const num = (v: number | undefined) => (v != null && v > 0 ? String(v) : '');
+
+/**
+ * Riêng CHỈ SỐ ĐỒNG HỒ thì GIỮ số 0.
+ *
+ * `num` ở trên coi 0 là "không có", đúng với tổng tiền và tổng m³ — nhưng sai hẳn với chỉ
+ * số: đồng hồ mới lắp có chỉ số cũ đúng bằng 0, và đó là giá trị thật.
+ *
+ * Đã đo được hậu quả (11/09/2026): tờ giấy nước ghi `CHỈ SỐ CŨ: 0`, ô chỉ số cũ bỏ trắng,
+ * dòng báo "Chưa có chỉ số cũ" và không phát hành được — trong khi tờ giấy có đủ số.
+ */
+const numReading = (v: number | undefined) => (v != null && v >= 0 ? String(v) : '');
 
 /**
  * TOÀN BỘ khác biệt điện ↔ nước gom vào đây.
@@ -75,12 +88,13 @@ const KIND: Record<UtilityKind, {
   qtyLabel: string;
   readingLabel: string;
   parse: (ocr: { rawText?: string; numbers?: string[] }) => ParsedBill;
-  ocr: (url: string) => Promise<{ rawText?: string; numbers?: string[]; totalAmount?: number; billingPeriod?: string }>;
+  ocr: (url: string) => Promise<{ rawText?: string; numbers?: string[]; totalAmount?: number; billingPeriod?: string; customerCode?: string }>;
   unitPrice: (amount: number, qty: number) => number;
   publish: (input: {
     propertyId: number; billingPeriod: string; month: number; year: number;
     qty: number; amount: number; imageUrl?: string;
     prevReading?: number; newReading?: number;
+    customerCode?: string; ocrConfirmed?: boolean;
   }) => Promise<{ unitPrice?: number }>;
 }> = {
   ELECTRIC: {
@@ -97,6 +111,7 @@ const KIND: Record<UtilityKind, {
       return {
         qty: p.totalKwh, amount: p.totalAmount, period: p.billingPeriod,
         prevReading: p.prevReading ?? '', newReading: p.newReading ?? '',
+        customerCode: p.customerCode ?? '',
       };
     },
     ocr: (url) => evnBillService.ocr(url),
@@ -117,7 +132,8 @@ const KIND: Record<UtilityKind, {
       const p = parseWaterInvoice(ocr);
       return {
         qty: num(p.totalQuantity), amount: num(p.totalAmount), period: p.billingPeriod ?? '',
-        prevReading: num(p.prevReading), newReading: num(p.newReading),
+        prevReading: numReading(p.prevReading), newReading: numReading(p.newReading),
+        customerCode: p.customerCode ?? '',
       };
     },
     ocr: (url) => waterBillService.ocr(url),
@@ -128,6 +144,95 @@ const KIND: Record<UtilityKind, {
 };
 
 /** Một nhà trong lô, kèm số liệu đọc được và kết quả phát hành. */
+/**
+ * ĐỐI CHIẾU MÃ KHÁCH HÀNG NGAY TRÊN DÒNG — nói trước khi admin bấm phát hành.
+ *
+ * Máy chủ cũng đối chiếu và chặn, nhưng nó chỉ lên tiếng SAU khi bấm. Với nhập lô ba chục
+ * dòng thì đó là ba chục dòng đỏ hiện ra cùng lúc, và admin phải đọc ngược từng câu lỗi để
+ * biết dòng nào cần sửa. Bày kết quả so ngay lúc đọc xong ảnh thì sai chỗ nào thấy chỗ đó,
+ * sửa xong mới bấm.
+ *
+ * Chuẩn hoá GIỐNG HỆT máy chủ (`UtilityCustomerCodeHelper.normalize`): bỏ mọi ký tự không
+ * phải chữ-số rồi hạ chữ thường. Lệch cách chuẩn hoá là màn hình khoe dấu tích xanh xong
+ * máy chủ vẫn chặn — tệ hơn hẳn việc không so gì cả.
+ */
+/** Mã chuẩn của căn nhà theo loại hoá đơn đang nhập. */
+const expectedCodeOf = (prop: PropertyResponse, kind: 'ELECTRIC' | 'WATER') =>
+  kind === 'WATER' ? prop.waterCustomerCode : prop.electricityCustomerCode;
+
+const normCode = (s?: string | null) => (s ?? '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+
+type CodeMatchState = 'ok' | 'mismatch' | 'missing-paper' | 'no-expected';
+
+interface CodeMatchResult {
+  state: CodeMatchState;
+  /** Mã chuẩn của căn nhà, in hoa cho dễ đọc. Rỗng khi nhà chưa khai mã. */
+  expected: string;
+  inputClass: string;
+  note: string;
+  noteClass: string;
+  title: string;
+}
+
+const codeMatchOf = (paper: string, storedRaw?: string | null): CodeMatchResult => {
+  const stored = normCode(storedRaw);
+  const expected = stored.toUpperCase();
+  const actual = normCode(paper);
+
+  /*
+    Nhà chưa khai mã: máy chủ bỏ qua đối chiếu, nên màn hình cũng không được doạ — nhưng
+    PHẢI nói ra là đang không đối chiếu.
+
+    Bản đầu để trạng thái này im lặng hoàn toàn: ô xám, không tích, không chữ. Nhìn vào
+    không phân biệt được "đã kiểm và không sao" với "không kiểm gì cả", nên một mã sai
+    hiển nhiên vẫn trông y như một mã đúng. Đó đúng là chỗ đã làm mất thời gian thật
+    (11/09/2026): dữ liệu mã chưa nạp vào DB mà màn hình không hé một lời.
+  */
+  if (!stored) {
+    return {
+      state: 'no-expected',
+      expected: '',
+      inputClass: 'border-slate-200 bg-white text-slate-700 focus:border-slate-400',
+      note: 'Nhà chưa khai mã — không đối chiếu được',
+      noteClass: 'text-slate-400',
+      title: 'Nhà này chưa khai mã khách hàng nên không có gì để đối chiếu. '
+        + 'Khai mã ở hồ sơ căn nhà thì ô này mới bắt lỗi được.',
+    };
+  }
+
+  if (!actual) {
+    return {
+      state: 'missing-paper',
+      expected,
+      inputClass: 'border-amber-300 bg-amber-50 text-amber-800 placeholder:text-amber-500 focus:border-amber-400',
+      note: `Chưa đọc được mã — nhà này lưu ${expected}`,
+      noteClass: 'text-amber-700',
+      title: `Mã chuẩn của căn nhà: ${expected}. Nhập mã in trên tờ giấy để đối chiếu.`,
+    };
+  }
+
+  if (actual === stored) {
+    return {
+      state: 'ok',
+      expected,
+      inputClass: 'border-emerald-300 bg-emerald-50 text-emerald-900 focus:border-emerald-500',
+      note: '',
+      noteClass: '',
+      title: `Khớp mã chuẩn của căn nhà (${expected}).`,
+    };
+  }
+
+  return {
+    state: 'mismatch',
+    expected,
+    inputClass: 'border-rose-400 bg-rose-50 text-rose-900 focus:border-rose-500',
+    note: `Sai mã — nhà này lưu ${expected}`,
+    noteClass: 'font-semibold text-rose-700',
+    title: `Mã trên giấy không khớp mã chuẩn của căn nhà (${expected}). `
+      + 'Hoặc OCR đọc lệch, hoặc ảnh này thuộc căn nhà khác.',
+  };
+};
+
 interface Row {
   property: PropertyResponse;
   folder: string;
@@ -152,6 +257,19 @@ interface Row {
    * admin tự gõ bị ghi nhận là "đọc từ ảnh". Tách ba nguồn để nhãn nói đúng sự thật.
    */
   periodSource: 'ocr' | 'manual' | 'default';
+  /**
+   * MÃ KHÁCH HÀNG đọc từ ảnh, sửa được. Điện là mã KH của EVN, nước là số danh bộ.
+   *
+   * Bắt buộc gửi khi căn nhà đã lưu mã: máy chủ chặn phát hành và ném
+   * CUSTOMER_CODE_REQUIRED / CUSTOMER_CODE_MISMATCH. Nhập theo lô mà thiếu ô này thì cả
+   * lô hỏng cùng lúc, và admin không có chỗ nào để sửa ngoài việc quét lại từ đầu.
+   *
+   * CẢ HAI LOẠI đều dùng, từ BE 5c6a65c. Trước đó nước được thả (`assertCustomerCodeMatches`
+   * thoát sớm khi gặp WATER), nên ô này từng chỉ hiện với điện. Gắn nhầm hoá đơn nước vào
+   * nhà khác hại y hệt gắn nhầm hoá đơn điện — cả một dãy phòng bị thu sai — nên không có
+   * lý do nghiệp vụ nào để nước lỏng hơn.
+   */
+  customerCode: string;
   /** Chỉ nhà nguyên căn mới dùng — cần để phát hành thẳng cho khách. */
   prevReading: string;
   newReading: string;
@@ -250,9 +368,23 @@ const withAutoNewReading = (r: Row): Row => {
  * mà ba thứ đó sửa ở ba chỗ khác nhau. Admin đứng trước bảng ba chục dòng và không biết
  * phải chạm vào ô nào. Nói thẳng ra thì mất thêm một cột chữ, và tiết kiệm cả một vòng dò.
  */
-const rowBlocker = (r: Row, unit: string): string | null => {
+const rowBlocker = (r: Row, unit: string, kind: 'ELECTRIC' | 'WATER'): string | null => {
   if (!(Number(onlyDigits(r.totalQty)) > 0)) return `Chưa có tổng ${unit}`;
   if (!(Number(onlyDigits(r.totalAmount)) > 0)) return 'Chưa có tổng tiền';
+  /*
+    Mã lệch thì CHẶN ngay tại đây, đừng để bấm rồi máy chủ mới từ chối.
+
+    Máy chủ chặn cùng lý do, nhưng chặn sớm thì admin sửa lúc còn đang nhìn tờ giấy. Chặn
+    muộn thì ba chục dòng đỏ hiện ra một lượt sau khi đã bấm, và phải đọc ngược từng câu.
+    Từ 11/09/2026 xét CẢ NƯỚC: máy chủ đã bật đối chiếu số danh bộ (BE 5c6a65c), trước đó
+    nó thoát sớm với loại nước nên xét ở app cũng vô nghĩa.
+  */
+  {
+    const m = codeMatchOf(r.customerCode, expectedCodeOf(r.property, kind));
+    const label = kind === 'WATER' ? 'Số danh bộ' : 'Mã KH';
+    if (m.state === 'mismatch') return `${label} sai — nhà này lưu ${m.expected}`;
+    if (m.state === 'missing-paper') return `Chưa có ${label.toLowerCase()}`;
+  }
   // Kỳ sai định dạng cũng là chưa sẵn sàng — nó là khoá đối chiếu, không phải nhãn hiển thị.
   const period = periodProblem(r.billingPeriod);
   if (period) return `Kỳ hoá đơn: ${period}`;
@@ -295,8 +427,8 @@ const rowBlocker = (r: Row, unit: string): string | null => {
 };
 
 /** Dòng đã đủ dữ liệu để phát hành chưa. Dòng đã xong / đã có kỳ này thì không tính. */
-const rowReady = (r: Row, unit: string): boolean =>
-  !r.already && r.state !== 'done' && rowBlocker(r, unit) === null;
+const rowReady = (r: Row, unit: string, kind: 'ELECTRIC' | 'WATER'): boolean =>
+  !r.already && r.state !== 'done' && rowBlocker(r, unit, kind) === null;
 
 type FilterKey = 'all' | 'issue' | 'ready' | 'skip';
 
@@ -305,12 +437,13 @@ type FilterKey = 'all' | 'issue' | 'ready' | 'skip';
  * CÓ VẤN ĐỀ giữa hàng chục dòng đã đúng sẵn — cuộn tay dò từng dòng thì vừa lâu vừa sót.
  */
 const FILTERS: {
-  key: FilterKey; label: string; on: string; match: (r: Row, unit: string) => boolean;
+  key: FilterKey; label: string; on: string;
+  match: (r: Row, unit: string, kind: 'ELECTRIC' | 'WATER') => boolean;
 }[] = [
   { key: 'all', label: 'Tất cả', on: 'bg-slate-800 text-white', match: () => true },
   {
     key: 'issue', label: 'Cần sửa', on: 'bg-amber-500 text-white',
-    match: (r, unit) => !r.already && r.state !== 'done' && rowBlocker(r, unit) !== null,
+    match: (r, unit, kind) => !r.already && r.state !== 'done' && rowBlocker(r, unit, kind) !== null,
   },
   { key: 'ready', label: 'Sẵn sàng', on: 'bg-emerald-600 text-white', match: rowReady },
   {
@@ -412,7 +545,7 @@ export const UtilityBillZipImport = ({
         folder: m.folder,
         file: m.file,
         totalQty: '', totalAmount: '', billingPeriod: batchPeriod, periodSource: 'default',
-        prevReading: '', newReading: '', paperPrev: '',
+        prevReading: '', newReading: '', paperPrev: '', customerCode: '',
         already: publishedIds.has(m.property.id),
         state: 'idle',
       };
@@ -439,6 +572,10 @@ export const UtilityBillZipImport = ({
           base.newReading = parsed.newReading;
           // Giữ bản gốc của giấy — `prevReading` bên dưới có thể bị sổ hệ thống ghi đè.
           base.paperPrev = parsed.prevReading;
+          // Mã KH: tin số của máy chủ trước, rồi tới parser của app. Nước bỏ qua vì máy
+          // chủ không đối chiếu mã cho hoá đơn nước.
+          base.customerCode = (ocr as { customerCode?: string })?.customerCode
+            || parsed.customerCode || '';
           if (!base.totalQty && !base.totalAmount) base.note = 'Không đọc được số — nhập tay';
         } catch {
           base.note = 'Dịch vụ đọc hoá đơn lỗi — nhập tay';
@@ -515,7 +652,7 @@ export const UtilityBillZipImport = ({
 
   // ── Chặng 3: phát hành TUẦN TỰ, giữ lại dòng lỗi ──────────────────────────
   const publishAll = async () => {
-    const targets = rows.map((r, i) => ({ r, i })).filter(({ r }) => rowReady(r, cfg.unit));
+    const targets = rows.map((r, i) => ({ r, i })).filter(({ r }) => rowReady(r, cfg.unit, kind));
     if (targets.length === 0) return;
     setConfirmOpen(false);
     setBusy(true);
@@ -535,6 +672,9 @@ export const UtilityBillZipImport = ({
           imageUrl: r.imageUrl || undefined,
           prevReading: isWhole(r.property) ? Number(onlyDigits(r.prevReading)) : undefined,
           newReading: isWhole(r.property) ? Number(onlyDigits(r.newReading)) : undefined,
+          // Thiếu mã là cả lô hỏng cùng lúc khi nhà đã khai mã — xem chú thích ở `Row`.
+          customerCode: r.customerCode.trim() || undefined,
+          ocrConfirmed: true,
         });
 
         /*
@@ -586,9 +726,23 @@ export const UtilityBillZipImport = ({
         ok += 1;
       } catch (e: any) {
         // Cùng lỗi đọc nhầm trường như trên — mã ở `data.code`, không phải `data.error`.
-        const msg = e?.response?.data?.code === 'BILL_ALREADY_EXISTS'
+        const errCode = e?.response?.data?.code;
+        /*
+          Hai lỗi mã khách hàng phải nói NGẮN và nói ĐÚNG Ô CẦN SỬA.
+
+          Ở nhập lô, một câu dài của máy chủ nhân với ba chục dòng là không ai đọc. Mà cách
+          gỡ thì chỉ có một: sửa ô mã ngay trên dòng đó rồi bấm phát hành lại — dòng đã
+          thành công không bị làm lại vì `skip` chặn sẵn.
+        */
+        const norm = (s?: string) => (s ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        const expected = norm(e?.response?.data?.details?.expectedCustomerCode);
+        const msg = errCode === 'BILL_ALREADY_EXISTS'
           ? 'Kỳ này nhà đã có hoá đơn rồi'
-          : (e?.response?.data?.message || e?.message || 'Phát hành thất bại');
+          : errCode === 'CUSTOMER_CODE_MISMATCH'
+            ? `${kind === 'WATER' ? 'Số danh bộ' : 'Mã KH'} không khớp — nhà này lưu "${expected || '—'}". Sửa ô mã rồi phát hành lại.`
+            : errCode === 'CUSTOMER_CODE_REQUIRED'
+              ? `Nhà này đã khai ${kind === 'WATER' ? 'số danh bộ' : 'mã KH'} — điền số trên giấy vào ô mã rồi phát hành lại.`
+              : (e?.response?.data?.message || e?.message || 'Phát hành thất bại');
         patch(i, { state: 'error', error: msg });
       }
       setProgress(p => ({ ...p, done: p.done + 1 }));
@@ -628,7 +782,7 @@ export const UtilityBillZipImport = ({
     return p < cfg.priceFloor || p > cfg.priceCeil;
   };
 
-  const readyCount = rows.filter(r => rowReady(r, cfg.unit)).length;
+  const readyCount = rows.filter(r => rowReady(r, cfg.unit, kind)).length;
   const doneCount = rows.filter(r => r.state === 'done').length;
   const errCount = rows.filter(r => r.state === 'error').length;
 
@@ -802,7 +956,7 @@ MTX#125/
                   {/* Bộ lọc — với 100 dòng, cuộn tay tìm dòng đỏ là không khả thi. */}
                   <div className="ml-auto flex items-center gap-1">
                     {FILTERS.map(f => {
-                      const n = rows.filter(r => f.match(r, cfg.unit)).length;
+                      const n = rows.filter(r => f.match(r, cfg.unit, kind)).length;
                       const on = filter === f.key;
                       return (
                         <button
@@ -854,13 +1008,13 @@ MTX#125/
                       {/* Giữ chỉ số GỐC `i` qua bộ lọc — `patch(i, …)` sửa theo vị trí trong
                           `rows`, lọc xong mà đánh số lại thì mỗi lần lọc sẽ sửa nhầm dòng. */}
                       {rows.map((r, i) => ({ r, i }))
-                        .filter(({ r }) => FILTERS.find(f => f.key === filter)!.match(r, cfg.unit))
+                        .filter(({ r }) => FILTERS.find(f => f.key === filter)!.match(r, cfg.unit, kind))
                         .map(({ r, i }) => {
                         const whole = isWhole(r.property);
                         const price = rowUnitPrice(r);
                         const skip = r.already || r.state === 'done';
                         const periodIssue = skip ? null : periodProblem(r.billingPeriod);
-                        const blocker = skip ? null : rowBlocker(r, cfg.unit);
+                        const blocker = skip ? null : rowBlocker(r, cfg.unit, kind);
                         return (
                           <tr key={r.property.id} className={
                             r.state === 'done' ? 'bg-emerald-50/50'
@@ -876,6 +1030,43 @@ MTX#125/
                                 )}
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-bold text-slate-800">{r.property.propertyName}</p>
+                                  {/*
+                                    MÃ KHÁCH HÀNG ĐIỆN — ô sửa được, nằm ngay dưới tên nhà.
+
+                                    Không phải để trang trí: máy chủ CHẶN phát hành khi mã lệch
+                                    mã đã lưu của căn nhà. Nhập theo lô mà thiếu ô này thì cả ba
+                                    chục dòng hỏng cùng lúc, và admin không có chỗ nào sửa ngoài
+                                    việc bỏ hết đi quét lại từ đầu.
+
+                                    Cả điện lẫn nước: máy chủ đối chiếu cả hai từ 11/09/2026.
+                                  */}
+                                  {!skip && (() => {
+                                    const match = codeMatchOf(
+                                      r.customerCode, expectedCodeOf(r.property, kind),
+                                    );
+                                    return (
+                                      <>
+                                        <div className="mt-0.5 flex items-center gap-1">
+                                          <input
+                                            value={r.customerCode}
+                                            onChange={(e) => patch(i, { customerCode: e.target.value })}
+                                            placeholder={match.expected
+                                              || (kind === 'WATER' ? 'Số danh bộ trên giấy' : 'Mã KH trên giấy')}
+                                            title={match.title}
+                                            className={`w-full rounded border px-1.5 py-0.5 font-mono text-[11px] font-bold tracking-wide outline-none ${match.inputClass}`}
+                                          />
+                                          {match.state === 'ok' && (
+                                            <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                                          )}
+                                        </div>
+                                        {!!match.note && (
+                                          <p className={`mt-0.5 text-[10px] leading-tight ${match.noteClass}`}>
+                                            {match.note}
+                                          </p>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                   <div className="flex items-center gap-1.5">
                                     {/*
                                       Kỳ nằm ở dòng phụ của cột Nhà, không chiếm cột riêng: cả
@@ -1025,14 +1216,14 @@ MTX#125/
           {confirmOpen && (
             <ConfirmPublish
               noun={cfg.noun}
-              rows={rows.filter(r => rowReady(r, cfg.unit)).map(r => ({
+              rows={rows.filter(r => rowReady(r, cfg.unit, kind)).map(r => ({
                 name: r.property.propertyName,
                 period: r.billingPeriod,
                 whole: isWhole(r.property),
                 outlier: isOutlier(r),
                 defaultPeriod: r.periodSource === 'default',
               }))}
-              skipped={rows.filter(r => !rowReady(r, cfg.unit) && !r.already && r.state !== 'done').length}
+              skipped={rows.filter(r => !rowReady(r, cfg.unit, kind) && !r.already && r.state !== 'done').length}
               onCancel={() => setConfirmOpen(false)}
               onConfirm={publishAll}
             />

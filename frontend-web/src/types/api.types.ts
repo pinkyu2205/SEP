@@ -159,6 +159,17 @@ export interface PropertyDraftRequest {
   roomsPerFloor?: number;
   createdBy?: number;
   imageUrls?: string[];
+  /**
+   * MÃ KHÁCH HÀNG ĐIỆN / NƯỚC của căn nhà (BE 618f9dd).
+   *
+   * Khai ở đây thì lúc phát hành hoá đơn mới đối chiếu được với mã in trên tờ giấy — máy
+   * chủ CHẶN phát hành khi lệch. Chưa khai thì nó bỏ qua đối chiếu, tức mất luôn cái chốt
+   * bắt gắn nhầm hoá đơn vào nhà khác.
+   *
+   * Máy chủ tự chuẩn hoá (bỏ dấu cách/gạch, hạ chữ thường) nên gõ kiểu nào cũng được.
+   */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
 }
 
 /** Response từ tất cả endpoint property */
@@ -173,6 +184,24 @@ export interface PropertyResponse {
    * xong vẫn có thể trả về rỗng.
    */
   propertyCode?: string;
+  /**
+   * ── MÃ KHÁCH HÀNG ĐIỆN / NƯỚC CỦA CĂN NHÀ (BE 618f9dd, 10/09/2026) ──────────
+   *
+   * Mã chuẩn đã khai lúc tiếp nhận nhà, máy chủ lưu ở dạng chữ thường và đã bỏ hết dấu
+   * cách/gạch (`UtilityCustomerCodeHelper.normalize`).
+   *
+   * Đây là mốc để đối chiếu với mã đọc từ tờ hoá đơn lúc phát hành. Máy chủ cũng tự so và
+   * CHẶN nếu lệch, nhưng có mã ở đây thì màn hình nói được ngay lúc admin nhìn thấy tờ
+   * giấy, thay vì để họ bấm phát hành rồi mới ăn lỗi.
+   *
+   * Rỗng = nhà chưa khai mã; khi đó máy chủ bỏ qua đối chiếu. Đây là một lỗ hổng IM LẶNG
+   * chứ không phải một lỗi: hoá đơn vẫn phát hành trót lọt, chỉ là không còn ai kiểm nó có
+   * đúng nhà hay không.
+   *
+   * Từ BE 5c6a65c, CẢ ĐIỆN VÀ NƯỚC đều bị đối chiếu; trước đó nhánh nước thoát sớm.
+   */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
   shortAddress: string;
   fullAddress: string;
   descriptions?: string;
@@ -296,6 +325,9 @@ export interface PropertyCreateRequest {
   totalRooms?: number;
   managedBy?: number;
   imageUrls?: string[];
+  /** Mã khách hàng điện / nước — xem chú thích ở `PropertyDraftRequest`. */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
 }
 
 // =============================================================================
