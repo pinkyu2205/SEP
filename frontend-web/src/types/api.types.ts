@@ -720,6 +720,68 @@ export interface PricingCalculationResponse {
   roomCount?: number;
   roomResults?: RoomPricingResult[];
   wholeHouseResult?: RoomPricingResult;
+
+  // ── Tính giá theo từng khoản vốn (BE thêm 14/09/2026, commit 7614c9f; bổ sung c2848dd) ──
+  // Chỉ `POST /pricing/calculate` trả các field dưới; `GET /pricing` chưa trả.
+  // `cRent/cRenovation/cEquipment` từ c2848dd đã cộng lại từ `capitalItems`; `roomResults[].rentShare/...`
+  // vẫn = 0 — FE cộng theo phòng từ `capitalItems`, xem review/capitalItems.ts.
+  /** Mỗi khoản vốn có lịch khấu hao riêng; khoản của đợt trước giữ nguyên `monthlyAmount`. */
+  capitalItems?: PricingCapitalItem[];
+  /** Dự phòng sửa chữa sau bảo hành / tháng — đã nằm trong `fixedOpex`. */
+  repairReservePerMonth?: number;
+  /** Phần công ty tự chịu, chỉ để hiển thị, không cộng vào giá. */
+  companyAbsorbed?: CompanyAbsorbed;
+  /**
+   * Giá sàn phiên bản trước / phiên bản này — nhà chia phòng là TỔNG mọi phòng (BE a40f1ac). 0 khi chưa có
+   * phiên bản trước. Phiên bản trước tính theo cấu hình lúc đó, nên chênh lệch không chỉ do cải tạo.
+   */
+  previousFloor?: number;
+  newFloor?: number;
+}
+
+export type PricingCapitalItemKind = 'RENT' | 'RENOVATION' | 'EQUIPMENT' | 'EQUIPMENT_UPGRADE';
+
+export interface PricingCapitalItem {
+  id: number;
+  /** "Vốn thuê nhà" / tên danh mục cải tạo / tên thiết bị (BE c2848dd). */
+  itemName?: string | null;
+  pricingVersion: number;
+  kind: PricingCapitalItemKind;
+  /** renovation_line_id hoặc equipment_id. */
+  sourceId?: number | null;
+  /** Có giá trị = khoản riêng của phòng đó; null = khoản chung chia đều. */
+  roomId?: number | null;
+  /** true = thiết bị khu vực chung. */
+  houseArea?: boolean | null;
+  amount: number;
+  /** Ngày bắt đầu khấu hao (ISO). Khoản lập ở đợt nào thì mang ngày của đợt đó. */
+  startDate: string;
+  months: number;
+  /**
+   * = monthlyAmount × số tháng đã qua. BE đếm tháng theo NGÀY 1 của tháng (tháng đang dở cũng tính),
+   * nên có thể nhiều hơn cách đếm tháng tròn của FE một tháng — FE ưu tiên số của BE.
+   */
+  depreciatedAmount?: number | null;
+  /** = amount − depreciatedAmount (BE c2848dd). */
+  remainingAmount?: number | null;
+  monthlyAmount: number;
+}
+
+export interface TenantOnOldPrice {
+  /** null = nhà nguyên căn. */
+  roomId: number | null;
+  roomName: string | null;
+  contractPrice: number;
+  newFloorPrice: number;
+  remainingMonths: number;
+  absorbedAmount: number;
+}
+
+export interface CompanyAbsorbed {
+  /** Tiền thay thiết bị hỏng bằng loại tương đương — không tăng giá. */
+  equivalentReplacement: number;
+  /** Khách đang ở giữ giá hợp đồng cũ tới hết hạn. */
+  tenantsOnOldPrice: TenantOnOldPrice[];
 }
 
 export interface PricingReconciliationResponse {

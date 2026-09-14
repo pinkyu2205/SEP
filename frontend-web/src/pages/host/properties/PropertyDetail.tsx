@@ -22,14 +22,15 @@ import {
 import { formatCurrency } from '@/utils';
 import { normalizeVi } from '@/utils/helpers';
 import { MonthPicker, useServerPeriod } from '../shared';
+import { currentMonth, monthLabel } from '@/utils/period';
 import { normalizeRoomNumber } from '@/services/propertyOccupancy.service';
 import { adminService, type AdminInvoiceRow } from '@/services/admin.service';
 import { canUseFullInvoices } from '@/services/invoiceAccess';
 import {
-  INVOICE_TYPE_META, loadPropertyBills, type PropertyBillBreakdown,
+  INVOICE_TYPE_META, groupOnboardPayments, loadPropertyBills, type PropertyBillBreakdown,
 } from './propertyOperationStatus';
 import {
-  PropertyStatusPanel, RoomBillChip, WholeHouseBillLine, billHeading,
+  BillLines, PropertyStatusPanel, RoomBillChip, WholeHouseBillLine, billHeading,
 } from './PropertyStatusPanel';
 
 // ─── Tab của màn chi tiết ────────────────────────────────────────────────────
@@ -98,6 +99,23 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
   // Gọi đúng tên thì host biết mình phải làm gì; gọi là "Nháp" thì không ai đụng tới,
   // nhà đứng ở trạng thái hoạt động mà admin không xếp được khách nào vào.
   DRAFT:       { label: 'Chưa mở cho thuê', cls: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400',   border: 'border-amber-200 hover:border-amber-300' },
+  // Chỉ dùng khi đang xem một THÁNG ĐÃ QUA mà phòng không có hợp đồng nào nằm trong tháng đó.
+  // Không gọi "Phòng trống": lúc đó phòng có thể chưa mở, đang cải tạo… — chỉ biết chắc là chưa có khách.
+  PAST_EMPTY:  { label: 'Chưa có khách', cls: 'bg-slate-100 text-slate-500',    dot: 'bg-slate-300',   border: 'border-slate-200 hover:border-slate-300' },
+};
+
+/**
+ * Hợp đồng có khách ở trong tháng `ym` ("YYYY-MM") không: đã vào ở trước hoặc trong tháng đó, và
+ * chưa hết hạn trước tháng đó. Hợp đồng nháp / chờ ký không tính.
+ *
+ * Giới hạn: HĐ chấm dứt sớm vẫn tính tới `endDate` gốc — `/host/contracts` không trả ngày chấm dứt.
+ */
+const contractCoversMonth = (c: TenantContractResponse, ym: string): boolean => {
+  if (c.status === 'DRAFT' || c.status === 'PENDING') return false;
+  const start = (c.moveInDate || c.startDate || '').slice(0, 7);
+  if (!start || start > ym) return false;
+  const end = (c.endDate || '').slice(0, 7);
+  return !end || end >= ym;
 };
 
 const propertyStatusLabel: Record<string, { label: string; cls: string }> = {
@@ -193,30 +211,74 @@ const INV_STATUS_META: Record<string, { label: string; cls: string }> = {
 };
 
 /**
- * Lịch sử hoá đơn của MỘT phòng — mọi kỳ, không chỉ kỳ đang xem.
+ * Mọi hoá đơn (mọi kỳ) của một nhà.
  *
- * Gọi `listInvoices({})` không kèm `period` để lấy trọn lịch sử, rồi lọc tại máy theo
- * nhà + số phòng. Chỉ gọi khi host thực sự mở phòng ra xem: đây là dữ liệu nặng và
- * phần lớn lần vào trang chi tiết là để xem phòng trống / đổi trạng thái, không ai
- * cần tới nó.
+ * Gọi `listInvoices({})` không kèm `period` để lấy trọn lịch sử, rồi lọc tại máy theo nhà.
+ * Chỉ gọi khi thật sự cần (mở phòng ra xem, hoặc nhà nguyên căn đang có khách): đây là dữ
+ * liệu nặng.
  */
-function RoomInvoiceHistory({ propertyId, roomNumber }: { propertyId: number; roomNumber: string }) {
+function usePropertyInvoices(propertyId: number, enabled: boolean) {
   const [rows, setRows] = useState<AdminInvoiceRow[] | null>(null);
   const [denied, setDenied] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     (async () => {
       if (!(await canUseFullInvoices())) { if (active) setDenied(true); return; }
       const all = await adminService.listInvoices({}).catch(() => [] as AdminInvoiceRow[]);
-      if (!active) return;
-      const want = normalizeRoomNumber(roomNumber);
-      setRows(all
-        .filter(r => r.propertyId === propertyId && normalizeRoomNumber(r.roomNumber) === want)
-        .sort((a, b) => (b.periodKey ?? '').localeCompare(a.periodKey ?? '')));
+      if (active) setRows(all.filter(r => r.propertyId === propertyId));
     })();
     return () => { active = false; };
-  }, [propertyId, roomNumber]);
+  }, [propertyId, enabled]);
+
+  return { rows, denied };
+}
+
+type DepositState = 'paid' | 'unpaid' | 'unknown';
+
+/**
+ * Cọc của một hợp đồng đã thu chưa.
+ *
+ * `/host/contracts` KHÔNG trả trạng thái thanh toán (`paymentStatus` luôn trống ở màn host), nên
+ * trước đây ô cọc luôn báo "Chưa thu cọc" dù khách đã trả. Cọc thu cùng tiền nhà kỳ đầu qua phiếu
+ * gộp `HD-ONBOARD-{id hợp đồng}` → phiếu đó đã thu là cọc đã thu. Không tìm thấy phiếu (không có
+ * quyền xem hoá đơn, dữ liệu cũ) thì trả `unknown` — thà không nói còn hơn nói sai.
+ */
+const depositStateOf = (contract: TenantContractResponse, rows: AdminInvoiceRow[] | null): DepositState => {
+  const ps = (contract.paymentStatus || '').toUpperCase();
+  if (ps === 'PAID') return 'paid';
+  if (!rows) return 'unknown';
+  const envelope = rows.find(r => r.isOnboardEnvelope
+    && (r.contractId === contract.id || r.code === `HD-ONBOARD-${contract.id}`));
+  if (!envelope) return 'unknown';
+  return envelope.status === 'PAID' ? 'paid' : 'unpaid';
+};
+
+const DepositStateText = ({ state }: { state: DepositState }) => (
+  state === 'unknown' ? null : (
+    <p className={`text-[11px] font-bold ${state === 'paid' ? 'text-emerald-600' : 'text-amber-600'}`}>
+      {state === 'paid' ? '✓ Đã thu cọc' : 'Chưa thu cọc'}
+    </p>
+  )
+);
+
+/**
+ * Lịch sử hoá đơn của MỘT phòng — mọi kỳ, không chỉ kỳ đang xem. Dữ liệu do modal nạp một lần
+ * (`usePropertyInvoices`) và dùng chung với ô trạng thái cọc.
+ */
+function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
+  allRows: AdminInvoiceRow[] | null;
+  denied: boolean;
+  roomNumber: string;
+}) {
+  const rows = useMemo(() => {
+    if (!allRows) return null;
+    const want = normalizeRoomNumber(roomNumber);
+    return allRows
+      .filter(r => normalizeRoomNumber(r.roomNumber) === want)
+      .sort((a, b) => (b.periodKey ?? '').localeCompare(a.periodKey ?? ''));
+  }, [allRows, roomNumber]);
 
   if (denied) {
     return (
@@ -248,33 +310,83 @@ function RoomInvoiceHistory({ propertyId, roomNumber }: { propertyId: number; ro
   return (
     <div className="space-y-3">
       {[...byPeriod.entries()].map(([key, list]) => {
-        const unpaid = list.filter(r => r.status !== 'PAID' && r.status !== 'CANCELLED').length;
+        const entries = groupOnboardPayments(list, r => r.isOnboardEnvelope, r => r.collectedInInvoiceCode);
+        /** Tiền khách THỰC trả trong kỳ: phiếu gộp tính trọn (đã gồm tiền nhà kỳ đầu), không cộng lại dòng con. */
+        const paidCash = entries.reduce((s, e) => {
+          const r = e.kind === 'onboard' ? e.payment.envelope : e.item;
+          return r.status === 'PAID' ? s + r.amount : s;
+        }, 0);
+        const unpaidRows = entries
+          .map(e => (e.kind === 'onboard' ? e.payment.envelope : e.item))
+          .filter(r => r.status !== 'PAID' && r.status !== 'CANCELLED');
+        const unpaidSum = unpaidRows.reduce((s, r) => s + r.amount, 0);
         return (
           <div key={key}>
-            <div className="mb-1 flex items-center justify-between px-1">
+            <div className="mb-1 flex items-center justify-between gap-2 px-1">
               <p className="text-xs font-black text-slate-500">
                 {key === '—' ? 'Không rõ kỳ' : `Tháng ${Number(key.slice(5))}/${key.slice(0, 4)}`}
               </p>
-              <p className={`text-[11px] font-bold ${unpaid > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {unpaid > 0 ? `${unpaid} chưa thu` : 'Đã thu đủ'}
+              <p className={`text-right text-[11px] font-bold ${unpaidRows.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                {paidCash > 0 && <>Đã thu {formatCurrency(paidCash)}</>}
+                {unpaidRows.length > 0
+                  ? <>{paidCash > 0 && ' · '}còn {formatCurrency(unpaidSum)} chưa thu</>
+                  : paidCash > 0 ? ' · đủ' : 'Đã thu đủ'}
               </p>
             </div>
             <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
-              {list.map(r => {
+              {entries.map(e => {
+                if (e.kind === 'onboard') {
+                  const { envelope, rents, deposit } = e.payment;
+                  const st = INV_STATUS_META[envelope.status] ?? INV_STATUS_META.PENDING;
+                  return (
+                    <div key={envelope.id} className="px-3 py-2">
+                      {/* MỘT lần khách trả lúc nhận phòng — tách rõ bên trong gồm những gì. */}
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 shrink-0 text-center leading-none">🧾</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-bold text-slate-800">Thanh toán lúc nhận phòng</p>
+                          <p className="truncate font-mono text-[11px] text-slate-400">{envelope.code} · khách trả một lần</p>
+                        </div>
+                        <span className="shrink-0 text-xs font-black tabular-nums text-slate-900">{formatCurrency(envelope.amount)}</span>
+                        <span className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-black ${st.cls}`}>
+                          {st.label}
+                        </span>
+                      </div>
+                      <div className="ml-6 mt-1.5 space-y-1 border-l-2 border-slate-100 pl-3">
+                        {deposit != null ? (
+                          <div className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="text-slate-600">💰 Tiền cọc <span className="text-slate-400">· hoàn lại khi trả phòng</span></span>
+                            <span className="font-bold tabular-nums text-slate-700">{formatCurrency(deposit)}</span>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-500">Gồm tiền cọc + tiền nhà kỳ đầu</p>
+                        )}
+                        {rents.map(r => (
+                          <div key={r.id} className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="min-w-0 truncate text-slate-600">
+                              🏠 Tiền nhà kỳ đầu <span className="font-mono text-slate-400">· {r.code}</span>
+                            </span>
+                            <span className="font-bold tabular-nums text-slate-700">{formatCurrency(r.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                const r = e.item;
                 const meta = INVOICE_TYPE_META[r.type] ?? INVOICE_TYPE_META.OTHER;
                 const st = INV_STATUS_META[r.status] ?? INV_STATUS_META.PENDING;
                 return (
                   <div key={r.id} className="flex items-center gap-2 px-3 py-2">
                     <span className="w-4 shrink-0 text-center leading-none">{meta.icon}</span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-bold text-slate-800">
-                        {r.isOnboardEnvelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
-                      </p>
+                      <p className="truncate text-xs font-bold text-slate-800">{r.isOnboardEnvelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}</p>
                       <p className="truncate font-mono text-[11px] text-slate-400">{r.code}</p>
+                      {r.collectedAtOnboard && (
+                        <p className="text-[11px] font-semibold text-emerald-700">Đã thu cùng cọc lúc nhận phòng, không thu thêm</p>
+                      )}
                     </div>
-                    <span className="shrink-0 text-xs font-black tabular-nums text-slate-900">
-                      {formatCurrency(r.amount)}
-                    </span>
+                    <span className="shrink-0 text-xs font-black tabular-nums text-slate-900">{formatCurrency(r.amount)}</span>
                     <span className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-black ${st.cls}`}>
                       {st.label}
                     </span>
@@ -305,6 +417,9 @@ function RoomDetailModal({
   const [selected, setSelected] = useState<string>(room.status);
   const [saving, setSaving] = useState(false);
   const dirty = selected !== room.status;
+  // Nạp một lần, dùng chung cho lịch sử hoá đơn và ô trạng thái cọc.
+  const { rows: invoiceRows, denied: invoicesDenied } = usePropertyInvoices(propertyId, true);
+  const depositState = tenant ? depositStateOf(tenant, invoiceRows) : 'unknown';
 
   // ESC để đóng (không đóng khi đang lưu)
   useEffect(() => {
@@ -387,11 +502,7 @@ function RoomDetailModal({
                 <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Tiền cọc</p>
                   <p className="font-bold text-slate-800">{tenant.deposit ? formatCurrency(tenant.deposit) : '—'}</p>
-                  <p className={`text-[11px] font-bold ${
-                    (tenant.paymentStatus || '').toUpperCase() === 'PAID' ? 'text-emerald-600' : 'text-amber-600'
-                  }`}>
-                    {(tenant.paymentStatus || '').toUpperCase() === 'PAID' ? '✓ Đã thu cọc' : 'Chưa thu cọc'}
-                  </p>
+                  <DepositStateText state={depositState} />
                 </div>
                 <div className="rounded-lg bg-white/70 px-3 py-2">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Kỳ hạn</p>
@@ -448,7 +559,7 @@ function RoomDetailModal({
             <p className="mb-2 flex items-center gap-1.5 text-sm font-bold text-slate-800">
               <Wallet className="h-4 w-4 text-slate-400" /> Hoá đơn của phòng
             </p>
-            <RoomInvoiceHistory propertyId={propertyId} roomNumber={room.roomNumber} />
+            <RoomInvoiceHistory allRows={invoiceRows} denied={invoicesDenied} roomNumber={room.roomNumber} />
           </div>
 
           {/* Đổi trạng thái */}
@@ -510,8 +621,26 @@ export const PropertyDetail = () => {
   const [tab, setTab] = useState<DetailTab>('overview');
   // Index ảnh đang xem phóng to trong thư viện ảnh tòa nhà (null = đóng).
   const [lightbox, setLightbox] = useState<number | null>(null);
-  /** Kỳ đang xem cho phần hoá đơn. Khai thác không phụ thuộc kỳ (luôn là hiện tại). */
+  /**
+   * Kỳ đang xem. Đổi kỳ thì đổi CẢ hoá đơn lẫn khách thuê / trạng thái phòng trong kỳ đó.
+   *
+   * Trước đây kỳ chỉ đổi phần hoá đơn, còn khách thuê luôn là "hiện tại": lùi về tháng 3/2025 vẫn
+   * thấy 5 phòng "Đang thuê" dù hợp đồng mới bắt đầu 01/09/2026 — đọc như có khách từ năm ngoái.
+   */
   const [period, setPeriod] = useServerPeriod();
+  /** Kỳ hiện tại (hoặc tương lai) → dùng trạng thái sống của phòng; kỳ đã qua → suy từ hợp đồng. */
+  const isNowPeriod = period >= currentMonth();
+  /** Khách ở trong kỳ đang xem — `roomId` bỏ trống = nhà nguyên căn (mọi hợp đồng của nhà). */
+  const tenantInPeriod = (roomId?: number): TenantContractResponse | null => {
+    const mine = contracts.filter(c => roomId == null || c.roomId === roomId);
+    if (isNowPeriod) return mine.find(c => c.status === 'ACTIVE') ?? null;
+    return mine
+      .filter(c => contractCoversMonth(c, period))
+      .sort((a, b) => (b.moveInDate || b.startDate || '').localeCompare(a.moveInDate || a.startDate || ''))[0] ?? null;
+  };
+  /** Trạng thái hiển thị của phòng theo kỳ đang xem. */
+  const roomStatusInPeriod = (room: RoomResponse): string =>
+    isNowPeriod ? room.status : (tenantInPeriod(room.id) ? 'RENTED' : 'PAST_EMPTY');
   const [bills, setBills] = useState<PropertyBillBreakdown | null>(null);
   const [billsLoading, setBillsLoading] = useState(true);
   /** Lưới phòng chỉ hiện phòng còn hoá đơn chưa trả trong kỳ. */
@@ -594,10 +723,15 @@ export const PropertyDetail = () => {
   const filteredRooms = useMemo(() => {
     const kw = normalizeVi(roomSearch.trim());
     const list = rooms.filter(r => {
-      if (filterStatus !== 'all' && r.status !== filterStatus) return false;
+      // Kỳ đã qua không có chip "Bảo trì" — lỡ đang chọn thì bỏ qua thay vì ra lưới rỗng.
+      if (filterStatus !== 'all' && !(filterStatus === 'MAINTENANCE' && !isNowPeriod)) {
+        const s = roomStatusInPeriod(r);
+        // Kỳ đã qua: chip "Phòng trống" gom luôn các phòng chưa có khách trong kỳ.
+        if (!(s === filterStatus || (filterStatus === 'AVAILABLE' && s === 'PAST_EMPTY'))) return false;
+      }
       if (onlyUnpaid && !unpaidRoomKeys.has(normalizeRoomNumber(r.roomNumber))) return false;
       if (kw) {
-        const tenant = contracts.find(c => c.roomId === r.id && c.status === 'ACTIVE');
+        const tenant = tenantInPeriod(r.id);
         const hay = [r.roomNumber, r.structureDescription, tenant?.tenantFullName, tenant?.tenantPhone]
           .filter(Boolean).map(v => normalizeVi(String(v))).join(' ');
         if (!hay.includes(kw)) return false;
@@ -613,7 +747,13 @@ export const PropertyDetail = () => {
         default:            return a.roomNumber.localeCompare(b.roomNumber, 'vi', { numeric: true });
       }
     });
-  }, [rooms, contracts, filterStatus, roomSearch, roomSort, onlyUnpaid, unpaidRoomKeys]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rooms, contracts, filterStatus, roomSearch, roomSort, onlyUnpaid, unpaidRoomKeys, period]);
+
+  // Nhà nguyên căn đang có khách: cần mọi hoá đơn (mọi kỳ) để biết cọc đã thu chưa — phiếu gộp cọc
+  // nằm ở kỳ nhận nhà, không phải kỳ đang xem. Nhà chia phòng thì modal phòng tự nạp.
+  const hasWholeHouseTenant = property?.wholeHouse === true && contracts.some(c => c.status === 'ACTIVE');
+  const { rows: houseInvoiceRows } = usePropertyInvoices(Number(id), hasWholeHouseTenant);
 
   if (loading) {
     return (
@@ -663,11 +803,19 @@ export const PropertyDetail = () => {
         { label: 'Số tầng',     value: property.totalFloor ?? property.floorCount ?? '—', icon: Layers, color: 'text-slate-600', bg: 'bg-slate-50' },
       ];
 
+  // Đếm theo KỲ ĐANG XEM. Kỳ đã qua chỉ biết chắc có khách hay không (không có lịch sử bảo trì /
+  // mở phòng), nên gom thành 2 nhóm và ẩn chip "Bảo trì".
+  const rentedInPeriod = isNowPeriod ? rented : rooms.filter(r => tenantInPeriod(r.id)).length;
+  const periodCounts = isNowPeriod
+    ? { total: rooms.length, rented, available, maintenance, notReady }
+    : { total: rooms.length, rented: rentedInPeriod, available: rooms.length - rentedInPeriod, maintenance: 0, notReady: 0 };
+  const houseTenant = tenantInPeriod();
+
   const FILTER_TABS = [
     { value: 'all',         label: 'Tất cả',    count: rooms.length },
-    { value: 'AVAILABLE',   label: 'Phòng trống', count: available },
-    { value: 'RENTED',      label: 'Đang thuê',   count: rented },
-    { value: 'MAINTENANCE', label: 'Bảo trì',     count: maintenance },
+    { value: 'AVAILABLE',   label: isNowPeriod ? 'Phòng trống' : 'Chưa có khách', count: periodCounts.available },
+    { value: 'RENTED',      label: 'Đang thuê',   count: periodCounts.rented },
+    ...(isNowPeriod ? [{ value: 'MAINTENANCE', label: 'Bảo trì', count: maintenance }] : []),
   ];
 
   return (
@@ -784,9 +932,10 @@ export const PropertyDetail = () => {
       {tab === 'overview' && (
         <PropertyStatusPanel
           isWholeHouse={isWholeHouse}
-          counts={{ total: rooms.length, rented, available, maintenance, notReady }}
-          tenantName={activeContract?.tenantFullName}
-          contractEnd={activeContract?.endDate ? fmtDate(activeContract.endDate) : undefined}
+          counts={periodCounts}
+          tenantName={houseTenant?.tenantFullName}
+          contractEnd={houseTenant?.endDate ? fmtDate(houseTenant.endDate) : undefined}
+          pastPeriod={!isNowPeriod}
           bills={bills}
           period={period}
           onPeriodChange={setPeriod}
@@ -905,9 +1054,20 @@ export const PropertyDetail = () => {
                   <WholeHousePriceActions property={property} onChanged={fetchData} />
                 </div>
               </div>
-              <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
+              {/* Nhà nguyên căn không lưu cọc ở cấp nhà (`property.deposit` trống) — cọc nằm trong hợp đồng.
+                  Đang có khách thì hiện cọc của hợp đồng đó thay vì "—". */}
+              <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm text-slate-500"><Wallet className="w-4 h-4" /> Tiền cọc</span>
-                <span className="font-bold text-slate-800">{property.deposit != null ? formatCurrency(property.deposit) : '—'}</span>
+                <span className="text-right">
+                  <span className="block font-bold text-slate-800">
+                    {activeContract?.deposit
+                      ? formatCurrency(activeContract.deposit)
+                      : property.deposit != null ? formatCurrency(property.deposit) : '—'}
+                  </span>
+                  {activeContract?.deposit ? (
+                    <span className="block text-[11px] text-slate-400">theo hợp đồng đang thuê</span>
+                  ) : null}
+                </span>
               </div>
               <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm text-slate-500"><Ruler className="w-4 h-4" /> Diện tích</span>
@@ -920,71 +1080,87 @@ export const PropertyDetail = () => {
             </div>
           </div>
 
-          {/* Khách thuê hiện tại */}
+          {/* Khách thuê — theo KỲ ĐANG XEM (kỳ hiện tại = khách đang ở; tháng đã qua = khách ở trong tháng đó) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
-            <div className="flex items-center gap-2.5 mb-5">
+            <div className="mb-5 flex flex-wrap items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
                 <UserRound className="w-5 h-5 text-blue-600" />
               </div>
-              <h2 className="text-lg font-bold text-slate-900">Khách thuê hiện tại</h2>
+              <h2 className="text-lg font-bold text-slate-900">
+                {isNowPeriod ? 'Khách thuê hiện tại' : `Khách thuê ${monthLabel(period).toLowerCase()}`}
+              </h2>
+              {/*
+                Ô chọn kỳ đặt ở ĐẦU thẻ, không nằm trong phần có khách: tháng không có khách thì thẻ
+                rỗng, ô chọn mà nằm trong phần đó là mất luôn đường quay lại tháng khác.
+                State dùng chung với tab Tổng quan — hai tab không hiện cùng lúc.
+              */}
+              <div className="ml-auto">
+                <MonthPicker value={period} onChange={setPeriod} />
+              </div>
             </div>
-            {activeContract ? (
+            {houseTenant ? (
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="w-11 h-11 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold shrink-0">
-                    {activeContract.tenantFullName.charAt(0).toUpperCase()}
+                    {houseTenant.tenantFullName.charAt(0).toUpperCase()}
                   </div>
                   <div className="min-w-0">
-                    <p className="font-bold text-slate-900 truncate">{activeContract.tenantFullName}</p>
-                    <MaskedField value={activeContract.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
+                    <p className="font-bold text-slate-900 truncate">{houseTenant.tenantFullName}</p>
+                    <MaskedField value={houseTenant.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
                   </div>
-                  <span className="ml-auto shrink-0 text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">Đang thuê</span>
+                  <span className={`ml-auto shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${
+                    houseTenant.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {houseTenant.status === 'ACTIVE' ? 'Đang thuê' : 'Đã trả nhà'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5 text-sm">
                   <div className="rounded-xl bg-slate-50 px-4 py-3">
                     <p className="text-xs text-slate-400 flex items-center gap-1"><BadgeDollarSign className="w-3 h-3" /> Giá thuê</p>
-                    <p className="font-bold text-slate-800 mt-0.5">{formatCurrency(activeContract.rentAmount)}</p>
+                    <p className="font-bold text-slate-800 mt-0.5">{formatCurrency(houseTenant.rentAmount)}</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 px-4 py-3">
                     <p className="text-xs text-slate-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Tiền cọc</p>
-                    <p className="font-bold text-slate-800 mt-0.5">{formatCurrency(activeContract.deposit)}</p>
+                    <p className="font-bold text-slate-800 mt-0.5">{formatCurrency(houseTenant.deposit)}</p>
+                    <DepositStateText state={depositStateOf(houseTenant, houseInvoiceRows)} />
                   </div>
                   <div className="rounded-xl bg-slate-50 px-4 py-3 col-span-2">
                     <p className="text-xs text-slate-400 flex items-center gap-1"><CalendarClock className="w-3 h-3" /> Kỳ hạn hợp đồng</p>
-                    <p className="font-bold text-slate-800 mt-0.5">{fmtDate(activeContract.startDate)} → {activeContract.endDate ? fmtDate(activeContract.endDate) : 'Không thời hạn'}</p>
+                    <p className="font-bold text-slate-800 mt-0.5">{fmtDate(houseTenant.startDate)} → {houseTenant.endDate ? fmtDate(houseTenant.endDate) : 'Không thời hạn'}</p>
                   </div>
                 </div>
 
                 {/* Khách này kỳ này trả tới đâu — cùng dữ liệu với khối ở tab Tổng quan. */}
                 <div>
-                  {/*
-                    Ô chọn kỳ lặp lại ở đây (state dùng chung với tab Tổng quan). Hai tab
-                    không bao giờ hiện cùng lúc nên không có chuyện nhìn thấy hai ô rồi
-                    tưởng là hai giá trị khác nhau — đổi lại host khỏi phải quay về tab
-                    Tổng quan chỉ để đổi tháng.
-                  */}
-                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                      {billHeading(bills?.source, period)}
-                    </p>
-                    <MonthPicker value={period} onChange={setPeriod} />
-                  </div>
+                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                    {billHeading(bills?.source, period)}
+                  </p>
                   {billsLoading ? (
                     <p className="text-sm text-slate-400">Đang tải…</p>
                   ) : (bills?.total.total ?? 0) === 0 ? (
                     <p className="text-sm text-slate-400">Kỳ này chưa phát sinh hoá đơn nào.</p>
                   ) : (
-                    <WholeHouseBillLine bills={bills!} />
+                    <>
+                      <WholeHouseBillLine bills={bills!} />
+                      {/* Từng hoá đơn một — giống modal phòng của nhà chia phòng: biết đích xác khoản nào
+                          đã trả, khoản nào còn nợ, chứ không chỉ "1/2 đã thu". */}
+                      {bills!.lines.length > 0 && <BillLines lines={bills!.lines} showWhere={false} />}
+                    </>
                   )}
                 </div>
               </div>
-            ) : (
+            ) : isNowPeriod ? (
               <div className="text-center py-10">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-3">
                   <CircleCheck className="w-7 h-7 text-emerald-500" />
                 </div>
                 <p className="font-bold text-slate-700">Căn nhà đang trống</p>
                 <p className="text-sm text-slate-400 mt-1">Chưa có khách thuê. Onboard khách ở mục “Khách thuê”.</p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center">
+                <p className="font-bold text-slate-500">{monthLabel(period)} chưa có khách thuê</p>
+                <p className="mt-1 text-sm text-slate-400">Không có hợp đồng thuê nào nằm trong tháng này.</p>
               </div>
             )}
           </div>
@@ -1094,8 +1270,8 @@ export const PropertyDetail = () => {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filteredRooms.map(room => {
-            const st = roomStatusMap[room.status] ?? roomStatusMap.DRAFT;
-            const tenant = contracts.find(c => c.roomId === room.id && c.status === 'ACTIVE') ?? null;
+            const st = roomStatusMap[roomStatusInPeriod(room)] ?? roomStatusMap.DRAFT;
+            const tenant = tenantInPeriod(room.id);
             return (
               <button key={room.id} onClick={() => setSelectedRoom(room)}
                 className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition-all hover:shadow-md ${st.border}`}>
@@ -1146,6 +1322,10 @@ export const PropertyDetail = () => {
                         <MaskedField value={tenant.tenantPhone} emptyText="" className="text-[11px] text-slate-500" />
                       </div>
                     </div>
+                  ) : !isNowPeriod ? (
+                    <p className="rounded-xl border border-dashed border-slate-200 px-2.5 py-2 text-center text-xs text-slate-400">
+                      {monthLabel(period)} chưa có khách thuê
+                    </p>
                   ) : room.structureDescription ? (
                     <p className="line-clamp-2 text-xs text-slate-400">{room.structureDescription}</p>
                   ) : null}
@@ -1161,6 +1341,16 @@ export const PropertyDetail = () => {
                     `applied` là số đang thu; khác `listed` thì ghi thêm dòng niêm yết.
                   */}
                   {(() => {
+                    // Tháng đã qua: không hiện giá đang niêm yết / nút đổi giá (đó là chuyện của HÔM NAY).
+                    // Có khách trong tháng thì hiện đúng giá trong hợp đồng của họ; không có khách thì để trống.
+                    if (!isNowPeriod) {
+                      return tenant ? (
+                        <div className="mt-auto border-t border-slate-100 pt-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Giá thuê theo hợp đồng</p>
+                          <p className="mt-0.5 text-lg font-black leading-none text-slate-700">{formatCurrency(tenant.rentAmount)}</p>
+                        </div>
+                      ) : null;
+                    }
                     const listed = room.listedPrice ?? room.price;
                     const applied = room.appliedPrice ?? room.price;
                     const differs = listed != null && applied != null && listed !== applied;

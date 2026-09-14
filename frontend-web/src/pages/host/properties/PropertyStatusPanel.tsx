@@ -9,14 +9,14 @@
  * lại `occupancyFromProperty`: ở đây có sẵn phòng thật nên đếm thẳng vẫn đúng hơn con
  * số tổng hợp BE gửi kèm danh sách nhà.
  */
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { AlertCircle, ChevronDown, KeyRound, Receipt } from 'lucide-react';
 import { normalizeRoomNumber } from '@/services/propertyOccupancy.service';
 import { formatCurrency } from '@/utils';
 import { fmtDate, monthLabel } from '@/utils/period';
 import { MonthPicker } from '../shared';
 import {
-  BILL_META, INVOICE_TYPE_META, INVOICE_TYPE_ORDER, billStateOf,
+  BILL_META, INVOICE_TYPE_META, INVOICE_TYPE_ORDER, billStateOf, groupOnboardPayments,
   type BillLine, type BillSource, type BillSummary, type PropertyBillBreakdown,
 } from './propertyOperationStatus';
 
@@ -36,11 +36,14 @@ const SEGMENTS: { key: keyof Omit<RoomCounts, 'total'>; cls: string; label: stri
   { key: 'notReady',    cls: 'bg-slate-200',   label: 'chưa mở' },
 ];
 
-const OccupancySide = ({ isWholeHouse, counts, tenantName, contractEnd }: {
+const OccupancySide = ({ isWholeHouse, counts, tenantName, contractEnd, pastPeriod, period }: {
   isWholeHouse: boolean;
   counts: RoomCounts;
   tenantName?: string;
   contractEnd?: string;
+  /** Đang xem một tháng đã qua — số liệu suy từ hợp đồng nằm trong tháng đó, câu chữ đổi sang quá khứ. */
+  pastPeriod?: boolean;
+  period: string;
 }) => {
   const occupied = isWholeHouse ? !!tenantName : counts.rented > 0;
   const segs = SEGMENTS.map(s => ({ ...s, n: counts[s.key] })).filter(s => s.n > 0);
@@ -48,13 +51,13 @@ const OccupancySide = ({ isWholeHouse, counts, tenantName, contractEnd }: {
   return (
     <div className="flex-1">
       <p className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-400">
-        <KeyRound className="h-3.5 w-3.5" /> Khai thác
+        <KeyRound className="h-3.5 w-3.5" /> Khai thác{pastPeriod ? ` ${monthLabel(period).toLowerCase()}` : ''}
       </p>
 
       {isWholeHouse ? (
         <>
           <p className={`mt-1.5 text-lg font-black leading-tight ${occupied ? 'text-emerald-600' : 'text-rose-500'}`}>
-            {occupied ? 'Đang cho thuê' : 'Đang để trống'}
+            {occupied ? (pastPeriod ? 'Có khách thuê' : 'Đang cho thuê') : (pastPeriod ? 'Chưa có khách' : 'Đang để trống')}
           </p>
           <p className="mt-1 text-[13px] font-semibold text-slate-600">
             {occupied ? (
@@ -62,7 +65,7 @@ const OccupancySide = ({ isWholeHouse, counts, tenantName, contractEnd }: {
                 Khách: <b className="text-slate-700">{tenantName}</b>
                 {contractEnd && <span className="text-slate-400"> · HĐ đến {contractEnd}</span>}
               </>
-            ) : 'Cả căn chưa có khách nào'}
+            ) : pastPeriod ? 'Tháng này không có hợp đồng thuê nào' : 'Cả căn chưa có khách nào'}
           </p>
         </>
       ) : (
@@ -186,8 +189,15 @@ const LINE_STATUS: Record<string, { label: string; cls: string }> = {
   CANCELLED: { label: 'Đã huỷ',       cls: 'bg-slate-100 text-slate-500 border-slate-200' },
 };
 
-/** Bảng từng hoá đơn — mở ra khi host muốn biết đích xác đang chờ khoản nào của ai. */
-const BillLines = ({ lines }: { lines: BillLine[] }) => (
+/**
+ * Bảng từng hoá đơn — mở ra khi host muốn biết đích xác đang chờ khoản nào của ai.
+ * Dùng cả ở thẻ "Khách thuê hiện tại" của nhà nguyên căn (`PropertyDetail`).
+ */
+export const BillLines = ({ lines, showWhere = true }: {
+  lines: BillLine[];
+  /** false = bỏ cột "Phòng / khách" (nhà nguyên căn: luôn là cả căn, tên khách đã hiện ở trên). */
+  showWhere?: boolean;
+}) => (
   <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
     {/*
       BỐN cột, không phải sáu. Hai cột bị gộp vì chúng không đứng riêng nổi:
@@ -206,31 +216,23 @@ const BillLines = ({ lines }: { lines: BillLine[] }) => (
       <thead className="bg-slate-50 text-left text-[10px] font-black uppercase tracking-widest text-slate-400">
         <tr>
           <th className="px-3 py-2">Khoản thu</th>
-          <th className="px-3 py-2">Phòng / khách</th>
+          {showWhere && <th className="px-3 py-2">Phòng / khách</th>}
           <th className="px-3 py-2 text-right">Số tiền</th>
           <th className="px-3 py-2">Trạng thái</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
-        {lines.map(l => {
-          const meta = INVOICE_TYPE_META[l.type];
-          const st = LINE_STATUS[l.status] ?? LINE_STATUS.PENDING;
-          const settled = l.status === 'PAID' || l.status === 'CANCELLED';
-          return (
-            <tr key={l.id} className={l.envelope ? 'bg-slate-50/60' : undefined}>
-              <td className="px-3 py-1.5">
-                <p className="whitespace-nowrap font-bold text-slate-800">
-                  {meta.icon} {l.envelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
-                </p>
-                <p className="font-mono text-[11px] text-slate-400">{l.code}</p>
-              </td>
-              <td className="px-3 py-1.5 text-xs text-slate-600">
-                {l.roomNumber ? <b className="text-slate-800">P.{l.roomNumber}</b> : 'Cả căn'}
-                {l.tenantName && <span className="text-slate-400"> · {l.tenantName}</span>}
-              </td>
-              <td className="whitespace-nowrap px-3 py-1.5 text-right font-black tabular-nums text-slate-900">
-                {formatCurrency(l.amount)}
-              </td>
+        {groupOnboardPayments(lines, l => !!l.envelope, l => l.collectedInInvoiceCode).map(e => {
+          const where = (l: BillLine) => (!showWhere ? null : (
+            <td className="px-3 py-1.5 text-xs text-slate-600">
+              {l.roomNumber && l.roomNumber !== 'NGUYEN_CAN' ? <b className="text-slate-800">P.{l.roomNumber}</b> : 'Cả căn'}
+              {l.tenantName && <span className="text-slate-400"> · {l.tenantName}</span>}
+            </td>
+          ));
+          const statusCell = (l: BillLine) => {
+            const st = LINE_STATUS[l.status] ?? LINE_STATUS.PENDING;
+            const settled = l.status === 'PAID' || l.status === 'CANCELLED';
+            return (
               <td className="px-3 py-1.5">
                 <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-black ${st.cls}`}>
                   {st.label}
@@ -241,27 +243,90 @@ const BillLines = ({ lines }: { lines: BillLine[] }) => (
                   </span>
                 )}
               </td>
+            );
+          };
+
+          if (e.kind === 'onboard') {
+            // MỘT lần khách trả lúc nhận phòng: một dòng tổng, bên dưới tách cọc + tiền nhà kỳ đầu.
+            const { envelope, rents, deposit } = e.payment;
+            return (
+              <Fragment key={envelope.id}>
+                <tr>
+                  <td className="px-3 py-1.5">
+                    <p className="whitespace-nowrap font-bold text-slate-800">🧾 Thanh toán lúc nhận phòng</p>
+                    <p className="font-mono text-[11px] text-slate-400">{envelope.code} · khách trả một lần</p>
+                  </td>
+                  {where(envelope)}
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right font-black tabular-nums text-slate-900">
+                    {formatCurrency(envelope.amount)}
+                  </td>
+                  {statusCell(envelope)}
+                </tr>
+                {deposit != null ? (
+                  <tr className="bg-slate-50/50">
+                    <td className="py-1 pl-8 pr-3 text-xs text-slate-600" colSpan={showWhere ? 2 : 1}>
+                      💰 Tiền cọc <span className="text-slate-400">· hoàn lại khi trả phòng</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-1 text-right text-xs font-bold tabular-nums text-slate-600">
+                      {formatCurrency(deposit)}
+                    </td>
+                    <td />
+                  </tr>
+                ) : (
+                  <tr className="bg-slate-50/50">
+                    <td className="py-1 pl-8 pr-3 text-xs text-slate-500" colSpan={showWhere ? 4 : 3}>Gồm tiền cọc + tiền nhà kỳ đầu</td>
+                  </tr>
+                )}
+                {rents.map(r => (
+                  <tr key={r.id} className="bg-slate-50/50">
+                    <td className="py-1 pl-8 pr-3 text-xs text-slate-600" colSpan={showWhere ? 2 : 1}>
+                      🏠 Tiền nhà kỳ đầu <span className="font-mono text-slate-400">· {r.code}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-1 text-right text-xs font-bold tabular-nums text-slate-600">
+                      {formatCurrency(r.amount)}
+                    </td>
+                    <td />
+                  </tr>
+                ))}
+              </Fragment>
+            );
+          }
+
+          const l = e.item;
+          const meta = INVOICE_TYPE_META[l.type];
+          return (
+            <tr key={l.id}>
+              <td className="px-3 py-1.5">
+                <p className="whitespace-nowrap font-bold text-slate-800">
+                  {meta.icon} {l.envelope ? 'Cọc + tiền nhà kỳ đầu' : meta.label}
+                </p>
+                <p className="font-mono text-[11px] text-slate-400">{l.code}</p>
+                {l.collectedAtOnboard && (
+                  <p className="text-[11px] font-semibold text-emerald-700">Đã thu cùng cọc lúc nhận phòng, không thu thêm</p>
+                )}
+              </td>
+              {where(l)}
+              <td className="whitespace-nowrap px-3 py-1.5 text-right font-black tabular-nums text-slate-900">
+                {formatCurrency(l.amount)}
+              </td>
+              {statusCell(l)}
             </tr>
           );
         })}
       </tbody>
     </table>
-    {lines.some(l => l.envelope) && (
-      <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-1.5 text-[11px] font-semibold text-slate-500">
-        Dòng nền xám là phiếu thu gộp lúc đón khách — không cộng vào tổng, vì cọc và tiền
-        nhà kỳ đầu đã được ghi riêng ở nơi khác.
-      </p>
-    )}
   </div>
 );
 
 export const PropertyStatusPanel = ({
-  isWholeHouse, counts, tenantName, contractEnd, bills, period, onPeriodChange, loading,
+  isWholeHouse, counts, tenantName, contractEnd, pastPeriod, bills, period, onPeriodChange, loading,
 }: {
   isWholeHouse: boolean;
   counts: RoomCounts;
   tenantName?: string;
   contractEnd?: string;
+  /** Kỳ đang xem đã qua — khai thác lấy theo hợp đồng trong kỳ, không phải hiện tại. */
+  pastPeriod?: boolean;
   bills: PropertyBillBreakdown | null;
   period: string;
   onPeriodChange: (ym: string) => void;
@@ -274,13 +339,13 @@ export const PropertyStatusPanel = ({
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-bold text-slate-900">Tình trạng nhà</h2>
-        {/* Kỳ CHỈ đổi phần hoá đơn — khai thác luôn là "ngay lúc này". */}
+        {/* Kỳ đổi CẢ hoá đơn lẫn khai thác: tháng đã qua thì khai thác theo hợp đồng nằm trong tháng đó. */}
         <MonthPicker value={period} onChange={onPeriodChange} />
       </div>
 
       <div className="flex flex-col gap-5 sm:flex-row sm:gap-8">
         <OccupancySide isWholeHouse={isWholeHouse} counts={counts}
-          tenantName={tenantName} contractEnd={contractEnd} />
+          tenantName={tenantName} contractEnd={contractEnd} pastPeriod={pastPeriod} period={period} />
         <div className="hidden w-px shrink-0 bg-slate-100 sm:block" />
         <BillSide bills={bills} period={period} loading={loading} />
       </div>

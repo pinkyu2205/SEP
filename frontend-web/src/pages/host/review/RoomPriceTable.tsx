@@ -1,7 +1,9 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, RotateCcw, Wand2 } from 'lucide-react';
 import type { PricingCalculationResponse, RoomPricingResult } from '@/types/api.types';
+import { serverNow } from '@/utils/serverTime';
 import { formatVND, shortVND } from './pricingBreakdown';
+import { capitalParts, roomCapital, type RoomCapital } from './capitalItems';
 
 /**
  * Bảng giá từng phòng cho màn Duyệt giá.
@@ -133,7 +135,20 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
   const revMonths = revenueMonths && revenueMonths > 0 ? revenueMonths : months;
   const totalSet = rooms.reduce((s, r) => s + (prices[r.roomId] || 0), 0);
   const totalSuggested = rooms.reduce((s, r) => s + Math.round(r.suggestedPriceWithProfit), 0);
-  const totalInvest = rooms.reduce((s, r) => s + (r.totalInvestment || 0), 0) || calc.capex;
+
+  /**
+   * Có bảng khoản vốn (BE 14/09/2026) thì vốn từng phòng cộng từ đó: khoản chung chia đều + khoản
+   * riêng của phòng. BE lúc này trả `rentShare/renovationShare/equipmentShare` = 0 nên không đọc
+   * được nữa, và "vốn" dùng để tính lãi là phần CÒN LẠI chứ không phải tổng gốc.
+   */
+  const items = calc.capitalItems?.length ? calc.capitalItems : null;
+  const today = serverNow();
+  const capitalOf = (r: RoomPricingResult): RoomCapital | null =>
+    items ? roomCapital(items, r.roomId, rooms.length, today) : null;
+  const reserve = calc.repairReservePerMonth ?? 0;
+  const totalInvest = items
+    ? capitalParts(items, today).remaining
+    : rooms.reduce((s, r) => s + (r.totalInvestment || 0), 0) || calc.capex;
 
   const setAll = (fn: (r: RoomPricingResult) => number) => {
     const next: Record<number, number> = {};
@@ -169,7 +184,7 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
           <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2.5 font-bold">Phòng</th>
-              <th className="px-3 py-2.5 text-right font-bold">Vốn phân bổ</th>
+              <th className="px-3 py-2.5 text-right font-bold">{items ? 'Vốn còn phải lấy lại' : 'Vốn phân bổ'}</th>
               <th className="px-3 py-2.5 text-right font-bold">Hoàn vốn / tháng</th>
               <th className="px-3 py-2.5 text-right font-bold">Giá đề xuất</th>
               {/* Cột DUY NHẤT sửa được — nền tô + ô nhập đã đủ nói lên điều đó, không cần chú thích */}
@@ -184,7 +199,8 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
               const price = prices[r.roomId] || 0;
               const below = price > 0 && price < r.roomFloor;
               const rMonths = revMonths;
-              const invest = r.totalInvestment ?? 0;
+              const cap = capitalOf(r);
+              const invest = cap ? Math.round(cap.remaining) : r.totalInvestment ?? 0;
               const profit = price > 0 && invest > 0 ? price * rMonths - invest : null;
               const diff = price - Math.round(r.suggestedPriceWithProfit);
               const open = openRoom === r.roomId;
@@ -278,19 +294,43 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <DetailCard step="1" title="Phòng gánh bao nhiêu vốn">
-                            <DRow label="Tiền thuê nhà" value={r.rentShare != null ? formatVND(r.rentShare) : '—'} />
-                            <DRow label="Cải tạo" value={r.renovationShare != null ? formatVND(r.renovationShare) : '—'} />
-                            <DRow label="Thiết bị" value={r.equipmentShare != null ? formatVND(r.equipmentShare) : '—'} />
-                            <DRow label="Tổng vốn phòng" value={invest > 0 ? formatVND(invest) : '—'} total />
-                          </DetailCard>
+                          {cap ? (
+                            <DetailCard step="1" title="Phòng gánh bao nhiêu vốn">
+                              <DRow label="Tiền thuê nhà" value={formatVND(cap.rent)} />
+                              <DRow label="Cải tạo" value={formatVND(cap.renovation)} />
+                              <DRow label="Thiết bị" value={formatVND(cap.equipment)} />
+                              <DRow label="Tổng vốn phòng" value={formatVND(cap.total)} total />
+                              {cap.depreciated > 0 && (
+                                <>
+                                  <DRow label="Đã lấy lại qua tiền thuê" value={`− ${formatVND(cap.depreciated)}`} tone="good" />
+                                  <DRow label="Còn phải lấy lại" value={formatVND(cap.remaining)} total accent />
+                                </>
+                              )}
+                            </DetailCard>
+                          ) : (
+                            <DetailCard step="1" title="Phòng gánh bao nhiêu vốn">
+                              <DRow label="Tiền thuê nhà" value={r.rentShare != null ? formatVND(r.rentShare) : '—'} />
+                              <DRow label="Cải tạo" value={r.renovationShare != null ? formatVND(r.renovationShare) : '—'} />
+                              <DRow label="Thiết bị" value={r.equipmentShare != null ? formatVND(r.equipmentShare) : '—'} />
+                              <DRow label="Tổng vốn phòng" value={invest > 0 ? formatVND(invest) : '—'} total />
+                            </DetailCard>
+                          )}
 
-                          <DetailCard step="2" title="Vì sao chia chừng đó"
-                            footer="Phòng rộng gánh nhiều vốn hơn, nên giá thuê cũng cao hơn tương ứng.">
-                            <DRow label="Diện tích thực" value={`${r.area} m²`} />
-                            <DRow label="Quy đổi (gồm KV chung)" value={`${r.effectiveM2} m²`} />
-                            <DRow label="Trọng số phân bổ" value={String(r.weight)} total />
-                          </DetailCard>
+                          {cap ? (
+                            <DetailCard step="2" title="Vì sao chia chừng đó"
+                              footer="Tiền thuê nhà, cải tạo và thiết bị khu vực chung chia đều cho mọi phòng. Thiết bị lắp trong phòng nào thì chỉ phòng đó gánh.">
+                              <DRow label={`Phần chung ÷ ${rooms.length} phòng`} value={formatVND(cap.common.total)} />
+                              <DRow label="Thiết bị riêng của phòng" value={formatVND(cap.own.total)} />
+                              <DRow label="Mỗi tháng phải lấy lại" value={formatVND(cap.monthly)} total />
+                            </DetailCard>
+                          ) : (
+                            <DetailCard step="2" title="Vì sao chia chừng đó"
+                              footer="Phòng rộng gánh nhiều vốn hơn, nên giá thuê cũng cao hơn tương ứng.">
+                              <DRow label="Diện tích thực" value={`${r.area} m²`} />
+                              <DRow label="Quy đổi (gồm KV chung)" value={`${r.effectiveM2} m²`} />
+                              <DRow label="Trọng số phân bổ" value={String(r.weight)} total />
+                            </DetailCard>
+                          )}
 
                           {/*
                             Đã BỎ mọi thứ liên quan GIÁ SÀN khỏi màn này (20/08/2026) — cột
@@ -303,7 +343,7 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
                           <DetailCard step="3" title="Giá đề xuất tính thế nào">
                             <DRow label="Hoàn vốn / tháng" value={r.monthlyBreakEven != null ? formatVND(r.monthlyBreakEven) : '—'} />
                             {r.suggestedPriceWithProfit != null && r.monthlyBreakEven != null && (
-                              <DRow label="+ Vận hành, bù trống & lãi"
+                              <DRow label={reserve > 0 ? '+ Dự phòng sửa chữa, vận hành, bù trống & lãi' : '+ Vận hành, bù trống & lãi'}
                                 value={formatVND(Math.max(0, r.suggestedPriceWithProfit - r.monthlyBreakEven))} />
                             )}
                             <DRow label="Đề xuất (đã có lãi)" value={formatVND(r.suggestedPriceWithProfit)} total accent />
