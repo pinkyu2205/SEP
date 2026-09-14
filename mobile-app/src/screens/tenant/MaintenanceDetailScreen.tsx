@@ -8,6 +8,8 @@ import { MaintenanceRequest } from '@/types';
 import {
   formatDate, formatDateTime, formatCurrency, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor, showAlert,
+  isVideoUrl, formatDurationLabel, remainingEvidenceSlots, EVIDENCE_MAX_FILES,
+  pickEvidenceFromCamera, pickEvidenceFromLibrary, type EvidenceAsset,
 } from '@/utils';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
@@ -19,6 +21,7 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { VideoPreviewModal } from '../../components/common/VideoPreviewModal';
 import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 import type { SharedBill } from '@/types/bill';
@@ -90,13 +93,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
     onRefresh: () => { void refreshReal(); },
   });
 
-  // Nộp ảnh đã tự sửa (Luồng B — status pending_tenant_repair, chưa nộp ảnh).
+  // Nộp ảnh/video đã tự sửa (Luồng B — status pending_tenant_repair, chưa nộp). Video
+  // thêm 14/09/2026 theo yêu cầu mentor — evidenceMediaPicker.ts.
   const [selfRepairNote, setSelfRepairNote] = useState('');
-  const [selfRepairUris, setSelfRepairUris] = useState<string[]>([]);
+  const [selfRepairAssets, setSelfRepairAssets] = useState<EvidenceAsset[]>([]);
   const [busy, setBusy] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
 
   // Thanh toán chi phí bảo trì (Luồng B, lỗi do khách) — hoá đơn PayOS đã có sẵn từ
   // lúc manager complete(), chỉ cần tái dùng InvoicePaymentModal như hoá đơn thường.
@@ -113,31 +118,46 @@ export const MaintenanceDetailScreen: React.FC = () => {
   const currentStatusMeta = (request && STATUS_META[request.status]) || STATUS_META.open;
   const priorityColor = getMaintenancePriorityColor(request?.priority ?? 'medium');
 
+  /**
+   * Mở 1 ảnh/video đính kèm ĐÃ upload (before/after/fault_evidence — invoice giữ nguyên
+   * ảnh-only, không cần đổi). Video mở VideoPreviewModal; ảnh mở PhotoLightbox — lọc bỏ
+   * video khỏi mảng lướt để lightbox không lỡ lướt tới 1 video rồi render ảnh vỡ.
+   */
+  const openAttachment = (uris: string[], uri: string) => {
+    if (isVideoUrl(uri)) { setVideoPreviewUrl(uri); return; }
+    const imageOnly = uris.filter(u => !isVideoUrl(u));
+    setLightbox({ uris: imageOnly, index: imageOnly.indexOf(uri) });
+  };
+
   // ── Actions ────────────────────────────────────────────────────────
 
   const pickFromCamera = async () => {
     setPhotoMenuOpen(false);
+    const remaining = remainingEvidenceSlots(selfRepairAssets.length);
+    if (remaining <= 0) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
-    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    if (!r.canceled && r.assets[0]) setSelfRepairUris(prev => [...prev, r.assets[0].uri]);
+    const media = await pickEvidenceFromCamera();
+    if (media) setSelfRepairAssets(prev => [...prev, media]);
   };
   const pickFromLibrary = async () => {
     setPhotoMenuOpen(false);
-    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
-    if (!r.canceled) setSelfRepairUris(prev => [...prev, ...r.assets.map(a => a.uri)]);
+    const remaining = remainingEvidenceSlots(selfRepairAssets.length);
+    if (remaining <= 0) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
+    const picked = await pickEvidenceFromLibrary(remaining);
+    if (picked.length) setSelfRepairAssets(prev => [...prev, ...picked]);
   };
 
-  /** Tenant nộp ảnh đã tự sửa xong (bắt buộc ≥1 ảnh) — chờ manager verify-repair. */
+  /** Tenant nộp ảnh/video đã tự sửa xong (bắt buộc ≥1) — chờ manager verify-repair. */
   const submitSelfRepair = async () => {
     if (busy) return;
-    if (selfRepairUris.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh chứng minh đã sửa xong.'); return; }
+    if (selfRepairAssets.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh/video chứng minh đã sửa xong.'); return; }
     try {
       setBusy(true);
-      await realMaintenanceService.submitSelfRepair(idNum, selfRepairNote.trim() || undefined, selfRepairUris);
+      await realMaintenanceService.submitSelfRepair(idNum, selfRepairNote.trim() || undefined, selfRepairAssets);
       await refreshReal();
-      setSelfRepairNote(''); setSelfRepairUris([]);
+      setSelfRepairNote(''); setSelfRepairAssets([]);
       showAlert('✅ Đã gửi', 'Quản lý sẽ kiểm tra và xác nhận kết quả sửa chữa của bạn.');
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi ảnh. Vui lòng thử lại.')); }
     finally { setBusy(false); }
@@ -346,8 +366,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
               {(() => {
                 const uris = request.beforeImages?.length ? request.beforeImages : request.images;
                 return uris.map((uri, i) => (
-                  <TouchableOpacity key={i} activeOpacity={0.85} onPress={() => setLightbox({ uris, index: i })}>
-                    <Image source={{ uri }} style={styles.attachmentImage} />
+                  <TouchableOpacity key={i} activeOpacity={0.85} onPress={() => openAttachment(uris, uri)}>
+                    {isVideoUrl(uri) ? (
+                      <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
+                        <Text style={{ fontSize: 22 }}>🎬</Text>
+                        <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                      </View>
+                    ) : (
+                      <Image source={{ uri }} style={styles.attachmentImage} />
+                    )}
                   </TouchableOpacity>
                 ));
               })()}
@@ -370,8 +397,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
                 {request.faultEvidenceImages!.map((uri, i) => (
                   <TouchableOpacity key={i} activeOpacity={0.85}
-                    onPress={() => setLightbox({ uris: request.faultEvidenceImages!, index: i })}>
-                    <Image source={{ uri }} style={styles.attachmentImage} />
+                    onPress={() => openAttachment(request.faultEvidenceImages!, uri)}>
+                    {isVideoUrl(uri) ? (
+                      <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
+                        <Text style={{ fontSize: 22 }}>🎬</Text>
+                        <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                      </View>
+                    ) : (
+                      <Image source={{ uri }} style={styles.attachmentImage} />
+                    )}
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -386,8 +420,15 @@ export const MaintenanceDetailScreen: React.FC = () => {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagesRow}>
               {request.afterImages!.map((uri, i) => (
                 <TouchableOpacity key={i} activeOpacity={0.85}
-                  onPress={() => setLightbox({ uris: request.afterImages!, index: i })}>
-                  <Image source={{ uri }} style={styles.attachmentImage} />
+                  onPress={() => openAttachment(request.afterImages!, uri)}>
+                  {isVideoUrl(uri) ? (
+                    <View style={[styles.attachmentImage, styles.videoAttachmentTile]}>
+                      <Text style={{ fontSize: 22 }}>🎬</Text>
+                      <Text style={styles.videoAttachmentText}>▶ Xem video</Text>
+                    </View>
+                  ) : (
+                    <Image source={{ uri }} style={styles.attachmentImage} />
+                  )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -447,27 +488,47 @@ export const MaintenanceDetailScreen: React.FC = () => {
                 🛠 Bạn cần tự sửa lỗi này{remainingDays != null
                   ? remainingDays >= 0 ? ` trong ${remainingDays} ngày nữa` : ' — ĐÃ QUÁ HẠN'
                   : ''}{request.selfRepairDeadline ? ` (hạn ${formatDate(request.selfRepairDeadline)})` : ''}.
-                Sửa xong thì chụp ảnh gửi để quản lý xác nhận.
+                Sửa xong thì chụp ảnh/video gửi để quản lý xác nhận.
               </Text>
             </View>
-            <Text style={styles.sectionTitle}>Ảnh chứng minh đã sửa xong</Text>
+            <Text style={styles.sectionTitle}>Ảnh/video chứng minh đã sửa xong</Text>
             <View style={styles.rejectImagesRow}>
-              {selfRepairUris.map((uri, i) => (
-                <View key={`${uri}-${i}`} style={styles.rejectThumbWrap}>
-                  <TouchableOpacity onPress={() => setLightbox({ uris: selfRepairUris, index: i })}>
-                    <Image source={{ uri }} style={styles.rejectThumb} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.rejectThumbRemove}
-                    onPress={() => setSelfRepairUris(prev => prev.filter((_, idx) => idx !== i))}
-                  >
-                    <Text style={styles.rejectThumbRemoveText}>×</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <TouchableOpacity style={styles.rejectAddBtn} onPress={() => setPhotoMenuOpen(true)}>
-                <Text style={styles.rejectAddBtnText}>＋{'\n'}Ảnh</Text>
-              </TouchableOpacity>
+              {(() => {
+                // Lightbox chỉ phát ảnh — lọc bỏ video khỏi danh sách lướt (video local
+                // chưa upload, chưa có gì để xem trước, xem tile placeholder bên dưới).
+                const imageOnlyUris = selfRepairAssets.filter(a => a.type !== 'video').map(a => a.uri);
+                return selfRepairAssets.map((asset, i) => {
+                  const isVideo = asset.type === 'video';
+                  return (
+                    <View key={`${asset.uri}-${i}`} style={styles.rejectThumbWrap}>
+                      <TouchableOpacity
+                        disabled={isVideo}
+                        onPress={() => setLightbox({ uris: imageOnlyUris, index: imageOnlyUris.indexOf(asset.uri) })}
+                      >
+                        {isVideo ? (
+                          <View style={[styles.rejectThumb, styles.videoRejectTile]}>
+                            <Text style={{ fontSize: 20 }}>🎬</Text>
+                            <Text style={styles.videoRejectTileText}>{formatDurationLabel(asset.durationMs)}</Text>
+                          </View>
+                        ) : (
+                          <Image source={{ uri: asset.uri }} style={styles.rejectThumb} />
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.rejectThumbRemove}
+                        onPress={() => setSelfRepairAssets(prev => prev.filter((_, idx) => idx !== i))}
+                      >
+                        <Text style={styles.rejectThumbRemoveText}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                });
+              })()}
+              {selfRepairAssets.length < EVIDENCE_MAX_FILES && (
+                <TouchableOpacity style={styles.rejectAddBtn} onPress={() => setPhotoMenuOpen(true)}>
+                  <Text style={styles.rejectAddBtnText}>＋{'\n'}Ảnh/video</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <TextInput
               style={styles.rejectInput}
@@ -538,7 +599,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
       <CameraCaptureModal
         visible={cameraOpen}
         multi
-        onCapture={(uri) => setSelfRepairUris(prev => [...prev, uri])}
+        onCapture={(uri) => setSelfRepairAssets(prev => [...prev, { uri, type: 'image' }])}
         onClose={() => setCameraOpen(false)}
       />
 
@@ -546,9 +607,9 @@ export const MaintenanceDetailScreen: React.FC = () => {
       <Modal visible={photoMenuOpen} transparent animationType="fade" onRequestClose={() => setPhotoMenuOpen(false)}>
         <Pressable style={styles.photoMenuBackdrop} onPress={() => setPhotoMenuOpen(false)}>
           <Pressable style={styles.photoMenuCard} onPress={() => {}}>
-            <Text style={styles.photoMenuTitle}>Thêm ảnh</Text>
+            <Text style={styles.photoMenuTitle}>Thêm ảnh/video</Text>
             <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromCamera}>
-              <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh</Text>
+              <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh/quay video</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromLibrary}>
               <Text style={styles.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
@@ -560,6 +621,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
         </Pressable>
       </Modal>
       <PhotoLightbox state={lightbox} onChange={setLightbox} />
+      <VideoPreviewModal visible={!!videoPreviewUrl} url={videoPreviewUrl} onClose={() => setVideoPreviewUrl(null)} />
 
       <InvoicePaymentModal
         visible={payModalOpen}
@@ -650,6 +712,8 @@ const styles = StyleSheet.create({
 
   imagesRow: { marginTop: Spacing.sm },
   attachmentImage: { width: 120, height: 120, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+  videoAttachmentTile: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A', gap: 4 },
+  videoAttachmentText: { color: Colors.white, fontSize: 11, fontWeight: '700' },
 
   appointmentTime: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
   appointmentStatus: { fontSize: 13, color: Colors.textMuted, marginTop: 4 },
@@ -698,6 +762,8 @@ const styles = StyleSheet.create({
   rejectImagesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
   rejectThumbWrap: { width: 72, height: 72, borderRadius: BorderRadius.md, overflow: 'hidden' },
   rejectThumb: { width: '100%', height: '100%', backgroundColor: Colors.divider },
+  videoRejectTile: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A', gap: 2 },
+  videoRejectTileText: { color: Colors.white, fontSize: 10, fontWeight: '700' },
   rejectThumbRemove: {
     position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 10,
     backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',

@@ -126,6 +126,7 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   visitArrivalConfirmedAt: dto.visitArrivalConfirmedAt,
   repairAppointmentAt: dto.repairAppointmentAt,
   repairStartedAt: dto.repairStartedAt,
+  chargeInvoiceId: dto.chargeInvoiceId,
 });
 
 /** DTO -> MaintenanceTicket (manager model) */
@@ -181,6 +182,7 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   visitArrivalConfirmedAt: dto.visitArrivalConfirmedAt,
   repairAppointmentAt: dto.repairAppointmentAt,
   repairStartedAt: dto.repairStartedAt,
+  chargeInvoiceId: dto.chargeInvoiceId,
 });
 
 /**

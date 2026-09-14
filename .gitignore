@@ -33,9 +33,10 @@ android/app/build/
 .env.production
 .env.staging
 
-# Khoá Firebase/FCM — commit lên là lộ, phải tải lại từ Firebase Console
-google-services.json
-GoogleService-Info.plist
+# Khoá Firebase Admin SDK/FCM — commit lên là lộ, phải tải lại từ Firebase Console
+# (google-services.json/GoogleService-Info.plist KHÔNG che ở đây — EAS Build cloud chỉ
+# upload file đã git-track, thiếu file này thì build native fail; 2 file đó chỉ chứa
+# client config + 1 API key giới hạn theo package name, không phải bí mật như key dưới)
 *-firebase-adminsdk-*.json
 serviceAccountKey.json
 # Keystore ký app Android — mất là không cập nhật được app đã phát hành

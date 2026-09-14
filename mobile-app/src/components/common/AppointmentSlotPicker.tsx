@@ -50,10 +50,15 @@ export const AppointmentSlotPicker: React.FC<Props> = ({
     return () => { cancelled = true; };
   }, [date, propertyId, excludeRequestId]);
 
-  const isSlotDisabled = (t: string): boolean => {
+  const isSlotPast = (t: string): boolean => {
     const slotStart = toLocalDateTime(date, t);
-    if (!slotStart) return true;
-    if (slotStart.getTime() <= serverNow().getTime()) return true;
+    return !slotStart || slotStart.getTime() <= serverNow().getTime();
+  };
+
+  /** Khung giờ đã có người đặt — ẩn hẳn khỏi lưới, không chỉ làm mờ (khác slot quá khứ, vẫn hiện mờ). */
+  const isSlotBusy = (t: string): boolean => {
+    const slotStart = toLocalDateTime(date, t);
+    if (!slotStart) return false;
     const slotEnd = new Date(slotStart.getTime() + slotMinutes * 60000);
     return busySlots.some(b => {
       const bStart = new Date(b.start);
@@ -61,6 +66,8 @@ export const AppointmentSlotPicker: React.FC<Props> = ({
       return slotStart < bEnd && slotEnd > bStart;
     });
   };
+
+  const visibleSlotTimes = slotTimes.filter(t => !isSlotBusy(t));
 
   return (
     <View>
@@ -77,29 +84,33 @@ export const AppointmentSlotPicker: React.FC<Props> = ({
             {String(MAINTENANCE_BUSINESS_END_HOUR).padStart(2, '0')}:00
             {loading ? ' · đang tải khung giờ bận…' : ''}
           </Text>
-          <View style={styles.grid}>
-            {slotTimes.map((t) => {
-              const disabled = isSlotDisabled(t);
-              const active = time === t;
-              return (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.chip, active && styles.chipActive, disabled && styles.chipDisabled]}
-                  onPress={() => !disabled && onTimeChange(t)}
-                  disabled={disabled}
-                  activeOpacity={0.75}
-                >
-                  <Text style={[
-                    styles.chipText,
-                    active && styles.chipTextActive,
-                    disabled && styles.chipTextDisabled,
-                  ]}>
-                    {t}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          {visibleSlotTimes.length === 0 && !loading ? (
+            <Text style={styles.hint}>Ngày này đã kín lịch, vui lòng chọn ngày khác.</Text>
+          ) : (
+            <View style={styles.grid}>
+              {visibleSlotTimes.map((t) => {
+                const disabled = isSlotPast(t);
+                const active = time === t;
+                return (
+                  <TouchableOpacity
+                    key={t}
+                    style={[styles.chip, active && styles.chipActive, disabled && styles.chipDisabled]}
+                    onPress={() => !disabled && onTimeChange(t)}
+                    disabled={disabled}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[
+                      styles.chipText,
+                      active && styles.chipTextActive,
+                      disabled && styles.chipTextDisabled,
+                    ]}>
+                      {t}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </>
       )}
     </View>

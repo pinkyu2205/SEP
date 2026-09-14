@@ -6,3 +6,4 @@ export * from './meterPhoto';
 export * from './equipmentPhoto';
 export * from './contractStatus';
 export * from './roomPhoto';
+export * from './evidenceMediaPicker';
