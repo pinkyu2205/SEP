@@ -142,9 +142,16 @@ export interface Derived {
   /** capex = tiền thuê trả chủ + cải tạo + thiết bị */
   capexParts: { rent: number; renovation: number; equipment: number };
   capexMatches: boolean;
-  /** Hoàn vốn/tháng = capex ÷ số tháng hợp đồng */
+  /**
+   * Hoàn vốn/tháng. Có `capitalItems` thì = Σ "mỗi tháng" của từng khoản (mỗi khoản có lịch
+   * riêng); chưa có thì = capex ÷ số tháng như công thức cũ.
+   */
   recoveryMatches: boolean;
-  /** Chi phí nền/tháng = vận hành + hoàn vốn */
+  /** true = hoàn vốn/tháng được cộng từ bảng khoản vốn, không phải capex ÷ số tháng. */
+  recoveryFromItems: boolean;
+  /** Dự phòng sửa chữa sau bảo hành / tháng (0 nếu BE chưa trả). */
+  reserve: number;
+  /** Chi phí nền/tháng = vận hành + hoàn vốn + dự phòng sửa chữa */
   opexMatches: boolean;
   /** Doanh thu mục tiêu = (chi phí nền + lãi mong muốn) ÷ (1 − biên trống phòng) */
   targetMatches: boolean;
@@ -153,11 +160,19 @@ export interface Derived {
   vRatePct: number;
 }
 
-export const derive = (calc: PricingCalculationResponse): Derived => {
-  const rent = calc.cRent ?? 0;
-  const renovation = calc.cRenovation ?? 0;
-  const equipment = calc.cEquipment ?? 0;
+/**
+ * @param parts Tổng theo loại cộng từ `capitalItems` (xem capitalItems.ts). Truyền vào khi BE trả
+ *   bảng khoản vốn — lúc đó BE để `cRent/cRenovation/cEquipment` = 0 nên không đọc được từ đó nữa.
+ */
+export const derive = (
+  calc: PricingCalculationResponse,
+  parts?: { rent: number; renovation: number; equipment: number; monthly: number } | null,
+): Derived => {
+  const rent = parts ? parts.rent : calc.cRent ?? 0;
+  const renovation = parts ? parts.renovation : calc.cRenovation ?? 0;
+  const equipment = parts ? parts.equipment : calc.cEquipment ?? 0;
   const vRate = calc.vRate ?? 0;
+  const reserve = calc.repairReservePerMonth ?? 0;
 
   const profitPerMonth = calc.pDesired != null && calc.pDesired > 0
     ? calc.pDesired
@@ -165,14 +180,18 @@ export const derive = (calc: PricingCalculationResponse): Derived => {
       ? (calc.capex * calc.roiExpected) / 100 / 12
       : 0;
 
-  const recovery = calc.contractMonths > 0 ? calc.capex / calc.contractMonths : 0;
-  const opex = (calc.oOperation ?? 0) + calc.monthlyRecovery;
+  const recovery = parts
+    ? parts.monthly
+    : calc.contractMonths > 0 ? calc.capex / calc.contractMonths : 0;
+  const opex = (calc.oOperation ?? 0) + calc.monthlyRecovery + reserve;
   const target = vRate < 1 ? (calc.fixedOpex + profitPerMonth) / (1 - vRate) : 0;
 
   return {
     capexParts: { rent, renovation, equipment },
     capexMatches: verify(rent + renovation + equipment, calc.capex) && rent + renovation + equipment > 0,
     recoveryMatches: verify(recovery, calc.monthlyRecovery),
+    recoveryFromItems: !!parts,
+    reserve,
     opexMatches: verify(opex, calc.fixedOpex),
     targetMatches: verify(target, calc.revenueTarget),
     profitPerMonth,

@@ -378,7 +378,61 @@ export interface BillLine {
    * thấy hụt một dòng so với sổ hoá đơn, nhưng KHÔNG cộng vào tổng (xem `addInvoice`).
    */
   envelope?: boolean;
+  /**
+   * Tiền nhà kỳ đầu đã thu CHUNG một lần với cọc (cùng mã giao dịch với phiếu `HD-ONBOARD-*`).
+   * Là doanh thu thật, vẫn cộng vào tổng — cờ này chỉ để nói rõ đây không phải khoản thu thêm.
+   */
+  collectedAtOnboard?: boolean;
+  /** Mã phiếu gộp đã thu khoản này (chỉ có khi `collectedAtOnboard`). */
+  collectedInInvoiceCode?: string;
 }
+
+/**
+ * Một lần khách trả tiền lúc nhận phòng: phiếu gộp `HD-ONBOARD-*` + các hoá đơn tiền nhà kỳ đầu
+ * đã thu chung trong đó. Phần còn lại của phiếu gộp là tiền cọc.
+ */
+export interface OnboardPayment<T> {
+  envelope: T;
+  rents: T[];
+  /** = tiền phiếu gộp − tiền nhà kỳ đầu. `null` khi không thấy dòng tiền nhà để trừ (không đoán). */
+  deposit: number | null;
+}
+
+export type PaymentEntry<T> =
+  | { kind: 'onboard'; payment: OnboardPayment<T> }
+  | { kind: 'single'; item: T };
+
+/**
+ * Gom phiếu gộp lúc nhận phòng với tiền nhà kỳ đầu của nó thành MỘT mục.
+ *
+ * Vì sao: BE ghi một lần khách trả 6tr thành 2 hoá đơn — phiếu gộp 6tr (cọc 4tr + tiền nhà 2tr) và
+ * hoá đơn "Tiền nhà" 2tr (cùng mã giao dịch). Liệt kê ngang hàng thì người đọc cộng ra 8tr. Gom lại:
+ * một mục 6tr, bên trong tách cọc 4tr + tiền nhà 2tr. Hoá đơn tiền nhà chỉ bị gom khi phiếu gộp của
+ * nó nằm trong cùng danh sách — không thì vẫn hiện riêng như thường.
+ */
+export const groupOnboardPayments = <T extends { code: string; amount: number }>(
+  list: T[],
+  isEnvelope: (t: T) => boolean,
+  parentCodeOf: (t: T) => string | undefined,
+): PaymentEntry<T>[] => {
+  const envelopeCodes = new Set(list.filter(isEnvelope).map(t => t.code));
+  const out: PaymentEntry<T>[] = [];
+  for (const t of list) {
+    const parent = parentCodeOf(t);
+    if (parent && envelopeCodes.has(parent)) continue;
+    if (isEnvelope(t)) {
+      const rents = list.filter(x => parentCodeOf(x) === t.code);
+      const rentSum = rents.reduce((s, x) => s + x.amount, 0);
+      out.push({
+        kind: 'onboard',
+        payment: { envelope: t, rents, deposit: rents.length > 0 ? Math.max(0, t.amount - rentSum) : null },
+      });
+    } else {
+      out.push({ kind: 'single', item: t });
+    }
+  }
+  return out;
+};
 
 /** Thứ tự + nhãn của các loại khoản thu, dùng chung mọi nơi hiển thị. */
 export const INVOICE_TYPE_META: Record<AdminInvoiceType, { label: string; icon: string }> = {
@@ -434,6 +488,8 @@ export const loadPropertyBills = async (
         roomNumber: r.roomNumber, tenantName: r.tenantName,
         amount: r.amount, status: r.status, dueDate: r.dueDate,
         envelope: r.isOnboardEnvelope,
+        collectedAtOnboard: r.collectedAtOnboard,
+        collectedInInvoiceCode: r.collectedInInvoiceCode,
       });
     }
     return { source: 'full', byRoom, byType, house, lines: sortLines(lines), total };

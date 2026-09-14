@@ -82,6 +82,8 @@ async function postExcel(
   dryRun: boolean,
   /** Chỉ áp dụng cho endpoint hợp đồng nháp — bỏ qua dòng lỗi, import phần sạch. */
   skipInvalidRows?: boolean,
+  /** Tham số query riêng của từng endpoint (vd `propertyId` của file cải tạo bổ sung). */
+  extraParams?: Record<string, string>,
 ): Promise<BulkImportResponse> {
   const form = new FormData();
   form.append('file', file);
@@ -90,7 +92,7 @@ async function postExcel(
 
   let res: Response;
   try {
-    const query = new URLSearchParams({ dryRun: String(dryRun) });
+    const query = new URLSearchParams({ dryRun: String(dryRun), ...extraParams });
     if (skipInvalidRows) query.set('skipInvalidRows', 'true');
     res = await fetch(`${API_BASE}${endpoint}?${query}`, {
       method: 'POST',
@@ -161,14 +163,17 @@ export const importService = {
   },
 
   /**
-   * POST /api/v1/import/renovation-supplement-excel?dryRun=... — Cải tạo bổ sung (session v2+).
+   * POST /api/v1/import/renovation-supplement-excel?propertyId=...&dryRun=... — Cải tạo bổ sung (session v2+).
    * Tiên quyết: nhà đã ACTIVE và đã gọi POST /properties/{id}/renovation/start (mở session mới).
    * Import xong: completeRenovation + tính lại giá + submit-to-host → PENDING_HOST_REVIEW
    * (đổi chi phí/thiết bị nên host duyệt lại giá); manifest TB mua cộng dồn.
+   *
+   * `propertyId` BẮT BUỘC (BE c2848dd, 14/09/2026): cải tạo bổ sung làm theo từng nhà, BE từ chối dòng
+   * có mã HĐ không thuộc nhà này. Thiếu tham số thì Spring trả 400 ngay.
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
-  importRenovationSupplementExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
-    return postExcel(RENOVATION_SUPPLEMENT_ENDPOINT, file, dryRun);
+  importRenovationSupplementExcel(file: File, dryRun: boolean, propertyId: number): Promise<BulkImportResponse> {
+    return postExcel(RENOVATION_SUPPLEMENT_ENDPOINT, file, dryRun, false, { propertyId: String(propertyId) });
   },
 
   /**

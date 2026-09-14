@@ -1,28 +1,60 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import {
   AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning,
   Hammer, Loader2, Upload, X,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '@/services/import.service';
-import type { BulkImportError, BulkImportResponse } from '@/types/api.types';
+import { propertyService } from '@/services/property.service';
+import type { BulkImportError, BulkImportResponse, PropertyResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { normalizeVi } from '@/utils/helpers';
 
 const TEMPLATE_URL = '/templates/SLMS2026_import_matrix_cai_tao_bo_sung.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
+
+/** Tên sheet + cột mã HĐ — khớp `ExcelRenovationSupplementWorkbookReader` của BE. */
+const DATA_SHEETS = ['1. Hop_Dong_Cai_Tao', '2. Thiet_Bi_Mua_Moi'];
+const CONTRACT_HEADER = normalizeVi('Mã hợp đồng thuê');
 
 type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
 
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
+interface FileContractRow { sheet: string; row: number; code: string }
+
+/** Đọc mã HĐ của mọi dòng dữ liệu ở 2 sheet — chạy trên trình duyệt, chưa gửi đi đâu. */
+const readContractRows = async (f: File): Promise<FileContractRow[]> => {
+  const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
+  const out: FileContractRow[] = [];
+  for (const name of DATA_SHEETS) {
+    const ws = wb.Sheets[name];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '', raw: false });
+    const col = (rows[0] ?? []).findIndex((h) => normalizeVi(String(h).trim()) === CONTRACT_HEADER);
+    if (col < 0) continue;
+    rows.slice(1).forEach((r, i) => {
+      const code = String(r[col] ?? '').trim();
+      if (code) out.push({ sheet: name, row: i + 2, code });
+    });
+  }
+  return out;
+};
+
 /**
  * Import cải tạo bổ sung (session v2+) — POST /import/renovation-supplement-excel.
  * Tiên quyết: đã gọi renovation/start (nhà đang UNDER_RENOVATION). Nhập xong → BE tính lại giá +
  * gửi Host duyệt lại → PENDING_HOST_REVIEW (vì cải tạo bổ sung đổi chi phí/thiết bị nên cần host duyệt giá mới).
  * File gồm hợp đồng cải tạo (sheet 1) + thiết bị mua mới (sheet 2, có Hành động THEM_MOI/THAY_THE).
+ *
+ * ⚠️ CHỈ CHO NHÀ ĐANG MỞ. Cải tạo bổ sung làm theo từng nhà (bấm "Bắt đầu cải tạo lại" ở nhà nào thì
+ * cải tạo nhà đó). BE nay nhận `propertyId` và tự từ chối dòng của nhà khác (c2848dd), nhưng lỗi trả về
+ * là bảng lỗi từng dòng khó hiểu. Nên vẫn đọc file ngay trên trình duyệt, có dòng mã HĐ khác mã của nhà
+ * này là chặn trước khi gửi, kèm câu giải thích rõ ràng.
  */
-export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
+export const SupplementImportPanel = ({ property, onDone }: { property: PropertyResponse; onDone?: () => void }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -31,24 +63,56 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
   const [errors, setErrors] = useState<BulkImportError[]>([]);
   const [errorMessage, setErrorMessage] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** Mã HĐ chủ nhà của nhà đang mở — `undefined` = đang tải, `null` = không tra được. */
+  const [contractCode, setContractCode] = useState<string | null | undefined>(undefined);
+  /** Mã HĐ đọc từ file — `null` = chưa đọc / đọc không được (để BE tự kiểm). */
+  const [fileRows, setFileRows] = useState<FileContractRow[] | null>(null);
+  const [readingFile, setReadingFile] = useState(false);
 
-  const pickFile = (f: File | null | undefined) => {
+  useEffect(() => {
+    let alive = true;
+    setContractCode(undefined);
+    propertyService.getInboundContract(property.id)
+      .then((c) => { if (alive) setContractCode(c?.contractCode?.trim() || null); })
+      .catch(() => { if (alive) setContractCode(null); });
+    return () => { alive = false; };
+  }, [property.id]);
+
+  const sameCode = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase();
+  const foreignRows = contractCode && fileRows ? fileRows.filter((r) => !sameCode(r.code, contractCode)) : [];
+  const ownRowCount = contractCode && fileRows ? fileRows.length - foreignRows.length : 0;
+  const foreignCodes = [...new Set(foreignRows.map((r) => r.code))];
+  /** Chặn gửi file: có dòng của nhà khác, hoặc không có dòng nào của nhà này. */
+  const scopeBlocked = !!contractCode && !!fileRows && (foreignRows.length > 0 || ownRowCount === 0);
+
+  const pickFile = async (f: File | null | undefined) => {
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
     setFile(f); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
+    setFileRows(null);
+    setReadingFile(true);
+    try {
+      setFileRows(await readContractRows(f));
+    } catch {
+      // Đọc không được thì để BE kiểm như cũ — không chặn nhầm vì lỗi đọc phía trình duyệt.
+      setFileRows(null);
+    } finally {
+      setReadingFile(false);
+    }
   };
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
+    setFileRows(null);
     if (inputRef.current) inputRef.current.value = '';
   };
 
   const run = async (dryRun: boolean) => {
-    if (!file) return;
+    if (!file || scopeBlocked) return;
     setPhase(dryRun ? 'validating' : 'importing');
     setErrors([]); setErrorMessage('');
     try {
-      const res = await importService.importRenovationSupplementExcel(file, dryRun);
+      const res = await importService.importRenovationSupplementExcel(file, dryRun, property.id);
       setResult(res);
       if (dryRun) {
         setPhase('validated');
@@ -70,7 +134,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
     }
   };
 
-  const busy = phase === 'validating' || phase === 'importing';
+  const busy = phase === 'validating' || phase === 'importing' || readingFile;
   const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0 && !errorMessage;
 
   if (phase === 'done' && result) {
@@ -97,6 +161,10 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
           <p className="mt-1 max-w-xl text-sm text-slate-500">
             File gồm hợp đồng cải tạo và thiết bị mua mới (THÊM_MỚI / THAY_THẾ). Nhập xong, hệ thống
             <b className="text-slate-600"> tự động gửi Host duyệt lại giá</b> (vì đổi chi phí/thiết bị).
+          </p>
+          <p className="mt-1 max-w-xl text-xs text-slate-500">
+            Chỉ nhập cho <b className="text-slate-700">{property.propertyName}</b>
+            {contractCode && <> — mọi dòng phải có mã HĐ <span className="font-mono font-semibold text-slate-700">{contractCode}</span></>}.
           </p>
         </div>
         <a href={TEMPLATE_URL} download
@@ -139,6 +207,57 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
           </div>
         )}
 
+        {readingFile && (
+          <p className="mt-4 flex items-center gap-2 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" /> Đang đọc file...
+          </p>
+        )}
+
+        {scopeBlocked && foreignRows.length > 0 && (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <p className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              File có {foreignRows.length} dòng của nhà khác — mỗi lần chỉ nhập cho nhà đang mở
+            </p>
+            <p className="mt-1 text-xs leading-relaxed">
+              Nhà này có mã HĐ <span className="font-mono font-semibold">{contractCode}</span>, nhưng file còn chứa{' '}
+              {foreignCodes.map((c, i) => (
+                <span key={c}>{i > 0 && ', '}<span className="font-mono font-semibold">{c}</span></span>
+              ))}. Tách file theo từng nhà hoặc xoá các dòng đó rồi chọn lại.
+              {ownRowCount > 0 && ` (${ownRowCount} dòng còn lại đúng là của nhà này.)`}
+            </p>
+            <div className="mt-2 max-h-48 overflow-auto rounded-lg border border-rose-200 bg-white">
+              <table className="w-full text-xs">
+                <thead className="bg-rose-50 text-left font-semibold uppercase tracking-wide text-rose-500">
+                  <tr><th className="px-3 py-1.5">Sheet</th><th className="px-3 py-1.5">Dòng</th><th className="px-3 py-1.5">Mã HĐ</th></tr>
+                </thead>
+                <tbody>
+                  {foreignRows.map((r) => (
+                    <tr key={`${r.sheet}-${r.row}`} className="border-t border-rose-100">
+                      <td className="px-3 py-1.5 font-mono text-slate-500">{r.sheet}</td>
+                      <td className="px-3 py-1.5 font-semibold text-slate-700">{r.row}</td>
+                      <td className="px-3 py-1.5 font-mono text-rose-600">{r.code}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {scopeBlocked && foreignRows.length === 0 && (
+          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
+            <FileWarning className="mt-0.5 h-4 w-4 shrink-0" />
+            File không có dòng cải tạo hay thiết bị nào mang mã HĐ {contractCode} của nhà này.
+          </div>
+        )}
+
+        {contractCode === null && file && (
+          <p className="mt-4 text-xs text-amber-600">
+            Không tra được mã HĐ của nhà này nên chưa kiểm được file có lẫn nhà khác không — máy chủ vẫn sẽ kiểm khi nhập.
+          </p>
+        )}
+
         {errorMessage && (
           <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
             <FileWarning className="mt-0.5 h-4 w-4 shrink-0" /> {errorMessage}
@@ -176,7 +295,7 @@ export const SupplementImportPanel = ({ onDone }: { onDone?: () => void }) => {
               <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {result!.renovationLinesImported} dòng cải tạo · {result!.equipmentRowsImported} thiết bị
             </p>
           )}
-          <button onClick={() => run(true)} disabled={!file || busy}
+          <button onClick={() => run(true)} disabled={!file || busy || scopeBlocked}
             className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition">
             {phase === 'validating'
               ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra...</>
