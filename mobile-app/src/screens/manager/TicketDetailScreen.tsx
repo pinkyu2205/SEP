@@ -7,42 +7,54 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import QRCode from 'react-native-qrcode-svg';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, TicketCategory, TicketPriority, PhotoEvidence, TimelineEntry,
+  FaultResolutionPath,
 } from '@/store/maintenanceStore';
 import type { MaintenanceReqCategory, MaintenanceReqPriority, EquipmentDto } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { realEquipmentService } from '@/services/manager/equipmentService';
+import { realTenantService } from '@/services/tenant/tenantService';
+import { uploadImageToCloudinary } from '@/services/core/cloudinary';
+import { parseMaintenanceInvoice } from '@/utils/maintenanceInvoiceParser';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { MaintenanceProgressTimeline } from '../../components/common/MaintenanceProgressTimeline';
 import { MaintenancePhotoHistory } from '../../components/common/MaintenancePhotoHistory';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
+import { VideoPreviewModal } from '../../components/common/VideoPreviewModal';
 import { EquipmentQrScanModal } from '../../components/common/EquipmentQrScanModal';
 import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
-import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
-import { showAlert, formatDateTime } from '@/utils';
+import { useMaintenanceRealtime, useBillingRealtime } from '@/hooks/useBillingRealtime';
+import {
+  showAlert, formatDateTime, isVideoUrl, formatDurationLabel, remainingEvidenceSlots,
+  pickEvidenceFromCamera, pickEvidenceFromLibrary, EVIDENCE_MAX_FILES, type EvidenceAsset,
+} from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
 import { toLocalDateTime, toApiDateTime, isBeforeAppointmentDay } from '@/utils/maintenanceAppointment';
 import {
   MAINTENANCE_STATUS_META, StatusMeta, MAINTENANCE_BILLING_HINT_META,
   EQUIPMENT_REPLACE_SUGGEST_COUNT, MAINTENANCE_REPAIR_SLOT_MINUTES,
+  MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS,
 } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
 /**
- * TẠM ẨN (05/09/2026) — Luồng B (lỗi do khách) đang bị chặn ở khâu report-fault/
- * admin-review chưa hỗ trợ đặt lịch sửa như Luồng A (xem
- * docs/maintenance-appointment-implementation-spec.md). Ẩn nút để manager không tạo
- * thêm phiếu TENANT_FAULT trong lúc chờ xin BE mở rộng report-fault/admin-review.
- * Bật lại: đổi thành true (đồng thời hiện lại nút "Xem xét & duyệt" phía
- * frontend-web/src/pages/admin/MaintenanceFaultReview.tsx).
+ * BẬT LẠI (15/09/2026) — chuyển hẳn nút "Báo lỗi do khách" sang luồng reject-fault CŨ
+ * (manager quyết định lỗi + hướng xử lý ngay tại chỗ), khớp yêu cầu BE mới: lỗi do
+ * tenant PHẢI thanh toán TRƯỚC khi sửa/bàn giao (không phải sau như report-fault/
+ * admin-review) — xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
+ * submitRejectFault() đổi hẳn từ reportFault() (luồng admin-duyệt-sau, tạm ẩn cùng cờ
+ * này từ 01/09) sang rejectFault() (luồng cũ, giờ nối thêm chargeBeforeRepair()/
+ * handover() cho hai nhánh sửa-tại-chỗ và mang-đi-kiểm-tra-thêm — xem khối "Ai chịu
+ * phí" mới ở dưới và màn REPAIR_SCHEDULED off-site).
  */
-const TENANT_FAULT_FLOW_ENABLED = false;
+const TENANT_FAULT_FLOW_ENABLED = true;
 
 /**
  * Quét QR xác nhận có mặt rồi mà quá 30' chưa nộp bước tiếp theo (duyệt/báo lỗi do
@@ -130,6 +142,13 @@ const isUnderWarranty = (eq: EquipmentDto | null): boolean => {
   return !Number.isNaN(end) && serverNow().getTime() < end;
 };
 
+/** Gợi ý mặc định hạn tự sửa = hôm nay + N ngày (YYYY-MM-DD, giờ server). */
+const addDaysIso = (days: number): string => {
+  const d = serverNow();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
 const daysLeft = (deadline?: string): number | null => {
   if (!deadline) return null;
   const end = new Date(deadline).getTime();
@@ -150,38 +169,48 @@ const PHOTO_KIND_META: Record<PhotoKind, { label: string; color: string; icon: s
 
 const PhotoEvidenceRow: React.FC<{
   type: PhotoKind;
-  /** ảnh đã có trên server (URL) */
+  /** ảnh/video đã có trên server (URL) */
   urls?: string[];
-  /** ảnh local vừa chụp/chọn (chưa hoặc đang upload) */
+  /** ảnh/video local vừa chụp/chọn (chưa hoặc đang upload) */
   photos: PhotoEvidence[];
   onAdd: () => void;
   disabled?: boolean;
-  /** Bấm vào 1 ảnh (server hoặc local) để xem toàn màn hình. */
+  /** Bấm vào 1 ẢNH (server hoặc local) để xem toàn màn hình. */
   onView?: (uris: string[], index: number) => void;
+  /** Bấm vào 1 VIDEO đã upload (có URL thật) để phát trong VideoPreviewModal — video
+   * local chưa upload chỉ có tile placeholder, không gọi callback này. */
+  onViewVideo?: (url: string) => void;
   /**
-   * Xoá 1 ảnh LOCAL (chưa/đang upload hoặc upload lỗi) để chụp/chọn lại — CHỈ áp dụng
-   * ảnh local, KHÔNG áp dụng ảnh đã lên server (`urls`): BE chưa có endpoint xoá ảnh đã
-   * lưu — nay BE ĐÃ có `DELETE /{id}/photos` (07/09/2026), xem `onRemoveServer`.
+   * Xoá 1 ảnh/video LOCAL (chưa/đang upload hoặc upload lỗi) để chụp/chọn lại — CHỈ áp
+   * dụng đồ local, KHÔNG áp dụng đồ đã lên server (`urls`): BE chưa có endpoint xoá ảnh
+   * đã lưu — nay BE ĐÃ có `DELETE /{id}/photos` (07/09/2026), xem `onRemoveServer`.
    */
   onRemoveLocal?: (localId: string) => void;
   /**
-   * Xoá 1 ảnh ĐÃ lên server (url nằm trong `urls`, không phải `photos` local) — chỉ
-   * truyền prop này ở những chỗ được phép đổi ảnh (phiếu còn mở, đúng loại ảnh).
+   * Xoá 1 ảnh/video ĐÃ lên server (url nằm trong `urls`, không phải `photos` local) —
+   * chỉ truyền prop này ở những chỗ được phép đổi ảnh (phiếu còn mở, đúng loại).
    */
   onRemoveServer?: (url: string) => void;
-}> = ({ type, urls = [], photos, onAdd, disabled, onView, onRemoveLocal, onRemoveServer }) => {
+  /** INVOICE bắt buộc ảnh thật (đầu vào OCR đọc số tiền hoá đơn) — không cho chọn video,
+   * chỉ đổi nhãn nút "+ Thêm ảnh" (việc chặn thật sự nằm ở nơi gọi picker). @default true */
+  allowVideo?: boolean;
+}> = ({ type, urls = [], photos, onAdd, disabled, onView, onViewVideo, onRemoveLocal, onRemoveServer, allowVideo = true }) => {
   const filtered = photos.filter(p => p.type === type);
   const meta     = PHOTO_KIND_META[type];
   const isEmpty  = urls.length === 0 && filtered.length === 0;
   const allUris  = [...urls, ...filtered.map(p => p.uri).filter((u): u is string => !!u)];
+  const atLimit  = urls.length + filtered.length >= EVIDENCE_MAX_FILES;
   return (
     <View style={phs.container}>
       <View style={phs.header}>
         <Text style={phs.label}>{meta.label}</Text>
-        {!disabled && (
+        {!disabled && !atLimit && (
           <TouchableOpacity style={[phs.addBtn, { borderColor: meta.color }]} onPress={onAdd}>
-            <Text style={[phs.addBtnText, { color: meta.color }]}>+ Thêm ảnh</Text>
+            <Text style={[phs.addBtnText, { color: meta.color }]}>+ Thêm {allowVideo ? 'ảnh/video' : 'ảnh'}</Text>
           </TouchableOpacity>
+        )}
+        {!disabled && atLimit && (
+          <Text style={phs.limitText}>Đã đủ {EVIDENCE_MAX_FILES} — xoá bớt để thêm mới</Text>
         )}
       </View>
       {isEmpty ? (
@@ -191,42 +220,64 @@ const PhotoEvidenceRow: React.FC<{
         </View>
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={phs.scrollRow}>
-          {urls.map((uri, i) => (
-            <TouchableOpacity key={`url-${i}`} activeOpacity={0.85}
-              style={[phs.photoCard, { borderColor: meta.color + '50' }]}
-              onPress={() => onView?.(allUris, i)}
-            >
-              <Image source={{ uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
-              {onRemoveServer && (
-                <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveServer(uri)}>
-                  <Text style={phs.photoRemoveBtnText}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </TouchableOpacity>
-          ))}
-          {filtered.map((photo, i) => (
-            <TouchableOpacity key={photo.id} activeOpacity={0.85}
-              style={[phs.photoCard, { borderColor: meta.color + '50' }]}
-              // Đừng cộng urls.length + i làm chỉ số: nếu có ảnh local nào trước đó
-              // thiếu uri (đang chờ đọc file) thì allUris ngắn hơn filtered, cộng dồn
-              // sẽ lệch chỉ số/mở nhầm ảnh — tìm đúng vị trí thật bằng indexOf.
-              onPress={() => photo.uri && onView?.(allUris, allUris.indexOf(photo.uri))}
-            >
-              {photo.uri ? (
-                <Image source={{ uri: photo.uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
-              ) : (
-                <View style={[phs.photoPlaceholder, { backgroundColor: meta.color + '15' }]}>
-                  <Text style={phs.photoPlaceholderIcon}>{meta.icon}</Text>
-                </View>
-              )}
-              <Text style={phs.photoDate}>{photo.capturedAt.split(' ')[0]}</Text>
-              {onRemoveLocal && (
-                <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveLocal(photo.id)}>
-                  <Text style={phs.photoRemoveBtnText}>✕</Text>
-                </TouchableOpacity>
-              )}
-            </TouchableOpacity>
-          ))}
+          {urls.map((uri, i) => {
+            const isVideo = isVideoUrl(uri);
+            return (
+              <TouchableOpacity key={`url-${i}`} activeOpacity={0.85}
+                style={[phs.photoCard, { borderColor: meta.color + '50' }]}
+                onPress={() => isVideo ? onViewVideo?.(uri) : onView?.(allUris, i)}
+              >
+                {isVideo ? (
+                  <View style={[phs.photoPlaceholder, phs.videoTile, { width: '100%' }]}>
+                    <Text style={{ fontSize: 22 }}>🎬</Text>
+                    <Text style={phs.videoPlayHint}>▶ Xem video</Text>
+                  </View>
+                ) : (
+                  <Image source={{ uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
+                )}
+                {onRemoveServer && (
+                  <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveServer(uri)}>
+                    <Text style={phs.photoRemoveBtnText}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          {filtered.map((photo, i) => {
+            const isVideo = photo.mediaType === 'video';
+            return (
+              <TouchableOpacity key={photo.id} activeOpacity={0.85}
+                style={[phs.photoCard, { borderColor: meta.color + '50' }]}
+                // Đừng cộng urls.length + i làm chỉ số: nếu có ảnh local nào trước đó
+                // thiếu uri (đang chờ đọc file) thì allUris ngắn hơn filtered, cộng dồn
+                // sẽ lệch chỉ số/mở nhầm ảnh — tìm đúng vị trí thật bằng indexOf.
+                onPress={() => {
+                  // Video local CHƯA upload — chưa có gì thật để phát, chỉ là placeholder.
+                  if (isVideo) return;
+                  if (photo.uri) onView?.(allUris, allUris.indexOf(photo.uri));
+                }}
+              >
+                {isVideo ? (
+                  <View style={[phs.photoPlaceholder, { backgroundColor: meta.color + '15' }]}>
+                    <Text style={phs.photoPlaceholderIcon}>🎬</Text>
+                    <Text style={phs.videoDurationText}>{formatDurationLabel(photo.durationMs)}</Text>
+                  </View>
+                ) : photo.uri ? (
+                  <Image source={{ uri: photo.uri }} style={[phs.photoPlaceholder, { width: '100%' }]} />
+                ) : (
+                  <View style={[phs.photoPlaceholder, { backgroundColor: meta.color + '15' }]}>
+                    <Text style={phs.photoPlaceholderIcon}>{meta.icon}</Text>
+                  </View>
+                )}
+                <Text style={phs.photoDate}>{photo.capturedAt.split(' ')[0]}</Text>
+                {onRemoveLocal && (
+                  <TouchableOpacity style={phs.photoRemoveBtn} onPress={() => onRemoveLocal(photo.id)}>
+                    <Text style={phs.photoRemoveBtnText}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -252,6 +303,10 @@ const phs = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.7)', alignItems: 'center', justifyContent: 'center',
   },
   photoRemoveBtnText: { color: Colors.white, fontSize: 10, fontWeight: '900' },
+  limitText:            { fontSize: 10, color: Colors.textMuted, fontStyle: 'italic', maxWidth: 160, textAlign: 'right' },
+  videoTile:            { backgroundColor: '#0F172A', gap: 2 },
+  videoPlayHint:        { color: Colors.white, fontSize: 10, fontWeight: '700' },
+  videoDurationText:    { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, marginTop: 2 },
 });
 
 // ── Screen ──────────────────────────────────────────────────────────────────
@@ -296,6 +351,15 @@ export const TicketDetailScreen: React.FC = () => {
     onRefresh: () => { void refreshReal(); },
   });
 
+  // Phát hiện khách vừa thanh toán hoá đơn thiệt hại (chargeBeforeRepair, 15/09/2026) —
+  // event billing riêng (không phải maintenance), không có requestId, phải đối chiếu qua
+  // invoiceId === chargeInvoiceId (xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md).
+  useBillingRealtime({
+    enabled: isRealId && !!ticket?.chargeInvoiceId,
+    filter: e => e.event === 'INVOICE_PAID' && e.invoiceId === ticket?.chargeInvoiceId,
+    onRefresh: () => { void refreshReal(); },
+  });
+
   const [noteInput, setNoteInput] = useState('');
   const [photos,    setPhotos]    = useState<PhotoEvidence[]>(ticket?.photos || []);
   const [busy,      setBusy]      = useState(false);
@@ -303,6 +367,8 @@ export const TicketDetailScreen: React.FC = () => {
   const [cameraFor, setCameraFor] = useState<PhotoKind | null>(null);
   const [photoMenuFor, setPhotoMenuFor] = useState<PhotoKind | null>(null);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  /** Video ĐÃ upload (URL thật) đang xem trong VideoPreviewModal — null = đóng. */
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   // Manager BẮT BUỘC gán category khi duyệt (Luồng A), priority tùy chọn. Tenant có thể
   // đã tự chọn category lúc tạo (báo hỏng không gắn thiết bị) — prefill sẵn, đổi được.
   const [approveCategory, setApproveCategory] = useState<TicketCategory | null>(ticket?.category ?? null);
@@ -326,10 +392,18 @@ export const TicketDetailScreen: React.FC = () => {
     setApproveCategory(c => c ?? 'appliance');
   }, [realTicket, realEquipmentId]);
 
-  // ── Luồng B: report-fault (lỗi do khách) — 01/09/2026: chỉ mô tả + ảnh bằng
-  // chứng, không còn chọn "Hướng xử lý" — gửi thẳng cho admin duyệt trên web.
+  // ── Luồng B: reject-fault (lỗi do khách, manager quyết định ngay tại chỗ) —
+  // BẬT LẠI 15/09/2026 cùng thanh-toán-trước-khi-sửa (xem TENANT_FAULT_FLOW_ENABLED).
   const [faultFormOpen,   setFaultFormOpen]   = useState(false);
   const [faultReason,     setFaultReason]     = useState('');
+  const [resolutionPath,  setResolutionPath]  = useState<FaultResolutionPath>('manager_repair');
+  const [selfRepairDeadlineText, setSelfRepairDeadlineText] = useState(addDaysIso(MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS));
+  const [estimatedAmountText,    setEstimatedAmountText]    = useState('');
+  // Chỉ có ý nghĩa khi resolutionPath=manager_repair — thiết bị phải mang đi kiểm tra
+  // thêm ngoài hiện trường, chưa biết ngày bàn giao thật (BE để repairAppointmentAt
+  // trống, REPAIR_SCHEDULED chờ đặt lịch sau qua rescheduleRepair — xem màn off-site
+  // bên dưới, nhánh `ticket.status === 'repair_scheduled'`).
+  const [needsOffSiteInspection, setNeedsOffSiteInspection] = useState(false);
   const [rejectingFault, setRejectingFault] = useState(false);
 
   const submitRejectFault = async () => {
@@ -339,13 +413,52 @@ export const TicketDetailScreen: React.FC = () => {
     if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
     const evidenceUrls = ticket?.faultEvidenceImages ?? [];
     if (evidenceUrls.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh bằng chứng lỗi.'); return; }
+
+    let selfRepairDeadline: string | undefined;
+    let estimatedDamageAmount: number | undefined;
+    if (resolutionPath === 'tenant_self_repair') {
+      if (!selfRepairDeadlineText.trim()) { showAlert('Thiếu hạn', 'Vui lòng nhập hạn tự sửa.'); return; }
+      const amount = Number(estimatedAmountText.replace(/[^0-9]/g, ''));
+      if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu số tiền', 'Vui lòng nhập số tiền thiệt hại ước tính (> 0).'); return; }
+      selfRepairDeadline = selfRepairDeadlineText.trim();
+      estimatedDamageAmount = amount;
+    } else if (needsReplacement) {
+      // Thiết bị hỏng hoàn toàn — số đền bù LUÔN tự tính (xem computeAutoDamageAmount),
+      // phải gửi kèm NGAY LÚC NÀY: chargeBeforeRepair() sau này không có field riêng cho
+      // số này, chỉ đọc lại đúng estimatedDamageAmount đã lưu trên phiếu (xem BE
+      // resolveMaintenanceChargeAmount) — không gửi ở đây thì sau không có cách bù lại.
+      if (!rejectFaultAutoDamageAmount || rejectFaultAutoDamageAmount <= 0) {
+        showAlert(
+          'Thiếu dữ liệu thiết bị',
+          'Thiết bị chưa có dữ liệu giá + ngày bảo hành, cũng chưa có mức phạt cố định (penaltyFee) để tự tính số tiền đền bù — không thể đánh dấu thay mới cho thiết bị này.',
+        );
+        return;
+      }
+      estimatedDamageAmount = rejectFaultAutoDamageAmount;
+    }
     try {
       setRejectingFault(true);
-      await realMaintenanceService.reportFault(idNum, { faultReason: reason, faultEvidenceImages: evidenceUrls });
+      await realMaintenanceService.rejectFault(idNum, {
+        faultReason: reason,
+        faultEvidenceImages: evidenceUrls,
+        resolutionPath: resolutionPath === 'manager_repair' ? 'MANAGER_REPAIR' : 'TENANT_SELF_REPAIR',
+        selfRepairDeadline,
+        estimatedDamageAmount,
+        needsOffSiteInspection: resolutionPath === 'manager_repair' ? needsOffSiteInspection : undefined,
+      });
       await refreshReal();
-      setFaultFormOpen(false); setFaultReason('');
-      showAlert('📨 Đã gửi admin duyệt', 'Quản trị viên sẽ xem xét mô tả và ảnh bằng chứng, việc sửa/thu tiền tiếp theo xử lý ngoài hệ thống.');
-    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể gửi báo cáo. Vui lòng thử lại.')); }
+      setFaultFormOpen(false); setFaultReason(''); setNeedsOffSiteInspection(false);
+      showAlert(
+        resolutionPath === 'manager_repair'
+          ? (needsOffSiteInspection ? '📦 Đã ghi nhận — mang thiết bị đi kiểm tra thêm' : '🔧 Đã ghi nhận lỗi khách')
+          : '🛠 Đã giao khách tự sửa',
+        resolutionPath === 'manager_repair'
+          ? (needsOffSiteInspection
+            ? 'Khi có kết quả, lập hoá đơn thiệt hại rồi đặt lịch bàn giao cho khách thanh toán trước.'
+            : 'Lập hoá đơn thiệt hại để khách thanh toán trước khi sửa — hệ thống sẽ chặn "Báo sửa xong" cho tới khi thanh toán xong.')
+          : `Khách có tới ${selfRepairDeadlineText} để tự sửa và nộp ảnh.`,
+      );
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận. Vui lòng thử lại.')); }
     finally { setRejectingFault(false); }
   };
 
@@ -353,6 +466,9 @@ export const TicketDetailScreen: React.FC = () => {
   // Chỉ còn ảnh + số tiền trên UI — vendor/date/mô tả tự điền ngầm (BE vẫn bắt buộc
   // non-blank) từ ô "Ghi chú" dùng chung, không hỏi lại manager.
   const [invoiceAmountText, setInvoiceAmountText] = useState('');
+  // OCR ảnh hoá đơn (best-effort, xem runInvoiceOcr) — chỉ để hiện loading nhỏ, không
+  // chặn gì cả: lỗi/không đọc được thì ô tiền vẫn để trống như luồng nhập tay cũ.
+  const [invoiceOcrLoading, setInvoiceOcrLoading] = useState(false);
   // "Ai chịu phí" (06/09/2026) — chỉ có ý nghĩa chọn ở Luồng A (IN_REPAIR); Luồng B
   // (TENANT_FAULT + MANAGER_REPAIR) BE luôn tự thu bất kể field này, không cần hỏi lại.
   const [chargeToTenant, setChargeToTenant] = useState(false);
@@ -366,6 +482,82 @@ export const TicketDetailScreen: React.FC = () => {
       .catch(() => { /* không tải được → autoDamageAmount ra null, chặn thu phí (xem dưới) */ });
     return () => { active = false; };
   }, [realEquipmentId]);
+  /**
+   * Bản dùng riêng cho FORM reject-fault (15/09/2026) — KHÔNG được gate qua
+   * `effectiveChargeToTenant` như `autoDamageAmount` bên dưới (biến đó chỉ true khi
+   * ticket.status đã là 'tenant_fault', mà lúc đang ở form reject-fault thì status vẫn
+   * còn 'open' — Luồng B lỗi khách chắc chắn sẽ thu phí nên không cần điều kiện đó).
+   */
+  const rejectFaultAutoDamageAmount = needsReplacement ? computeAutoDamageAmount(replacementEquipment) : null;
+
+  // ── Charge (Luồng B mới, 15/09/2026) — lập hoá đơn thiệt hại TRƯỚC khi sửa/bàn giao,
+  // dùng chung cho cả nhánh sửa tại chỗ (status=tenant_fault) và nhánh mang đi kiểm tra
+  // thêm (status=repair_scheduled, off-site — xem màn riêng bên dưới). Chỉ cần
+  // invoiceAmountText (tái dùng state ở trên) — equipmentNeedsReplacement/estimatedDamageAmount
+  // đã chốt xong từ lúc reject-fault (xem rejectFaultAutoDamageAmount), /charge không có
+  // field riêng cho số đó nữa (xem BE MaintenanceChargeRequest/resolveMaintenanceChargeAmount).
+  const [charging, setCharging] = useState(false);
+  const hasReplacementAmount = (ticket?.estimatedDamageAmount ?? 0) > 0;
+  const submitCharge = async () => {
+    if (charging || !ticket) return;
+    const raw = invoiceAmountText.replace(/[^0-9]/g, '');
+    const amount = raw ? Number(raw) : 0;
+    if (!hasReplacementAmount && (!Number.isFinite(amount) || amount <= 0)) {
+      showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).');
+      return;
+    }
+    try {
+      setCharging(true);
+      await realMaintenanceService.chargeBeforeRepair(idNum, {
+        invoiceVendor: DEFAULT_INVOICE_VENDOR,
+        invoiceDate: today(),
+        invoiceAmount: amount > 0 ? amount : undefined,
+        equipmentNeedsReplacement: hasReplacementAmount || undefined,
+      });
+      await refreshReal();
+      setInvoiceAmountText('');
+      showAlert('🧾 Đã lập hoá đơn', 'Hệ thống đã tạo hoá đơn — khách cần thanh toán trước khi tiếp tục sửa/bàn giao.');
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể lập hoá đơn. Vui lòng thử lại.')); }
+    finally { setCharging(false); }
+  };
+
+  // ── Handover (Luồng B nhánh off-site, 15/09/2026) — quét QR bàn giao thiết bị sau khi
+  // đã thanh toán, cùng cơ chế quét QR client-side với confirm-arrival/start-repair
+  // (extractEquipmentIdFromQr — xem handleArrivalScan/handleStartRepairScan).
+  const [handoverScanOpen, setHandoverScanOpen] = useState(false);
+  const [handoverBusy, setHandoverBusy] = useState(false);
+  const doHandover = async () => {
+    if (handoverBusy || !ticket) return;
+    try {
+      setHandoverBusy(true);
+      // Ảnh AFTER ĐÃ upload thẳng lên server ngay lúc chụp/chọn (xem addLocalPhoto →
+      // uploadPhotos, giống hệt cơ chế của handleComplete()) — gửi lại `ticket.afterImages`
+      // ở đây sẽ bị BE nối CSV thêm 1 lần nữa (appendCsv KHÔNG dedupe), ra ảnh trùng lặp.
+      // Để trống để BE tự đọc từ `req.getAfterImageUrls()` đã lưu sẵn.
+      await realMaintenanceService.handover(idNum, { handoverImages: [] });
+      await refreshReal();
+    } catch (e: any) {
+      showAlert('Không thể bàn giao', apiErrMsg(e, 'Vui lòng thử lại.'));
+    } finally {
+      setHandoverBusy(false);
+    }
+  };
+  const handleHandoverScan = (raw: string) => {
+    setHandoverScanOpen(false);
+    const scannedId = extractEquipmentIdFromQr(raw);
+    if (!scannedId || !realEquipmentId || Number(scannedId) !== realEquipmentId) {
+      showAlert(
+        'QR không khớp thiết bị',
+        'Mã QR quét được không khớp với thiết bị của phiếu này. Vui lòng quét lại đúng thiết bị.',
+        [
+          { text: 'Đóng', style: 'cancel' },
+          { text: 'Quét lại', onPress: () => setHandoverScanOpen(true) },
+        ],
+      );
+      return;
+    }
+    void doHandover();
+  };
 
   // ── Verify-repair (Luồng B — tenant đã tự sửa) ──────────────────────
   const [verifyNote, setVerifyNote] = useState('');
@@ -592,8 +784,37 @@ export const TicketDetailScreen: React.FC = () => {
   const hasInvoicePhoto = (ticket.invoiceImages?.length ?? 0) > 0 || photos.some(p => p.type === 'invoice');
   const hasFaultEvidence = (ticket.faultEvidenceImages?.length ?? 0) > 0 || photos.some(p => p.type === 'fault_evidence');
   const beforeUrls = ticket.beforeImages?.length ? ticket.beforeImages : ticket.images;
+  // Luồng B mới (15/09/2026, sửa tại chỗ — Nhánh A của thanh-toán-trước-khi-sửa): status
+  // đã là tenant_fault NGAY từ reject-fault (không qua REPAIR_SCHEDULED) khi manager không
+  // chọn needsOffSiteInspection. Phải charge() rồi tenant thanh toán XONG mới cho
+  // "Báo sửa xong" — khớp đúng complete() phía BE (ném lỗi nếu chargeInvoiceId null, hoặc
+  // hoá đơn đó chưa PAID — xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md).
+  const isTenantFaultManagerRepair = ticket.status === 'tenant_fault' && ticket.faultResolutionPath === 'manager_repair';
+  const needsChargeBeforeRepair = isTenantFaultManagerRepair && !ticket.chargeInvoiceId;
+  // `issuedInvoice` chỉ còn có mặt trong khi hoá đơn CHƯA PAID/CANCELLED (mọi GET) — còn
+  // set nghĩa là còn chờ khách trả tiền; chargeInvoiceId có mà issuedInvoice không còn
+  // (undefined) nghĩa là đã thanh toán xong.
+  const hasUnpaidCharge = !!ticket.chargeInvoiceId && !!ticket.issuedInvoice;
+  const chargeIsPaid = !!ticket.chargeInvoiceId && !ticket.issuedInvoice;
   const canComplete = ['in_repair', 'tenant_fault'].includes(ticket.status)
-    && (ticket.status !== 'tenant_fault' || ticket.faultResolutionPath === 'manager_repair');
+    && (ticket.status !== 'tenant_fault' || ticket.faultResolutionPath === 'manager_repair')
+    && !needsChargeBeforeRepair
+    && !hasUnpaidCharge;
+
+  /** Tổng ảnh/video hiện có (server + local) theo từng loại — dùng để chặn thêm khi đã
+   * đủ EVIDENCE_MAX_FILES (yêu cầu mentor 14/09/2026: tối đa 5 ảnh/video mỗi bộ, ảnh/
+   * video mới chọn + ảnh/video đã có trên server cộng lại). */
+  const evidenceUrlsForType = (type: PhotoKind): string[] | undefined => {
+    switch (type) {
+      case 'before': return beforeUrls;
+      case 'after': return ticket.afterImages;
+      case 'invoice': return ticket.invoiceImages;
+      case 'fault_evidence': return ticket.faultEvidenceImages;
+      default: return undefined;
+    }
+  };
+  const evidenceCountFor = (type: PhotoKind): number =>
+    (evidenceUrlsForType(type)?.length ?? 0) + photos.filter(p => p.type === type).length;
 
   // "Ai chịu phí" chỉ thật sự là lựa chọn ở Luồng A (in_repair) — Luồng B (tenant_fault,
   // manager sửa hộ) BE luôn tự thu bất kể cờ FE gửi, nên coi như true để tính UI/validate.
@@ -613,21 +834,60 @@ export const TicketDetailScreen: React.FC = () => {
       updatedAt: today(),
     });
 
-  const addLocalPhoto = async (type: PhotoKind, uri: string) => {
+  const addLocalPhoto = async (type: PhotoKind, media: EvidenceAsset) => {
     const localId = `ph-${Date.now()}`;
-    setPhotos(prev => [...prev, { id: localId, type, uri, capturedAt: now() }]);
+    setPhotos(prev => [...prev, {
+      id: localId, type, uri: media.uri, capturedAt: now(),
+      mediaType: media.type, durationMs: media.durationMs,
+    }]);
     if (isReal) {
       const beType = type === 'before' ? 'BEFORE' : type === 'after' ? 'AFTER'
         : type === 'invoice' ? 'INVOICE' : 'FAULT_EVIDENCE';
       try {
-        await realMaintenanceService.uploadPhotos(idNum, [uri], beType);
+        await realMaintenanceService.uploadPhotos(idNum, [media], beType);
         await refreshReal();
         // refreshReal() vừa nạp lại snapshot ảnh từ BE — đã chứa ảnh vừa upload, bỏ bản
         // optimistic cục bộ để tránh hiện trùng ảnh.
         setPhotos(prev => prev.filter(p => p.id !== localId));
+        // Ảnh hoá đơn -> thử OCR tự điền số tiền. Không await: chạy nền, không chặn/làm
+        // chậm việc thêm ảnh (nhất là lúc chọn nhiều ảnh cùng lúc từ thư viện). INVOICE
+        // luôn là ảnh (picker bị chặn ở pickPhotoFromCamera/Library) nên media.uri an toàn.
+        if (type === 'invoice') void runInvoiceOcr(media.uri);
       } catch (e: any) {
-        showAlert('Lỗi tải ảnh', apiErrMsg(e, 'Không tải được ảnh lên máy chủ. Ảnh vẫn được lưu tạm trên máy.'));
+        showAlert('Lỗi tải ảnh', apiErrMsg(e, 'Không tải được ảnh/video lên máy chủ. Vẫn được lưu tạm trên máy.'));
       }
+    }
+  };
+
+  /**
+   * OCR ảnh hoá đơn sửa chữa -> pre-fill `invoiceAmountText` (vẫn sửa tay được bình
+   * thường, không tự gửi). Best-effort tuyệt đối: lỗi/không đọc được số thì lặng lẽ bỏ
+   * qua, KHÔNG showAlert (khác với OCR đồng hồ) — vì đây chỉ là gợi ý phụ, ảnh hoá đơn
+   * đã lưu thành công rồi, làm phiền manager bằng một cảnh báo cho một bước tự động không
+   * ai yêu cầu là phản tác dụng.
+   *
+   * Tái dùng `realTenantService.ocrEvnBill` — endpoint `/api/v1/ocr/evn-bill` tên gọi là
+   * "evn-bill" nhưng theo BE (`OcrServiceImpl.readUtilityBill`) chỉ OCR generic rồi dò
+   * nhãn tiền tổng quát, không có gì ràng buộc riêng cho hoá đơn điện — xem
+   * `maintenanceInvoiceParser.ts`. Phải upload ảnh lên Cloudinary lấy URL PUBLIC trước
+   * (giống `UtilityBillingScreen.captureRoomMeter`): OCR.space tải ảnh qua URL, mà ảnh
+   * lưu qua `uploadPhotos` ở trên nằm trên storage riêng của BE (`LocalPropertyImageStorage`),
+   * không chắc public/ổn định bằng Cloudinary.
+   */
+  const runInvoiceOcr = async (uri: string) => {
+    if (invoiceAmountText) return; // Manager đã có số (gõ tay hoặc OCR trước đó) -> không ghi đè.
+    try {
+      setInvoiceOcrLoading(true);
+      const url = await uploadImageToCloudinary(uri);
+      const ocr = await realTenantService.ocrEvnBill(url);
+      const parsed = parseMaintenanceInvoice(ocr);
+      if (parsed.totalAmount) {
+        setInvoiceAmountText(current => current || formatMoneyInput(parsed.totalAmount));
+      }
+    } catch {
+      // Best-effort — không đọc được thì để trống như luồng nhập tay cũ.
+    } finally {
+      setInvoiceOcrLoading(false);
     }
   };
 
@@ -661,18 +921,45 @@ export const TicketDetailScreen: React.FC = () => {
 
   // Menu "Thêm ảnh" trong UI (không dùng Alert.alert 3 nút) — Alert.alert là no-op
   // trên react-native-web nên menu Chụp ảnh/Thư viện trước đây không bấm được trên web.
+  //
+  // INVOICE luôn chỉ nhận ẢNH (OCR đọc số tiền hoá đơn cần ảnh tĩnh, không đọc được
+  // video) — giữ nguyên picker ảnh-only cũ cho type này. AFTER/FAULT_EVIDENCE cho chọn
+  // lẫn ảnh/video (yêu cầu mentor 14/09/2026), tối đa EVIDENCE_MAX_FILES tổng cộng.
   const pickPhotoFromCamera = async (type: PhotoKind) => {
     setPhotoMenuFor(null);
+    const remaining = remainingEvidenceSlots(evidenceCountFor(type));
+    if (remaining <= 0) {
+      showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`);
+      return;
+    }
+    if (type === 'invoice') {
+      if (Platform.OS === 'web') { setCameraFor(type); return; }
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
+      const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+      if (!r.canceled && r.assets[0]) await addLocalPhoto(type, { uri: r.assets[0].uri, type: 'image' });
+      return;
+    }
     if (Platform.OS === 'web') { setCameraFor(type); return; }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
-    const r = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    if (!r.canceled && r.assets[0]) await addLocalPhoto(type, r.assets[0].uri);
+    const media = await pickEvidenceFromCamera();
+    if (media) await addLocalPhoto(type, media);
   };
   const pickPhotoFromLibrary = async (type: PhotoKind) => {
     setPhotoMenuFor(null);
-    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 5 });
-    if (!r.canceled) for (const a of r.assets) await addLocalPhoto(type, a.uri);
+    const remaining = remainingEvidenceSlots(evidenceCountFor(type));
+    if (remaining <= 0) {
+      showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`);
+      return;
+    }
+    if (type === 'invoice') {
+      const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: remaining });
+      if (!r.canceled) for (const a of r.assets) await addLocalPhoto(type, { uri: a.uri, type: 'image' });
+      return;
+    }
+    const picked = await pickEvidenceFromLibrary(remaining);
+    for (const media of picked) await addLocalPhoto(type, media);
   };
 
   // ── Actions theo flow mới ──────────────────────────────────────────
@@ -721,17 +1008,24 @@ export const TicketDetailScreen: React.FC = () => {
   const handleComplete = async () => {
     if (busy) return;
     if (!hasAfterPhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh SAU sửa chữa.'); return; }
-    if (!hasInvoicePhoto) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hoá đơn.'); return; }
+    // Đã charge() TRƯỚC khi sửa (chargeInvoiceId đã set, 15/09/2026) — BE complete() bỏ
+    // qua hẳn việc tạo hoá đơn (đã có + đã PAID rồi, xem canComplete ở trên), chỉ cần
+    // ảnh AFTER. KHÔNG hỏi lại ảnh hoá đơn/số tiền — hỏi lại là thu trùng một khoản đã
+    // thu ở bước charge().
+    if (!ticket.chargeInvoiceId && !hasInvoicePhoto) {
+      showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh hoá đơn.');
+      return;
+    }
     const invoiceAmountRaw = invoiceAmountText.replace(/[^0-9]/g, '');
     const amount = invoiceAmountRaw ? Number(invoiceAmountRaw) : 0;
     // BE (commit afd2f17, 07/09/2026): số tiền hoá đơn chỉ bắt buộc >0 khi KHÔNG thay
     // thiết bị — thay mới thì có thể để trống/0, tiền đền bù tự tính đứng một mình đủ.
-    if (!needsReplacement && (!Number.isFinite(amount) || amount <= 0)) {
+    if (!ticket.chargeInvoiceId && !needsReplacement && (!Number.isFinite(amount) || amount <= 0)) {
       showAlert('Thiếu thông tin', 'Vui lòng nhập số tiền hoá đơn hợp lệ (> 0).');
       return;
     }
     let damageAmount: number | undefined;
-    if (needsReplacement && effectiveChargeToTenant) {
+    if (!ticket.chargeInvoiceId && needsReplacement && effectiveChargeToTenant) {
       // Số này LUÔN tự tính (khấu hao còn lại nếu còn bảo hành, penaltyFee nếu hết) —
       // không có nguồn nào để thu tay, không cho phép nhập tay thay thế (07/09/2026).
       if (!autoDamageAmount || autoDamageAmount <= 0) {
@@ -749,18 +1043,25 @@ export const TicketDetailScreen: React.FC = () => {
         await realMaintenanceService.complete(idNum, {
           resolutionNote: noteInput.trim() || undefined,
           repairDescription: noteInput.trim() || 'Đã sửa xong',
-          invoiceVendor: DEFAULT_INVOICE_VENDOR,
-          invoiceDate: today(),
-          invoiceAmount: amount,
+          // Đã charge() trước rồi thì complete() không dùng các field hoá đơn này nữa —
+          // gửi undefined để khỏi nhầm tưởng còn thu thêm lần nữa.
+          invoiceVendor: ticket.chargeInvoiceId ? undefined : DEFAULT_INVOICE_VENDOR,
+          invoiceDate: ticket.chargeInvoiceId ? undefined : today(),
+          invoiceAmount: ticket.chargeInvoiceId ? undefined : amount,
           // Luồng B (tenant_fault) BE luôn tự thu — chỉ Luồng A mới thật sự cần cờ này.
           chargeToTenant: ticket.status === 'in_repair' ? chargeToTenant : undefined,
-          equipmentNeedsReplacement: needsReplacement || undefined,
-          estimatedDamageAmount: damageAmount,
+          // Đã charge() trước thì suy thẳng từ estimatedDamageAmount đã lưu trên phiếu
+          // (chốt lúc reject-fault) — KHÔNG dùng lại state `needsReplacement` cục bộ vì
+          // màn có thể đã bị đóng/mở lại từ lúc reject-fault (mất state), xem
+          // hasReplacementAmount. BE vẫn cần cờ này ở đúng lần complete() để tự cập nhật
+          // lại Equipment (status NEW, reset maintenanceCount — applyEquipmentReplacementOnComplete).
+          equipmentNeedsReplacement: (ticket.chargeInvoiceId ? hasReplacementAmount : needsReplacement) || undefined,
+          estimatedDamageAmount: ticket.chargeInvoiceId ? undefined : damageAmount,
         });
         await refreshReal();
         setNoteInput(''); setInvoiceAmountText('');
         setChargeToTenant(false); setNeedsReplacement(false);
-        const willCharge = ticket.status === 'tenant_fault' || chargeToTenant;
+        const willCharge = !ticket.chargeInvoiceId && (ticket.status === 'tenant_fault' || chargeToTenant);
         showAlert(
           '🛠 Đã báo sửa xong',
           willCharge
@@ -853,6 +1154,203 @@ export const TicketDetailScreen: React.FC = () => {
       setRescheduleRepairBusy(false);
     }
   };
+
+  /**
+   * Phiếu REPAIR_SCHEDULED nhánh "mang thiết bị đi kiểm tra thêm" (off-site, Luồng B mới
+   * 15/09/2026 — needsOffSiteInspection lúc reject-fault) — CHỈ phiếu này mới có
+   * faultResolutionPath=manager_repair ở status REPAIR_SCHEDULED (Luồng A dùng approve(),
+   * không set field này — xem canComplete ở trên). Khác hẳn màn "Bắt đầu sửa" (Luồng A)
+   * bên dưới: sửa/kiểm tra đã xảy ra NGOÀI hiện trường, phiếu không quay lại IN_REPAIR mà
+   * đi thẳng CLOSED qua handover() — cần lập hoá đơn + đặt lịch bàn giao + chờ thanh
+   * toán trước khi quét QR bàn giao, xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
+   */
+  if (ticket.status === 'repair_scheduled' && ticket.faultResolutionPath === 'manager_repair') {
+    const canSetHandoverDate = !ticket.repairAppointmentAt || isBeforeAppointmentDay(ticket.repairAppointmentAt);
+    const readyToHandover = chargeIsPaid && !!ticket.repairAppointmentAt;
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.header}>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.backIcon}>‹</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={s.headerCode}>{ticket.ticketCode}</Text>
+            <Text style={s.headerTitle} numberOfLines={1}>{ticket.title}</Text>
+          </View>
+        </View>
+        <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
+            <Text style={s.descText}>
+              {ticket.roomName} · {ticket.tenantName}{ticket.equipmentName ? ` · ${ticket.equipmentName}` : ''}
+            </Text>
+            <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+              Lỗi do khách — {ticket.faultReason || 'không có ghi chú'}. Khi có kết quả kiểm tra/báo giá: lập hoá
+              đơn thiệt hại, đặt lịch bàn giao, rồi quét QR bàn giao sau khi khách đã thanh toán.
+            </Text>
+          </View>
+
+          {/* Bước 1: lập hoá đơn thiệt hại (giống hệt Nhánh A, chỉ khác thời điểm gọi) */}
+          {!ticket.chargeInvoiceId && (
+            <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
+              <Text style={s.cardSectionTitle}>🧾 Lập hoá đơn thiệt hại</Text>
+              {hasReplacementAmount ? (
+                <View style={[s.textInput, s.readonlyAmountBox]}>
+                  <Text style={s.readonlyAmountText}>Đền bù thay thiết bị: {fmt(ticket.estimatedDamageAmount)}</Text>
+                </View>
+              ) : null}
+              <TextInput
+                style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
+                value={invoiceAmountText}
+                onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
+                placeholder={hasReplacementAmount ? 'Chi phí phát sinh thêm (VNĐ) — để trống nếu không có' : 'Số tiền hoá đơn (VNĐ)'}
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="numeric"
+              />
+              <TouchableOpacity
+                style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }, charging && s.btnDisabled]}
+                onPress={submitCharge}
+                disabled={charging}
+              >
+                <Text style={s.advanceBtnText}>{charging ? 'Đang lập hoá đơn...' : '🧾 Lập hoá đơn & thu tiền'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Bước 2 (song song bước 1, không cần đúng thứ tự): đặt/đổi lịch bàn giao */}
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🗓 Lịch bàn giao</Text>
+            <Text style={s.descText}>
+              {ticket.repairAppointmentAt ? formatDateTime(ticket.repairAppointmentAt) : 'Chưa đặt lịch'}
+            </Text>
+            {canSetHandoverDate && (
+              <TouchableOpacity style={[s.reviewBtn, { marginTop: Spacing.sm, alignSelf: 'flex-start', paddingHorizontal: Spacing.lg }]} onPress={openRescheduleRepair}>
+                <Text style={s.reviewBtnText}>{ticket.repairAppointmentAt ? '🗓 Đổi lịch bàn giao' : '🗓 Đặt lịch bàn giao'}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Bước 3: đang chờ khách thanh toán */}
+          {hasUnpaidCharge && ticket.issuedInvoice && (
+            <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
+              <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Đang chờ khách thanh toán</Text>
+              <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
+                {fmt(ticket.issuedInvoice.grandTotal)}
+              </Text>
+              {!!ticket.issuedInvoice.payosQrCode && (
+                <View style={{ alignItems: 'center', marginTop: Spacing.md }}>
+                  <QRCode value={ticket.issuedInvoice.payosQrCode} size={200} />
+                </View>
+              )}
+              <Text style={[s.pickHint, { textAlign: 'center', marginTop: Spacing.sm }]}>
+                Đưa mã QR này cho khách quét bằng app Ngân hàng để thanh toán. Trạng thái tự cập nhật khi thanh
+                toán xong — không cần bấm gì thêm.
+              </Text>
+            </View>
+          )}
+
+          {/* Bước 4: đã thanh toán — chụp ảnh bàn giao rồi quét QR bàn giao */}
+          {chargeIsPaid && (
+            <View style={[s.card, { borderColor: Colors.success, borderWidth: 1.5 }]}>
+              <Text style={s.cardSectionTitle}>✅ Đã thanh toán — sẵn sàng bàn giao</Text>
+              {!ticket.repairAppointmentAt && (
+                <Text style={s.pickHint}>Vui lòng đặt lịch bàn giao ở trên trước khi quét QR.</Text>
+              )}
+              <PhotoEvidenceRow
+                type="after" urls={ticket.afterImages} photos={photos}
+                onAdd={() => setPhotoMenuFor('after')}
+                onView={(uris, i) => setLightbox({ uris, index: i })}
+                onViewVideo={(url) => setVideoPreviewUrl(url)}
+                onRemoveLocal={removeLocalPhoto}
+                onRemoveServer={(url) => removeServerPhoto('AFTER', url)}
+              />
+              {realEquipmentId ? (
+                <TouchableOpacity
+                  style={[s.advanceBtn, { marginTop: Spacing.md }, (!readyToHandover || !hasAfterPhoto || handoverBusy) && s.btnDisabled]}
+                  onPress={() => setHandoverScanOpen(true)}
+                  disabled={!readyToHandover || !hasAfterPhoto || handoverBusy}
+                >
+                  <Text style={s.advanceBtnText}>
+                    {handoverBusy ? 'Đang bàn giao...' : !hasAfterPhoto ? '📷 Quét QR bàn giao (cần ảnh AFTER)' : '📷 Quét QR bàn giao'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[s.advanceBtn, { marginTop: Spacing.md }, (!readyToHandover || !hasAfterPhoto || handoverBusy) && s.btnDisabled]}
+                  onPress={doHandover}
+                  disabled={!readyToHandover || !hasAfterPhoto || handoverBusy}
+                >
+                  <Text style={s.advanceBtnText}>{handoverBusy ? 'Đang bàn giao...' : '✅ Xác nhận đã bàn giao'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+            <Text style={s.cancelBtnText}>Hủy yêu cầu này</Text>
+          </TouchableOpacity>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+
+        <EquipmentQrScanModal
+          visible={handoverScanOpen}
+          title="Quét QR bàn giao"
+          onClose={() => setHandoverScanOpen(false)}
+          onScan={handleHandoverScan}
+        />
+        <Modal visible={rescheduleRepairOpen} transparent animationType="fade" onRequestClose={() => setRescheduleRepairOpen(false)}>
+          <Pressable style={s.photoMenuBackdrop} onPress={() => setRescheduleRepairOpen(false)}>
+            <Pressable style={s.photoMenuCard} onPress={() => {}}>
+              <Text style={s.photoMenuTitle}>{ticket.repairAppointmentAt ? 'Đổi lịch bàn giao' : 'Đặt lịch bàn giao'}</Text>
+              <AppointmentSlotPicker
+                propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+                slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+                excludeRequestId={idNum}
+                date={rescheduleRepairDate}
+                onDateChange={setRescheduleRepairDate}
+                time={rescheduleRepairTime}
+                onTimeChange={setRescheduleRepairTime}
+              />
+              <TouchableOpacity
+                style={[s.advanceBtn, { marginTop: Spacing.md }, (!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy) && s.btnDisabled]}
+                onPress={confirmRescheduleRepair}
+                disabled={!rescheduleRepairDate || !rescheduleRepairTime || rescheduleRepairBusy}
+              >
+                <Text style={s.advanceBtnText}>{rescheduleRepairBusy ? 'Đang lưu...' : '✅ Xác nhận lịch mới'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.photoMenuCancel} onPress={() => setRescheduleRepairOpen(false)}>
+                <Text style={s.photoMenuCancelText}>Đóng</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <CameraCaptureModal
+          visible={cameraFor !== null}
+          onCapture={(uri) => { const t = cameraFor; setCameraFor(null); if (t) void addLocalPhoto(t, { uri, type: 'image' }); }}
+          onClose={() => setCameraFor(null)}
+        />
+        <Modal visible={photoMenuFor !== null} transparent animationType="fade" onRequestClose={() => setPhotoMenuFor(null)}>
+          <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
+            <Pressable style={s.photoMenuCard} onPress={() => {}}>
+              <Text style={s.photoMenuTitle}>Thêm ảnh/video</Text>
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor)}>
+                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh/quay video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
+                <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
+                <Text style={s.photoMenuCancelText}>Đóng</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <PhotoLightbox state={lightbox} onChange={setLightbox} />
+        <VideoPreviewModal visible={!!videoPreviewUrl} url={videoPreviewUrl} onClose={() => setVideoPreviewUrl(null)} />
+      </SafeAreaView>
+    );
+  }
 
   // Phiếu đã đặt lịch sửa sau (Luồng A, chọn "Đặt lịch sửa sau" lúc duyệt) — chặn xử lý
   // tiếp cho tới khi quét QR bắt đầu sửa, hoặc xác nhận thường nếu không gắn thiết bị.
@@ -1029,7 +1527,8 @@ export const TicketDetailScreen: React.FC = () => {
           {/* Ảnh TRƯỚC sửa chữa là bằng chứng hiện trạng do TENANT chụp lúc tạo yêu cầu —
               manager không được thêm/sửa để tránh có ý đồ xấu (ngụy tạo hiện trạng). */}
           <PhotoEvidenceRow type="before" urls={beforeUrls} photos={photos} onAdd={() => {}} disabled
-            onView={(uris, i) => setLightbox({ uris, index: i })} />
+            onView={(uris, i) => setLightbox({ uris, index: i })}
+            onViewVideo={(url) => setVideoPreviewUrl(url)} />
         </View>
 
         {/* ── Cảnh báo vòng đời thiết bị ───────────────────────────── */}
@@ -1049,6 +1548,7 @@ export const TicketDetailScreen: React.FC = () => {
               type="after" urls={ticket.afterImages} photos={photos}
               onAdd={() => setPhotoMenuFor('after')}
               onView={(uris, i) => setLightbox({ uris, index: i })}
+              onViewVideo={(url) => setVideoPreviewUrl(url)}
               onRemoveLocal={removeLocalPhoto}
               onRemoveServer={(url) => removeServerPhoto('AFTER', url)}
             />
@@ -1068,15 +1568,18 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🖼 Ảnh sau sửa chữa</Text>
             <PhotoEvidenceRow type="after" urls={ticket.afterImages} photos={photos} onAdd={() => {}} disabled
-              onView={(uris, i) => setLightbox({ uris, index: i })} />
+              onView={(uris, i) => setLightbox({ uris, index: i })}
+              onViewVideo={(url) => setVideoPreviewUrl(url)} />
             {!!ticket.resolutionNote && (
               <Text style={[s.descText, { marginTop: Spacing.sm }]}>{ticket.resolutionNote}</Text>
             )}
           </View>
         )}
 
-        {/* ── Hoá đơn — chỉ cần ảnh + số tiền ────────────────────── */}
-        {canComplete && (
+        {/* ── Hoá đơn — chỉ cần ảnh + số tiền (KHÔNG áp dụng khi đã charge() trước khi
+             sửa, 15/09/2026 — hoá đơn/số tiền đã chốt xong ở bước đó, hỏi lại là thu
+             trùng, xem canComplete/handleComplete) ── */}
+        {canComplete && !ticket.chargeInvoiceId && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
             <PhotoEvidenceRow
@@ -1085,7 +1588,14 @@ export const TicketDetailScreen: React.FC = () => {
               onView={(uris, i) => setLightbox({ uris, index: i })}
               onRemoveLocal={removeLocalPhoto}
               onRemoveServer={(url) => removeServerPhoto('INVOICE', url)}
+              allowVideo={false}
             />
+            {invoiceOcrLoading && (
+              <View style={s.invoiceOcrRow}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={s.invoiceOcrText}>Đang đọc số tiền từ ảnh hoá đơn...</Text>
+              </View>
+            )}
             <TextInput
               style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
               value={invoiceAmountText}
@@ -1105,7 +1615,7 @@ export const TicketDetailScreen: React.FC = () => {
         )}
 
         {/* ── Ai chịu phí (chỉ Luồng A — Luồng B lỗi khách BE luôn tự thu) ── */}
-        {canComplete && ticket.status === 'in_repair' && (
+        {canComplete && !ticket.chargeInvoiceId && ticket.status === 'in_repair' && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Ai chịu phí sửa chữa?</Text>
             <View style={s.payChoiceRow}>
@@ -1134,8 +1644,20 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Đã charge() trước rồi — quyết định "thay mới" đã chốt lúc reject-fault
+            (estimatedDamageAmount), chỉ hiện lại để manager biết, không hỏi lại. */}
+        {canComplete && !!ticket.chargeInvoiceId && hasReplacementAmount && (
+          <View style={[s.card, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⚠️ Thiết bị thay mới — đã đền bù</Text>
+            <Text style={s.descText}>
+              Khách đã thanh toán {fmt(ticket.estimatedDamageAmount)} tiền đền bù thay thiết bị (chốt lúc báo lỗi).
+              Bấm "Báo sửa xong" sẽ tự cập nhật lại thiết bị.
+            </Text>
+          </View>
+        )}
+
         {/* ── Thiết bị hỏng hoàn toàn, phải thay mới ─────────────────── */}
-        {canComplete && !!realEquipmentId && (
+        {canComplete && !ticket.chargeInvoiceId && !!realEquipmentId && (
           <View style={s.card}>
             <TouchableOpacity
               style={s.replaceToggleRow}
@@ -1181,7 +1703,7 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>🧾 Hoá đơn sửa chữa</Text>
             <PhotoEvidenceRow type="invoice" urls={ticket.invoiceImages} photos={photos} onAdd={() => {}} disabled
-              onView={(uris, i) => setLightbox({ uris, index: i })} />
+              onView={(uris, i) => setLightbox({ uris, index: i })} allowVideo={false} />
             {ticket.invoiceAmount != null && (
               <Text style={[s.descText, s.moneyReadout]}>{fmt(ticket.invoiceAmount)}</Text>
             )}
@@ -1198,12 +1720,24 @@ export const TicketDetailScreen: React.FC = () => {
             <Text style={s.descText}>{ticket.faultReason || 'Không có ghi chú.'}</Text>
             {(ticket.faultEvidenceImages?.length ?? 0) > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
-                {ticket.faultEvidenceImages!.map((uri, i) => (
-                  <TouchableOpacity key={i}
-                    onPress={() => setLightbox({ uris: ticket.faultEvidenceImages!, index: i })}>
-                    <Image source={{ uri }} style={s.rejectImage} />
-                  </TouchableOpacity>
-                ))}
+                {ticket.faultEvidenceImages!.map((uri, i) => {
+                  const isVideo = isVideoUrl(uri);
+                  return (
+                    <TouchableOpacity key={i}
+                      onPress={() => isVideo
+                        ? setVideoPreviewUrl(uri)
+                        : setLightbox({ uris: ticket.faultEvidenceImages!, index: i })}>
+                      {isVideo ? (
+                        <View style={[s.rejectImage, s.videoRejectTile]}>
+                          <Text style={{ fontSize: 22 }}>🎬</Text>
+                          <Text style={s.videoRejectTileText}>▶ Xem video</Text>
+                        </View>
+                      ) : (
+                        <Image source={{ uri }} style={s.rejectImage} />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             )}
             {/* Phiếu gửi qua report-fault (luồng mới) — faultResolutionPath luôn null. */}
@@ -1228,6 +1762,61 @@ export const TicketDetailScreen: React.FC = () => {
                   : ''}
                 {ticket.estimatedDamageAmount != null ? ` · Ước tính: ${fmt(ticket.estimatedDamageAmount)}` : ''}
               </Text>
+            )}
+          </View>
+        )}
+
+        {/* ── Lập hoá đơn thiệt hại TRƯỚC khi sửa (charge, 15/09/2026) — chỉ cho
+             TENANT_FAULT + faultResolutionPath=manager_repair chưa charge(); nhánh
+             off-site (REPAIR_SCHEDULED) có màn riêng bên dưới, xem needsChargeBeforeRepair. ── */}
+        {needsChargeBeforeRepair && (
+          <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>🧾 Lập hoá đơn thiệt hại (thu trước khi sửa)</Text>
+            <Text style={s.pickHint}>
+              Bắt buộc lập hoá đơn để khách thanh toán TRƯỚC khi sửa — hệ thống sẽ chặn "Báo sửa xong" cho tới khi
+              khách trả xong.
+            </Text>
+            {hasReplacementAmount ? (
+              <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
+                <Text style={s.readonlyAmountText}>Đền bù thay thiết bị: {fmt(ticket.estimatedDamageAmount)}</Text>
+              </View>
+            ) : null}
+            <TextInput
+              style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
+              value={invoiceAmountText}
+              onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
+              placeholder={hasReplacementAmount ? 'Chi phí phát sinh thêm (VNĐ) — để trống nếu không có' : 'Số tiền hoá đơn (VNĐ)'}
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="numeric"
+            />
+            <TouchableOpacity
+              style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }, charging && s.btnDisabled]}
+              onPress={submitCharge}
+              disabled={charging}
+            >
+              <Text style={s.advanceBtnText}>{charging ? 'Đang lập hoá đơn...' : '🧾 Lập hoá đơn & thu tiền'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Đang chờ khách thanh toán hoá đơn thiệt hại (charge, 15/09/2026) ── */}
+        {hasUnpaidCharge && ticket.issuedInvoice && (
+          <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Đang chờ khách thanh toán</Text>
+            <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
+              {fmt(ticket.issuedInvoice.grandTotal)}
+            </Text>
+            {!!ticket.issuedInvoice.payosQrCode && (
+              <View style={{ alignItems: 'center', marginTop: Spacing.md }}>
+                <QRCode value={ticket.issuedInvoice.payosQrCode} size={200} />
+              </View>
+            )}
+            <Text style={[s.pickHint, { textAlign: 'center', marginTop: Spacing.sm }]}>
+              Đưa mã QR này cho khách quét bằng app Ngân hàng để thanh toán. Trạng thái tự cập nhật khi thanh toán
+              xong — không cần bấm gì thêm.
+            </Text>
+            {!!ticket.issuedInvoice.dueDate && (
+              <Text style={[s.pickHint, { textAlign: 'center' }]}>Hạn thanh toán: {formatDateTime(ticket.issuedInvoice.dueDate)}</Text>
             )}
           </View>
         )}
@@ -1340,7 +1929,7 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Form báo lỗi do khách (Luồng B) ──────────────────────── */}
+        {/* ── Form báo lỗi do khách (Luồng B — manager quyết định ngay tại chỗ) ── */}
         {ticket.status === 'open' && faultFormOpen && (
           <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>⚠️ Báo lỗi do khách</Text>
@@ -1357,13 +1946,97 @@ export const TicketDetailScreen: React.FC = () => {
                 type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}
                 onAdd={() => setPhotoMenuFor('fault_evidence')}
                 onView={(uris, i) => setLightbox({ uris, index: i })}
+                onViewVideo={(url) => setVideoPreviewUrl(url)}
                 onRemoveLocal={removeLocalPhoto}
                 onRemoveServer={(url) => removeServerPhoto('FAULT_EVIDENCE', url)}
               />
             </View>
-            <Text style={s.pickHint}>
-              Gửi xong sẽ chuyển cho admin xem xét trên web — việc sửa/thu tiền tiếp theo xử lý ngoài hệ thống.
-            </Text>
+
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hướng xử lý</Text>
+            <View style={s.reviewRow}>
+              <TouchableOpacity
+                style={[s.reviewBtn, resolutionPath === 'manager_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
+                onPress={() => setResolutionPath('manager_repair')}
+              >
+                <Text style={[s.reviewBtnText, resolutionPath === 'manager_repair' && { color: Colors.primary }]}>Manager sửa hộ</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reviewBtn, resolutionPath === 'tenant_self_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
+                onPress={() => setResolutionPath('tenant_self_repair')}
+              >
+                <Text style={[s.reviewBtnText, resolutionPath === 'tenant_self_repair' && { color: Colors.primary }]}>Khách tự sửa</Text>
+              </TouchableOpacity>
+            </View>
+
+            {resolutionPath === 'manager_repair' ? (
+              <>
+                <TouchableOpacity
+                  style={[s.replaceToggleRow, { marginTop: Spacing.sm }]}
+                  onPress={() => setNeedsOffSiteInspection(v => !v)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.checkbox, needsOffSiteInspection && s.checkboxChecked]}>
+                    {needsOffSiteInspection && <Text style={s.checkboxMark}>✓</Text>}
+                  </View>
+                  <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
+                </TouchableOpacity>
+                <Text style={s.pickHint}>
+                  {needsOffSiteInspection
+                    ? 'Chưa sửa được tại chỗ — phiếu chuyển "Đã đặt lịch sửa", chưa có ngày bàn giao (đặt sau khi có kết quả kiểm tra + báo giá).'
+                    : 'Sửa được ngay tại hiện trường — lập hoá đơn thiệt hại ngay sau khi gửi, khách thanh toán xong mới bắt đầu sửa.'}
+                </Text>
+
+                <TouchableOpacity
+                  style={[s.replaceToggleRow, { marginTop: Spacing.md }]}
+                  onPress={() => setNeedsReplacement(v => !v)}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.checkbox, needsReplacement && s.checkboxChecked]}>
+                    {needsReplacement && <Text style={s.checkboxMark}>✓</Text>}
+                  </View>
+                  <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
+                </TouchableOpacity>
+                {needsReplacement && (
+                  <>
+                    <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
+                      <Text style={s.readonlyAmountText}>
+                        {rejectFaultAutoDamageAmount ? fmt(rejectFaultAutoDamageAmount) : '— Chưa có dữ liệu —'}
+                      </Text>
+                    </View>
+                    <Text style={s.costHint}>
+                      {rejectFaultAutoDamageAmount
+                        ? isUnderWarranty(replacementEquipment)
+                          ? 'Còn bảo hành — số tiền này là phần khấu hao còn lại của thiết bị, tự tính, không thể sửa.'
+                          : 'Đã hết bảo hành — số tiền này là mức phạt cố định của thiết bị (penaltyFee), tự tính, không thể sửa.'
+                        : 'Thiết bị chưa có dữ liệu giá/bảo hành, cũng chưa có mức phạt cố định — không thể đánh dấu thay mới cho thiết bị này.'}
+                    </Text>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hạn tự sửa</Text>
+                <TextInput
+                  style={s.textInput}
+                  value={selfRepairDeadlineText}
+                  onChangeText={setSelfRepairDeadlineText}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={Colors.textMuted}
+                />
+                <Text style={s.pickHint}>Gợi ý mặc định {MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS} ngày — có thể sửa lại.</Text>
+
+                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Số tiền thiệt hại ước tính (đ)</Text>
+                <TextInput
+                  style={s.textInput}
+                  value={estimatedAmountText}
+                  onChangeText={t => setEstimatedAmountText(formatMoneyInput(t))}
+                  placeholder="Nhập số tiền..."
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="numeric"
+                />
+                <Text style={s.pickHint}>Số cuối có thể điều chỉnh lúc trả phòng — đây chỉ là ước tính.</Text>
+              </>
+            )}
 
             <TouchableOpacity
               style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }]}
@@ -1371,7 +2044,7 @@ export const TicketDetailScreen: React.FC = () => {
               disabled={rejectingFault || !hasFaultEvidence}
             >
               <Text style={s.advanceBtnText}>
-                {rejectingFault ? 'Đang gửi...' : !hasFaultEvidence ? 'Thêm ảnh bằng chứng trước' : 'Gửi cho admin duyệt'}
+                {rejectingFault ? 'Đang gửi...' : !hasFaultEvidence ? 'Thêm ảnh bằng chứng trước' : 'Ghi nhận lỗi do khách'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setFaultFormOpen(false)}>
@@ -1412,12 +2085,24 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={[s.card, { borderColor: '#F97316', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>🛠 Khách đã nộp ảnh tự sửa</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {(ticket.selfRepairImages ?? []).map((uri, i) => (
-                <TouchableOpacity key={i}
-                  onPress={() => setLightbox({ uris: ticket.selfRepairImages ?? [], index: i })}>
-                  <Image source={{ uri }} style={s.rejectImage} />
-                </TouchableOpacity>
-              ))}
+              {(ticket.selfRepairImages ?? []).map((uri, i) => {
+                const isVideo = isVideoUrl(uri);
+                return (
+                  <TouchableOpacity key={i}
+                    onPress={() => isVideo
+                      ? setVideoPreviewUrl(uri)
+                      : setLightbox({ uris: ticket.selfRepairImages ?? [], index: i })}>
+                    {isVideo ? (
+                      <View style={[s.rejectImage, s.videoRejectTile]}>
+                        <Text style={{ fontSize: 22 }}>🎬</Text>
+                        <Text style={s.videoRejectTileText}>▶ Xem video</Text>
+                      </View>
+                    ) : (
+                      <Image source={{ uri }} style={s.rejectImage} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
             <TextInput
               style={[s.textInput, { marginTop: Spacing.sm }]}
@@ -1487,12 +2172,15 @@ export const TicketDetailScreen: React.FC = () => {
         )}
         {canComplete && (
           <TouchableOpacity
-            style={[s.advanceBtn, (!hasAfterPhoto || !hasInvoicePhoto) && s.btnDisabled]}
+            style={[s.advanceBtn, (!hasAfterPhoto || (!ticket.chargeInvoiceId && !hasInvoicePhoto)) && s.btnDisabled]}
             onPress={handleComplete}
             disabled={busy}
           >
             <Text style={s.advanceBtnText}>
-              🛠 Báo sửa xong{(!hasAfterPhoto || !hasInvoicePhoto) ? ' (cần ảnh AFTER + hoá đơn)' : ''}
+              🛠 Báo sửa xong{
+                !hasAfterPhoto ? ' (cần ảnh AFTER)'
+                  : (!ticket.chargeInvoiceId && !hasInvoicePhoto) ? ' (cần ảnh hoá đơn)' : ''
+              }
             </Text>
           </TouchableOpacity>
         )}
@@ -1512,7 +2200,7 @@ export const TicketDetailScreen: React.FC = () => {
 
       <CameraCaptureModal
         visible={cameraFor !== null}
-        onCapture={(uri) => { const t = cameraFor; setCameraFor(null); if (t) void addLocalPhoto(t, uri); }}
+        onCapture={(uri) => { const t = cameraFor; setCameraFor(null); if (t) void addLocalPhoto(t, { uri, type: 'image' }); }}
         onClose={() => setCameraFor(null)}
       />
 
@@ -1520,9 +2208,11 @@ export const TicketDetailScreen: React.FC = () => {
       <Modal visible={photoMenuFor !== null} transparent animationType="fade" onRequestClose={() => setPhotoMenuFor(null)}>
         <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
           <Pressable style={s.photoMenuCard} onPress={() => {}}>
-            <Text style={s.photoMenuTitle}>Thêm ảnh</Text>
+            <Text style={s.photoMenuTitle}>{photoMenuFor === 'invoice' ? 'Thêm ảnh' : 'Thêm ảnh/video'}</Text>
             <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor)}>
-              <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+              <Text style={s.photoMenuOptionText}>
+                {photoMenuFor === 'invoice' ? '📷 Chụp ảnh' : '📷 Chụp ảnh/quay video'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
               <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
@@ -1534,6 +2224,7 @@ export const TicketDetailScreen: React.FC = () => {
         </Pressable>
       </Modal>
       <PhotoLightbox state={lightbox} onChange={setLightbox} />
+      <VideoPreviewModal visible={!!videoPreviewUrl} url={videoPreviewUrl} onClose={() => setVideoPreviewUrl(null)} />
     </SafeAreaView>
   );
 };
@@ -1593,6 +2284,9 @@ const s = StyleSheet.create({
   noteInput:  { minHeight: 80, textAlignVertical: 'top' },
   moneyInput: { textAlign: 'right', fontWeight: '700' },
   moneyReadout: { textAlign: 'right', fontWeight: '800', fontSize: 18, marginTop: Spacing.sm },
+  // Loading nhỏ khi đang OCR ảnh hoá đơn (best-effort, xem runInvoiceOcr).
+  invoiceOcrRow: { flexDirection: 'row', alignItems: 'center', marginTop: Spacing.sm, gap: 6 },
+  invoiceOcrText: { fontSize: 12, color: Colors.textMuted },
   // Số tiền đền bù tự động — hộp hiển thị, KHÔNG phải ô nhập (manager không được sửa).
   readonlyAmountBox: { backgroundColor: Colors.background, justifyContent: 'center' },
   readonlyAmountText: { textAlign: 'right', fontWeight: '700', fontSize: 14, color: Colors.textPrimary },
@@ -1601,6 +2295,8 @@ const s = StyleSheet.create({
   replaceAlertText: { fontSize: 13, color: '#B91C1C', lineHeight: 19 },
 
   rejectImage: { width: 110, height: 110, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+  videoRejectTile: { backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  videoRejectTileText: { color: Colors.white, fontSize: 11, fontWeight: '700' },
 
   pickHint: { fontSize: 11, color: Colors.textMuted, marginTop: Spacing.sm },
 

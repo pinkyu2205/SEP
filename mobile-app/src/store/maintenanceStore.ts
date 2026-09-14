@@ -73,6 +73,12 @@ export interface PhotoEvidence {
   uri: string;
   caption?: string;
   capturedAt: string;
+  /** 'image' khi thiếu (dữ liệu mock/legacy trước 14/09/2026 chỉ có ảnh). Video thêm
+   * 14/09/2026 theo yêu cầu mentor — xem src/utils/evidenceMediaPicker.ts. */
+  mediaType?: 'image' | 'video';
+  /** Chỉ có khi mediaType==='video' (mili-giây) — hiện dạng mm:ss trên tile placeholder
+   * local, ảnh/video local chưa upload nên chưa có gì để phát thật. */
+  durationMs?: number;
 }
 
 export interface MaintenanceTicket {
@@ -144,6 +150,12 @@ export interface MaintenanceTicket {
   repairAppointmentAt?: string;
   /** Manager quét QR bắt đầu sửa. */
   repairStartedAt?: string;
+  /**
+   * Id hoá đơn thu phí lập TRƯỚC khi sửa (PUT /{id}/charge, 15/09/2026) — set rồi thì
+   * không lập lại được nữa. Dùng chung với `issuedInvoice` (còn set = còn CHƯA thanh
+   * toán) để biết đang chờ khách trả tiền hay đã xong, xem TicketDetailScreen.
+   */
+  chargeInvoiceId?: number | null;
 }
 
 

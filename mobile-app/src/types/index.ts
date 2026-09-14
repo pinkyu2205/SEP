@@ -214,6 +214,13 @@ export interface MaintenanceRequest {
   repairAppointmentAt?: string;
   /** Manager quét QR bắt đầu sửa (repair_scheduled → in_repair/tenant_fault). */
   repairStartedAt?: string;
+  /**
+   * Id hoá đơn thu phí lập TRƯỚC khi sửa (PUT /{id}/charge, 15/09/2026) — có nghĩa là
+   * TENANT_FAULT/REPAIR_SCHEDULED (Luồng B manager sửa hộ) đã được lập hoá đơn, chỉ null
+   * khi CHƯA lập. Set rồi thì không đổi (charge() chỉ gọi được 1 lần) — dùng chung với
+   * `issuedInvoice` (còn set = còn CHƯA thanh toán) để biết chờ thanh toán hay đã xong.
+   */
+  chargeInvoiceId?: number | null;
 }
 
 export interface CreateMaintenanceRequest {
@@ -319,6 +326,13 @@ export interface MaintenanceRequestDto {
   repairAppointmentAt?: string;
   /** Manager quét QR bắt đầu sửa. */
   repairStartedAt?: string;
+  /**
+   * Id hoá đơn thu phí lập TRƯỚC khi sửa (PUT /{id}/charge, 15/09/2026) — khớp
+   * `MaintenanceRequest.chargeInvoiceId` (BE). Set rồi thì `charge()` không gọi lại được
+   * nữa (BusinessException) — dùng chung với `issuedInvoice` (còn set = còn hoá đơn CHƯA
+   * PAID/CANCELLED) để biết đang chờ khách thanh toán hay đã thanh toán xong.
+   */
+  chargeInvoiceId?: number | null;
 }
 
 /** Khớp `TenantInvoiceResponse` (BE) — subset field FE cần để hiện hoá đơn/QR ngay sau confirm(). */
@@ -368,6 +382,12 @@ export interface ApproveMaintenanceRequestDto {
   priority?: MaintenanceReqPriority;
   /** Tùy chọn — có thì chuyển REPAIR_SCHEDULED thay vì sửa ngay (IN_REPAIR). */
   repairAppointmentAt?: string;
+  /**
+   * Tùy chọn — BE có field này trên MaintenanceApproveRequest nhưng KHÔNG dùng ở màn
+   * này (luồng hao mòn/lỗi chủ không cần mang thiết bị đi kiểm tra thêm) — khai báo cho
+   * khớp DTO, không có UI nào gửi field này (15/09/2026).
+   */
+  needsOffSiteInspection?: boolean;
 }
 
 /**
@@ -411,6 +431,44 @@ export interface RejectFaultRequestDto {
   estimatedDamageAmount?: number;
   /** Tùy chọn, chỉ có ý nghĩa khi resolutionPath=MANAGER_REPAIR — có thì chuyển REPAIR_SCHEDULED thay vì TENANT_FAULT ngay. */
   repairAppointmentAt?: string;
+  /**
+   * Tùy chọn, chỉ có ý nghĩa khi resolutionPath=MANAGER_REPAIR (15/09/2026) — thiết bị
+   * phải mang đi kiểm tra thêm ngoài hiện trường, chưa biết ngày bàn giao thật. BE
+   * chuyển REPAIR_SCHEDULED với repairAppointmentAt để trống (đặt sau qua
+   * reschedule-repair khi có kết quả) thay vì TENANT_FAULT ngay — xem
+   * docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
+   */
+  needsOffSiteInspection?: boolean;
+}
+
+/**
+ * PUT /{id}/charge — manager lập hoá đơn thu phí thiệt hại TRƯỚC khi sửa/bàn giao
+ * (15/09/2026, chỉ áp dụng TENANT_FAULT/REPAIR_SCHEDULED + faultResolutionPath=
+ * MANAGER_REPAIR). Cùng công thức tính tiền với complete(): equipmentNeedsReplacement=
+ * true dùng `estimatedDamageAmount` đã lưu sẵn trên phiếu (gán lúc reject-fault) +
+ * cộng thêm invoiceAmount nếu có; false thì invoiceAmount bắt buộc > 0. Chỉ gọi được
+ * MỘT LẦN — BE ném lỗi nếu phiếu đã có chargeInvoiceId. Field tên khớp
+ * `MaintenanceChargeRequest.java` (BE) — đọc trực tiếp, không suy đoán.
+ */
+export interface MaintenanceChargeRequestDto {
+  invoiceVendor: string;
+  invoiceNumber?: string;
+  invoiceDate: string;
+  invoiceAmount?: number;
+  equipmentNeedsReplacement?: boolean;
+  /** Tùy chọn — WEAR | TENANT_MISUSE | TENANT_MODIFICATION | MISUSE (DamageCause enum, BE). */
+  damageCause?: MaintenanceReqDamageCause;
+}
+
+/**
+ * PUT /{id}/handover — manager bàn giao thiết bị sau khi sửa/kiểm tra OFF-SITE (Luồng
+ * B nhánh mang đi kiểm tra thêm, 15/09/2026). Chỉ gọi được khi REPAIR_SCHEDULED, và nếu
+ * phiếu đã có chargeInvoiceId thì hoá đơn đó phải PAID trước (BE tự chặn, FE nên ẩn nút
+ * trước khi vậy). BE set CLOSED thẳng, bỏ qua IN_REPAIR vì đã sửa/kiểm tra ngoài hiện
+ * trường. Field tên khớp `MaintenanceHandoverRequest.java` (BE).
+ */
+export interface MaintenanceHandoverRequestDto {
+  handoverImages: string[];
 }
 
 /** PUT /{id}/reschedule-visit — đổi lịch hẹn xem. Chỉ khi OPEN, chưa confirm-arrival, còn trước ngày hẹn. */

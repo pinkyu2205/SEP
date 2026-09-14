@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { formatDate } from '@/utils';
+import { formatDate, isVideoUrl } from '@/utils';
 import type { MaintenancePhotoHistoryDto } from '@/types';
 import { PhotoLightbox, type LightboxState } from './PhotoLightbox';
+import { VideoPreviewModal } from './VideoPreviewModal';
 
 const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: string }[] = [
   { type: 'BEFORE',         label: '📸 Hiện trạng ban đầu', color: Colors.warning },
@@ -20,6 +21,7 @@ const GROUPS: { type: MaintenancePhotoHistoryDto['type']; label: string; color: 
  */
 export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistoryDto[] }> = ({ photos }) => {
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   if (!photos || photos.length === 0) return null;
   const sorted = [...photos].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -34,20 +36,30 @@ export const MaintenancePhotoHistory: React.FC<{ photos?: MaintenancePhotoHistor
           <View key={g.type} style={s.group}>
             <Text style={[s.groupLabel, { color: g.color }]}>{g.label} ({items.length})</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {items.map((p, i) => (
-                <TouchableOpacity key={`${p.url}-${i}`} activeOpacity={0.85}
-                  style={[s.item, { borderColor: g.color + '50' }]}
-                  onPress={() => setLightbox({ uris, index: i })}
-                >
-                  <Image source={{ uri: p.url }} style={s.thumb} />
-                  <Text style={s.date}>{formatDate(p.createdAt)}</Text>
-                </TouchableOpacity>
-              ))}
+              {items.map((p, i) => {
+                const isVideo = isVideoUrl(p.url);
+                return (
+                  <TouchableOpacity key={`${p.url}-${i}`} activeOpacity={0.85}
+                    style={[s.item, { borderColor: g.color + '50' }]}
+                    onPress={() => isVideo ? setVideoPreviewUrl(p.url) : setLightbox({ uris, index: i })}
+                  >
+                    {isVideo ? (
+                      <View style={[s.thumb, s.videoThumb]}>
+                        <Text style={{ fontSize: 18 }}>🎬</Text>
+                      </View>
+                    ) : (
+                      <Image source={{ uri: p.url }} style={s.thumb} />
+                    )}
+                    <Text style={s.date}>{formatDate(p.createdAt)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         );
       })}
       <PhotoLightbox state={lightbox} onChange={setLightbox} />
+      <VideoPreviewModal visible={!!videoPreviewUrl} url={videoPreviewUrl} onClose={() => setVideoPreviewUrl(null)} />
     </View>
   );
 };
@@ -59,5 +71,6 @@ const s = StyleSheet.create({
   groupLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6 },
   item: { width: 88, marginRight: Spacing.sm, borderRadius: BorderRadius.md, borderWidth: 1, overflow: 'hidden' },
   thumb: { width: '100%', height: 72, backgroundColor: Colors.divider },
+  videoThumb: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F172A' },
   date: { fontSize: 10, color: Colors.textMuted, padding: 4, textAlign: 'center' },
 });

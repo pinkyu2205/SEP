@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import type { EvidenceAsset } from '@/utils/evidenceMediaPicker';
 import type {
   MaintenanceRequestDto,
   CreateMaintenanceRequestDto,
@@ -13,6 +14,8 @@ import type {
   RescheduleVisitRequestDto,
   RescheduleRepairRequestDto,
   ManagerAvailabilitySlotDto,
+  MaintenanceChargeRequestDto,
+  MaintenanceHandoverRequestDto,
 } from '@/types';
 
 /**
@@ -52,16 +55,36 @@ export interface MaintenanceListParams {
   size?: number;
 }
 
-/** RN FormData cho ảnh local URI (native cần object {uri,name,type}, web cần Blob). */
-const appendFiles = async (form: FormData, uris: string[]) => {
-  for (let i = 0; i < uris.length; i++) {
-    const uri = uris[i];
-    const name = uri.split('/').pop()?.split('?')[0] || `photo-${Date.now()}-${i}.jpg`;
+/** Đoán đuôi + mime type video từ URI local (mặc định mp4 khi không nhận ra đuôi). */
+const guessVideoFile = (uri: string): { ext: string; mime: string } => {
+  const match = /\.([a-zA-Z0-9]+)(?:\?|#|$)/.exec(uri);
+  const ext = (match?.[1] || 'mp4').toLowerCase();
+  const MIME: Record<string, string> = {
+    mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v',
+    webm: 'video/webm', avi: 'video/x-msvideo', '3gp': 'video/3gpp', mkv: 'video/x-matroska',
+  };
+  return { ext, mime: MIME[ext] || 'video/mp4' };
+};
+
+/**
+ * RN FormData cho ảnh/video local URI (native cần object {uri,name,type}, web cần Blob).
+ * BE lưu file THEO ĐÚNG BYTES nhận được + tên file (LocalPropertyImageStorage.store chỉ
+ * ghi `file.getBytes()` + `file.getOriginalFilename()`, không kiểm content-type để từ
+ * chối) nên chỉ cần gửi đúng đuôi file là video được lưu & phục vụ lại đúng loại —
+ * KHÔNG được gắn cứng 'image/jpeg' cho video như bản cũ (14/09/2026, thêm bằng chứng
+ * video bảo trì, xem BE MaintenanceServiceImpl.storeFiles/LocalPropertyImageStorage).
+ */
+const appendFiles = async (form: FormData, assets: EvidenceAsset[]) => {
+  for (let i = 0; i < assets.length; i++) {
+    const { uri, type } = assets[i];
+    const isVideo = type === 'video';
+    const { ext, mime } = isVideo ? guessVideoFile(uri) : { ext: 'jpg', mime: 'image/jpeg' };
+    const name = uri.split('/').pop()?.split('?')[0] || `evidence-${Date.now()}-${i}.${ext}`;
     if (typeof window !== 'undefined' && (uri.startsWith('blob:') || uri.startsWith('data:'))) {
       const blob = await (await fetch(uri)).blob();
       form.append('files', blob as any, name);
     } else {
-      form.append('files', { uri, name, type: 'image/jpeg' } as any);
+      form.append('files', { uri, name, type: mime } as any);
     }
   }
 };
@@ -126,11 +149,11 @@ export const realMaintenanceService = {
    * uploadPhotos hoặc gửi kèm ở đây (multipart).
    */
   submitSelfRepair: async (
-    id: number, note: string | undefined, imageUris: string[],
+    id: number, note: string | undefined, assets: EvidenceAsset[],
   ): Promise<MaintenanceRequestDto> => {
     const form = new FormData();
     if (note) form.append('note', note);
-    await appendFiles(form, imageUris);
+    await appendFiles(form, assets);
     const { data } = await realApiClient.put<MaintenanceRequestDto>(
       `${BASE}/${id}/submit-self-repair`, form, { headers: { 'Content-Type': 'multipart/form-data' } },
     );
@@ -170,13 +193,48 @@ export const realMaintenanceService = {
   },
 
   /**
-   * PUT /{id}/reject-fault — manager xác định lỗi do tenant (Luồng B). resolutionPath
-   * MANAGER_REPAIR → TENANT_FAULT (hoặc REPAIR_SCHEDULED nếu kèm repairAppointmentAt);
-   * TENANT_SELF_REPAIR → PENDING_TENANT_REPAIR (bắt buộc kèm selfRepairDeadline +
-   * estimatedDamageAmount — BE không tự default).
+   * PUT /{id}/reject-fault — manager xác định lỗi do tenant (Luồng B — manager-driven,
+   * bật lại 15/09/2026 cùng thanh-toán-trước-khi-sửa, xem
+   * docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md). resolutionPath:
+   *   MANAGER_REPAIR + không needsOffSiteInspection/repairAppointmentAt → TENANT_FAULT
+   *     ngay (sửa tại chỗ) — phải gọi chargeBeforeRepair() rồi mới complete() được.
+   *   MANAGER_REPAIR + needsOffSiteInspection=true → REPAIR_SCHEDULED, repairAppointmentAt
+   *     để trống (mang thiết bị đi kiểm tra thêm, đặt lịch bàn giao sau qua
+   *     rescheduleRepair() khi có kết quả) — chargeBeforeRepair() + thanh toán xong mới
+   *     handover() được.
+   *   TENANT_SELF_REPAIR → PENDING_TENANT_REPAIR (bắt buộc kèm selfRepairDeadline +
+   *     estimatedDamageAmount — BE không tự default).
    */
   rejectFault: async (id: number, body: RejectFaultRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject-fault`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/charge — manager lập hoá đơn thu phí thiệt hại TRƯỚC khi sửa/bàn giao
+   * (15/09/2026, `chargeBeforeRepair` — BE). Chỉ gọi được 1 lần (BusinessException nếu
+   * phiếu đã có chargeInvoiceId). Response kèm `issuedInvoice` (QR PayOS) ngay — nhưng
+   * GET /{id} sau đó cũng luôn trả issuedInvoice khi hoá đơn còn chưa PAID/CANCELLED,
+   * không cần giữ lại response này.
+   */
+  chargeBeforeRepair: async (
+    id: number, body: MaintenanceChargeRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/charge`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/handover — manager bàn giao thiết bị đã sửa/kiểm tra OFF-SITE (nhánh
+   * needsOffSiteInspection của reject-fault, 15/09/2026). Chỉ gọi được khi
+   * REPAIR_SCHEDULED; nếu phiếu có chargeInvoiceId thì hoá đơn đó phải đã PAID (BE tự
+   * chặn 409, FE nên ẩn nút trước khi vậy — xem TicketDetailScreen). Bắt buộc
+   * handoverImages (AFTER) — BE set CLOSED thẳng, không qua IN_REPAIR.
+   */
+  handover: async (
+    id: number, body: MaintenanceHandoverRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/handover`, body);
     return data;
   },
 
@@ -249,14 +307,17 @@ export const realMaintenanceService = {
 
   // ---- Shared ----
 
-  /** POST /{id}/photos?type= — upload ảnh BEFORE / FAULT_EVIDENCE / SELF_REPAIR / AFTER / INVOICE. */
+  /**
+   * POST /{id}/photos?type= — upload ảnh/video BEFORE / FAULT_EVIDENCE / SELF_REPAIR /
+   * AFTER / INVOICE (INVOICE luôn chỉ nhận ảnh — chỗ gọi tự chặn, xem TicketDetailScreen).
+   */
   uploadPhotos: async (
     id: number,
-    uris: string[],
+    assets: EvidenceAsset[],
     type: MaintenancePhotoType,
   ): Promise<MaintenanceRequestDto> => {
     const form = new FormData();
-    await appendFiles(form, uris);
+    await appendFiles(form, assets);
     const { data } = await realApiClient.post<MaintenanceRequestDto>(`${BASE}/${id}/photos`, form, {
       params: { type },
       headers: { 'Content-Type': 'multipart/form-data' },

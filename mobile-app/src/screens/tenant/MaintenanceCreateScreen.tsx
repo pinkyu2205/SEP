@@ -5,12 +5,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
 import {
   formatDate, showAlert, readApiError,
   validateEquipmentPhoto, classifyEquipment, requireLiveCapture,
+  pickEvidenceFromCamera, pickEvidenceFromLibrary, remainingEvidenceSlots,
+  formatDurationLabel, EVIDENCE_MAX_FILES, type EvidenceAsset,
 } from '@/utils';
 import { serverNow } from '@/utils/serverTime';
 import { toLocalDateTime, toApiDateTime } from '@/utils/maintenanceAppointment';
@@ -18,7 +19,7 @@ import { useTenantContract } from '@/hooks';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import { visionService } from '@/services/shared/visionService';
-import { uploadImageToCloudinary } from '@/services/core/cloudinary';
+import { uploadImageToCloudinary, uploadMediaToCloudinary } from '@/services/core/cloudinary';
 import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
 import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
@@ -46,7 +47,16 @@ const NON_EQUIPMENT_CATEGORIES: {
  *                 là mất luôn ý nghĩa của cái nhãn.
  */
 type PhotoCheck = 'verified' | 'rejected' | 'unchecked';
-interface PickedImage { uri: string; check: PhotoCheck }
+interface PickedImage {
+  uri: string;
+  check: PhotoCheck;
+  /** 'image' mặc định — video thêm 14/09/2026 (yêu cầu mentor: bằng chứng bảo trì cho
+   * phép cả video, xem src/utils/evidenceMediaPicker.ts). */
+  mediaType?: 'image' | 'video';
+  /** Chỉ có khi mediaType==='video' (mili-giây) — hiện dạng mm:ss trên tile placeholder
+   * (video CHƯA upload lúc đang tạo phiếu — chỉ upload thật lúc bấm Gửi, xem handleSubmit). */
+  durationMs?: number;
+}
 
 export const MaintenanceCreateScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -115,19 +125,30 @@ export const MaintenanceCreateScreen: React.FC = () => {
     : selectedCategory?.placeholder ?? 'Chọn danh mục bên trên trước';
 
   /**
-   * Thêm 1 ảnh vào yêu cầu, có đối chiếu thiết bị.
+   * Thêm 1 ảnh/video vào yêu cầu — chỉ ẢNH mới được đối chiếu thiết bị bằng vision (đọc
+   * tem nhãn), VIDEO thì bỏ qua bước đối chiếu hoàn toàn (không có API đọc nhãn từ
+   * video) và giữ tạm ở dạng local — chỉ thật sự upload lên Cloudinary lúc bấm "Gửi yêu
+   * cầu" (xem handleSubmit), giống cách ảnh của nhánh "sự cố không gắn thiết bị" đang
+   * làm. Video thêm 14/09/2026 theo yêu cầu mentor (đính kèm bằng chứng dạng video).
    *
-   * Với thiết bị có tem nhãn: tải ảnh lên rồi đọc chữ trong ảnh, so với tên thiết bị
-   * đang báo hỏng. Ảnh KHÔNG bị vứt đi khi không nhận ra — vẫn giữ làm ảnh mô tả chỗ
-   * hỏng (nhiều chỗ hỏng chụp cận thì không thấy tem) — nhưng phải có ít nhất 1 ảnh
-   * nhận ra được thì mới gửi được, kiểm ở handleSubmit.
+   * Với ẢNH của thiết bị có tem nhãn: tải ảnh lên rồi đọc chữ trong ảnh, so với tên
+   * thiết bị đang báo hỏng. Ảnh KHÔNG bị vứt đi khi không nhận ra — vẫn giữ làm ảnh mô
+   * tả chỗ hỏng (nhiều chỗ hỏng chụp cận thì không thấy tem) — nhưng phải có ít nhất 1
+   * ảnh nhận ra được thì mới gửi được, kiểm ở handleSubmit.
    */
-  const addImage = async (uri: string) => {
-    if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
+  const addMedia = async (media: EvidenceAsset) => {
+    if (images.length >= 5) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
     const push = (img: PickedImage) => setImages(prev => (prev.length >= 5 ? prev : [...prev, img]));
 
+    if (media.type === 'video') {
+      push({ uri: media.uri, check: 'unchecked', mediaType: 'video', durationMs: media.durationMs });
+      setPhotoNote(null);
+      return;
+    }
+    const uri = media.uri;
+
     // Sự cố không gắn thiết bị (kết cấu/điện/nước) — không có gì để đối chiếu.
-    if (!equipment) return push({ uri, check: 'unchecked' });
+    if (!equipment) return push({ uri, check: 'unchecked', mediaType: 'image' });
 
     setChecking(true);
     try {
@@ -142,7 +163,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
         // Không nhìn được ảnh thì KHÔNG dám nói gì về nội dung ảnh — để 'unchecked',
         // vẫn cho gửi, nhưng không gắn nhãn hợp lệ. KHÔNG nhớ trạng thái lỗi này:
         // một lần hỏng vặt không được phép tắt kiểm tra cho những ảnh sau.
-        push({ uri: url, check: 'unchecked' });
+        push({ uri: url, check: 'unchecked', mediaType: 'image' });
         // Lỗi hệ thống thì khách không sửa được gì → im lặng. Riêng lỗi "gửi quá nhiều
         // ảnh" thì phải nói, vì đó là điều họ tự xử lý được (chờ rồi thử lại).
         const msg = readApiError(err, '');
@@ -153,14 +174,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
       const result = validateEquipmentPhoto(equipmentName, labels);
       if (result.status === 'match') {
-        push({ uri: url, check: 'verified' });
+        push({ uri: url, check: 'verified', mediaType: 'image' });
         setPhotoNote({ tone: 'ok', text: `✓ Đã nhận ra ${equipClass?.label ?? 'thiết bị'} trong ảnh.` });
       } else if (result.status === 'mismatch') {
-        push({ uri: url, check: 'rejected' });
+        push({ uri: url, check: 'rejected', mediaType: 'image' });
         setPhotoNote({ tone: 'warn', text: `${result.reason ?? ''} Ảnh vẫn được giữ làm ảnh mô tả chỗ hỏng.` });
       } else {
         // Nhãn chung chung = không đủ căn cứ. Im lặng, đừng bắt khách giải trình.
-        push({ uri: url, check: 'unchecked' });
+        push({ uri: url, check: 'unchecked', mediaType: 'image' });
         setPhotoNote(null);
       }
     } catch {
@@ -171,18 +192,18 @@ export const MaintenanceCreateScreen: React.FC = () => {
   };
 
   const pickImage = async () => {
-    if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: 5 - images.length, quality: 0.6 });
-    if (result.canceled) return;
-    for (const asset of result.assets) await addImage(asset.uri);
+    if (images.length >= 5) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
+    const picked = await pickEvidenceFromLibrary(remainingEvidenceSlots(images.length));
+    for (const media of picked) await addMedia(media);
   };
 
   const takePhoto = async () => {
-    if (images.length >= 5) { showAlert('Giới hạn', 'Bạn chỉ có thể đính kèm tối đa 5 ảnh.'); return; }
-    // Web: launchCameraAsync chỉ mở file picker → dùng camera modal in-app.
+    if (images.length >= 5) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
+    // Web: launchCameraAsync chỉ mở file picker → dùng camera modal in-app (ảnh-only,
+    // expo-camera CameraView không quay video trong modal này).
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
-    const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.6 });
-    if (!result.canceled && result.assets[0]) await addImage(result.assets[0].uri);
+    const media = await pickEvidenceFromCamera();
+    if (media) await addMedia(media);
   };
 
   const removeImage = (idx: number) => {
@@ -265,7 +286,12 @@ export const MaintenanceCreateScreen: React.FC = () => {
       const uploaded: string[] = [];
       for (const img of images) {
         if (img.uri.startsWith('http')) { uploaded.push(img.uri); continue; }
-        try { uploaded.push(await uploadImageToCloudinary(img.uri)); } catch { /* bỏ ảnh lỗi */ }
+        try {
+          const url = img.mediaType === 'video'
+            ? await uploadMediaToCloudinary(img.uri, 'video')
+            : await uploadImageToCloudinary(img.uri);
+          uploaded.push(url);
+        } catch { /* bỏ ảnh/video lỗi */ }
       }
       if (uploaded.length === 0) {
         setSubmitting(false);
@@ -441,9 +467,9 @@ export const MaintenanceCreateScreen: React.FC = () => {
           <View style={styles.imageRow}>
             <TouchableOpacity style={styles.imageAddBtn} onPress={takePhoto} disabled={checking}>
               <Text style={styles.imageAddEmoji}>📷</Text>
-              <Text style={styles.imageAddText}>{checking ? 'Đang kiểm ảnh…' : 'Chụp ảnh'}</Text>
+              <Text style={styles.imageAddText}>{checking ? 'Đang kiểm ảnh…' : 'Chụp ảnh/video'}</Text>
             </TouchableOpacity>
-            {/* Đồ không có tem nhãn không kiểm được nội dung ảnh → chỉ nhận ảnh chụp tại chỗ. */}
+            {/* Đồ không có tem nhãn không kiểm được nội dung ảnh → chỉ nhận ảnh/video chụp tại chỗ. */}
             {!liveOnly && (
               <TouchableOpacity style={styles.imageAddBtn} onPress={pickImage} disabled={checking}>
                 <Text style={styles.imageAddEmoji}>🖼️</Text>
@@ -453,28 +479,45 @@ export const MaintenanceCreateScreen: React.FC = () => {
           </View>
           {images.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imagePreviewRow}>
-              {images.map((img, idx) => (
-                <View key={idx} style={styles.imagePreviewWrap}>
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => setLightbox({ uris: images.map(i => i.uri), index: idx })}
-                  >
-                    <Image source={{ uri: img.uri }} style={styles.imagePreview} />
-                  </TouchableOpacity>
-                  {/* Chỉ gắn nhãn khi THỰC SỰ đã đối chiếu được — 'unchecked' thì không
-                      nói gì, đỡ hiểu nhầm là app đã xác nhận. */}
-                  {needsVerifiedPhoto && img.check !== 'unchecked' && (
-                    <View style={[styles.imageBadge, img.check === 'verified' ? styles.imageBadgeOk : styles.imageBadgeWarn]}>
-                      <Text style={styles.imageBadgeText}>
-                        {img.check === 'verified' ? '✓ Đúng thiết bị' : 'Ảnh mô tả'}
-                      </Text>
-                    </View>
-                  )}
-                  <TouchableOpacity style={styles.imageRemoveBtn} onPress={() => removeImage(idx)}>
-                    <Text style={{ color: Colors.white, fontSize: 10, fontWeight: '700' }}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
+              {images.map((img, idx) => {
+                const isVideo = img.mediaType === 'video';
+                // Video CHƯA upload lúc đang tạo phiếu (chỉ upload thật lúc bấm Gửi) —
+                // không có gì để phát, chỉ hiện tile placeholder + thời lượng.
+                // Lightbox chỉ phát ảnh — lọc bỏ video khỏi danh sách lướt để không lỡ
+                // lướt tới 1 video rồi render <Image> ra ảnh vỡ (video local chưa upload,
+                // chưa có gì để xem trước — xem placeholder ở nhánh isVideo bên dưới).
+                const imageOnlyUris = images.filter(i => i.mediaType !== 'video').map(i => i.uri);
+                return (
+                  <View key={idx} style={styles.imagePreviewWrap}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      disabled={isVideo}
+                      onPress={() => setLightbox({ uris: imageOnlyUris, index: imageOnlyUris.indexOf(img.uri) })}
+                    >
+                      {isVideo ? (
+                        <View style={[styles.imagePreview, styles.videoPreviewTile]}>
+                          <Text style={{ fontSize: 22 }}>🎬</Text>
+                          <Text style={styles.videoPreviewDuration}>{formatDurationLabel(img.durationMs)}</Text>
+                        </View>
+                      ) : (
+                        <Image source={{ uri: img.uri }} style={styles.imagePreview} />
+                      )}
+                    </TouchableOpacity>
+                    {/* Chỉ gắn nhãn khi THỰC SỰ đã đối chiếu được — 'unchecked' thì không
+                        nói gì, đỡ hiểu nhầm là app đã xác nhận (video luôn 'unchecked'). */}
+                    {needsVerifiedPhoto && img.check !== 'unchecked' && (
+                      <View style={[styles.imageBadge, img.check === 'verified' ? styles.imageBadgeOk : styles.imageBadgeWarn]}>
+                        <Text style={styles.imageBadgeText}>
+                          {img.check === 'verified' ? '✓ Đúng thiết bị' : 'Ảnh mô tả'}
+                        </Text>
+                      </View>
+                    )}
+                    <TouchableOpacity style={styles.imageRemoveBtn} onPress={() => removeImage(idx)}>
+                      <Text style={{ color: Colors.white, fontSize: 10, fontWeight: '700' }}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </ScrollView>
           )}
           {photoNote && (
@@ -484,8 +527,8 @@ export const MaintenanceCreateScreen: React.FC = () => {
           )}
           <Text style={styles.imageHint}>
             {liveOnly
-              ? `Chụp trực tiếp tại phòng · Tối đa 5 ảnh · ${images.length}/5`
-              : `Bắt buộc ít nhất 1 ảnh · Tối đa 5 ảnh · ${images.length}/5`}
+              ? `Chụp trực tiếp tại phòng · Tối đa ${EVIDENCE_MAX_FILES} ảnh/video · ${images.length}/${EVIDENCE_MAX_FILES}`
+              : `Bắt buộc ít nhất 1 ảnh · Tối đa ${EVIDENCE_MAX_FILES} ảnh/video (video ≤ 45s) · ${images.length}/${EVIDENCE_MAX_FILES}`}
           </Text>
         </View>
 
@@ -525,7 +568,7 @@ export const MaintenanceCreateScreen: React.FC = () => {
       <CameraCaptureModal
         visible={cameraOpen}
         multi
-        onCapture={(uri) => { void addImage(uri); }}
+        onCapture={(uri) => { void addMedia({ uri, type: 'image' }); }}
         onClose={() => setCameraOpen(false)}
       />
       <PhotoLightbox state={lightbox} onChange={setLightbox} />
@@ -606,6 +649,8 @@ const styles = StyleSheet.create({
   imagePreviewRow: { flexDirection: 'row', marginBottom: Spacing.sm },
   imagePreviewWrap: { marginRight: Spacing.sm, position: 'relative' },
   imagePreview: { width: 80, height: 80, borderRadius: BorderRadius.md },
+  videoPreviewTile: { backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  videoPreviewDuration: { color: Colors.white, fontSize: 11, fontWeight: '700' },
   imageRemoveBtn: {
     position: 'absolute', top: 4, right: 4, width: 20, height: 20,
     borderRadius: 10, backgroundColor: Colors.error, alignItems: 'center', justifyContent: 'center',
