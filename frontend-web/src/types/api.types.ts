@@ -159,6 +159,17 @@ export interface PropertyDraftRequest {
   roomsPerFloor?: number;
   createdBy?: number;
   imageUrls?: string[];
+  /**
+   * MÃ KHÁCH HÀNG ĐIỆN / NƯỚC của căn nhà (BE 618f9dd).
+   *
+   * Khai ở đây thì lúc phát hành hoá đơn mới đối chiếu được với mã in trên tờ giấy — máy
+   * chủ CHẶN phát hành khi lệch. Chưa khai thì nó bỏ qua đối chiếu, tức mất luôn cái chốt
+   * bắt gắn nhầm hoá đơn vào nhà khác.
+   *
+   * Máy chủ tự chuẩn hoá (bỏ dấu cách/gạch, hạ chữ thường) nên gõ kiểu nào cũng được.
+   */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
 }
 
 /** Response từ tất cả endpoint property */
@@ -173,6 +184,24 @@ export interface PropertyResponse {
    * xong vẫn có thể trả về rỗng.
    */
   propertyCode?: string;
+  /**
+   * ── MÃ KHÁCH HÀNG ĐIỆN / NƯỚC CỦA CĂN NHÀ (BE 618f9dd, 10/09/2026) ──────────
+   *
+   * Mã chuẩn đã khai lúc tiếp nhận nhà, máy chủ lưu ở dạng chữ thường và đã bỏ hết dấu
+   * cách/gạch (`UtilityCustomerCodeHelper.normalize`).
+   *
+   * Đây là mốc để đối chiếu với mã đọc từ tờ hoá đơn lúc phát hành. Máy chủ cũng tự so và
+   * CHẶN nếu lệch, nhưng có mã ở đây thì màn hình nói được ngay lúc admin nhìn thấy tờ
+   * giấy, thay vì để họ bấm phát hành rồi mới ăn lỗi.
+   *
+   * Rỗng = nhà chưa khai mã; khi đó máy chủ bỏ qua đối chiếu. Đây là một lỗ hổng IM LẶNG
+   * chứ không phải một lỗi: hoá đơn vẫn phát hành trót lọt, chỉ là không còn ai kiểm nó có
+   * đúng nhà hay không.
+   *
+   * Từ BE 5c6a65c, CẢ ĐIỆN VÀ NƯỚC đều bị đối chiếu; trước đó nhánh nước thoát sớm.
+   */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
   shortAddress: string;
   fullAddress: string;
   descriptions?: string;
@@ -296,6 +325,9 @@ export interface PropertyCreateRequest {
   totalRooms?: number;
   managedBy?: number;
   imageUrls?: string[];
+  /** Mã khách hàng điện / nước — xem chú thích ở `PropertyDraftRequest`. */
+  electricityCustomerCode?: string;
+  waterCustomerCode?: string;
 }
 
 // =============================================================================
@@ -688,6 +720,68 @@ export interface PricingCalculationResponse {
   roomCount?: number;
   roomResults?: RoomPricingResult[];
   wholeHouseResult?: RoomPricingResult;
+
+  // ── Tính giá theo từng khoản vốn (BE thêm 14/09/2026, commit 7614c9f; bổ sung c2848dd) ──
+  // Chỉ `POST /pricing/calculate` trả các field dưới; `GET /pricing` chưa trả.
+  // `cRent/cRenovation/cEquipment` từ c2848dd đã cộng lại từ `capitalItems`; `roomResults[].rentShare/...`
+  // vẫn = 0 — FE cộng theo phòng từ `capitalItems`, xem review/capitalItems.ts.
+  /** Mỗi khoản vốn có lịch khấu hao riêng; khoản của đợt trước giữ nguyên `monthlyAmount`. */
+  capitalItems?: PricingCapitalItem[];
+  /** Dự phòng sửa chữa sau bảo hành / tháng — đã nằm trong `fixedOpex`. */
+  repairReservePerMonth?: number;
+  /** Phần công ty tự chịu, chỉ để hiển thị, không cộng vào giá. */
+  companyAbsorbed?: CompanyAbsorbed;
+  /**
+   * Giá sàn phiên bản trước / phiên bản này — nhà chia phòng là TỔNG mọi phòng (BE a40f1ac). 0 khi chưa có
+   * phiên bản trước. Phiên bản trước tính theo cấu hình lúc đó, nên chênh lệch không chỉ do cải tạo.
+   */
+  previousFloor?: number;
+  newFloor?: number;
+}
+
+export type PricingCapitalItemKind = 'RENT' | 'RENOVATION' | 'EQUIPMENT' | 'EQUIPMENT_UPGRADE';
+
+export interface PricingCapitalItem {
+  id: number;
+  /** "Vốn thuê nhà" / tên danh mục cải tạo / tên thiết bị (BE c2848dd). */
+  itemName?: string | null;
+  pricingVersion: number;
+  kind: PricingCapitalItemKind;
+  /** renovation_line_id hoặc equipment_id. */
+  sourceId?: number | null;
+  /** Có giá trị = khoản riêng của phòng đó; null = khoản chung chia đều. */
+  roomId?: number | null;
+  /** true = thiết bị khu vực chung. */
+  houseArea?: boolean | null;
+  amount: number;
+  /** Ngày bắt đầu khấu hao (ISO). Khoản lập ở đợt nào thì mang ngày của đợt đó. */
+  startDate: string;
+  months: number;
+  /**
+   * = monthlyAmount × số tháng đã qua. BE đếm tháng theo NGÀY 1 của tháng (tháng đang dở cũng tính),
+   * nên có thể nhiều hơn cách đếm tháng tròn của FE một tháng — FE ưu tiên số của BE.
+   */
+  depreciatedAmount?: number | null;
+  /** = amount − depreciatedAmount (BE c2848dd). */
+  remainingAmount?: number | null;
+  monthlyAmount: number;
+}
+
+export interface TenantOnOldPrice {
+  /** null = nhà nguyên căn. */
+  roomId: number | null;
+  roomName: string | null;
+  contractPrice: number;
+  newFloorPrice: number;
+  remainingMonths: number;
+  absorbedAmount: number;
+}
+
+export interface CompanyAbsorbed {
+  /** Tiền thay thiết bị hỏng bằng loại tương đương — không tăng giá. */
+  equivalentReplacement: number;
+  /** Khách đang ở giữ giá hợp đồng cũ tới hết hạn. */
+  tenantsOnOldPrice: TenantOnOldPrice[];
 }
 
 export interface PricingReconciliationResponse {

@@ -92,13 +92,43 @@ const amountAfterLabel = (
 /** m³ một kỳ của một hộ/căn — quá ngưỡng này là OCR bắt nhầm ô tiền. */
 const MAX_PLAUSIBLE_M3 = 9999;
 
+/**
+ * Số đứng NGAY SAU một nhãn cụ thể, trên cùng một dòng chữ phẳng.
+ *
+ * Vì sao không dùng `amountAfterLabel` cho chỉ số:
+ *
+ *  1. **Hàm kia lấy số CUỐI dòng.** Giấy nước hay in cả ba nhãn trên một hàng —
+ *     `CHỈ SỐ MỚI: 3   CHỈ SỐ CŨ: 0   TIÊU THỤ (m3): 3` — nên "số cuối dòng" trả về cùng
+ *     một giá trị cho cả ba nhãn.
+ *  2. **Hàm kia loại số 0** (`n > 0`). Đồng hồ mới lắp có chỉ số cũ đúng bằng 0, và đó là
+ *     giá trị hợp lệ chứ không phải "không đọc được".
+ *
+ * Đơn vị `m³` bị gỡ trước khi dò: để nguyên thì nhãn `tiêu thụ (m3)` có chữ số 3 nằm ngay
+ * sau nhãn, và hàm này vớ đúng con 3 đó thay vì giá trị thật.
+ */
+const numberAfterLabel = (flat: string, label: string): number | undefined => {
+  // `(?:…)` bọc nhãn là BẮT BUỘC: nhãn truyền vào có dấu `|`, không bọc thì phép hoặc ăn
+  // ra ngoài và `chi so moi|cs moi|so doc thang nay[^0-9]{0,12}(\d…)` chỉ gắn phần bắt số
+  // vào nhánh CUỐI — hai nhánh đầu khớp xong trả về nhóm 1 rỗng.
+  const m = flat.match(new RegExp(`(?:${label})[^0-9]{0,12}(\\d[\\d.,]*)`));
+  if (!m?.[1]) return undefined;
+  const n = toNumber(m[1]);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
   const raw = ocr?.rawText ?? '';
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const out: ParsedWaterInvoice = {};
 
   // ── Tổng tiền: BẮT BUỘC là "tổng tiền thanh toán", không phải "cộng tiền hàng" ──
-  out.totalAmount = amountAfterLabel(lines, /tong tien thanh toan|tong cong tien thanh toan/);
+  /*
+    `.{0,8}` giữa "tong" và "tien" là để ôm các biến thể thật của tờ giấy:
+    "Tổng tiền thanh toán", "Tổng cộng tiền thanh toán", và "Tổng SỐ tiền thanh toán".
+    Bản trước liệt kê cứng hai cách đầu nên tờ nào viết "Tổng số tiền thanh toán" là ô tổng
+    tiền bỏ trống — mà đó là cách viết của mẫu hoá đơn nước đang dùng.
+  */
+  out.totalAmount = amountAfterLabel(lines, /tong.{0,8}tien thanh toan/);
   // Không thấy nhãn tổng → thử cộng tay: tiền hàng + thuế + phí BVMT. Vẫn an toàn hơn
   // lấy đại "cộng tiền hàng" vì đó chắc chắn là số THIẾU.
   if (!out.totalAmount) {
@@ -113,15 +143,31 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
     BẮT BUỘC có nhãn đứng trước, không dò tự do — xem chú thích ở `customerCode`.
     Nhãn viết mỗi nơi một kiểu: "Danh bộ", "Danh bạ", "Mã KH", "Mã khách hàng".
   */
-  const codeLine = lines.find((l) => /danh b[oa]|ma kh\b|ma khach hang/.test(norm(l)));
+  /*
+    `sdb` là nhãn THẬT của Tổng công ty Cấp nước Sài Gòn, và là nhãn hay gặp nhất — tờ giấy
+    in `SDB: 1512 284 3356`, không hề có chữ "danh bộ" nào. Thiếu nó là parser bỏ trắng ô
+    số danh bộ trên đúng loại hoá đơn phổ biến nhất.
+
+    Chữ số in thành từng nhóm cách nhau bằng khoảng trắng; phần `[\d\s.-]` ôm hết rồi
+    `replace` bỏ mọi thứ không phải số, nên `1512 284 3356` về đúng `151228433356`.
+
+    KHÔNG khớp được với hai nhãn nằm ngay cạnh trên cùng tờ giấy: `SỐ ĐỊNH DANH` (không có
+    chữ "b" sau "danh") và `MLT: TA4.1301.7750` (giá trị bắt đầu bằng chữ, mà mẫu bắt buộc
+    ký tự đầu là chữ số).
+  */
+  const codeLine = lines.find((l) => /\bsdb\b|danh b[oa]|ma kh\b|ma khach hang/.test(norm(l)));
   if (codeLine) {
-    const m = norm(codeLine).match(/(?:danh b[oa]|ma kh|ma khach hang)[^0-9a-z]*([0-9][\d\s.-]{6,18})/);
+    const m = norm(codeLine).match(/(?:\bsdb\b|danh b[oa]|ma kh|ma khach hang)[^0-9a-z]*([0-9][\d\s.-]{6,18})/);
     const digits = m?.[1].replace(/[^0-9]/g, '');
     if (digits && digits.length >= 7) out.customerCode = digits;
   }
 
   // ── Số m³ tiêu thụ ──
-  out.totalQuantity = amountAfterLabel(lines, /so luong tieu thu/, { small: true });
+  // Ba cách viết đã gặp trên giấy thật: "Số Lượng Tiêu Thụ", "Lượng nước tiêu thụ (m³)",
+  // và "TIÊU THỤ (m3)". Nhãn cuối trần trụi nhất nên để sau cùng.
+  out.totalQuantity = amountAfterLabel(
+    lines, /so luong tieu thu|luong nuoc tieu thu|tieu thu/, { small: true },
+  );
   if (!out.totalQuantity) {
     // Dự phòng: hiệu hai chỉ số "Số Đọc Tháng Này" − "Số Đọc Tháng Trước".
     const now = amountAfterLabel(lines, /so doc thang nay/, { small: true });
@@ -139,13 +185,39 @@ export const parseWaterInvoice = (ocr: WaterOcrInput): ParsedWaterInvoice => {
    * parser cũ trả về rỗng hoàn toàn, admin phải gõ tay cả 3 ô. `findReadingTriple` bắt
    * bộ ba tự khớp phép trừ nên đọc được bất kể nhãn viết tắt kiểu gì và cột nào in trước.
    */
-  // Đưa số m³ đọc từ nhãn vào làm ràng buộc, giống bên điện: bộ ba phải trừ ra đúng con
-  // số đó thì mới nhận. Chưa đọc được m³ thì bỏ trống và hàm quay về chấm điểm như cũ.
-  const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3, out.totalQuantity);
-  if (triple) {
-    out.prevReading = triple.prevReading;
-    out.newReading = triple.newReading;
-    out.totalQuantity = triple.consumption;
+  /*
+    ĐƯỜNG 1 — ĐỌC THEO NHÃN. Ưu tiên tuyệt đối khi tờ giấy có in nhãn.
+
+    Giấy nước thường in thẳng `CHỈ SỐ MỚI: 3   CHỈ SỐ CŨ: 0`. Đọc đúng nhãn thì chính xác
+    tuyệt đối và — quan trọng hơn — xử lý được ĐỒNG HỒ MỚI LẮP, loại có chỉ số cũ bằng 0.
+
+    Cách dò bộ ba ở đường 2 không bao giờ đọc nổi ca đó: nó bỏ qua số 0 khi gom token, và
+    còn đòi tiêu thụ phải nhỏ hơn chỉ số cũ — với `3 − 0 = 3` thì điều kiện đó vô nghĩa.
+    Nhà mới bàn giao đồng hồ là ca thường gặp, không phải ngoại lệ hiếm.
+  */
+  const flatForReadings = norm(raw.replace(/\s+/g, ' ')).replace(/\(?\s*m\s*[3³]\s*\)?/g, ' ');
+  const labelNew = numberAfterLabel(flatForReadings, 'chi so moi|cs moi|so doc thang nay');
+  const labelPrev = numberAfterLabel(flatForReadings, 'chi so cu|cs cu|so doc thang truoc');
+
+  if (labelNew != null && labelPrev != null && labelNew >= labelPrev) {
+    out.prevReading = labelPrev;
+    out.newReading = labelNew;
+    /*
+      Hiệu hai chỉ số là con số ĐÁNG TIN NHẤT cho lượng tiêu thụ — nó tự chứng minh bằng
+      phép trừ. Chỉ giữ số đọc từ nhãn `tiêu thụ` khi nó khớp; lệch thì tin phép trừ, vì
+      nhãn `tiêu thụ` hay đứng cạnh cột "dịch vụ thoát nước" có cùng con số và dễ vớ nhầm.
+    */
+    const diff = labelNew - labelPrev;
+    if (diff > 0 && diff <= MAX_PLAUSIBLE_M3) out.totalQuantity = diff;
+  } else {
+    // ĐƯỜNG 2 — dò bộ ba tự khớp phép trừ, cho tờ giấy không in nhãn. Đưa số m³ đọc từ
+    // nhãn vào làm ràng buộc, giống bên điện.
+    const triple = findReadingTriple(raw, MAX_PLAUSIBLE_M3, out.totalQuantity);
+    if (triple) {
+      out.prevReading = triple.prevReading;
+      out.newReading = triple.newReading;
+      out.totalQuantity = triple.consumption;
+    }
   }
 
   // ── Kỳ: "Thời gian sử dụng: 07/12/2024 - 06/01/2025" ──

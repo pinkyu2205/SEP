@@ -257,6 +257,44 @@ export const StepPropertyInfo = ({ property, onNext, nextLabel = 'Tiếp tục c
             <p className="text-slate-500 mb-1">Tổng phòng</p>
             <p className="font-bold text-slate-900">{property.totalRooms}</p>
           </div>
+
+          {/*
+            MÃ KHÁCH HÀNG ĐIỆN / NƯỚC — CHỈ ĐỌC, vì nó vào bằng file Excel tiếp nhận nhà
+            (cột "Mã khách hàng điện" / "Mã khách hàng nước"), không phải gõ tay ở đây.
+
+            Nhưng phải BÀY RA, không được im lặng. Máy chủ chặn phát hành hoá đơn khi mã
+            trên tờ giấy lệch mã đã lưu — mà nhà nào chưa có mã thì nó bỏ qua đối chiếu
+            hoàn toàn. Tức một cột Excel để trống làm mất luôn cái chốt bắt gắn nhầm hoá
+            đơn vào nhà khác, và mất một cách không ai thấy: mọi thứ vẫn chạy, chỉ là
+            không còn ai kiểm.
+
+            Hiện ở đây thì ngay sau khi import là soát được, chứ không phải đợi tới lúc
+            phát hành hoá đơn mới phát hiện cả lô không có mã.
+          */}
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Mã khách hàng điện</p>
+            {property.electricityCustomerCode ? (
+              <p className="font-mono font-bold uppercase text-slate-900">
+                {property.electricityCustomerCode}
+              </p>
+            ) : (
+              <p className="text-sm font-semibold text-amber-600">
+                Chưa có — hoá đơn điện sẽ không được đối chiếu
+              </p>
+            )}
+          </div>
+          <div className="col-span-2">
+            <p className="text-slate-500 mb-1">Số danh bộ nước</p>
+            {property.waterCustomerCode ? (
+              <p className="font-mono font-bold uppercase text-slate-900">
+                {property.waterCustomerCode}
+              </p>
+            ) : (
+              <p className="text-sm font-semibold text-amber-600">
+                Chưa có — hoá đơn nước sẽ không được đối chiếu
+              </p>
+            )}
+          </div>
         </div>
       </section>
 

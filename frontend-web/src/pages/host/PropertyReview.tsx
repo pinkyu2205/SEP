@@ -26,11 +26,15 @@ import type {
   PricingMode,
   PricingCalculationResponse,
   CalculatePricingRequest,
+  RenovationSession,
 } from '@/types/api.types';
 import { HandoverEquipmentSection } from '@/pages/admin/onboarding/HandoverEquipmentSection';
 import { OperationalEquipmentPanel } from '@/pages/admin/onboarding/OperationalEquipmentPanel';
 import { PropertyMap } from '@/components/PropertyMap';
 import { RoomPriceTable } from './review/RoomPriceTable';
+import { CapitalItemsPanel } from './review/CapitalItemsPanel';
+import { capitalParts } from './review/capitalItems';
+import { RepricingReview } from './review/RepricingReview';
 import {
   BigStat, Divider, Line, Note, Panel, derive, formatVND, shortVND,
 } from './review/pricingBreakdown';
@@ -215,7 +219,43 @@ const MoneyInput = ({
   </div>
 );
 
+/**
+ * `/host/review/:id` — chọn đúng màn duyệt giá.
+ *
+ * • Nhà mới tiếp nhận (chỉ có đợt cải tạo 1, hoặc không cải tạo) → [[OnboardingPriceReview]]: xem toàn bộ
+ *   vốn, chốt giá lần đầu, kích hoạt cho thuê.
+ * • Nhà đã có đợt cải tạo BỔ SUNG (đợt ≥ 2 — BE đánh số đợt bổ sung từ 2) → [[RepricingReview]]: nhà đang
+ *   cho thuê, chỉ duyệt phần thay đổi; khách đang ở giữ giá hợp đồng.
+ */
 export const HostPropertyReview = () => {
+  const { id } = useParams<{ id: string }>();
+  const propertyId = Number(id);
+  const [sessions, setSessions] = useState<RenovationSession[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setSessions(null);
+    propertyService.getRenovationSessions(propertyId)
+      .then((s) => { if (alive) setSessions(s ?? []); })
+      // Không tra được đợt cải tạo thì rơi về màn duyệt giá gốc — màn đó vẫn dùng được cho mọi nhà.
+      .catch(() => { if (alive) setSessions([]); });
+    return () => { alive = false; };
+  }, [propertyId]);
+
+  if (sessions === null) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
+      </div>
+    );
+  }
+  if (sessions.some((s) => s.sessionNumber >= 2)) {
+    return <RepricingReview key={propertyId} propertyId={propertyId} sessions={sessions} />;
+  }
+  return <OnboardingPriceReview key={propertyId} />;
+};
+
+const OnboardingPriceReview = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const propertyId = Number(id);
@@ -451,9 +491,41 @@ export const HostPropertyReview = () => {
    */
   const zoneHasManager = !!zoneLink;
 
+  /**
+   * LƯỚI AN TOÀN cho hai lỗi BE đã biết (doc-be/BE-NGHIEMTHU-LAN2-...-2026-09-14.md), cả hai đều
+   * ra một con số giá trông bình thường nhưng sai, Host bấm duyệt là đóng băng luôn:
+   *
+   *   • Bảng khoản vốn không có tiền thuê chủ nhà — nhà duyệt giá trước 14/09/2026 chưa có khoản
+   *     vốn phiên bản 1, đợt cải tạo bổ sung chỉ còn khoản mới. Hoàn vốn/tháng rơi từ ~3,6tr xuống
+   *     vài chục nghìn một phòng.
+   *   • Một phòng xuất hiện hai lần — BE không đánh dấu phiên bản giá cũ, trả cả bảng cũ lẫn mới.
+   *
+   * Chặn cứng như khi thiếu quản lý khu vực: đây là loại sai không sửa lại được sau khi duyệt.
+   * BE sửa xong thì hai điều kiện này tự thành false, không cần gỡ.
+   */
+  const capitalMissingRent = !!calc?.capitalItems?.length
+    && !calc.capitalItems.some((i) => i.kind === 'RENT');
+  /**
+   * Mọi hạng mục cải tạo của nhà (mọi đợt) phải nằm trong bảng khoản vốn đúng một lần. Lệch nghĩa là
+   * BE bỏ sót hoặc tính trùng — ca đã gặp: BE dựng bù khoản vốn cho nhà cũ nhưng bỏ qua các dòng đã gắn
+   * đợt 1, nên thiếu toàn bộ cải tạo (và thiết bị) lúc tiếp nhận nhà. `totalRenovationCost` của
+   * onboarding summary là tổng mọi dòng cải tạo của nhà.
+   */
+  const renovationInItems = (calc?.capitalItems ?? [])
+    .filter((i) => i.kind === 'RENOVATION')
+    .reduce((s, i) => s + i.amount, 0);
+  const capitalRenovationMismatch = !!calc?.capitalItems?.length && !!summary
+    && Math.abs(renovationInItems - (summary.totalRenovationCost ?? 0)) > 1;
+  const duplicatedRooms = (() => {
+    const ids = (calc?.roomResults ?? []).map((r) => r.roomId);
+    return ids.length !== new Set(ids).size;
+  })();
+  const pricingDataBroken = capitalMissingRent || capitalRenovationMismatch || duplicatedRooms;
+
   const canConfirm =
     canEdit &&
     !!calc &&
+    !pricingDataBroken &&
     zoneHasManager &&
     // Kích hoạt sớm hơn ngày hợp đồng thì phải tick xác nhận đã đọc cảnh báo.
     (!leaseNotStarted || ackEarlyActivation) &&
@@ -548,7 +620,14 @@ export const HostPropertyReview = () => {
     );
   }
 
-  const d = calc ? derive(calc) : null;
+  const today = serverNow();
+  /**
+   * Tổng theo loại cộng từ bảng khoản vốn (BE 14/09/2026). Có bảng thì mọi chỗ đọc từ đây:
+   * BE trả `cRent/cRenovation/cEquipment` = 0 khi có `capitalItems`, đọc thẳng là hiện
+   * "Tiền thuê trả chủ nhà 0 đ".
+   */
+  const parts = calc?.capitalItems?.length ? capitalParts(calc.capitalItems, today) : null;
+  const d = calc ? derive(calc, parts) : null;
   const months = calc?.contractMonths ?? 0;
   const inbound = summary.inboundContract;
   // ── BA con số thời hạn, khác nhau có chủ đích. Trang hiện cả ba chứ không giấu bên nào,
@@ -625,9 +704,16 @@ export const HostPropertyReview = () => {
   const totalMonthly = isRoomScope
     ? (calc?.roomResults || []).reduce((s, r) => s + (roomPrices[r.roomId] || 0), 0)
     : wholeFinal;
-  const totalInvest = isRoomScope
-    ? (calc?.roomResults || []).reduce((s, r) => s + (r.totalInvestment || 0), 0) || (calc?.capex ?? 0)
-    : (calc?.capex ?? 0);
+  /**
+   * Vốn phải lấy lại trong `revenueMonths` tháng tới. Có bảng khoản vốn thì là phần CÒN LẠI của
+   * từng khoản: sau đợt cải tạo bổ sung, khoản của đợt trước đã lấy lại được một phần — trừ cả
+   * `capex` (tổng gốc) khỏi doanh thu của những tháng còn lại là tính lỗ sai.
+   */
+  const totalInvest = parts
+    ? parts.remaining
+    : isRoomScope
+      ? (calc?.roomResults || []).reduce((s, r) => s + (r.totalInvestment || 0), 0) || (calc?.capex ?? 0)
+      : (calc?.capex ?? 0);
   // Doanh thu tính theo số tháng THẬT của hợp đồng, không theo số tháng cắt cụt của BE —
   // nếu không thì lãi cả kỳ bị báo thiếu đúng một tháng tiền thuê.
   const totalProfit = totalMonthly > 0 && revenueMonths > 0 ? totalMonthly * revenueMonths - totalInvest : 0;
@@ -646,10 +732,14 @@ export const HostPropertyReview = () => {
     if (!calc || totalMonthly <= 0 || revenueMonths <= 0) return null;
     const revenue = totalMonthly * revenueMonths;
     const opexTotal = (calc.oOperation ?? 0) * revenueMonths;
-    const net = revenue - totalInvest - opexTotal;
+    // Dự phòng sửa chữa sau bảo hành cũng đã cộng vào giá — là tiền để dành cho sửa chữa,
+    // không phải lãi, nên trừ ra như chi phí vận hành.
+    const reserveTotal = (calc.repairReservePerMonth ?? 0) * revenueMonths;
+    const net = revenue - totalInvest - opexTotal - reserveTotal;
     return {
       revenue,
       opexTotal,
+      reserveTotal,
       net,
       perMonth: net / revenueMonths,
       /** Lãi TRƯỚC chi phí vận hành — con số cũ, giữ lại để không ai tưởng số bị mất đi đâu. */
@@ -670,7 +760,7 @@ export const HostPropertyReview = () => {
     // vốn) nên tháng đuôi không bao giờ được tính là tháng có tiền về.
     const parts = {
       goal: d.profitPerMonth * revenueMonths,
-      buffer: (recovery + (calc.oOperation ?? 0) + d.profitPerMonth) * vRate * revenueMonths,
+      buffer: (recovery + (calc.oOperation ?? 0) + d.reserve + d.profitPerMonth) * vRate * revenueMonths,
       above: (totalMonthly - target) * revenueMonths,
     };
     const sum = parts.goal + parts.buffer + parts.above;
@@ -706,6 +796,37 @@ export const HostPropertyReview = () => {
 
       {error && (
         <div className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-semibold text-rose-700">{error}</div>
+      )}
+
+      {pricingDataBroken && (
+        <div className="mb-6 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5">
+          <p className="flex items-center gap-2 text-sm font-black text-rose-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            Kết quả tính giá của máy chủ đang sai — chưa duyệt được căn này
+          </p>
+          <div className="mt-2 space-y-1.5 text-xs leading-relaxed text-rose-700">
+            {capitalMissingRent && (
+              <p>
+                • Bảng khoản vốn <b>không có tiền thuê trả chủ nhà</b>, chỉ còn các khoản của đợt cải tạo mới. Giá gợi ý
+                vì vậy thấp hơn thực tế rất nhiều — duyệt theo giá này là cho thuê lỗ suốt phần còn lại của hợp đồng.
+              </p>
+            )}
+            {capitalRenovationMismatch && (
+              <p>
+                • Chi phí cải tạo trong bảng khoản vốn là <b>{formatVND(renovationInItems)}</b>, nhưng các hạng mục cải tạo
+                của căn này cộng lại là <b>{formatVND(summary.totalRenovationCost ?? 0)}</b>. Máy chủ đang bỏ sót (hoặc tính
+                trùng) một phần vốn nên giá gợi ý không đúng.
+              </p>
+            )}
+            {duplicatedRooms && (
+              <p>
+                • Một số phòng xuất hiện <b>hai lần</b> trong kết quả (máy chủ trả cả bảng giá cũ lẫn mới), nên không biết
+                dòng nào là giá đúng.
+              </p>
+            )}
+            <p>Đã báo team BE. Sau khi BE sửa, bấm &quot;Tính lại theo cấu hình&quot; — nút Xác nhận sẽ tự mở.</p>
+          </div>
+        </div>
       )}
 
       {/* ── 1. Tòa nhà ──────────────────────────────────────────────────────── */}
@@ -793,7 +914,7 @@ export const HostPropertyReview = () => {
               {inbound ? (
                 <>
                   <p className="mt-2 text-xl font-black tabular-nums text-slate-900">
-                    {formatVND(calc?.cRent ?? inbound.totalRentAmount)}
+                    {formatVND(parts?.rent ?? calc?.cRent ?? inbound.totalRentAmount)}
                   </p>
                   <div className="mt-2 space-y-0.5 text-xs">
                     <p className="text-slate-500">Mã HĐ: <span className="font-mono font-bold text-slate-700">{inbound.contractCode}</span></p>
@@ -838,7 +959,7 @@ export const HostPropertyReview = () => {
                 <Hammer className="h-3.5 w-3.5" /> 2. Chi phí cải tạo
               </p>
               <p className="mt-2 text-xl font-black tabular-nums text-slate-900">
-                {formatVND(calc?.cRenovation ?? summary.totalRenovationCost ?? 0)}
+                {formatVND(parts?.renovation ?? calc?.cRenovation ?? summary.totalRenovationCost ?? 0)}
               </p>
               {summary.renovationLines?.length > 0 ? (
                 <div className="mt-2 space-y-1">
@@ -883,7 +1004,7 @@ export const HostPropertyReview = () => {
                 để trống còn hơn bịa một con số trông như thật.
               */}
               {(() => {
-                const eq = calc?.cEquipment ?? (() => {
+                const eq = parts?.equipment ?? calc?.cEquipment ?? (() => {
                   const rent = calc?.cRent ?? inbound?.totalRentAmount;
                   const reno = calc?.cRenovation ?? summary.totalRenovationCost;
                   if (calc?.capex == null || rent == null || reno == null) return null;
@@ -924,10 +1045,33 @@ export const HostPropertyReview = () => {
                 </div>
                 <p className="text-2xl font-black tabular-nums text-white">{formatVND(calc.capex)}</p>
               </div>
+              {parts && parts.depreciated > 0 && (
+                <p className="mt-1.5 border-t border-slate-700 pt-1.5 text-xs text-slate-300">
+                  Đã lấy lại <b className="tabular-nums text-white">{formatVND(parts.depreciated)}</b> qua tiền thuê —
+                  còn phải lấy lại <b className="tabular-nums text-white">{formatVND(parts.remaining)}</b>. Chi tiết ở bảng khoản vốn bên dưới.
+                </p>
+              )}
             </div>
           )}
         </Panel>
       </div>
+
+      {/* ── 2b. Từng khoản vốn — chỉ có khi máy chủ trả bảng khoản vốn ─────────
+          Đây là chỗ trả lời "sau cải tạo bổ sung giá mới ở đâu ra": khoản cũ giữ nguyên mỗi
+          tháng, đợt mới chỉ cộng thêm. Kèm dự phòng bảo hành và phần công ty tự chịu. */}
+      {calc && parts && (
+        <div className="mb-5">
+          <CapitalItemsPanel
+            calc={calc}
+            today={today}
+            rentLabel={inbound?.contractCode}
+            roomLabel={(roomId) => {
+              const r = calc.roomResults?.find((x) => x.roomId === roomId);
+              return r?.roomNumber ? `Phòng ${r.roomNumber}` : null;
+            }}
+          />
+        </div>
+      )}
 
       {/* ── Thiết bị chi tiết — ĐÓNG SẴN ─────────────────────────────────────
           Một toà 50 phòng dễ có vài trăm thiết bị. Bung sẵn thì hai khối này chiếm mấy màn
@@ -1158,8 +1302,14 @@ export const HostPropertyReview = () => {
                 <Divider />
                 <Line
                   label="Mỗi tháng phải lấy lại"
-                  hint="Thu về đều đặn bấy nhiêu thì hết hợp đồng vừa đủ huề, chưa lời"
-                  formula={d?.recoveryMatches ? `${shortVND(calc.capex)} ÷ ${months} tháng` : undefined}
+                  hint={d?.recoveryFromItems
+                    ? 'Cộng số tiền mỗi tháng của từng khoản vốn — mỗi khoản có lịch riêng, xem bảng khoản vốn'
+                    : 'Thu về đều đặn bấy nhiêu thì hết hợp đồng vừa đủ huề, chưa lời'}
+                  formula={d?.recoveryMatches
+                    ? d.recoveryFromItems
+                      ? `Σ ${calc.capitalItems?.length ?? 0} khoản`
+                      : `${shortVND(calc.capex)} ÷ ${months} tháng`
+                    : undefined}
                   value={formatVND(calc.monthlyRecovery)}
                   tone="accent"
                 />
@@ -1168,10 +1318,21 @@ export const HostPropertyReview = () => {
                   hint="Chi phí khác + lương quản lý phân bổ, lấy từ Cấu hình duyệt giá"
                   value={formatVND(calc.oOperation ?? 0)}
                 />
+                {calc.repairReservePerMonth != null && (
+                  <Line
+                    label="Dự phòng sửa chữa sau bảo hành"
+                    hint="Để dành cho những tháng thiết bị đã hết bảo hành — tính sẵn nên giá không phải tăng lúc hết bảo hành"
+                    value={formatVND(calc.repairReservePerMonth)}
+                  />
+                )}
                 <Line
                   label="Thu tối thiểu mỗi tháng"
                   hint="Không thu đủ mức này là lỗ"
-                  formula={d?.opexMatches ? `${shortVND(calc.monthlyRecovery)} + ${shortVND(calc.oOperation ?? 0)}` : undefined}
+                  formula={d?.opexMatches
+                    ? d.reserve > 0
+                      ? `${shortVND(calc.monthlyRecovery)} + ${shortVND(calc.oOperation ?? 0)} + ${shortVND(d.reserve)}`
+                      : `${shortVND(calc.monthlyRecovery)} + ${shortVND(calc.oOperation ?? 0)}`
+                    : undefined}
                   value={formatVND(calc.fixedOpex)}
                   tone="total"
                 />
@@ -1280,7 +1441,7 @@ export const HostPropertyReview = () => {
                   {realMonths - revenueMonths} tháng cuối để dành làm <b>cửa sổ bàn giao</b>: cho khách dọn đi,
                   tháo nội thất, sơn sửa hoàn trả hiện trạng cho chủ nhà gốc — quãng đó không có khách nào ở.
                   <span className="mt-1 block">
-                    Tiền thuê trả chủ vẫn tính <b>đủ trọn gói {formatVND(calc.cRent ?? 0)}</b> cho cả {realMonths} tháng
+                    Tiền thuê trả chủ vẫn tính <b>đủ trọn gói {formatVND(d?.capexParts.rent ?? calc.cRent ?? 0)}</b> cho cả {realMonths} tháng
                     trong tổng tiền bỏ ra, nên không tháng nào bị hụt — chỉ là phải lấy lại xong sớm hơn.
                   </span>
                   <span className="mt-1 block">
@@ -1399,10 +1560,11 @@ export const HostPropertyReview = () => {
                       hint={realMonths > revenueMonths ? `Chỉ ${revenueMonths}/${realMonths} tháng có khách` : undefined}
                       formula={wholeFinal > 0 ? `${shortVND(wholeFinal)} × ${revenueMonths} tháng` : undefined}
                       value={wholeFinal > 0 ? formatVND(wholeFinal * revenueMonths) : '—'} />
-                    <Line label="Trừ tiền đã bỏ ra" value={`− ${formatVND(calc.capex)}`} />
+                    <Line label={parts && parts.depreciated > 0 ? 'Trừ vốn còn phải lấy lại' : 'Trừ tiền đã bỏ ra'}
+                      value={`− ${formatVND(totalInvest)}`} />
                     <Divider />
                     <Line label="Lãi dự kiến cả kỳ" tone={totalProfit >= 0 ? 'good' : 'bad'} size="lg"
-                      hint={calc.capex > 0 ? `Tương đương ${Math.round((totalProfit / calc.capex) * 100)}% trên vốn` : undefined}
+                      hint={totalInvest > 0 ? `Tương đương ${Math.round((totalProfit / totalInvest) * 100)}% trên vốn` : undefined}
                       value={wholeFinal > 0 ? `${totalProfit < 0 ? '− ' : ''}${formatVND(Math.abs(totalProfit))}` : '—'} />
                     <Divider />
                     <Line label="Lãi trung bình mỗi tháng" tone="good"
@@ -1437,13 +1599,29 @@ export const HostPropertyReview = () => {
                   formula={`${shortVND(totalMonthly)} × ${revenueMonths} tháng`}
                   value={formatVND(pnl.revenue)}
                 />
-                <Line label="− Tiền đã bỏ ra (thuê nhà + cải tạo + thiết bị)" value={`− ${formatVND(totalInvest)}`} />
+                <Line
+                  label={parts && parts.depreciated > 0
+                    ? '− Vốn còn phải lấy lại (thuê nhà + cải tạo + thiết bị)'
+                    : '− Tiền đã bỏ ra (thuê nhà + cải tạo + thiết bị)'}
+                  hint={parts && parts.depreciated > 0
+                    ? `Đã lấy lại ${formatVND(parts.depreciated)} trên tổng ${formatVND(parts.total)} qua tiền thuê trước đây`
+                    : undefined}
+                  value={`− ${formatVND(totalInvest)}`}
+                />
                 <Line
                   label="− Chi phí vận hành cả kỳ"
                   hint={`${formatVND(calc.oOperation ?? 0)}/tháng × ${revenueMonths} tháng`}
                   value={`− ${formatVND(pnl.opexTotal)}`}
                   tone="bad"
                 />
+                {pnl.reserveTotal > 0 && (
+                  <Line
+                    label="− Dự phòng sửa chữa sau bảo hành cả kỳ"
+                    hint={`${formatVND(calc.repairReservePerMonth ?? 0)}/tháng × ${revenueMonths} tháng — tiền để dành sửa chữa, không phải lãi`}
+                    value={`− ${formatVND(pnl.reserveTotal)}`}
+                    tone="bad"
+                  />
+                )}
                 <Divider />
                 <Line
                   label="TIỀN LỜI THẬT CẢ KỲ"
@@ -1588,6 +1766,8 @@ export const HostPropertyReview = () => {
                 không tự cuộn ngược lên tìm khối cảnh báo để đoán lý do. */}
             {summary.status !== 'PENDING_HOST_REVIEW' ? (
               <p className="text-xs font-semibold text-amber-600">Chỉ xác nhận được khi ở trạng thái &quot;Chờ Host duyệt&quot;</p>
+            ) : pricingDataBroken ? (
+              <p className="text-xs font-semibold text-rose-600">Kết quả tính giá của máy chủ đang sai — xem cảnh báo đầu trang</p>
             ) : !zoneHasManager ? (
               <button
                 type="button"

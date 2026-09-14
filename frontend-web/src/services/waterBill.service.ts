@@ -86,8 +86,15 @@ export const waterBillService = {
    * OCR ảnh hoá đơn nước. Dùng chung endpoint với EVN: BE chỉ trả rawText + danh sách số,
    * không hiểu biết gì riêng về hoá đơn điện, nên parser nước tái sử dụng được.
    */
+  /*
+    GỬI KÈM `type: 'WATER'` — máy chủ nhận tham số này từ BE be11f58.
+
+    Bỏ trống thì máy chủ mặc định ELECTRIC và đi dò mã khách hàng EVN trên một tờ giấy nước.
+    Không có mã nào để tìm, nên nó chỉ tốn công và có nguy cơ vớ nhầm một dãy số khác trên
+    giấy rồi trả về như thể đó là mã thật.
+  */
   ocr: (imageUrl: string): Promise<{ rawText?: string; numbers?: string[] }> =>
-    api.post('/api/v1/ocr/evn-bill', { imageUrl }),
+    api.post('/api/v1/ocr/evn-bill', { imageUrl, type: 'WATER' }),
 
   create: (input: CreateWaterBillInput): Promise<WaterBill> =>
     api.post<unknown, WaterBill>(BASE, { ...input, type: TYPE }),
