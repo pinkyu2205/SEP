@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   AlertCircle, ArrowLeft, Banknote, Building, CalendarDays, Calculator, CheckCircle2,
-  DollarSign, FileText, Hammer, Image as ImageIcon, Link2, MapPin, Package,
-  Percent, PiggyBank, Send, SlidersHorizontal, Target, UserCog,
+  ChevronUp, DollarSign, Droplet, FileText, Hammer, Image as ImageIcon, Link2, MapPin,
+  Package, Percent, PiggyBank, Send, SlidersHorizontal, Target, UserCog, Zap,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 /*
@@ -191,6 +191,85 @@ const ReadRow = ({ label, value, icon: Icon, hint, strong }: {
     }`}>{value}</span>
   </div>
 );
+
+/**
+ * Con số ở THANH ĐÁY + cách tính bung lên khi bấm.
+ *
+ * Thanh đáy là chỗ Host đứng lúc bấm "Xác nhận & Kích hoạt", nên ba con số ở đây phải giải
+ * thích được — nhưng không thể in phép tính ra thẳng vì thanh chỉ cao ba dòng. Bấm vào thì
+ * mở lên trên (popover), không đẩy layout, không che nút Xác nhận.
+ */
+/**
+ * Mã khách hàng điện / số danh bộ nước.
+ *
+ * Hiện IN HOA cho dễ dò trên tờ hoá đơn giấy — máy chủ lưu chữ thường sau khi chuẩn hoá
+ * (bỏ dấu cách/gạch), còn khi đối chiếu thì hai bên đều chuẩn hoá nên hoa hay thường không
+ * đổi kết quả.
+ */
+const UtilityCode = ({ icon: Icon, label, value }: {
+  icon: React.ElementType;
+  label: string;
+  value?: string | null;
+}) => (
+  <div>
+    <p className="flex items-center gap-1.5 text-xs text-slate-500">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      {label}
+    </p>
+    {value ? (
+      <p className="mt-0.5 break-all font-mono text-sm font-bold uppercase text-slate-900">{value}</p>
+    ) : (
+      <p className="mt-0.5 text-sm font-bold text-amber-600">Chưa khai</p>
+    )}
+  </div>
+);
+
+const BarFormula = ({ children }: { children: React.ReactNode }) => (
+  <p className="whitespace-pre-line rounded-lg bg-slate-50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-700 ring-1 ring-slate-200">
+    {children}
+  </p>
+);
+
+const BarStat = ({ label, value, valueTone, sub, detail, className = '' }: {
+  label: string;
+  value: string;
+  valueTone: string;
+  sub?: string;
+  detail: React.ReactNode;
+  className?: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title={open ? 'Thu gọn cách tính' : 'Xem cách tính'}
+        className="group text-left"
+      >
+        <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-slate-400 transition group-hover:text-indigo-600">
+          {label}
+          <ChevronUp className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
+        </span>
+        <span className={`block text-lg font-black tabular-nums ${valueTone}`}>{value}</span>
+        {sub && <span className="block text-[11px] font-semibold text-slate-400">{sub}</span>}
+      </button>
+
+      {open && (
+        <>
+          {/* Bấm ra ngoài là đóng — popover ở thanh dính, không có chỗ nào khác để thoát. */}
+          <button type="button" aria-label="Đóng" onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default" />
+          <div className="absolute bottom-full left-0 z-50 mb-3 w-[22rem] max-w-[calc(100vw-2rem)] space-y-2 rounded-xl border border-slate-200 bg-white p-3.5 text-xs leading-relaxed text-slate-600 shadow-2xl">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+            {detail}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 const MoneyInput = ({
   value, onChange, placeholder, suffix = 'đ', invalid, disabled,
@@ -753,14 +832,22 @@ const OnboardingPriceReview = () => {
    */
   const surplus = (() => {
     if (!calc || !d || !pnl) return null;
-    const vRate = calc.vRate ?? 0;
-    const recovery = calc.monthlyRecovery;
     const target = calc.revenueTarget;
     // Không còn số hạng "tháng đuôi dư ra": doanh thu đã chốt ở min(còn lại, số tháng chia
     // vốn) nên tháng đuôi không bao giờ được tính là tháng có tiền về.
     const parts = {
       goal: d.profitPerMonth * revenueMonths,
-      buffer: (recovery + (calc.oOperation ?? 0) + d.reserve + d.profitPerMonth) * vRate * revenueMonths,
+      /*
+        Phần bù trống phòng = HIỆU lấy từ số máy chủ trả (doanh thu mục tiêu − thu tối thiểu
+        − lãi mục tiêu), KHÔNG tự nhân lại vRate.
+
+        Bản cũ tính `(hoàn vốn + vận hành + dự phòng + lãi) × vRate` vì tưởng máy chủ nhân
+        (1 + v). Thực tế `PricingCalculator.applyVacancyBuffer` CHIA cho (1 − v): v = 10%
+        làm giá tăng 11,1%, nên số này hụt ~5 triệu, tổng ba nguồn không khớp lãi ròng, và cả
+        khối "Vì sao lãi ròng ... chứ không phải ..." biến mất — thay bằng câu "không tách
+        được nguồn chênh lệch". Lấy hiệu thì luôn khớp, kể cả khi BE đổi công thức lần nữa.
+      */
+      buffer: Math.max(0, target - calc.fixedOpex - d.profitPerMonth) * revenueMonths,
       above: (totalMonthly - target) * revenueMonths,
     };
     const sum = parts.goal + parts.buffer + parts.above;
@@ -869,6 +956,38 @@ const OnboardingPriceReview = () => {
               </div>
             )}
           </div>
+          {/*
+            Mã KH điện / số danh bộ nước — không dính gì tới giá, nhưng đây là màn KÍCH HOẠT:
+            bấm xong là nhà bắt đầu chạy thật, và mỗi tháng admin nhập hoá đơn điện/nước theo lô
+            sẽ khớp nhà theo đúng hai mã này. Thiếu mã thì hoá đơn không tự đối chiếu được, mà
+            lúc đó nhà đã có khách — sửa muộn hơn nhiều so với chặn lại ở đây.
+            Host không tự khai được hai mã này (admin khai ở Cấu hình khai thác) nên chỉ hiện
+            để đối chiếu, và chỉ cảnh báo khi thiếu.
+          */}
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 text-sm">
+            <UtilityCode
+              icon={Zap}
+              label="Mã KH điện"
+              value={property?.electricityCustomerCode}
+            />
+            <UtilityCode
+              icon={Droplet}
+              label="Số danh bộ nước"
+              value={property?.waterCustomerCode}
+            />
+          </div>
+          {(!property?.electricityCustomerCode || !property?.waterCustomerCode) && (
+            <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-800">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                Nhà chưa khai đủ mã — hoá đơn {!property?.electricityCustomerCode ? 'điện' : ''}
+                {!property?.electricityCustomerCode && !property?.waterCustomerCode ? ' và ' : ''}
+                {!property?.waterCustomerCode ? 'nước' : ''} sau này sẽ không tự đối chiếu được với
+                nhà này. Kích hoạt vẫn được, nhưng nên báo admin bổ sung ở <b>Cấu hình khai thác</b>.
+              </span>
+            </p>
+          )}
+
           {property?.descriptions && (
             <div className="mt-4 border-t border-slate-100 pt-4">
               <p className="mb-1 text-xs text-slate-500">Mô tả chi tiết</p>
@@ -1737,26 +1856,50 @@ const OnboardingPriceReview = () => {
                 vừa mơ hồ (mục tiêu gì?) vừa không phải điều Host cần biết lúc bấm Xác nhận. */}
             {calc && pnl && (
               <>
-                <div className="hidden sm:block">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tiền lời thật / tháng</p>
-                  <p className={`text-lg font-black tabular-nums ${pnl.perMonth >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                    {pnl.perMonth < 0 ? '− ' : ''}{formatVND(Math.abs(pnl.perMonth))}
-                  </p>
-                  {d && d.profitPerMonth > 0 && (
-                    <p className="text-[11px] font-semibold text-slate-400">
-                      mục tiêu {formatVND(d.profitPerMonth)}
-                    </p>
+                <BarStat
+                  className="hidden sm:block"
+                  label="Tiền lời thật / tháng"
+                  value={`${pnl.perMonth < 0 ? '− ' : ''}${formatVND(Math.abs(pnl.perMonth))}`}
+                  valueTone={pnl.perMonth >= 0 ? 'text-emerald-700' : 'text-rose-600'}
+                  sub={d && d.profitPerMonth > 0 ? `mục tiêu ${formatVND(d.profitPerMonth)}` : undefined}
+                  detail={(
+                    <>
+                      <BarFormula>
+                        {shortVND(pnl.net)} ÷ {revenueMonths} tháng = {formatVND(pnl.perMonth)}
+                      </BarFormula>
+                      <p>
+                        Lấy lãi thật của cả kỳ chia đều số tháng có tiền vào. Đây là tiền còn lại{' '}
+                        <b>sau khi</b> đã hoàn hết vốn bỏ ra và trả chi phí vận hành — khác với{' '}
+                        {d && d.profitPerMonth > 0 ? <>mục tiêu {formatVND(d.profitPerMonth)} bạn đặt,</> : <>mục tiêu bạn đặt,</>}{' '}
+                        vì giá chốt thường cao hơn giá đề xuất và phần bù phòng trống chưa dùng tới.
+                      </p>
+                    </>
                   )}
-                </div>
-                <div className="hidden lg:block">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                    Tiền lời thật cả kỳ ({revenueMonths} tháng)
-                  </p>
-                  <p className={`text-lg font-black tabular-nums ${pnl.net >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                    {pnl.net < 0 ? '− ' : ''}{formatVND(Math.abs(pnl.net))}
-                  </p>
-                  <p className="text-[11px] font-semibold text-slate-400">đã trừ tiền bỏ ra &amp; chi phí</p>
-                </div>
+                />
+                <BarStat
+                  className="hidden lg:block"
+                  label={`Tiền lời thật cả kỳ (${revenueMonths} tháng)`}
+                  value={`${pnl.net < 0 ? '− ' : ''}${formatVND(Math.abs(pnl.net))}`}
+                  valueTone={pnl.net >= 0 ? 'text-emerald-700' : 'text-rose-600'}
+                  sub="đã trừ tiền bỏ ra & chi phí"
+                  detail={(
+                    <>
+                      <BarFormula>
+                        {shortVND(totalMonthly)} × {revenueMonths} tháng
+                        {'\n'}− {shortVND(totalInvest)} tiền bỏ ra
+                        {'\n'}− {shortVND(pnl.opexTotal)} vận hành
+                        {pnl.reserveTotal > 0 && <>{'\n'}− {shortVND(pnl.reserveTotal)} dự phòng sửa chữa</>}
+                        {'\n'}= {formatVND(pnl.net)}
+                      </BarFormula>
+                      <p>
+                        Doanh thu {formatVND(pnl.revenue)} là giá chốt nhân số tháng thật sự có khách.
+                        Trừ tiền bỏ ra (thuê chủ + cải tạo + thiết bị), chi phí vận hành mỗi tháng
+                        {pnl.reserveTotal > 0 && ' và khoản để dành sửa chữa sau bảo hành'} thì còn lại
+                        chừng này là tiền lời.
+                      </p>
+                    </>
+                  )}
+                />
               </>
             )}
           </div>

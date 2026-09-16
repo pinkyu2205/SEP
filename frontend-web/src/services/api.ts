@@ -13,12 +13,34 @@ const api = axios.create({
   },
 });
 
+/**
+ * Endpoint xác thực CÔNG KHAI — tuyệt đối không đính Bearer token vào.
+ *
+ * Ca thật 16/09/2026: máy còn `access_token` của phiên trước, người dùng gõ đúng
+ * `owner`/mật khẩu vẫn bị "Tên đăng nhập hoặc mật khẩu không đúng" mãi. Lý do nằm ở
+ * BE: `JwtFilter` chạy TRƯỚC mọi thứ, thấy header Authorization là đi tra user của
+ * token đó; user không còn trong DB (làm lại dữ liệu test, xoá/đổi tài khoản) thì
+ * `loadUserByUsername` ném lỗi và cả request **đăng nhập** trả 403 — dù đường dẫn
+ * /api/v1/auth/** là permitAll. Web bắt được 403 rồi báo sai mật khẩu, nên càng gõ
+ * lại càng không ra.
+ *
+ * Token cũ không có vai trò gì ở các endpoint này, nên cách chắc chắn nhất là không
+ * gửi nó đi. (Còn `/auth/me`, `/auth/change-password` thì VẪN cần token.)
+ */
+const PUBLIC_AUTH_PATHS = [
+  '/api/v1/auth/login',
+  '/api/v1/auth/register',
+  '/api/v1/auth/tenant-activate',
+];
+
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // Lấy token từ nơi bạn lưu (VD: localStorage hoặc sessionStorage)
-    // Hiện tại WebAuthContext đang dùng mock user. Sau này khi làm API Login thật, 
-    // bạn lưu token vào localStorage và lấy ra ở đây.
+    const url = config.url ?? '';
+    if (PUBLIC_AUTH_PATHS.some((path) => url.startsWith(path))) {
+      if (config.headers) delete config.headers.Authorization;
+      return config;
+    }
     const token = localStorage.getItem('access_token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
