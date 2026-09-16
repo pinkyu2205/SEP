@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, Cloud, DollarSign, HardDrive,
-  Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp, UserCog, Wallet,
+  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, ChevronDown, Cloud, DollarSign,
+  HardDrive, HelpCircle, Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp,
+  UserCog, Wallet,
 } from 'lucide-react';
 import {
   DEFAULT_PRICING_CONFIG, blendedManagerCost, contractEscalationSchedule, costPerPropertyOf,
@@ -61,6 +62,91 @@ const Field = ({ label, hint, children }: { label: string; hint?: React.ReactNod
     {hint && <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p>}
   </label>
 );
+
+/**
+ * Khối giải thích BẤM MỚI MỞ.
+ *
+ * Trang này có nhiều ô mà cách tính đằng sau dài hơn cả cái ô — in hết ra dưới mỗi ô thì
+ * người vào chỉnh một con số phải lội qua mấy đoạn văn không liên quan. Để dạng gấp lại:
+ * dòng gợi ý ngắn vẫn hiện sẵn, còn phần công thức + ví dụ bằng số thật chỉ bung ra khi
+ * người dùng chủ động bấm. Dùng <details> để bấm/bàn phím/đọc màn hình đều chạy sẵn.
+ */
+const Explainer = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <details className="group mt-2 rounded-xl border border-slate-200 bg-slate-50/80">
+    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-500 transition hover:text-indigo-700">
+      <HelpCircle className="h-3.5 w-3.5" />
+      {title}
+      <ChevronDown className="ml-auto h-3.5 w-3.5 transition group-open:rotate-180" />
+    </summary>
+    <div className="space-y-2.5 border-t border-slate-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
+      {children}
+    </div>
+  </details>
+);
+
+/** Một dòng công thức — cho dễ đọc hơn là nhét vào câu văn. */
+const Formula = ({ children }: { children: React.ReactNode }) => (
+  <p className="rounded-lg bg-white px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-800 ring-1 ring-slate-200">
+    {children}
+  </p>
+);
+
+/**
+ * Diễn giải biên trống phòng — số liệu lấy từ chính cấu hình đang gõ, không phải ví dụ chế.
+ *
+ * Chỗ dễ hiểu sai nhất: máy chủ CHIA cho (1 − v) chứ không CỘNG v% (PricingCalculator
+ * .applyVacancyBuffer bên BE). Để 10% thì giá thật tăng 11,1%. Bản cũ ghi "cộng thêm 10%
+ * vào giá" nên Host đọc số nào cũng thấy lệch.
+ */
+const VacancyMath = ({ cfg, opex }: { cfg: PricingConfig; opex: number }) => {
+  const v = cfg.vRatePct / 100;
+  const profit = cfg.mode === 'FORWARD' ? cfg.pDesired : 0;
+  const known = opex + profit;
+  const grossed = v < 1 ? known / (1 - v) : 0;
+  const uplift = grossed - known;
+  const upliftPct = known > 0 ? (uplift / known) * 100 : 0;
+
+  return (
+    <>
+      <Formula>
+        Giá đề xuất = (Chi phí cố định mỗi tháng + Lãi mục tiêu) ÷ (100% − {cfg.vRatePct}%)
+      </Formula>
+
+      <p>
+        Chi phí cố định của một căn gồm <b>khấu hao vốn</b> (tiền thuê chủ nhà, cải tạo, thiết bị
+        chia đều số tháng còn khai thác), <b>dự phòng sửa chữa</b> và <b>chi phí vận hành</b>. Hai
+        khoản đầu khác nhau ở từng căn nên chỉ hiện lúc duyệt giá; phần chốt chung ở trang này là
+        chi phí vận hành {formatVND(opex)}
+        {cfg.mode === 'FORWARD' && <> và lãi mục tiêu {formatVND(cfg.pDesired)}</>}.
+      </p>
+
+      {cfg.vRatePct > 0 ? (
+        <>
+          <p className="font-semibold text-slate-700">Tính thử trên phần đã biết:</p>
+          <Formula>
+            {formatVND(known)} ÷ {(1 - v).toFixed(2).replace('.', ',')} = {formatVND(Math.round(grossed))}
+            <br />
+            phần bù trống phòng: {formatVND(Math.round(uplift))} (+{upliftPct.toFixed(1).replace('.', ',')}%)
+          </Formula>
+          <p>
+            <b>Chia chứ không cộng.</b> Để trống {cfg.vRatePct}% số tháng nghĩa là cả kỳ chỉ thu được{' '}
+            {100 - cfg.vRatePct}% số tháng, nên phải chia cho {(1 - v).toFixed(2).replace('.', ',')} thì
+            tiền thu thực tế mới đủ. Cộng thẳng {cfg.vRatePct}% vào giá sẽ thiếu — giá đúng phải cao hơn{' '}
+            {upliftPct.toFixed(1).replace('.', ',')}%.
+          </p>
+        </>
+      ) : (
+        <p>Đang để <b>0%</b> — giá không cộng đồng nào cho tháng trống, cứ một tháng không có khách
+          là lỗ đúng phần chi phí tháng đó.</p>
+      )}
+
+      <p className="text-slate-500">
+        Biên này áp cho <b>mọi căn</b>, cả giá sàn lẫn giá đề xuất. Máy chủ chặn từ 100% trở lên
+        (chia cho 0). Sửa xong nhớ bấm Lưu, và giá của các căn đã duyệt chỉ đổi khi bấm tính lại.
+      </p>
+    </>
+  );
+};
 
 const Card = ({ title, icon: Icon, children, tone = 'plain' }: {
   title: string;
@@ -496,17 +582,22 @@ export const PricingConfigPage = () => {
           {/* ── 4. Dự phòng ───────────────────────────────────────────────── */}
           <Card title="Dự phòng rủi ro" icon={Calculator}>
             <div className="space-y-4">
-              <Field
-                label="Biên dự phòng trống phòng"
-                hint={<>Cộng thêm {cfg.vRatePct}% vào giá để bù những tháng phòng bỏ trống. Thường để 10%.</>}
-              >
-                <div className="relative">
-                  <input type="number" min={0} max={99} value={cfg.vRatePct}
-                    onChange={(e) => set('vRatePct', Math.min(99, Math.max(0, Number(e.target.value) || 0)))}
-                    className="input-field pr-10 text-right font-bold tabular-nums" />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">%</span>
-                </div>
-              </Field>
+              <div>
+                <Field
+                  label="Biên dự phòng trống phòng"
+                  hint={<>Bù những tháng phòng bỏ trống. Thường để 10%.</>}
+                >
+                  <div className="relative">
+                    <input type="number" min={0} max={99} value={cfg.vRatePct}
+                      onChange={(e) => set('vRatePct', Math.min(99, Math.max(0, Number(e.target.value) || 0)))}
+                      className="input-field pr-10 text-right font-bold tabular-nums" />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">%</span>
+                  </div>
+                </Field>
+                <Explainer title={`Cách ${cfg.vRatePct}% này vào giá`}>
+                  <VacancyMath cfg={cfg} opex={opex} />
+                </Explainer>
+              </div>
 
               <Field
                 label="Trừ cửa sổ bàn giao cuối kỳ"
