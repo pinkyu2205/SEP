@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { AlertCircle, Check } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { AlertCircle, Check, ChevronDown } from 'lucide-react';
 import type { PricingCalculationResponse } from '@/types/api.types';
 
 /**
@@ -35,7 +35,17 @@ export const verify = (mine: number, theirs?: number | null): boolean =>
 
 // ─── Nguyên liệu hiển thị ────────────────────────────────────────────────────
 
-/** Một dòng số liệu: nhãn · (giải thích) · phép tính · giá trị. */
+/**
+ * Một dòng số liệu: nhãn · giá trị, phần "vì sao ra số này" GẤP LẠI — bấm nhãn mới mở.
+ *
+ * Trước đây mỗi dòng in thẳng cả lời giải thích lẫn phép tính, hai dòng chữ xám dưới mỗi
+ * con số. Bảng 12 dòng thành ba chục dòng chữ: người chỉ cần liếc xem giá bao nhiêu phải
+ * đọc lướt qua hết, còn người thật sự muốn kiểm phép tính thì lại khó dò vì mọi thứ đều
+ * xám như nhau. Nay mặc định chỉ còn nhãn + số; ai cần soát thì bấm vào nhãn (gạch chân
+ * chấm chấm là dấu hiệu bấm được).
+ *
+ * NGOẠI LỆ: dòng `tone="bad"` luôn mở sẵn — đó là cảnh báo sai số, giấu đi thì hỏng việc.
+ */
 export const Line = ({
   label, hint, formula, value, tone = 'plain', size = 'md', indent,
 }: {
@@ -48,6 +58,7 @@ export const Line = ({
   size?: 'sm' | 'md' | 'lg';
   indent?: boolean;
 }) => {
+  const [open, setOpen] = useState(false);
   const valueCls = {
     plain: 'text-slate-800',
     total: 'text-slate-900',
@@ -57,15 +68,41 @@ export const Line = ({
     muted: 'text-slate-400',
   }[tone];
   const sizeCls = { sm: 'text-xs', md: 'text-sm', lg: 'text-base' }[size];
+  const labelCls = `${sizeCls} ${tone === 'total' ? 'font-bold text-slate-700' : 'font-medium text-slate-600'}`;
+
+  const hasDetail = !!(hint || formula);
+  const pinned = tone === 'bad';          // cảnh báo: không gấp
+  const showDetail = hasDetail && (pinned || open);
+
   return (
     <div className={`flex items-start justify-between gap-4 py-1.5 ${indent ? 'pl-4' : ''}`}>
       <div className="min-w-0">
-        <p className={`${sizeCls} ${tone === 'total' ? 'font-bold text-slate-700' : 'font-medium text-slate-600'}`}>
-          {label}
-        </p>
-        {hint && <p className="mt-0.5 text-[11px] leading-snug text-slate-400">{hint}</p>}
-        {formula && (
-          <p className="mt-0.5 font-mono text-[11px] leading-snug text-slate-400">{formula}</p>
+        {hasDetail && !pinned ? (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            title={open ? 'Thu gọn cách tính' : 'Xem cách tính'}
+            className="group flex items-start gap-1.5 text-left"
+          >
+            <span className={`${labelCls} underline decoration-dotted decoration-slate-300 underline-offset-4 transition group-hover:text-indigo-700 group-hover:decoration-indigo-400`}>
+              {label}
+            </span>
+            <ChevronDown className={`mt-[3px] h-3 w-3 shrink-0 text-slate-300 transition group-hover:text-indigo-500 ${open ? 'rotate-180' : ''}`} />
+          </button>
+        ) : (
+          <p className={labelCls}>{label}</p>
+        )}
+
+        {showDetail && (
+          <div className="mt-1 space-y-1">
+            {formula && (
+              <p className="inline-block rounded-md bg-white px-2 py-1 font-mono text-[11px] leading-snug text-slate-700 ring-1 ring-slate-200">
+                {formula}
+              </p>
+            )}
+            {hint && <p className="text-[11px] leading-snug text-slate-500">{hint}</p>}
+          </div>
         )}
       </div>
       <p className={`shrink-0 tabular-nums ${sizeCls} ${tone === 'total' ? 'font-black' : 'font-bold'} ${valueCls}`}>
