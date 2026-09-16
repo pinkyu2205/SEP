@@ -100,16 +100,24 @@ export async function pickEvidenceFromLibrary(remaining: number): Promise<Eviden
 }
 
 /**
- * Chụp ảnh HOẶC quay video bằng camera hệ thống — người dùng tự chọn ảnh/video ngay
- * trong UI camera (mediaTypes cho cả 2 loại). Video quay giới hạn cứng 45s qua
- * `videoMaxDuration`. Chất lượng video hạ xuống Medium trên iOS để đỡ nặng dung lượng;
- * Android không có tuỳ chọn chất lượng video trong expo-image-picker (~17.0.11 — không
- * có field nào tương đương `videoQuality` cho Android), đành chấp nhận file gốc — KHÔNG
- * thêm thư viện nén native để bù (xem ghi chú đầu file).
+ * Chụp ảnh HOẶC quay video bằng camera hệ thống — PHẢI truyền đúng `mode` cần dùng.
+ *
+ * 16/09/2026: trước đây truyền `mediaTypes: ['images', 'videos']` (cả 2 loại cùng lúc)
+ * với kỳ vọng người dùng tự chọn ảnh/video ngay trong UI camera hệ thống — chỉ đúng trên
+ * iOS. Trên Android, `launchCameraAsync` KHÔNG hỗ trợ trộn 2 loại: truyền cả 2 khiến máy
+ * luôn mở thẳng camera CHỤP ẢNH, không có cách nào chuyển sang quay video (xác nhận qua
+ * test thật trên Vivo — tenant bấm "chụp hình/quay video" chỉ chụp được ảnh). Phải tách
+ * hẳn 2 nút "Chụp ảnh"/"Quay video" ở UI gọi hàm này với đúng 1 mediaTypes mỗi lần.
+ *
+ * Video quay giới hạn cứng 45s qua `videoMaxDuration`. Chất lượng video hạ xuống Medium
+ * trên iOS để đỡ nặng dung lượng; Android không có tuỳ chọn chất lượng video trong
+ * expo-image-picker (~17.0.11 — không có field nào tương đương `videoQuality` cho
+ * Android), đành chấp nhận file gốc — KHÔNG thêm thư viện nén native để bù (xem ghi chú
+ * đầu file).
  */
-export async function pickEvidenceFromCamera(): Promise<EvidenceAsset | null> {
+export async function pickEvidenceFromCamera(mode: EvidenceMediaType): Promise<EvidenceAsset | null> {
   const result = await ImagePicker.launchCameraAsync({
-    mediaTypes: ['images', 'videos'],
+    mediaTypes: mode === 'video' ? ['videos'] : ['images'],
     quality: 0.6,
     videoMaxDuration: 45,
     videoQuality: Platform.OS === 'ios' ? ImagePicker.UIImagePickerControllerQualityType.Medium : undefined,

@@ -127,6 +127,10 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   repairAppointmentAt: dto.repairAppointmentAt,
   repairStartedAt: dto.repairStartedAt,
   chargeInvoiceId: dto.chargeInvoiceId,
+  companyAbsorbedFault: dto.companyAbsorbedFault,
+  companyAbsorbedNote: dto.companyAbsorbedNote,
+  expectedReturnAt: dto.expectedReturnAt,
+  equipmentReplacementFlagged: dto.equipmentReplacementFlagged,
 });
 
 /** DTO -> MaintenanceTicket (manager model) */
@@ -183,6 +187,10 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   repairAppointmentAt: dto.repairAppointmentAt,
   repairStartedAt: dto.repairStartedAt,
   chargeInvoiceId: dto.chargeInvoiceId,
+  companyAbsorbedFault: dto.companyAbsorbedFault,
+  companyAbsorbedNote: dto.companyAbsorbedNote,
+  expectedReturnAt: dto.expectedReturnAt,
+  equipmentReplacementFlagged: dto.equipmentReplacementFlagged,
 });
 
 /**

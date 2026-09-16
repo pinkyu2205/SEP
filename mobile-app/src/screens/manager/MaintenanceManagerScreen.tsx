@@ -64,6 +64,10 @@ export const MaintenanceManagerScreen: React.FC = () => {
   const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | MaintenanceStatusKey>('all');
+  // Lọc riêng "công ty trả hộ" (companyAbsorbedFault, 16/09/2026) — orthogonal với
+  // statusFilter (một ticket absorbed có thể ở nhiều status khác nhau: in_repair,
+  // repair_scheduled...), lọc client-side như statusFilter, không gọi lại API.
+  const [absorbedOnly, setAbsorbedOnly] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(false);
   // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
   // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
@@ -147,6 +151,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
     // crash cả app (không phải lỗi cú pháp nên tsc không bắt được).
     return openTickets
       .filter(t => statusFilter === 'all' || t.status === statusFilter)
+      .filter(t => !absorbedOnly || t.companyAbsorbedFault)
       .filter(t => !q
         || (t.title ?? '').toLowerCase().includes(q)
         || (t.ticketCode ?? '').toLowerCase().includes(q)
@@ -158,11 +163,17 @@ export const MaintenanceManagerScreen: React.FC = () => {
           - (b.priority ? PRIORITY_ORDER[b.priority] ?? 9 : 9);
         return p !== 0 ? p : b.updatedAt.localeCompare(a.updatedAt);
       });
-  }, [openTickets, search, statusFilter]);
+  }, [openTickets, search, statusFilter, absorbedOnly]);
 
   // Đổi bộ lọc/tìm kiếm thì thu gọn lại danh sách — tránh cuộn dài dằng dặc mỗi lần
   // gõ tìm kiếm mới sau khi đã "Xem thêm" ở lượt lọc trước.
-  React.useEffect(() => { setQueueExpanded(false); }, [search, statusFilter]);
+  React.useEffect(() => { setQueueExpanded(false); }, [search, statusFilter, absorbedOnly]);
+
+  // Số ticket "công ty trả hộ" trong hàng đợi đang mở — chỉ hiện chip khi có ít nhất 1.
+  const absorbedCount = useMemo(
+    () => openTickets.filter(t => t.companyAbsorbedFault).length,
+    [openTickets],
+  );
 
   // Recent activity: last 4 tickets sorted by updatedAt desc
   const recentActivity = useMemo(() =>
@@ -329,6 +340,16 @@ export const MaintenanceManagerScreen: React.FC = () => {
                 </TouchableOpacity>
               );
             })}
+            {absorbedCount > 0 && (
+              <TouchableOpacity
+                style={[s.filterChip, absorbedOnly && { backgroundColor: '#DC2626', borderColor: '#DC2626' }]}
+                onPress={() => setAbsorbedOnly(v => !v)}
+              >
+                <Text style={[s.filterChipText, absorbedOnly && s.filterChipTextActive]}>
+                  🏢 Công ty trả hộ {absorbedCount}
+                </Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
 
           <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
@@ -366,6 +387,11 @@ export const MaintenanceManagerScreen: React.FC = () => {
                       {t.ticketCode} · {t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn nhà' : t.roomName}
                       {overdue ? '  ⚠️ quá hạn' : ''}
                     </Text>
+                    {t.companyAbsorbedFault && (
+                      <View style={s.absorbedBadge}>
+                        <Text style={s.absorbedBadgeText}>🏢 Công ty trả hộ</Text>
+                      </View>
+                    )}
                   </View>
                   <View style={[s.activityStatus, { backgroundColor: cfg.bg }]}>
                     <Text style={[s.activityStatusText, { color: cfg.color }]}>{cfg.label}</Text>
@@ -586,6 +612,9 @@ const s = StyleSheet.create({
   filterChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
   filterChipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterChipTextActive: { color: Colors.white },
+
+  absorbedBadge:     { alignSelf: 'flex-start', backgroundColor: '#FFFBEB', borderRadius: BorderRadius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2, marginTop: 4 },
+  absorbedBadgeText: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
 
   expandBtn:     { alignItems: 'center', paddingVertical: Spacing.sm, marginTop: 2 },
   expandBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },

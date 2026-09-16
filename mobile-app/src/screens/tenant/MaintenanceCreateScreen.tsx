@@ -202,7 +202,16 @@ export const MaintenanceCreateScreen: React.FC = () => {
     // Web: launchCameraAsync chỉ mở file picker → dùng camera modal in-app (ảnh-only,
     // expo-camera CameraView không quay video trong modal này).
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
-    const media = await pickEvidenceFromCamera();
+    const media = await pickEvidenceFromCamera('image');
+    if (media) await addMedia(media);
+  };
+
+  // 16/09/2026: tách riêng khỏi takePhoto — launchCameraAsync trên Android không mở
+  // được máy quay video nếu mediaTypes trộn lẫn ảnh+video (xem evidenceMediaPicker.ts).
+  // Không có bản thay thế trên web (CameraCaptureModal chỉ chụp ảnh) — nút bị ẩn ở UI.
+  const takeVideo = async () => {
+    if (images.length >= 5) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
+    const media = await pickEvidenceFromCamera('video');
     if (media) await addMedia(media);
   };
 
@@ -467,8 +476,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
           <View style={styles.imageRow}>
             <TouchableOpacity style={styles.imageAddBtn} onPress={takePhoto} disabled={checking}>
               <Text style={styles.imageAddEmoji}>📷</Text>
-              <Text style={styles.imageAddText}>{checking ? 'Đang kiểm ảnh…' : 'Chụp ảnh/video'}</Text>
+              <Text style={styles.imageAddText}>{checking ? 'Đang kiểm ảnh…' : 'Chụp ảnh'}</Text>
             </TouchableOpacity>
+            {Platform.OS !== 'web' && (
+              <TouchableOpacity style={styles.imageAddBtn} onPress={takeVideo} disabled={checking}>
+                <Text style={styles.imageAddEmoji}>🎥</Text>
+                <Text style={styles.imageAddText}>Quay video</Text>
+              </TouchableOpacity>
+            )}
             {/* Đồ không có tem nhãn không kiểm được nội dung ảnh → chỉ nhận ảnh/video chụp tại chỗ. */}
             {!liveOnly && (
               <TouchableOpacity style={styles.imageAddBtn} onPress={pickImage} disabled={checking}>
