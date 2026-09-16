@@ -16,6 +16,8 @@ import type {
   ManagerAvailabilitySlotDto,
   MaintenanceChargeRequestDto,
   MaintenanceHandoverRequestDto,
+  MaintenanceSendForInspectionRequestDto,
+  MaintenanceDiagnoseRequestDto,
 } from '@/types';
 
 /**
@@ -207,6 +209,34 @@ export const realMaintenanceService = {
    */
   rejectFault: async (id: number, body: RejectFaultRequestDto): Promise<MaintenanceRequestDto> => {
     const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/reject-fault`, body);
+    return data;
+  },
+
+  /**
+   * PUT /{id}/send-for-inspection — mang thiết bị đi kiểm tra thêm khi CHƯA biết nguyên
+   * nhân (16/09/2026). Chỉ gọi được từ OPEN (sau confirm-arrival). OPEN → REPAIR_SCHEDULED,
+   * damageCause/flowType/faultResolutionPath để trống — chẩn đoán thật làm sau qua
+   * diagnose(). Body optional.
+   */
+  sendForInspection: async (
+    id: number, body?: MaintenanceSendForInspectionRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(
+      `${BASE}/${id}/send-for-inspection`, body ?? {},
+    );
+    return data;
+  },
+
+  /**
+   * PUT /{id}/diagnose — màn "Chẩn đoán & báo giá" (16/09/2026), dùng chung cho: (a) gọi
+   * ngay từ OPEN khi sửa được ngay tại chỗ, hoặc (b) gọi từ REPAIR_SCHEDULED khi
+   * damageCause == null (phiếu đã qua sendForInspection). Thay thế nhánh MANAGER_REPAIR
+   * của rejectFault() — nhánh TENANT_SELF_REPAIR vẫn dùng rejectFault() như cũ.
+   */
+  diagnose: async (
+    id: number, body: MaintenanceDiagnoseRequestDto,
+  ): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/diagnose`, body);
     return data;
   },
 

@@ -156,6 +156,14 @@ export interface MaintenanceTicket {
    * toán) để biết đang chờ khách trả tiền hay đã xong, xem TicketDetailScreen.
    */
   chargeInvoiceId?: number | null;
+  /** Khách lỗi (TENANT_MISUSE) nhưng từ chối trả — công ty trả hộ (immutable một khi true). */
+  companyAbsorbedFault?: boolean;
+  /** Tóm tắt thoả thuận ngoài app khi companyAbsorbedFault=true. */
+  companyAbsorbedNote?: string;
+  /** Dự kiến trả máy khi mang đi kiểm tra (send-for-inspection) — chỉ tham khảo. */
+  expectedReturnAt?: string;
+  /** true = diagnose() đã chốt thiết bị cần thay mới (16/09/2026). */
+  equipmentReplacementFlagged?: boolean;
 }
 
 

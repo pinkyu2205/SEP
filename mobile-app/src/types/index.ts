@@ -221,6 +221,18 @@ export interface MaintenanceRequest {
    * `issuedInvoice` (còn set = còn CHƯA thanh toán) để biết chờ thanh toán hay đã xong.
    */
   chargeInvoiceId?: number | null;
+  /** Khách lỗi (TENANT_MISUSE) nhưng từ chối trả — công ty trả hộ (immutable một khi true). */
+  companyAbsorbedFault?: boolean;
+  /** Tóm tắt thoả thuận ngoài app khi companyAbsorbedFault=true. */
+  companyAbsorbedNote?: string;
+  /** Dự kiến trả máy khi mang đi kiểm tra (send-for-inspection) — chỉ tham khảo. */
+  expectedReturnAt?: string;
+  /**
+   * true = diagnose() đã chốt thiết bị cần thay mới (16/09/2026) — đọc field này (KHÔNG
+   * suy luận từ estimatedDamageAmount > 0) khi quyết định gửi equipmentNeedsReplacement
+   * cho charge()/complete()/handover().
+   */
+  equipmentReplacementFlagged?: boolean;
 }
 
 export interface CreateMaintenanceRequest {
@@ -333,6 +345,18 @@ export interface MaintenanceRequestDto {
    * PAID/CANCELLED) để biết đang chờ khách thanh toán hay đã thanh toán xong.
    */
   chargeInvoiceId?: number | null;
+  /** Khách lỗi (TENANT_MISUSE) nhưng từ chối trả — công ty trả hộ (immutable một khi true). */
+  companyAbsorbedFault?: boolean;
+  /** Tóm tắt thoả thuận ngoài app khi companyAbsorbedFault=true. */
+  companyAbsorbedNote?: string;
+  /** Dự kiến trả máy khi mang đi kiểm tra (send-for-inspection) — chỉ tham khảo. */
+  expectedReturnAt?: string;
+  /**
+   * true = diagnose() đã chốt thiết bị cần thay mới (16/09/2026) — đọc field này (KHÔNG
+   * suy luận từ estimatedDamageAmount > 0) khi quyết định gửi equipmentNeedsReplacement
+   * cho charge()/complete()/handover().
+   */
+  equipmentReplacementFlagged?: boolean;
 }
 
 /** Khớp `TenantInvoiceResponse` (BE) — subset field FE cần để hiện hoá đơn/QR ngay sau confirm(). */
@@ -458,6 +482,71 @@ export interface MaintenanceChargeRequestDto {
   equipmentNeedsReplacement?: boolean;
   /** Tùy chọn — WEAR | TENANT_MISUSE | TENANT_MODIFICATION | MISUSE (DamageCause enum, BE). */
   damageCause?: MaintenanceReqDamageCause;
+}
+
+/**
+ * PUT /{id}/send-for-inspection — mang thiết bị đi kiểm tra thêm khi CHƯA biết nguyên
+ * nhân (16/09/2026). Chỉ gọi được từ OPEN (sau confirm-arrival). OPEN → REPAIR_SCHEDULED,
+ * để trống damageCause/flowType/faultResolutionPath — chẩn đoán thật sự làm sau qua
+ * diagnose(). Body optional, có thể gửi object rỗng. Field tên khớp
+ * `MaintenanceSendForInspectionRequest.java` (BE).
+ */
+export interface MaintenanceSendForInspectionRequestDto {
+  /** Dự kiến trả máy (tham khảo) — không ràng buộc gì. */
+  expectedReturnAt?: string;
+  /** Tùy chọn — ghi đè/gán category nếu phiếu chưa có. */
+  category?: string;
+  /** Tùy chọn — ghi chú timeline. */
+  note?: string;
+}
+
+/**
+ * PUT /{id}/diagnose — màn "Chẩn đoán & báo giá" (16/09/2026), dùng chung cho: (a) gọi
+ * ngay từ OPEN khi sửa được ngay tại chỗ, hoặc (b) gọi từ REPAIR_SCHEDULED khi
+ * damageCause == null (phiếu đã qua send-for-inspection). Thay thế nhánh MANAGER_REPAIR
+ * của reject-fault() — nhánh TENANT_SELF_REPAIR vẫn dùng reject-fault() như cũ. Field
+ * tên khớp `MaintenanceDiagnoseRequest.java` (BE).
+ */
+export interface MaintenanceDiagnoseRequestDto {
+  /**
+   * Khi equipmentNeedsReplacement=false/undefined: giá thợ báo — bắt buộc, >=0, BE lưu
+   * vào estimatedDamageAmount. Khi =true: chi phí phát sinh thêm — TUỲ CHỌN, BE lưu vào
+   * invoiceAmount (cộng thêm bên cạnh estimatedDamageAmount, không thay thế).
+   */
+  quotedRepairAmount?: number;
+  /**
+   * Thiết bị hỏng hoàn toàn — cần thay mới (16/09/2026). Áp dụng độc lập với
+   * damageCause — cả WEAR lẫn TENANT_MISUSE đều nhận field này.
+   */
+  equipmentNeedsReplacement?: boolean;
+  /**
+   * BẮT BUỘC khi equipmentNeedsReplacement=true, >0 — giá trị thay thế thiết bị. FE tự
+   * tính (khấu hao còn lại nếu còn bảo hành, penaltyFee nếu hết — xem
+   * computeAutoDamageAmount ở TicketDetailScreen), BE KHÔNG tự tính lại.
+   */
+  estimatedDamageAmount?: number;
+  /** WEAR = hao mòn tự nhiên (công ty trả). TENANT_MISUSE = lỗi do khách. */
+  damageCause: 'WEAR' | 'TENANT_MISUSE';
+  /**
+   * Bắt buộc khi damageCause=TENANT_MISUSE. true = khách đồng ý trả → lập hoá đơn +
+   * gate thanh toán. false = khách từ chối → companyAbsorbedFault, công ty trả hộ.
+   */
+  tenantAgreesToPay?: boolean;
+  /** Bắt buộc khi lỗi do khách. */
+  faultReason?: string;
+  /** Bắt buộc (>=1) khi lỗi do khách — ảnh/video bằng chứng. */
+  faultEvidenceImages?: string[];
+  /** Tùy chọn — chỉ có ý nghĩa khi tenantAgreesToPay=false. */
+  companyAbsorbedNote?: string;
+  /**
+   * Lịch hẹn giao máy/sửa chính thức. BẮT BUỘC nếu đang gọi từ REPAIR_SCHEDULED (sau
+   * khi mang đi kiểm tra); tùy chọn nếu gọi từ OPEN (có giá trị → REPAIR_SCHEDULED
+   * thay vì sửa ngay).
+   */
+  repairAppointmentAt?: string;
+  /** Bắt buộc nếu ticket chưa có category — an toàn thì luôn gửi kèm. */
+  category?: MaintenanceReqCategory;
+  priority?: MaintenanceReqPriority;
 }
 
 /**

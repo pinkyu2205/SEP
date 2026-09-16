@@ -12,7 +12,6 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import {
   useTickets, maintenanceStore, MaintenanceTicket,
   TicketStatus, TicketCategory, TicketPriority, PhotoEvidence, TimelineEntry,
-  FaultResolutionPath,
 } from '@/store/maintenanceStore';
 import type { MaintenanceReqCategory, MaintenanceReqPriority, EquipmentDto } from '@/types';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
@@ -31,7 +30,8 @@ import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPi
 import { useMaintenanceRealtime, useBillingRealtime } from '@/hooks/useBillingRealtime';
 import {
   showAlert, formatDateTime, isVideoUrl, formatDurationLabel, remainingEvidenceSlots,
-  pickEvidenceFromCamera, pickEvidenceFromLibrary, EVIDENCE_MAX_FILES, type EvidenceAsset,
+  pickEvidenceFromCamera, pickEvidenceFromLibrary, EVIDENCE_MAX_FILES,
+  type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
@@ -39,22 +39,9 @@ import { toLocalDateTime, toApiDateTime, isBeforeAppointmentDay } from '@/utils/
 import {
   MAINTENANCE_STATUS_META, StatusMeta, MAINTENANCE_BILLING_HINT_META,
   EQUIPMENT_REPLACE_SUGGEST_COUNT, MAINTENANCE_REPAIR_SLOT_MINUTES,
-  MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS,
 } from '@/constants/maintenance';
 
 // ── Config ──────────────────────────────────────────────────────────────────
-
-/**
- * BẬT LẠI (15/09/2026) — chuyển hẳn nút "Báo lỗi do khách" sang luồng reject-fault CŨ
- * (manager quyết định lỗi + hướng xử lý ngay tại chỗ), khớp yêu cầu BE mới: lỗi do
- * tenant PHẢI thanh toán TRƯỚC khi sửa/bàn giao (không phải sau như report-fault/
- * admin-review) — xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
- * submitRejectFault() đổi hẳn từ reportFault() (luồng admin-duyệt-sau, tạm ẩn cùng cờ
- * này từ 01/09) sang rejectFault() (luồng cũ, giờ nối thêm chargeBeforeRepair()/
- * handover() cho hai nhánh sửa-tại-chỗ và mang-đi-kiểm-tra-thêm — xem khối "Ai chịu
- * phí" mới ở dưới và màn REPAIR_SCHEDULED off-site).
- */
-const TENANT_FAULT_FLOW_ENABLED = true;
 
 /**
  * Quét QR xác nhận có mặt rồi mà quá 30' chưa nộp bước tiếp theo (duyệt/báo lỗi do
@@ -140,13 +127,6 @@ const isUnderWarranty = (eq: EquipmentDto | null): boolean => {
   if (!endStr) return false;
   const end = new Date(endStr).getTime();
   return !Number.isNaN(end) && serverNow().getTime() < end;
-};
-
-/** Gợi ý mặc định hạn tự sửa = hôm nay + N ngày (YYYY-MM-DD, giờ server). */
-const addDaysIso = (days: number): string => {
-  const d = serverNow();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
 };
 
 const daysLeft = (deadline?: string): number | null => {
@@ -392,74 +372,42 @@ export const TicketDetailScreen: React.FC = () => {
     setApproveCategory(c => c ?? 'appliance');
   }, [realTicket, realEquipmentId]);
 
-  // ── Luồng B: reject-fault (lỗi do khách, manager quyết định ngay tại chỗ) —
-  // BẬT LẠI 15/09/2026 cùng thanh-toán-trước-khi-sửa (xem TENANT_FAULT_FLOW_ENABLED).
-  const [faultFormOpen,   setFaultFormOpen]   = useState(false);
-  const [faultReason,     setFaultReason]     = useState('');
-  const [resolutionPath,  setResolutionPath]  = useState<FaultResolutionPath>('manager_repair');
-  const [selfRepairDeadlineText, setSelfRepairDeadlineText] = useState(addDaysIso(MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS));
-  const [estimatedAmountText,    setEstimatedAmountText]    = useState('');
-  // Chỉ có ý nghĩa khi resolutionPath=manager_repair — thiết bị phải mang đi kiểm tra
-  // thêm ngoài hiện trường, chưa biết ngày bàn giao thật (BE để repairAppointmentAt
-  // trống, REPAIR_SCHEDULED chờ đặt lịch sau qua rescheduleRepair — xem màn off-site
-  // bên dưới, nhánh `ticket.status === 'repair_scheduled'`).
-  const [needsOffSiteInspection, setNeedsOffSiteInspection] = useState(false);
-  const [rejectingFault, setRejectingFault] = useState(false);
+  // ── Luồng mới (16/09/2026) — 2 lựa chọn cấp cao nhất khi OPEN (thay approve() +
+  // reject-fault() cũ, xoá hẳn nhánh "Giao khách tự sửa" — không dùng hướng xử lý này
+  // nữa): "Sửa được ngay"/"sau khi mang đi kiểm tra" dùng chung form "Chẩn đoán & báo
+  // giá" (diagnose()), "Mang đi kiểm tra thêm" dùng sendForInspection(). Xem
+  // docs/maintenance-diagnose-redesign-be-2026-09-16.md (BE). Phiếu CŨ đã ở
+  // pending_tenant_repair (tạo trước 16/09/2026) vẫn xử lý bình thường ở dưới — chỉ bỏ
+  // lối tạo mới, không đụng luồng verify-repair cho phiếu cũ.
+  const [diagnoseFormOpen, setDiagnoseFormOpen] = useState(false);
+  const [diagnoseQuotedAmountText, setDiagnoseQuotedAmountText] = useState('');
+  const [diagnoseCause, setDiagnoseCause] = useState<'WEAR' | 'TENANT_MISUSE' | null>(null);
+  const [diagnoseFaultReason, setDiagnoseFaultReason] = useState('');
+  const [diagnoseTenantAgreesToPay, setDiagnoseTenantAgreesToPay] = useState<boolean | null>(null);
+  const [diagnoseCompanyAbsorbedNote, setDiagnoseCompanyAbsorbedNote] = useState('');
+  // "Thiết bị hỏng hoàn toàn — cần thay mới" (16/09/2026, BE commit 49201d9+d2bc708) —
+  // độc lập với damageCause, áp dụng cho cả 4 nhánh. Dùng chung replacementEquipment/
+  // computeAutoDamageAmount đã có sẵn cho Luồng A (cùng 1 thiết bị của ticket này) — state
+  // riêng `needsReplacement` phía dưới KHÔNG dùng chung vì đó là state của form
+  // handleComplete() khác hẳn màn/thời điểm này.
+  const [diagnoseNeedsReplacement, setDiagnoseNeedsReplacement] = useState(false);
+  // Chỉ có ý nghĩa khi gọi từ OPEN (case "sửa được ngay") — tick vào thì bắt buộc chọn
+  // giờ qua AppointmentSlotPicker (dùng chung approveRepairDate/approveRepairTime bên
+  // dưới); gọi từ REPAIR_SCHEDULED (sau khi mang đi kiểm tra) luôn BẮT BUỘC chọn giờ,
+  // không cần checkbox này.
+  const [diagnoseWantsSchedule, setDiagnoseWantsSchedule] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
 
-  const submitRejectFault = async () => {
-    if (rejectingFault) return;
-    if (blockIfArrivalStale()) return;
-    const reason = faultReason.trim();
-    if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
-    const evidenceUrls = ticket?.faultEvidenceImages ?? [];
-    if (evidenceUrls.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh bằng chứng lỗi.'); return; }
+  const [inspectionFormOpen, setInspectionFormOpen] = useState(false);
+  const [inspectionDate, setInspectionDate] = useState('');
+  const [inspectionTime, setInspectionTime] = useState<string | null>(null);
+  const [inspectionNote, setInspectionNote] = useState('');
+  const [sendingForInspection, setSendingForInspection] = useState(false);
 
-    let selfRepairDeadline: string | undefined;
-    let estimatedDamageAmount: number | undefined;
-    if (resolutionPath === 'tenant_self_repair') {
-      if (!selfRepairDeadlineText.trim()) { showAlert('Thiếu hạn', 'Vui lòng nhập hạn tự sửa.'); return; }
-      const amount = Number(estimatedAmountText.replace(/[^0-9]/g, ''));
-      if (!Number.isFinite(amount) || amount <= 0) { showAlert('Thiếu số tiền', 'Vui lòng nhập số tiền thiệt hại ước tính (> 0).'); return; }
-      selfRepairDeadline = selfRepairDeadlineText.trim();
-      estimatedDamageAmount = amount;
-    } else if (needsReplacement) {
-      // Thiết bị hỏng hoàn toàn — số đền bù LUÔN tự tính (xem computeAutoDamageAmount),
-      // phải gửi kèm NGAY LÚC NÀY: chargeBeforeRepair() sau này không có field riêng cho
-      // số này, chỉ đọc lại đúng estimatedDamageAmount đã lưu trên phiếu (xem BE
-      // resolveMaintenanceChargeAmount) — không gửi ở đây thì sau không có cách bù lại.
-      if (!rejectFaultAutoDamageAmount || rejectFaultAutoDamageAmount <= 0) {
-        showAlert(
-          'Thiếu dữ liệu thiết bị',
-          'Thiết bị chưa có dữ liệu giá + ngày bảo hành, cũng chưa có mức phạt cố định (penaltyFee) để tự tính số tiền đền bù — không thể đánh dấu thay mới cho thiết bị này.',
-        );
-        return;
-      }
-      estimatedDamageAmount = rejectFaultAutoDamageAmount;
-    }
-    try {
-      setRejectingFault(true);
-      await realMaintenanceService.rejectFault(idNum, {
-        faultReason: reason,
-        faultEvidenceImages: evidenceUrls,
-        resolutionPath: resolutionPath === 'manager_repair' ? 'MANAGER_REPAIR' : 'TENANT_SELF_REPAIR',
-        selfRepairDeadline,
-        estimatedDamageAmount,
-        needsOffSiteInspection: resolutionPath === 'manager_repair' ? needsOffSiteInspection : undefined,
-      });
-      await refreshReal();
-      setFaultFormOpen(false); setFaultReason(''); setNeedsOffSiteInspection(false);
-      showAlert(
-        resolutionPath === 'manager_repair'
-          ? (needsOffSiteInspection ? '📦 Đã ghi nhận — mang thiết bị đi kiểm tra thêm' : '🔧 Đã ghi nhận lỗi khách')
-          : '🛠 Đã giao khách tự sửa',
-        resolutionPath === 'manager_repair'
-          ? (needsOffSiteInspection
-            ? 'Khi có kết quả, lập hoá đơn thiệt hại rồi đặt lịch bàn giao cho khách thanh toán trước.'
-            : 'Lập hoá đơn thiệt hại để khách thanh toán trước khi sửa — hệ thống sẽ chặn "Báo sửa xong" cho tới khi thanh toán xong.')
-          : `Khách có tới ${selfRepairDeadlineText} để tự sửa và nộp ảnh.`,
-      );
-    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận. Vui lòng thử lại.')); }
-    finally { setRejectingFault(false); }
+  /** Đóng hết 2 form OPEN trước khi mở 1 form khác — tránh 2 form cùng hiện. */
+  const openTopLevelForm = (which: 'diagnose' | 'inspection') => {
+    setDiagnoseFormOpen(which === 'diagnose');
+    setInspectionFormOpen(which === 'inspection');
   };
 
   // ── Complete (Luồng A / Luồng B nhánh manager sửa hộ) ───────────────
@@ -482,20 +430,12 @@ export const TicketDetailScreen: React.FC = () => {
       .catch(() => { /* không tải được → autoDamageAmount ra null, chặn thu phí (xem dưới) */ });
     return () => { active = false; };
   }, [realEquipmentId]);
-  /**
-   * Bản dùng riêng cho FORM reject-fault (15/09/2026) — KHÔNG được gate qua
-   * `effectiveChargeToTenant` như `autoDamageAmount` bên dưới (biến đó chỉ true khi
-   * ticket.status đã là 'tenant_fault', mà lúc đang ở form reject-fault thì status vẫn
-   * còn 'open' — Luồng B lỗi khách chắc chắn sẽ thu phí nên không cần điều kiện đó).
-   */
-  const rejectFaultAutoDamageAmount = needsReplacement ? computeAutoDamageAmount(replacementEquipment) : null;
-
   // ── Charge (Luồng B mới, 15/09/2026) — lập hoá đơn thiệt hại TRƯỚC khi sửa/bàn giao,
   // dùng chung cho cả nhánh sửa tại chỗ (status=tenant_fault) và nhánh mang đi kiểm tra
   // thêm (status=repair_scheduled, off-site — xem màn riêng bên dưới). Chỉ cần
   // invoiceAmountText (tái dùng state ở trên) — equipmentNeedsReplacement/estimatedDamageAmount
-  // đã chốt xong từ lúc reject-fault (xem rejectFaultAutoDamageAmount), /charge không có
-  // field riêng cho số đó nữa (xem BE MaintenanceChargeRequest/resolveMaintenanceChargeAmount).
+  // đã chốt xong từ lúc diagnose()/reject-fault, /charge không có field riêng cho số đó
+  // nữa (xem BE MaintenanceChargeRequest/resolveMaintenanceChargeAmount).
   const [charging, setCharging] = useState(false);
   const hasReplacementAmount = (ticket?.estimatedDamageAmount ?? 0) > 0;
   const submitCharge = async () => {
@@ -782,11 +722,10 @@ export const TicketDetailScreen: React.FC = () => {
   // Ảnh AFTER/INVOICE đã có (server hoặc local) — điều kiện để "Báo sửa xong".
   const hasAfterPhoto = (ticket.afterImages?.length ?? 0) > 0 || photos.some(p => p.type === 'after');
   const hasInvoicePhoto = (ticket.invoiceImages?.length ?? 0) > 0 || photos.some(p => p.type === 'invoice');
-  const hasFaultEvidence = (ticket.faultEvidenceImages?.length ?? 0) > 0 || photos.some(p => p.type === 'fault_evidence');
   const beforeUrls = ticket.beforeImages?.length ? ticket.beforeImages : ticket.images;
-  // Luồng B mới (15/09/2026, sửa tại chỗ — Nhánh A của thanh-toán-trước-khi-sửa): status
-  // đã là tenant_fault NGAY từ reject-fault (không qua REPAIR_SCHEDULED) khi manager không
-  // chọn needsOffSiteInspection. Phải charge() rồi tenant thanh toán XONG mới cho
+  // Luồng B (sửa tại chỗ — Nhánh A của thanh-toán-trước-khi-sửa): status đã là tenant_fault
+  // NGAY từ diagnose() (TENANT_MISUSE + tenantAgreesToPay=true, không kèm repairAppointmentAt
+  // — 16/09/2026, thay reject-fault cũ). Phải charge() rồi tenant thanh toán XONG mới cho
   // "Báo sửa xong" — khớp đúng complete() phía BE (ném lỗi nếu chargeInvoiceId null, hoặc
   // hoá đơn đó chưa PAID — xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md).
   const isTenantFaultManagerRepair = ticket.status === 'tenant_fault' && ticket.faultResolutionPath === 'manager_repair';
@@ -824,6 +763,11 @@ export const TicketDetailScreen: React.FC = () => {
   const autoDamageAmount = (needsReplacement && effectiveChargeToTenant)
     ? computeAutoDamageAmount(replacementEquipment) : null;
   const replacementUnderWarranty = isUnderWarranty(replacementEquipment);
+  // Số đền bù cho checkbox "cần thay mới" ở màn Chẩn đoán (diagnose(), 16/09/2026) —
+  // KHÔNG gate theo "ai chịu phí" như autoDamageAmount ở trên: hao mòn tự nhiên vẫn cần
+  // số này (công ty tự chịu, chỉ lưu tham khảo), không riêng gì lỗi khách.
+  const diagnoseAutoDamageAmount = diagnoseNeedsReplacement
+    ? computeAutoDamageAmount(replacementEquipment) : null;
 
   // Cập nhật store + append timeline (đường mock).
   const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
@@ -925,7 +869,7 @@ export const TicketDetailScreen: React.FC = () => {
   // INVOICE luôn chỉ nhận ẢNH (OCR đọc số tiền hoá đơn cần ảnh tĩnh, không đọc được
   // video) — giữ nguyên picker ảnh-only cũ cho type này. AFTER/FAULT_EVIDENCE cho chọn
   // lẫn ảnh/video (yêu cầu mentor 14/09/2026), tối đa EVIDENCE_MAX_FILES tổng cộng.
-  const pickPhotoFromCamera = async (type: PhotoKind) => {
+  const pickPhotoFromCamera = async (type: PhotoKind, mode: EvidenceMediaType = 'image') => {
     setPhotoMenuFor(null);
     const remaining = remainingEvidenceSlots(evidenceCountFor(type));
     if (remaining <= 0) {
@@ -940,10 +884,12 @@ export const TicketDetailScreen: React.FC = () => {
       if (!r.canceled && r.assets[0]) await addLocalPhoto(type, { uri: r.assets[0].uri, type: 'image' });
       return;
     }
+    // Quay video chưa hỗ trợ trên web (CameraCaptureModal/expo-camera CameraView chỉ
+    // chụp ảnh) — nút "Quay video" bị ẩn trên web ở UI, chỉ còn nhánh ảnh chạy tới đây.
     if (Platform.OS === 'web') { setCameraFor(type); return; }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
-    const media = await pickEvidenceFromCamera();
+    const media = await pickEvidenceFromCamera(mode);
     if (media) await addLocalPhoto(type, media);
   };
   const pickPhotoFromLibrary = async (type: PhotoKind) => {
@@ -964,44 +910,143 @@ export const TicketDetailScreen: React.FC = () => {
 
   // ── Actions theo flow mới ──────────────────────────────────────────
 
-  /** OPEN → IN_REPAIR: manager duyệt (Luồng A) — BẮT BUỘC chọn category. */
-  const handleApprove = async () => {
-    if (busy) return;
-    if (blockIfArrivalStale()) return;
+  /**
+   * OPEN (sửa ngay, có/không kèm lịch sửa sau) HOẶC REPAIR_SCHEDULED chưa có damageCause
+   * (sau khi mang đi kiểm tra) → diagnose(): xác định nguyên nhân + báo giá, dùng chung
+   * 2 case qua `fromInspection`. Thay thế approve() (hao mòn) + nhánh MANAGER_REPAIR của
+   * reject-fault() (16/09/2026, xem docs/maintenance-diagnose-redesign-be-2026-09-16.md).
+   * Tái dùng approveCategory/approvePriority/approveRepairDate/approveRepairTime (state
+   * cũ của form "Duyệt") — cùng field, chỉ đổi API đích.
+   */
+  const submitDiagnose = async (fromInspection: boolean) => {
+    if (diagnosing) return;
+    if (!fromInspection && blockIfArrivalStale()) return;
     if (!approveCategory) {
-      showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi duyệt.');
+      showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi chẩn đoán.');
       return;
     }
-    const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
-    if (!dt) { showAlert('Thiếu lịch sửa', 'Vui lòng chọn ngày và giờ hẹn sửa (chọn hôm nay nếu muốn sửa ngay).'); return; }
-    if (dt.getTime() <= serverNow().getTime()) {
-      showAlert('Lịch sửa không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+    const rawAmount = diagnoseQuotedAmountText.replace(/[^0-9]/g, '');
+    const enteredAmount = rawAmount ? Number(rawAmount) : NaN;
+    // Không thay thiết bị: ô tiền là "giá thợ báo", bắt buộc. Thay thiết bị: ô tiền đổi
+    // thành "chi phí phát sinh thêm", tuỳ chọn — số chính lấy từ diagnoseAutoDamageAmount
+    // (tự tính, không cho nhập tay, xem checkbox trong renderDiagnoseForm).
+    let quotedRepairAmount: number | undefined;
+    if (diagnoseNeedsReplacement) {
+      if (!diagnoseAutoDamageAmount || diagnoseAutoDamageAmount <= 0) {
+        showAlert(
+          'Thiếu dữ liệu thiết bị',
+          'Thiết bị chưa có dữ liệu giá + ngày bảo hành, cũng chưa có mức phạt cố định (penaltyFee) để tự tính số tiền đền bù — không thể đánh dấu thay mới cho thiết bị này.',
+        );
+        return;
+      }
+      quotedRepairAmount = Number.isFinite(enteredAmount) && enteredAmount > 0 ? enteredAmount : undefined;
+    } else {
+      if (!Number.isFinite(enteredAmount) || enteredAmount < 0) {
+        showAlert('Thiếu giá thợ báo', 'Vui lòng nhập giá thợ báo hợp lệ (>= 0).');
+        return;
+      }
+      quotedRepairAmount = enteredAmount;
+    }
+    if (!diagnoseCause) {
+      showAlert('Chưa chọn nguyên nhân', 'Vui lòng chọn "Hao mòn tự nhiên" hoặc "Lỗi do khách".');
       return;
     }
-    const repairAppointmentAt = toApiDateTime(dt);
-    if (isReal) {
-      try {
-        setBusy(true);
-        await realMaintenanceService.approve(idNum, {
-          category: approveCategory.toUpperCase() as MaintenanceReqCategory,
-          priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
-          repairAppointmentAt,
-        });
-        // Gửi xong quay về màn "Bảo trì & Sửa chữa" — trước đây trỏ nhầm sang 'Equipment'
-        // (danh sách thiết bị theo nhà), một stack screen độc lập không nhận
-        // propertyId/roomCode kiểu này nên rơi vào "Chưa được giao nhà nào" (07/09/2026).
-        // 'ManagerMaintenance' là tab lồng trong 'ManagerTabs', phải điều hướng qua đúng
-        // navigator cha (xem navigationRef.ts — MANAGER_TAB_ROUTES).
-        navigation.navigate('ManagerTabs', { screen: 'ManagerMaintenance' });
-      } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể duyệt yêu cầu. Vui lòng thử lại.')); }
-      finally { setBusy(false); }
-      return;
+
+    let tenantAgreesToPay: boolean | undefined;
+    let faultReasonBody: string | undefined;
+    let faultEvidenceImages: string[] | undefined;
+    let companyAbsorbedNote: string | undefined;
+    if (diagnoseCause === 'TENANT_MISUSE') {
+      const reason = diagnoseFaultReason.trim();
+      if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
+      const evidenceUrls = ticket?.faultEvidenceImages ?? [];
+      if (evidenceUrls.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh/video bằng chứng lỗi.'); return; }
+      if (diagnoseTenantAgreesToPay == null) {
+        showAlert('Chưa chọn', 'Vui lòng chọn khách có đồng ý trả chi phí hay không.');
+        return;
+      }
+      faultReasonBody = reason;
+      faultEvidenceImages = evidenceUrls;
+      tenantAgreesToPay = diagnoseTenantAgreesToPay;
+      companyAbsorbedNote = !diagnoseTenantAgreesToPay ? (diagnoseCompanyAbsorbedNote.trim() || undefined) : undefined;
     }
-    patchStore(
-      { status: 'in_repair', category: approveCategory, priority: approvePriority ?? undefined },
-      mkEntry('in_repair', noteInput.trim() || `Manager duyệt yêu cầu [${approveCategory.toUpperCase()}]`),
-    );
-    setNoteInput('');
+
+    let repairAppointmentAt: string | undefined;
+    if (fromInspection || diagnoseWantsSchedule) {
+      const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
+      if (!dt) {
+        showAlert('Thiếu lịch hẹn', fromInspection
+          ? 'Vui lòng chọn ngày giờ hẹn giao/sửa chính thức.'
+          : 'Vui lòng chọn ngày giờ hẹn sửa, hoặc bỏ chọn "Đặt lịch sửa sau".');
+        return;
+      }
+      if (dt.getTime() <= serverNow().getTime()) {
+        showAlert('Lịch hẹn không hợp lệ', 'Thời điểm hẹn phải ở tương lai. Vui lòng chọn lại giờ khác.');
+        return;
+      }
+      repairAppointmentAt = toApiDateTime(dt);
+    }
+
+    try {
+      setDiagnosing(true);
+      await realMaintenanceService.diagnose(idNum, {
+        quotedRepairAmount,
+        equipmentNeedsReplacement: diagnoseNeedsReplacement || undefined,
+        estimatedDamageAmount: diagnoseNeedsReplacement ? diagnoseAutoDamageAmount ?? undefined : undefined,
+        damageCause: diagnoseCause,
+        tenantAgreesToPay,
+        faultReason: faultReasonBody,
+        faultEvidenceImages,
+        companyAbsorbedNote,
+        repairAppointmentAt,
+        category: approveCategory.toUpperCase() as MaintenanceReqCategory,
+        priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
+      });
+      await refreshReal();
+      setDiagnoseFormOpen(false);
+      setDiagnoseQuotedAmountText(''); setDiagnoseCause(null); setDiagnoseFaultReason('');
+      setDiagnoseTenantAgreesToPay(null); setDiagnoseCompanyAbsorbedNote(''); setDiagnoseWantsSchedule(false);
+      setDiagnoseNeedsReplacement(false);
+      showAlert(
+        diagnoseCause === 'WEAR'
+          ? '✅ Đã ghi nhận hao mòn tự nhiên'
+          : tenantAgreesToPay === false ? '⚠️ Công ty trả hộ chi phí' : '⚠️ Đã ghi nhận lỗi do khách',
+        repairAppointmentAt
+          ? 'Đã đặt lịch sửa/giao máy — chờ tới đúng lịch hẹn.'
+          : diagnoseCause === 'TENANT_MISUSE' && tenantAgreesToPay
+            ? 'Lập hoá đơn thiệt hại để khách thanh toán trước khi sửa.'
+            : 'Đang tiến hành sửa chữa.',
+      );
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận chẩn đoán. Vui lòng thử lại.')); }
+    finally { setDiagnosing(false); }
+  };
+
+  /**
+   * OPEN → REPAIR_SCHEDULED, mang thiết bị đi kiểm tra thêm khi CHƯA biết nguyên nhân
+   * (16/09/2026) — chẩn đoán thật làm sau qua submitDiagnose(fromInspection=true) một khi
+   * thợ báo kết quả (xem branch "Đang kiểm tra", `ticket.status === 'repair_scheduled'
+   * && !ticket.damageCause`).
+   */
+  const submitSendForInspection = async () => {
+    if (sendingForInspection) return;
+    if (blockIfArrivalStale()) return;
+    const dt = inspectionTime ? toLocalDateTime(inspectionDate, inspectionTime) : null;
+    try {
+      setSendingForInspection(true);
+      await realMaintenanceService.sendForInspection(idNum, {
+        expectedReturnAt: dt ? toApiDateTime(dt) : undefined,
+        category: approveCategory ? approveCategory.toUpperCase() : undefined,
+        note: inspectionNote.trim() || undefined,
+      });
+      await refreshReal();
+      setInspectionFormOpen(false);
+      setInspectionDate(''); setInspectionTime(null); setInspectionNote('');
+      showAlert(
+        '📦 Đã ghi nhận — mang thiết bị đi kiểm tra thêm',
+        'Khi có kết quả, vào lại phiếu để nhập chẩn đoán & báo giá.',
+      );
+    } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận. Vui lòng thử lại.')); }
+    finally { setSendingForInspection(false); }
   };
 
   /** IN_REPAIR/TENANT_FAULT → CLOSED: báo sửa xong (bắt buộc AFTER + INVOICE + thông tin hoá đơn). */
@@ -1050,13 +1095,20 @@ export const TicketDetailScreen: React.FC = () => {
           invoiceAmount: ticket.chargeInvoiceId ? undefined : amount,
           // Luồng B (tenant_fault) BE luôn tự thu — chỉ Luồng A mới thật sự cần cờ này.
           chargeToTenant: ticket.status === 'in_repair' ? chargeToTenant : undefined,
-          // Đã charge() trước thì suy thẳng từ estimatedDamageAmount đã lưu trên phiếu
-          // (chốt lúc reject-fault) — KHÔNG dùng lại state `needsReplacement` cục bộ vì
-          // màn có thể đã bị đóng/mở lại từ lúc reject-fault (mất state), xem
-          // hasReplacementAmount. BE vẫn cần cờ này ở đúng lần complete() để tự cập nhật
-          // lại Equipment (status NEW, reset maintenanceCount — applyEquipmentReplacementOnComplete).
-          equipmentNeedsReplacement: (ticket.chargeInvoiceId ? hasReplacementAmount : needsReplacement) || undefined,
-          estimatedDamageAmount: ticket.chargeInvoiceId ? undefined : damageAmount,
+          // Đã charge() trước thì đọc đúng cờ BE đã chốt lúc diagnose() — KHÔNG suy luận
+          // từ estimatedDamageAmount > 0 nữa (BE giờ luôn set field này kể cả sửa thường
+          // không thay gì, xem equipmentReplacementFlagged — BE commit 49201d9, 16/09/2026).
+          equipmentNeedsReplacement: ticket.chargeInvoiceId
+            ? (ticket.equipmentReplacementFlagged || undefined)
+            : (needsReplacement || undefined),
+          // BE applyEquipmentReplacementOnComplete() đọc estimatedDamageAmount TỪ REQUEST
+          // này (không tự lấy lại từ phiếu đã lưu) — undefined thì nó fallback thẳng
+          // sang Equipment.penaltyFee, SAI nếu giá trị thật sự (chốt lúc diagnose(), có
+          // thể là khấu hao còn lại nếu còn bảo hành) khác với penaltyFee. Phải gửi lại
+          // đúng số đã lưu trên phiếu cho nhánh đã charge().
+          estimatedDamageAmount: ticket.chargeInvoiceId
+            ? (ticket.equipmentReplacementFlagged ? ticket.estimatedDamageAmount : undefined)
+            : damageAmount,
         });
         await refreshReal();
         setNoteInput(''); setInvoiceAmountText('');
@@ -1098,6 +1150,211 @@ export const TicketDetailScreen: React.FC = () => {
       }},
     ]);
   };
+
+  /**
+   * Form "Chẩn đoán & báo giá" (16/09/2026) — dùng chung 2 nơi: card inline khi OPEN
+   * (`fromInspection=false`, gọi từ nút "🔧 Sửa được ngay" trong khối 3 lựa chọn bên
+   * dưới) và màn "Đang kiểm tra" (`fromInspection=true`, early-return riêng phía trên,
+   * xem `ticket.status === 'repair_scheduled' && !ticket.damageCause`). Khác nhau đúng 2
+   * chỗ: lịch hẹn bắt buộc hay tuỳ chọn (qua checkbox), và nút "Quay lại" chỉ có ở case
+   * inline (case màn riêng không có gì để quay lại — Huỷ yêu cầu đã có nút riêng).
+   */
+  const renderDiagnoseForm = (fromInspection: boolean) => (
+    <View style={[s.card, { borderColor: Colors.primary, borderWidth: 1.5 }]}>
+      <Text style={s.cardSectionTitle}>🔍 Chẩn đoán & báo giá</Text>
+
+      <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>
+        {ticket.category ? 'Phân loại sự cố' : 'Phân loại sự cố (bắt buộc)'}
+      </Text>
+      <TouchableOpacity style={s.dropdownBtn} onPress={() => setCategoryMenuOpen(o => !o)} activeOpacity={0.75}>
+        <Text style={[s.dropdownBtnText, !approveCategory && s.dropdownBtnPlaceholder]}>
+          {approveCategory ? `${CATEGORY_CONFIG[approveCategory].icon} ${CATEGORY_CONFIG[approveCategory].label}` : 'Chọn danh mục sự cố'}
+        </Text>
+        <Text style={s.dropdownChevron}>{categoryMenuOpen ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
+      {categoryMenuOpen && (
+        <View style={s.dropdownList}>
+          {APPROVE_CATEGORY_KEYS.map(key => {
+            const c = CATEGORY_CONFIG[key];
+            const active = approveCategory === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[s.dropdownItem, active && s.dropdownItemActive]}
+                onPress={() => { setApproveCategory(key); setCategoryMenuOpen(false); }}
+                activeOpacity={0.75}
+              >
+                <Text style={[s.dropdownItemText, active && s.dropdownItemTextActive]}>{c.icon} {c.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={[s.replaceToggleRow, { marginTop: Spacing.md }]}
+        onPress={() => setDiagnoseNeedsReplacement(v => !v)}
+        activeOpacity={0.75}
+      >
+        <View style={[s.checkbox, diagnoseNeedsReplacement && s.checkboxChecked]}>
+          {diagnoseNeedsReplacement && <Text style={s.checkboxMark}>✓</Text>}
+        </View>
+        <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
+      </TouchableOpacity>
+      {diagnoseNeedsReplacement && (
+        <>
+          <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
+            <Text style={s.readonlyAmountText}>
+              {diagnoseAutoDamageAmount ? fmt(diagnoseAutoDamageAmount) : '— Chưa có dữ liệu —'}
+            </Text>
+          </View>
+          <Text style={s.costHint}>
+            {diagnoseAutoDamageAmount
+              ? isUnderWarranty(replacementEquipment)
+                ? 'Còn bảo hành — số tiền này là phần khấu hao còn lại của thiết bị, tự tính, không thể sửa.'
+                : 'Đã hết bảo hành — số tiền này là mức phạt cố định của thiết bị (penaltyFee), tự tính, không thể sửa.'
+              : 'Thiết bị chưa có dữ liệu giá/bảo hành, cũng chưa có mức phạt cố định — không thể đánh dấu thay mới cho thiết bị này.'}
+          </Text>
+        </>
+      )}
+
+      <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>
+        {diagnoseNeedsReplacement ? 'Chi phí phát sinh thêm (đ) — để trống nếu không có' : 'Giá thợ báo (đ)'}
+      </Text>
+      <TextInput
+        style={[s.textInput, s.moneyInput]}
+        value={diagnoseQuotedAmountText}
+        onChangeText={t => setDiagnoseQuotedAmountText(formatMoneyInput(t))}
+        placeholder={diagnoseNeedsReplacement ? 'Vd: công lắp đặt...' : 'Nhập giá thợ báo...'}
+        placeholderTextColor={Colors.textMuted}
+        keyboardType="numeric"
+      />
+
+      <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Nguyên nhân</Text>
+      <View style={s.reviewRow}>
+        <TouchableOpacity
+          style={[s.reviewBtn, diagnoseCause === 'WEAR' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
+          onPress={() => setDiagnoseCause('WEAR')}
+        >
+          <Text style={[s.reviewBtnText, diagnoseCause === 'WEAR' && { color: Colors.primary }]}>Hao mòn tự nhiên</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.reviewBtn, diagnoseCause === 'TENANT_MISUSE' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
+          onPress={() => setDiagnoseCause('TENANT_MISUSE')}
+        >
+          <Text style={[s.reviewBtnText, diagnoseCause === 'TENANT_MISUSE' && { color: Colors.primary }]}>Lỗi do khách</Text>
+        </TouchableOpacity>
+      </View>
+
+      {diagnoseCause === 'TENANT_MISUSE' && (
+        <>
+          <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Lý do</Text>
+          <TextInput
+            style={s.textInput}
+            value={diagnoseFaultReason}
+            onChangeText={setDiagnoseFaultReason}
+            placeholder="Mô tả lỗi do khách gây ra (vd: tự tháo ống nước, dùng sai cách...)"
+            placeholderTextColor={Colors.textMuted}
+            multiline
+          />
+          <View style={{ marginTop: Spacing.sm }}>
+            <PhotoEvidenceRow
+              type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}
+              onAdd={() => setPhotoMenuFor('fault_evidence')}
+              onView={(uris, i) => setLightbox({ uris, index: i })}
+              onViewVideo={(url) => setVideoPreviewUrl(url)}
+              onRemoveLocal={removeLocalPhoto}
+              onRemoveServer={(url) => removeServerPhoto('FAULT_EVIDENCE', url)}
+            />
+          </View>
+
+          <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Khách có đồng ý trả không?</Text>
+          <View style={s.reviewRow}>
+            <TouchableOpacity
+              style={[s.reviewBtn, diagnoseTenantAgreesToPay === true && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
+              onPress={() => setDiagnoseTenantAgreesToPay(true)}
+            >
+              <Text style={[s.reviewBtnText, diagnoseTenantAgreesToPay === true && { color: Colors.primary }]}>Khách đồng ý trả</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.reviewBtn, diagnoseTenantAgreesToPay === false && { backgroundColor: '#FEF2F2', borderColor: '#DC2626' }]}
+              onPress={() => setDiagnoseTenantAgreesToPay(false)}
+            >
+              <Text style={[s.reviewBtnText, diagnoseTenantAgreesToPay === false && { color: '#DC2626' }]}>Khách từ chối trả</Text>
+            </TouchableOpacity>
+          </View>
+          {diagnoseTenantAgreesToPay === false && (
+            <>
+              <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Ghi chú thoả thuận (tùy chọn)</Text>
+              <TextInput
+                style={[s.textInput, s.noteInput]}
+                value={diagnoseCompanyAbsorbedNote}
+                onChangeText={setDiagnoseCompanyAbsorbedNote}
+                placeholder="Tóm tắt thoả thuận ngoài app..."
+                placeholderTextColor={Colors.textMuted}
+                multiline
+              />
+              <Text style={s.pickHint}>Công ty sẽ trả hộ chi phí này — không lập hoá đơn thu khách.</Text>
+            </>
+          )}
+        </>
+      )}
+
+      {fromInspection ? (
+        <>
+          <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Lịch hẹn giao máy / sửa chính thức (bắt buộc)</Text>
+          <AppointmentSlotPicker
+            propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+            slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+            excludeRequestId={idNum}
+            date={approveRepairDate}
+            onDateChange={setApproveRepairDate}
+            time={approveRepairTime}
+            onTimeChange={setApproveRepairTime}
+          />
+        </>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={[s.replaceToggleRow, { marginTop: Spacing.md }]}
+            onPress={() => setDiagnoseWantsSchedule(v => !v)}
+            activeOpacity={0.75}
+          >
+            <View style={[s.checkbox, diagnoseWantsSchedule && s.checkboxChecked]}>
+              {diagnoseWantsSchedule && <Text style={s.checkboxMark}>✓</Text>}
+            </View>
+            <Text style={s.cardSectionTitle}>🗓 Đặt lịch sửa sau thay vì sửa ngay</Text>
+          </TouchableOpacity>
+          {diagnoseWantsSchedule && (
+            <View style={{ marginTop: Spacing.sm }}>
+              <AppointmentSlotPicker
+                propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+                slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+                excludeRequestId={idNum}
+                date={approveRepairDate}
+                onDateChange={setApproveRepairDate}
+                time={approveRepairTime}
+                onTimeChange={setApproveRepairTime}
+              />
+            </View>
+          )}
+        </>
+      )}
+
+      <TouchableOpacity
+        style={[s.advanceBtn, { marginTop: Spacing.md }, diagnosing && s.btnDisabled]}
+        onPress={() => submitDiagnose(fromInspection)}
+        disabled={diagnosing}
+      >
+        <Text style={s.advanceBtnText}>{diagnosing ? 'Đang gửi...' : '✅ Xác nhận chẩn đoán'}</Text>
+      </TouchableOpacity>
+      {!fromInspection && (
+        <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setDiagnoseFormOpen(false)}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>← Quay lại</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   const doStartRepair = async () => {
     if (startRepairBusy) return;
@@ -1156,17 +1413,106 @@ export const TicketDetailScreen: React.FC = () => {
   };
 
   /**
-   * Phiếu REPAIR_SCHEDULED nhánh "mang thiết bị đi kiểm tra thêm" (off-site, Luồng B mới
-   * 15/09/2026 — needsOffSiteInspection lúc reject-fault) — CHỈ phiếu này mới có
-   * faultResolutionPath=manager_repair ở status REPAIR_SCHEDULED (Luồng A dùng approve(),
-   * không set field này — xem canComplete ở trên). Khác hẳn màn "Bắt đầu sửa" (Luồng A)
-   * bên dưới: sửa/kiểm tra đã xảy ra NGOÀI hiện trường, phiếu không quay lại IN_REPAIR mà
-   * đi thẳng CLOSED qua handover() — cần lập hoá đơn + đặt lịch bàn giao + chờ thanh
-   * toán trước khi quét QR bàn giao, xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
+   * Phiếu REPAIR_SCHEDULED nhưng CHƯA có damageCause (16/09/2026) — vừa qua
+   * sendForInspection() (mang thiết bị đi kiểm tra thêm), chưa biết nguyên nhân. PHẢI
+   * chặn TRƯỚC 2 branch repair_scheduled bên dưới (thứ tự if quan trọng): branch off-site
+   * (faultResolutionPath=manager_repair) không bao giờ khớp phiếu này (BE để
+   * faultResolutionPath null cho tới khi diagnose() xong), nhưng branch "Bắt đầu sửa chữa"
+   * (QR gate) bên dưới thì có — phiếu chưa chẩn đoán không được phép quét QR bắt đầu sửa
+   * (BE start-repair() cũng chặn cứng nếu damageCause null).
+   */
+  if (ticket.status === 'repair_scheduled' && !ticket.damageCause) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <View style={s.header}>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={s.backIcon}>‹</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={s.headerCode}>{ticket.ticketCode}</Text>
+            <Text style={s.headerTitle} numberOfLines={1}>{ticket.title}</Text>
+          </View>
+        </View>
+        <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>📦 Đang mang đi kiểm tra</Text>
+            <Text style={s.descText}>
+              {ticket.roomName} · {ticket.tenantName}{ticket.equipmentName ? ` · ${ticket.equipmentName}` : ''}
+            </Text>
+            {!!ticket.expectedReturnAt && (
+              <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+                Dự kiến trả máy: {formatDateTime(ticket.expectedReturnAt)}
+              </Text>
+            )}
+            <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+              Chưa xác định nguyên nhân — khi thợ báo kết quả kiểm tra/báo giá, nhập chẩn đoán bên dưới.
+            </Text>
+          </View>
+
+          {!diagnoseFormOpen ? (
+            <TouchableOpacity style={[s.advanceBtn, { backgroundColor: Colors.primary }]} onPress={() => setDiagnoseFormOpen(true)}>
+              <Text style={s.advanceBtnText}>📋 Nhập kết quả chẩn đoán</Text>
+            </TouchableOpacity>
+          ) : renderDiagnoseForm(true)}
+
+          <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+            <Text style={s.cancelBtnText}>Hủy yêu cầu này</Text>
+          </TouchableOpacity>
+          <View style={{ height: 40 }} />
+        </ScrollView>
+
+        <CameraCaptureModal
+          visible={cameraFor !== null}
+          onCapture={(uri) => { const t = cameraFor; setCameraFor(null); if (t) void addLocalPhoto(t, { uri, type: 'image' }); }}
+          onClose={() => setCameraFor(null)}
+        />
+        <Modal visible={photoMenuFor !== null} transparent animationType="fade" onRequestClose={() => setPhotoMenuFor(null)}>
+          <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
+            <Pressable style={s.photoMenuCard} onPress={() => {}}>
+              <Text style={s.photoMenuTitle}>Thêm ảnh/video</Text>
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
+                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
+              </TouchableOpacity>
+              {Platform.OS !== 'web' && (
+                <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
+                  <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
+                <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.photoMenuCancel} onPress={() => setPhotoMenuFor(null)}>
+                <Text style={s.photoMenuCancelText}>Đóng</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <PhotoLightbox state={lightbox} onChange={setLightbox} />
+        <VideoPreviewModal visible={!!videoPreviewUrl} url={videoPreviewUrl} onClose={() => setVideoPreviewUrl(null)} />
+      </SafeAreaView>
+    );
+  }
+
+  /**
+   * Phiếu REPAIR_SCHEDULED có faultResolutionPath=manager_repair — CHỈ phiếu lỗi khách
+   * (TENANT_MISUSE) mới có field này set (Luồng A hao mòn/WEAR không set — xem canComplete
+   * ở trên). Khác hẳn màn "Bắt đầu sửa" (Luồng A) bên dưới: sửa/kiểm tra đã xảy ra NGOÀI
+   * hiện trường (đã qua sendForInspection() rồi diagnose(), hoặc diagnose() ngay từ OPEN
+   * kèm repairAppointmentAt), phiếu không quay lại IN_REPAIR mà đi thẳng CLOSED qua
+   * handover() — cần lập hoá đơn + đặt lịch bàn giao + chờ thanh toán trước khi quét QR
+   * bàn giao, xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
+   * Từ 16/09/2026, ticket ở đây LUÔN có damageCause=TENANT_MISUSE (branch phía trên đã
+   * chặn hết case damageCause null) — có thể là khách đồng ý trả (chargeIsPaid gate như
+   * cũ) hoặc khách từ chối trả/công ty trả hộ (companyAbsorbedFault=true, bỏ qua gate
+   * thanh toán — xem readyToHandover bên dưới).
    */
   if (ticket.status === 'repair_scheduled' && ticket.faultResolutionPath === 'manager_repair') {
     const canSetHandoverDate = !ticket.repairAppointmentAt || isBeforeAppointmentDay(ticket.repairAppointmentAt);
-    const readyToHandover = chargeIsPaid && !!ticket.repairAppointmentAt;
+    // companyAbsorbedFault (16/09/2026): charge() bị BE chặn cứng cho case này (ném lỗi)
+    // nên chargeInvoiceId/chargeIsPaid sẽ MÃI MÃI false — phải tự bỏ qua gate thanh toán,
+    // không thì nút bàn giao không bao giờ bật được (xem 2 khối "Lập hoá đơn"/"Đang chờ
+    // thanh toán" bên dưới cũng bị ẩn hẳn cho case này).
+    const readyToHandover = (chargeIsPaid || ticket.companyAbsorbedFault) && !!ticket.repairAppointmentAt;
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
@@ -1185,18 +1531,23 @@ export const TicketDetailScreen: React.FC = () => {
               {ticket.roomName} · {ticket.tenantName}{ticket.equipmentName ? ` · ${ticket.equipmentName}` : ''}
             </Text>
             <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
-              Lỗi do khách — {ticket.faultReason || 'không có ghi chú'}. Khi có kết quả kiểm tra/báo giá: lập hoá
-              đơn thiệt hại, đặt lịch bàn giao, rồi quét QR bàn giao sau khi khách đã thanh toán.
+              Lỗi do khách — {ticket.faultReason || 'không có ghi chú'}.{' '}
+              {ticket.companyAbsorbedFault
+                ? 'Khách từ chối trả — công ty đã trả hộ, không cần lập hoá đơn. Đặt lịch bàn giao rồi quét QR bàn giao.'
+                : 'Khi có kết quả kiểm tra/báo giá: lập hoá đơn thiệt hại, đặt lịch bàn giao, rồi quét QR bàn giao sau khi khách đã thanh toán.'}
             </Text>
           </View>
 
-          {/* Bước 1: lập hoá đơn thiệt hại (giống hệt Nhánh A, chỉ khác thời điểm gọi) */}
-          {!ticket.chargeInvoiceId && (
+          {/* Bước 1: lập hoá đơn thiệt hại (giống hệt Nhánh A, chỉ khác thời điểm gọi) —
+              BỎ QUA hẳn khi companyAbsorbedFault (BE chặn cứng charge() cho case này). */}
+          {!ticket.chargeInvoiceId && !ticket.companyAbsorbedFault && (
             <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
               <Text style={s.cardSectionTitle}>🧾 Lập hoá đơn thiệt hại</Text>
               {hasReplacementAmount ? (
                 <View style={[s.textInput, s.readonlyAmountBox]}>
-                  <Text style={s.readonlyAmountText}>Đền bù thay thiết bị: {fmt(ticket.estimatedDamageAmount)}</Text>
+                  <Text style={s.readonlyAmountText}>
+                    {ticket.equipmentReplacementFlagged ? 'Đền bù thay thiết bị' : 'Giá đã chốt lúc chẩn đoán'}: {fmt(ticket.estimatedDamageAmount)}
+                  </Text>
                 </View>
               ) : null}
               <TextInput
@@ -1231,7 +1582,7 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
 
           {/* Bước 3: đang chờ khách thanh toán */}
-          {hasUnpaidCharge && ticket.issuedInvoice && (
+          {hasUnpaidCharge && ticket.issuedInvoice && !ticket.companyAbsorbedFault && (
             <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
               <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Đang chờ khách thanh toán</Text>
               <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
@@ -1249,10 +1600,12 @@ export const TicketDetailScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Bước 4: đã thanh toán — chụp ảnh bàn giao rồi quét QR bàn giao */}
-          {chargeIsPaid && (
+          {/* Bước 4: đã thanh toán (hoặc công ty trả hộ) — chụp ảnh bàn giao rồi quét QR bàn giao */}
+          {(chargeIsPaid || ticket.companyAbsorbedFault) && (
             <View style={[s.card, { borderColor: Colors.success, borderWidth: 1.5 }]}>
-              <Text style={s.cardSectionTitle}>✅ Đã thanh toán — sẵn sàng bàn giao</Text>
+              <Text style={s.cardSectionTitle}>
+                {ticket.companyAbsorbedFault ? '✅ Công ty trả hộ — sẵn sàng bàn giao' : '✅ Đã thanh toán — sẵn sàng bàn giao'}
+              </Text>
               {!ticket.repairAppointmentAt && (
                 <Text style={s.pickHint}>Vui lòng đặt lịch bàn giao ở trên trước khi quét QR.</Text>
               )}
@@ -1334,9 +1687,14 @@ export const TicketDetailScreen: React.FC = () => {
           <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
             <Pressable style={s.photoMenuCard} onPress={() => {}}>
               <Text style={s.photoMenuTitle}>Thêm ảnh/video</Text>
-              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor)}>
-                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh/quay video</Text>
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
+                <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
               </TouchableOpacity>
+              {Platform.OS !== 'web' && (
+                <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
+                  <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
                 <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
               </TouchableOpacity>
@@ -1488,6 +1846,18 @@ export const TicketDetailScreen: React.FC = () => {
             <Text style={[s.badgeText, { color: Colors.textSecondary }]}>🏢 {ticket.propertyName}</Text>
           </View>
         </View>
+
+        {/* ── Công ty trả hộ (companyAbsorbedFault, 16/09/2026 — immutable một khi true) ── */}
+        {ticket.companyAbsorbedFault && (
+          <View style={[s.replaceAlert, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+            <Text style={[s.replaceAlertText, { color: '#DC2626', fontWeight: '700' }]}>
+              ⚠️ Khách từ chối trả — công ty đã trả hộ
+            </Text>
+            {!!ticket.companyAbsorbedNote && (
+              <Text style={[s.replaceAlertText, { marginTop: 4 }]}>{ticket.companyAbsorbedNote}</Text>
+            )}
+          </View>
+        )}
 
         {/* ── Info card ──────────────────────────────────────────── */}
         <View style={s.card}>
@@ -1644,13 +2014,15 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Đã charge() trước rồi — quyết định "thay mới" đã chốt lúc reject-fault
-            (estimatedDamageAmount), chỉ hiện lại để manager biết, không hỏi lại. */}
-        {canComplete && !!ticket.chargeInvoiceId && hasReplacementAmount && (
+        {/* Đã charge() trước rồi — quyết định "thay mới" đã chốt lúc diagnose()
+            (equipmentReplacementFlagged, 16/09/2026 — KHÔNG dùng hasReplacementAmount vì
+            estimatedDamageAmount giờ luôn có giá trị dù có thay hay không), chỉ hiện lại
+            để manager biết, không hỏi lại. */}
+        {canComplete && !!ticket.chargeInvoiceId && ticket.equipmentReplacementFlagged && (
           <View style={[s.card, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
             <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⚠️ Thiết bị thay mới — đã đền bù</Text>
             <Text style={s.descText}>
-              Khách đã thanh toán {fmt(ticket.estimatedDamageAmount)} tiền đền bù thay thiết bị (chốt lúc báo lỗi).
+              Khách đã thanh toán {fmt(ticket.estimatedDamageAmount)} tiền đền bù thay thiết bị (chốt lúc chẩn đoán).
               Bấm "Báo sửa xong" sẽ tự cập nhật lại thiết bị.
             </Text>
           </View>
@@ -1778,7 +2150,9 @@ export const TicketDetailScreen: React.FC = () => {
             </Text>
             {hasReplacementAmount ? (
               <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
-                <Text style={s.readonlyAmountText}>Đền bù thay thiết bị: {fmt(ticket.estimatedDamageAmount)}</Text>
+                <Text style={s.readonlyAmountText}>
+                  {ticket.equipmentReplacementFlagged ? 'Đền bù thay thiết bị' : 'Giá đã chốt lúc chẩn đoán'}: {fmt(ticket.estimatedDamageAmount)}
+                </Text>
               </View>
             ) : null}
             <TextInput
@@ -1832,222 +2206,68 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── Phân loại + chọn hướng xử lý khi OPEN ─────────────────── */}
-        {ticket.status === 'open' && !faultFormOpen && (
+        {/* ── 2 lựa chọn cấp cao nhất khi OPEN (16/09/2026, bỏ "Giao khách tự sửa") ── */}
+        {ticket.status === 'open' && !diagnoseFormOpen && !inspectionFormOpen && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>
-              {ticket.category ? 'Phân loại sự cố' : 'Phân loại sự cố (bắt buộc khi duyệt)'}
-            </Text>
-            {!!ticket.category && (
-              <Text style={s.pickHint}>Khách thuê đã chọn khi tạo yêu cầu — bạn vẫn có thể đổi.</Text>
-            )}
-            {!ticket.category && !!realEquipmentId && (
-              <Text style={s.pickHint}>Gợi ý sẵn "Trang thiết bị" vì yêu cầu có gắn thiết bị — đổi lại nếu không đúng.</Text>
-            )}
-            <TouchableOpacity
-              style={s.dropdownBtn}
-              onPress={() => setCategoryMenuOpen(o => !o)}
-              activeOpacity={0.75}
-            >
-              <Text style={[s.dropdownBtnText, !approveCategory && s.dropdownBtnPlaceholder]}>
-                {approveCategory ? `${CATEGORY_CONFIG[approveCategory].icon} ${CATEGORY_CONFIG[approveCategory].label}` : 'Chọn danh mục sự cố'}
-              </Text>
-              <Text style={s.dropdownChevron}>{categoryMenuOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-            {categoryMenuOpen && (
-              <View style={s.dropdownList}>
-                {APPROVE_CATEGORY_KEYS.map(key => {
-                  const c = CATEGORY_CONFIG[key];
-                  const active = approveCategory === key;
-                  return (
-                    <TouchableOpacity
-                      key={key}
-                      style={[s.dropdownItem, active && s.dropdownItemActive]}
-                      onPress={() => { setApproveCategory(key); setCategoryMenuOpen(false); }}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={[s.dropdownItemText, active && s.dropdownItemTextActive]}>{c.icon} {c.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-            <Text style={s.pickHint}>Phân loại dùng cho báo cáo chi phí sau sửa chữa.</Text>
-
-            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Mức độ ưu tiên (tùy chọn)</Text>
-            <TouchableOpacity
-              style={s.dropdownBtn}
-              onPress={() => setPriorityMenuOpen(o => !o)}
-              activeOpacity={0.75}
-            >
-              <Text style={[s.dropdownBtnText, !approvePriority && s.dropdownBtnPlaceholder, approvePriority && { color: PRIORITY_CONFIG[approvePriority].color, fontWeight: '700' }]}>
-                {approvePriority ? PRIORITY_CONFIG[approvePriority].label : '— Không chọn —'}
-              </Text>
-              <Text style={s.dropdownChevron}>{priorityMenuOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-            {priorityMenuOpen && (
-              <View style={s.dropdownList}>
-                <TouchableOpacity
-                  style={s.dropdownItem}
-                  onPress={() => { setApprovePriority(null); setPriorityMenuOpen(false); }}
-                  activeOpacity={0.75}
-                >
-                  <Text style={s.dropdownItemText}>— Không chọn —</Text>
-                </TouchableOpacity>
-                {APPROVE_PRIORITY_KEYS.map(key => {
-                  const p = PRIORITY_CONFIG[key];
-                  const active = approvePriority === key;
-                  return (
-                    <TouchableOpacity
-                      key={key}
-                      style={[s.dropdownItem, active && { backgroundColor: p.bg }]}
-                      onPress={() => { setApprovePriority(key); setPriorityMenuOpen(false); }}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={[s.dropdownItemText, active && { color: p.color, fontWeight: '700' }]}>{p.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-
-            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Hẹn lịch sửa</Text>
+            <Text style={s.cardSectionTitle}>Chọn hướng xử lý</Text>
             <Text style={s.pickHint}>
-              Muốn sửa ngay thì chọn hôm nay và khung giờ còn trống gần nhất.
+              Xác định thợ có sửa được ngay không, hay cần mang thiết bị đi kiểm tra thêm.
             </Text>
-            <View style={{ marginTop: Spacing.sm }}>
-              <AppointmentSlotPicker
-                propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
-                slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
-                excludeRequestId={idNum}
-                date={approveRepairDate}
-                onDateChange={setApproveRepairDate}
-                time={approveRepairTime}
-                onTimeChange={setApproveRepairTime}
-              />
-            </View>
+            <TouchableOpacity
+              style={[s.advanceBtn, { marginTop: Spacing.md }]}
+              onPress={() => openTopLevelForm('diagnose')}
+              disabled={busy}
+            >
+              <Text style={s.advanceBtnText}>🔧 Sửa được ngay</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.advanceBtn, { backgroundColor: '#0369A1', marginBottom: 0 }]}
+              onPress={() => openTopLevelForm('inspection')}
+              disabled={busy}
+            >
+              <Text style={s.advanceBtnText}>📦 Mang đi kiểm tra thêm</Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        {/* ── Form báo lỗi do khách (Luồng B — manager quyết định ngay tại chỗ) ── */}
-        {ticket.status === 'open' && faultFormOpen && (
-          <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
-            <Text style={s.cardSectionTitle}>⚠️ Báo lỗi do khách</Text>
+        {/* ── "Sửa được ngay" → form Chẩn đoán & báo giá (diagnose(), case OPEN) ── */}
+        {ticket.status === 'open' && diagnoseFormOpen && renderDiagnoseForm(false)}
+
+        {/* ── "Mang đi kiểm tra thêm" (sendForInspection()) ─────────── */}
+        {ticket.status === 'open' && inspectionFormOpen && (
+          <View style={[s.card, { borderColor: '#0369A1', borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
+            <Text style={s.pickHint}>
+              Chưa xác định được nguyên nhân — phiếu chuyển "Đã đặt lịch sửa". Khi thợ báo kết quả, quay lại phiếu
+              để nhập chẩn đoán & báo giá.
+            </Text>
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Dự kiến trả máy (tùy chọn)</Text>
+            <AppointmentSlotPicker
+              propertyId={ticket.propertyId ? Number(ticket.propertyId) : undefined}
+              slotMinutes={MAINTENANCE_REPAIR_SLOT_MINUTES}
+              excludeRequestId={idNum}
+              date={inspectionDate}
+              onDateChange={setInspectionDate}
+              time={inspectionTime}
+              onTimeChange={setInspectionTime}
+            />
+            <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Ghi chú (tùy chọn)</Text>
             <TextInput
-              style={s.textInput}
-              value={faultReason}
-              onChangeText={setFaultReason}
-              placeholder="Mô tả lỗi do khách gây ra (vd: tự tháo ống nước, dùng sai cách...)"
+              style={[s.textInput, s.noteInput]}
+              value={inspectionNote}
+              onChangeText={setInspectionNote}
+              placeholder="Ghi chú..."
               placeholderTextColor={Colors.textMuted}
               multiline
             />
-            <View style={{ marginTop: Spacing.sm }}>
-              <PhotoEvidenceRow
-                type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}
-                onAdd={() => setPhotoMenuFor('fault_evidence')}
-                onView={(uris, i) => setLightbox({ uris, index: i })}
-                onViewVideo={(url) => setVideoPreviewUrl(url)}
-                onRemoveLocal={removeLocalPhoto}
-                onRemoveServer={(url) => removeServerPhoto('FAULT_EVIDENCE', url)}
-              />
-            </View>
-
-            <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hướng xử lý</Text>
-            <View style={s.reviewRow}>
-              <TouchableOpacity
-                style={[s.reviewBtn, resolutionPath === 'manager_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
-                onPress={() => setResolutionPath('manager_repair')}
-              >
-                <Text style={[s.reviewBtnText, resolutionPath === 'manager_repair' && { color: Colors.primary }]}>Manager sửa hộ</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.reviewBtn, resolutionPath === 'tenant_self_repair' && { backgroundColor: Colors.primaryBg, borderColor: Colors.primary }]}
-                onPress={() => setResolutionPath('tenant_self_repair')}
-              >
-                <Text style={[s.reviewBtnText, resolutionPath === 'tenant_self_repair' && { color: Colors.primary }]}>Khách tự sửa</Text>
-              </TouchableOpacity>
-            </View>
-
-            {resolutionPath === 'manager_repair' ? (
-              <>
-                <TouchableOpacity
-                  style={[s.replaceToggleRow, { marginTop: Spacing.sm }]}
-                  onPress={() => setNeedsOffSiteInspection(v => !v)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.checkbox, needsOffSiteInspection && s.checkboxChecked]}>
-                    {needsOffSiteInspection && <Text style={s.checkboxMark}>✓</Text>}
-                  </View>
-                  <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
-                </TouchableOpacity>
-                <Text style={s.pickHint}>
-                  {needsOffSiteInspection
-                    ? 'Chưa sửa được tại chỗ — phiếu chuyển "Đã đặt lịch sửa", chưa có ngày bàn giao (đặt sau khi có kết quả kiểm tra + báo giá).'
-                    : 'Sửa được ngay tại hiện trường — lập hoá đơn thiệt hại ngay sau khi gửi, khách thanh toán xong mới bắt đầu sửa.'}
-                </Text>
-
-                <TouchableOpacity
-                  style={[s.replaceToggleRow, { marginTop: Spacing.md }]}
-                  onPress={() => setNeedsReplacement(v => !v)}
-                  activeOpacity={0.75}
-                >
-                  <View style={[s.checkbox, needsReplacement && s.checkboxChecked]}>
-                    {needsReplacement && <Text style={s.checkboxMark}>✓</Text>}
-                  </View>
-                  <Text style={s.cardSectionTitle}>⚠️ Thiết bị hỏng hoàn toàn — cần thay mới</Text>
-                </TouchableOpacity>
-                {needsReplacement && (
-                  <>
-                    <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
-                      <Text style={s.readonlyAmountText}>
-                        {rejectFaultAutoDamageAmount ? fmt(rejectFaultAutoDamageAmount) : '— Chưa có dữ liệu —'}
-                      </Text>
-                    </View>
-                    <Text style={s.costHint}>
-                      {rejectFaultAutoDamageAmount
-                        ? isUnderWarranty(replacementEquipment)
-                          ? 'Còn bảo hành — số tiền này là phần khấu hao còn lại của thiết bị, tự tính, không thể sửa.'
-                          : 'Đã hết bảo hành — số tiền này là mức phạt cố định của thiết bị (penaltyFee), tự tính, không thể sửa.'
-                        : 'Thiết bị chưa có dữ liệu giá/bảo hành, cũng chưa có mức phạt cố định — không thể đánh dấu thay mới cho thiết bị này.'}
-                    </Text>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Hạn tự sửa</Text>
-                <TextInput
-                  style={s.textInput}
-                  value={selfRepairDeadlineText}
-                  onChangeText={setSelfRepairDeadlineText}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={Colors.textMuted}
-                />
-                <Text style={s.pickHint}>Gợi ý mặc định {MAINTENANCE_SELF_REPAIR_DEFAULT_DAYS} ngày — có thể sửa lại.</Text>
-
-                <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Số tiền thiệt hại ước tính (đ)</Text>
-                <TextInput
-                  style={s.textInput}
-                  value={estimatedAmountText}
-                  onChangeText={t => setEstimatedAmountText(formatMoneyInput(t))}
-                  placeholder="Nhập số tiền..."
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="numeric"
-                />
-                <Text style={s.pickHint}>Số cuối có thể điều chỉnh lúc trả phòng — đây chỉ là ước tính.</Text>
-              </>
-            )}
-
             <TouchableOpacity
-              style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }]}
-              onPress={submitRejectFault}
-              disabled={rejectingFault || !hasFaultEvidence}
+              style={[s.advanceBtn, { backgroundColor: '#0369A1', marginTop: Spacing.md }, sendingForInspection && s.btnDisabled]}
+              onPress={submitSendForInspection}
+              disabled={sendingForInspection}
             >
-              <Text style={s.advanceBtnText}>
-                {rejectingFault ? 'Đang gửi...' : !hasFaultEvidence ? 'Thêm ảnh bằng chứng trước' : 'Ghi nhận lỗi do khách'}
-              </Text>
+              <Text style={s.advanceBtnText}>{sendingForInspection ? 'Đang gửi...' : '📦 Xác nhận mang đi kiểm tra'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setFaultFormOpen(false)}>
+            <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setInspectionFormOpen(false)}>
               <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>← Quay lại</Text>
             </TouchableOpacity>
           </View>
@@ -2056,7 +2276,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Note input — chỉ hiện riêng ở trạng thái không có ảnh AFTER đi kèm
              (open/pending_tenant_repair); khi canComplete thì Ghi chú đã gộp vào
              block "Ảnh sau sửa chữa" phía trên. ── */}
-        {!isTerminal && !faultFormOpen && !canComplete && (
+        {!isTerminal && !diagnoseFormOpen && !inspectionFormOpen && !canComplete && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Ghi chú</Text>
             <TextInput
@@ -2147,29 +2367,8 @@ export const TicketDetailScreen: React.FC = () => {
         </View>
 
         {/* ── Actions theo status ─────────────────────────────────── */}
-        {ticket.status === 'open' && !faultFormOpen && (
-          <>
-            <TouchableOpacity
-              style={[s.advanceBtn, { backgroundColor: '#65A30D' }, (!approveCategory || !approveRepairTime) && s.btnDisabled]}
-              onPress={handleApprove}
-              disabled={busy}
-            >
-              <Text style={s.advanceBtnText}>
-                Duyệt{!approveCategory ? ' — chọn danh mục trước'
-                  : !approveRepairTime ? ' — chọn lịch sửa trước' : ''}
-              </Text>
-            </TouchableOpacity>
-            {TENANT_FAULT_FLOW_ENABLED && (
-              <TouchableOpacity
-                style={[s.advanceBtn, { backgroundColor: Colors.white, borderWidth: 1.5, borderColor: '#DC2626', marginBottom: Spacing.md }]}
-                onPress={() => setFaultFormOpen(true)}
-                disabled={busy}
-              >
-                <Text style={[s.advanceBtnText, { color: '#DC2626' }]}>⚠️ Báo lỗi do khách</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        )}
+        {/* Nút chọn hướng xử lý khi OPEN đã chuyển lên khối "Chọn hướng xử lý" phía trên
+            (16/09/2026, xem openTopLevelForm) — ở đây chỉ còn action của các status khác. */}
         {canComplete && (
           <TouchableOpacity
             style={[s.advanceBtn, (!hasAfterPhoto || (!ticket.chargeInvoiceId && !hasInvoicePhoto)) && s.btnDisabled]}
@@ -2209,11 +2408,14 @@ export const TicketDetailScreen: React.FC = () => {
         <Pressable style={s.photoMenuBackdrop} onPress={() => setPhotoMenuFor(null)}>
           <Pressable style={s.photoMenuCard} onPress={() => {}}>
             <Text style={s.photoMenuTitle}>{photoMenuFor === 'invoice' ? 'Thêm ảnh' : 'Thêm ảnh/video'}</Text>
-            <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor)}>
-              <Text style={s.photoMenuOptionText}>
-                {photoMenuFor === 'invoice' ? '📷 Chụp ảnh' : '📷 Chụp ảnh/quay video'}
-              </Text>
+            <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'image')}>
+              <Text style={s.photoMenuOptionText}>📷 Chụp ảnh</Text>
             </TouchableOpacity>
+            {photoMenuFor !== 'invoice' && Platform.OS !== 'web' && (
+              <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromCamera(photoMenuFor, 'video')}>
+                <Text style={s.photoMenuOptionText}>🎥 Quay video</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={s.photoMenuOption} onPress={() => photoMenuFor && pickPhotoFromLibrary(photoMenuFor)}>
               <Text style={s.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
             </TouchableOpacity>

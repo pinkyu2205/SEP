@@ -9,7 +9,7 @@ import {
   formatDate, formatDateTime, formatCurrency, getMaintenanceCategoryLabel,
   getMaintenancePriorityLabel, getMaintenancePriorityColor, showAlert,
   isVideoUrl, formatDurationLabel, remainingEvidenceSlots, EVIDENCE_MAX_FILES,
-  pickEvidenceFromCamera, pickEvidenceFromLibrary, type EvidenceAsset,
+  pickEvidenceFromCamera, pickEvidenceFromLibrary, type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_BILLING_HINT_META,
@@ -131,14 +131,16 @@ export const MaintenanceDetailScreen: React.FC = () => {
 
   // ── Actions ────────────────────────────────────────────────────────
 
-  const pickFromCamera = async () => {
+  const pickFromCamera = async (mode: EvidenceMediaType = 'image') => {
     setPhotoMenuOpen(false);
     const remaining = remainingEvidenceSlots(selfRepairAssets.length);
     if (remaining <= 0) { showAlert('Giới hạn', `Bạn chỉ có thể đính kèm tối đa ${EVIDENCE_MAX_FILES} ảnh/video.`); return; }
+    // Quay video chưa hỗ trợ trên web (CameraCaptureModal/expo-camera CameraView chỉ
+    // chụp ảnh) — nút "Quay video" bị ẩn trên web ở UI, chỉ còn nhánh ảnh chạy tới đây.
     if (Platform.OS === 'web') { setCameraOpen(true); return; }
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (perm.status !== 'granted') { showAlert('Lỗi', 'Cần quyền camera.'); return; }
-    const media = await pickEvidenceFromCamera();
+    const media = await pickEvidenceFromCamera(mode);
     if (media) setSelfRepairAssets(prev => [...prev, media]);
   };
   const pickFromLibrary = async () => {
@@ -608,9 +610,14 @@ export const MaintenanceDetailScreen: React.FC = () => {
         <Pressable style={styles.photoMenuBackdrop} onPress={() => setPhotoMenuOpen(false)}>
           <Pressable style={styles.photoMenuCard} onPress={() => {}}>
             <Text style={styles.photoMenuTitle}>Thêm ảnh/video</Text>
-            <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromCamera}>
-              <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh/quay video</Text>
+            <TouchableOpacity style={styles.photoMenuOption} onPress={() => pickFromCamera('image')}>
+              <Text style={styles.photoMenuOptionText}>📷 Chụp ảnh</Text>
             </TouchableOpacity>
+            {Platform.OS !== 'web' && (
+              <TouchableOpacity style={styles.photoMenuOption} onPress={() => pickFromCamera('video')}>
+                <Text style={styles.photoMenuOptionText}>🎥 Quay video</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.photoMenuOption} onPress={pickFromLibrary}>
               <Text style={styles.photoMenuOptionText}>🖼️ Chọn từ thư viện</Text>
             </TouchableOpacity>
