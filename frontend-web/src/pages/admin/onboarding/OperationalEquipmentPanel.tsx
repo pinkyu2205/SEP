@@ -16,6 +16,17 @@ const STATUS_LABEL: Record<string, string> = {
   NEW: 'Mới', GOOD: 'Tốt', DAMAGED: 'Hư hỏng nhẹ', BROKEN: 'Hỏng', MAINTENANCE: 'Bảo trì', DISPOSED: 'Đã thanh lý',
 };
 
+/** Màu badge tình trạng — BROKEN nổi bật đỏ vì đây là tín hiệu "cần thay thế" từ luồng
+ * bảo trì (diagnose() đánh dấu equipmentNeedsReplacement), không phải chỉ là mô tả suông. */
+const STATUS_STYLE: Record<string, string> = {
+  NEW: 'bg-emerald-100 text-emerald-700',
+  GOOD: 'bg-slate-100 text-slate-600',
+  DAMAGED: 'bg-amber-100 text-amber-700',
+  BROKEN: 'bg-rose-100 text-rose-700',
+  MAINTENANCE: 'bg-sky-100 text-sky-700',
+  DISPOSED: 'bg-slate-100 text-slate-400',
+};
+
 const formatVND = (n: number) => new Intl.NumberFormat('vi-VN').format(n) + ' đ';
 const formatDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
@@ -57,6 +68,7 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
   const [effect, setEffect] = useState<EffectFilter>('active');
   const [source, setSource] = useState<SourceFilter>('all');
   const [place, setPlace] = useState('all');
+  const [status, setStatus] = useState('all');
   const [perPage, setPerPage] = useState(PER_PAGE_OPTIONS[0]);
   const [page, setPage] = useState(1);
 
@@ -73,6 +85,8 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
   const all = items ?? [];
   const activeCount = useMemo(() => all.filter(e => e.currentEffective).length, [all]);
   const replacedCount = all.length - activeCount;
+  // Thiết bị "Hỏng" — tín hiệu cần thay thế do luồng bảo trì đánh dấu (diagnose()).
+  const brokenCount = useMemo(() => all.filter(e => e.status === 'BROKEN').length, [all]);
 
   // Danh sách vị trí có thật trong dữ liệu (phòng / khu vực chung / toàn nhà)
   const placeOptions = useMemo(
@@ -87,6 +101,7 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
       if (effect === 'replaced' && e.currentEffective) return false;
       if (source !== 'all' && e.source !== source) return false;
       if (place !== 'all' && loc(e) !== place) return false;
+      if (status !== 'all' && e.status !== status) return false;
       if (kw) {
         const hay = [e.catalogName, e.note, loc(e), STATUS_LABEL[e.status] ?? e.status]
           .filter(Boolean).map(v => normalizeVi(String(v))).join(' ');
@@ -94,17 +109,17 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
       }
       return true;
     });
-  }, [all, search, effect, source, place]);
+  }, [all, search, effect, source, place, status]);
 
   const totalValue = useMemo(() => filtered.reduce((s, e) => s + (e.price || 0), 0), [filtered]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
-  useEffect(() => { setPage(1); }, [search, effect, source, place, perPage]);
+  useEffect(() => { setPage(1); }, [search, effect, source, place, status, perPage]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
   const paged = filtered.slice((page - 1) * perPage, page * perPage);
 
   const activeFilters = (search.trim() ? 1 : 0) + (effect !== 'active' ? 1 : 0)
-    + (source !== 'all' ? 1 : 0) + (place !== 'all' ? 1 : 0);
-  const reset = () => { setSearch(''); setEffect('active'); setSource('all'); setPlace('all'); };
+    + (source !== 'all' ? 1 : 0) + (place !== 'all' ? 1 : 0) + (status !== 'all' ? 1 : 0);
+  const reset = () => { setSearch(''); setEffect('active'); setSource('all'); setPlace('all'); setStatus('all'); };
 
   /**
    * Bọc nội dung vào vỏ thu gọn khi được yêu cầu. Tóm tắt (số thiết bị + tổng giá trị) nằm
@@ -122,6 +137,11 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-bold text-slate-600">
               {activeCount} đang dùng
             </span>
+            {brokenCount > 0 && (
+              <span className="rounded-full bg-rose-100 px-2 py-0.5 font-bold text-rose-700">
+                🔧 {brokenCount} cần thay thế
+              </span>
+            )}
             {totalValue > 0 && (
               <span className="font-bold text-indigo-700">{formatVND(totalValue)}</span>
             )}
@@ -183,6 +203,18 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
           <option value="all">Mọi nguồn</option>
           <option value="HANDOVER">Bàn giao</option>
           <option value="PURCHASED">Mua mới</option>
+        </select>
+
+        <select
+          value={status}
+          onChange={e => setStatus(e.target.value)}
+          className={`${selectCls} ${status === 'BROKEN' ? 'border-rose-300 text-rose-700' : ''}`}
+        >
+          <option value="all">Mọi tình trạng</option>
+          {brokenCount > 0 && <option value="BROKEN">🔧 Cần thay thế ({brokenCount})</option>}
+          {Object.entries(STATUS_LABEL).filter(([k]) => k !== 'BROKEN').map(([k, label]) => (
+            <option key={k} value={k}>{label}</option>
+          ))}
         </select>
 
         {placeOptions.length > 1 && (
@@ -267,8 +299,12 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
                         {eq.source === 'PURCHASED' ? 'Mua mới' : 'Bàn giao'}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-600">
-                      {STATUS_LABEL[eq.status] ?? eq.status}
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        STATUS_STYLE[eq.status] ?? 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {STATUS_LABEL[eq.status] ?? eq.status}
+                      </span>
                     </td>
                     <td className="px-4 py-2.5">
                       <span className={`flex items-center gap-1 whitespace-nowrap text-xs ${
