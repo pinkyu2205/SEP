@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -1432,27 +1432,6 @@ const InspectionSection: React.FC<{
                   🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
                 </Text>
               )}
-              {/* Quy ước đọc số — phải giống nhau giữa lúc đón khách và các kỳ hoá đơn
-                  sau, nếu không hiệu số giữa 2 kỳ sẽ sai. */}
-              <View style={styles.meterRuleBox}>
-                <Text style={styles.meterRuleText}>
-                  • Chỉ nhập phần <Text style={styles.meterRuleStrong}>ĐEN</Text>
-                  {kind === 'elec' ? ' (kWh)' : ' (m³)'}, bỏ phần{' '}
-                  <Text style={styles.meterRuleRed}>ĐỎ</Text>.
-                </Text>
-                <Text style={styles.meterRuleText}>
-                  • Số <Text style={styles.meterRuleRed}>ĐỎ</Text> từ{' '}
-                  <Text style={styles.meterRuleStrong}>5 trở lên</Text> → cộng thêm 1 vào
-                  phần đen. Vd 3081<Text style={styles.meterRuleRed}>5</Text> →{' '}
-                  <Text style={styles.meterRuleStrong}>3082</Text>; 3081
-                  <Text style={styles.meterRuleRed}>4</Text> →{' '}
-                  <Text style={styles.meterRuleStrong}>3081</Text>.
-                </Text>
-                <Text style={styles.meterRuleText}>
-                  • Chữ số đang nhảy giữa 2 số → lấy số{' '}
-                  <Text style={styles.meterRuleStrong}>NHỎ HƠN</Text>.
-                </Text>
-              </View>
               {/* Ô nhập bị KHOÁ khi chưa có ảnh và chưa xin mã — xem meterUnlocked. */}
               <TextInput
                 style={[
@@ -1737,6 +1716,15 @@ const DepositOtpPanel: React.FC<{
   const [otpSending, setOtpSending] = useState(false)
   /** Tiến độ xác nhận hai bên. Null = chưa hỏi được BE (chưa thu tiền, hoặc lỗi mạng). */
   const [confirmState, setConfirmState] = useState<ContractConfirmState | null>(null)
+  /**
+   * Chặn điều hướng sang "Đón khách thành công" HAI LẦN cho cùng một hợp đồng.
+   *
+   * `navigation.navigate` không thay thế màn hiện tại nên `ResumeContractScreen` vẫn
+   * sống bên dưới sau khi điều hướng — poll `confirmState` bên dưới vẫn chạy tiếp và có
+   * thể thấy `activated=true` một lần nữa, dẫn tới đẩy thêm một bản "thành công" chồng
+   * lên màn vừa mở (ca quản lý tự bấm mã của mình và BE trả ACTIVE ngay trong `confirm`).
+   */
+  const navigatedToSuccessRef = useRef(false)
 
   /**
    * Đã lưu hiện trạng phòng chưa — điều kiện để lộ nút "Tạo mã thanh toán".
@@ -1811,6 +1799,40 @@ const DepositOtpPanel: React.FC<{
       contractConfirmService.getConfirmState(contract.id).then(setConfirmState).catch(() => {})
     },
   })
+
+  /**
+   * Khách nhập mã SAU CÙNG trong khi quản lý đã xác nhận từ trước (ca hay gặp: quản lý
+   * bấm mã ngay lúc đứng chờ khách kích hoạt tài khoản). BE kích hoạt hợp đồng ngay từ
+   * API của khách — quản lý chỉ biết qua poll/realtime ở trên, nên phải tự bắt lúc
+   * `activated` bật lên. Thiếu effect này thì nhánh `managerDone` bên dưới cứ đứng ở
+   * "Đang chờ khách nhập mã..." vĩnh viễn dù hợp đồng đã ACTIVE từ lâu — màn hình quản
+   * lý trông như bị đơ, không có gì báo hay điều hướng đi đâu cả.
+   */
+  useEffect(() => {
+    if (!confirmState?.activated || navigatedToSuccessRef.current) return
+    navigatedToSuccessRef.current = true
+    let alive = true
+    ;(async () => {
+      let full: TenantContractResponse = contract
+      try {
+        full = await realTenantService.getContract(contract.id)
+      } catch {
+        // Thiếu vài field phụ (username mới/cờ tạo TK) thì vẫn còn contractCode/tên
+        // khách từ `contract` gốc — đủ để hiện màn thành công.
+      }
+      if (!alive) return
+      navigation.navigate('OnboardingSuccess', {
+        contractCode: full.contractCode,
+        tenantFullName: full.tenantFullName,
+        roomNumber: full.roomNumber,
+        phone: full.tenantPhone,
+        username: full.tenantUsername ?? full.tenantPhone,
+        accountCreated: full.tenantAccountCreated ?? false,
+        rolePromoted: full.tenantRolePromoted ?? false,
+      })
+    })()
+    return () => { alive = false }
+  }, [confirmState?.activated])
 
   /** Bên nào đang bị chờ. Chưa hỏi được BE thì coi như chưa ai xác nhận. */
   const waitingFor: ConfirmWaitingFor = confirmState?.waitingFor ?? 'BOTH'
@@ -1897,6 +1919,7 @@ const DepositOtpPanel: React.FC<{
        * với hợp đồng chưa hiệu lực.
        */
       if (res.status === 'ACTIVE') {
+        navigatedToSuccessRef.current = true
         navigation.navigate('OnboardingSuccess', {
           contractCode: res.contractCode,
           tenantFullName: res.tenantFullName,
@@ -2400,17 +2423,6 @@ const styles = StyleSheet.create({
   },
   overrideBadgeText: { flex: 1, fontSize: 11, color: '#9A3412' },
   overrideBadgeClear: { fontSize: 11, fontWeight: '700', color: '#9A3412' },
-  meterRuleBox: {
-    backgroundColor: '#FFFBEB',
-    borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-    gap: 2,
-  },
-  meterRuleText: { fontSize: 11, color: '#92400E', lineHeight: 16 },
-  meterRuleStrong: { fontWeight: '800' },
-  meterRuleRed: { fontWeight: '800', color: '#DC2626' },
   ocrAltBox: { marginTop: Spacing.sm },
   ocrAltLabel: { fontSize: 11, color: Colors.textMuted, marginBottom: 6 },
   ocrAltRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
