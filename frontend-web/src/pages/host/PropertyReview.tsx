@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   AlertCircle, ArrowLeft, Banknote, Building, CalendarDays, Calculator, CheckCircle2,
-  ChevronUp, DollarSign, Droplet, FileText, Hammer, Image as ImageIcon, Link2, MapPin,
+  DollarSign, Droplet, FileText, Hammer, Image as ImageIcon, Link2, MapPin,
   Package, Percent, PiggyBank, Send, SlidersHorizontal, Target, UserCog, Zap,
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
@@ -36,7 +36,7 @@ import { CapitalItemsPanel } from './review/CapitalItemsPanel';
 import { capitalParts } from './review/capitalItems';
 import { RepricingReview } from './review/RepricingReview';
 import {
-  BigStat, Divider, Line, Note, Panel, derive, formatVND, shortVND,
+  BarStat, BigStat, Divider, ExplainFormula, Line, Note, Panel, derive, formatVND, shortVND,
 } from './review/pricingBreakdown';
 
 /**
@@ -193,13 +193,6 @@ const ReadRow = ({ label, value, icon: Icon, hint, strong }: {
 );
 
 /**
- * Con số ở THANH ĐÁY + cách tính bung lên khi bấm.
- *
- * Thanh đáy là chỗ Host đứng lúc bấm "Xác nhận & Kích hoạt", nên ba con số ở đây phải giải
- * thích được — nhưng không thể in phép tính ra thẳng vì thanh chỉ cao ba dòng. Bấm vào thì
- * mở lên trên (popover), không đẩy layout, không che nút Xác nhận.
- */
-/**
  * Mã khách hàng điện / số danh bộ nước.
  *
  * Hiện IN HOA cho dễ dò trên tờ hoá đơn giấy — máy chủ lưu chữ thường sau khi chuẩn hoá
@@ -223,53 +216,6 @@ const UtilityCode = ({ icon: Icon, label, value }: {
     )}
   </div>
 );
-
-const BarFormula = ({ children }: { children: React.ReactNode }) => (
-  <p className="whitespace-pre-line rounded-lg bg-slate-50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-700 ring-1 ring-slate-200">
-    {children}
-  </p>
-);
-
-const BarStat = ({ label, value, valueTone, sub, detail, className = '' }: {
-  label: string;
-  value: string;
-  valueTone: string;
-  sub?: string;
-  detail: React.ReactNode;
-  className?: string;
-}) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`relative ${className}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        title={open ? 'Thu gọn cách tính' : 'Xem cách tính'}
-        className="group text-left"
-      >
-        <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-slate-400 transition group-hover:text-indigo-600">
-          {label}
-          <ChevronUp className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
-        </span>
-        <span className={`block text-lg font-black tabular-nums ${valueTone}`}>{value}</span>
-        {sub && <span className="block text-[11px] font-semibold text-slate-400">{sub}</span>}
-      </button>
-
-      {open && (
-        <>
-          {/* Bấm ra ngoài là đóng — popover ở thanh dính, không có chỗ nào khác để thoát. */}
-          <button type="button" aria-label="Đóng" onClick={() => setOpen(false)}
-            className="fixed inset-0 z-40 cursor-default" />
-          <div className="absolute bottom-full left-0 z-50 mb-3 w-[22rem] max-w-[calc(100vw-2rem)] space-y-2 rounded-xl border border-slate-200 bg-white p-3.5 text-xs leading-relaxed text-slate-600 shadow-2xl">
-            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</p>
-            {detail}
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
 
 const MoneyInput = ({
   value, onChange, placeholder, suffix = 'đ', invalid, disabled,
@@ -377,6 +323,8 @@ const OnboardingPriceReview = () => {
   const [zoneLinks, setZoneLinks] = useState<ZoneManagerLink[]>([]);
   /** Chặn tự tính lặp: mỗi lần vào trang chỉ tự tính đúng một lần. */
   const autoCalcRef = useRef(false);
+  /** Kết quả máy chủ đã lưu sẵn — chỉ dùng khi tự tính lại lúc mở trang không được. */
+  const savedCalcRef = useRef<PricingCalculationResponse | null>(null);
   const [calc, setCalc] = useState<PricingCalculationResponse | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [calcError, setCalcError] = useState('');
@@ -416,11 +364,15 @@ const OnboardingPriceReview = () => {
         setSummary(summaryData);
         setProperty(propertyData);
 
-        // Lấy kết quả tính giá đã lưu (nếu có) — 404 = chưa tính, bỏ qua (interceptor không toast 404).
+        // Kết quả tính giá đã lưu (nếu có) — 404 = chưa tính, bỏ qua (interceptor không toast 404).
+        // Nhà còn chờ duyệt thì KHÔNG hiện ngay: trang sẽ tự tính lại theo cấu hình (xem effect tự
+        // tính bên dưới), bản lưu chỉ để dự phòng khi tính lại thất bại. Hiện trước rồi mới thay
+        // thì Host kịp thấy số sai nhấp nháy một hai giây.
         try {
           const saved = await propertyService.getPricing(propertyId);
-          applyCalc(saved);
-        } catch { /* chưa có kết quả tính giá — host sẽ nhập mục tiêu rồi bấm Tính giá */ }
+          if (summaryData.status === 'PENDING_HOST_REVIEW') savedCalcRef.current = saved;
+          else applyCalc(saved);
+        } catch { /* chưa có kết quả tính giá */ }
       } catch (err: any) {
         setError(err.response?.data?.message || err.message || 'Không tải được dữ liệu');
       } finally {
@@ -482,17 +434,18 @@ const OnboardingPriceReview = () => {
    * hành, nó không biết tới khái niệm lương quản lý. Việc tách hai dòng chỉ để người đọc
    * thấy tiền đi đâu — xem `totalOpex()`.
    */
-  const handleCalculate = async () => {
+  /** @returns true nếu tính được. */
+  const handleCalculate = async (): Promise<boolean> => {
     setCalcError('');
     if (!cfg) {
       setCalcError('Chưa tải được cấu hình duyệt giá. Tải lại trang hoặc mở "Cấu hình duyệt giá".');
-      return;
+      return false;
     }
     if (!cfgReady) {
       setCalcError(cfg.mode === 'FORWARD'
         ? 'Cấu hình chưa có tiền lãi mục tiêu. Vào "Cấu hình duyệt giá" để nhập trước.'
         : 'Cấu hình chưa có tỷ lệ sinh lời mục tiêu. Vào "Cấu hình duyệt giá" để nhập trước.');
-      return;
+      return false;
     }
     const req: CalculatePricingRequest = {
       mode: cfg.mode,
@@ -505,6 +458,7 @@ const OnboardingPriceReview = () => {
     try {
       const data = await propertyService.calculatePricing(propertyId, req);
       applyCalc(data);
+      return true;
     } catch (err: any) {
       const raw = err.response?.data?.message || err.response?.data?.error || err.message || '';
       // BE đang lỗi deserialize DTO (thiếu @NoArgsConstructor) — xem doc/BE-pricing-calculate-jackson-noargs.md
@@ -514,28 +468,36 @@ const OnboardingPriceReview = () => {
           ? 'Máy chủ chưa nhận được yêu cầu tính giá (lỗi cấu hình DTO phía Backend). Đã báo team BE khắc phục — vui lòng thử lại sau.'
           : raw || 'Không tính được giá',
       );
+      return false;
     } finally {
       setCalculating(false);
     }
   };
 
   /**
-   * TỰ TÍNH khi vào trang — Host không phải bấm nút nào nữa.
+   * TỰ TÍNH MỖI LẦN MỞ TRANG — Host không phải bấm "Tính lại theo cấu hình" nữa.
    *
-   * Mục tiêu định giá nay nằm ở cấu hình chung, nên tới màn này là đã đủ dữ kiện để ra giá.
-   * Bắt bấm "Tính giá" thêm một lần chỉ là thao tác thừa: không có lựa chọn nào để cân nhắc
-   * trước khi bấm.
+   * Bản trước chỉ tự tính khi máy chủ CHƯA lưu kết quả nào. Nhưng lúc admin bấm gửi Host,
+   * `submitToHost` bên BE đã tự tính một lần bằng thông số MẶC ĐỊNH và lưu lại — nên nhà nào mở
+   * ra cũng "đã có kết quả", điều kiện tự tính không bao giờ đúng, Host luôn phải bấm nút. Kết
+   * quả lưu sẵn đó còn sai: không theo cấu hình duyệt giá, và `GET /pricing` không trả bảng khoản
+   * vốn nên tiền bỏ ra bị tính = 0 (ca thật 16/09/2026: thanh đáy báo lãi 279 triệu, tính lại mới
+   * ra 81 triệu).
    *
-   * Chỉ tự tính khi CHƯA có kết quả lưu sẵn — có rồi thì tôn trọng con số máy chủ đang giữ,
-   * đừng tự ghi đè sau lưng Host. Muốn tính lại thì có nút riêng.
+   * Tính lại không làm mất quyết định nào của Host: giá Host chốt chỉ được lưu khi bấm
+   * "Xác nhận & Kích hoạt"; trước đó kết quả tính chỉ là bản nháp của máy chủ. Nhà không còn chờ
+   * duyệt thì không tính (hiện đúng bản đã lưu). Tính lỗi hoặc cấu hình chưa đủ thì mới lùi về bản
+   * lưu sẵn, kèm thông báo lỗi.
    */
   useEffect(() => {
     if (autoCalcRef.current) return;
-    if (!cfgReady || !summary || calc || calculating || !canEdit) return;
+    if (!summary || !canEdit || !cfg) return;   // chờ tải xong hồ sơ + cấu hình
     autoCalcRef.current = true;
-    handleCalculate();
+    handleCalculate().then((ok) => {
+      if (!ok && savedCalcRef.current) applyCalc(savedCalcRef.current);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cfgReady, summary, calc, canEdit]);
+  }, [summary, canEdit, cfg]);
 
   /**
    * Hợp đồng với chủ nhà chưa tới ngày bắt đầu — công ty CHƯA có quyền quản lý căn này.
@@ -738,6 +700,45 @@ const OnboardingPriceReview = () => {
 
   /** Tháng trôi mất ở ĐẦU kỳ (cải tạo / chờ duyệt) — chỉ để hiển thị chuỗi trừ dần. */
   const lostMonths = Math.max(0, realMonths - rentableMonths);
+
+  /**
+   * Vì sao mất bấy nhiêu tháng — bằng NGÀY cụ thể, không chỉ một con số.
+   *
+   * Câu hỏi thật từ Host (17/09/2026): HĐ chủ nhà bắt đầu 15/09, cho thuê được từ 17/09 — chỉ
+   * trễ 2 ngày mà màn hình ghi "−1 tháng". Đúng, vì BE đếm bằng `ChronoUnit.MONTHS.between`:
+   * chỉ tính THÁNG TRÒN. Từ 17/09/2026 tới hết HĐ là 23 tháng + 29 ngày lẻ → bỏ 29 ngày lẻ →
+   * 23 tháng, so với 24 tháng của cả HĐ là mất 1. Không nói ra thì trông như máy chủ trừ bừa.
+   *
+   * Ngày cho thuê được = muộn nhất trong (ngày HĐ bắt đầu, ngày cải tạo xong, hôm nay) — xem
+   * `InboundLeaseRules.rentableFrom`. Đoán lại lý do bằng cách so ngày để nói cho Host hiểu.
+   */
+  const lostExplain = (() => {
+    if (lostMonths <= 0 || !inbound?.startDate || !inbound?.endDate || !calc?.rentableFrom) return null;
+    const DAY = 86_400_000;
+    const addMonthsClamped = (d: Date, n: number) => {
+      // Giống LocalDate.plusMonths của Java: 31/01 + 1 tháng = 28/02, không tràn sang 03/03.
+      const r = new Date(d.getFullYear(), d.getMonth() + n, 1);
+      const lastDay = new Date(r.getFullYear(), r.getMonth() + 1, 0).getDate();
+      r.setDate(Math.min(d.getDate(), lastDay));
+      return r;
+    };
+    const start = parseDate(inbound.startDate);
+    const from = parseDate(calc.rentableFrom);
+    const endExclusive = parseDate(inbound.endDate);
+    endExclusive.setDate(endExclusive.getDate() + 1); // HĐ tính trọn ngày kết thúc
+    const lateDays = Math.round((from.getTime() - start.getTime()) / DAY);
+    const leftoverDays = Math.max(0, Math.round((endExclusive.getTime() - addMonthsClamped(from, rentableMonths).getTime()) / DAY));
+
+    const today = serverNow();
+    today.setHours(0, 0, 0, 0);
+    const same = (a?: string, b?: Date) => !!a && !!b && parseDate(a).getTime() === b.getTime();
+    const reason = same(summary.renovationEndDate, from)
+      ? 'ngày cải tạo xong'
+      : from.getTime() === today.getTime()
+        ? 'hôm nay — ngày tính giá; nhà chưa được duyệt nên trước hôm nay chưa thu được tiền'
+        : 'ngày sớm nhất nhà nhận khách được';
+    return { lateDays, leftoverDays, reason };
+  })();
 
   /**
    * Máy chủ chia vốn cho nhiều tháng hơn số tháng thu được tiền ⇒ giá đề xuất thiếu.
@@ -1350,12 +1351,25 @@ const OnboardingPriceReview = () => {
           subtitle={calc ? 'Mỗi dòng là một bước tính, dùng đúng con số của dòng phía trên.' : undefined}>
           {!calc ? (
             <div className="flex min-h-[280px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 p-6 text-center">
-              <Calculator className="mb-3 h-8 w-8 text-slate-300" />
-              <p className="text-sm font-semibold text-slate-500">Chưa có kết quả tính</p>
-              <p className="mt-1 max-w-sm text-xs leading-relaxed text-slate-400">
-                Nhập mục tiêu bên trái rồi bấm <b>&quot;Tính giá cho thuê&quot;</b>. Hệ thống sẽ hiện toàn bộ
-                phép tính từ tổng tiền bỏ ra cho tới giá thuê từng phòng.
-              </p>
+              {calculating || (canEdit && !cfg) ? (
+                <>
+                  <div className="mb-3 h-8 w-8 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-500" />
+                  <p className="text-sm font-semibold text-slate-500">Đang tính giá theo cấu hình duyệt giá…</p>
+                  <p className="mt-1 max-w-sm text-xs leading-relaxed text-slate-400">
+                    Mở trang là tự tính, không cần bấm nút. Vài giây là xong.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Calculator className="mb-3 h-8 w-8 text-slate-300" />
+                  <p className="text-sm font-semibold text-slate-500">Chưa có kết quả tính</p>
+                  <p className="mt-1 max-w-sm text-xs leading-relaxed text-slate-400">
+                    {calcError
+                      ? <>Không tự tính được: {calcError}</>
+                      : <>Bấm <b>&quot;Tính lại theo cấu hình&quot;</b> để tính giá theo cấu hình duyệt giá hiện tại.</>}
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -1385,9 +1399,23 @@ const OnboardingPriceReview = () => {
                 {lostMonths > 0 && (
                   <Line
                     label="Đã trôi mất trước khi cho thuê được"
-                    hint={calc.rentableFrom
-                      ? `Cải tạo + chờ duyệt — chỉ cho thuê được từ ${formatDate(calc.rentableFrom)}`
-                      : 'Cải tạo + chờ duyệt — vẫn trả tiền thuê chủ nhà nhưng không có doanh thu'}
+                    formula={lostExplain && inbound?.startDate && inbound?.endDate && calc.rentableFrom ? (
+                      <>
+                        <span className="block">HĐ chủ nhà      {formatDate(inbound.startDate)} → {formatDate(inbound.endDate)} = {realMonths} tháng tròn</span>
+                        <span className="block">Cho thuê được   {formatDate(calc.rentableFrom)} (trễ {lostExplain.lateDays} ngày)</span>
+                        <span className="block">Còn khai thác   {formatDate(calc.rentableFrom)} → {formatDate(inbound.endDate)} = {rentableMonths} tháng tròn{lostExplain.leftoverDays > 0 ? ` + ${lostExplain.leftoverDays} ngày lẻ` : ''}</span>
+                        <span className="block font-bold">Chỉ đếm tháng tròn → {realMonths} − {rentableMonths} = −{lostMonths} tháng</span>
+                      </>
+                    ) : undefined}
+                    hint={lostExplain
+                      ? `Vì sao ${formatDate(calc.rentableFrom)}: ${lostExplain.reason}. `
+                        + (lostExplain.leftoverDays > 0
+                          ? `Chỉ trễ ${lostExplain.lateDays} ngày nhưng mất trọn ${lostMonths} tháng, vì ${lostExplain.leftoverDays} ngày lẻ cuối kỳ không đủ một tháng nên máy chủ bỏ ra. `
+                          : '')
+                        + 'Vốn vẫn phải thu đủ, chỉ là chia cho ít tháng hơn — giá đề xuất nhích lên một chút, nghiêng về không lỗ.'
+                      : calc.rentableFrom
+                        ? `Cải tạo + chờ duyệt — chỉ cho thuê được từ ${formatDate(calc.rentableFrom)}`
+                        : 'Cải tạo + chờ duyệt — vẫn trả tiền thuê chủ nhà nhưng không có doanh thu'}
                     value={`− ${lostMonths} tháng`}
                     tone="bad"
                     indent
@@ -1402,22 +1430,40 @@ const OnboardingPriceReview = () => {
                     indent
                   />
                 )}
-                <Line
-                  label="Số tháng THẬT SỰ CÓ TIỀN VÀO"
-                  hint={startInfo && !startInfo.started && lostMonths === 0
-                    ? `Hợp đồng chưa tới ngày bắt đầu (còn ${startInfo.daysLeft} ngày) — chưa mất tháng nào ở đầu kỳ`
-                    : 'Phải lấy lại đủ tiền trong đúng quãng này'}
-                  value={`${revenueMonths} tháng`}
-                  tone="accent"
-                />
-                <Line
-                  label="Số tháng dùng để chia tiền"
-                  hint={overCountedMonths > 0
-                    ? `⚠ Nhiều hơn ${overCountedMonths} tháng so với số tháng có tiền vào → giá gợi ý bị thấp`
-                    : 'Khớp với số tháng có tiền vào ở trên'}
-                  value={`${months} tháng`}
-                  tone={overCountedMonths > 0 ? 'bad' : 'plain'}
-                />
+                {/*
+                  Hai con số "có tiền vào" và "dùng để chia tiền" chỉ khác nhau khi máy chủ đếm sai
+                  (BE cũ chia vốn cho cả tháng không thu được tiền). BE đã sửa nên bình thường chúng
+                  BẰNG NHAU — in hai dòng giống hệt chỉ làm người đọc tưởng là hai thứ khác nhau.
+                  Gộp làm một; lệch thì mới tách ra kèm cảnh báo.
+                */}
+                {months > 0 && months !== revenueMonths ? (
+                  <>
+                    <Line
+                      label="Số tháng THẬT SỰ CÓ TIỀN VÀO"
+                      hint="Phải lấy lại đủ tiền trong đúng quãng này"
+                      value={`${revenueMonths} tháng`}
+                      tone="accent"
+                    />
+                    <Line
+                      label="Số tháng máy chủ dùng để chia tiền"
+                      hint={overCountedMonths > 0
+                        ? `⚠ Nhiều hơn ${overCountedMonths} tháng so với số tháng có tiền vào → giá gợi ý bị thấp`
+                        : `Ít hơn số tháng có tiền vào ${revenueMonths - months} tháng`}
+                      value={`${months} tháng`}
+                      tone="bad"
+                    />
+                  </>
+                ) : (
+                  <Line
+                    label="Số tháng có tiền vào — dùng để chia vốn"
+                    formula={`${realMonths} tháng HĐ${lostMonths > 0 ? ` − ${lostMonths} trôi mất` : ''}${handoverBuffer > 0 ? ` − ${handoverBuffer} trả nhà` : ''} = ${revenueMonths} tháng`}
+                    hint={startInfo && !startInfo.started && lostMonths === 0
+                      ? `Hợp đồng chưa tới ngày bắt đầu (còn ${startInfo.daysLeft} ngày) — chưa mất tháng nào ở đầu kỳ. Vốn và chi phí chia đều cho đúng số tháng này.`
+                      : 'Chỉ những tháng thật sự có khách trả tiền. Vốn và chi phí được chia đều cho đúng số tháng này — tháng không thu được tiền thì không bắt gánh.'}
+                    value={`${revenueMonths} tháng`}
+                    tone="accent"
+                  />
+                )}
                 <Divider />
                 <Line
                   label="Mỗi tháng phải lấy lại"
@@ -1864,9 +1910,9 @@ const OnboardingPriceReview = () => {
                   sub={d && d.profitPerMonth > 0 ? `mục tiêu ${formatVND(d.profitPerMonth)}` : undefined}
                   detail={(
                     <>
-                      <BarFormula>
+                      <ExplainFormula>
                         {shortVND(pnl.net)} ÷ {revenueMonths} tháng = {formatVND(pnl.perMonth)}
-                      </BarFormula>
+                      </ExplainFormula>
                       <p>
                         Lấy lãi thật của cả kỳ chia đều số tháng có tiền vào. Đây là tiền còn lại{' '}
                         <b>sau khi</b> đã hoàn hết vốn bỏ ra và trả chi phí vận hành — khác với{' '}
@@ -1884,13 +1930,13 @@ const OnboardingPriceReview = () => {
                   sub="đã trừ tiền bỏ ra & chi phí"
                   detail={(
                     <>
-                      <BarFormula>
+                      <ExplainFormula>
                         {shortVND(totalMonthly)} × {revenueMonths} tháng
                         {'\n'}− {shortVND(totalInvest)} tiền bỏ ra
                         {'\n'}− {shortVND(pnl.opexTotal)} vận hành
                         {pnl.reserveTotal > 0 && <>{'\n'}− {shortVND(pnl.reserveTotal)} dự phòng sửa chữa</>}
                         {'\n'}= {formatVND(pnl.net)}
-                      </BarFormula>
+                      </ExplainFormula>
                       <p>
                         Doanh thu {formatVND(pnl.revenue)} là giá chốt nhân số tháng thật sự có khách.
                         Trừ tiền bỏ ra (thuê chủ + cải tạo + thiết bị), chi phí vận hành mỗi tháng
