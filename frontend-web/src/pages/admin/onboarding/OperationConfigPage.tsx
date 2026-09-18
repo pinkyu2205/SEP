@@ -16,6 +16,7 @@ import { RenovationImportPanel } from './RenovationImportPanel';
 import { HandoverEquipmentSection } from './HandoverEquipmentSection';
 import { OperationalEquipmentPanel } from './OperationalEquipmentPanel';
 import { SupplementImportPanel } from './SupplementImportPanel';
+import { RenovationCumulativeView, equipLoc } from './RenovationCumulativeView';
 import { BuildingFilterBar, ResultBar, BuildingTable } from './BuildingFilters';
 import { useBuildingFilters, ONBOARDING_STEPS, type StatusOption } from './buildingFilterState';
 
@@ -50,12 +51,6 @@ const flatToSessions = (lines: RenovationLineResponse[]): RenovationSession[] =>
   { sessionNumber: 1, startDate: undefined, endDate: undefined, totalCost: lines.reduce((s, l) => s + l.cost, 0), lines },
 ];
 
-const AREA_LABEL: Record<string, string> = {
-  LIVING_ROOM: 'Phòng khách', KITCHEN: 'Bếp', BATHROOM: 'Nhà tắm',
-  BALCONY: 'Ban công', GARAGE: 'Nhà để xe', OTHER: 'Khu vực chung',
-};
-const equipLoc = (e: { roomNumber?: string | null; houseArea?: string | null }): string =>
-  e.roomNumber ? `Phòng ${e.roomNumber}` : e.houseArea ? (AREA_LABEL[e.houseArea] ?? e.houseArea) : 'Toàn nhà';
 
 const SessionAccordion = ({ session, defaultOpen = true }: { session: RenovationSession; defaultOpen?: boolean }) => {
   const [open, setOpen] = useState(defaultOpen);
@@ -144,6 +139,7 @@ const SessionAccordion = ({ session, defaultOpen = true }: { session: Renovation
 const RenovationHistoryPanel = ({ property }: { property: PropertyResponse }) => {
   const [sessions, setSessions] = useState<RenovationSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'total' | 'sessions'>('total');
 
   useEffect(() => {
     if (!property.hasRenovation && !property.renovationCompleted) { setLoading(false); return; }
@@ -171,21 +167,30 @@ const RenovationHistoryPanel = ({ property }: { property: PropertyResponse }) =>
 
   if (loading) return <div className="py-16 text-center text-slate-400">Đang tải...</div>;
 
-  const grandTotal = sessions.reduce((s, sess) => s + sess.totalCost, 0);
+  // `totalCost` của BE chỉ cộng HẠNG MỤC CẢI TẠO, không có thiết bị mua — ghi rõ ở nhãn thẻ.
+  const renovationTotal = sessions.reduce((s, sess) => s + sess.totalCost, 0);
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-          <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wide mb-1.5">Tổng chi phí tất cả đợt</p>
-          <p className="text-2xl font-black text-amber-600">{formatVND(grandTotal)}</p>
+      {/* Hai cách xem: tổng gộp mọi đợt (mặc định) hoặc từng đợt v1, v2… */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+          {([
+            ['total', 'Tổng đến hiện tại'],
+            ['sessions', `Từng đợt${sessions.length ? ` (${[...sessions].sort((a, b) => a.sessionNumber - b.sessionNumber).map(s => s.versionLabel ?? `v${s.sessionNumber}`).join(', ')})` : ''}`],
+          ] as const).map(([key, label]) => (
+            <button key={key} type="button" onClick={() => setView(key)}
+              className={`rounded-lg px-3.5 py-1.5 text-sm font-bold transition ${
+                view === key ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>
+              {label}
+            </button>
+          ))}
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Số đợt cải tạo</p>
-          <p className={`text-2xl font-black ${property.renovationCompleted ? 'text-emerald-600' : 'text-amber-600'}`}>
-            {sessions.length} đợt {property.renovationCompleted ? '(hoàn thành)' : '(đang thi công)'}
-          </p>
-        </div>
+        <p className="text-xs text-slate-400">
+          {view === 'total'
+            ? 'Gộp mọi đợt: tổng vốn, lũy kế theo thời gian, hạng mục theo loại, thiết bị theo vị trí.'
+            : 'Mỗi đợt một khối — đợt đang hiệu lực mở sẵn.'}
+        </p>
       </div>
 
       {sessions.length === 0 ? (
@@ -193,12 +198,29 @@ const RenovationHistoryPanel = ({ property }: { property: PropertyResponse }) =>
           <Hammer className="w-10 h-10 mx-auto mb-3 text-slate-300" />
           <p className="text-sm text-slate-400">Chưa có hạng mục cải tạo nào được ghi nhận</p>
         </div>
+      ) : view === 'total' ? (
+        <RenovationCumulativeView sessions={sessions} />
       ) : (
-        <div className="space-y-3">
-          {sessions.map((sess, idx) => (
-            <SessionAccordion key={sess.sessionNumber} session={sess} defaultOpen={idx === sessions.length - 1} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <p className="text-xs font-bold text-amber-700/70 uppercase tracking-wide mb-1.5">Chi phí cải tạo tất cả đợt</p>
+              <p className="text-2xl font-black text-amber-600">{formatVND(renovationTotal)}</p>
+              <p className="mt-0.5 text-xs text-amber-700/70">Chưa gồm thiết bị mua — xem tab “Tổng đến hiện tại”</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Số đợt cải tạo</p>
+              <p className={`text-2xl font-black ${property.renovationCompleted ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {sessions.length} đợt {property.renovationCompleted ? '(hoàn thành)' : '(đang thi công)'}
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {sessions.map((sess, idx) => (
+              <SessionAccordion key={sess.sessionNumber} session={sess} defaultOpen={idx === sessions.length - 1} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -563,113 +585,55 @@ const QuickStat = ({ icon: Icon, label, value }: { icon: LucideIcon; label: stri
 );
 
 /**
- * SỬA MÃ KHÁCH HÀNG ĐIỆN / SỐ DANH BỘ NƯỚC của căn nhà đã tồn tại.
+ * MÃ KHÁCH HÀNG ĐIỆN / SỐ DANH BỘ NƯỚC — CHỈ XEM.
  *
- * ─── Vì sao nằm ở màn CẤU HÌNH KHAI THÁC, không phải màn Khởi tạo nhà ────────
- * Màn khởi tạo là dữ liệu đổ từ file Excel tiếp nhận nhà — sửa tay ở đó là sửa ngược một
- * bản ghi vừa được import, dễ thành hai nguồn sự thật. Tới màn này thì nhà đã tồn tại và
- * đang vận hành, sửa một trường của nó là việc chính đáng.
+ * Chốt 17/09/2026: hai mã này là dữ liệu nhập từ file Khởi tạo nhà, KHÔNG sửa tay trên giao
+ * diện. Bản 11/09 từng có ô nhập + nút "Lưu mã" (PATCH .../utility-customer-codes) để chữa khi
+ * file gõ nhầm — đã gỡ: nhìn như dữ liệu import sửa tuỳ ý được, lại dễ lỡ tay gõ vào, mà mã sai
+ * là máy chủ chặn phát hành hoá đơn của cả căn.
  *
- * ─── Vì sao phải sửa được ────────────────────────────────────────────────────
- * Máy chủ CHẶN phát hành hoá đơn khi mã trên tờ giấy lệch mã đã lưu. Sai một ký tự trong
- * file Excel là khoá luôn việc thu tiền của căn đó, và trước 11/09/2026 không có đường nào
- * chữa qua giao diện — import lại thì bị bỏ qua vì trùng nhà, còn lại đúng một cách là mở
- * database chạy SQL tay.
+ * Đường đổi mã duy nhất: sửa cột "Mã khách hàng điện" / "Mã khách hàng nước" trong file khởi
+ * tạo nhà rồi NHẬP LẠI. Máy chủ nhận ra nhà đã tồn tại (trùng mã HĐ) và chỉ ghi đè hai mã —
+ * kết quả `CODES_UPDATED`, không tạo nhà mới, không đụng trường nào khác.
  *
- * Dùng endpoint riêng `PATCH .../utility-customer-codes` chứ không phải `updateProperty`:
- * cái kia đòi gửi lại cả hồ sơ nhà, tức mở đường ghi đè nhầm trường không liên quan chỉ để
- * sửa một chuỗi. Máy chủ tự chuẩn hoá (bỏ dấu cách/gạch, hạ chữ thường) nên gõ kiểu nào
- * cũng được.
+ * Hiện IN HOA cho dễ dò với tờ hoá đơn giấy; máy chủ lưu chữ thường sau khi chuẩn hoá (bỏ dấu
+ * cách/gạch), đối chiếu thì hai bên đều chuẩn hoá nên hoa hay thường không đổi kết quả.
  */
-const UtilityCodeCard = ({ detail, onSaved }: {
-  detail: PropertyResponse;
-  onSaved: (next: PropertyResponse) => void;
-}) => {
-  const [elec, setElec] = useState(detail.electricityCustomerCode ?? '');
-  const [water, setWater] = useState(detail.waterCustomerCode ?? '');
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState('');
+const UtilityCodeCard = ({ detail }: { detail: PropertyResponse }) => {
+  const elec = detail.electricityCustomerCode?.trim();
+  const water = detail.waterCustomerCode?.trim();
 
-  // Nhà đổi (chuyển sang căn khác trong danh sách) thì ô phải theo — nếu không nó giữ
-  // nguyên mã của căn trước và người dùng tưởng căn này đã có mã.
-  useEffect(() => {
-    setElec(detail.electricityCustomerCode ?? '');
-    setWater(detail.waterCustomerCode ?? '');
-    setSaved(false);
-    setError('');
-  }, [detail.id, detail.electricityCustomerCode, detail.waterCustomerCode]);
-
-  const dirty = elec.trim() !== (detail.electricityCustomerCode ?? '')
-    || water.trim() !== (detail.waterCustomerCode ?? '');
-
-  const save = async () => {
-    setSaving(true);
-    setError('');
-    try {
-      const next = await propertyService.updateUtilityCustomerCodes(detail.id, {
-        electricityCustomerCode: elec.trim(),
-        waterCustomerCode: water.trim(),
-      });
-      onSaved(next);
-      setSaved(true);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Không lưu được mã.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const CodeRow = ({ label, value }: { label: string; value?: string }) => (
+    <div>
+      <p className="mb-0.5 text-xs font-bold text-slate-600">{label}</p>
+      {value ? (
+        <p title="Lấy từ file Khởi tạo nhà. Đổi mã: sửa cột mã trong file rồi nhập lại."
+          className="break-all rounded-lg bg-slate-50 px-3 py-1.5 font-mono text-sm font-bold uppercase text-slate-900 ring-1 ring-slate-200">
+          {value}
+        </p>
+      ) : (
+        <p className="rounded-lg bg-amber-50 px-3 py-1.5 text-sm font-bold text-amber-700 ring-1 ring-amber-200">Chưa khai</p>
+      )}
+    </div>
+  );
 
   return (
     <SideCard title="Mã khách hàng" icon={Hash}>
       <div className="space-y-3">
-        <label className="block">
-          <span className="mb-1 block text-xs font-bold text-slate-600">Mã khách hàng điện</span>
-          <input
-            value={elec}
-            onChange={(e) => { setElec(e.target.value); setSaved(false); }}
-            placeholder="VD: PE05000222239"
-            className="input-field py-1.5 font-mono text-sm"
-          />
-        </label>
+        <CodeRow label="Mã khách hàng điện" value={elec} />
+        <CodeRow label="Số danh bộ nước" value={water} />
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-bold text-slate-600">Số danh bộ nước</span>
-          <input
-            value={water}
-            onChange={(e) => { setWater(e.target.value); setSaved(false); }}
-            placeholder="VD: 1512 284 3356"
-            className="input-field py-1.5 font-mono text-sm"
-          />
-        </label>
-
-        {/* Nói rõ hậu quả của ô trống. Thiếu mã KHÔNG chặn gì cả — nó chỉ lặng lẽ tắt việc
-            đối chiếu, tức mất cái chốt bắt hoá đơn gắn nhầm nhà mà không ai hay. */}
-        {(!elec.trim() || !water.trim()) && (
+        {/* Thiếu mã KHÔNG chặn gì cả — nó chỉ lặng lẽ tắt việc đối chiếu, tức mất cái chốt bắt
+            hoá đơn gắn nhầm nhà mà không ai hay. Nên phải nói ra. */}
+        {(!elec || !water) && (
           <p className="text-xs leading-relaxed text-amber-600">
-            {!elec.trim() && !water.trim()
+            {!elec && !water
               ? 'Chưa có mã nào — hoá đơn điện và nước đều không được đối chiếu khi phát hành.'
-              : !elec.trim()
+              : !elec
                 ? 'Chưa có mã điện — hoá đơn điện sẽ không được đối chiếu.'
                 : 'Chưa có số danh bộ — hoá đơn nước sẽ không được đối chiếu.'}
           </p>
         )}
-
-        {!!error && <p className="text-xs font-semibold text-rose-600">{error}</p>}
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={save}
-            disabled={saving || !dirty}
-            className="btn-primary flex-1 py-1.5 text-sm disabled:opacity-50"
-          >
-            {saving ? 'Đang lưu...' : 'Lưu mã'}
-          </button>
-          {saved && !dirty && (
-            <span className="text-xs font-bold text-emerald-600">Đã lưu</span>
-          )}
-        </div>
       </div>
     </SideCard>
   );
@@ -838,7 +802,7 @@ const ConfigOverview = ({ property }: { property: PropertyResponse }) => {
           </div>
         </SideCard>
 
-        <UtilityCodeCard detail={detail} onSaved={setDetail} />
+        <UtilityCodeCard detail={detail} />
 
         <SideCard title="Vận hành" icon={UserRound}>
           <div className="divide-y divide-slate-100">

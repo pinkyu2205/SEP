@@ -7,6 +7,7 @@ import { ManagedProperty } from '@/types/managedProperty';
 import { realPropertyService, ApiRoom } from '@/services/manager/propertyApi';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { realManagerInvoiceService, ManagerInvoice } from '@/services/manager/invoiceService';
+import { EquipmentSummaryCard } from '@/components/manager/EquipmentSummaryCard';
 
 // `fmt` đã bỏ 13/08/2026 — màn này không còn in số tiền nào (tiền nhà ẩn với manager).
 
@@ -301,6 +302,11 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Thiết bị của nhà — mở thẳng màn Thiết bị đã chọn sẵn nhà này. */}
+        {Number.isFinite(pid) && (
+          <EquipmentSummaryCard propertyId={pid} onOpen={() => nav('Equipment')} />
+        )}
 
         {/* 5. Tenant Section */}
         <View style={styles.sectionHeader}>

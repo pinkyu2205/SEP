@@ -119,24 +119,6 @@ export const meterReadingService = {
     }
     return merged;
   },
-
-  /**
-   * VIỆC ĐIỆN CỦA KỲ SẮP TỚI — chưa tới hạn, chỉ để báo trước.
-   *
-   * `listAllPending` cố tình bỏ nhóm này ra vì nó chưa phải việc phải làm hôm nay. Nhưng
-   * bỏ hẳn khỏi màn hình thì trang chủ của quản lý trắng trơn suốt gần cả tháng, rồi tới
-   * ngày cuối tháng bỗng hiện ra một đống việc — không ai sắp xếp được kiểu đó.
-   *
-   * Trả về RỖNG vào đúng ngày cuối tháng: lúc đó nó đã thành việc phải làm và nằm trong
-   * `listAllPending` rồi, đếm cả hai chỗ là nhân đôi.
-   */
-  listUpcomingElectric: async (): Promise<PendingMeterReadingItem[]> => {
-    const now = serverNow();
-    const calendarPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (meterReadingPeriodIso(now) === calendarPeriod) return [];
-    const rows = await meterReadingService.listPending(calendarPeriod).catch(() => []);
-    return rows.filter(r => r.utilityType === 'ELECTRICITY');
-  },
 };
 
 /**

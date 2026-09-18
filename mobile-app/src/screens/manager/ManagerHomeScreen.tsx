@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius, canTerminateForUnpaidRent } from '@/constants';
+import { Colors, Spacing, BorderRadius, canTerminateForUnpaidRent, isMeterReadingDay } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
@@ -106,17 +106,15 @@ export const ManagerHomeScreen: React.FC = () => {
   const [draftContracts, setDraftContracts] = useState<TenantContractResponse[]>([]);
   const [activeContracts, setActiveContracts] = useState<TenantContractResponse[]>([]);
   const [checkouts, setCheckouts] = useState<CheckoutRequestDto[]>([]);
-  /** Số dòng phòng còn thiếu ảnh công tơ kỳ này (mỗi HĐ thiếu cả điện lẫn nước tính 2 dòng). */
-  const [pendingMeterCount, setPendingMeterCount] = useState(0);
-  /** Việc điện của kỳ sắp tới — chưa tới hạn, dùng cho khối "Sắp tới" khi My Task rỗng. */
-  const [upcomingMeters, setUpcomingMeters] = useState<PendingMeterReadingItem[]>([]);
+  /** Phòng còn thiếu chỉ số/ảnh công tơ đã tới hạn — tách điện và nước vì hai lịch khác nhau. */
+  const [pendingMeters, setPendingMeters] = useState<PendingMeterReadingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const realUnread = useUnreadNotifications();   // badge chuông: BE + thông báo trả phòng
 
   const load = useCallback(async () => {
     try {
-      const [props, inv, pay, drafts, checkoutList, pendingMeters, upcomingRows] = await Promise.all([
+      const [props, inv, pay, drafts, checkoutList, meterRows] = await Promise.all([
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
@@ -131,16 +129,13 @@ export const ManagerHomeScreen: React.FC = () => {
           đụng tới. Màn "Cần chụp công tơ" hỏi đúng cùng hàm này nên hai bên luôn khớp số.
         */
         meterReadingService.listAllPending().catch(() => []),
-        // Việc điện của kỳ CHƯA tới hạn — chỉ để báo trước, xem `listUpcomingElectric`.
-        meterReadingService.listUpcomingElectric().catch(() => []),
       ]);
       setProperties(props);
       setInvoices(inv);
       setPayments(pay);
       setDraftContracts(drafts);
       setCheckouts(checkoutList);
-      setPendingMeterCount(pendingMeters.length);
-      setUpcomingMeters(upcomingRows);
+      setPendingMeters(meterRows);
 
       // HĐ đang hiệu lực — để loại hoá đơn của khách ĐÃ chấm dứt khỏi "My Task".
       // Hỏi theo từng nhà (xem listActiveByProperties) nên phải đợi có `props` trước.
@@ -254,6 +249,16 @@ export const ManagerHomeScreen: React.FC = () => {
     ['PENDING', 'APPROVED', 'INSPECTING', 'DISPUTED', 'SETTLING'].includes((c.status || '').toUpperCase()),
   ).length;
 
+  /*
+    Việc chụp công tơ tách ĐIỆN và NƯỚC: điện chỉ tới hạn vào ngày cuối tháng (hôm đó là
+    "hạn hôm nay", qua ngày là quá hạn), nước tới hạn theo lịch người ghi nước. Gộp một ô
+    "Phòng chưa chụp công tơ" thì đúng ngày cuối tháng quản lý không đọc ra là phải đi chốt
+    số điện. `listAllPending` chỉ trả việc ĐÃ tới hạn nên giữa tháng hai ô này tự bằng 0.
+  */
+  const pendingElecCount  = pendingMeters.filter(r => r.utilityType === 'ELECTRICITY').length;
+  const pendingWaterCount = pendingMeters.length - pendingElecCount;
+  const elecDueToday = isMeterReadingDay();
+
   const priorityItems = [
     { id: 'p0', icon: '🤝', label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
     { id: 'p1', icon: '🧾', label: 'Tiền nhà quá hạn',          count: overdueRent + overdueOther, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
@@ -270,22 +275,10 @@ export const ManagerHomeScreen: React.FC = () => {
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
     // Không chụp được ảnh công tơ thì không phát hành được hoá đơn điện/nước — việc này
     // chặn cả kỳ thu tiền, nên xếp cùng nhóm gấp với tiền quá hạn.
-    { id: 'p6', icon: '📸', label: 'Phòng chưa chụp công tơ', count: pendingMeterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
+    { id: 'p6', icon: '⚡', label: elecDueToday ? 'Chốt chỉ số điện — hạn hôm nay' : 'Chỉ số điện quá hạn chưa chốt',
+      count: pendingElecCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
+    { id: 'p7', icon: '💧', label: 'Phòng chưa chụp đồng hồ nước', count: pendingWaterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
   ];
-
-  /* Hạn + số ngày còn lại của việc chốt số điện kỳ sắp tới. Ngày lấy từ chính dòng BE
-     trả về, không tự tính — BE mới là nơi biết ngày cuối kỳ của kỳ đó. */
-  const upcomingMeterDue = upcomingMeters[0]?.meterDueDate
-    ? upcomingMeters[0].meterDueDate.split('-').reverse().join('/')
-    : null;
-  const upcomingDaysLeft = (() => {
-    const iso = upcomingMeters[0]?.meterDueDate;
-    if (!iso) return null;
-    const due = new Date(iso + 'T00:00:00').getTime();
-    if (Number.isNaN(due)) return null;
-    const today = serverNow(); today.setHours(0, 0, 0, 0);
-    return Math.round((due - today.getTime()) / 86400000);
-  })();
 
   const activeItems    = priorityItems.filter(p => p.count > 0);
   const criticalItems  = activeItems.filter(p => p.urgency === 'critical');
@@ -352,40 +345,14 @@ export const ManagerHomeScreen: React.FC = () => {
           /*
             ── Hết việc gấp ──
 
-            Bản trước chỉ có đúng một dòng "Mọi thứ ổn định hôm nay". Nói thật thì đúng,
-            nhưng vô dụng: My Task là chỗ trả lời "hôm nay tôi làm gì", mà phần lớn ngày
-            trong tháng đều không có việc quá hạn nào — nên gần cả tháng quản lý mở app ra
-            chỉ thấy một dấu tích xanh, rồi tới ngày cuối tháng bỗng hiện ra cả đống phòng
-            phải chụp. Không ai sắp xếp được kiểu đó.
-
-            Nên khi rảnh thì nói VIỆC SẮP TỚI: còn mấy ngày, bao nhiêu phòng. Đây là việc
-            định kỳ lớn nhất của quản lý và trước đây nó vô hình cho tới đúng hạn.
+            KHÔNG báo trước việc chốt số điện của kỳ chưa tới hạn (gỡ 18/09/2026). Bản trước
+            hiện "Chốt chỉ số điện · N phòng · còn 12 ngày" suốt cả tháng: quản lý bấm vào thì
+            màn Điện đang ở kỳ tháng trước — không có gì để chụp — nên họ đọc thành "app bắt
+            chốt số giữa tháng mà không cho chụp". Việc điện chỉ hiện ở My Task từ đúng ngày
+            cuối tháng (ô "Chốt chỉ số điện — hạn hôm nay" phía trên).
           */
           <View style={s.clearCard}>
-            {upcomingMeterDue ? (
-              <TouchableOpacity
-                style={s.upcomingRow}
-                onPress={() => navigation.navigate('UtilityBilling')}
-                activeOpacity={0.75}
-              >
-                <View style={[s.secondaryIconWrap, { backgroundColor: Colors.accent + '14' }]}>
-                  <MaterialIcons name="bolt" size={17} color="#F59E0B" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.upcomingTitle}>
-                    Chốt chỉ số điện · {upcomingMeters.length} phòng
-                  </Text>
-                  <Text style={s.upcomingSub}>
-                    Hạn {upcomingMeterDue}
-                    {upcomingDaysLeft != null && upcomingDaysLeft > 0 && ` · còn ${upcomingDaysLeft} ngày`}
-                  </Text>
-                </View>
-                <Text style={s.chevron}>›</Text>
-              </TouchableOpacity>
-            ) : null}
-            <Text style={[s.clearText, !!upcomingMeterDue && s.clearTextTight]}>
-              ✅  Không có việc nào quá hạn
-            </Text>
+            <Text style={s.clearText}>✅  Mọi thứ ổn định hôm nay</Text>
           </View>
         ) : (
           <>
@@ -841,14 +808,6 @@ const s = StyleSheet.create({
     paddingVertical: Spacing.md, alignItems: 'center',
     marginBottom: Spacing.xs,
   },
-  upcomingRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
-    paddingBottom: Spacing.md, marginBottom: Spacing.md,
-    borderBottomWidth: 1, borderBottomColor: Colors.divider,
-  },
-  upcomingTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  upcomingSub:   { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  clearTextTight: { textAlign: 'left' },
   clearText: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center' },
   homeLoading: { paddingVertical: Spacing.xl, alignItems: 'center' },
 

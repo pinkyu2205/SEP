@@ -1,8 +1,8 @@
 import realApiClient from '@/services/core/realApiClient';
 import type {
   EquipmentDto,
-  EquipmentMaintenanceHistoryDto,
   EquipmentLifecycleStatus,
+  MaintenanceRequestDto,
 } from '@/types';
 
 /**
@@ -90,17 +90,16 @@ export const realEquipmentService = {
   },
 
   /**
-   * Lịch sử bảo trì của 1 thiết bị.
-   * Lưu ý BE có 2 endpoint gần giống nhau: `/maintenance-history` (trả
-   * MaintenanceRequestResponse — phiếu bảo trì) và `/maintenance-history-feature`
-   * (trả EquipmentMaintenanceHistoryResponse — đúng shape FE cần). Dùng cái sau.
+   * Lịch sử bảo trì của 1 thiết bị = các PHIẾU BẢO TRÌ gắn với nó, mới nhất trước.
+   *
+   * BE `GET /equipment/{id}/maintenance-history` trả `List<MaintenanceRequestResponse>`
+   * (`MaintenanceServiceImpl.getEquipmentMaintenanceHistory`), KHÔNG phải
+   * `EquipmentMaintenanceHistoryResponse` như tên gọi. Trước 18/09/2026 FE khai kiểu kia
+   * nên đọc `maintenanceDate` / `note` / `repairCost` — ba field phiếu không có — và mục
+   * "Lịch sử bảo trì" chỉ hiện được mã phiếu kèm dấu "—". Route `-feature` không tồn tại.
    */
-  getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
-    const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
-      // Route thật của BE là `/maintenance-history` — hậu tố `-feature` là do FE tự thêm,
-      // không controller nào phía BE nhận. Kết quả: 404 và `GlobalExceptionHandler` trả
-      // "Route không tồn tại", hiện thẳng vào khối Lịch sử bảo trì.
-      // (`GlobalEquipmentController` dòng 26: @GetMapping("/{id}/maintenance-history"))
+  getMaintenanceHistory: async (id: number): Promise<MaintenanceRequestDto[]> => {
+    const { data } = await realApiClient.get<MaintenanceRequestDto[]>(
       `/api/v1/equipment/${id}/maintenance-history`,
     );
     return data;

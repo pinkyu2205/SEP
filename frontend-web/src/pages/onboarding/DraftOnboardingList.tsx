@@ -16,6 +16,7 @@ import { openContractBlob } from '../../utils/contractFile';
 import { StatCard, Pagination } from '../admin/shared';
 import { DraftContractFormModal } from './DraftContractFormModal';
 import { DraftContractImportModal } from './DraftContractImportModal';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { buildOccupancyMap, type PropertyOccupancy } from '@/services/propertyOccupancy.service';
 import { PropertyCapacityPanel, type CapacityRow } from './PropertyCapacityPanel';
 
@@ -278,6 +279,71 @@ export const DraftOnboardingList = () => {
   const pageStart = (page - 1) * ROWS_PER_PAGE;
   const pageItems = filteredDrafts.slice(pageStart, pageStart + ROWS_PER_PAGE);
 
+  // ─── Chọn nhiều để XOÁ HÀNG LOẠT ─────────────────────────────────────────
+  //
+  // "Xoá" ở đây = HUỶ hồ sơ (POST /tenant-contracts/{id}/cancel), đúng như nút thùng rác ở
+  // từng dòng: hồ sơ chuyển sang đã huỷ, biến khỏi danh sách (trang chỉ lấy DRAFT), phòng giữ
+  // chỗ được trả lại. KHÔNG dùng DELETE cứng — mất dấu vết, và nút từng dòng cũng không dùng.
+  //
+  // BE không có API hàng loạt → gọi từng hồ sơ, mỗi lượt 5 cái. Hồ sơ nào lỗi thì giữ lại
+  // trong lựa chọn để thử lại, không nuốt mất.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkDone, setBulkDone] = useState(0);
+
+  // Chỉ giữ lựa chọn còn nằm trong danh sách ĐANG LỌC — đổi bộ lọc mà vẫn giữ id bị khuất
+  // thì bấm xoá sẽ xoá cả những hồ sơ người dùng không còn nhìn thấy.
+  useEffect(() => {
+    const visible = new Set(filteredDrafts.map((d) => d.id));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredDrafts]);
+
+  const pageIds = pageItems.map((d) => d.id);
+  const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const pageSomeSelected = pageIds.some((id) => selected.has(id));
+  const selectedDrafts = filteredDrafts.filter((d) => selected.has(d.id));
+
+  const toggleOne = (id: number) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const togglePage = () => setSelected((prev) => {
+    const next = new Set(prev);
+    if (pageAllSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    return next;
+  });
+
+  const runBulkDelete = async () => {
+    const targets = selectedDrafts;
+    if (targets.length === 0) return;
+    setBulkRunning(true);
+    setBulkDone(0);
+    const failed: TenantContractResponse[] = [];
+    for (let i = 0; i < targets.length; i += 5) {
+      const chunk = targets.slice(i, i + 5);
+      const results = await Promise.allSettled(chunk.map((d) => tenantService.cancel(d.id)));
+      results.forEach((r, j) => { if (r.status === 'rejected') failed.push(chunk[j]); });
+      setBulkDone(Math.min(targets.length, i + chunk.length));
+    }
+    setBulkRunning(false);
+    setBulkOpen(false);
+
+    const ok = targets.length - failed.length;
+    if (ok > 0) toast.success(`Đã xoá ${ok} hồ sơ đón khách.`);
+    if (failed.length > 0) {
+      const names = failed.slice(0, 3).map((d) => d.tenantFullName || d.contractCode).join(', ');
+      toast.error(`${failed.length} hồ sơ không xoá được: ${names}${failed.length > 3 ? '…' : ''}. Vẫn đang được chọn để thử lại.`);
+    }
+    setSelected(new Set(failed.map((d) => d.id)));
+    fetchData();
+  };
+
   // ─── Khối "Chỗ trống của các nhà ở trang này" ─────────────────────────────
   //
   // Phạm vi CỐ TÌNH hẹp: chỉ các nhà có hồ sơ trong trang hiện tại.
@@ -498,10 +564,40 @@ export const DraftOnboardingList = () => {
            dòng hồ sơ 3 dòng, thành ra 1 hồ sơ chiếm 5 dòng và trang dài vô tận. Nay tên nhà
            là MỘT CỘT, mỗi hồ sơ 1 dòng, quét mắt theo cột nào cũng được. */
         <div className="card overflow-hidden p-0">
+          {/* Thanh thao tác hàng loạt — chỉ hiện khi đã chọn, không chiếm chỗ lúc bình thường. */}
+          {selected.size > 0 && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-rose-100 bg-rose-50/70 px-4 py-2.5 text-sm">
+              <span className="font-bold text-rose-800">Đã chọn {selected.size} hồ sơ</span>
+              {selected.size < filteredDrafts.length && (
+                <button type="button" onClick={() => setSelected(new Set(filteredDrafts.map((d) => d.id)))}
+                  className="text-xs font-semibold text-indigo-600 hover:underline">
+                  Chọn tất cả {filteredDrafts.length} hồ sơ{hasFilter ? ' đang lọc' : ''}
+                </button>
+              )}
+              <button type="button" onClick={() => setSelected(new Set())}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-800 hover:underline">
+                Bỏ chọn
+              </button>
+              <button type="button" onClick={() => setBulkOpen(true)}
+                className="ml-auto flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-rose-700">
+                <Trash2 className="h-3.5 w-3.5" /> Xoá {selected.size} hồ sơ
+              </button>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1080px] text-left text-sm">
               <thead className="table-header">
                 <tr>
+                  <th className="w-10 py-2.5 pl-4 pr-1">
+                    <input
+                      type="checkbox"
+                      checked={pageAllSelected}
+                      ref={(el) => { if (el) el.indeterminate = !pageAllSelected && pageSomeSelected; }}
+                      onChange={togglePage}
+                      title={pageAllSelected ? 'Bỏ chọn cả trang' : 'Chọn cả trang này'}
+                      className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-rose-600"
+                    />
+                  </th>
                   <th className="px-4 py-2.5 font-bold">Khách thuê</th>
                   <th className="px-4 py-2.5 font-bold">Nhà · phòng</th>
                   <th className="px-4 py-2.5 font-bold">Quản lý</th>
@@ -521,10 +617,21 @@ export const DraftOnboardingList = () => {
                     /* Vạch màu bên trái: quét một lượt là thấy dòng nào gấp. */
                     <tr
                       key={d.id}
-                      className={`border-l-[3px] transition-colors hover:bg-slate-50/60 ${
+                      className={`border-l-[3px] transition-colors ${
+                        selected.has(d.id) ? 'bg-rose-50/50' : 'hover:bg-slate-50/60'
+                      } ${
                         late > 0 ? 'border-l-rose-500' : isToday ? 'border-l-amber-400' : 'border-l-transparent'
                       }`}
                     >
+                      <td className="w-10 py-2.5 pl-4 pr-1">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(d.id)}
+                          onChange={() => toggleOne(d.id)}
+                          aria-label={`Chọn hồ sơ ${d.tenantFullName || d.contractCode}`}
+                          className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-rose-600"
+                        />
+                      </td>
                       {/* Khách + SĐT (che, bấm mắt để xem đủ) */}
                       <td className="px-4 py-2.5">
                         <p className="font-bold text-slate-900">
@@ -657,6 +764,39 @@ export const DraftOnboardingList = () => {
       {editing && (
         <DraftContractFormModal editContract={editing} onClose={() => setEditing(null)} onSuccess={fetchData} />
       )}
+
+      <ConfirmDialog
+        open={bulkOpen}
+        tone="danger"
+        title={`Xoá ${selectedDrafts.length} hồ sơ đón khách?`}
+        message={(
+          <>
+            <span className="block">
+              {selectedDrafts.slice(0, 5).map((d) => (
+                <span key={d.id} className="block truncate">
+                  • <b className="text-slate-700">{d.tenantFullName || d.contractCode}</b>
+                  {' — '}{properties[d.propertyId]?.propertyName || `Nhà #${d.propertyId}`}
+                  {d.roomNumber ? ` · P${d.roomNumber}` : ''}
+                </span>
+              ))}
+              {selectedDrafts.length > 5 && <span className="block">… và {selectedDrafts.length - 5} hồ sơ khác</span>}
+            </span>
+            <span className="mt-2 block">
+              Hồ sơ bị huỷ như nút thùng rác ở từng dòng: biến khỏi danh sách, phòng được trả lại chỗ trống.
+              Không hoàn tác được.
+            </span>
+            {bulkRunning && (
+              <span className="mt-2 block font-semibold text-rose-600">
+                Đang xoá {bulkDone}/{selectedDrafts.length}…
+              </span>
+            )}
+          </>
+        )}
+        confirmText={`Xoá ${selectedDrafts.length} hồ sơ`}
+        loading={bulkRunning}
+        onConfirm={runBulkDelete}
+        onCancel={() => setBulkOpen(false)}
+      />
     </div>
   );
 };
