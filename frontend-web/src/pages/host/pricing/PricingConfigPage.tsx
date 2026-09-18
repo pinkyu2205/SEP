@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, ChevronDown, Cloud, DollarSign,
-  HardDrive, HelpCircle, Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp,
+  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, Cloud, DollarSign,
+  HardDrive, Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp,
   UserCog, Wallet,
 } from 'lucide-react';
 import {
@@ -15,6 +15,7 @@ import {
 import { propertyService } from '@/services/property.service';
 import { zoneAssignmentService } from '@/services/zoneAssignment.service';
 import { todayIso } from '@/utils/serverTime';
+import { ExplainFormula, Explainer } from '@/pages/host/review/pricingBreakdown';
 
 /**
  * CẤU HÌNH DUYỆT GIÁ — một lần, dùng cho MỌI căn nhà.
@@ -64,34 +65,6 @@ const Field = ({ label, hint, children }: { label: string; hint?: React.ReactNod
 );
 
 /**
- * Khối giải thích BẤM MỚI MỞ.
- *
- * Trang này có nhiều ô mà cách tính đằng sau dài hơn cả cái ô — in hết ra dưới mỗi ô thì
- * người vào chỉnh một con số phải lội qua mấy đoạn văn không liên quan. Để dạng gấp lại:
- * dòng gợi ý ngắn vẫn hiện sẵn, còn phần công thức + ví dụ bằng số thật chỉ bung ra khi
- * người dùng chủ động bấm. Dùng <details> để bấm/bàn phím/đọc màn hình đều chạy sẵn.
- */
-const Explainer = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <details className="group mt-2 rounded-xl border border-slate-200 bg-slate-50/80">
-    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-500 transition hover:text-indigo-700">
-      <HelpCircle className="h-3.5 w-3.5" />
-      {title}
-      <ChevronDown className="ml-auto h-3.5 w-3.5 transition group-open:rotate-180" />
-    </summary>
-    <div className="space-y-2.5 border-t border-slate-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
-      {children}
-    </div>
-  </details>
-);
-
-/** Một dòng công thức — cho dễ đọc hơn là nhét vào câu văn. */
-const Formula = ({ children }: { children: React.ReactNode }) => (
-  <p className="rounded-lg bg-white px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-800 ring-1 ring-slate-200">
-    {children}
-  </p>
-);
-
-/**
  * Diễn giải biên trống phòng — số liệu lấy từ chính cấu hình đang gõ, không phải ví dụ chế.
  *
  * Chỗ dễ hiểu sai nhất: máy chủ CHIA cho (1 − v) chứ không CỘNG v% (PricingCalculator
@@ -108,9 +81,9 @@ const VacancyMath = ({ cfg, opex }: { cfg: PricingConfig; opex: number }) => {
 
   return (
     <>
-      <Formula>
+      <ExplainFormula>
         Giá đề xuất = (Chi phí cố định mỗi tháng + Lãi mục tiêu) ÷ (100% − {cfg.vRatePct}%)
-      </Formula>
+      </ExplainFormula>
 
       <p>
         Chi phí cố định của một căn gồm <b>khấu hao vốn</b> (tiền thuê chủ nhà, cải tạo, thiết bị
@@ -123,11 +96,11 @@ const VacancyMath = ({ cfg, opex }: { cfg: PricingConfig; opex: number }) => {
       {cfg.vRatePct > 0 ? (
         <>
           <p className="font-semibold text-slate-700">Tính thử trên phần đã biết:</p>
-          <Formula>
+          <ExplainFormula>
             {formatVND(known)} ÷ {(1 - v).toFixed(2).replace('.', ',')} = {formatVND(Math.round(grossed))}
             <br />
             phần bù trống phòng: {formatVND(Math.round(uplift))} (+{upliftPct.toFixed(1).replace('.', ',')}%)
-          </Formula>
+          </ExplainFormula>
           <p>
             <b>Chia chứ không cộng.</b> Để trống {cfg.vRatePct}% số tháng nghĩa là cả kỳ chỉ thu được{' '}
             {100 - cfg.vRatePct}% số tháng, nên phải chia cho {(1 - v).toFixed(2).replace('.', ',')} thì
@@ -594,7 +567,7 @@ export const PricingConfigPage = () => {
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">%</span>
                   </div>
                 </Field>
-                <Explainer title={`Cách ${cfg.vRatePct}% này vào giá`}>
+                <Explainer className="mt-2" title={`Cách ${cfg.vRatePct}% này vào giá`}>
                   <VacancyMath cfg={cfg} opex={opex} />
                 </Explainer>
               </div>
