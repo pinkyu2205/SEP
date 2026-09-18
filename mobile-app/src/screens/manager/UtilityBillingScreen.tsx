@@ -12,8 +12,9 @@ import { useFocusEffect, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   Colors, Spacing, BorderRadius, Shadow,
-  alreadySentReason, currentPeriod,
+  alreadySentReason,
   METER_READING_RULE_TEXT, WATER_READING_RULE_TEXT, meterReadingPeriod, meterReadingPeriodIso, meterReadingDeadline,
+  isMeterReadingDay, nextMeterReadingDate,
 } from '@/constants';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realPropertyService } from '@/services/manager/propertyApi';
@@ -532,6 +533,8 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   const [savingRoomId, setSavingRoomId] = useState<string | null>(null);
   /** Số phòng bị loại khỏi kỳ vì khách dọn vào sau khi kỳ đã khép — xem `enterElecReadings`. */
   const [elecSkippedRooms, setElecSkippedRooms] = useState(0);
+  /** Đang dựng danh sách phòng của bước chốt số — chưa xong thì chưa được kết luận "không có phòng nào". */
+  const [elecRoomsLoading, setElecRoomsLoading] = useState(false);
   /**
    * Phòng đang mở hộp xin mã admin để chốt số KHÔNG CÓ ẢNH (null = đóng).
    *
@@ -850,6 +853,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
    * (chưa có hoá đơn EVN vẫn phải chốt được số).
    */
   const enterElecReadings = async (propId: string) => {
+    setElecRoomsLoading(true);
+    try {
+      await loadElecReadings(propId);
+    } finally {
+      setElecRoomsLoading(false);
+    }
+  };
+
+  const loadElecReadings = async (propId: string) => {
     setElecStep('room_readings');
     setEvnBillLoading(true);
     setEvnBillError(null);
@@ -1274,23 +1286,22 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     setWaterReadingsError(null);
     setWaterBill(null);
 
-    const { month, year } = currentPeriod();
     const periodIso = captureMonthIso();
 
     const [billRes, savedRes] = await Promise.allSettled([
-      managerWaterBillService.getForPeriod(Number(propId), month, year),
+      managerWaterBillService.getLatest(Number(propId)),
       savedMeterReadingService.listForPeriod(Number(propId), periodIso, 'WATER'),
     ]);
 
-    const bill = billRes.status === 'fulfilled' ? billRes.value : null;
-    setWaterBill(bill);
+    let bill = billRes.status === 'fulfilled' ? billRes.value : null;
     if (billRes.status === 'rejected') {
       const e: any = billRes.reason;
       setWaterBillError(
         e?.response?.data?.message || e?.message || 'Không tải được hoá đơn nước của kỳ này.',
       );
     }
-    setWaterBillLoading(false);
+    // `setWaterBillLoading(false)` để SAU khi xét "đã dùng hết" bên dưới — tắt sớm thì thẻ
+    // trạng thái nháy "chưa có hoá đơn" rồi mới nhảy sang hoá đơn thật.
 
     const savedByRoom = new Map<string, SavedMeterReading>();
     if (savedRes.status === 'fulfilled') {
@@ -1305,9 +1316,34 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     }
 
     const prop = properties.find(p => p.id === propId);
-    const { lastReadings, sentKeys, issuedQty, delivery, issued } = await fetchRoomHistory(
+    let { lastReadings, sentKeys, issuedQty, delivery, issued } = await fetchRoomHistory(
       propId, 'WATER', bill?.billingPeriod,
     );
+
+    /*
+      HOÁ ĐƠN ĐÃ DÙNG HẾT = không còn là hoá đơn "đang chờ chỉ số".
+
+      Nước không có kỳ cố định nên hoá đơn mới nhất thường là hoá đơn của LẦN TRƯỚC, đã gửi
+      đủ các phòng. Giữ nó làm hoá đơn của màn này thì mọi phòng hiện "✓ Đã gửi khách", ô
+      nhập bị ẩn, và quản lý không chốt được số cho lần người ghi nước xuống tiếp theo.
+
+      Đã dùng hết khi mọi phòng có khách trong kỳ của nó đều đã nhận hoá đơn (phòng đón
+      khách sau kỳ đó không tính — hoá đơn ấy không liên quan tới họ). Lúc đó coi như chưa có
+      hoá đơn mới; chỉ số cũ vẫn lấy từ hoá đơn vừa rồi (`lastReadings`).
+    */
+    if (bill && prop) {
+      const billEnd = `${bill.year}-${String(bill.month).padStart(2, '0')}-${String(new Date(bill.year, bill.month, 0).getDate()).padStart(2, '0')}`;
+      const eligible = prop.rooms.filter(r => !r.contractStart || r.contractStart <= billEnd);
+      if (eligible.every(r => sentKeys.has(r.id))) {
+        bill = null;
+        sentKeys = new Set();
+        delivery = new Map();
+        issued = new Map();
+        issuedQty = 0;
+      }
+    }
+    setWaterBill(bill);
+    setWaterBillLoading(false);
     setWaterDelivery(delivery);
     setWaterIssued(issued);
     setWaterSentKeys(sentKeys);
@@ -1755,6 +1791,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     const { month: readMonth, year: readYear } = meterReadingPeriod();
     const periodLabel = `${String(readMonth).padStart(2, '0')}/${readYear}`;
     const deadline = meterReadingDeadline();
+    /*
+      Ngoài ngày cuối tháng, tab này mở KỲ THÁNG TRƯỚC — chỉ để chốt nốt phòng còn sót. Kỳ
+      tháng này chưa chụp được vì công tơ chưa khép kỳ. Phải nói thẳng ra: không nói thì
+      quản lý thấy nhà trống việc (vd. mới đón khách tháng này) và hiểu nhầm là app đang bắt
+      chờ admin đẩy hoá đơn EVN mới cho chụp.
+    */
+    const readingDay = isMeterReadingDay();
+    const nextReading = nextMeterReadingDate();
+    const nothingToRead = !isWholeHouse && !elecRoomsLoading && !elecReadingsError
+      && roomElecReadings.length === 0;
 
     if (elecStep === 'done') {
       const savedCount = roomElecReadings.filter(r => r.saved || r.sent).length;
@@ -1821,6 +1867,15 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
           <View>
             <SectionHeader title={`Nhà nào cần chốt số kỳ ${periodLabel}?`} />
 
+            {!readingDay && (
+              <View style={styles.infoBanner}>
+                <Text style={styles.infoBannerText}>
+                  Hôm nay chưa phải ngày chốt số. Màn này đang mở kỳ {periodLabel} để chốt nốt
+                  phòng còn sót (nếu có). Kỳ {nextReading.periodLabel} chốt vào ngày {nextReading.dateLabel}.
+                </Text>
+              </View>
+            )}
+
             <PropertyPicker
               properties={properties}
               loading={loadingProps}
@@ -1861,7 +1916,17 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 không phải để ngắm tổng kWh. Nguyên căn không có việc nên không hiện. */}
             {!isWholeHouse && <MeterTaskBanner bill={elecTask} kind="elec" deadlineRule="month_end" />}
 
-            {/* ── Thẻ trạng thái hoá đơn EVN của kỳ ── */}
+            {/* ── Thẻ trạng thái hoá đơn EVN của kỳ ──
+                Không có phòng nào để chốt thì bỏ thẻ "chờ admin": câu "cứ chốt chỉ số bên
+                dưới" mà bên dưới trống trơn là đẩy quản lý tới đúng cách hiểu sai. */}
+            {nothingToRead && !evnBill && !evnBillError ? null
+              : !isWholeHouse && !evnBill && !evnBillLoading && !evnBillError ? (
+                <NoBillNote
+                  text={`Chưa có hoá đơn EVN kỳ ${periodLabel} — bình thường. Cứ chốt số từng phòng bên dưới, khách chưa nhận gì. `
+                    + 'Admin đẩy hoá đơn lên là hệ thống tự tính tiền và gửi cho khách.'}
+                  onRecheck={() => selectedPropertyId && enterElecReadings(selectedPropertyId)}
+                />
+              ) : (
             <View style={styles.card}>
               {evnBillLoading ? (
                 <View style={styles.scanningRow}>
@@ -1882,23 +1947,16 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 </View>
               ) : !evnBill ? (
                 /*
-                  CHƯA CÓ HOÁ ĐƠN EVN — và đó là chuyện BÌNH THƯỜNG, không phải lỗi.
-
-                  Đây là chỗ đổi nghĩa lớn nhất của màn hình. Câu cũ ("Chờ admin gửi hóa đơn
-                  EVN … khi admin gửi xong bạn ghi chỉ số như bình thường") biến việc chụp
-                  đồng hồ thành việc phải xếp hàng sau admin. Giấy nhà nước tháng sau mới về,
-                  còn công tơ thì hết ngày cuối tháng là khép kỳ — chờ giấy là chỉ số đã trôi.
+                  Chỉ còn NHÀ NGUYÊN CĂN tới được nhánh này — nhà chia phòng đã rẽ sang
+                  `NoBillNote` ở trên. Nguyên căn không có việc gì để làm trên màn này nên thẻ
+                  to không che mất thứ gì.
                 */
                 <View style={styles.evnWaitBox}>
                   <Text style={styles.evnWaitEmoji}>⏳</Text>
                   <Text style={styles.evnWaitTitle}>Admin chưa đẩy hoá đơn EVN kỳ {periodLabel}</Text>
                   <Text style={styles.evnWaitText}>
-                    {isWholeHouse
-                      ? 'Nhà nguyên căn không cần chụp đồng hồ: hoá đơn EVN chính là hoá đơn của căn này, '
-                        + 'hệ thống gửi thẳng cho khách ngay khi admin đẩy lên.'
-                      : 'Không sao — cứ chốt chỉ số bên dưới. Khách CHƯA nhận gì cả.\n\n'
-                        + 'Khi admin đẩy hoá đơn EVN của kỳ này lên, hệ thống tự nhân đơn giá với chỉ số '
-                        + 'bạn đã chốt rồi gửi hoá đơn thẳng cho từng khách. Bạn và khách đều được báo lúc đó.'}
+                    Nhà nguyên căn không cần chụp đồng hồ: hoá đơn EVN chính là hoá đơn của căn này,
+                    hệ thống gửi thẳng cho khách ngay khi admin đẩy lên.
                   </Text>
                   <TouchableOpacity
                     style={[styles.primaryBtn, { marginTop: Spacing.md }]}
@@ -1944,6 +2002,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 </>
               )}
             </View>
+            )}
 
             {isWholeHouse ? (
               <View style={styles.actionRow}>
@@ -1983,17 +2042,38 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                   Phòng bị loại khỏi kỳ phải được NÓI RA. Không nói thì quản lý mở nhà 4
                   phòng ra thấy 1 phòng, hoặc thấy trống trơn, và không có cách nào biết đó
                   là đúng hay là app hỏng — rồi sẽ đi hỏi admin.
+
+                  Trống hẳn (vd. nhà mới đón khách tháng này, mở giữa tháng) thì nói luôn
+                  hôm nào mới chụp được, thay vì để quản lý tưởng đang phải chờ admin.
                 */}
-                {elecSkippedRooms > 0 && (
+                {nothingToRead ? (
+                  <View style={styles.card}>
+                    <View style={styles.evnWaitBox}>
+                      {/* Không dùng 📅: emoji lịch vẽ sẵn một ngày cụ thể ("July 17"), người
+                          xem đọc thành ngày chụp — trong khi hạn là ngày cuối tháng. */}
+                      <Text style={styles.evnWaitEmoji}>⏰</Text>
+                      <Text style={styles.evnWaitTitle}>
+                        {readingDay ? `Kỳ ${periodLabel} không có phòng nào để chốt` : 'Chưa tới ngày chốt số điện'}
+                      </Text>
+                      <Text style={styles.evnWaitText}>
+                        {elecSkippedRooms > 0
+                          ? `Kỳ ${periodLabel}: cả ${elecSkippedRooms} phòng đều đón khách sau khi kỳ này khép, nên không có số điện nào để thu — quãng nhà còn trống công ty chịu.`
+                          : `Kỳ ${periodLabel}: nhà này chưa có phòng nào có khách.`}
+                        {!readingDay && `\n\nKỳ ${nextReading.periodLabel} chốt vào ngày ${nextReading.dateLabel} (ngày cuối tháng). `
+                          + 'Hôm đó My Task sẽ nhắc, mở lại màn này là chụp đồng hồ và chốt số được ngay — '
+                          + 'không cần chờ admin đẩy hoá đơn EVN.'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : elecSkippedRooms > 0 && (
                   <View style={styles.infoBanner}>
                     <Text style={styles.infoBannerText}>
-                      {roomElecReadings.length === 0
-                        ? `Kỳ ${periodLabel} chưa có phòng nào để chốt: cả ${elecSkippedRooms} phòng đều đón khách sau khi kỳ này khép. Tiền điện của kỳ này thuộc quãng nhà còn trống, công ty chịu.`
-                        : `Đã bỏ qua ${elecSkippedRooms} phòng đón khách sau khi kỳ ${periodLabel} khép — khách chưa ở thì không có số điện của kỳ này để thu.`}
+                      Đã bỏ qua {elecSkippedRooms} phòng đón khách sau khi kỳ {periodLabel} khép — khách chưa ở thì không có số điện của kỳ này để thu.
                     </Text>
                   </View>
                 )}
 
+                {!nothingToRead && (
                 <View style={styles.progressRow}>
                   <Text style={styles.progressText}>
                     Đã chốt: {elecTask.roomsDone}/{elecTask.roomsTotal} phòng
@@ -2016,6 +2096,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     </TouchableOpacity>
                   )}
                 </View>
+                )}
 
                 {/* Hạn mức chỉ có nghĩa khi đã biết tổng trên giấy nhà nước. Chưa có hoá đơn
                     EVN thì không có gì để so — `QuotaBar` tự trả null, để đây cho rõ ý. */}
@@ -2164,6 +2245,13 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
             {!!waterBill && <MeterTaskBanner bill={waterTask} kind="water" />}
 
             {/* ── Thẻ trạng thái hoá đơn nước ── */}
+            {!waterBill && !waterBillLoading && !waterBillError ? (
+              <NoBillNote
+                text={'Chưa có hoá đơn nước mới — bình thường. Cứ chốt số từng phòng bên dưới, khách chưa nhận gì. '
+                  + 'Admin đẩy hoá đơn lên là hệ thống tự tính tiền và gửi cho khách.'}
+                onRecheck={() => waterPropertyId && enterWaterReadings(waterPropertyId)}
+              />
+            ) : (
             <View style={styles.card}>
               {waterBillLoading ? (
                 <View style={styles.scanningRow}>
@@ -2182,23 +2270,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                     <Text style={styles.primaryBtnText}>Thử lại</Text>
                   </TouchableOpacity>
                 </View>
-              ) : !waterBill ? (
-                <View style={styles.evnWaitBox}>
-                  <Text style={styles.evnWaitEmoji}>💧</Text>
-                  <Text style={styles.evnWaitTitle}>Chưa có hoá đơn nước của nhà này</Text>
-                  <Text style={styles.evnWaitText}>
-                    Bình thường — cứ chốt chỉ số bên dưới. Khách CHƯA nhận gì cả.
-                    {'\n\n'}Khi admin đẩy hoá đơn nước lên, hệ thống tự nhân đơn giá với chỉ số
-                    bạn đã chốt rồi gửi hoá đơn thẳng cho từng khách. Bạn và khách đều được báo lúc đó.
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.primaryBtn, { marginTop: Spacing.md }]}
-                    onPress={() => waterPropertyId && enterWaterReadings(waterPropertyId)}
-                  >
-                    <Text style={styles.primaryBtnText}>🔄 Kiểm tra lại</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
+              ) : !waterBill ? null : (
                 <>
                   <View style={styles.evnResult}>
                     <View style={styles.evnResultHeader}>
@@ -2229,6 +2301,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
                 </>
               )}
             </View>
+            )}
 
             {!!waterReadingsError && (
               <View style={styles.evnWaitBox}>
@@ -2716,7 +2789,9 @@ const SentInvoicePanel: React.FC<{
     return () => { alive = false; };
   }, [propertyId, type, reloadKey]);
 
-  if (!propertyId) return null;
+  // Chưa gửi hoá đơn nào thì không chiếm chỗ: một thẻ nguyên khối chỉ để nói "chưa có gì"
+  // đẩy thẻ phòng — việc chính của màn — xuống dưới mép màn hình.
+  if (!propertyId || list.length === 0) return null;
 
   const paid   = list.filter(i => i.status === 'PAID').length;
   const unpaid = list.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE').length;
@@ -2728,39 +2803,46 @@ const SentInvoicePanel: React.FC<{
         {loading && <ActivityIndicator size="small" color={Colors.primary} />}
       </View>
 
-      {list.length === 0 ? (
-        <Text style={statusSt.empty}>
-          {loading ? 'Đang tải...' : `Chưa gửi hóa đơn ${label} nào cho nhà này.`}
-        </Text>
-      ) : (
-        <>
-          <View style={statusSt.statRow}>
-            <Text style={[statusSt.statChip, { color: Colors.success }]}>● Đã thu: {paid}</Text>
-            <Text style={[statusSt.statChip, { color: Colors.warning }]}>● Chưa thu: {unpaid}</Text>
+      <View style={statusSt.statRow}>
+        <Text style={[statusSt.statChip, { color: Colors.success }]}>● Đã thu: {paid}</Text>
+        <Text style={[statusSt.statChip, { color: Colors.warning }]}>● Chưa thu: {unpaid}</Text>
+      </View>
+      {list.map(inv => {
+        const st = UTIL_STATUS[inv.status] ?? UTIL_STATUS.PENDING;
+        return (
+          <View key={inv.id} style={statusSt.row}>
+            <View style={{ flex: 1 }}>
+              <Text style={statusSt.rowTitle}>
+                {inv.roomNumber ? `Phòng ${inv.roomNumber}` : 'Nhà nguyên căn'} · T{String(inv.month).padStart(2, '0')}/{inv.year}
+              </Text>
+              <Text style={statusSt.rowSub}>
+                {(inv.tenantName || inv.code)} · {fmt(inv.amount)}
+              </Text>
+            </View>
+            <View style={[statusSt.badge, { backgroundColor: st.bg }]}>
+              <Text style={[statusSt.badgeText, { color: st.color }]}>{st.label}</Text>
+            </View>
           </View>
-          {list.map(inv => {
-            const st = UTIL_STATUS[inv.status] ?? UTIL_STATUS.PENDING;
-            return (
-              <View key={inv.id} style={statusSt.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={statusSt.rowTitle}>
-                    {inv.roomNumber ? `Phòng ${inv.roomNumber}` : 'Nhà nguyên căn'} · T{String(inv.month).padStart(2, '0')}/{inv.year}
-                  </Text>
-                  <Text style={statusSt.rowSub}>
-                    {(inv.tenantName || inv.code)} · {fmt(inv.amount)}
-                  </Text>
-                </View>
-                <View style={[statusSt.badge, { backgroundColor: st.bg }]}>
-                  <Text style={[statusSt.badgeText, { color: st.color }]}>{st.label}</Text>
-                </View>
-              </View>
-            );
-          })}
-        </>
-      )}
+        );
+      })}
     </View>
   );
 };
+
+/**
+ * Chưa có hoá đơn tổng (EVN / nước) — trạng thái BÌNH THƯỜNG của luồng chốt số trước.
+ *
+ * Một dòng gọn thay cho thẻ to có icon + nút (18/09/2026): thẻ to chiếm gần hết màn hình,
+ * đẩy thẻ phòng — việc chính — xuống dưới mép, và trông như màn hình đang bắt chờ admin.
+ */
+const NoBillNote: React.FC<{ text: string; onRecheck: () => void }> = ({ text, onRecheck }) => (
+  <View style={styles.noBillNote}>
+    <Text style={styles.noBillNoteText}>{text}</Text>
+    <TouchableOpacity onPress={onRecheck} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+      <Text style={styles.editLink}>🔄 Kiểm tra lại</Text>
+    </TouchableOpacity>
+  </View>
+);
 
 const PICKER_PAGE_SIZE = 8; // số nhà hiện ban đầu; còn lại mở dần qua nút "Xem thêm"
 
@@ -3104,6 +3186,12 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3, borderLeftColor: Colors.primary,
   },
   infoBannerText: { fontSize: 12, color: Colors.primary, fontWeight: '600' },
+  noBillNote: {
+    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
+    padding: Spacing.md, marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, gap: Spacing.xs,
+  },
+  noBillNoteText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
 
   propertyRow: {
     flexDirection: 'row', alignItems: 'center', padding: Spacing.md,

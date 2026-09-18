@@ -104,4 +104,19 @@ export const managerWaterBillService = {
     // Bản bị admin thu hồi coi như không có — không được tính theo đơn giá đã huỷ.
     return items.find((b) => b.status !== 'REVOKED') ?? null;
   },
+
+  /**
+   * Hoá đơn nước MỚI NHẤT của nhà, bất kể tháng — đúng thứ máy chủ dùng để ghép khi quản lý
+   * chốt số (`saveLockedReading` lấy bản PUBLISHED mới nhất). Hỏi theo tháng như
+   * `getForPeriod` thì admin ghi tháng khác đi là app báo "chưa có hoá đơn" trong khi máy
+   * chủ đã có. BE sắp theo `createdAt DESC` nên phần tử đầu là mới nhất.
+   */
+  getLatest: async (propertyId: number): Promise<WaterBill | null> => {
+    const { data } = await realApiClient.get<{ items?: WaterBill[] } | WaterBill[]>(
+      '/api/v1/manager/utility-bills',
+      { params: { propertyId, type: 'WATER' } },
+    );
+    const items = Array.isArray(data) ? data : data?.items ?? [];
+    return items.find((b) => b.status !== 'REVOKED') ?? null;
+  },
 };

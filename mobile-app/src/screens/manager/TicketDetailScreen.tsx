@@ -536,10 +536,12 @@ export const TicketDetailScreen: React.FC = () => {
     realEquipmentService.getMaintenanceHistory(realEquipmentId)
       .then((list) => {
         if (!active) return;
-        const others = list.filter((h) => h.maintenanceRequestId !== idNum);
+        // Mỗi dòng là một PHIẾU (xem `getMaintenanceHistory`): loại chính phiếu này theo `id`,
+        // mốc sửa = lúc xong, chưa xong thì lúc báo.
+        const others = list.filter((h) => h.id !== idNum);
         setEquipRepairCount(others.length);
         const last = others
-          .map((h) => h.maintenanceDate)
+          .map((h) => h.resolvedAt ?? h.createdAt)
           .filter(Boolean)
           .sort()
           .pop();

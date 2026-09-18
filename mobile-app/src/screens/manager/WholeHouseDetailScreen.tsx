@@ -14,6 +14,7 @@ import {
   invoiceKind, invoiceAmountText,
 } from '@/services/manager/invoiceService';
 import { serverNow } from '@/utils/serverTime';
+import { EquipmentSummaryCard } from '@/components/manager/EquipmentSummaryCard';
 
 const STATUS_META: Record<WholeHouseRentalStatus, { label: string; color: string; bg: string }> = {
   rented: { label: 'Đang thuê', color: Colors.success, bg: Colors.successLight },
@@ -376,6 +377,19 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
               </Text>
             )}
           </>
+        )}
+
+        {/*
+          Nằm NGOÀI nhánh có hợp đồng: đồ đạc được kiểm kê từ lúc tiếp nhận nhà, nhà đang
+          trống vẫn phải xem và cập nhật được (vd. trước khi đón khách mới).
+        */}
+        {!loading && Number.isFinite(pid) && (
+          <View style={{ marginTop: Spacing.lg }}>
+            <EquipmentSummaryCard
+              propertyId={pid}
+              onOpen={() => navigation.navigate('Equipment', { propertyId: pid })}
+            />
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
