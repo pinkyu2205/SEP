@@ -168,6 +168,19 @@ export const meterReadingDeadline = (now: Date = serverNow()): string => {
   return `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
 };
 
+/**
+ * Ngày chốt số KẾ TIẾP = ngày cuối của tháng dương lịch hiện tại (chính hôm nay nếu hôm nay
+ * là ngày cuối tháng). Dùng để nói với quản lý "kỳ tháng này chụp vào hôm nào" khi màn hình
+ * còn đang mở kỳ tháng trước.
+ */
+export const nextMeterReadingDate = (now: Date = serverNow()) => {
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const mm = String(month).padStart(2, '0');
+  const dd = String(lastDayOfMonth(now)).padStart(2, '0');
+  return { dateLabel: `${dd}/${mm}/${year}`, periodLabel: `${mm}/${year}` };
+};
+
 /** Câu luật hiện dưới thanh bước của tab Điện — thay `UTILITY_WINDOW_TEXT` (chỉ đúng cho nước). */
 export const METER_READING_RULE_TEXT =
   'Chốt số vào ngày cuối tháng · hoá đơn tự phát hành khi admin đẩy hoá đơn EVN';
