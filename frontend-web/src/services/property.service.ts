@@ -97,25 +97,13 @@ export const propertyService = {
     return out;
   },
 
-  /** PUT /properties/{id} — Cập nhật thông tin cơ bản */
   /**
-   * PATCH /properties/{id}/utility-customer-codes — sửa mã KH điện / số danh bộ nước của
-   * căn nhà ĐÃ TỒN TẠI (BE 5c6a65c).
+   * PUT /properties/{id} — Cập nhật thông tin cơ bản.
    *
-   * Vì sao cần một endpoint riêng thay vì dùng `updateProperty`: mã là thứ phải sửa được
-   * lẻ, sau khi nhà đã chạy. EVN đổi mã, hoặc file Excel tiếp nhận gõ nhầm một ký tự — mà
-   * gọi `updateProperty` thì phải gửi lại toàn bộ hồ sơ nhà, tức mở đường ghi đè nhầm
-   * những trường không liên quan chỉ để sửa một chuỗi.
-   *
-   * Quy ước của máy chủ: `undefined`/không gửi = không đổi; chuỗi RỖNG = xoá mã.
+   * Mã KH điện / số danh bộ nước KHÔNG sửa qua giao diện (chốt 17/09/2026) — chỉ đổi bằng cách
+   * nhập lại file Khởi tạo nhà (máy chủ trả CODES_UPDATED). Đã gỡ wrapper PATCH
+   * `.../utility-customer-codes` từng dùng cho ô sửa mã ở Cấu hình khai thác.
    */
-  updateUtilityCustomerCodes: (
-    id: number,
-    data: { electricityCustomerCode?: string; waterCustomerCode?: string },
-  ): Promise<PropertyResponse> => {
-    return api.patch(`${BASE}/${id}/utility-customer-codes`, data);
-  },
-
   updateProperty: (id: number, data: PropertyCreateRequest | PropertyDraftRequest): Promise<PropertyResponse> => {
     return api.put(`${BASE}/${id}`, data);
   },

@@ -1,8 +1,9 @@
 import realApiClient from '@/services/core/realApiClient';
 import type {
   EquipmentDto,
-  EquipmentMaintenanceHistoryDto,
   EquipmentLifecycleStatus,
+  EquipmentMaintenanceHistoryDto,
+  MaintenanceRequestDto,
 } from '@/types';
 
 /**
@@ -80,11 +81,27 @@ export const realEquipmentService = {
   },
 
   /**
-   * GET /api/v1/equipment/{id}/maintenance-history — lịch sử bảo trì của 1 thiết bị, trả
-   * EquipmentMaintenanceHistoryResponse (có `photoUrls`). Danh sách phiếu bảo trì của thiết
-   * bị nằm ở `/maintenance-tickets`, không dùng ở đây.
+   * Các PHIẾU BẢO TRÌ gắn với 1 thiết bị, mới nhất trước — dùng cho "Lịch sử bảo trì" ở màn
+   * Thiết bị và đếm số lần hỏng ở TicketDetailScreen.
+   *
+   * BE 21/09/2026 (commit b270c35): danh sách phiếu chuyển sang
+   * `GET /equipment/{id}/maintenance-tickets` (`List<MaintenanceRequestResponse>`); route
+   * `/maintenance-history` giờ trả bản ghi lịch sử (xem `getMaintenanceRecords`). Trước đó
+   * `/maintenance-history` trả phiếu, nên tên hàm giữ nguyên để các màn cũ không phải đổi.
    */
-  getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
+  getMaintenanceHistory: async (id: number): Promise<MaintenanceRequestDto[]> => {
+    const { data } = await realApiClient.get<MaintenanceRequestDto[]>(
+      `/api/v1/equipment/${id}/maintenance-tickets`,
+    );
+    return data;
+  },
+
+  /**
+   * GET /api/v1/equipment/{id}/maintenance-history — bản ghi lịch sử bảo trì
+   * (`EquipmentMaintenanceHistoryResponse`: ngày, chi phí, ghi chú, `photoUrls` ảnh
+   * trước/sau/hoá đơn của từng lần).
+   */
+  getMaintenanceRecords: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
       `/api/v1/equipment/${id}/maintenance-history`,
     );

@@ -11,13 +11,14 @@
  * State/bộ lọc nằm ở ./propertyListState (giữ file này chỉ export component để
  * React Fast Refresh hoạt động).
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertCircle, ArrowDownUp, ArrowRight, Building2, ChevronLeft, ChevronRight, DoorOpen,
-  Home, KeyRound, Layers, LayoutGrid, MapPin, Receipt, RotateCcw, Ruler, Search, SlidersHorizontal,
+  Hammer, Home, KeyRound, Layers, LayoutGrid, MapPin, Receipt, RotateCcw, Ruler, Search, SlidersHorizontal,
   Table2, User, Wallet, X, type LucideIcon,
 } from 'lucide-react';
 import type { PropertyResponse } from '@/types/api.types';
+import { propertyService } from '@/services/property.service';
 import { normalizeVi } from '@/utils/helpers';
 import {
   STATUS_BADGE, HOST_STATUS_CHIPS, SORT_LABEL, TYPE_LABEL, MANAGER_LABEL,
@@ -95,43 +96,168 @@ export const StatTile = ({
 };
 
 // ─── Hồ sơ chờ Host phê duyệt ───────────────────────────────────────────────
-/** 1 dòng hồ sơ chờ duyệt — dùng cho cả dải xem nhanh và popup danh sách đầy đủ. */
-const PendingRow = ({ p, onOpen }: { p: PropertyResponse; onOpen: () => void }) => (
-  <button onClick={onOpen}
-    className="group flex w-full min-w-0 items-center gap-3 rounded-xl bg-white px-3.5 py-2.5 text-left transition hover:bg-amber-50">
-    <div className="flex h-11 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-amber-50">
-      {p.imageUrls?.length
-        ? <img src={p.imageUrls[0]} alt="" className="h-full w-full object-cover" />
-        : <Building2 className="h-4 w-4 text-amber-300" />}
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="truncate text-sm font-bold text-slate-800 transition group-hover:text-amber-700">
-        {p.propertyName}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
-        <MapPin className="h-3 w-3 shrink-0" />
-        <span className="truncate">{p.fullAddress || p.shortAddress}</span>
-      </p>
-    </div>
-    <span className="flex shrink-0 items-center gap-1 text-xs font-bold text-amber-600">
-      Duyệt <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-    </span>
-  </button>
-);
+/**
+ * Hồ sơ chờ duyệt giá có HAI loại, việc Host phải làm khác hẳn nhau:
+ *
+ *  - NHÀ MỚI (chỉ có đợt cải tạo 1, hoặc không cải tạo): chưa từng cho thuê. Host đọc toàn bộ
+ *    tiền bỏ ra, đặt mục tiêu lãi, chốt giá rồi KÍCH HOẠT cho nhà nhận khách.
+ *  - CẢI TẠO BỔ SUNG (có đợt ≥ 2): nhà đang cho thuê, giá cũ đã duyệt. Host chỉ xem đợt vừa làm
+ *    thêm gì và chốt GIÁ NIÊM YẾT MỚI — khách đang ở giữ nguyên giá hợp đồng.
+ *
+ * Trộn chung một danh sách thì Host không biết bấm vào sẽ gặp màn nào, cũng không ưu tiên được
+ * (nhà đang có khách mà treo duyệt lại giá lâu thì phòng trống vẫn niêm yết giá cũ).
+ *
+ * Phân loại bằng đúng quy tắc màn /host/review/:id dùng để chọn giao diện
+ * (`sessions.some(s => s.sessionNumber >= 2)`), nên bấm vào cột nào là ra đúng màn cột đó.
+ */
+export type PendingKind = 'fresh' | 'repricing';
 
-const PENDING_PER_PAGE = 12;
+/** Số đợt cải tạo lớn nhất của mỗi hồ sơ chờ duyệt; `undefined` = đang tải. */
+const usePendingSessions = (items: PropertyResponse[]) => {
+  const [maxSession, setMaxSession] = useState<Record<number, number>>({});
+  const [loading, setLoading] = useState(false);
+  const idsKey = items.map(p => p.id).join(',');
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    let alive = true;
+    setLoading(true);
+    // Danh sách bất động sản không kèm đợt cải tạo — phải hỏi riêng từng hồ sơ. Số hồ sơ chờ
+    // duyệt thường chỉ vài cái nên gọi song song là đủ nhanh.
+    Promise.allSettled(items.map(p => propertyService.getRenovationSessions(p.id)))
+      .then(results => {
+        if (!alive) return;
+        const next: Record<number, number> = {};
+        results.forEach((r, i) => {
+          next[items[i].id] = r.status === 'fulfilled'
+            ? Math.max(0, ...r.value.map(s => s.sessionNumber ?? 0))
+            : 0; // hỏi lỗi thì coi như nhà mới — màn duyệt giá tự chọn lại cho đúng khi mở
+        });
+        setMaxSession(next);
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
+
+  const kindOf = (p: PropertyResponse): PendingKind => ((maxSession[p.id] ?? 0) >= 2 ? 'repricing' : 'fresh');
+  return { maxSession, loading, kindOf };
+};
+
+const KIND_META: Record<PendingKind, {
+  title: string; desc: string; icon: LucideIcon; head: string; count: string; hover: string; action: string;
+}> = {
+  fresh: {
+    title: 'Nhà mới — duyệt giá lần đầu',
+    desc: 'Chưa từng cho thuê. Duyệt xong nhà được kích hoạt và bắt đầu nhận khách.',
+    icon: Home,
+    head: 'border-amber-200 bg-amber-50',
+    count: 'bg-amber-500 text-white',
+    hover: 'hover:bg-amber-50 group-hover:text-amber-700',
+    action: 'text-amber-600',
+  },
+  repricing: {
+    title: 'Cải tạo bổ sung — duyệt lại giá',
+    desc: 'Nhà đang cho thuê vừa cải tạo thêm. Chốt giá niêm yết mới; khách đang ở giữ giá hợp đồng.',
+    icon: Hammer,
+    head: 'border-indigo-200 bg-indigo-50',
+    count: 'bg-indigo-600 text-white',
+    hover: 'hover:bg-indigo-50 group-hover:text-indigo-700',
+    action: 'text-indigo-600',
+  },
+};
+
+/** 1 dòng hồ sơ chờ duyệt. */
+const PendingRow = ({ p, kind, session, onOpen }: {
+  p: PropertyResponse;
+  kind: PendingKind;
+  session?: number;
+  onOpen: () => void;
+}) => {
+  const meta = KIND_META[kind];
+  return (
+    <button onClick={onOpen}
+      className={`group flex w-full min-w-0 items-center gap-3 rounded-xl bg-white px-3 py-2.5 text-left transition ${meta.hover.split(' ')[0]}`}>
+      <div className="flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-50">
+        {p.imageUrls?.length
+          ? <img src={p.imageUrls[0]} alt="" className="h-full w-full object-cover" />
+          : <Building2 className="h-4 w-4 text-slate-300" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className={`flex items-center gap-1.5 text-sm font-bold text-slate-800 transition ${meta.hover.split(' ')[1]}`}>
+          <span className="truncate">{p.propertyName}</span>
+          {kind === 'repricing' && session != null && session >= 2 && (
+            <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-black text-indigo-700">
+              Đợt {session}
+            </span>
+          )}
+        </p>
+        <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
+          <MapPin className="h-3 w-3 shrink-0" />
+          <span className="truncate">{p.fullAddress || p.shortAddress}</span>
+        </p>
+      </div>
+      <span className={`flex shrink-0 items-center gap-0.5 text-xs font-bold ${meta.action}`}>
+        Duyệt <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </button>
+  );
+};
+
+/** Một cột trong popup — mỗi loại hồ sơ một cột, cuộn riêng. */
+const PendingColumn = ({ kind, rows, total, loading, maxSession, onOpen }: {
+  kind: PendingKind;
+  rows: PropertyResponse[];
+  total: number;
+  loading: boolean;
+  maxSession: Record<number, number>;
+  onOpen: (p: PropertyResponse) => void;
+}) => {
+  const meta = KIND_META[kind];
+  const Icon = meta.icon;
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200">
+      <div className={`border-b px-4 py-3 ${meta.head}`}>
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-slate-600" />
+          <h4 className="flex-1 text-sm font-black text-slate-800">{meta.title}</h4>
+          <span className={`min-w-[1.75rem] rounded-full px-2 py-0.5 text-center text-xs font-black ${meta.count}`}>
+            {loading ? '…' : total}
+          </span>
+        </div>
+        <p className="mt-1 text-[11px] leading-snug text-slate-500">{meta.desc}</p>
+      </div>
+      <div className="min-h-[8rem] flex-1 overflow-y-auto p-1.5">
+        {loading ? (
+          <p className="py-10 text-center text-xs text-slate-400">Đang phân loại hồ sơ…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-10 text-center text-xs text-slate-400">
+            {total === 0 ? 'Không có hồ sơ nào' : 'Không có hồ sơ nào khớp từ khóa'}
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {rows.map(p => (
+              <PendingRow key={p.id} p={p} kind={kind} session={maxSession[p.id]} onOpen={() => onOpen(p)} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+};
 
 /**
- * Popup danh sách đầy đủ hồ sơ chờ duyệt — có tìm kiếm + phân trang nên chịu
- * được vài trăm hồ sơ (bung hết inline thì trang dài vô tận).
+ * Popup đầy đủ: hai cột "Nhà mới" và "Cải tạo bổ sung", tìm kiếm áp cho cả hai. Mỗi cột cuộn
+ * riêng nên chịu được vài trăm hồ sơ mà popup không dài ra.
  */
-const PendingApprovalModal = ({ items, onOpen, onClose }: {
+const PendingApprovalModal = ({ items, sessions, onOpen, onClose }: {
   items: PropertyResponse[];
+  sessions: ReturnType<typeof usePendingSessions>;
   onOpen: (p: PropertyResponse) => void;
   onClose: () => void;
 }) => {
   const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
+  const { loading, kindOf, maxSession } = sessions;
 
   const filtered = useMemo(() => {
     const kw = normalizeVi(q.trim());
@@ -142,14 +268,13 @@ const PendingApprovalModal = ({ items, onOpen, onClose }: {
     );
   }, [items, q]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PENDING_PER_PAGE));
-  const safePage = Math.min(page, totalPages);
-  const paged = filtered.slice((safePage - 1) * PENDING_PER_PAGE, safePage * PENDING_PER_PAGE);
+  const fresh = items.filter(p => kindOf(p) === 'fresh');
+  const repricing = items.filter(p => kindOf(p) === 'repricing');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm"
       onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
@@ -158,7 +283,11 @@ const PendingApprovalModal = ({ items, onOpen, onClose }: {
           </span>
           <div className="min-w-0 flex-1">
             <h3 className="font-black text-slate-900">Hồ sơ chờ bạn phê duyệt giá</h3>
-            <p className="text-xs text-slate-500">Bấm vào một hồ sơ để xem và duyệt</p>
+            <p className="text-xs text-slate-500">
+              {loading
+                ? 'Bấm vào một hồ sơ để xem và duyệt'
+                : <>{fresh.length} nhà mới · {repricing.length} cải tạo bổ sung — bấm vào một hồ sơ để xem và duyệt</>}
+            </p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
             <X className="h-5 w-5" />
@@ -169,11 +298,11 @@ const PendingApprovalModal = ({ items, onOpen, onClose }: {
         <div className="border-b border-slate-100 px-5 py-3">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} autoFocus
+            <input value={q} onChange={e => setQ(e.target.value)} autoFocus
               placeholder="Tìm theo tên tòa nhà, địa chỉ, khu vực... (không cần dấu)"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-9 text-sm outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100" />
             {q && (
-              <button onClick={() => { setQ(''); setPage(1); }}
+              <button onClick={() => setQ('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-slate-400 transition hover:bg-slate-200">
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -181,37 +310,21 @@ const PendingApprovalModal = ({ items, onOpen, onClose }: {
           </div>
         </div>
 
-        {/* Danh sách */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-          {paged.length === 0 ? (
-            <p className="py-12 text-center text-sm text-slate-400">Không có hồ sơ nào khớp từ khóa.</p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {paged.map(p => <PendingRow key={p.id} p={p} onOpen={() => onOpen(p)} />)}
-            </div>
-          )}
+        {/* Hai cột */}
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 md:grid-cols-2 md:overflow-hidden">
+          <PendingColumn kind="fresh" total={fresh.length} loading={loading} maxSession={maxSession}
+            rows={filtered.filter(p => kindOf(p) === 'fresh')} onOpen={onOpen} />
+          <PendingColumn kind="repricing" total={repricing.length} loading={loading} maxSession={maxSession}
+            rows={filtered.filter(p => kindOf(p) === 'repricing')} onOpen={onOpen} />
         </div>
 
-        {/* Chân: kết quả + phân trang */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-5 py-3">
+        {/* Chân */}
+        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
           <p className="text-xs text-slate-500">
-            Hiển thị <b className="text-slate-800">{filtered.length === 0 ? 0 : (safePage - 1) * PENDING_PER_PAGE + 1}–
-            {Math.min(safePage * PENDING_PER_PAGE, filtered.length)}</b> trên{' '}
-            <b className="text-slate-800">{filtered.length}</b> hồ sơ
+            {q
+              ? <>Khớp <b className="text-slate-800">{filtered.length}</b> / {items.length} hồ sơ</>
+              : <>Tổng <b className="text-slate-800">{items.length}</b> hồ sơ chờ duyệt</>}
           </p>
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1.5">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:opacity-40">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <span className="px-1 text-xs font-bold text-slate-500">{safePage} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 disabled:opacity-40">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -219,16 +332,19 @@ const PendingApprovalModal = ({ items, onOpen, onClose }: {
 };
 
 /**
- * Dải nhắc việc gọn 1 dòng: số lượng + tên vài hồ sơ đầu, bấm vào mở popup có
- * tìm kiếm & phân trang. Chiều cao không đổi dù có 10 hay 1000 hồ sơ.
+ * Dải nhắc việc gọn 1 dòng: số lượng theo từng loại + tên vài hồ sơ đầu, bấm vào mở popup hai
+ * cột. Chiều cao không đổi dù có 10 hay 1000 hồ sơ.
  */
 export const PendingApprovalPanel = ({ items, onOpen }: {
   items: PropertyResponse[];
   onOpen: (p: PropertyResponse) => void;
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
+  const sessions = usePendingSessions(items);
   if (items.length === 0) return null;
 
+  const repricingCount = sessions.loading ? 0 : items.filter(p => sessions.kindOf(p) === 'repricing').length;
+  const freshCount = items.length - repricingCount;
   const names = items.slice(0, 2).map(p => p.propertyName);
   const rest = items.length - names.length;
 
@@ -240,8 +356,16 @@ export const PendingApprovalPanel = ({ items, onOpen }: {
           <AlertCircle className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold leading-tight text-amber-900">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-bold leading-tight text-amber-900">
             {items.length} hồ sơ đang chờ bạn phê duyệt giá
+            {!sessions.loading && (
+              <span className="flex items-center gap-1.5">
+                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-white">{freshCount} nhà mới</span>
+                {repricingCount > 0 && (
+                  <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-black text-white">{repricingCount} cải tạo bổ sung</span>
+                )}
+              </span>
+            )}
           </p>
           <p className="truncate text-xs text-amber-700/90">
             {names.join(' · ')}{rest > 0 && ` · +${rest} hồ sơ khác`}
@@ -255,6 +379,7 @@ export const PendingApprovalPanel = ({ items, onOpen }: {
       {modalOpen && (
         <PendingApprovalModal
           items={items}
+          sessions={sessions}
           onOpen={p => { setModalOpen(false); onOpen(p); }}
           onClose={() => setModalOpen(false)}
         />

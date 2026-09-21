@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { AlertCircle, Check, ChevronDown } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 import type { PricingCalculationResponse } from '@/types/api.types';
 
 /**
@@ -154,6 +154,116 @@ export const BigStat = ({ label, value, sub, tone = 'slate' }: {
       <p className="text-[11px] font-bold uppercase tracking-wide opacity-60">{label}</p>
       <p className="mt-1 text-lg font-black leading-none tabular-nums">{value}</p>
       {sub && <p className="mt-1 text-[11px] font-medium opacity-70">{sub}</p>}
+    </div>
+  );
+};
+
+// ─── Khối "bấm mới mở" — dùng chung cho Cấu hình giá, Duyệt giá, Duyệt lại giá ─────
+
+/** Một phép tính hiển thị dạng chữ đều, xuống dòng được bằng '\n'. */
+export const ExplainFormula = ({ children }: { children: ReactNode }) => (
+  <p className="whitespace-pre-line rounded-lg bg-white px-2.5 py-2 font-mono text-[11px] leading-relaxed text-slate-700 ring-1 ring-slate-200">
+    {children}
+  </p>
+);
+
+/**
+ * Thanh "Cách tính" gấp lại, bấm mới mở. Dùng <details> nên chuột, bàn phím, trình đọc màn
+ * hình đều chạy sẵn. Dòng gợi ý ngắn để ở ngoài; công thức + ví dụ bằng số thật để bên trong.
+ */
+export const Explainer = ({ title, children, className = '' }: {
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) => (
+  <details className={`group rounded-xl border border-slate-200 bg-slate-50/80 ${className}`}>
+    <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-500 transition hover:text-indigo-700">
+      <HelpCircle className="h-3.5 w-3.5" />
+      {title}
+      <ChevronDown className="ml-auto h-3.5 w-3.5 transition group-open:rotate-180" />
+    </summary>
+    <div className="space-y-2.5 border-t border-slate-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
+      {children}
+    </div>
+  </details>
+);
+
+/**
+ * Thẻ số lớn BẤM ĐƯỢC — mặc định chỉ nhãn + số + một dòng phụ; bấm thì bung phần "con số này
+ * ra từ đâu" ngay bên dưới (không popover, vì thẻ nằm giữa trang còn chỗ).
+ */
+export const ExpandStat = ({ label, value, sub, tone = 'slate', detail }: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: 'slate' | 'indigo' | 'emerald' | 'rose' | 'amber';
+  detail?: ReactNode;
+}) => {
+  const [open, setOpen] = useState(false);
+  const map = {
+    slate: 'border-slate-200 bg-white text-slate-900',
+    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-800',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    rose: 'border-rose-200 bg-rose-50 text-rose-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+  }[tone];
+  if (!detail) return <BigStat label={label} value={value} sub={sub} tone={tone} />;
+  return (
+    <div className={`rounded-xl border ${map}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        title={open ? 'Thu gọn cách tính' : 'Xem cách tính'}
+        className="group w-full px-3.5 py-3 text-left">
+        <p className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide opacity-60 group-hover:opacity-90">
+          {label}
+          <ChevronDown className={`ml-auto h-3.5 w-3.5 transition ${open ? 'rotate-180' : ''}`} />
+        </p>
+        <p className="mt-1 text-lg font-black leading-none tabular-nums">{value}</p>
+        {sub && <p className="mt-1 text-[11px] font-medium opacity-70">{sub}</p>}
+      </button>
+      {open && (
+        <div className="space-y-2 border-t border-current/10 bg-white/70 px-3.5 py-3 text-xs leading-relaxed text-slate-600">
+          {detail}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Con số ở THANH DÍNH ĐÁY + cách tính bung lên khi bấm (popover — thanh chỉ cao ba dòng,
+ * in phép tính thẳng ra là vỡ). Bấm ra ngoài là đóng, không che nút xác nhận.
+ */
+export const BarStat = ({ label, value, valueTone = 'text-slate-900', sub, detail, className = '' }: {
+  label: string;
+  value: ReactNode;
+  valueTone?: string;
+  sub?: ReactNode;
+  detail: ReactNode;
+  className?: string;
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`relative ${className}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        title={open ? 'Thu gọn cách tính' : 'Xem cách tính'}
+        className="group text-left">
+        <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-slate-400 transition group-hover:text-indigo-600">
+          {label}
+          <ChevronUp className={`h-3 w-3 transition ${open ? 'rotate-180' : ''}`} />
+        </span>
+        <span className={`block text-lg font-black tabular-nums ${valueTone}`}>{value}</span>
+        {sub && <span className="block text-[11px] font-semibold text-slate-400">{sub}</span>}
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="Đóng" onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default" />
+          <div className="absolute bottom-full left-0 z-50 mb-3 w-[22rem] max-w-[calc(100vw-2rem)] space-y-2 rounded-xl border border-slate-200 bg-white p-3.5 text-xs leading-relaxed text-slate-600 shadow-2xl">
+            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+            {detail}
+          </div>
+        </>
+      )}
     </div>
   );
 };
