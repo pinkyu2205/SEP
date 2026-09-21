@@ -1275,7 +1275,7 @@ export interface PropertyPurgeResponse {
 
 export type MaintenanceRequestStatus =
   | 'OPEN' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
-  | 'OUTSTANDING_DAMAGE' | 'CLOSED' | 'CANCELLED';
+  | 'OUTSTANDING_DAMAGE' | 'WAITING_PAYMENT' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceRequestCategory = 'APPLIANCE' | 'FURNITURE' | 'PLUMBING' | 'ELECTRICAL';
 export type MaintenanceFlowType = 'NORMAL_WEAR' | 'TENANT_FAULT';
@@ -1417,4 +1417,6 @@ export interface EquipmentMaintenanceHistoryResponse {
   maintenanceDate: string;
   repairCost?: number;
   note?: string;
+  /** Ảnh trước / sau / hoá đơn của lần bảo trì (BE 21/09/2026). */
+  photoUrls?: string[];
 }

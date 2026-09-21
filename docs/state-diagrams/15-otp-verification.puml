@@ -1,0 +1,34 @@
+@startuml OtpVerificationState
+title Figure — Auth: mã OTP xác thực (kích hoạt tài khoản, xác nhận hợp đồng hai bên) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> ISSUED : sendOtp(phone, purpose, referenceId)\n6 chữ số ngẫu nhiên, hạn 5 phút (twilio.otp.expiry-minutes),\ngửi qua Twilio; purpose = TENANT_ACTIVATION /\nCONTRACT_CONFIRM_TENANT / CONTRACT_CONFIRM_MANAGER
+
+ISSUED --> ISSUED : Nhập sai\n/ attemptCount + 1, "Mã OTP không đúng"
+
+ISSUED --> VERIFIED : Nhập đúng [chưa hết hạn, attemptCount < 5]\n/ verified = true
+
+ISSUED --> EXPIRED : Quá expiresAt\n"Mã OTP đã hết hạn. Vui lòng gửi lại."
+ISSUED --> LOCKED : attemptCount ≥ 5\n"Đã nhập sai quá số lần cho phép"
+
+EXPIRED --> ISSUED : Gửi lại → tạo bản ghi OTP mới\n(bản mới nhất chưa verified được dùng để kiểm tra)
+LOCKED --> ISSUED : Gửi lại → tạo bản ghi OTP mới
+
+VERIFIED --> [*] : Bước nghiệp vụ tiếp theo\n(đặt mật khẩu / ghi nhận xác nhận của tenant hoặc manager)
+
+note right of ISSUED
+  EXPIRED và LOCKED không phải cột trong DB: đó là kết quả kiểm tra
+  expiresAt và attemptCount khi verifyOrThrow. Chỉ verified được lưu.
+  Hợp đồng chỉ ACTIVE khi cả hai OTP đã xác thực (file 27).
+end note
+
+@enduml

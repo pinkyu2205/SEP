@@ -1,0 +1,198 @@
+@startuml PropertySubmitHostConfirm
+title Figure — Property: Gửi Host duyệt giá, Host xác nhận, nhà ACTIVE và gán Operation Manager Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+actor Host
+participant "Front-end" as FE
+participant "PropertyOnboardingController" as C
+participant "PropertyOnboardingServiceImpl" as S
+participant "DepreciationServiceImpl" as DS
+participant "PropertyRepository" as PR
+participant "DepreciationResultRepository" as DRR
+participant "ZoneManagerRepository" as ZMR
+participant "RoomRepository" as RR
+participant "UnitPriceServiceImpl" as UPS
+participant "TenantOnboardingServiceImpl" as TOS
+participant "NotificationRepository +\nUserPushTokenService" as NP
+database DB
+
+== Admin gửi Host duyệt ==
+Admin -> FE : (1) "Gửi Host duyệt giá"
+FE -> C : (2) POST /api/v1/properties/{propertyId}/submit-to-host
+activate C
+C -> S : (3) submitToHost(propertyId)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> PR : (6) findById(propertyId)
+activate PR
+PR -> DB : (7) SELECT Property
+DB --> PR : (8) property
+PR --> S : (9) property
+deactivate PR
+alt [Nhà không ở RENOVATION_COMPLETED]
+  S --> C : BusinessException "Phải hoàn thành 3 quy trình onboarding"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> S : (10) validateReadyForSubmit(): đã chọn loại hình + cải tạo,\ncó HĐ đầu vào, có hạng mục cải tạo (nếu cải tạo),\nnhà chia phòng: gán đủ thiết bị bàn giao + tạo đủ số phòng,\nđã có lịch cải tạo
+alt [Thiếu dữ liệu bắt buộc]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> DS : (11) calculate(propertyId, CalculateDepreciationRequest)
+activate DS
+DS -> DB : (12) SELECT InboundContract, RenovationSession, Equipment (PURCHASED, ACTIVE), PricingConfig
+DB --> DS : (13) dữ liệu tính giá
+DS -> DS : (14) Xoá kết quả phiên bản hiện tại;\ntính cửa sổ doanh thu; lập PricingCapitalItem\n(tiền thuê đầu vào, cải tạo, thiết bị, dự phòng sửa chữa, lương quản lý…);\ntính giá sàn từng phòng / cả nhà (roomFloor)
+DS -> DRR : (15) save(DepreciationResult) + supersedeOldVersions()
+activate DRR
+DRR -> DB : (16) INSERT DepreciationResult, PricingCapitalItem
+DB --> DRR : (17) OK
+deactivate DRR
+DS --> S : (18) DepreciationCalculationResponse
+deactivate DS
+S -> PR : (19) save(submittedToHostAt = now,\nstatus = PENDING_HOST_REVIEW)
+activate PR
+PR -> DB : (20) UPDATE Property
+DB --> PR : (21) OK
+deactivate PR
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> DB : (22) CommitTransaction()
+DB --> S : (23) Committed
+deactivate DB
+S --> C : (24) OnboardingSummaryResponse
+deactivate S
+C --> FE : (25) 200 OK
+deactivate C
+FE --> Admin : (26) Chờ Host duyệt
+
+== Host xác nhận giá — nhà vào khai thác ==
+Host -> FE : (27) Chọn giá (nhà / từng phòng) + % dự phòng → "Xác nhận"
+FE -> C : (28) POST /api/v1/properties/{propertyId}/host-confirm\nHostConfirmRequest
+activate C
+C -> S : (29) hostConfirm(propertyId, request)
+activate S
+S -> DB : (30) BeginTransaction()
+activate DB
+DB --> S : (31) Success
+S -> PR : (32) findById(propertyId)
+activate PR
+PR --> S : (33) property
+deactivate PR
+alt [Không ở PENDING_HOST_REVIEW / cải tạo chưa xong /\nchưa có kết quả tính giá]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> S : (34) InboundLeaseRules.assertLeaseNotExpired(hôm nay, HĐ đầu vào)
+S -> ZMR : (35) findById(zoneId) — khu vực phải có quản lý vận hành
+activate ZMR
+ZMR -> DB : (36) SELECT ZoneManager
+DB --> ZMR : (37) zoneManager / empty
+ZMR --> S : (38) zoneManager
+deactivate ZMR
+alt [Khu vực chưa có quản lý]
+  S --> C : BusinessException ZONE_HAS_NO_MANAGER\n(giá đã gồm lương quản lý, duyệt xong không tính lại)
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> PR : (39) save(hostContingencyPercent, operationManagerId = manager của khu vực,\nstatus = ACTIVE, managerAcceptedAt)
+activate PR
+PR -> DB : (40) UPDATE Property
+DB --> PR : (41) OK
+deactivate PR
+S -> NP : (42) notifyPropertyAssigned(property, managerId)\nNotification PROPERTY_ASSIGNED + Expo push
+activate NP
+NP -> DB : (43) INSERT Notification
+DB --> NP : (44) OK
+NP --> S : (45) done
+deactivate NP
+alt [Nhà nguyên căn]
+  S -> S : (46) confirmWholeHouse(): không nhận giá theo phòng;\nfinalPrice = resolveFinalPrice(propertyPrice, roomFloor, contingency%)
+  S -> PR : (47) save(property.price, appliedPrice nếu phòng còn DRAFT / AVAILABLE)
+  opt [Giá đổi so với trước]
+    S -> UPS : (48) recordOnboardingPriceChange(HOST_DOI hoặc CAI_TAO_BO_SUNG)
+    activate UPS
+    UPS -> DB : (49) INSERT RoomPriceHistory
+    DB --> UPS : (50) OK
+    deactivate UPS
+  end
+  S -> RR : (51) activateDraftRooms() — phòng DRAFT → AVAILABLE
+else [Nhà chia phòng]
+  S -> S : (46') confirmPerRoom(): bắt buộc gửi giá đủ từng phòng,\nmỗi phòng phải có DepreciationResult
+  loop [Mỗi phòng]
+    S -> RR : (47') room.price = resolveFinalPrice(); appliedPrice nếu DRAFT / AVAILABLE
+    opt [Giá đổi]
+      S -> UPS : (48') recordOnboardingPriceChange(roomId, …)
+    end
+  end
+  S -> RR : (49') saveAll(rooms) + openDraftRoomsIfActive():\nphòng có giá + có kết quả tính giá → AVAILABLE,\nphòng thiếu giá bị bỏ qua và báo trong response
+end
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> DB : (52) CommitTransaction()
+DB --> S : (53) Committed
+deactivate DB
+S --> C : (54) PropertyActivationResponse
+deactivate S
+C --> FE : (55) 200 OK
+deactivate C
+FE --> Host : (56) Nhà ACTIVE, phòng mở cho thuê
+
+== Admin gán / đổi Operation Manager cho nhà ==
+Admin -> FE : (57) Chọn manager → "Gán quản lý"
+FE -> C : (58) POST hoặc PUT /api/v1/properties/{propertyId}/operation-manager
+activate C
+C -> S : (59) assignOperationManager() / changeOperationManager()
+activate S
+S -> S : (60) validateOperationManager(): user phải ROLE_MANAGER và ACTIVE
+alt [Nhà không ở PENDING_OPERATION_MANAGER / ACTIVE / RENTED, hoặc manager không hợp lệ]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> ZMR : (61) upsertZoneManager(): ghi zone_managers\n(một khu vực một quản lý)
+activate ZMR
+ZMR -> DB : (62) INSERT / UPDATE ZoneManager
+DB --> ZMR : (63) OK
+deactivate ZMR
+alt [Nhà đã ACTIVE / RENTED và manager mới khác]
+  S -> PR : (64) save(operationManagerId mới)
+  S -> TOS : (65) reassignManagerForProperty(propertyId, newManagerId)\n→ gán lại mọi hợp đồng chưa kết thúc + thông báo
+  activate TOS
+  TOS -> DB : (66) UPDATE TenantContract.assignedManager
+  DB --> TOS : (67) OK
+  TOS --> S : (68) số hợp đồng đã gán lại
+  deactivate TOS
+else [Nhà đang PENDING_OPERATION_MANAGER]
+  S -> PR : (64') save(operationManagerId, status = ACTIVE, managerAcceptedAt)
+  S -> NP : (65') notifyPropertyAssigned(property, managerId)
+  S -> RR : (66') kích hoạt phòng DRAFT (nhà chia phòng bắt buộc đủ giá)
+end
+S --> C : (69) PropertyActivationResponse / PropertyResponse
+deactivate S
+C --> FE : (70) 200 OK
+deactivate C
+FE --> Admin : (71) Đã gán quản lý
+
+@enduml

@@ -174,12 +174,20 @@ export const realMaintenanceService = {
   },
 
   /**
-   * PUT /{id}/confirm-arrival — manager quét QR đúng thiết bị (app tự chặn, BE không
-   * validate) xác nhận đã có mặt tại hiện trường. OPEN → OPEN, chỉ ghi mốc thời gian —
-   * BẮT BUỘC gọi trước approve/reject-fault (trừ phiếu cũ không có visitAppointmentAt).
+   * PUT /{id}/confirm-arrival — manager quét QR thiết bị để BẮT ĐẦU XỬ LÝ phiếu tại hiện
+   * trường (BE 21/09/2026: BE tự so khớp `qrCode` với thiết bị của phiếu, sai → 400).
+   * OPEN → OPEN, chỉ ghi mốc thời gian — BẮT BUỘC gọi trước diagnose/reject-fault/
+   * send-for-inspection (trừ phiếu cũ không có visitAppointmentAt). Xem phiếu KHÔNG cần
+   * gọi API này.
+   *
+   * `qrCode`: bắt buộc khi phiếu có thiết bị — gửi dạng chuẩn `EQ-<id>` (FE đã khớp đúng
+   * thiết bị cục bộ rồi mới gọi, xem `toEquipmentQrCode`). Phiếu không gắn thiết bị: bỏ
+   * trống, không gửi body.
    */
-  confirmArrival: async (id: number): Promise<MaintenanceRequestDto> => {
-    const { data } = await realApiClient.put<MaintenanceRequestDto>(`${BASE}/${id}/confirm-arrival`);
+  confirmArrival: async (id: number, qrCode?: string): Promise<MaintenanceRequestDto> => {
+    const { data } = await realApiClient.put<MaintenanceRequestDto>(
+      `${BASE}/${id}/confirm-arrival`, qrCode ? { qrCode } : undefined,
+    );
     return data;
   },
 

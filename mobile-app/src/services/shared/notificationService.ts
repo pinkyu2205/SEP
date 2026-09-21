@@ -140,6 +140,8 @@ const normalizeType = (row: BeNotificationRow): string => {
       case 'MAINTENANCE_SELF_REPAIR_SUBMITTED': return 'maintenance_accepted';
       // Hoá đơn bồi thường đã phát hành — đúng việc `maintenance_cost` sinh ra.
       case 'MAINTENANCE_CHARGE_ISSUED': return 'maintenance_cost';
+      // Đã sửa/bàn giao xong, chờ khách thanh toán hoá đơn (BE 21/09/2026) — việc đang chờ khách trả tiền.
+      case 'MAINTENANCE_WAITING_PAYMENT': return 'maintenance_cost';
       /**
        * BE ship 03/09/2026 (commit `3381711`) — luồng "lỗi do khách" mới gửi thẳng
        * admin duyệt trên web (report-fault) thay vì manager tự chọn hướng xử lý.

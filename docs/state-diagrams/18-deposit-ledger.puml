@@ -1,0 +1,33 @@
+@startuml DepositLedgerState
+title Figure — Checkout: tình trạng tiền cọc trên sổ (DepositStatus, suy ra bởi DepositLedgerStatusResolver) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> NOT_COLLECTED : Hợp đồng chưa thanh toán onboard\n(paymentStatus ≠ PAID)
+
+NOT_COLLECTED --> HELD : Khách thanh toán cọc (paymentStatus = PAID)
+
+HELD --> HELD : Hợp đồng còn hiệu lực\nHợp đồng đã đóng nhưng chưa có bảng quyết toán\nCheckout chưa COMPLETED\nCheckout COMPLETED nhưng refundAmount > 0 (chưa chi hoàn)
+
+HELD --> REFUNDED : Đã chi hoàn cọc (settlement.refundPaidAt ≠ null)\nCheckout COMPLETED, refundAmount ≤ 0\n(cọc bị cấn trừ hết, không phải cưỡng chế)
+
+HELD --> FORFEITED : Checkout COMPLETED bằng cưỡng chế (forceSettledAt ≠ null)\n[refundAmount ≤ 0]
+
+REFUNDED --> [*]
+FORFEITED --> [*]
+
+note right of HELD
+  Đây không phải cột lưu: trạng thái được tính lại mỗi lần đọc
+  từ hợp đồng, bảng quyết toán và trạng thái checkout.
+  refundPaidAt ≠ null luôn cho REFUNDED, kiểm tra trước mọi điều kiện khác.
+end note
+
+@enduml

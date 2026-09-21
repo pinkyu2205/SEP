@@ -1,0 +1,122 @@
+@startuml ContractDraftDocument
+title Figure — Contract: Xuất file hợp đồng nháp (PDF), lưu file, xem / tải hợp đồng Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Manager / Admin" as M
+actor "Tenant / Owner" as V
+participant "Front-end" as FE
+participant "Cloudinary" as CLD
+participant "TenantContractActionController" as C
+participant "TenantContractDocumentServiceImpl" as S
+participant "TenantOnboardingServiceImpl" as TOS
+participant "TenantContractRepository" as TCR
+participant "DocxTemplateRenderer +\nDocxToPdfConverter" as PDF
+database DB
+
+== Xuất PDF nháp từ template ==
+M -> FE : (1) Mở hợp đồng DRAFT → "Xuất hợp đồng nháp"
+FE -> C : (2) POST /api/v1/tenant-contracts/{id}/draft-document
+activate C
+C -> S : (3) getContractForUser(id, userId, role)
+activate S
+S -> TCR : (4) loadAndSync(contractId)
+activate TCR
+TCR -> DB : (5) SELECT TenantContract
+DB --> TCR : (6) contract
+TCR --> S : (7) contract
+deactivate TCR
+S -> TOS : (8) syncExpiredIfNeeded(contract) — HĐ quá hạn thì đổi EXPIRED
+activate TOS
+TOS --> S : (9) done
+deactivate TOS
+S -> S : (10) assertCanView(): admin / owner luôn xem được;\nmanager phải là operationManager của nhà;\ntenant phải là chủ hợp đồng
+alt [Không có quyền xem]
+  S --> C : AccessDeniedException
+  C --> FE : 403
+  FE --> M : Hiển thị lỗi
+end
+S --> C : (11) TenantContractResponse
+deactivate S
+C -> S : (12) renderDraftDocument(contractId)
+activate S
+S -> S : (13) assertCanGenerateDraft(): chỉ khi status = DRAFT
+alt [Hợp đồng không ở DRAFT]
+  S --> C : BusinessException "Chỉ xuất file nháp khi HĐ đang DRAFT"
+  C --> FE : Error response
+  FE --> M : Hiển thị lỗi
+end
+S -> S : (14) buildVariables(contract): bên cho thuê, bên thuê, nhà / phòng,\ntiền thuê, cọc, lộ trình tăng giá, thành viên ở cùng, nội thất bàn giao…
+S -> PDF : (15) DocxTemplateRenderer.render(template phòng hoặc nguyên căn, vars)
+activate PDF
+PDF --> S : (16) docx
+S -> PDF : (17) DocxToPdfConverter.convert(docx)
+PDF --> S : (18) pdf bytes
+deactivate PDF
+alt [Lỗi template / chuyển đổi PDF]
+  S --> C : BusinessException "Không tạo được PDF hợp đồng"
+  C --> FE : Error response
+  FE --> M : Hiển thị lỗi
+end
+S --> C : (19) byte[] PDF
+deactivate S
+C --> FE : (20) 200 OK application/pdf\n(attachment "DRAFT-{contractCode}.pdf")
+deactivate C
+FE --> M : (21) Xem / in PDF nháp để hai bên ký
+
+== Lưu file hợp đồng đã ký ==
+M -> FE : (22) Tải file PDF đã ký lên
+FE -> CLD : (23) Upload file
+CLD --> FE : (24) URL file
+FE -> C : (25) PUT /api/v1/tenant-contracts/{id}\nUpdateDraftContractRequest (draftContractFileUrl = URL)
+activate C
+C -> TOS : (26) updateDraftContract(contractId, request)
+activate TOS
+TOS -> TCR : (27) save(contract.draftContractFileUrl, các trường nháp khác)
+activate TCR
+TCR -> DB : (28) UPDATE TenantContract
+DB --> TCR : (29) OK
+deactivate TCR
+TOS --> C : (30) TenantContractResponse
+deactivate TOS
+C --> FE : (31) 200 OK
+deactivate C
+FE --> M : (32) Hợp đồng đã đính kèm file
+
+== Xem / tải hợp đồng ==
+V -> FE : (33) Mở hợp đồng → "Xem file"
+FE -> C : (34) GET /api/v1/tenant-contracts/{id}/document\nGET /tenant-contracts/{id}/document/download
+activate C
+C -> S : (35) getDocument() / downloadContractDocument(id, userId, role)
+activate S
+S -> TCR : (36) loadAndSync(contractId) + assertCanView()
+activate TCR
+TCR -> DB : (37) SELECT TenantContract
+DB --> TCR : (38) contract
+TCR --> S : (39) contract
+deactivate TCR
+alt [Không có quyền / hợp đồng chưa có file]
+  S --> C : AccessDeniedException / BusinessException\n"Hợp đồng chưa có file — xuất PDF nháp, upload rồi lưu URL"
+  C --> FE : Error response
+  FE --> V : Hiển thị lỗi
+end
+S -> S : (40) resolveContractFileUrl(): ưu tiên draftContractFileUrl, sau đó documentUrl
+opt [download]
+  S -> S : (41) fetchContractFileBytes(url): đọc file cục bộ nếu URL chứa /uploads/contracts/,\nnếu không thì tải qua HTTP
+  alt [Không tải được file]
+    S --> C : BusinessException "Không tải được file hợp đồng"
+    C --> FE : Error response
+    FE --> V : Hiển thị lỗi
+  end
+end
+S --> C : (42) URL file hoặc byte[] (PDF; còn hỗ trợ DOCX cũ)
+deactivate S
+C --> FE : (43) 200 OK (Content-Disposition inline)
+deactivate C
+FE --> V : (44) Mở PDF viewer
+
+@enduml

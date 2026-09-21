@@ -1,0 +1,198 @@
+@startuml TenantPayInvoicePayos
+title Figure — Billing: Tenant thanh toán hoá đơn qua PayOS (tạo QR, webhook, kiểm tra thủ công) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+participant "Front-end" as FE
+participant "TenantMeController" as C
+participant "TenantBillingServiceImpl" as S
+participant "TenantInvoiceRepository" as TIR
+participant "TenantInvoicePayosOrderRepository" as POR
+participant "PayosService" as PAYOS
+participant "PayosWebhookController" as WH
+participant "InvoicePaidEventListener" as EL
+participant "RealtimeEventService" as RT
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+database DB
+
+== Bước A — Tạo QR thanh toán ==
+Tenant -> FE : (1) Mở hoá đơn → "Thanh toán"
+FE -> C : (2) POST /api/v1/tenant/me/invoices/{id}/payment
+activate C
+C -> S : (3) createPayment(tenantUserId, invoiceId)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TIR : (6) loadOwnedInvoice(invoiceId, tenantUserId)
+activate TIR
+TIR -> DB : (7) SELECT TenantInvoice
+DB --> TIR : (8) TenantInvoice
+TIR --> S : (9) invoice
+deactivate TIR
+alt [Không phải chủ hoá đơn / đã PAID / đã CANCELLED]
+  S --> C : ResourceNotFoundException / BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> POR : (10) updateStatusForInvoice(ACTIVE → SUPERSEDED)\n(vô hiệu các QR cũ)
+activate POR
+POR -> DB : (11) UPDATE TenantInvoicePayosOrder
+DB --> POR : (12) OK
+deactivate POR
+S -> PAYOS : (13) createPaymentLink(orderCode = now(ms),\namount, invoiceCode)
+activate PAYOS
+PAYOS --> S : (14) checkoutUrl + qrCode
+deactivate PAYOS
+S -> POR : (15) save(TenantInvoicePayosOrder\npurpose=SELF, status=ACTIVE)
+activate POR
+POR -> DB : (16) INSERT TenantInvoicePayosOrder
+DB --> POR : (17) OK
+deactivate POR
+S -> TIR : (18) save(invoice: payosOrderCode, checkoutUrl, qrCode)
+activate TIR
+TIR -> DB : (19) UPDATE TenantInvoice
+DB --> TIR : (20) OK
+deactivate TIR
+
+break [Lỗi nghiệp vụ / hệ thống (vd PayOS lỗi)]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> DB : (21) CommitTransaction()
+DB --> S : (22) Committed
+deactivate DB
+S --> C : (23) TenantInvoiceResponse (có QR)
+deactivate S
+C --> FE : (24) 200 OK
+deactivate C
+FE --> Tenant : (25) Hiển thị mã QR
+
+== Bước B — PayOS gọi webhook khi khách chuyển khoản ==
+PAYOS -> WH : (26) POST /api/v1/payos/webhook\n(payload + signature, không JWT)
+activate WH
+WH -> PAYOS : (27) verifyWebhookSignature(data, signature)
+activate PAYOS
+PAYOS --> WH : (28) true / false
+deactivate PAYOS
+alt [Không có data (ping xác minh)]
+  WH --> PAYOS : 200 {success: true}
+else [Sai chữ ký]
+  WH --> PAYOS : 200 {success: false} (bỏ qua)
+end
+alt [code = "00" và orderCode > 0]
+  WH -> S : (29) TenantOnboardingService.markDepositPaid(orderCode)\n(tiền cọc hợp đồng — xem file 26)
+  WH -> S : (30) markInvoicePaidByPayosOrderCode(orderCode)
+  activate S
+  S -> DB : (31) BeginTransaction()
+  activate DB
+  DB --> S : (32) Success
+  S -> POR : (33) findByOrderCode(orderCode)
+  activate POR
+  POR -> DB : (34) SELECT TenantInvoicePayosOrder
+  DB --> POR : (35) order / empty
+  POR --> S : (36) Optional<Order>
+  deactivate POR
+  alt [Không có order, fallback legacy: findByPayosOrderCode trên TenantInvoice]
+    S -> TIR : (37) findByPayosOrderCode(orderCode)
+    activate TIR
+    TIR -> DB : (38) SELECT TenantInvoice
+    DB --> TIR : (39) invoice
+    TIR --> S : (40) Optional<TenantInvoice>
+    deactivate TIR
+  end
+  alt [Order đã PAID]
+    S --> WH : bỏ qua (idempotent)
+  else [Hoá đơn đã PAID rồi (trả thừa)]
+    S -> DB : (41) UPDATE order = PAID + notifyOverpayment()
+  else [Hợp lệ]
+    S -> DB : (41') UPDATE order = PAID
+    S -> S : (42) markPaid(invoice, method, "VQR-orderCode", context)
+    S -> DB : (43) UPDATE TenantInvoice (PAID, paidAt, method, transactionId)\nINSERT TenantPayment\nUPDATE UtilityInvoice = PAID (nếu có)\nnếu HĐ RENT: tắt terminationProposed
+    DB --> S : (44) OK
+    S -> S : (45) saveAndPublishPaidInvoice() →\npublishEvent(InvoicePaidEvent)
+  end
+  S -> DB : (46) CommitTransaction()
+  DB --> S : (47) Committed
+  deactivate DB
+  S --> WH : (48) done
+  deactivate S
+end
+WH --> PAYOS : (49) 200 {success: true}\n(lỗi xử lý vẫn trả 200, chỉ log)
+deactivate WH
+
+== Bước C — Sau commit: realtime + thông báo ==
+S -> EL : (50) InvoicePaidEvent (AFTER_COMMIT)
+activate EL
+EL -> S : (51) handleInvoicePaidAfterCommit()
+activate S
+S -> RT : (52) publishInvoicePaid(invoice, context)
+activate RT
+RT --> S : (53) STOMP event tới tenant / manager
+deactivate RT
+deactivate S
+EL -> S : (54) sendPaymentNotificationsAfterCommit()\n(REQUIRES_NEW)
+activate S
+S -> NR : (55) save Notification: PAYMENT_RECEIVED_TENANT,\nPAYMENT_RECEIVED_MANAGER, PAYMENT_RECEIVED_ADMIN (mỗi admin)
+activate NR
+NR -> DB : (56) INSERT Notification
+DB --> NR : (57) OK
+deactivate NR
+S -> UPT : (58) sendToUser(tenant, manager)
+activate UPT
+UPT --> S : (59) Expo push
+deactivate UPT
+S -> DB : (60) INSERT HostNotification\n(mỗi ROLE_OWNER, insertIfAbsent "invoice-paid:{id}")
+DB --> S : (61) OK
+deactivate S
+deactivate EL
+
+== Bước D — Khách bấm "Kiểm tra thanh toán" (khi webhook chưa tới) ==
+Tenant -> FE : (62) "Tôi đã chuyển khoản"
+FE -> C : (63) POST /api/v1/tenant/me/invoices/{id}/payment/check
+activate C
+C -> S : (64) checkPayment(tenantUserId, invoiceId)
+activate S
+S -> TIR : (65) loadOwnedInvoice()
+activate TIR
+TIR -> DB : (66) SELECT TenantInvoice
+DB --> TIR : (67) invoice
+TIR --> S : (68) invoice
+deactivate TIR
+alt [Đã PAID]
+  S --> C : trả hoá đơn hiện tại
+else [Có payosOrderCode]
+  S -> PAYOS : (69) getPaymentStatus(orderCode)
+  activate PAYOS
+  PAYOS --> S : (70) PAID / khác
+  deactivate PAYOS
+  alt [PAYOS = PAID]
+    S -> DB : (71) markPaid() + INSERT TenantPayment + publish InvoicePaidEvent
+    DB --> S : (72) OK
+  else [Chưa PAID]
+    S -> DB : (71') createBankTransferClaim() — INSERT TenantPaymentClaim\nPENDING_VERIFY (manager duyệt tay, xem file 17)
+    DB --> S : (72') OK
+  end
+else [Không có payosOrderCode]
+  S -> DB : (69') createBankTransferClaim()
+  DB --> S : (70') OK
+end
+S --> C : (73) TenantInvoiceResponse
+deactivate S
+C --> FE : (74) 200 OK
+deactivate C
+FE --> Tenant : (75) Hiển thị PAID hoặc "chờ manager xác nhận"
+
+@enduml

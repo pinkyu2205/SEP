@@ -1,0 +1,91 @@
+@startuml Login
+title Figure — Login Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor User
+participant "Front-end" as FE
+participant "AuthController" as C
+participant "AuthServiceImpl" as S
+participant "UserRepository" as UR
+participant "AuthenticationManager" as AM
+participant "CustomUserDetailsService" as UDS
+participant "JwtUtil" as JWT
+database DB
+
+User -> FE : (1) Nhập username/SĐT + mật khẩu → "Đăng nhập"
+FE -> C : (2) POST /api/v1/auth/login\nAuthRequest
+activate C
+C -> S : (3) login(request)
+activate S
+
+S -> UR : (4) findByUsername(input)\n(fallback: findByPhoneNumber local/quốc tế)
+activate UR
+UR -> DB : (5) SELECT User
+DB --> UR : (6) User / empty
+UR --> S : (7) User?
+deactivate UR
+
+alt [Tenant còn firstLogin = true]
+  S --> C : BusinessException\n"Tài khoản chưa kích hoạt (OTP + tạo mật khẩu)"
+  C --> FE : Error response
+  FE --> User : Chuyển sang màn Kích hoạt tài khoản
+end
+
+S -> UR : (8) findByUsername(username)
+activate UR
+UR -> DB : (9) SELECT User
+DB --> UR : (10) User / empty
+UR --> S : (11) User
+deactivate UR
+
+alt [Không tìm thấy user]
+  S --> C : RuntimeException "Không tìm thấy user"
+  C --> FE : Error response
+  FE --> User : Hiển thị lỗi
+end
+
+alt [status = DISABLE (hợp đồng đã kết thúc)]
+  S --> C : BusinessException\n"Tài khoản đã ngừng hoạt động"
+  C --> FE : Error response
+  FE --> User : Hiển thị lỗi
+end
+
+S -> AM : (12) authenticate(username, password)
+activate AM
+AM -> UDS : (13) loadUserByUsername()
+activate UDS
+UDS -> DB : (14) SELECT User
+DB --> UDS : (15) User
+UDS --> AM : (16) UserDetails
+deactivate UDS
+AM --> S : (17) OK / BadCredentialsException
+deactivate AM
+
+alt [Sai mật khẩu]
+  S --> C : BadCredentialsException
+  C --> FE : 401 Unauthorized
+  FE --> User : Hiển thị lỗi đăng nhập
+end
+
+S -> UDS : (18) loadUserByUsername(username)
+activate UDS
+UDS --> S : (19) UserDetails
+deactivate UDS
+
+S -> JWT : (20) generateToken(userDetails)
+activate JWT
+JWT --> S : (21) jwt
+deactivate JWT
+
+S --> C : (22) AuthResponse(jwt, username,\nrole, firstLogin)
+deactivate S
+C --> FE : (23) 200 OK + AuthResponse
+deactivate C
+FE --> User : (24) Lưu token, điều hướng theo role
+
+@enduml

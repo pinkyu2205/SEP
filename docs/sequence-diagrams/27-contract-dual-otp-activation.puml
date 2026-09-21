@@ -1,0 +1,191 @@
+@startuml ContractDualOtpActivation
+title Figure — Contract: Xác nhận hợp đồng bằng OTP hai bên (Tenant + Manager) và kích hoạt Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+actor Manager
+participant "Front-end" as FE
+participant "TenantMyContractController /\nTenantContractActionController" as C
+participant "TenantOnboardingServiceImpl" as S
+participant "OtpServiceImpl" as OTP
+participant "TwilioService" as TW
+participant "TenantContractRepository" as TCR
+participant "TenantBillingServiceImpl" as TBS
+participant "ContractEquipmentServiceImpl" as CES
+participant "RealtimeEventService" as RT
+participant "NotificationRepository" as NR
+database DB
+
+== Bước A — Gửi OTP cho hai bên ==
+Tenant -> FE : (1) Mở app → hợp đồng chờ xác nhận → "Gửi mã OTP"
+FE -> C : (2) POST /api/v1/tenant/me/contracts/{id}/send-confirm-otp
+activate C
+C -> S : (3) sendDualContractConfirmOtps(contractId)
+activate S
+S -> DB : (4) BeginTransaction()\nSELECT TenantContract ... FOR UPDATE
+activate DB
+DB --> S : (5) contract (đã khoá dòng)
+
+S -> S : (6) requirePaidPendingContractForUpdate(): phải PAID cọc,\nstatus PENDING / DRAFT — assertCurrentUserOwnsContract()
+alt [Chưa thanh toán onboard / sai trạng thái / không phải khách của HĐ / đã ACTIVE]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+alt [Đủ 2 mốc OTP mà chưa ACTIVE (ca đua cũ)]
+  S -> S : (7) healStuckDualOtpIfNeeded() → activateContract() (tự lành)
+end
+S -> S : (8) assertEarlyMoveInWindowForSendOtp():\nInboundLeaseRules.assertCanReceiveTenant, nhận sớm ≤ maxEarlyMoveInDays
+alt [Nhận sớm quá số ngày cho phép / ngoài cửa sổ hợp đồng đầu vào]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+opt [Bên nào chưa xác nhận thì mới gửi]
+  S -> OTP : (9) sendOtp(OtpDeliveryOverride.PHONE,\nCONTRACT_CONFIRM_TENANT, contractId)
+  activate OTP
+  OTP -> DB : (10) INSERT OtpVerification (6 số, hết hạn 5 phút)
+  DB --> OTP : (11) OK
+  OTP -> TW : (12) sendOtp(phone, code)
+  activate TW
+  TW --> OTP : (13) sent
+  deactivate TW
+  OTP --> S : (14) done
+  deactivate OTP
+  S -> OTP : (15) sendOtp(..., CONTRACT_CONFIRM_MANAGER, contractId)
+  activate OTP
+  OTP --> S : (16) done (tương tự bước 10–13)
+  deactivate OTP
+end
+alt [Cả hai bên đã xác nhận rồi]
+  S --> C : BusinessException "Cả hai bên đã xác nhận OTP rồi"
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> TCR : (17) saveAndFlush(confirmRequestedAt = now)
+activate TCR
+TCR -> DB : (18) UPDATE TenantContract
+DB --> TCR : (19) OK
+deactivate TCR
+S -> RT : (20) publishContractConfirmProgress(contract)
+activate RT
+RT --> S : (21) STOMP event (hai bên thấy tiến độ OTP)
+deactivate RT
+S -> DB : (22) CommitTransaction()
+DB --> S : (23) Committed
+deactivate DB
+S --> C : (24) void
+deactivate S
+C --> FE : (25) 200 OK
+deactivate C
+FE --> Tenant : (26) Nhập OTP tenant
+
+== Bước B — Tenant nhập OTP của mình ==
+Tenant -> FE : (27) Nhập mã 6 số
+FE -> C : (28) POST /api/v1/tenant/me/contracts/{id}/confirm-otp
+activate C
+C -> S : (29) confirmContractByTenant(contractId, otp)
+activate S
+S -> DB : (30) BeginTransaction() + SELECT ... FOR UPDATE
+activate DB
+DB --> S : (31) contract
+S -> OTP : (32) verifyOrThrow(phone, otp, CONTRACT_CONFIRM_TENANT, contractId)
+activate OTP
+OTP -> DB : (33) SELECT OtpVerification mới nhất chưa verified
+DB --> OTP : (34) otp
+alt [Hết hạn / quá số lần sai / sai mã]
+  OTP --> S : BusinessException (sai mã thì tăng attemptCount)
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi OTP
+end
+OTP -> DB : (35) UPDATE OtpVerification verified = true
+DB --> OTP : (36) OK
+OTP --> S : (37) OK
+deactivate OTP
+S -> TCR : (38) saveAndFlush(tenantOtpVerifiedAt = now)
+activate TCR
+TCR -> DB : (39) UPDATE TenantContract
+DB --> TCR : (40) OK
+deactivate TCR
+S -> S : (41) tryActivateAfterDualOtp(): đọc lại dòng đã khoá,\npublishContractConfirmProgress()
+alt [Manager chưa xác nhận OTP]
+  S --> C : TenantContractResponse (vẫn PENDING)
+end
+
+== Bước C — Manager nhập OTP của mình ==
+Manager -> FE : (42) Nhập mã 6 số
+FE -> C : (43) POST /api/v1/tenant-contracts/{id}/confirm
+activate C
+C -> S : (44) confirmContract(contractId, otp)
+S -> OTP : (45) verifyOrThrow(phone, otp, CONTRACT_CONFIRM_MANAGER, contractId)
+activate OTP
+OTP --> S : (46) OK
+deactivate OTP
+S -> TCR : (47) saveAndFlush(managerOtpVerifiedAt = now,\nonboardedByManager, onboardedAt)
+activate TCR
+TCR -> DB : (48) UPDATE TenantContract
+DB --> TCR : (49) OK
+deactivate TCR
+S -> S : (50) tryActivateAfterDualOtp() → đủ 2 mốc → activateContract()
+
+== Bước D — Kích hoạt (bên nào xác nhận sau cùng thì chạy) ==
+S -> S : (51) activateContract(contract): phải PAID + đủ 2 OTP,\nassertCanReceiveTenant, nhận sớm > max thì clamp ngày vào ở
+opt [HĐ nháp chưa có tenant]
+  S -> DB : (52) getOrCreateTenant(...) → INSERT User + Tenant
+  DB --> S : (53) Tenant
+end
+opt [Thuê theo phòng]
+  S -> DB : (54) existsByRoomIdAndStatus(ACTIVE) → UPDATE Room.status = RENTED
+  DB --> S : (55) OK
+end
+S -> TCR : (56) save(status = ACTIVE, activatedAt = now)
+activate TCR
+TCR -> DB : (57) UPDATE TenantContract
+DB --> TCR : (58) OK
+deactivate TCR
+S -> CES : (59) disableDeclinedForActiveContract(contract)
+S -> TBS : (60) backfillOnboardingInvoiceTenant() +\ngenerateProratedRentForNewContract()
+activate TBS
+TBS -> DB : (61) INSERT / UPDATE TenantInvoice
+DB --> TBS : (62) OK
+deactivate TBS
+S -> S : (63) unitPriceService.applyContractRent(HOP_DONG, "Kích hoạt HĐ …")
+S -> NR : (64) notifyContractActivated(contract)
+activate NR
+NR -> DB : (65) INSERT Notification
+DB --> NR : (66) OK
+deactivate NR
+S -> RT : (67) publishContractActivated(contract)
+activate RT
+RT --> S : (68) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (69) CommitTransaction()
+DB --> S : (70) Committed
+deactivate DB
+S --> C : (71) TenantContractResponse (status = ACTIVE)
+deactivate S
+C --> FE : (72) 200 OK
+deactivate C
+FE --> Manager : (73) Hợp đồng ACTIVE, khách vào ở
+
+note over S
+  Tài khoản khách được tạo / gắn từ lúc thu cọc (file 26)
+  và kích hoạt mật khẩu bằng OTP (file 03) trước khi khách xác nhận hợp đồng.
+end note
+
+@enduml

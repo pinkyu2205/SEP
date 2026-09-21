@@ -1,0 +1,144 @@
+@startuml MaintenanceReportFaultAdminReview
+title Figure — Maintenance: Manager báo lỗi do khách (report-fault) và Admin duyệt (admin-review) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+actor Admin
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "UserRepository" as UR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+== Manager báo lỗi do khách ==
+Manager -> FE : (1) Nhập lý do + ảnh bằng chứng → "Báo lỗi do khách"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/report-fault\nMaintenanceReportFaultRequest
+activate C
+C -> S : (3) reportFault(id, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+S -> S : (10) requireManagerAccess(req)\nrequireStatus(OPEN)
+
+alt [Sai status / thiếu faultReason / thiếu ảnh bằng chứng]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> S : (11) flowType = TENANT_FAULT, damageCause = TENANT_MISUSE,\nfaultReason, faultResolutionPath = null,\nstatus = TENANT_FAULT
+S -> MR : (12) save(req)
+activate MR
+MR -> DB : (13) UPDATE MaintenanceRequest + INSERT photo history (FAULT_EVIDENCE)\nINSERT MaintenanceTimeline
+DB --> MR : (14) OK
+MR --> S : (15) saved
+deactivate MR
+
+S -> UR : (16) notifyAdmins(): findByRoleAndStatus(ROLE_ADMIN, ACTIVE)
+activate UR
+UR -> DB : (17) SELECT User
+DB --> UR : (18) admins
+UR --> S : (19) List<User>
+deactivate UR
+S -> NR : (20) save(Notification MAINTENANCE_FAULT_REPORTED) mỗi admin\n+ notifyTenant()
+activate NR
+NR -> DB : (21) INSERT Notification
+DB --> NR : (22) OK
+deactivate NR
+S -> UPT : (23) sendToUser(admin…, tenant)
+activate UPT
+UPT --> S : (24) Expo push
+deactivate UPT
+S -> RT : (25) publishMaintenanceEvent(FAULT_REPORTED)
+activate RT
+RT --> S : (26) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (27) CommitTransaction()
+DB --> S : (28) Committed
+deactivate DB
+S --> C : (29) MaintenanceRequestResponse
+deactivate S
+C --> FE : (30) 200 OK
+deactivate C
+FE --> Manager : (31) Phiếu TENANT_FAULT — chờ admin duyệt
+
+== Admin duyệt báo lỗi ==
+Admin -> FE : (32) Duyệt / Không duyệt + ghi chú
+FE -> C : (33) PUT /api/v1/maintenance/{id}/admin-review\nMaintenanceAdminReviewRequest
+activate C
+C -> S : (34) adminReviewFault(id, request)
+activate S
+S -> DB : (35) BeginTransaction()
+activate DB
+DB --> S : (36) Success
+
+S -> MR : (37) findActive(id)
+activate MR
+MR -> DB : (38) SELECT MaintenanceRequest
+DB --> MR : (39) MaintenanceRequest
+MR --> S : (40) req
+deactivate MR
+S -> S : (41) requireAdminAccess()
+
+alt [Thiếu approved / status ≠ TENANT_FAULT / không phải luồng lỗi khách /\nchưa có faultReason / đã rẽ nhánh luồng cũ / đã duyệt rồi]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+
+S -> MR : (42) save(adminReviewedAt, adminReviewedBy,\nadminApproved, adminReviewNote)
+activate MR
+MR -> DB : (43) UPDATE MaintenanceRequest\nINSERT MaintenanceTimeline
+DB --> MR : (44) OK
+MR --> S : (45) saved
+deactivate MR
+S -> NR : (46) notifyPropertyManager(\n"Admin đã duyệt / không duyệt báo lỗi")
+activate NR
+NR -> DB : (47) INSERT Notification MAINTENANCE_ADMIN_REVIEWED
+DB --> NR : (48) OK
+deactivate NR
+S -> UPT : (49) sendToUser(manager)
+activate UPT
+UPT --> S : (50) Expo push
+deactivate UPT
+S -> RT : (51) publishMaintenanceEvent(ADMIN_REVIEWED)
+activate RT
+RT --> S : (52) STOMP event
+deactivate RT
+
+S -> DB : (53) CommitTransaction()
+DB --> S : (54) Committed
+deactivate DB
+S --> C : (55) MaintenanceRequestResponse
+deactivate S
+C --> FE : (56) 200 OK
+deactivate C
+FE --> Admin : (57) Hiển thị kết quả duyệt
+
+@enduml

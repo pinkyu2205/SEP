@@ -1,0 +1,176 @@
+@startuml BulkImportAndSupplementRenovation
+title Figure — Property: Import Excel onboarding nhiều nhà & Cải tạo bổ sung (thay thiết bị hỏng) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+participant "Front-end" as FE
+participant "BulkImportController" as C
+participant "BulkOnboardingImportServiceImpl" as BOS
+participant "BulkRenovationSupplementImportServiceImpl" as BRS
+participant "PropertyOnboardingServiceImpl" as POS
+participant "InboundContractServiceImpl" as ICS
+participant "DepreciationServiceImpl" as DS
+participant "InboundContractRepository" as ICR
+database DB
+
+== Import onboarding cho nhiều nhà từ 1 file Excel ==
+Admin -> FE : (1) Chọn file Excel (sheet HĐ thuê nhà, cải tạo, thiết bị) → "Kiểm tra" / "Import"
+FE -> C : (2) POST /api/v1/import/onboarding-excel (multipart, dryRun)
+activate C
+C -> BOS : (3) importWorkbook(file, dryRun)
+activate BOS
+BOS -> DB : (4) BeginTransaction()
+activate DB
+DB --> BOS : (5) Success
+BOS -> BOS : (6) workbookReader.read(file)\nresolveSkippedContracts() — bỏ HĐ đã tồn tại / địa chỉ trùng\nvalidate(workbook) — kiểm từng sheet, mã điện nước, thiết bị, tồn kho
+alt [Có lỗi validation]
+  BOS --> C : BulkImportValidationException (danh sách lỗi theo sheet + dòng)
+  C --> FE : 400 + errors
+  FE --> Admin : Hiển thị lỗi từng dòng
+end
+alt [dryRun = true]
+  BOS --> C : BulkImportResponse (chỉ đếm, không ghi DB)
+  C --> FE : 200 OK
+  FE --> Admin : Xem trước kết quả
+end
+loop [Mỗi hợp đồng thuê nhà hợp lệ]
+  alt [Hợp đồng đã tồn tại]
+    BOS -> BOS : (7) tryUpdateCustomerCodesOnExisting() hoặc ghi nhận "skipped"
+  else [Hợp đồng mới]
+    BOS -> POS : (8) createDraft(PropertyDraftRequest) — zone theo tỉnh / quận
+    activate POS
+    POS -> DB : (9) INSERT Property (DRAFT)
+    DB --> POS : (10) OK
+    POS --> BOS : (11) PropertyResponse
+    deactivate POS
+    BOS -> ICS : (12) signContract(propertyId, request) → PENDING
+    activate ICS
+    ICS -> DB : (13) INSERT InboundContract
+    DB --> ICS : (14) OK
+    ICS --> BOS : (15) InboundContractResponse
+    deactivate ICS
+    BOS -> POS : (16) setOnboardingOptions(wholeHouse theo mã HĐ / mô tả,\nhasRenovation = có dòng cải tạo)
+    BOS -> POS : (17) addRenovationLine() × mỗi dòng cải tạo
+    BOS -> BOS : (18) createRoomsForContract() — tạo phòng theo sheet thiết bị
+    BOS -> POS : (19) saveEquipmentManifest() + assignEquipment() × mỗi dòng thiết bị
+    BOS -> POS : (20) completeRenovation(propertyId)
+    activate POS
+    POS -> DB : (21) UPDATE Property → RENOVATION_COMPLETED\n(hoặc ACTIVE / PENDING_HOST_REVIEW tuỳ điều kiện — file 34)
+    DB --> POS : (22) OK
+    POS --> BOS : (23) PropertyResponse
+    deactivate POS
+  end
+end
+break [Lỗi hệ thống ở bất kỳ nhà nào]
+  BOS -> DB : RollbackTransaction() — toàn bộ file bị huỷ
+  DB --> BOS : Rolled back
+  BOS --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+BOS -> DB : (24) CommitTransaction()
+DB --> BOS : (25) Committed
+deactivate DB
+BOS --> C : (26) BulkImportResponse (contractsProcessed, skipped, kết quả từng HĐ)
+deactivate BOS
+C --> FE : (27) 200 OK
+deactivate C
+FE --> Admin : (28) Kết quả import — nhà sẵn sàng gửi Host (file 35)
+
+== Cải tạo bổ sung: bắt đầu đợt mới ==
+Admin -> FE : (29) Trang Cấu hình khai thác → "Bắt đầu cải tạo lại"\n(thường sau cảnh báo thiết bị cần thay mới — file 09)
+FE -> C : (30) POST /api/v1/properties/{propertyId}/renovation/start
+activate C
+C -> POS : (31) startRenovation(propertyId)
+activate POS
+POS -> DB : (32) SELECT Property
+DB --> POS : (33) property
+alt [Nhà không ở ACTIVE]
+  POS --> C : BusinessException "Chỉ cải tạo lại khi nhà đang ACTIVE"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+POS -> DB : (34) UPDATE Property status = UNDER_RENOVATION,\nrenovationCompleted = false, hasRenovation = true
+POS -> DB : (35) INSERT RenovationSession (sessionNumber = max + 1, tối thiểu 2,\nIN_PROGRESS, startDate = hôm nay)
+DB --> POS : (36) OK
+POS --> C : (37) PropertyResponse
+deactivate POS
+C --> FE : (38) 200 OK
+deactivate C
+FE --> Admin : (39) Nhà UNDER_RENOVATION — mời upload Excel bổ sung
+
+== Upload Excel cải tạo bổ sung ==
+Admin -> FE : (40) Chọn file Excel (hạng mục cải tạo + thiết bị mua mới / thay thế) → "Import"
+FE -> C : (41) POST /api/v1/import/renovation-supplement-excel\n(multipart, propertyId, dryRun)
+activate C
+C -> BRS : (42) importSupplementWorkbook(propertyId, file, dryRun)
+activate BRS
+BRS -> DB : (43) BeginTransaction()
+activate DB
+DB --> BRS : (44) Success
+BRS -> BRS : (45) workbookReader.read(file); validate(propertyId, workbook):\nmã HĐ phải thuộc đúng nhà, đợt hiện tại sessionNumber ≥ 2,\nnguồn thiết bị = PURCHASED, THAY_THE phải đủ thiết bị ACTIVE để thay
+alt [Có lỗi validation / file không có dòng nào]
+  BRS --> C : BulkImportValidationException
+  C --> FE : 400 + errors
+  FE --> Admin : Hiển thị lỗi từng dòng
+end
+alt [dryRun = true]
+  BRS --> C : BulkImportResponse (chỉ đếm)
+  C --> FE : 200 OK
+  FE --> Admin : Xem trước
+end
+loop [Mỗi mã hợp đồng đầu vào trong file]
+  BRS -> ICR : (46) findByContractCode(contractCode)
+  activate ICR
+  ICR -> DB : (47) SELECT InboundContract
+  DB --> ICR : (48) contract → property
+  ICR --> BRS : (49) InboundContract
+  deactivate ICR
+  BRS -> POS : (50) addRenovationLine() × mỗi hạng mục
+  BRS -> POS : (51) appendPurchasedEquipmentManifest() — cộng dồn số lượng manifest PURCHASED
+  BRS -> POS : (52) assignEquipment() × mỗi thiết bị:\nTHAY_THE → thiết bị cũ operationalStatus = DISABLED,\nthiết bị mới lưu replacedEquipmentId + replacedEquipmentPrice
+  activate POS
+  POS -> DB : (53) INSERT / UPDATE EquipmentManifest, Equipment
+  DB --> POS : (54) OK
+  deactivate POS
+  BRS -> POS : (55) completeRenovation(propertyId)\n(đợt bổ sung → status = RENOVATION_COMPLETED)
+  BRS -> POS : (56) submitToHost(propertyId)
+  activate POS
+  POS -> DS : (57) calculate() — tính lại giá theo đợt cải tạo mới (pricingVersion mới)
+  activate DS
+  DS -> DB : (58) INSERT DepreciationResult, PricingCapitalItem
+  DB --> DS : (59) OK
+  DS --> POS : (60) DepreciationCalculationResponse
+  deactivate DS
+  POS -> DB : (61) UPDATE Property status = PENDING_HOST_REVIEW
+  DB --> POS : (62) OK
+  deactivate POS
+end
+break [Lỗi hệ thống]
+  BRS -> DB : RollbackTransaction()
+  DB --> BRS : Rolled back
+  BRS --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+BRS -> DB : (63) CommitTransaction()
+DB --> BRS : (64) Committed
+deactivate DB
+BRS --> C : (65) BulkImportResponse ("đã tính lại giá và gửi Host duyệt")
+deactivate BRS
+C --> FE : (66) 200 OK
+deactivate C
+FE --> Admin : (67) Nhà chờ Host duyệt giá mới (file 35 — CAI_TAO_BO_SUNG)
+
+note over Admin, DB
+  Các endpoint import còn lại cùng controller: lease-excel (chỉ HĐ + thiết bị bàn giao),
+  renovation-excel (cấu hình khai thác), tenant-draft-contracts-excel (hợp đồng khách nháp — dùng onboardTenant, file 25),
+  property-images-zip (ảnh nhà theo mã HĐ), DELETE onboarding-excel/contracts/{contractCode} (xoá nhà đã import).
+end note
+
+@enduml

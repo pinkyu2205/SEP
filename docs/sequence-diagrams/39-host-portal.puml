@@ -1,0 +1,169 @@
+@startuml HostPortal
+title Figure — Host Portal: duyệt giá hợp đồng thuê, hợp đồng thuê gốc, chi phí, thông báo, hoàn cọc Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Host
+participant "Front-end" as FE
+participant "HostController" as C
+participant "HostPortalServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "InboundContractRepository" as ICR
+participant "HostExpenseRepository" as HER
+participant "HostNotificationRepository" as HNR
+participant "CheckoutProcessServiceImpl" as CPS
+participant "NotificationRepository +\nUserPushTokenService" as NP
+database DB
+
+== Host mở chuông thông báo (tự đồng bộ việc cần xử lý) ==
+Host -> FE : (1) Mở chuông thông báo
+FE -> C : (2) GET /api/v1/host/notifications
+activate C
+C -> S : (3) listNotifications(userId, unreadOnly, pageable)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> S : (6) syncSystemNotifications(userId): quét
+S -> DB : (7) SELECT Property PENDING_HOST_REVIEW,\nTenantContract PENDING, InboundContract ACTIVE sắp hết hạn
+DB --> S : (8) danh sách cần chú ý
+loop [Mỗi căn chờ duyệt giá / HĐ chờ duyệt / master lease sắp hết hạn]
+  S -> HNR : (9) insertIfAbsent(userId, dedupeKey, type, title, message, priority)
+  activate HNR
+  HNR -> DB : (10) INSERT HostNotification (bỏ qua nếu đã có dedupeKey)
+  DB --> HNR : (11) OK
+  deactivate HNR
+end
+S -> HNR : (12) findByUserId / findByUserIdAndRead(false)
+activate HNR
+HNR -> DB : (13) SELECT HostNotification
+DB --> HNR : (14) page
+HNR --> S : (15) Page<HostNotification>
+deactivate HNR
+S -> DB : (16) CommitTransaction()
+DB --> S : (17) Committed
+deactivate DB
+S --> C : (18) Page<HostNotificationDto>
+deactivate S
+C --> FE : (19) 200 OK
+deactivate C
+FE --> Host : (20) Danh sách thông báo\n(đánh dấu đã đọc: PUT /notifications/{id}/read, /read-all)
+
+== Host xem tổng quan tài chính ==
+Host -> FE : (21) Mở dashboard tháng
+FE -> C : (22) GET /api/v1/host/dashboard/summary?month=\nGET /finance/cashflow, /expense-breakdown, /property-pnl,\n/receivables-aging, /deposits, /reports/*
+activate C
+C -> S : (23) getDashboardSummary(month) và các báo cáo
+activate S
+S -> DB : (24) SELECT tổng hợp: doanh thu khách thuê, chi phí (tiền thuê gốc + chi phí phát sinh),\nsố phòng theo trạng thái, HĐ chờ duyệt, master lease sắp hết hạn, hoá đơn chưa thu
+DB --> S : (25) số liệu (chỉ đọc, không ghi DB)
+S -> S : (26) So sánh với tháng trước (changePct),\ntỉ lệ lấp đầy, lợi nhuận ròng
+S --> C : (27) HostDashboardSummaryResponse
+deactivate S
+C --> FE : (28) 200 OK
+deactivate C
+FE --> Host : (29) Biểu đồ và chỉ số
+
+== Host duyệt / từ chối giá của hợp đồng thuê ==
+Host -> FE : (30) Mở HĐ chờ duyệt giá → "Duyệt" hoặc "Từ chối" (+ lý do)
+FE -> C : (31) PUT /api/v1/host/contracts/{id}/approve\nhoặc /reject
+activate C
+C -> S : (32) approveContract(contractId) / rejectContract(contractId, reason)
+activate S
+S -> TCR : (33) findById(contractId)
+activate TCR
+TCR -> DB : (34) SELECT TenantContract
+DB --> TCR : (35) contract
+TCR --> S : (36) contract
+deactivate TCR
+alt [priceApprovalStatus ≠ PENDING_PRICE_APPROVAL]
+  S --> C : BusinessException "Chỉ duyệt / từ chối HĐ đang chờ duyệt giá"
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> TCR : (37) save(priceApprovalStatus = APPROVED_AWAITING_DEPOSIT\nhoặc PRICE_REJECTED + priceRejectReason)
+activate TCR
+TCR -> DB : (38) UPDATE TenantContract
+DB --> TCR : (39) OK
+deactivate TCR
+S -> NP : (40) notifyPriceApprovalResult(): Notification + push\nPRICE_APPROVAL_RESULT cho manager phụ trách\n(không kèm số tiền)
+activate NP
+NP -> DB : (41) INSERT Notification
+DB --> NP : (42) OK
+NP --> S : (43) done
+deactivate NP
+S --> C : (44) HostContractDto
+deactivate S
+C --> FE : (45) 200 OK
+deactivate C
+FE --> Host : (46) Manager tiếp tục thu cọc (file 26)\nhoặc sửa giá và gửi duyệt lại (resubmit-approval)
+
+== Host quản lý hợp đồng thuê gốc (master lease) ==
+Host -> FE : (47) Tạo / sửa / chấm dứt master lease
+FE -> C : (48) POST /api/v1/host/master-leases\nPUT /master-leases/{id}\nPOST /master-leases/{id}/terminate
+activate C
+C -> S : (49) createMasterLease() / updateMasterLease() / terminateMasterLease()
+activate S
+S -> ICR : (50) existsByPropertyId(propertyId) khi tạo mới
+activate ICR
+ICR -> DB : (51) SELECT EXISTS InboundContract
+DB --> ICR : (52) true / false
+ICR --> S : (53) boolean
+deactivate ICR
+alt [Tạo mới nhưng tòa nhà đã có master lease]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> ICR : (54) save(InboundContract: mã "ML-{propertyId}-{time}",\ntotalRent = tiền thuê tháng × số tháng, status ACTIVE)\nhoặc cập nhật trường / status = TERMINATED
+activate ICR
+ICR -> DB : (55) INSERT / UPDATE InboundContract
+DB --> ICR : (56) OK
+deactivate ICR
+S --> C : (57) MasterLeaseDto
+deactivate S
+C --> FE : (58) 200 OK
+deactivate C
+FE --> Host : (59) Danh sách master lease cập nhật
+
+== Host ghi chi phí vận hành ==
+Host -> FE : (60) Nhập tòa nhà, hạng mục, số tiền, tháng, ghi chú → "Lưu chi phí"
+FE -> C : (61) POST /api/v1/host/expenses\nPUT /expenses/{id}\nDELETE /expenses/{id}
+activate C
+C -> S : (62) createExpense() / updateExpense(id, patch) / deleteExpense(id)
+activate S
+S -> HER : (63) save / delete(HostExpense)
+activate HER
+HER -> DB : (64) INSERT / UPDATE / DELETE HostExpense
+DB --> HER : (65) OK
+deactivate HER
+alt [Không tìm thấy tòa nhà / chi phí]
+  S --> C : ResourceNotFoundException
+  C --> FE : 404
+  FE --> Host : Hiển thị lỗi
+end
+S --> C : (66) HostExpenseDto
+deactivate S
+C --> FE : (67) 200 OK
+deactivate C
+FE --> Host : (68) Chi phí đã lưu (ảnh hưởng báo cáo lãi lỗ)
+
+== Host ghi nhận đã chuyển hoàn cọc ==
+Host -> FE : (69) Nhập ngày chuyển, hình thức, ảnh chứng từ → "Đã hoàn cọc"
+FE -> C : (70) POST /api/v1/host/finance/deposits/{contractId}/refund\nCheckoutRefundRequest
+activate C
+C -> CPS : (71) refundByContractId(contractId, request)\n→ chọn hồ sơ trả phòng hoàn cọc được → refund() (xem file 32)
+activate CPS
+CPS -> DB : (72) UPDATE CheckoutSettlement (refundPaidAt…) + INSERT DepositAuditLog\n+ thông báo và SMS cho khách
+DB --> CPS : (73) OK
+CPS --> C : (74) DepositRefundResponse
+deactivate CPS
+C --> FE : (75) 200 OK
+deactivate C
+FE --> Host : (76) Đã ghi nhận hoàn cọc
+
+@enduml

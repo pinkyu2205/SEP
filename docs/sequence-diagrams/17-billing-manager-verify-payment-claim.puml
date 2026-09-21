@@ -1,0 +1,119 @@
+@startuml ManagerVerifyPaymentClaim
+title Figure — Billing: Manager xác nhận / từ chối thanh toán chuyển khoản của khách Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "ManagerBillingController" as C
+participant "ManagerBillingServiceImpl" as S
+participant "TenantPaymentClaimRepository" as TPCR
+participant "TenantBillingServiceImpl" as TBS
+participant "TenantInvoiceRepository" as TIR
+participant "InvoicePaidEventListener" as EL
+database DB
+
+== Xác nhận ==
+Manager -> FE : (1) Mở danh sách thanh toán chờ duyệt → "Xác nhận"
+FE -> C : (2) POST /api/v1/manager/payments/{claimId}/verify
+activate C
+C -> S : (3) verifyPayment(managerId, isAdmin, claimId)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TPCR : (6) loadClaimForManager(claimId, managerId, isAdmin)
+activate TPCR
+TPCR -> DB : (7) SELECT TenantPaymentClaim
+DB --> TPCR : (8) claim
+TPCR --> S : (9) claim (đã kiểm tra quyền theo nhà)
+deactivate TPCR
+
+alt [Claim không phải PENDING_VERIFY]
+  S --> C : BusinessException "Chỉ xác nhận thanh toán đang chờ duyệt"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> TBS : (10) approvePaymentClaim(claim, managerId)
+activate TBS
+alt [Hoá đơn đã PAID qua kênh khác]
+  TBS --> S : BusinessException "Vui lòng Từ chối yêu cầu này để tránh ghi trùng"
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> TPCR : (11) save(claim: VERIFIED, verifiedAt, verifiedBy)
+activate TPCR
+TPCR -> DB : (12) UPDATE TenantPaymentClaim
+DB --> TPCR : (13) OK
+deactivate TPCR
+TBS -> TBS : (14) markPaid(invoice, method, "CLAIM-{id}")
+TBS -> TIR : (15) save(invoice: PAID) + INSERT TenantPayment\n+ UtilityInvoice = PAID (nếu có)
+activate TIR
+TIR -> DB : (16) UPDATE TenantInvoice / INSERT TenantPayment
+DB --> TIR : (17) OK
+deactivate TIR
+TBS -> TBS : (18) publishEvent(InvoicePaidEvent)
+TBS --> S : (19) done
+deactivate TBS
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (20) CommitTransaction()
+DB --> S : (21) Committed
+deactivate DB
+S --> C : (22) ManagerPaymentResponse
+deactivate S
+C --> FE : (23) 200 OK
+deactivate C
+FE --> Manager : (24) Claim VERIFIED, hoá đơn PAID
+
+S -> EL : (25) InvoicePaidEvent (sau commit)\n→ realtime + thông báo (xem file 16, bước C)
+
+== Từ chối ==
+Manager -> FE : (26) Nhập lý do → "Từ chối"
+FE -> C : (27) POST /api/v1/manager/payments/{claimId}/reject
+activate C
+C -> S : (28) rejectPayment(managerId, isAdmin, claimId, reason)
+activate S
+S -> DB : (29) BeginTransaction()
+activate DB
+DB --> S : (30) Success
+S -> TPCR : (31) loadClaimForManager()
+activate TPCR
+TPCR -> DB : (32) SELECT TenantPaymentClaim
+DB --> TPCR : (33) claim
+TPCR --> S : (34) claim
+deactivate TPCR
+alt [Claim không phải PENDING_VERIFY]
+  S --> C : BusinessException "Chỉ từ chối thanh toán đang chờ duyệt"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> TPCR : (35) save(claim: REJECTED, rejectReason,\nverifiedAt, verifiedBy)
+activate TPCR
+TPCR -> DB : (36) UPDATE TenantPaymentClaim
+DB --> TPCR : (37) OK
+deactivate TPCR
+S -> DB : (38) CommitTransaction()
+DB --> S : (39) Committed
+deactivate DB
+S --> C : (40) ManagerPaymentResponse
+deactivate S
+C --> FE : (41) 200 OK
+deactivate C
+FE --> Manager : (42) Claim REJECTED
+
+@enduml

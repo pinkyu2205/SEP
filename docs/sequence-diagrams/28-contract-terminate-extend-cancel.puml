@@ -1,0 +1,185 @@
+@startuml ContractTerminateExtendCancel
+title Figure — Contract: Huỷ hợp đồng chưa kích hoạt, thanh lý, gia hạn và cron tự huỷ khách không đến Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "TenantContractActionController" as C
+participant "TenantOnboardingServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "RoomRepository /\nPropertyRepository" as RP
+participant "ContractEquipmentServiceImpl" as CES
+participant "UnitPriceServiceImpl" as UPS
+participant "UserRepository" as UR
+participant "NotificationRepository" as NR
+participant "ContractLifecycleCron" as CRON
+database DB
+
+== Huỷ hợp đồng chưa kích hoạt ==
+Manager -> FE : (1) "Huỷ hợp đồng" (DRAFT / PENDING)
+FE -> C : (2) POST /api/v1/tenant-contracts/{id}/cancel
+activate C
+C -> S : (3) cancelContract(contractId)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> TCR : (6) findContract(contractId)
+activate TCR
+TCR -> DB : (7) SELECT TenantContract
+DB --> TCR : (8) contract
+TCR --> S : (9) contract
+deactivate TCR
+alt [Hợp đồng đã ACTIVE]
+  S --> C : BusinessException "Dùng API thanh lý (/terminate)"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> RP : (10) releaseContractOccupancy(): Room RENTED → AVAILABLE;\nnguyên căn: Property RENTED → ACTIVE
+activate RP
+RP -> DB : (11) UPDATE Room / Property
+DB --> RP : (12) OK
+deactivate RP
+S -> CES : (13) restoreDisabledByContract(contractId)\n(mở lại thiết bị đã khoá theo HĐ)
+S -> TCR : (14) save(status = TERMINATED, terminatedAt,\npaymentStatus PENDING → CANCELLED)
+activate TCR
+TCR -> DB : (15) UPDATE TenantContract
+DB --> TCR : (16) OK
+deactivate TCR
+S -> UPS : (17) revertToListedPrice(contract)
+activate UPS
+UPS -> DB : (18) UPDATE giá phòng về giá niêm yết\nINSERT RoomPriceHistory
+DB --> UPS : (19) OK
+deactivate UPS
+S -> UR : (20) disableTenantAccountIfNoActiveContracts(user)\n(không còn HĐ ACTIVE/PENDING/DRAFT/EXPIRED → status = DISABLE)
+activate UR
+UR -> DB : (21) UPDATE User
+DB --> UR : (22) OK
+deactivate UR
+S -> DB : (23) CommitTransaction()
+DB --> S : (24) Committed
+deactivate DB
+S --> C : (25) void
+deactivate S
+C --> FE : (26) 200 OK
+deactivate C
+FE --> Manager : (27) Hợp đồng TERMINATED
+
+== Thanh lý hợp đồng đang hiệu lực ==
+Manager -> FE : (28) Chọn loại chấm dứt, lý do, ngày hiệu lực → "Thanh lý"
+FE -> C : (29) POST /api/v1/tenant-contracts/{id}/terminate\nTerminateContractRequest
+activate C
+C -> S : (30) terminateActiveContract(contractId, request)
+activate S
+S -> DB : (31) BeginTransaction()
+activate DB
+DB --> S : (32) Success
+S -> TCR : (33) findContract(contractId)
+activate TCR
+TCR --> S : (34) contract
+deactivate TCR
+alt [Đã TERMINATED / không phải ACTIVE hoặc EXPIRED]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+opt [Loại chấm dứt = VIOLATION (vi phạm)]
+  S -> DB : (35) SELECT TenantInvoice RENT OVERDUE của HĐ (quá hạn > 2 ngày)
+  DB --> S : (36) invoices
+  alt [Không có hoá đơn tiền phòng quá hạn đủ ngày]
+    S --> C : BusinessException "Không thể đơn phương chấm dứt (lỗi vi phạm)…"
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+end
+alt [Ngày hiệu lực trước ngày bắt đầu HĐ]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> RP : (37) releaseContractOccupancy()
+S -> TCR : (38) save(status = TERMINATED, terminatedAt, terminationType,\nterminationReason, terminationNote, endDate = ngày hiệu lực)
+activate TCR
+TCR -> DB : (39) UPDATE TenantContract
+DB --> TCR : (40) OK
+deactivate TCR
+S -> UPS : (41) revertToListedPrice(contract)
+S -> DB : (42) CommitTransaction()
+DB --> S : (43) Committed
+deactivate DB
+S --> C : (44) TenantContractResponse
+deactivate S
+C --> FE : (45) 200 OK
+deactivate C
+FE --> Manager : (46) Hợp đồng đã thanh lý — tài khoản khách CHƯA bị khoá\n(khách còn phải xác nhận / khiếu nại hoàn cọc, xem file 32)
+
+== Gia hạn trực tiếp ==
+Manager -> FE : (47) Nhập ngày kết thúc mới (+ tiền thuê mới) → "Gia hạn"
+FE -> C : (48) PATCH /api/v1/tenant-contracts/{id}/extend\nExtendContractRequest
+activate C
+C -> S : (49) extendContract(contractId, request)
+activate S
+S -> DB : (50) BeginTransaction()
+activate DB
+DB --> S : (51) Success
+S -> TCR : (52) findContract(contractId)
+activate TCR
+TCR --> S : (53) contract
+deactivate TCR
+alt [Không ACTIVE / ngày mới không sau ngày kết thúc hiện tại /\nvượt cửa sổ hợp đồng đầu vào]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> TCR : (54) save(endDate mới, rentAmount + baseRentAmount nếu đổi giá)
+activate TCR
+TCR -> DB : (55) UPDATE TenantContract
+DB --> TCR : (56) OK
+deactivate TCR
+opt [Đổi tiền thuê]
+  S -> UPS : (57) applyContractRent(contract, HOP_DONG, "Gia hạn HĐ …")
+end
+S -> NR : (58) notifyContractExtended(): Notification + push cho khách và manager phụ trách
+activate NR
+NR -> DB : (59) INSERT Notification
+DB --> NR : (60) OK
+deactivate NR
+S -> DB : (61) CommitTransaction()
+DB --> S : (62) Committed
+deactivate DB
+S --> C : (63) TenantContractResponse
+deactivate S
+C --> FE : (64) 200 OK
+deactivate C
+FE --> Manager : (65) Hợp đồng gia hạn xong
+
+== Cron: tự huỷ hợp đồng khách không đến nhận nhà ==
+CRON -> S : (66) @Scheduled 08:05 hằng ngày:\nautoCancelNoShowContracts()
+activate S
+S -> DB : (67) BeginTransaction()
+activate DB
+DB --> S : (68) Success
+S -> TCR : (69) findByStatusInAndMoveInDateBefore(\n[DRAFT, PENDING], hôm nay − noShowGraceDays)
+activate TCR
+TCR -> DB : (70) SELECT TenantContract
+DB --> TCR : (71) stale contracts
+TCR --> S : (72) List<TenantContract>
+deactivate TCR
+loop [Mỗi hợp đồng quá hạn nhận nhà]
+  S -> RP : (73) releaseContractOccupancy(contract)
+  S -> TCR : (74) save(status = TERMINATED, terminationType = NO_SHOW,\nterminationReason = "Tự động hủy: khách không đến nhận nhà…")
+  S -> UR : (75) disableTenantAccountIfNoActiveContracts()
+  S -> NR : (76) notifyContractAutoCancelled(contract)
+end
+S -> DB : (77) CommitTransaction()
+DB --> S : (78) Committed
+deactivate DB
+S --> CRON : (79) số hợp đồng đã huỷ
+deactivate S
+
+@enduml

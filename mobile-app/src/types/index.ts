@@ -133,7 +133,8 @@ export type MaintenanceStatus =
   | 'tenant_fault'              // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'    // giao tenant tự sửa trước deadline
   | 'outstanding_damage'       // quá hạn/không đạt — chờ checkout trừ cọc
-  | 'closed'                   // hoàn tất
+  | 'waiting_payment'          // đã sửa/bàn giao xong, khách chưa thanh toán hoá đơn — trả xong BE tự đóng phiếu
+  | 'closed'                   // hoàn tất (và đã thanh toán nếu có thu khách)
   | 'cancelled';
 export type MaintenanceCategory = 'appliance' | 'furniture' | 'plumbing' | 'electrical';
 export type MaintenancePriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -233,6 +234,13 @@ export interface MaintenanceRequest {
    * cho charge()/complete()/handover().
    */
   equipmentReplacementFlagged?: boolean;
+  /** Snapshot thiết bị trên phiếu (21/09/2026) — số lần bảo trì, khấu hao, bảo hành còn lại. Xem được không cần quét QR. */
+  equipment?: EquipmentDto;
+  /**
+   * true = manager xem được phiếu nhưng phải quét QR (confirm-arrival) trước khi xử lý.
+   * BE chỉ bật khi phiếu có thiết bị + có lịch hẹn xem + chưa xác nhận có mặt.
+   */
+  qrScanRequiredToProcess?: boolean;
 }
 
 export interface CreateMaintenanceRequest {
@@ -245,7 +253,7 @@ export interface CreateMaintenanceRequest {
 // ===== Real API DTOs (redesign 01/09/2026) — enum UPPERCASE khớp BE =====
 export type MaintenanceReqStatus =
   | 'OPEN' | 'REPAIR_SCHEDULED' | 'IN_REPAIR' | 'TENANT_FAULT' | 'PENDING_TENANT_REPAIR'
-  | 'OUTSTANDING_DAMAGE' | 'CLOSED' | 'CANCELLED';
+  | 'OUTSTANDING_DAMAGE' | 'WAITING_PAYMENT' | 'CLOSED' | 'CANCELLED';
 export type MaintenanceReqPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type MaintenanceReqCategory = 'APPLIANCE' | 'FURNITURE' | 'PLUMBING' | 'ELECTRICAL';
 export type MaintenanceReqFlowType = 'NORMAL_WEAR' | 'TENANT_FAULT';
@@ -357,6 +365,10 @@ export interface MaintenanceRequestDto {
    * cho charge()/complete()/handover().
    */
   equipmentReplacementFlagged?: boolean;
+  /** Snapshot thiết bị trên phiếu (BE 21/09/2026). */
+  equipment?: EquipmentDto;
+  /** true = phải quét QR (confirm-arrival) trước khi xử lý — chỉ khi phiếu có thiết bị. */
+  qrScanRequiredToProcess?: boolean;
 }
 
 /** Khớp `TenantInvoiceResponse` (BE) — subset field FE cần để hiện hoá đơn/QR ngay sau confirm(). */
@@ -654,6 +666,14 @@ export interface EquipmentDto {
   warrantyEndDate?: string | null;
   /** Mức phạt cố định (VNĐ) khi hết bảo hành mà khách làm hư. */
   penaltyFee?: number | null;
+  /** Ngày mua / lắp (BE 21/09/2026). */
+  purchasedAt?: string | null;
+  /** Khấu hao / giá trị đền còn lại (VNĐ) — hết bảo hành = penaltyFee. */
+  remainingDepreciationAmount?: number | null;
+  remainingWarrantyMonths?: number | null;
+  remainingWarrantyYears?: number | null;
+  /** Vd "Còn 1 năm 3 tháng", "Hết bảo hành". */
+  remainingWarrantyLabel?: string | null;
   maintenanceCount: number;
   lastMaintenanceDate?: string | null;
   operationalStatus?: string;
@@ -671,6 +691,8 @@ export interface EquipmentMaintenanceHistoryDto {
   maintenanceDate: string;
   repairCost?: number;
   note?: string;
+  /** Ảnh trước / sau / hoá đơn của lần bảo trì (BE 21/09/2026). */
+  photoUrls?: string[];
 }
 
 // ======================== METER READING (Chỉ số điện nước) ========================

@@ -195,7 +195,7 @@ export const ProfileScreen: React.FC = () => {
     }
   };
 
-  // ── Cập nhật hồ sơ (PUT /api/v1/users/me) ──
+  // ── Cập nhật hồ sơ (PUT /api/v1/user/me) ──
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');

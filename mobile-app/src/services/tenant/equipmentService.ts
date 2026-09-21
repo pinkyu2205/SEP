@@ -28,6 +28,27 @@ export const realTenantEquipmentService = {
     return data;
   },
 
+  /**
+   * GET /tenant/me/equipments/{id} — chi tiết 1 thiết bị của tenant, kèm số lần bảo trì,
+   * ngày mua, bảo hành còn lại và khấu hao còn lại (BE 21/09/2026). BE tự chặn nếu thiết bị
+   * không thuộc phòng/HĐ của tenant.
+   */
+  getMyEquipmentById: async (id: number): Promise<EquipmentDto> => {
+    const { data } = await realApiClient.get<EquipmentDto>(`/api/v1/tenant/me/equipments/${id}`);
+    return data;
+  },
+
+  /**
+   * GET /tenant/me/equipments/{id}/maintenance-history — các lần bảo trì của thiết bị, có
+   * `photoUrls` (ảnh trước / sau / hoá đơn của từng lần).
+   */
+  getMyEquipmentHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
+    const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
+      `/api/v1/tenant/me/equipments/${id}/maintenance-history`,
+    );
+    return data;
+  },
+
   getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
       `/api/v1/equipment/${id}/maintenance-history`,

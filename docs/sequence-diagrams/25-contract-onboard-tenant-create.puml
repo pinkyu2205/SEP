@@ -1,0 +1,158 @@
+@startuml OnboardTenantCreateContract
+title Figure — Contract: Manager tạo hợp đồng thuê (onboard tenant — DRAFT / PENDING / ACTIVE) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "TenantContractController" as C
+participant "TenantOnboardingServiceImpl" as S
+participant "PropertyRepository /\nRoomRepository" as PR
+participant "TenantContractRepository" as TCR
+participant "ContractEquipmentServiceImpl" as CES
+participant "MeterOverrideService" as MOS
+participant "TenantBillingServiceImpl" as TBS
+participant "UnitPriceServiceImpl" as UPS
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+database DB
+
+Manager -> FE : (1) Nhập thông tin khách, giá thuê, cọc, ngày ở / kết thúc,\nchỉ số điện nước + ảnh, tình trạng phòng, thiết bị bàn giao → "Tạo hợp đồng"
+FE -> C : (2) POST /api/v1/properties/{propertyId}/rooms/{roomId}/tenant-contract\n(hoặc /tenant-contract cho nguyên căn) OnboardTenantRequest
+activate C
+C -> S : (3) onboardTenant(propertyId, roomId, request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> PR : (6) findById(propertyId)
+activate PR
+PR -> DB : (7) SELECT Property
+DB --> PR : (8) Property
+PR --> S : (9) Property
+deactivate PR
+
+S -> S : (10) Validate: (không phải draft) moveInDate = hôm nay,\nendDate > moveInDate, thời hạn ≤ 5 năm,\nInboundLeaseRules.assertOccupancyWindow()
+
+alt [Vi phạm rule ngày / cửa sổ hợp đồng đầu vào]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [Thuê theo phòng (roomId != null)]
+  S -> PR : (11) findByIdAndPropertyId(roomId, propertyId)
+  activate PR
+  PR --> S : (12) Room
+  deactivate PR
+  S -> TCR : (13) existsByRoomIdAndStatus(ACTIVE) +\nexistsOverlappingContractByRoom(moveIn, endDate)
+  activate TCR
+  TCR -> DB : (14) SELECT TenantContract
+  DB --> TCR : (15) exists / not exists
+  TCR --> S : (16) boolean
+  deactivate TCR
+else [Thuê nguyên căn]
+  S -> TCR : (11') existsByPropertyIdAndRoomIsNullAndStatus(ACTIVE) +\nexistsOverlappingContractByProperty(...)
+  activate TCR
+  TCR --> S : (12') boolean
+  deactivate TCR
+end
+alt [Phòng đã có HĐ ACTIVE / chồng lấn / đang RENTED /\nnhà chưa có operationManager]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [Không phải draft]
+  S -> DB : (17) getOrCreateTenant(request): tìm User theo SĐT,\nnếu chưa có → INSERT User + Tenant (mật khẩu ngẫu nhiên, firstLogin = true)
+  DB --> S : (18) Tenant
+end
+
+S -> S : (19) initStatus = DRAFT (nháp) |\nPENDING (cần thu cọc hoặc chờ host duyệt giá) |\nACTIVE (không cần cọc, không cần duyệt)\nassignedManager = operationManager của nhà (BE tự gán)
+S -> S : (20) RentEscalationSupport.applyWithDefaults()\n(lộ trình tăng giá thuê)\n+ thêm HouseholdMember (bỏ dòng trống)
+
+S -> CES : (21) resolveAndApplyHandover(contract, selectedEquipmentIds,\ndeclinedEquipmentIds, addedEquipments, addedEquipmentIds)
+activate CES
+CES -> DB : (22) INSERT TenantContractEquipment (thiết bị nhận / từ chối / thêm)
+DB --> CES : (23) OK
+CES --> S : (24) done
+deactivate CES
+
+S -> TCR : (25) saveAndFlush(contract) — thử tối đa 3 lần\nnếu trùng mã hợp đồng (DataIntegrityViolation)
+activate TCR
+TCR -> DB : (26) INSERT TenantContract
+DB --> TCR : (27) OK / trùng contractCode
+TCR --> S : (28) saved
+deactivate TCR
+
+S -> S : (29) requireMeterEvidence(): mỗi chỉ số cần ảnh HOẶC overrideToken
+alt [Có chỉ số nhưng thiếu cả ảnh lẫn override token]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+opt [Có override token điện / nước]
+  S -> MOS : (30) consumeOverrideIfPresent(managerId, contractId, kind,\ntoken, value, reason) — xem file 19
+  activate MOS
+  MOS --> S : (31) true
+  deactivate MOS
+end
+
+opt [Là nháp và có quản lý phụ trách]
+  S -> NR : (32) notifyAssignedManager(contract)
+  activate NR
+  NR -> DB : (33) INSERT Notification
+  DB --> NR : (34) OK
+  deactivate NR
+  S -> UPT : (35) sendToUser(manager)
+  activate UPT
+  UPT --> S : (36) Expo push
+  deactivate UPT
+end
+
+opt [Không draft, không cần cọc, không chờ duyệt giá, thuê theo phòng]
+  S -> DB : (37) UPDATE Room.status = RENTED
+  DB --> S : (38) OK
+end
+
+opt [Hợp đồng ACTIVE ngay]
+  S -> CES : (39) disableDeclinedForActiveContract(contract)\n(khoá thiết bị khách từ chối)
+  S -> TBS : (40) generateProratedRentForNewContract(contract)
+  activate TBS
+  TBS -> DB : (41) INSERT TenantInvoice RENT (pro-rata kỳ đầu)
+  DB --> TBS : (42) OK
+  deactivate TBS
+end
+
+S -> UPS : (43) applyContractRent(contract, HOP_DONG, "HĐ …")
+activate UPS
+UPS -> DB : (44) INSERT RoomPriceHistory + cập nhật giá phòng
+DB --> UPS : (45) OK
+UPS --> S : (46) done
+deactivate UPS
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (47) CommitTransaction()
+DB --> S : (48) Committed
+deactivate DB
+
+S --> C : (49) TenantContractResponse (+ cảnh báo bàn giao hợp đồng đầu vào)
+deactivate S
+C --> FE : (50) 200 OK / 201 Created
+deactivate C
+FE --> Manager : (51) Hợp đồng mới — DRAFT / PENDING (đi tiếp thu cọc, file 26) / ACTIVE
+
+@enduml

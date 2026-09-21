@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
-import { EquipmentDto } from '@/types';
+import { EquipmentDto, EquipmentMaintenanceHistoryDto } from '@/types';
 import {
-  formatDate, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
+  formatDate, formatCurrency, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
   getHouseAreaLabel, guessEquipmentCategory, showAlert,
 } from '@/utils';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
@@ -32,6 +32,23 @@ export const EquipmentDetailScreen: React.FC = () => {
   const equipment: EquipmentDto = route.params?.equipment;
   const [scanVisible, setScanVisible] = useState(false);
   const [checkingScan, setCheckingScan] = useState(false);
+
+  // Chi tiết + lịch sử bảo trì (BE 21/09/2026) — danh sách chỉ mang thông tin cơ bản, chi tiết
+  // mới có ngày mua, bảo hành còn lại, khấu hao còn lại. Lỗi mạng thì giữ dữ liệu từ danh sách.
+  const [detail, setDetail] = useState<EquipmentDto | null>(null);
+  const [history, setHistory] = useState<EquipmentMaintenanceHistoryDto[]>([]);
+  useEffect(() => {
+    const id = equipment?.id;
+    if (id == null) return;
+    let alive = true;
+    realTenantEquipmentService.getMyEquipmentById(id)
+      .then(d => { if (alive) setDetail(d); })
+      .catch(() => { /* giữ dữ liệu từ danh sách */ });
+    realTenantEquipmentService.getMyEquipmentHistory(id)
+      .then(h => { if (alive) setHistory(h ?? []); })
+      .catch(() => { /* chưa có lịch sử / offline — ẩn khối lịch sử */ });
+    return () => { alive = false; };
+  }, [equipment?.id]);
 
   /**
    * Bắt buộc quét đúng QR dán trên thiết bị trước khi mở form báo hỏng (06/09/2026) —
@@ -86,7 +103,17 @@ export const EquipmentDetailScreen: React.FC = () => {
     );
   }
 
-  const name = equipName(equipment);
+  // Chi tiết từ BE (nếu đã tải) chỉ bổ sung các trường mới — không đè dữ liệu đã có từ danh sách.
+  const eq: EquipmentDto = detail ? {
+    ...equipment,
+    maintenanceCount: detail.maintenanceCount ?? equipment.maintenanceCount,
+    lastMaintenanceDate: detail.lastMaintenanceDate ?? equipment.lastMaintenanceDate,
+    purchasedAt: detail.purchasedAt,
+    warrantyMonths: detail.warrantyMonths ?? equipment.warrantyMonths,
+    remainingWarrantyLabel: detail.remainingWarrantyLabel,
+    remainingDepreciationAmount: detail.remainingDepreciationAmount,
+  } : equipment;
+  const name = equipName(eq);
   const statusStyle = getEquipmentLifecycleColor(equipment.status);
   const categoryIcon = CATEGORY_ICON[guessEquipmentCategory(name)] ?? '🔧';
 
@@ -127,11 +154,19 @@ export const EquipmentDetailScreen: React.FC = () => {
         <View>
             <View style={styles.section}>
               {[
-                { label: 'Khu vực', value: getHouseAreaLabel(equipment.houseArea) },
-                { label: 'Phòng', value: equipment.roomName ?? equipment.roomNumber ?? 'Khu vực chung' },
-                { label: 'Ngày lắp đặt', value: equipment.installationDate ? formatDate(equipment.installationDate) : 'Chưa có' },
-                { label: 'Bảo trì gần nhất', value: equipment.lastMaintenanceDate ? formatDate(equipment.lastMaintenanceDate) : 'Chưa có' },
-                { label: 'Số lần bảo trì', value: `${equipment.maintenanceCount} lần` },
+                { label: 'Khu vực', value: getHouseAreaLabel(eq.houseArea) },
+                { label: 'Phòng', value: eq.roomName ?? eq.roomNumber ?? 'Khu vực chung' },
+                { label: 'Ngày mua / lắp đặt', value: (eq.purchasedAt ?? eq.installationDate) ? formatDate((eq.purchasedAt ?? eq.installationDate) as string) : 'Chưa có' },
+                ...(eq.remainingWarrantyLabel ? [{
+                  label: 'Bảo hành',
+                  value: eq.warrantyMonths ? `${eq.remainingWarrantyLabel} (${eq.warrantyMonths} tháng)` : eq.remainingWarrantyLabel,
+                }] : []),
+                ...(eq.remainingDepreciationAmount != null ? [{
+                  label: 'Giá trị đền bù còn lại',
+                  value: formatCurrency(eq.remainingDepreciationAmount),
+                }] : []),
+                { label: 'Bảo trì gần nhất', value: eq.lastMaintenanceDate ? formatDate(eq.lastMaintenanceDate) : 'Chưa có' },
+                { label: 'Số lần bảo trì', value: `${eq.maintenanceCount} lần` },
               ].map((row, i, arr) => (
                 <View key={i} style={[styles.infoRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
                   <Text style={styles.infoLabel}>{row.label}</Text>
@@ -140,6 +175,32 @@ export const EquipmentDetailScreen: React.FC = () => {
               ))}
             </View>
 
+
+            {/* Lịch sử các lần bảo trì + ảnh (BE 21/09/2026) */}
+            {history.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.notesTitle}>🛠 Lịch sử bảo trì</Text>
+                {history.map((h) => (
+                  <View key={h.id} style={styles.historyItem}>
+                    <View style={styles.historyHead}>
+                      <Text style={styles.historyDate}>{formatDate(h.maintenanceDate)}</Text>
+                      {h.repairCost != null && (
+                        <Text style={styles.historyCost}>{formatCurrency(h.repairCost)}</Text>
+                      )}
+                    </View>
+                    {!!h.requestCode && <Text style={styles.historyMeta}>Phiếu {h.requestCode}</Text>}
+                    {!!h.note && <Text style={styles.historyNote}>{h.note}</Text>}
+                    {(h.photoUrls?.length ?? 0) > 0 && (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
+                        {h.photoUrls!.map((uri, i) => (
+                          <Image key={`${h.id}-${i}`} source={{ uri }} style={styles.historyPhoto} />
+                        ))}
+                      </ScrollView>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
             {/* Ghi chú từ quản lý */}
             {equipment.note && (
               <View style={styles.notesCard}>
@@ -236,6 +297,15 @@ const styles = StyleSheet.create({
   },
   notesTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
   notesText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 22 },
+
+  // Lịch sử bảo trì
+  historyItem: { paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider },
+  historyHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyDate: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
+  historyCost: { fontSize: 13, fontWeight: '700', color: Colors.accent },
+  historyMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  historyNote: { fontSize: 13, color: Colors.textSecondary, marginTop: 4, lineHeight: 20 },
+  historyPhoto: { width: 72, height: 72, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
 
   // Usage tips
   tipsCard: {

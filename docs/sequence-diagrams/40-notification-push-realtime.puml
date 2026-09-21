@@ -1,0 +1,139 @@
+@startuml NotificationPushRealtime
+title Figure — Thông báo: đăng ký push token, gửi Expo push, khay chuông, SSE và WebSocket realtime Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor User
+participant "Mobile / Web App" as APP
+participant "PushTokenController" as PTC
+participant "UserPushTokenService" as UPT
+participant "PushNotificationService" as PNS
+participant "Expo Push API" as EXPO
+participant "AppNotificationController" as NC
+participant "AppNotificationServiceImpl" as NS
+participant "WebSocketConfig\n(STOMP /ws)" as WS
+participant "RealtimeEventServiceImpl" as RT
+participant "Domain Service\n(Maintenance, Billing, Contract…)" as DOM
+database DB
+
+== Đăng ký / gỡ push token (multi-device) ==
+User -> APP : (1) Đăng nhập → app xin quyền thông báo, lấy Expo push token
+APP -> PTC : (2) POST /api/v1/user/me/push-token {pushToken}
+activate PTC
+PTC -> DB : (3) SELECT User theo username trong JWT
+DB --> PTC : (4) user
+PTC -> UPT : (5) register(user, token)
+activate UPT
+UPT -> DB : (6) SELECT UserPushToken theo token
+DB --> UPT : (7) existing / empty
+alt [Token đã có và thuộc user khác]
+  UPT -> DB : (8) UPDATE UserPushToken.userId = user hiện tại (rebind)
+else [Token đã có cùng user]
+  UPT -> DB : (8') UPDATE updatedAt
+else [Token mới]
+  UPT -> DB : (8'') INSERT UserPushToken
+end
+UPT -> DB : (9) UPDATE User.pushToken = token mới nhất (đọc kiểu cũ)
+DB --> UPT : (10) OK
+UPT --> PTC : (11) done
+deactivate UPT
+PTC --> APP : (12) 200 {success: true}
+deactivate PTC
+
+User -> APP : (13) Đăng xuất
+APP -> PTC : (14) DELETE /api/v1/user/me/push-token (body tuỳ chọn)
+activate PTC
+PTC -> UPT : (15) unregister(user, token)
+activate UPT
+UPT -> DB : (16) DELETE UserPushToken (đúng máy, hoặc mọi máy nếu không gửi token)\nUPDATE User.pushToken
+DB --> UPT : (17) OK
+UPT --> PTC : (18) done
+deactivate UPT
+PTC --> APP : (19) 200 {success: true}
+deactivate PTC
+
+== Domain service phát thông báo (mẫu chung cho mọi nghiệp vụ) ==
+DOM -> DB : (20) INSERT Notification\n(userId, title, content, type, screen, paramsJson, read = false)
+DB --> DOM : (21) OK
+DOM -> UPT : (22) sendToUser(userId, title, body, data{type, screen, params})
+activate UPT
+UPT -> DB : (23) SELECT UserPushToken theo userId (+ User.pushToken cũ)
+DB --> UPT : (24) danh sách token
+UPT -> PNS : (25) sendPushNotifications(tokens, title, body, data)
+activate PNS
+PNS -> PNS : (26) Lọc token Expo ("ExponentPushToken…"),\ntoken khác chỉ ghi log
+loop [Mỗi lô tối đa 100 token]
+  PNS -> EXPO : (27) POST https://exp.host/--/api/v2/push/send\n[{to, sound: "default", title, body, data}]
+  activate EXPO
+  EXPO --> PNS : (28) ticket từng token (ok / lỗi)
+  deactivate EXPO
+  PNS -> PNS : (29) handleExpoResponse(): xử lý ticket lỗi\n(best-effort — timeout 5 giây, lỗi không ném về nghiệp vụ)
+end
+PNS --> UPT : (30) done
+deactivate PNS
+UPT --> DOM : (31) done
+deactivate UPT
+EXPO -> APP : (32) Đẩy thông báo tới thiết bị
+
+User -> APP : (33) Bấm vào thông báo
+APP -> APP : (34) đọc data.screen + data.params → điều hướng tới màn hình tương ứng\n(mobile; web chỉ đánh dấu đã đọc)
+
+== Khay thông báo trong app ==
+User -> APP : (35) Mở chuông thông báo
+APP -> NC : (36) GET /api/v1/notifications?unreadOnly=&types=\nGET /notifications/unread-count
+activate NC
+NC -> NS : (37) listNotifications(userId, unreadOnly, types, pageable) / unreadCount(userId)
+activate NS
+NS -> DB : (38) SELECT Notification WHERE userId ORDER BY id DESC (lọc theo type)
+DB --> NS : (39) page / số chưa đọc
+NS --> NC : (40) Page<NotificationResponse> (params parse từ paramsJson)
+deactivate NS
+NC --> APP : (41) 200 OK
+deactivate NC
+APP --> User : (42) Danh sách + số chưa đọc
+
+User -> APP : (43) Bấm một thông báo / "Đọc tất cả"
+APP -> NC : (44) PUT /api/v1/notifications/{id}/read\nPUT /api/v1/notifications/read-all
+activate NC
+NC -> NS : (45) markAsRead(userId, id) / markAllAsRead(userId)
+activate NS
+alt [Thông báo không tồn tại hoặc không thuộc user]
+  NS --> NC : ResourceNotFoundException
+  NC --> APP : 404
+end
+NS -> DB : (46) UPDATE Notification SET read = true
+DB --> NS : (47) OK
+NS --> NC : (48) void
+deactivate NS
+NC --> APP : (49) 200 OK
+deactivate NC
+
+== Realtime: SSE thông báo và WebSocket STOMP ==
+APP -> NC : (50) GET /api/v1/notifications/stream (SSE)
+activate NC
+NC --> APP : (51) SseEmitter — giữ kết nối, đẩy thông báo mới
+deactivate NC
+
+APP -> WS : (52) CONNECT ws://…/ws\nheader Authorization: Bearer <JWT>
+activate WS
+WS -> WS : (53) ChannelInterceptor: lấy username từ JWT →\nloadUserByUsername → validateToken → gắn Principal
+alt [Thiếu Bearer / token không hợp lệ]
+  WS --> APP : ERROR (từ chối kết nối)
+end
+WS --> APP : (54) CONNECTED
+deactivate WS
+APP -> WS : (55) SUBSCRIBE /user/queue/maintenance\nSUBSCRIBE /user/queue/billing
+
+DOM -> RT : (56) publishMaintenanceEvent(req, EVT_…) /\npublishInvoicePaid / publishContractConfirmProgress / publishContractActivated
+activate RT
+RT -> DB : (57) SELECT người nhận theo vai trò\n(admin, owner, manager phụ trách, tenant của phiếu / hoá đơn)
+DB --> RT : (58) danh sách userId
+RT -> WS : (59) convertAndSendToUser(user, "/queue/maintenance" hoặc "/queue/billing", event)
+WS --> APP : (60) MESSAGE — app nạp lại dữ liệu tương ứng
+deactivate RT
+
+@enduml

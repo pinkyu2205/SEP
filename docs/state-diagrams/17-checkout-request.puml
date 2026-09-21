@@ -1,0 +1,41 @@
+@startuml CheckoutRequestState
+title Figure — Checkout: vòng đời yêu cầu trả phòng (CheckoutRequestStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> PENDING : Tenant gửi yêu cầu trả phòng\nManager tạo hộ tenant\nCron 00:00 hợp đồng hết hạn (origin = CONTRACT_EXPIRED)
+
+PENDING --> APPROVED : Manager duyệt [hợp đồng còn ACTIVE]
+PENDING --> REJECTED : Manager từ chối + lý do\nTenant huỷ ("Khách hủy yêu cầu")\n[trừ phiếu CONTRACT_EXPIRED do hệ thống tạo]
+
+APPROVED --> INSPECTING : Manager lưu biên bản kiểm tra phòng lần đầu\n(chỉ số cuối, hư hỏng, ảnh)
+INSPECTING --> INSPECTING : Lưu lại biên bản kiểm tra\n(đồng bộ hoá đơn điện nước cuối + hoá đơn bồi thường)
+
+INSPECTING --> WAITING_TENANT : Manager gửi bảng quyết toán (settlement/submit)\n[cần biên bản kiểm tra]
+WAITING_TENANT --> SETTLING : Tenant đồng ý (acceptSettlement)\nCron 00:00: tự chấp nhận sau 7 ngày không phản hồi
+WAITING_TENANT --> DISPUTED : Tenant phản đối bảng quyết toán
+
+DISPUTED --> INSPECTING : Manager kiểm tra / chỉnh lại biên bản
+DISPUTED --> WAITING_TENANT : Manager gửi lại bảng quyết toán mới
+
+SETTLING --> COMPLETED : Manager hoàn tất (complete)\n[assertChargesSettledBeforeComplete: hoá đơn đã thanh toán hoặc cấn trừ cọc]\n/ thanh lý hợp đồng (EARLY_MOVE_OUT), phòng → AVAILABLE
+APPROVED --> COMPLETED : Manager hoàn tất ngay (complete)\n[APPROVED hoặc SETTLING mới hoàn tất được]
+
+REJECTED --> [*]
+COMPLETED --> [*]
+
+note right of SETTLING
+  Sau COMPLETED: hoàn cọc, cron 00:15 khoá tài khoản khi khách im lặng
+  sau khi nhận hoàn cọc (file 32, 33). CANCELLED có trong enum
+  nhưng chưa có đường nào ghi — huỷ của tenant ghi thành REJECTED.
+end note
+
+@enduml

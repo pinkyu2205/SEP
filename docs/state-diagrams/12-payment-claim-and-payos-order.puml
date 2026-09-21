@@ -1,0 +1,38 @@
+@startuml PaymentClaimAndPayosOrderState
+title Figure — Billing: yêu cầu xác nhận chuyển khoản (PaymentClaimStatus) và đơn PayOS của hoá đơn (PayosOrderStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Yêu cầu xác nhận chuyển khoản (TenantPaymentClaim)" as CLAIM {
+  [*] --> PENDING_VERIFY : Tenant báo "đã chuyển khoản"\n[PayOS chưa báo PAID; hoá đơn chưa PAID]\n(đã có claim PENDING_VERIFY thì cập nhật lại, không tạo mới)
+  PENDING_VERIFY --> VERIFIED : Manager duyệt (approvePaymentClaim)\n/ hoá đơn → PAID
+  PENDING_VERIFY --> REJECTED : Manager từ chối + lý do
+  VERIFIED --> [*]
+  REJECTED --> [*]
+  note right of PENDING_VERIFY
+    Hoá đơn đã PAID qua kênh khác thì không duyệt được,
+    manager phải Từ chối để tránh ghi nhận trùng.
+  end note
+}
+
+state "Đơn PayOS của hoá đơn (TenantInvoicePayosOrder)" as ORDER {
+  [*] --> ACTIVE : Tạo QR mới (orderCode = thời điểm, có expiredAt)\nTenant thanh toán / manager mở khoá tạo QR thu hộ
+  ACTIVE --> SUPERSEDED : Tạo QR mới cho cùng hoá đơn\n(đơn ACTIVE cũ bị thay thế)
+  ACTIVE --> PAID : Webhook PayOS code "00" (handlePayosOrderPaid, idempotent)
+  PAID --> [*] : hoá đơn → PAID, phát InvoicePaidEvent
+  SUPERSEDED --> [*]
+  note right of ACTIVE
+    EXPIRED có trong enum nhưng chưa có đường ghi:
+    hết hạn được nhận biết qua expiredAt, không đổi status.
+  end note
+}
+
+@enduml

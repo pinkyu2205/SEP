@@ -35,7 +35,7 @@ const daysBetween = (from: string) => {
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 const TERMINAL = ['closed', 'cancelled'];
-const WORKING = ['repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+const WORKING = ['repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage', 'waiting_payment'];
 // 'tenant_fault' đã được admin duyệt/không duyệt trên web là ĐIỂM DỪNG của app — BE
 // không đổi status (vẫn giữ nguyên 'tenant_fault' vĩnh viễn, xem TicketDetailScreen),
 // nên phải tự loại khỏi "đang xử lý" bằng adminReviewedAt, không thì ticket nằm lì

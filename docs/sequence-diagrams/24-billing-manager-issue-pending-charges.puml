@@ -1,0 +1,100 @@
+@startuml ManagerIssuePendingCharges
+title Figure — Billing: Manager gộp các khoản phát sinh thành hoá đơn cho khách (issue-invoice) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "ManagerPendingChargeController" as C
+participant "TenantPendingChargeServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "TenantPendingChargeRepository" as PCR
+participant "TenantInvoiceRepository" as TIR
+database DB
+
+== Xem các khoản chờ xuất hoá đơn ==
+Manager -> FE : (1) Mở màn "Khoản phát sinh"
+FE -> C : (2) GET /api/v1/manager/pending-charges?propertyId=&status=
+activate C
+C -> S : (3) getPendingChargesForManager(managerId, isAdmin, propertyId, status)
+activate S
+S -> PCR : (4) findForManager(...)
+activate PCR
+PCR -> DB : (5) SELECT TenantPendingCharge
+DB --> PCR : (6) charges
+PCR --> S : (7) List<TenantPendingCharge>
+deactivate PCR
+S --> C : (8) List<TenantPendingChargeResponse>
+deactivate S
+C --> FE : (9) 200 OK
+deactivate C
+FE --> Manager : (10) Danh sách khoản chờ (đền bù bảo trì, điều chỉnh khiếu nại…)
+
+== Gộp thành hoá đơn ==
+Manager -> FE : (11) Chọn các khoản của 1 hợp đồng → "Phát hành hoá đơn"
+FE -> C : (12) POST /api/v1/manager/pending-charges/issue-invoice\nIssueInvoiceRequest (contractId, chargeIds, dueDate)
+activate C
+C -> S : (13) issueInvoiceFromCharges(contractId, request)
+activate S
+S -> DB : (14) BeginTransaction()
+activate DB
+DB --> S : (15) Success
+
+S -> TCR : (16) findById(contractId)
+activate TCR
+TCR -> DB : (17) SELECT TenantContract
+DB --> TCR : (18) contract
+TCR --> S : (19) contract
+deactivate TCR
+alt [Không tìm thấy HĐ / danh sách khoản rỗng]
+  S --> C : ResourceNotFoundException / BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> PCR : (20) findAllById(chargeIds)
+activate PCR
+PCR -> DB : (21) SELECT TenantPendingCharge
+DB --> PCR : (22) charges
+PCR --> S : (23) List<TenantPendingCharge>
+deactivate PCR
+alt [Khoản không thuộc HĐ này / đã INVOICED hoặc xử lý rồi]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> S : (24) totalAmount = Σ amount\n(khoản hoàn/trừ có amount âm được cộng đại số)\ndueDate = request hoặc cuối tháng
+S -> TIR : (25) save(TenantInvoice type = MAINTENANCE,\ncode "HD-MAINT-...", status = PENDING)
+activate TIR
+TIR -> DB : (26) INSERT TenantInvoice
+DB --> TIR : (27) OK
+TIR --> S : (28) invoice
+deactivate TIR
+S -> PCR : (29) saveAll(charge.status = INVOICED, charge.invoice = invoice)
+activate PCR
+PCR -> DB : (30) UPDATE TenantPendingCharge
+DB --> PCR : (31) OK
+deactivate PCR
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> DB : (32) CommitTransaction()
+DB --> S : (33) Committed
+deactivate DB
+S --> C : (34) TenantInvoiceResponse
+deactivate S
+C --> FE : (35) 200 OK
+deactivate C
+FE --> Manager : (36) Hoá đơn đã tạo (khách thanh toán như file 16)
+
+@enduml

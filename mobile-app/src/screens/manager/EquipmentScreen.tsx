@@ -36,8 +36,8 @@ import {
  * Nguồn dữ liệu hiện tại:
  *   • Nhà      → managerPropertyService.getScopedProperties()  (lọc theo manager đăng nhập)
  *   • Thiết bị → GET /api/v1/properties/{id}/equipments
- *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status-feature
- *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-history  (trả phiếu bảo trì)
+ *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status
+ *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-tickets  (trả phiếu bảo trì)
  *
  * Trạng thái dùng thẳng enum EquipmentStatus của BE (6 giá trị) thay vì bộ 5 nhãn cũ
  * của FE — bộ cũ phải map lossy (replaced/retired đều thành DISPOSED) nên bấm xong

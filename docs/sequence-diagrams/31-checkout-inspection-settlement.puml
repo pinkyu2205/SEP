@@ -1,0 +1,207 @@
+@startuml CheckoutInspectionSettlement
+title Figure — Checkout: Kiểm tra phòng, lập bảng quyết toán, Tenant đồng ý / phản đối Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+actor Tenant
+participant "Front-end" as FE
+participant "CheckoutProcessController /\nTenantCheckoutProcessController" as C
+participant "CheckoutProcessServiceImpl" as S
+participant "CheckoutInspectionRepository" as CIR
+participant "MaintenanceServiceImpl" as MS
+participant "TenantInvoiceRepository" as TIR
+participant "CheckoutSettlementRepository" as CSR
+participant "CheckoutRequestRepository" as CRR
+participant "NotificationRepository +\nPushNotificationService" as NP
+database DB
+
+== Manager lưu biên bản kiểm tra phòng ==
+Manager -> FE : (1) Ghi tình trạng phòng, chỉ số điện nước cuối,\ncác hư hại (số tiền, ảnh) → "Lưu biên bản"
+FE -> C : (2) POST /api/v1/checkout-requests/{id}/inspection\nCheckoutInspectionRequest
+activate C
+C -> S : (3) saveInspection(checkoutRequestId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> CRR : (6) findById(checkoutRequestId)
+activate CRR
+CRR -> DB : (7) SELECT CheckoutRequest
+DB --> CRR : (8) checkoutRequest
+CRR --> S : (9) checkoutRequest
+deactivate CRR
+S -> S : (10) requireInspectionEditable(checkoutRequest)
+alt [Trạng thái không cho sửa biên bản]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> CIR : (11) findByCheckoutRequestId() — tạo mới nếu chưa có
+activate CIR
+CIR -> DB : (12) SELECT CheckoutInspection
+DB --> CIR : (13) inspection / empty
+CIR --> S : (14) inspection
+deactivate CIR
+S -> CIR : (15) save(inspection + damages: xoá danh sách cũ,\nthêm từng CheckoutDamageItem)
+activate CIR
+CIR -> DB : (16) INSERT / UPDATE CheckoutInspection, CheckoutDamageItem
+DB --> CIR : (17) OK
+deactivate CIR
+loop [Mỗi hư hại gắn với phiếu bảo trì]
+  S -> MS : (18) markOutstandingDamageResolved(maintenanceRequestId,\ndamageItemId, amount)
+  activate MS
+  MS -> DB : (19) UPDATE OutstandingDamageRecord resolvedAtCheckout = true,\ncheckoutDamageItemId (+ cập nhật số tiền thực tế)
+  DB --> MS : (20) OK
+  MS --> S : (21) done
+  deactivate MS
+end
+opt [Có chỉ số điện / nước cuối]
+  S -> DB : (22) createFinalUtilityInvoice(ELECTRIC / WATER):\nINSERT UtilityInvoice + TenantInvoice "chốt trả phòng"
+  DB --> S : (23) OK
+end
+S -> TIR : (24) syncCompensationInvoice(): đồng bộ hoá đơn COMPENSATION\ntheo danh sách hư hại
+activate TIR
+TIR -> DB : (25) INSERT / UPDATE TenantInvoice COMPENSATION
+DB --> TIR : (26) OK
+deactivate TIR
+S -> CRR : (27) save(status = INSPECTING) nếu chưa
+activate CRR
+CRR -> DB : (28) UPDATE CheckoutRequest
+DB --> CRR : (29) OK
+deactivate CRR
+opt [Trước đó không phải DISPUTED]
+  S -> NP : (30) sendNotification(tenant, CHECKOUT_INSPECTED)
+  activate NP
+  NP -> DB : (31) INSERT Notification
+  DB --> NP : (32) OK
+  deactivate NP
+end
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> DB : (33) CommitTransaction()
+DB --> S : (34) Committed
+deactivate DB
+S --> C : (35) void
+deactivate S
+C --> FE : (36) 200 OK
+deactivate C
+FE --> Manager : (37) Biên bản đã lưu — trạng thái INSPECTING
+
+== Manager xem bản quyết toán tạm tính ==
+Manager -> FE : (38) Mở màn quyết toán
+FE -> C : (39) GET /api/v1/checkout-requests/{id}/settlement
+activate C
+C -> S : (40) getSettlement(checkoutRequestId)
+activate S
+S -> CIR : (41) findByCheckoutRequestId() (bắt buộc đã có biên bản)
+S -> TIR : (42) findByTenantContractId(): gom hoá đơn chưa PAID,\nhoá đơn COMPENSATION mới, hoá đơn "chốt trả phòng"
+S -> S : (43) Tính: tổng nợ (chargesTotal), đã trả (chargesPaid),\ntổng hư hại; tiền phòng theo ngày ở thực tế →\nđiều chỉnh "hoàn tiền những ngày không ở" hoặc "tiền phòng ngày ở thêm"
+opt [Đã có bản quyết toán đã chốt]
+  S -> CSR : (44) findByCheckoutRequestId() → trả bản đã lưu
+end
+S --> C : (45) CheckoutSettlementResponse
+deactivate S
+C --> FE : (46) 200 OK
+deactivate C
+FE --> Manager : (47) Bảng quyết toán tạm tính
+
+== Manager gửi quyết toán cho khách ==
+Manager -> FE : (48) "Gửi quyết toán"
+FE -> C : (49) POST /api/v1/checkout-requests/{id}/settlement/submit
+activate C
+C -> S : (50) submitSettlement(checkoutRequestId)
+activate S
+S -> DB : (51) BeginTransaction()
+activate DB
+DB --> S : (52) Success
+S -> S : (53) Trạng thái phải INSPECTING hoặc DISPUTED
+alt [Sai trạng thái]
+  S --> C : RuntimeException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> S : (54) getSettlement() → refundAmount = cọc;\nextraChargeAmount = chargesTotal − adjustmentTotal;\nnếu âm → cộng phần dư vào hoàn cọc, extraCharge = 0
+S -> CSR : (55) save(CheckoutSettlement: unpaidTotal, damageTotal,\nadjustmentTotal, refundAmount, extraChargeAmount,\nsettlementInvoices, settlementAdjustments)
+activate CSR
+CSR -> DB : (56) INSERT / UPDATE CheckoutSettlement + con
+DB --> CSR : (57) OK
+deactivate CSR
+S -> CRR : (58) save(status = WAITING_TENANT)
+activate CRR
+CRR -> DB : (59) UPDATE CheckoutRequest
+DB --> CRR : (60) OK
+deactivate CRR
+S -> NP : (61) sendNotification(tenant, CHECKOUT_SETTLEMENT_SENT)
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> DB : (62) CommitTransaction()
+DB --> S : (63) Committed
+deactivate DB
+S --> C : (64) void
+deactivate S
+C --> FE : (65) 200 OK
+deactivate C
+FE --> Manager : (66) Chờ khách xác nhận (WAITING_TENANT)
+
+== Tenant đồng ý ==
+Tenant -> FE : (67) Xem bảng quyết toán → "Đồng ý"
+FE -> C : (68) POST /api/v1/tenant/me/checkout-requests/{id}/settlement/accept
+activate C
+C -> S : (69) acceptSettlement(checkoutRequestId, tenantId)
+activate S
+alt [Không phải chủ yêu cầu / không ở WAITING_TENANT]
+  S --> C : RuntimeException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> CRR : (70) save(status = SETTLING)
+activate CRR
+CRR -> DB : (71) UPDATE CheckoutRequest
+DB --> CRR : (72) OK
+deactivate CRR
+S -> NP : (73) sendNotification(manager, CHECKOUT_SETTLEMENT_ACCEPTED)
+S --> C : (74) void
+deactivate S
+C --> FE : (75) 200 OK
+deactivate C
+FE --> Tenant : (76) Chờ thu nợ / hoàn cọc (file 32)
+
+== Tenant phản đối ==
+Tenant -> FE : (77) Nhập lý do + ảnh → "Phản đối"
+FE -> C : (78) POST /api/v1/tenant/me/checkout-requests/{id}/settlement/dispute
+activate C
+C -> S : (79) disputeSettlement(checkoutRequestId, tenantId, request)
+activate S
+alt [Không phải chủ yêu cầu / không WAITING_TENANT / đã phản đối đủ 3 lần]
+  S --> C : RuntimeException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> CRR : (80) save(status = DISPUTED, disputeCount + 1,\ndisputeReason, disputePhotos, disputedAt)
+activate CRR
+CRR -> DB : (81) UPDATE CheckoutRequest
+DB --> CRR : (82) OK
+deactivate CRR
+S -> NP : (83) sendNotification(manager, CHECKOUT_DISPUTED)
+S --> C : (84) void
+deactivate S
+C --> FE : (85) 200 OK
+deactivate C
+FE --> Tenant : (86) Đã gửi phản đối — manager sửa biên bản rồi gửi lại (bước 1–66)
+
+@enduml
