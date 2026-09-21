@@ -1,0 +1,170 @@
+@startuml MaintenanceDiagnose
+title Figure — Maintenance: Manager chẩn đoán (diagnose) — hao mòn / lỗi khách, có thể kèm thay thiết bị Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "EquipmentRepository" as ER
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+Manager -> FE : (1) Chọn nguyên nhân (Hao mòn / Lỗi do khách),\nnhập giá, tick "cần thay mới" (nếu có),\nchọn "Sửa ngay" hoặc hẹn lịch sửa
+FE -> C : (2) PUT /api/v1/maintenance/{id}/diagnose\nMaintenanceDiagnoseRequest
+activate C
+C -> S : (3) diagnose(id, request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+S -> S : (10) requireManagerAccess(req)\nrequireVisitArrivalConfirmed(req)\nfromOpen = status OPEN\nfromInspection = REPAIR_SCHEDULED và chưa có damageCause
+
+alt [Không thuộc fromOpen / fromInspection,\nthiếu damageCause, hoặc damageCause ∉ {WEAR, TENANT_MISUSE}]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> S : (11) applyDiagnoseAmountFields(req, request, needsReplacement)
+
+alt [equipmentNeedsReplacement = true]
+  alt [estimatedDamageAmount ≤ 0 / quotedRepairAmount < 0]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+  S -> S : (12) estimatedDamageAmount = giá trị thay thế,\ninvoiceAmount = chi phí phát sinh thêm,\nequipmentReplacementFlagged = true
+  opt [Phiếu gắn equipmentId]
+    S -> ER : (13) findById(equipmentId)
+    activate ER
+    ER -> DB : (14) SELECT Equipment
+    DB --> ER : (15) Equipment
+    ER --> S : (16) Equipment
+    deactivate ER
+    S -> ER : (17) save(status = BROKEN,\nrecommendReplacement = true)
+    activate ER
+    ER -> DB : (18) UPDATE Equipment
+    DB --> ER : (19) OK
+    ER --> S : (20) saved
+    deactivate ER
+  end
+  S -> NR : (21) notifyAdmins("Thiết bị cần thay mới")\n→ mọi ROLE_ADMIN ACTIVE
+  activate NR
+  NR -> DB : (22) INSERT Notification EQUIPMENT_NEEDS_REPLACEMENT\n(1 dòng / admin)
+  DB --> NR : (23) OK
+  NR --> S : (24) saved
+  deactivate NR
+  S -> UPT : (25) sendToUser(từng admin)
+  activate UPT
+  UPT --> S : (26) Expo push
+  deactivate UPT
+else [Không thay thiết bị]
+  alt [quotedRepairAmount thiếu hoặc < 0]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+  S -> S : (12') estimatedDamageAmount = quotedRepairAmount,\nequipmentReplacementFlagged = false
+end
+
+alt [fromInspection nhưng thiếu repairAppointmentAt /\nthiếu category]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+alt [damageCause = WEAR (hao mòn tự nhiên — công ty chịu)]
+  S -> S : (27) flowType = NORMAL_WEAR, damageCause = WEAR
+  alt [fromInspection hoặc có repairAt]
+    S -> MR : (28) validateAndAssertSlotAvailable(managerId, repairAt, 60 phút)
+    activate MR
+    MR -> DB : (29) SELECT lịch của manager
+    DB --> MR : (30) slots
+    MR --> S : (31) OK / ConflictException
+    deactivate MR
+    S -> S : (32) status = REPAIR_SCHEDULED, repairAppointmentAt = repairAt
+  else [Sửa ngay]
+    S -> S : (32') status = IN_REPAIR
+    S -> RR : (33) markRoomMaintenance() → Room.status = MAINTENANCE
+    activate RR
+    RR -> DB : (34) UPDATE Room
+    DB --> RR : (35) OK
+    RR --> S : (36) done
+    deactivate RR
+  end
+else [damageCause = TENANT_MISUSE (lỗi do khách)]
+  alt [Thiếu tenantAgreesToPay / faultReason / ảnh bằng chứng]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+  S -> S : (37) flowType = TENANT_FAULT, damageCause = TENANT_MISUSE,\nfaultResolutionPath = MANAGER_REPAIR,\nlưu ảnh FAULT_EVIDENCE vào photo history
+  alt [tenantAgreesToPay = false → công ty trả hộ]
+    S -> S : (38) companyAbsorbedFault = true, companyAbsorbedNote\nstatus = REPAIR_SCHEDULED (fromInspection / có lịch)\nhoặc IN_REPAIR (sửa ngay, + markRoomMaintenance)
+  else [tenantAgreesToPay = true → khách trả]
+    S -> S : (38') companyAbsorbedFault = false\nstatus = REPAIR_SCHEDULED (fromInspection / có lịch)\nhoặc TENANT_FAULT (sửa ngay) — chờ lập hoá đơn & thanh toán
+  end
+end
+
+S -> MR : (39) save(req)
+activate MR
+MR -> DB : (40) UPDATE MaintenanceRequest
+DB --> MR : (41) OK
+MR --> S : (42) saved
+deactivate MR
+S -> DB : (43) INSERT MaintenanceTimeline\n(old → status mới, ghi rõ kết quả chẩn đoán + số tiền)
+DB --> S : (44) OK
+
+S -> NR : (45) notifyTenant(kết quả chẩn đoán)\nMAINTENANCE_APPROVED / MAINTENANCE_TENANT_FAULT
+activate NR
+NR -> DB : (46) INSERT Notification
+DB --> NR : (47) OK
+NR --> S : (48) saved
+deactivate NR
+S -> UPT : (49) sendToUser(tenant)
+activate UPT
+UPT --> S : (50) Expo push
+deactivate UPT
+S -> RT : (51) publishMaintenanceEvent(APPROVED / REJECT_FAULT\n/ SCHEDULE_CHANGED)
+activate RT
+RT --> S : (52) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (53) CommitTransaction()
+DB --> S : (54) Committed
+deactivate DB
+
+S --> C : (55) MaintenanceRequestResponse
+deactivate S
+C --> FE : (56) 200 OK + result
+deactivate C
+FE --> Manager : (57) Hiển thị bước kế tiếp theo trạng thái mới
+
+@enduml

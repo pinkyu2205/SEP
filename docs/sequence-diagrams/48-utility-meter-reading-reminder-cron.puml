@@ -1,0 +1,71 @@
+@startuml UtilityMeterReadingReminderCron
+title Figure — Billing: Cron nhắc manager chụp công tơ các phòng còn thiếu (08:00, 18:00, 20:00) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+participant "UtilityMeterReadingCron\n(08:00, 18:00, 20:00)" as CRON
+participant "UtilityBillServiceImpl" as S
+participant "UtilityBillRepository" as UBR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "UserRepository /\nHostNotificationRepository" as UR
+database DB
+
+CRON -> S : (1) remindUtilityMeterReading()
+activate S
+S -> DB : (2) BeginTransaction()
+activate DB
+DB --> S : (3) Success
+S -> UBR : (4) findPublishedSharedHouseBillsWithDeadline(PUBLISHED)\n— hoá đơn nhà chia phòng đã phát hành và có hạn chụp công tơ
+activate UBR
+UBR -> DB : (5) SELECT UtilityBill
+DB --> UBR : (6) bills
+UBR --> S : (7) List<UtilityBill>
+deactivate UBR
+
+loop [Mỗi hoá đơn]
+  S -> S : (8) roomProgress(bill): số phòng đủ điều kiện, số phòng đã có hoá đơn / chỉ số\n— đủ phòng thì bỏ qua
+  alt [Hôm nay quá hạn chụp (deadline)]
+    S -> S : (9) notifyReadingMilestone(UTILITY_READING_OVERDUE,\ndedupeKey "utility-reading:{billId}:overdue-{số ngày trễ}", báo cả admin và host)
+  else [Đúng hạn chụp và đã từ 20:00]
+    S -> S : (9') notifyReadingMilestone(UTILITY_READING_LATE_RISK,\ndedupeKey "…:late-risk")
+  else [Đúng hạn chụp và đã từ 18:00]
+    S -> S : (9'') notifyReadingMilestone(UTILITY_READING_DUE_TODAY,\ndedupeKey "…:due-today")
+  end
+  opt [Có mốc cần nhắc và chưa gửi (chống trùng theo dedupeKey)]
+    S -> NR : (10) existsByUserIdAndDedupeKey() → save(Notification\ntype UTILITY_READING_*, screen "MeterReadingPending", params propertyId / period)
+    activate NR
+    NR -> DB : (11) INSERT Notification (manager phụ trách nhà)
+    DB --> NR : (12) OK
+    NR --> S : (13) saved
+    deactivate NR
+    S -> UPT : (14) sendToUser(manager, title, content, data)
+    activate UPT
+    UPT --> S : (15) Expo push
+    deactivate UPT
+    opt [Mốc quá hạn (notifyAdminAndHost = true)]
+      S -> UR : (16) Notification cho mọi admin ACTIVE +\nHostNotification.insertIfAbsent cho owner
+      activate UR
+      UR -> DB : (17) INSERT Notification / HostNotification
+      DB --> UR : (18) OK
+      UR --> S : (19) done
+      deactivate UR
+    end
+  end
+end
+S -> DB : (20) CommitTransaction()
+DB --> S : (21) Committed
+deactivate DB
+S --> CRON : (22) số thông báo đã gửi
+deactivate S
+
+note over CRON, S
+  Manager nhận nhắc → chụp công tơ và chốt chỉ số từng phòng (file 20);
+  mỗi lần chốt xong, hoá đơn phòng đó được phát hành tự động (file 21).
+end note
+
+@enduml

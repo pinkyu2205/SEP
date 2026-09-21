@@ -1,0 +1,37 @@
+@startuml UserAccountState
+title Figure — User: vòng đời tài khoản (UserStatus + kích hoạt lần đầu) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> ACTIVE : Đăng ký (/auth/register)\nAdmin tạo tài khoản (/user)\nOnboard tạo khách mới (mật khẩu ngẫu nhiên)
+
+state ACTIVE {
+  [*] --> ChoKichHoat : khách do onboard tạo\n(firstLogin = true)
+  [*] --> DaKichHoat : đăng ký / admin tạo
+  ChoKichHoat --> DaKichHoat : OTP đúng (6 số, 5 phút, tối đa 5 lần)\n+ đặt mật khẩu (file 03)
+}
+
+state DISABLE
+DISABLE : Không đăng nhập được (AuthService)
+DISABLE : Không kích hoạt OTP được (TenantActivation)
+DISABLE : isEnabled() = false ở Spring Security
+
+ACTIVE --> DISABLE : Admin khoá (PATCH /user/{id}/status)
+ACTIVE --> DISABLE : Khách không còn hợp đồng\nDRAFT / PENDING / ACTIVE / EXPIRED nào\n(sau hoàn cọc, cron 00:15, huỷ, thanh lý)
+DISABLE --> ACTIVE : Admin mở khoá
+DISABLE --> ACTIVE : Onboard lại khách cũ\n(cùng SĐT, tạo hợp đồng mới)
+
+note bottom of DISABLE
+  INACTIVE là giá trị mặc định của entity, PENDING chưa có nơi nào ghi;
+  mọi đường tạo tài khoản trong code đều set ACTIVE ngay.
+end note
+
+@enduml

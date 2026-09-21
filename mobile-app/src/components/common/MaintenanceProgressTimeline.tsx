@@ -30,6 +30,8 @@ const NEXT_PLACEHOLDERS: Record<string, string[]> = {
   // nhánh xấu trước, bước thật sẽ tự nối thêm khi nó thật sự xảy ra.
   pending_tenant_repair:  ['closed'],
   outstanding_damage:     [],
+  // Khách thanh toán hoá đơn → BE tự đóng phiếu, bước kế tiếp chắc chắn là closed.
+  waiting_payment:         ['closed'],
   closed:                 [],
   cancelled:              [],
 };

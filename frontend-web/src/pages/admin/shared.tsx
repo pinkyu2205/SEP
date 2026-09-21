@@ -61,6 +61,7 @@ export const maintenanceStatusMap: Record<string, { label: string; color: string
   TENANT_FAULT: { label: 'Lỗi do khách', color: 'bg-rose-100 text-rose-700' },
   PENDING_TENANT_REPAIR: { label: 'Khách tự sửa', color: 'bg-orange-100 text-orange-700' },
   OUTSTANDING_DAMAGE: { label: 'Chờ trừ cọc', color: 'bg-red-200 text-red-800' },
+  WAITING_PAYMENT: { label: 'Chờ thanh toán', color: 'bg-amber-100 text-amber-800' },
   CLOSED: { label: 'Hoàn tất', color: 'bg-emerald-100 text-emerald-700' },
   CANCELLED: { label: 'Đã hủy', color: 'bg-slate-100 text-slate-600' },
 };

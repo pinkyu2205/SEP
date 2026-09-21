@@ -1,0 +1,71 @@
+@startuml MaintenanceRequestState
+title Figure — Maintenance: vòng đời phiếu bảo trì (MaintenanceStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state OPEN
+state REPAIR_SCHEDULED
+state IN_REPAIR
+state TENANT_FAULT
+state OUTSTANDING_DAMAGE
+state CLOSED
+state CANCELLED
+state PENDING_TENANT_REPAIR #FFF3CD
+state "TENANT_FAULT\n(luồng cũ, chưa rẽ nhánh)" as LEGACY_FAULT #FFF3CD
+
+[*] --> OPEN : Tenant tạo phiếu + hẹn giờ xem\n(POST /maintenance, 7h–18h, slot 30 phút, không trùng lịch)
+
+OPEN --> OPEN : reschedule-visit [chưa xác nhận có mặt, còn trước ngày hẹn]\nconfirm-arrival (quét QR đúng thiết bị) — chỉ ghi mốc, không đổi status
+
+OPEN --> IN_REPAIR : diagnose WEAR, sửa ngay\ndiagnose TENANT_MISUSE + khách từ chối trả (công ty trả hộ), sửa ngay\napprove sửa ngay
+OPEN --> TENANT_FAULT : diagnose TENANT_MISUSE + khách đồng ý trả, sửa ngay\nreject-fault MANAGER_REPAIR, sửa ngay
+OPEN --> REPAIR_SCHEDULED : send-for-inspection (mang thiết bị đi kiểm tra)\ndiagnose / reject-fault / approve có repairAppointmentAt
+
+OPEN --> CANCELLED : Tenant huỷ (chỉ khi OPEN)\nManager huỷ\nCron mỗi 10 phút [quá hạn hẹn xem 2 giờ, chưa xác nhận có mặt]
+
+REPAIR_SCHEDULED --> REPAIR_SCHEDULED : diagnose lần sau khi mang đi kiểm tra\n[chưa có damageCause, bắt buộc repairAppointmentAt]\nreschedule-repair [còn trước ngày hẹn]
+REPAIR_SCHEDULED --> IN_REPAIR : start-repair [đã chẩn đoán;\ncông ty trả hoặc hoá đơn thu phí đã PAID]\n(quét QR thiết bị, ghi repairStartedAt)
+REPAIR_SCHEDULED --> TENANT_FAULT : start-repair [flow TENANT_FAULT,\nkhách trả, hoá đơn đã PAID]
+REPAIR_SCHEDULED --> CLOSED : handover (bàn giao thiết bị sau kiểm tra thêm)
+REPAIR_SCHEDULED --> OUTSTANDING_DAMAGE : Cron 09:00 [quá hẹn 3 ngày,\nhoá đơn thu phí chưa PAID]
+
+IN_REPAIR --> CLOSED : complete [bắt buộc ảnh AFTER]\n/ thay thiết bị nếu cần, khôi phục trạng thái phòng
+TENANT_FAULT --> CLOSED : complete [MANAGER_REPAIR, bắt buộc ảnh AFTER;\nkhách trả thì hoá đơn phải PAID]
+
+OPEN --> PENDING_TENANT_REPAIR : reject-fault TENANT_SELF_REPAIR\n(giao khách tự sửa trước selfRepairDeadline)
+PENDING_TENANT_REPAIR --> CLOSED : verify-repair [đạt]
+PENDING_TENANT_REPAIR --> OUTSTANDING_DAMAGE : verify-repair [không đạt]\nCron 09:00 [quá hạn, không có ảnh SELF_REPAIR]
+
+OPEN --> LEGACY_FAULT : report-fault (manager báo lỗi khách)
+LEGACY_FAULT --> LEGACY_FAULT : admin-review (duyệt / không duyệt, chỉ một lần)
+
+CLOSED --> [*]
+CANCELLED --> [*]
+OUTSTANDING_DAMAGE --> [*] : chuyển sang checkout,\ntrừ vào cọc (file 31)
+
+note bottom of CANCELLED
+  Manager huỷ được từ mọi trạng thái chưa CLOSED / CANCELLED
+  (tenant chỉ huỷ được khi OPEN). Huỷ xong phòng được trả lại trạng thái cũ.
+end note
+
+note bottom of IN_REPAIR
+  Vào IN_REPAIR / TENANT_FAULT khi start-repair hoặc sửa ngay:
+  phòng → MAINTENANCE. Khi đóng phiếu: phòng → RENTED nếu còn hợp đồng ACTIVE,
+  ngược lại AVAILABLE, trừ khi còn phiếu mở khác trong phòng.
+end note
+
+legend right
+  Nền vàng: luồng cũ, FE không còn mở lối vào nhưng BE vẫn xử lý phiếu cũ.
+  Mọi diagnose / reject-fault / approve đều cần xác nhận có mặt trước,
+  trừ phiếu cũ chưa có lịch hẹn xem.
+endlegend
+
+@enduml

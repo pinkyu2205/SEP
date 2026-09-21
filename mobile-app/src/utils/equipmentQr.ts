@@ -26,3 +26,10 @@ export const extractEquipmentIdFromQr = (raw: string): string | null => {
   if (eq) return eq[1];
   return /^\d+$/.test(trimmed) ? trimmed : null;
 };
+
+/**
+ * Dạng chuẩn `EQ-<id>` để gửi lên BE (confirm-arrival, 21/09/2026). BE so khớp `qrCode` với
+ * `EQ-<id>` của thiết bị nên KHÔNG gửi chuỗi thô quét được: deep link `slms://…` hay số
+ * trần đều hợp lệ phía app nhưng không khớp nguyên văn phía BE.
+ */
+export const toEquipmentQrCode = (equipmentId: number | string): string => `EQ-${equipmentId}`;

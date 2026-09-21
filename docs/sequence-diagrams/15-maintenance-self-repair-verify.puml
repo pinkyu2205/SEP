@@ -1,0 +1,175 @@
+@startuml MaintenanceSelfRepairVerify
+title Figure — Maintenance: Khách tự sửa (submit-self-repair), Manager xác nhận (verify-repair) và Cron quá hạn — luồng cũ Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "OutstandingDamageRecordRepository" as ODR
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+participant "Scheduler (09:00 hằng ngày)" as CRON
+database DB
+
+note over Tenant, CRON
+  Luồng "giao khách tự sửa" không còn được FE mở lối vào,
+  nhưng BE vẫn xử lý cho các phiếu cũ đang ở PENDING_TENANT_REPAIR.
+end note
+
+== Khách gửi bằng chứng tự sửa ==
+Tenant -> FE : (1) Chụp ảnh đã tự sửa → "Gửi bằng chứng"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/submit-self-repair\n(JSON hoặc multipart)
+activate C
+C -> S : (3) submitSelfRepair(id, request, files)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) req
+MR --> S : (9) req
+deactivate MR
+S -> S : (10) requireStatus(PENDING_TENANT_REPAIR)\nrequireTenantOwner(req)\nstoreFiles(files)
+alt [Sai status / không phải chủ phiếu / không có ảnh SELF_REPAIR]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> DB : (11) INSERT MaintenancePhotoHistory (SELF_REPAIR)\nINSERT MaintenanceTimeline
+DB --> S : (12) OK
+S -> NR : (13) notifyPropertyManager("Khách thuê đã gửi bằng chứng tự sửa")
+activate NR
+NR -> DB : (14) INSERT Notification
+DB --> NR : (15) OK
+deactivate NR
+S -> UPT : (16) sendToUser(manager)
+activate UPT
+UPT --> S : (17) Expo push
+deactivate UPT
+S -> RT : (18) publishMaintenanceEvent(SELF_REPAIR_SUBMITTED)
+activate RT
+RT --> S : (19) STOMP event
+deactivate RT
+S -> DB : (20) CommitTransaction()
+DB --> S : (21) Committed
+deactivate DB
+S --> C : (22) MaintenanceRequestResponse
+deactivate S
+C --> FE : (23) 200 OK
+deactivate C
+FE --> Tenant : (24) Chờ manager xác nhận
+
+== Manager xác nhận / từ chối ==
+Manager -> FE : (25) Đạt / Không đạt (+ ảnh, ghi chú)
+FE -> C : (26) PUT /api/v1/maintenance/{id}/verify-repair
+activate C
+C -> S : (27) verifyRepair(id, request)
+activate S
+S -> DB : (28) BeginTransaction()
+activate DB
+DB --> S : (29) Success
+S -> MR : (30) findActive(id)
+activate MR
+MR -> DB : (31) SELECT MaintenanceRequest
+DB --> MR : (32) req
+MR --> S : (33) req
+deactivate MR
+S -> S : (34) requireManagerAccess(req)\nrequireStatus(PENDING_TENANT_REPAIR)\nhasPhotoType(SELF_REPAIR)
+alt [Sai status / khách chưa gửi ảnh tự sửa]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+alt [accepted = true]
+  S -> MR : (35) save(status = CLOSED, doneAt, resolvedAt)
+  activate MR
+  MR -> DB : (36) UPDATE MaintenanceRequest
+  DB --> MR : (37) OK
+  deactivate MR
+  S -> RR : (38) restoreRoomStatus(req)
+  activate RR
+  RR -> DB : (39) UPDATE Room
+  DB --> RR : (40) OK
+  deactivate RR
+  S -> NR : (41) notifyTenant("Tự sửa chữa đã được xác nhận")
+  activate NR
+  NR -> DB : (42) INSERT Notification MAINTENANCE_COMPLETED
+  DB --> NR : (43) OK
+  deactivate NR
+else [accepted = false]
+  S -> MR : (35') save(status = OUTSTANDING_DAMAGE)
+  activate MR
+  MR -> DB : (36') UPDATE MaintenanceRequest
+  DB --> MR : (37') OK
+  deactivate MR
+  S -> ODR : (38') createOutstandingDamageRecord(req)\n(nếu chưa có bản ghi cho phiếu)
+  activate ODR
+  ODR -> DB : (39') INSERT OutstandingDamageRecord\n(ước tính thiệt hại, ảnh bằng chứng)
+  DB --> ODR : (40') OK
+  deactivate ODR
+  S -> NR : (41') notifyTenant("Tự sửa chữa chưa đạt —\nxử lý khi checkout")
+  activate NR
+  NR -> DB : (42') INSERT Notification MAINTENANCE_SELF_REPAIR_OVERDUE
+  DB --> NR : (43') OK
+  deactivate NR
+end
+S -> DB : (44) INSERT MaintenanceTimeline
+DB --> S : (45) OK
+S -> UPT : (46) sendToUser(tenant)
+activate UPT
+UPT --> S : (47) Expo push
+deactivate UPT
+S -> RT : (48) publishMaintenanceEvent(VERIFY_REPAIR)
+activate RT
+RT --> S : (49) STOMP event
+deactivate RT
+S -> DB : (50) CommitTransaction()
+DB --> S : (51) Committed
+deactivate DB
+S --> C : (52) MaintenanceRequestResponse
+deactivate S
+C --> FE : (53) 200 OK
+deactivate C
+FE --> Manager : (54) Phiếu CLOSED hoặc OUTSTANDING_DAMAGE
+
+== Cron 09:00 hằng ngày: quá hạn ==
+CRON -> S : (55) processOverdueSelfRepairsTask() → processOverdueSelfRepairs()
+activate S
+S -> MR : (56) findByStatusAndSelfRepairDeadlineBefore(\nPENDING_TENANT_REPAIR, hôm nay)
+activate MR
+MR -> DB : (57) SELECT MaintenanceRequest
+DB --> MR : (58) danh sách quá hạn
+MR --> S : (59) List<MaintenanceRequest>
+deactivate MR
+loop [Mỗi phiếu quá hạn tự sửa và chưa có ảnh SELF_REPAIR]
+  S -> MR : (60) save(status = OUTSTANDING_DAMAGE)
+  S -> ODR : (61) createOutstandingDamageRecord(req)
+  S -> NR : (62) notifyTenant() + notifyPropertyManager()\nMAINTENANCE_SELF_REPAIR_OVERDUE
+end
+S -> MR : (63) findByStatus(REPAIR_SCHEDULED) lọc phiếu có chargeInvoiceId\nvà repairAppointmentAt < now − 3 ngày
+activate MR
+MR -> DB : (64) SELECT MaintenanceRequest
+DB --> MR : (65) danh sách
+MR --> S : (66) List<MaintenanceRequest>
+deactivate MR
+loop [Mỗi phiếu mà hoá đơn thu phí chưa PAID]
+  S -> MR : (67) save(status = OUTSTANDING_DAMAGE)
+  S -> ODR : (68) createOutstandingDamageRecord(req)
+  S -> NR : (69) notifyTenant("Quá hạn thanh toán phí sửa chữa")
+end
+deactivate S
+
+@enduml

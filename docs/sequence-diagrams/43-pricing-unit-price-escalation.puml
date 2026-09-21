@@ -1,0 +1,142 @@
+@startuml PricingUnitPriceEscalation
+title Figure — Pricing: đổi giá niêm yết, giá áp dụng theo hợp đồng, tăng giá định kỳ, về giá niêm yết khi khách trả Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Host
+participant "Front-end" as FE
+participant "PropertyController /\nRoomController" as C
+participant "UnitPriceServiceImpl" as S
+participant "PricingConfigService" as PCS
+participant "RoomRepository /\nPropertyRepository" as RP
+participant "TenantContractRepository" as TCR
+participant "RoomPriceHistoryRepository" as HR
+participant "NotificationRepository +\nUserPushTokenService" as NP
+participant "BillingCronServiceImpl\n(daily sweep 08:00)" as CRON
+database DB
+
+== Host đổi giá niêm yết của phòng / nhà (chỉ khi đang trống) ==
+Host -> FE : (1) Nhập giá mới + lý do → "Đổi giá niêm yết"
+FE -> C : (2) PATCH /api/v1/properties/{propertyId}/rooms/{roomId}/price\nhoặc PATCH /properties/{propertyId}/price
+activate C
+C -> S : (3) updateRoomListedPrice() / updatePropertyListedPrice(propertyId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> RP : (6) findById(propertyId) (+ findByIdAndPropertyId cho phòng)
+activate RP
+RP -> DB : (7) SELECT Property, Room
+DB --> RP : (8) entities
+RP --> S : (9) entities
+deactivate RP
+alt [Sai loại nhà (nguyên căn dùng /price, chia phòng dùng /rooms/{id}/price)]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> TCR : (10) isUnitOccupied(): tồn tại HĐ ACTIVE hoặc EXPIRED cho phòng / nhà
+activate TCR
+TCR -> DB : (11) SELECT EXISTS TenantContract
+DB --> TCR : (12) true / false
+TCR --> S : (13) boolean
+deactivate TCR
+alt [Đang có khách / giá ≤ 0 / thiếu lý do]
+  S --> C : BusinessException "Phòng đang có khách — không được đổi giá niêm yết"
+  C --> FE : Error response
+  FE --> Host : Hiển thị lỗi
+end
+S -> RP : (14) save(price = giá mới;\nappliedPrice = giá mới nếu trước đó appliedPrice = giá niêm yết cũ)
+activate RP
+RP -> DB : (15) UPDATE Room / Property
+DB --> RP : (16) OK
+deactivate RP
+S -> HR : (17) recordHistory(HOST_DOI, giá cũ → giá mới, lý do, người đổi)
+activate HR
+HR -> DB : (18) INSERT RoomPriceHistory
+DB --> HR : (19) OK
+deactivate HR
+S -> DB : (20) CommitTransaction()
+DB --> S : (21) Committed
+deactivate DB
+S --> C : (22) RoomResponse / PropertyResponse
+deactivate S
+C --> FE : (23) 200 OK
+deactivate C
+FE --> Host : (24) Giá niêm yết mới
+
+== Giá áp dụng theo hợp đồng thuê (appliedPrice) ==
+note over S
+  Được gọi từ onboardTenant (file 25), activateContract (file 27), extendContract (file 28):
+  applyContractRent(contract, HOP_DONG, lý do).
+end note
+S -> S : (25) applyContractRent(contract, changeType, reason):\nnewPrice = contract.rentAmount; baseRentAmount nếu chưa có
+S -> RP : (26) so sánh với appliedPrice hiện tại của phòng / nhà;\nkhác thì save(appliedPrice = newPrice)
+activate RP
+RP -> DB : (27) UPDATE Room / Property
+DB --> RP : (28) OK
+deactivate RP
+S -> HR : (29) recordHistory(changeType, cũ → mới, contractId, lý do)
+opt [Loại HOP_DONG / DIEU_KHOAN_HD / ANNUAL_INCREASE]
+  S -> NP : (30) notifyAppliedChanged(): thông báo giá áp dụng đổi
+end
+
+== Khách trả phòng / hợp đồng bị huỷ → về giá niêm yết ==
+note over S
+  Được gọi từ cancelContract, terminateActiveContract, autoCancelNoShowContracts (file 28).
+end note
+S -> S : (31) revertToListedPrice(contract)
+S -> TCR : (32) isOccupiedByOther(): còn hợp đồng khác đang chiếm phòng / nhà?
+activate TCR
+TCR --> S : (33) true / false
+deactivate TCR
+alt [Còn người khác thuê]
+  S -> S : (34) giữ nguyên
+else [Đã trống]
+  S -> RP : (34') save(appliedPrice = price niêm yết)
+  S -> HR : (35') recordHistory(TU_DONG, "Khách trả phòng, về giá niêm yết…")
+  S -> NP : (36') notifyVacantRestore(): báo Host và manager
+end
+
+== Cron 08:00: áp điều khoản tăng giá đến hạn ==
+CRON -> S : (37) applyDueEscalations()
+activate S
+S -> PCS : (38) current() — annualIncreasePct, escalationGraceMonths
+activate PCS
+PCS -> DB : (39) SELECT PricingConfig
+DB --> PCS : (40) config
+PCS --> S : (41) PricingConfig
+deactivate PCS
+opt [Tháng 1 (01/01 hoặc bù nếu lỡ cron), annualIncreasePct > 0]
+  loop [Mỗi phòng / nhà nguyên căn có giá niêm yết > 0, chưa tăng trong năm]
+    S -> RP : (42) save(price = price × (1 + pct))
+    S -> HR : (43) recordHistory(ANNUAL_INCREASE, "ANNUAL_INCREASE:{năm} · niêm yết +pct%")
+  end
+end
+loop [Mỗi hợp đồng ACTIVE / EXPIRED có điều khoản tăng giá]
+  alt [ANNUAL_CALENDAR — chỉ trong tháng 1]
+    S -> S : (44) bỏ qua nếu đã tăng năm nay, HĐ bắt đầu sau 01/01,\nhoặc còn trong thời gian ân hạn
+    S -> TCR : (45) save(rentAmount tăng 1 năm, lastEscalationYear)
+    S -> S : (46) applyContractRent(ANNUAL_INCREASE) +\nnotifyTenantEscalationApplied()
+  else [PERCENT — sau mỗi 12 tháng kể từ ngày bắt đầu]
+    S -> TCR : (45') save(rentAmount = base × (1+pct)^năm, rentEscalationLastFromMonth)
+    S -> S : (46') applyContractRent(DIEU_KHOAN_HD)
+  else [Theo lịch (SCHEDULE) — mốc fromMonth đến hạn]
+    S -> TCR : (45'') save(rentAmount = amount của mốc, rentEscalationLastFromMonth)
+    S -> S : (46'') applyContractRent(DIEU_KHOAN_HD)
+  end
+end
+S --> CRON : (47) số hợp đồng / đơn vị đã áp
+deactivate S
+
+CRON -> S : (48) notifyUpcomingAnnualEscalations()
+activate S
+S -> NP : (49) Cách 01/01 đúng 14–15 ngày: thông báo trước cho khách\n(giá cũ → giá mới) và gộp 1 thông báo / manager
+S --> CRON : (50) số khách đã báo
+deactivate S
+
+@enduml

@@ -1,0 +1,154 @@
+@startuml MaintenanceVisitScheduling
+title Figure — Maintenance: Đổi lịch hẹn xem & Manager xác nhận có mặt Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Tenant / Manager" as Actor
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+== Đổi lịch hẹn xem (Tenant hoặc Manager) ==
+Actor -> FE : (1) Chọn giờ hẹn mới → "Đổi lịch"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/reschedule-visit\nMaintenanceRescheduleVisitRequest
+activate C
+C -> S : (3) rescheduleVisit(id, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+S -> S : (10) assertCanRescheduleVisit()\n(Tenant: phải là chủ phiếu — Manager: requireManagerAccess)
+
+alt [status ≠ OPEN / manager đã xác nhận có mặt /\nkhông có lịch hẹn / đã tới ngày hẹn / thiếu giờ mới]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Actor : Hiển thị lỗi (chỉ còn cách huỷ)
+end
+
+S -> MR : (11) validateAndAssertSlotAvailable(managerId,\nnewAt, 30 phút, loại trừ chính phiếu này)
+activate MR
+MR -> DB : (12) SELECT lịch OPEN / REPAIR_SCHEDULED của manager
+DB --> MR : (13) slots
+MR --> S : (14) List<MaintenanceRequest>
+deactivate MR
+alt [Ngoài giờ hành chính / quá khứ / trùng lịch]
+  S --> C : BusinessException / ConflictException
+  C --> FE : Error response
+  FE --> Actor : Hiển thị lỗi
+end
+
+S -> MR : (15) save(req: visitAppointmentAt mới)
+activate MR
+MR -> DB : (16) UPDATE MaintenanceRequest
+DB --> MR : (17) OK
+MR --> S : (18) saved
+deactivate MR
+S -> DB : (19) INSERT MaintenanceTimeline\n("Đổi lịch hẹn xem: cũ → mới")
+DB --> S : (20) OK
+
+S -> NR : (21) notifyPropertyManager() + notifyTenant()\nsave(Notification MAINTENANCE_SCHEDULE_CHANGED)
+activate NR
+NR -> DB : (22) INSERT Notification ×2
+DB --> NR : (23) OK
+NR --> S : (24) saved
+deactivate NR
+S -> UPT : (25) sendToUser() cho manager và tenant
+activate UPT
+UPT --> S : (26) Expo push
+deactivate UPT
+S -> RT : (27) publishMaintenanceEvent(SCHEDULE_CHANGED)
+activate RT
+RT --> S : (28) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Actor : Hiển thị lỗi
+end
+
+S -> DB : (29) CommitTransaction()
+DB --> S : (30) Committed
+deactivate DB
+S --> C : (31) MaintenanceRequestResponse
+deactivate S
+C --> FE : (32) 200 OK
+deactivate C
+FE --> Actor : (33) Hiển thị lịch hẹn mới
+
+== Manager xác nhận có mặt tại hiện trường ==
+Manager -> FE : (34) Quét QR thiết bị → "Xác nhận đã đến"
+FE -> C : (35) PUT /api/v1/maintenance/{id}/confirm-arrival
+activate C
+C -> S : (36) confirmArrival(id)
+activate S
+S -> DB : (37) BeginTransaction()
+activate DB
+DB --> S : (38) Success
+
+S -> MR : (39) findActive(id)
+activate MR
+MR -> DB : (40) SELECT MaintenanceRequest
+DB --> MR : (41) MaintenanceRequest
+MR --> S : (42) req
+deactivate MR
+S -> S : (43) requireManagerAccess(req)\nrequireStatus(OPEN)
+
+alt [Đã xác nhận có mặt trước đó]
+  S --> C : trả lại phiếu hiện tại (idempotent)
+end
+
+S -> MR : (44) save(req: visitArrivalConfirmedAt = now)
+activate MR
+MR -> DB : (45) UPDATE MaintenanceRequest
+DB --> MR : (46) OK
+MR --> S : (47) saved
+deactivate MR
+S -> DB : (48) INSERT MaintenanceTimeline ("Manager xác nhận có mặt")
+DB --> S : (49) OK
+
+S -> NR : (50) notifyTenant("Manager đã tới xem sự cố")
+activate NR
+NR -> DB : (51) INSERT Notification
+DB --> NR : (52) OK
+NR --> S : (53) saved
+deactivate NR
+S -> UPT : (54) sendToUser(tenant)
+activate UPT
+UPT --> S : (55) Expo push
+deactivate UPT
+S -> RT : (56) publishMaintenanceEvent(SCHEDULE_CHANGED)
+activate RT
+RT --> S : (57) STOMP event
+deactivate RT
+
+S -> DB : (58) CommitTransaction()
+DB --> S : (59) Committed
+deactivate DB
+S --> C : (60) MaintenanceRequestResponse
+deactivate S
+C --> FE : (61) 200 OK
+deactivate C
+FE --> Manager : (62) Mở khoá bước chẩn đoán / gửi đi kiểm tra
+
+@enduml

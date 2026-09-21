@@ -1,0 +1,35 @@
+@startuml UtilityReadingReminderMilestonesState
+title Figure — Billing: mốc nhắc chụp công tơ của nhà chia phòng (cron 08:00, 18:00, 20:00) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> CHUA_DEN_HAN : Admin phát hành hoá đơn nhà chia phòng\n(PUBLISHED) có hạn chụp công tơ (deadline)
+
+CHUA_DEN_HAN --> DEN_HAN_HOM_NAY : Cron 18:00, hôm nay là deadline\n[còn phòng chưa có chỉ số]\n/ UTILITY_READING_DUE_TODAY cho manager
+DEN_HAN_HOM_NAY --> NGUY_CO_TRE : Cron 20:00, vẫn còn phòng thiếu\n/ UTILITY_READING_LATE_RISK cho manager
+NGUY_CO_TRE --> QUA_HAN : Qua deadline, còn phòng thiếu\n/ UTILITY_READING_OVERDUE cho manager, admin và host\n(mỗi ngày trễ một dedupeKey)
+CHUA_DEN_HAN --> QUA_HAN : Cron tới sau deadline mà chưa từng nhắc
+
+QUA_HAN --> QUA_HAN : Mỗi ngày trễ gửi một nhắc mới\n(dedupeKey "utility-reading:{billId}:overdue-{số ngày trễ}")
+
+CHUA_DEN_HAN --> DU_PHONG : Mọi phòng đủ điều kiện đã có hoá đơn / chỉ số
+DEN_HAN_HOM_NAY --> DU_PHONG : Manager chốt nốt các phòng (file 20)
+NGUY_CO_TRE --> DU_PHONG : Manager chốt nốt các phòng
+QUA_HAN --> DU_PHONG : Manager chốt nốt các phòng
+
+DU_PHONG --> [*] : roomProgress đủ → cron bỏ qua hoá đơn này
+
+note right of CHUA_DEN_HAN
+  Đây là mốc nhắc chứ không phải cột status: BE không lưu trạng thái này,
+  chỉ lưu Notification với dedupeKey để mỗi mốc chỉ gửi một lần.
+end note
+
+@enduml

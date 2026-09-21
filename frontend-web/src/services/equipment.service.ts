@@ -34,45 +34,34 @@ export const equipmentService = {
   },
 
   // ===========================================================================
-  // Lifecycle + Maintenance history
+  // Lifecycle + Maintenance history — `GlobalEquipmentController` (/api/v1/equipment)
   //
-  // ⚠ Nhóm endpoint KHÔNG gắn property nằm ở MaintenanceEquipmentController của BE
-  // và đều có hậu tố `/feature` / `-feature`. Đã đối chiếu source BE ngày 15/08/2026.
-  // Trước đó FE gọi thiếu hậu tố → sửa thiết bị và đổi trạng thái 404 im lặng.
+  // Đã đối chiếu source BE ngày 21/09/2026. Các route cũ có hậu tố `/feature` / `-feature`
+  // (MaintenanceEquipmentController) KHÔNG còn tồn tại — gọi vào sẽ 404. BE không có
+  // endpoint sửa thông tin thiết bị lẻ hay lọc thiết bị theo phòng ở nhóm này: sửa
+  // thiết bị đi qua `/properties/{propertyId}/equipments/...`, danh sách theo nhà dùng
+  // `getPropertyEquipment` ở trên.
   // ===========================================================================
 
-  /** GET /api/v1/equipment/{id}/feature */
+  /** GET /api/v1/equipment/{id} — chi tiết + khấu hao / bảo hành còn lại (ADMIN/MANAGER/TENANT) */
   getById: (id: number): Promise<MaintenanceEquipmentResponse> => {
-    return api.get(`/api/v1/equipment/${id}/feature`);
+    return api.get(`/api/v1/equipment/${id}`);
   },
 
-  /** GET /api/v1/equipment/feature?roomId= — thiết bị theo phòng */
-  getByRoom: (roomId: number): Promise<MaintenanceEquipmentResponse[]> => {
-    return api.get('/api/v1/equipment/feature', { params: { roomId } });
-  },
-
-  /** PUT /api/v1/equipment/{id}/feature — sửa thông tin thiết bị */
-  updateEquipment: (
-    id: number,
-    data: Partial<AddEquipmentRequest>,
-  ): Promise<MaintenanceEquipmentResponse> => {
-    return api.put(`/api/v1/equipment/${id}/feature`, data);
-  },
-
-  /** PATCH /api/v1/equipment/{id}/status-feature — đổi lifecycle status */
+  /** PATCH /api/v1/equipment/{id}/status — đổi lifecycle status (ADMIN/MANAGER) */
   updateLifecycleStatus: (
     id: number,
     status: EquipmentLifecycleStatus,
   ): Promise<MaintenanceEquipmentResponse> => {
-    return api.patch(`/api/v1/equipment/${id}/status-feature`, { status });
+    return api.patch(`/api/v1/equipment/${id}/status`, { status });
   },
 
   /**
-   * GET /api/v1/equipment/{id}/maintenance-history-feature
-   * BE có 2 endpoint gần trùng tên: bản không hậu tố trả MaintenanceRequestResponse
-   * (phiếu bảo trì), bản `-feature` trả EquipmentMaintenanceHistoryResponse — cái FE cần.
+   * GET /api/v1/equipment/{id}/maintenance-history — lịch sử bảo trì của thiết bị, có `photoUrls`
+   * (BE 21/09/2026: endpoint này trả EquipmentMaintenanceHistoryResponse; danh sách phiếu bảo trì
+   * chuyển sang `/maintenance-tickets`). Hậu tố `-feature` cũ không tồn tại phía BE.
    */
   getMaintenanceHistory: (id: number): Promise<EquipmentMaintenanceHistoryResponse[]> => {
-    return api.get(`/api/v1/equipment/${id}/maintenance-history-feature`);
+    return api.get(`/api/v1/equipment/${id}/maintenance-history`);
   },
 };

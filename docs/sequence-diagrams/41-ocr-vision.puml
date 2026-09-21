@@ -1,0 +1,142 @@
+@startuml OcrVision
+title Figure — OCR & Vision: đọc chỉ số công tơ, hoá đơn điện nước, nhận diện ảnh, mô tả hiện trạng phòng Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Manager / Admin" as U
+participant "Mobile / Web App" as APP
+participant "Cloudinary" as CLD
+participant "OcrController" as OC
+participant "OcrServiceImpl" as OS
+participant "VisionController" as VC
+participant "VisionServiceImpl" as VS
+participant "Google Cloud Vision" as GV
+participant "OCR.space" as OCRSP
+participant "LocalVisionProvider" as LOCAL
+participant "GeminiRoomDescribeProvider" as GEM
+
+== Chụp công tơ → đọc chỉ số ==
+U -> APP : (1) Chụp ảnh công tơ
+APP -> CLD : (2) Upload ảnh
+CLD --> APP : (3) imageUrl (HTTPS)
+APP -> OC : (4) POST /api/v1/ocr/meter {imageUrl}
+activate OC
+OC -> OS : (5) readMeter(imageUrl)
+activate OS
+OS -> GV : (6) images:annotate — DOCUMENT_TEXT_DETECTION\n(tốt hơn với LCD 7 đoạn)
+activate GV
+alt [Chưa cấu hình key / gọi lỗi / trả lỗi]
+  GV --> OS : lỗi hoặc null
+  OS -> OCRSP : (7) POST form (apikey, url, OCREngine=2, scale=true, filetype=JPG)
+  activate OCRSP
+  alt [OCR.space báo lỗi xử lý / dịch vụ lỗi]
+    OCRSP --> OS : lỗi
+    OS --> OC : BusinessException "Không đọc được ảnh đồng hồ. Vui lòng nhập tay."
+    OC --> APP : Error response
+    APP --> U : Cho nhập chỉ số tay
+  end
+  OCRSP --> OS : (8) ParsedText
+  deactivate OCRSP
+else [Vision trả text]
+  GV --> OS : (7') fullTextAnnotation.text
+end
+deactivate GV
+OS -> OS : (9) extractNumbers(text);\npickBest(): ưu tiên số đứng ngay trước đơn vị kWh / m³\n(tránh nhầm với số serial), sau đó mới xét độ dài
+OS --> OC : (10) OcrMeterResponse {reading, numbers, rawText}
+deactivate OS
+OC --> APP : (11) 200 OK
+deactivate OC
+APP --> U : (12) Điền sẵn chỉ số để người dùng xác nhận / sửa\n(rồi chốt chỉ số — file 20)
+
+== Chụp giấy hoá đơn EVN / nước → đọc số liệu ==
+U -> APP : (13) Chụp giấy hoá đơn của nhà
+APP -> CLD : (14) Upload ảnh
+CLD --> APP : (15) imageUrl
+APP -> OC : (16) POST /api/v1/ocr/evn-bill {imageUrl}
+activate OC
+OC -> OS : (17) readUtilityBill(imageUrl)
+activate OS
+OS -> OCRSP : (18) POST form (isTable=true, OCREngine=2)
+activate OCRSP
+alt [OCR.space lỗi]
+  OCRSP --> OS : lỗi
+  OS --> OC : BusinessException "Không đọc được hóa đơn. Vui lòng nhập tay."
+  OC --> APP : Error response
+  APP --> U : Cho nhập tay
+end
+OCRSP --> OS : (19) ParsedText
+deactivate OCRSP
+OS -> OS : (20) Tách theo nhãn: tổng tiêu thụ (kWh / m³), tổng tiền,\nkỳ hoá đơn, mã khách hàng, chỉ số cũ, chỉ số mới\nfieldsToConfirm = [customerCode, prevReading, newReading]
+OS --> OC : (21) OcrUtilityBillResponse
+deactivate OS
+OC --> APP : (22) 200 OK
+deactivate OC
+APP --> U : (23) Form phát hành hoá đơn điện / nước (file 21),\nbắt buộc người dùng xác nhận mã KH và chỉ số
+
+== Nhận diện vật dụng trong ảnh ==
+U -> APP : (24) Chụp ảnh thiết bị / hiện trạng
+APP -> VC : (25) POST /api/v1/vision/labels {imageUrl}
+activate VC
+VC -> VS : (26) detectLabels(imageUrl)
+activate VS
+VS -> VS : (27) validateImageUrl(): phải HTTPS và thuộc host ảnh được phép (Cloudinary)
+alt [URL thiếu / không HTTPS / sai host]
+  VS --> VC : BusinessException
+  VC --> APP : Error response
+  APP --> U : Hiển thị lỗi
+end
+VS -> VS : (28) providersInOrder(): chế độ auto → [google, local]
+loop [Mỗi provider theo thứ tự]
+  alt [Là google]
+    VS -> VS : (29) tryAcquireGoogleQuota() — giới hạn lượt / user / giờ
+    opt [Hết quota]
+      VS -> VS : bỏ qua, thử provider kế tiếp
+    end
+    VS -> GV : (30) detect(image) → nhãn
+    activate GV
+    GV --> VS : (31) labels / lỗi (lỗi → thử provider kế tiếp)
+    deactivate GV
+  else [Là local]
+    VS -> LOCAL : (30') detect(image)
+    activate LOCAL
+    LOCAL --> VS : (31') labels
+    deactivate LOCAL
+  end
+end
+alt [Không provider nào sẵn sàng / tất cả lỗi / hết quota]
+  VS --> VC : BusinessException ("Chưa cấu hình dịch vụ nhận diện ảnh",\n"Bạn đã gửi quá nhiều ảnh…", "Không nhận diện được ảnh")
+  VC --> APP : Error response
+  APP --> U : Hiển thị lỗi
+end
+VS --> VC : (32) VisionLabelsResponse
+deactivate VS
+VC --> APP : (33) 200 OK
+deactivate VC
+APP --> U : (34) Gợi ý tên / loại thiết bị
+
+== Mô tả hiện trạng phòng bằng AI ==
+U -> APP : (35) Chọn tối đa N ảnh hiện trạng → "Tạo mô tả"
+APP -> VC : (36) POST /api/v1/vision/describe-room {imageUrls}
+activate VC
+VC -> VS : (37) describeRoom(imageUrls)
+activate VS
+alt [Không có ảnh / vượt số ảnh tối đa / URL không hợp lệ / hết lượt mô tả trong giờ]
+  VS --> VC : BusinessException VISION_DESCRIBE_UNAVAILABLE / VISION_DESCRIBE_QUOTA
+  VC --> APP : Error response
+  APP --> U : Nhập mô tả tay
+end
+VS -> GEM : (38) describe(images)
+activate GEM
+GEM --> VS : (39) mô tả hiện trạng
+deactivate GEM
+VS --> VC : (40) VisionDescribeRoomResponse {description, model}
+deactivate VS
+VC --> APP : (41) 200 OK
+deactivate VC
+APP --> U : (42) Điền vào ô tình trạng phòng của hợp đồng (file 25)
+
+@enduml

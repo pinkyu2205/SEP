@@ -1,0 +1,208 @@
+@startuml InvoiceDispute
+title Figure — Billing: Tenant khiếu nại hoá đơn điện/nước — Admin kết luận Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+actor Admin
+participant "Front-end" as FE
+participant "TenantInvoiceDisputeController" as TC
+participant "AdminInvoiceDisputeController" as AC
+participant "InvoiceDisputeServiceImpl" as S
+participant "InvoiceDisputeRepository" as DR
+participant "TenantInvoiceRepository" as TIR
+participant "UtilityInvoiceRepository" as UIR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+database DB
+
+== Tenant gửi khiếu nại ==
+Tenant -> FE : (1) Mở hoá đơn điện/nước → "Khiếu nại"\n(lý do, ghi chú, ảnh)
+FE -> TC : (2) POST /api/v1/tenant/me/invoices/{id}/dispute\nCreateInvoiceDisputeRequest
+activate TC
+TC -> S : (3) create(tenantUserId, tenantInvoiceId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TIR : (6) loadOwnedUtilityInvoice(tenantUserId, invoiceId)
+activate TIR
+TIR -> DB : (7) SELECT TenantInvoice
+DB --> TIR : (8) invoice
+TIR --> S : (9) invoice
+deactivate TIR
+
+alt [Hoá đơn CANCELLED / không phải điện-nước (thiếu utilityInvoiceId)]
+  S --> TC : BusinessException INVOICE_CANCELLED / NOT_UTILITY_INVOICE
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> DR : (10) existsByTenantInvoiceIdAndStatusIn(BLOCKING)
+activate DR
+DR -> DB : (11) SELECT EXISTS InvoiceDispute
+DB --> DR : (12) true / false
+DR --> S : (13) boolean
+deactivate DR
+alt [Đã có khiếu nại đang mở]
+  S --> TC : BusinessException DISPUTE_ALREADY_EXISTS
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi (chỉ gửi lại sau khi tự rút)
+end
+
+S -> UIR : (14) findById(utilityInvoiceId)
+activate UIR
+UIR -> DB : (15) SELECT UtilityInvoice
+DB --> UIR : (16) utilityInvoice
+UIR --> S : (17) utilityInvoice
+deactivate UIR
+S -> DR : (18) save(InvoiceDispute status = OPEN, reason, note, photos)
+activate DR
+DR -> DB : (19) INSERT InvoiceDispute
+DB --> DR : (20) OK
+DR --> S : (21) dispute
+deactivate DR
+opt [Hoá đơn đang OVERDUE]
+  S -> TIR : (22) save(invoice.status = PENDING)\n(tạm dừng quá hạn trong lúc chờ kết luận)
+  activate TIR
+  TIR -> DB : (23) UPDATE TenantInvoice
+  DB --> TIR : (24) OK
+  deactivate TIR
+end
+S -> NR : (25) notifyAdminsAndManagerOnCreate():\nsave Notification cho mọi admin + manager phụ trách
+activate NR
+NR -> DB : (26) INSERT Notification
+DB --> NR : (27) OK
+NR --> S : (28) saved
+deactivate NR
+S -> UPT : (29) sendToUser(admin…, manager)
+activate UPT
+UPT --> S : (30) Expo push
+deactivate UPT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> TC : Exception
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> DB : (31) CommitTransaction()
+DB --> S : (32) Committed
+deactivate DB
+S --> TC : (33) InvoiceDisputeResponse
+deactivate S
+TC --> FE : (34) 200 OK
+deactivate TC
+FE --> Tenant : (35) Trạng thái khiếu nại: đang chờ xử lý
+
+== Tenant tự rút khiếu nại ==
+Tenant -> FE : (36) "Rút khiếu nại"
+FE -> TC : (37) POST /api/v1/tenant/me/invoices/{id}/dispute/withdraw
+activate TC
+TC -> S : (38) withdraw(tenantUserId, invoiceId)
+activate S
+S -> DR : (39) findFirstByTenantInvoiceIdOrderByCreatedAtDesc()
+activate DR
+DR -> DB : (40) SELECT InvoiceDispute
+DB --> DR : (41) dispute
+DR --> S : (42) dispute
+deactivate DR
+alt [Không có khiếu nại / không còn OPEN]
+  S --> TC : BusinessException DISPUTE_NOT_FOUND / DISPUTE_NOT_OPEN
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> DR : (43) save(status = WITHDRAWN, resolvedAt, note)
+activate DR
+DR -> DB : (44) UPDATE InvoiceDispute
+DB --> DR : (45) OK
+deactivate DR
+S -> TIR : (46) applyGraceDueDate(invoice) — cộng thời gian gia hạn
+activate TIR
+TIR -> DB : (47) UPDATE TenantInvoice.dueDate
+DB --> TIR : (48) OK
+deactivate TIR
+S --> TC : (49) InvoiceDisputeResponse
+deactivate S
+TC --> FE : (50) 200 OK
+deactivate TC
+FE --> Tenant : (51) Khiếu nại đã rút
+
+== Admin kết luận ==
+Admin -> FE : (52) Mở khiếu nại → chọn ACCEPTED / REJECTED (+ chỉ số, đơn giá đã sửa)
+FE -> AC : (53) POST /api/v1/admin/invoice-disputes/{id}/resolve\nResolveInvoiceDisputeRequest
+activate AC
+AC -> S : (54) resolve(adminUserId, disputeId, request)
+activate S
+S -> DB : (55) BeginTransaction()
+activate DB
+DB --> S : (56) Success
+S -> DR : (57) findById(disputeId)
+activate DR
+DR -> DB : (58) SELECT InvoiceDispute
+DB --> DR : (59) dispute
+DR --> S : (60) dispute
+deactivate DR
+alt [Khiếu nại không còn OPEN / outcome ∉ {ACCEPTED, REJECTED}]
+  S --> AC : BusinessException DISPUTE_ALREADY_RESOLVED / INVALID_OUTCOME
+  AC --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+
+alt [ACCEPTED]
+  opt [Có correctedNewReading + correctedUnitPrice]
+    S -> UIR : (61) save(UtilityInvoice: prev/new reading, consumption,\nunitPrice, amount mới)
+    activate UIR
+    UIR -> DB : (62) UPDATE UtilityInvoice
+    DB --> UIR : (63) OK
+    deactivate UIR
+    S -> S : (64) tenantInvoice.totalAmount = grandTotal = amount mới
+  end
+  alt [Hoá đơn đã PAID]
+    alt [Số tiền mới < số đã trả]
+      S -> DB : (65) createRefundCreditAmount(): INSERT TenantPendingCharge\n(khoản âm — hoàn / trừ vào kỳ sau)
+      DB --> S : (66) OK
+    else [Số tiền mới > số đã trả]
+      S -> S : (65') tenantInvoice.status = PENDING + applyGraceDueDate()
+    end
+  else [Chưa thanh toán]
+    S -> S : (65'') applyGraceDueDate(tenantInvoice)
+  end
+  S -> TIR : (67) save(tenantInvoice)
+  activate TIR
+  TIR -> DB : (68) UPDATE TenantInvoice
+  DB --> TIR : (69) OK
+  deactivate TIR
+else [REJECTED]
+  S -> S : (61') dispute.status = REJECTED, applyGraceDueDate(tenantInvoice)
+end
+S -> DR : (70) save(dispute: resolvedBy, resolvedAt, resolutionNote, status)
+activate DR
+DR -> DB : (71) UPDATE InvoiceDispute
+DB --> DR : (72) OK
+deactivate DR
+S -> NR : (73) notifyOnResolve(dispute, accepted) → Notification cho tenant
+activate NR
+NR -> DB : (74) INSERT Notification
+DB --> NR : (75) OK
+deactivate NR
+S -> UPT : (76) sendToUser(tenant)
+activate UPT
+UPT --> S : (77) Expo push
+deactivate UPT
+S -> DB : (78) CommitTransaction()
+DB --> S : (79) Committed
+deactivate DB
+S --> AC : (80) AdminInvoiceDisputeResponse
+deactivate S
+AC --> FE : (81) 200 OK
+deactivate AC
+FE --> Admin : (82) Khiếu nại đã kết luận\n(nếu ACCEPTED: khi phát hành lại hoá đơn kỳ đó,\nattachReplacementIfPresent() gắn hoá đơn thay thế)
+
+@enduml

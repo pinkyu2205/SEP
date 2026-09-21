@@ -1,0 +1,32 @@
+@startuml ContractExtensionRequestState
+title Figure — Contract: đơn xin gia hạn hợp đồng (ExtensionRequestStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> PENDING : Tenant gửi đơn\n(/tenant/me/contracts/{id}/extension-requests)
+
+PENDING --> APPROVED : Admin duyệt (approveRequest)\n/ hợp đồng gia hạn, thông báo tenant
+PENDING --> REJECTED : Admin từ chối + lý do
+PENDING --> WITHDRAWN : Tenant tự rút đơn
+PENDING --> EXPIRED : Cron 00:00\n[hôm nay > endDate + 7 ngày mà chưa xử lý]\n/ rejectReason = "Quá hạn xử lý"
+
+APPROVED --> [*]
+REJECTED --> [*]
+WITHDRAWN --> [*]
+EXPIRED --> [*]
+
+note right of PENDING
+  Còn đơn PENDING thì cron trả phòng tạm hoãn:
+  không chuyển hợp đồng sang EXPIRED và không tạo phiếu checkout
+  cho tới khi đơn được xử lý hoặc quá 7 ngày.
+end note
+
+@enduml

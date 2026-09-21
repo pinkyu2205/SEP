@@ -1,0 +1,38 @@
+@startuml TenantInvoiceState
+title Figure — Billing: vòng đời hoá đơn khách thuê (TenantInvoiceStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> PENDING : Phát hành hoá đơn tiền phòng (cron 00:05, kỳ đầu, thủ công)\nHoá đơn điện / nước (chốt chỉ số, admin phát hành)\nHoá đơn phát sinh, bồi thường bảo trì, quyết toán trả phòng
+
+PENDING --> OVERDUE : Cron 08:00 / tenant mở danh sách\n[dueDate < hôm nay, không có khiếu nại OPEN]\n/ tính phí trễ 1 lần (lateFeePercent), nhắc mỗi overdueRenotifyDays ngày,\nquá terminationAfterDays → đề nghị chấm dứt hợp đồng
+
+OVERDUE --> PENDING : Tenant mở khiếu nại (đóng băng hoá đơn)\nAdmin từ chối khiếu nại / duyệt khiếu nại\n[dueDate mới = +ngày ân hạn còn hiệu lực]
+
+PENDING --> PAID : PayOS webhook code "00" (InvoicePaidEvent)\nManager xác nhận chuyển khoản (file 17)\nTenant quét QR khi PayOS báo PAID
+OVERDUE --> PAID : Như trên (kể cả khi đã quá hạn)
+
+PAID --> PENDING : Admin duyệt khiếu nại làm tổng tiền tăng\n[đã thanh toán trước đó, dueDate ân hạn mới]
+PAID --> PAID : Admin duyệt khiếu nại làm tổng tiền giảm\n/ sinh khoản tín dụng hoàn (createRefundCreditAmount)
+
+PENDING --> CANCELLED : Cron huỷ hoá đơn kỳ đầu FIRST trùng QR onboard\nKiểm tra trả phòng sửa lại không còn hư hỏng\n→ huỷ hoá đơn bồi thường chưa trả
+OVERDUE --> CANCELLED : Như trên
+
+PAID --> [*]
+CANCELLED --> [*]
+
+note right of OVERDUE
+  PARTIAL có trong enum và được cron quét,
+  nhưng chưa có đường nào ghi PARTIAL.
+  Hoá đơn có khiếu nại OPEN bị bỏ qua khi chuyển OVERDUE và khi nhắc.
+end note
+
+@enduml

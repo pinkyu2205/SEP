@@ -1,0 +1,254 @@
+@startuml CheckoutRefundComplete
+title Figure — Checkout: Hoàn cọc, khách xác nhận / khiếu nại, cấn trừ cọc, thanh lý hợp đồng Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+actor Tenant
+actor Admin
+participant "Front-end" as FE
+participant "CheckoutProcessController /\nTenantMeLifecycleController /\nCheckoutRequestController" as C
+participant "CheckoutProcessServiceImpl" as PS
+participant "TenantCheckoutServiceImpl" as TS
+participant "TenantOnboardingServiceImpl" as TOS
+participant "CheckoutSettlementRepository" as CSR
+participant "TenantInvoiceRepository" as TIR
+participant "DepositAuditLogRepository" as DAL
+participant "TwilioService" as TW
+participant "NotificationRepository +\nPushNotificationService" as NP
+database DB
+
+== Manager ghi nhận đã hoàn cọc ==
+Manager -> FE : (1) Nhập ngày chuyển, hình thức, ảnh chứng từ → "Ghi nhận hoàn cọc"
+FE -> C : (2) POST /api/v1/checkout-requests/{id}/refund\nCheckoutRefundRequest
+activate C
+C -> PS : (3) refund(checkoutRequestId, request)
+activate PS
+PS -> DB : (4) BeginTransaction()
+activate DB
+DB --> PS : (5) Success
+PS -> PS : (6) assertCanRecordDepositRefund(checkoutRequest)
+PS -> TIR : (7) findByTenantContractIdAndStatusNotIn(PAID, CANCELLED)
+activate TIR
+TIR -> DB : (8) SELECT TenantInvoice
+DB --> TIR : (9) hoá đơn chưa thanh toán
+TIR --> PS : (10) List<TenantInvoice>
+deactivate TIR
+alt [Còn khoản chưa thanh toán]
+  PS --> C : BusinessException CHARGES_NOT_SETTLED
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi (thu đủ rồi mới hoàn cọc)
+end
+alt [Trạng thái không thuộc REFUND_ALLOWED_STATUSES]
+  PS --> C : BusinessException REFUND_NOT_ALLOWED
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+PS -> CSR : (11) findByCheckoutRequestId() — chưa có thì tạo bản quyết toán hoàn cọc
+activate CSR
+CSR -> DB : (12) SELECT CheckoutSettlement
+DB --> CSR : (13) settlement
+CSR --> PS : (14) settlement
+deactivate CSR
+alt [Đã ghi nhận hoàn cọc / số tiền ≤ 0 / thiếu ngày chuyển]
+  PS --> C : BusinessException REFUND_ALREADY_RECORDED / REFUND_NOT_ALLOWED / REFUND_INVALID
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+opt [Có ảnh chứng từ]
+  PS -> CSR : (15) existsByRefundProofHash(hash nội dung file)
+  activate CSR
+  CSR -> DB : (16) SELECT EXISTS
+  DB --> CSR : (17) true / false
+  CSR --> PS : (18) boolean
+  deactivate CSR
+  alt [Chứng từ đã dùng cho khoản cọc khác]
+    PS --> C : BusinessException DUPLICATE_PROOF
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi (409)
+  end
+end
+PS -> CSR : (19) save(settlement: refundAmount, method, proofUrl,\nrefundPaidAt, note, proofHash)
+activate CSR
+CSR -> DB : (20) UPDATE CheckoutSettlement
+DB --> CSR : (21) OK
+deactivate CSR
+PS -> DAL : (22) save(DepositAuditLog action = REFUND_RECORDED)
+activate DAL
+DAL -> DB : (23) INSERT DepositAuditLog
+DB --> DAL : (24) OK
+deactivate DAL
+PS -> NP : (25) sendNotification(tenant, CHECKOUT_REFUND_TRANSFERRED + CHECKOUT_REFUNDED)
+PS -> TW : (26) sendSms(SĐT tenant, "Chủ thuê đã chuyển tiền hoàn cọc…")
+activate TW
+TW --> PS : (27) sent
+deactivate TW
+break [Lỗi nghiệp vụ / hệ thống]
+  PS -> DB : RollbackTransaction()
+  DB --> PS : Rolled back
+  PS --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+PS -> DB : (28) CommitTransaction()
+DB --> PS : (29) Committed
+deactivate DB
+PS --> C : (30) DepositRefundResponse
+deactivate PS
+C --> FE : (31) 200 OK
+deactivate C
+FE --> Manager : (32) Đã ghi nhận hoàn cọc
+
+== Tenant xác nhận đã nhận cọc ==
+Tenant -> FE : (33) "Đã nhận được tiền"
+FE -> C : (34) POST /api/v1/tenant/me/checkout-requests/{id}/confirm-refund
+activate C
+C -> TS : (35) confirmRefund(requestId, tenantUserId)
+activate TS
+TS -> CSR : (36) findByCheckoutRequestId()
+activate CSR
+CSR -> DB : (37) SELECT CheckoutSettlement
+DB --> CSR : (38) settlement
+CSR --> TS : (39) settlement
+deactivate CSR
+alt [Chưa có quyết toán / manager chưa ghi nhận hoàn cọc]
+  TS --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+TS -> CSR : (40) save(refundConfirmedAt = now)
+TS -> DAL : (41) save(DepositAuditLog REFUND_CONFIRMED)
+TS -> NP : (42) sendNotification(mọi owner + admin, CHECKOUT_REFUND_CONFIRMED)\n+ sendNotification(manager, CHECKOUT_READY_TO_COMPLETE)
+TS -> TOS : (43) disableTenantAccountIfNoActiveContracts(tenantUserId, contractId)
+activate TOS
+TOS -> DB : (44) UPDATE User.status = DISABLE (nếu hết HĐ còn hiệu lực)
+DB --> TOS : (45) OK
+TOS --> TS : (46) done
+deactivate TOS
+TS --> C : (47) CheckoutRequestResponse
+deactivate TS
+C --> FE : (48) 200 OK
+deactivate C
+FE --> Tenant : (49) Hoàn tất nhận cọc — tài khoản bị khoá nếu hết hợp đồng
+
+== Tenant khiếu nại chưa nhận cọc — Admin xử lý ==
+Tenant -> FE : (50) Nhập lý do → "Chưa nhận được cọc"
+FE -> C : (51) POST /api/v1/tenant/me/checkout-requests/{id}/dispute-refund
+activate C
+C -> TS : (52) disputeRefund(requestId, tenantUserId, request)
+activate TS
+alt [Chưa hoàn cọc / đã xác nhận nhận / đang có khiếu nại chưa kết luận]
+  TS --> C : BusinessException (DISPUTE_IN_PROGRESS…)
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+TS -> CSR : (53) save(refundDisputedAt, refundDisputeReason)
+TS -> DAL : (54) save(DepositAuditLog REFUND_DISPUTED)
+TS -> NP : (55) sendNotification(mọi owner + admin, CHECKOUT_REFUND_DISPUTED)
+TS --> C : (56) CheckoutRequestResponse
+deactivate TS
+C --> FE : (57) 200 OK
+deactivate C
+FE --> Tenant : (58) Đã gửi khiếu nại
+
+Admin -> FE : (59) Chọn RETRANSFERRED / REJECTED + ghi chú
+FE -> C : (60) POST /api/v1/checkout-requests/{id}/resolve-refund-dispute
+activate C
+C -> TS : (61) resolveRefundDispute(requestId, adminUserId, request)
+activate TS
+alt [Không có khiếu nại đang mở / outcome không hợp lệ]
+  TS --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+alt [RETRANSFERRED]
+  TS -> CSR : (62) save(refundDisputeResolvedAt, outcome, refundPaidAt = now)
+  TS -> NP : (63) sendNotification(tenant, CHECKOUT_REFUND_RETRANSFERRED)
+else [REJECTED]
+  TS -> CSR : (62') save(refundDisputeResolvedAt, outcome, refundDisputeRejectedAt)
+  TS -> NP : (63') sendNotification(tenant, CHECKOUT_REFUND_DISPUTE_REJECTED)
+end
+TS -> DAL : (64) save(DepositAuditLog REFUND_DISPUTE_RESOLVED)
+TS --> C : (65) CheckoutRequestResponse
+deactivate TS
+C --> FE : (66) 200 OK
+deactivate C
+FE --> Admin : (67) Đã kết luận khiếu nại
+
+== Admin cấn trừ cọc khi khách không trả nợ ==
+Admin -> FE : (68) Xác nhận cấn trừ + lý do → "Cấn trừ cọc"
+FE -> C : (69) POST /api/v1/checkout-requests/{id}/force-settle
+activate C
+C -> TS : (70) forceSettle(requestId, adminUserId, request)
+activate TS
+TS -> TIR : (71) findByTenantContractIdAndStatusNotIn(PAID, CANCELLED)
+activate TIR
+TIR -> DB : (72) SELECT TenantInvoice
+DB --> TIR : (73) unpaidInvoices
+TIR --> TS : (74) List<TenantInvoice>
+deactivate TIR
+alt [Không tick xác nhận / đã cấn trừ / không có nợ /\nchưa đủ 30 ngày kể từ hoá đơn cuối]
+  TS --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+TS -> TIR : (75) mỗi hoá đơn: status = PAID, paidAt, paymentMethod = "Cấn trừ cọc"
+activate TIR
+TIR -> DB : (76) UPDATE TenantInvoice
+DB --> TIR : (77) OK
+deactivate TIR
+TS -> CSR : (78) save(settlement: forceSettledAt/By/Reason,\nrefundAmount = cọc − tổng nợ (không âm),\nrefundDueDate = +3 ngày làm việc nếu chưa có)
+activate CSR
+CSR -> DB : (79) UPDATE CheckoutSettlement
+DB --> CSR : (80) OK
+deactivate CSR
+TS -> DAL : (81) save(DepositAuditLog FORCE_SETTLE)
+TS -> NP : (82) sendNotification(owner + admin, CHECKOUT_DEPOSIT_REFUND_DUE)\n+ sendNotification(tenant, CHECKOUT_FORCE_SETTLED)
+TS --> C : (83) CheckoutRequestResponse
+deactivate TS
+C --> FE : (84) 200 OK
+deactivate C
+FE --> Admin : (85) Đã cấn trừ cọc
+
+== Manager hoàn tất — thanh lý hợp đồng ==
+Manager -> FE : (86) Ngày dọn đi thực tế + ghi chú → "Hoàn tất trả phòng"
+FE -> C : (87) POST /api/v1/checkout-requests/{id}/complete
+activate C
+C -> TS : (88) completeRequest(requestId, managerUserId, request)
+activate TS
+alt [Không ở APPROVED / SETTLING / HĐ không ACTIVE-EXPIRED /\nngày dọn đi trước ngày bắt đầu HĐ]
+  TS --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TS -> TIR : (89) assertChargesSettledBeforeComplete():\nmọi hoá đơn trong bảng quyết toán phải PAID / CANCELLED
+activate TIR
+TIR -> DB : (90) SELECT TenantInvoice
+DB --> TIR : (91) invoices
+TIR --> TS : (92) unpaid (nếu có)
+deactivate TIR
+alt [Khách còn nợ]
+  TS --> C : BusinessException "Khách còn nợ … — không thanh lý được"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TS -> TOS : (93) terminateActiveContract(contractId,\ntype = EARLY_MOVE_OUT, effectiveDate = ngày dọn đi thực tế)
+activate TOS
+TOS -> DB : (94) UPDATE TenantContract TERMINATED, trả phòng về AVAILABLE,\nrevertToListedPrice (xem file 28)
+DB --> TOS : (95) OK
+TOS --> TS : (96) TenantContractResponse
+deactivate TOS
+TS -> DB : (97) UPDATE CheckoutRequest status = COMPLETED, completedAt
+DB --> TS : (98) OK
+TS -> NP : (99) sendNotification(tenant, CHECKOUT_COMPLETED)
+TS --> C : (100) CheckoutRequestResponse
+deactivate TS
+C --> FE : (101) 200 OK
+deactivate C
+FE --> Manager : (102) Hồ sơ trả phòng COMPLETED
+
+@enduml

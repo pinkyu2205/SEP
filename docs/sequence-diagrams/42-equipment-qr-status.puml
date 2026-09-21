@@ -1,0 +1,156 @@
+@startuml EquipmentQrStatus
+title Figure — Equipment: quét QR thiết bị, cập nhật tình trạng, tạm ngưng, chuyển vị trí, thêm thiết bị Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Manager / Tenant" as U
+participant "Front-end" as FE
+participant "EquipmentQrController /\nGlobalEquipmentController /\nEquipmentController" as C
+participant "EquipmentServiceImpl" as S
+participant "PropertyAccessService" as PAS
+participant "EquipmentRepository" as ER
+participant "TenantContractRepository" as TCR
+participant "MaintenanceRequestRepository" as MR
+database DB
+
+== Quét QR để xem thiết bị ==
+U -> FE : (1) Quét mã QR dán trên thiết bị (vd "EQ-123")
+FE -> C : (2) GET /api/v1/equipments/by-qr/{qrCode}
+activate C
+C -> S : (3) getEquipmentByQrCode(qrCode)
+activate S
+S -> ER : (4) findByQrCode(qrCode)
+activate ER
+ER -> DB : (5) SELECT Equipment
+DB --> ER : (6) equipment / empty
+ER --> S : (7) Optional<Equipment>
+deactivate ER
+opt [Không tìm thấy theo qrCode]
+  S -> ER : (8) resolveEquipmentByQrFallback(): mã dạng "EQ-{id}" → findById(id)
+  activate ER
+  ER --> S : (9) equipment / ResourceNotFoundException
+  deactivate ER
+end
+opt [Người gọi là ROLE_TENANT]
+  S -> TCR : (10) findByTenantId(userId) → HĐ ACTIVE cùng nhà (và cùng phòng nếu thuê phòng)
+  activate TCR
+  TCR -> DB : (11) SELECT TenantContract
+  DB --> TCR : (12) contracts
+  TCR --> S : (13) List<TenantContract>
+  deactivate TCR
+  alt [Thiết bị không thuộc nhà / phòng khách đang thuê]
+    S --> C : AccessDeniedException "Bạn không có quyền xem thiết bị này"
+    C --> FE : 403
+    FE --> U : Hiển thị lỗi
+  end
+end
+S --> C : (14) EquipmentResponse (tên, tình trạng, bảo hành, lịch sử)
+deactivate S
+C --> FE : (15) 200 OK
+deactivate C
+FE --> U : (16) Thông tin thiết bị — nút "Báo hỏng" tạo phiếu bảo trì (file 05)\nhoặc manager quét để xác nhận có mặt / bắt đầu sửa (file 06, 11)
+
+== Manager cập nhật tình trạng vòng đời thiết bị ==
+U -> FE : (17) Đổi tình trạng (GOOD / MAINTENANCE / BROKEN / …)
+FE -> C : (18) PATCH /api/v1/equipment/{id}/status
+activate C
+C -> S : (19) updateEquipmentStatus(id, status)
+activate S
+S -> ER : (20) findById(id)
+activate ER
+ER -> DB : (21) SELECT Equipment
+DB --> ER : (22) equipment
+ER --> S : (23) equipment
+deactivate ER
+S -> PAS : (24) assertCanManageProperty(propertyId)
+activate PAS
+PAS --> S : (25) OK / Forbidden
+deactivate PAS
+alt [Không quản lý nhà chứa thiết bị]
+  S --> C : AccessDeniedException
+  C --> FE : 403
+  FE --> U : Hiển thị lỗi
+end
+S -> ER : (26) save(equipment.status;\nnếu chuyển sang MAINTENANCE / BROKEN: lastMaintenanceDate = now,\nmaintenanceCount + 1)
+activate ER
+ER -> DB : (27) UPDATE Equipment
+DB --> ER : (28) OK
+deactivate ER
+opt [Chuyển sang MAINTENANCE hoặc BROKEN và nhà đang có HĐ ACTIVE]
+  S -> MR : (29) recordStatusChangeMaintenance(): save(MaintenanceRequest\nstatus = CLOSED, ghi nhận "Cập nhật trạng thái: A → B")
+  activate MR
+  MR -> DB : (30) INSERT MaintenanceRequest (lịch sử vòng đời)
+  DB --> MR : (31) OK
+  deactivate MR
+end
+S --> C : (32) EquipmentResponse
+deactivate S
+C --> FE : (33) 200 OK
+deactivate C
+FE --> U : (34) Tình trạng mới\n(BROKEN cũng hiện trên trang Cấu hình khai thác — file 09)
+
+== Tạm ngưng / kích hoạt lại thiết bị ==
+U -> FE : (35) Đổi trạng thái vận hành (ACTIVE / DISABLED)
+FE -> C : (36) PATCH /api/v1/equipments/{id}/operational-status
+activate C
+C -> S : (37) updateEquipmentOperationalStatus(equipmentId, request)
+activate S
+S -> ER : (38) findById + save(operationalStatus;\nDISABLED → disabledAt = now, disabledReason;\nACTIVE → xoá disabledAt, disabledReason)
+activate ER
+ER -> DB : (39) UPDATE Equipment
+DB --> ER : (40) OK
+deactivate ER
+S --> C : (41) EquipmentResponse
+deactivate S
+C --> FE : (42) 200 OK
+deactivate C
+FE --> U : (43) Thiết bị đã đổi trạng thái vận hành
+
+== Thêm thiết bị bổ sung (khách / manager tự thêm) ==
+U -> FE : (44) Nhập tên, loại, chi phí, phòng → "Thêm thiết bị"
+FE -> C : (45) POST /api/v1/properties/{propertyId}/equipments
+activate C
+C -> S : (46) createAddedEquipment(propertyId, request)
+activate S
+S -> DB : (47) SELECT Property, Room (nếu chọn phòng);\ntìm EquipmentCatalog theo tên (chưa có thì INSERT catalog mới)
+DB --> S : (48) property, room, catalog
+S -> ER : (49) persistWithQrCode(): save Equipment (source ADDED_BY_TENANT,\nstatus NEW, ACTIVE, giá = chi phí) rồi gán qrCode "EQ-{id}" và save lại
+activate ER
+ER -> DB : (50) INSERT / UPDATE Equipment
+DB --> ER : (51) OK
+deactivate ER
+S --> C : (52) EquipmentResponse
+deactivate S
+C --> FE : (53) 200 OK
+deactivate C
+FE --> U : (54) Thiết bị mới kèm mã QR
+
+== Gán thiết bị từ kho vào phòng / gỡ gán (chỉ khi nhà đang onboarding) ==
+U -> FE : (55) Chọn thiết bị chưa có phòng → gán phòng, hoặc xoá thiết bị đã gán
+FE -> C : (56) PATCH /api/v1/properties/{propertyId}/equipments/{equipmentId}/assign\nDELETE /api/v1/properties/{propertyId}/equipments/{equipmentId}
+activate C
+C -> S : (57) reassignEquipment(propertyId, equipmentId, request) /\nunassignEquipment(propertyId, equipmentId)
+activate S
+S -> DB : (58) SELECT Property, Equipment theo (id, propertyId)
+DB --> S : (59) property, equipment
+alt [Nhà không còn ở quy trình onboarding (isEquipmentEditable = false) /\nthiết bị đã có phòng (khi gán lại) / không tìm thấy phòng, thiết bị]
+  S --> C : BusinessException / ResourceNotFoundException
+  C --> FE : Error response
+  FE --> U : Hiển thị lỗi
+end
+S -> ER : (60) reassign: save(equipment.room, houseArea)\nunassign: delete(equipment)
+activate ER
+ER -> DB : (61) UPDATE / DELETE Equipment
+DB --> ER : (62) OK
+deactivate ER
+S --> C : (63) EquipmentResponse / void
+deactivate S
+C --> FE : (64) 200 OK
+deactivate C
+FE --> U : (65) Danh sách thiết bị của nhà cập nhật
+
+@enduml

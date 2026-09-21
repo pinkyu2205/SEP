@@ -84,6 +84,7 @@ export const maintenanceReqStatusMap: Record<string, Badge> = {
   TENANT_FAULT:          { label: 'Lỗi do khách',  color: 'bg-rose-50 text-rose-700 border border-rose-200',      dot: 'bg-rose-500' },
   PENDING_TENANT_REPAIR: { label: 'Khách tự sửa',  color: 'bg-orange-50 text-orange-700 border border-orange-200', dot: 'bg-orange-500' },
   OUTSTANDING_DAMAGE:    { label: 'Chờ trừ cọc',   color: 'bg-red-100 text-red-800 border border-red-300',        dot: 'bg-red-600' },
+  WAITING_PAYMENT:       { label: 'Chờ thanh toán', color: 'bg-amber-50 text-amber-800 border border-amber-300',  dot: 'bg-amber-600' },
   CLOSED:                { label: 'Hoàn tất',      color: 'bg-emerald-50 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-500' },
   CANCELLED:             { label: 'Đã hủy',        color: 'bg-slate-100 text-slate-500 border border-slate-200', dot: 'bg-slate-400' },
 };
@@ -137,6 +138,7 @@ export function normalizeMaintenanceStatus(
     case 'TENANT_FAULT':
     case 'PENDING_TENANT_REPAIR':
     case 'OUTSTANDING_DAMAGE':
+    case 'WAITING_PAYMENT':
       return 'IN_PROGRESS';
     case 'CLOSED':
       return 'RESOLVED';

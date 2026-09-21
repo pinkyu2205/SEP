@@ -1,0 +1,142 @@
+@startuml ZoneManagerAssignment
+title Figure — Zone: Admin gán / chuyển / gỡ quản lý khu vực (bàn giao nhà và hợp đồng) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+participant "Front-end" as FE
+participant "ZoneAssignmentController" as C
+participant "ZoneAssignmentServiceImpl" as S
+participant "ZoneManagerRepository" as ZMR
+participant "PropertyOnboardingServiceImpl" as POS
+participant "TenantContractRepository" as TCR
+participant "ZoneManagerHandoverRepository" as HR
+participant "NotificationRepository +\nUserPushTokenService" as NP
+database DB
+
+== Gán quản lý cho khu vực ==
+Admin -> FE : (1) Chọn khu vực + manager → "Gán quản lý"
+FE -> C : (2) PUT /api/v1/zones/{zoneId}/manager\nAssignZoneManagerRequest
+activate C
+C -> S : (3) assignManager(zoneId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> DB : (6) SELECT Zone, SELECT User (manager)
+DB --> S : (7) zone, manager
+alt [Không tìm thấy khu vực / manager]
+  S --> C : ResourceNotFoundException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> ZMR : (8) findById(zoneId) — quản lý hiện tại (fromManagerId)
+activate ZMR
+ZMR -> DB : (9) SELECT ZoneManager
+DB --> ZMR : (10) existing / empty
+ZMR --> S : (11) existing
+deactivate ZMR
+alt [Khu vực đã thuộc đúng manager này]
+  S --> C : trả lại lần bàn giao gần nhất (không đổi gì)
+end
+S -> ZMR : (12) save(ZoneManager: zoneId, managerId, assignedBy, assignedAt)
+activate ZMR
+ZMR -> DB : (13) INSERT / UPDATE ZoneManager
+DB --> ZMR : (14) OK
+deactivate ZMR
+S -> POS : (15) applyZoneOperationManager(zoneId, managerId)\n→ từng nhà trong khu vực: assignOperationManager()
+activate POS
+POS -> DB : (16) UPDATE Property.operationManagerId\n(nhà chờ manager → ACTIVE + mở phòng DRAFT; nhà đang chạy → gán lại HĐ)
+DB --> POS : (17) OK
+POS --> S : (18) số nhà bị ảnh hưởng
+deactivate POS
+S -> TCR : (19) findActiveAndPendingByZoneId(zoneId) +\nupdateAssignedManagerByZoneId(manager, zoneId)
+activate TCR
+TCR -> DB : (20) UPDATE TenantContract.assignedManager
+DB --> TCR : (21) số HĐ đã cập nhật
+TCR --> S : (22) affectedContracts
+deactivate TCR
+S -> HR : (23) save(ZoneManagerHandover: from, to, changedBy,\naffectedProperties, affectedContracts)
+activate HR
+HR -> DB : (24) INSERT ZoneManagerHandover
+DB --> HR : (25) OK
+deactivate HR
+S -> NP : (26) sendHandoffNotifications():\nZONE_REVOKED cho manager cũ (còn phụ trách mấy khu vực),\nZONE_ASSIGNED cho manager mới (kèm số HĐ chờ đón khách),\nMANAGER_CHANGED cho từng khách thuê bị ảnh hưởng
+activate NP
+NP -> DB : (27) INSERT Notification (nhiều dòng)
+DB --> NP : (28) OK
+NP --> S : (29) done (+ Expo push)
+deactivate NP
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> DB : (30) CommitTransaction()
+DB --> S : (31) Committed
+deactivate DB
+S --> C : (32) ZoneHandoverResponse
+deactivate S
+C --> FE : (33) 200 OK
+deactivate C
+FE --> Admin : (34) Đã bàn giao khu vực
+
+== Chuyển quản lý sang khu vực mới (và nhả khu vực cũ) ==
+Admin -> FE : (35) Chọn manager, khu vực đích, các khu vực cần nhả
+FE -> C : (36) POST /api/v1/zones/manager-transfer\nManagerTransferRequest
+activate C
+C -> S : (37) transferManager(request)
+activate S
+S -> S : (38) assignManager(toZoneId, managerId) — như bước 3–34
+loop [Mỗi khu vực cần nhả (khác khu vực đích và đang thuộc manager này)]
+  S -> S : (39) doRemoveManager(releaseZoneId)
+end
+S --> C : (40) ZoneHandoverResponse
+deactivate S
+C --> FE : (41) 200 OK
+deactivate C
+FE --> Admin : (42) Đã chuyển
+
+== Gỡ quản lý khỏi khu vực ==
+Admin -> FE : (43) "Gỡ quản lý"
+FE -> C : (44) DELETE /api/v1/zones/{zoneId}/manager
+activate C
+C -> S : (45) removeManager(zoneId)
+activate S
+S -> TCR : (46) assertNoLiveContracts(zoneId):\nđếm HĐ ACTIVE / PENDING / DRAFT của khu vực
+activate TCR
+TCR -> DB : (47) SELECT TenantContract
+DB --> TCR : (48) contracts
+TCR --> S : (49) List<TenantContract>
+deactivate TCR
+alt [Còn hợp đồng đang có khách / chờ nhận / chờ đón]
+  S --> C : BusinessException "Không gỡ được quản lý… hãy đổi sang quản lý khác"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> ZMR : (50) delete(ZoneManager)
+activate ZMR
+ZMR -> DB : (51) DELETE ZoneManager
+DB --> ZMR : (52) OK
+deactivate ZMR
+S -> POS : (53) releaseZoneOperationManager(zoneId):\noperationManagerId = null; nhà ACTIVE → PENDING_OPERATION_MANAGER;\nphòng trống AVAILABLE → DRAFT
+activate POS
+POS -> DB : (54) UPDATE Property, Room
+DB --> POS : (55) OK
+deactivate POS
+S -> TCR : (56) removeAssignedManagerByZoneId(zoneId)
+S -> HR : (57) save(ZoneManagerHandover toManagerId = null)
+S -> NP : (58) sendHandoffNotifications(): ZONE_REVOKED + MANAGER_CHANGED\n("tạm thời chưa có quản lý phụ trách")
+S --> C : (59) void
+deactivate S
+C --> FE : (60) 200 OK
+deactivate C
+FE --> Admin : (61) Khu vực chưa có quản lý
+
+@enduml

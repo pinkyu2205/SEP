@@ -1,0 +1,52 @@
+@startuml PropertyLifecycleState
+title Figure — Property: vòng đời tòa nhà từ onboarding đến khai thác (PropertyStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> DRAFT : Admin tạo nháp (POST /properties/draft)
+
+DRAFT --> PENDING : Nhập hợp đồng đầu vào (inbound-contract)
+PENDING --> UNDER_RENOVATION : Chọn onboarding-options\n(mở đợt cải tạo #1 hoặc đánh dấu không cải tạo)
+
+UNDER_RENOVATION --> PENDING_EQUIPMENT_INSTALLATION : Gán thiết bị lần đầu (equipments/assign)\nhoặc import Excel onboarding / renovation
+PENDING_EQUIPMENT_INSTALLATION --> RENOVATION_COMPLETED : renovation/complete\n[hoàn tất 3 quy trình onboarding]
+
+UNDER_RENOVATION --> RENOVATION_COMPLETED : import lease-excel [hợp đồng không có cải tạo]\n(đặt thẳng trạng thái rồi tự submit-to-host)
+
+RENOVATION_COMPLETED --> PENDING_HOST_REVIEW : submit-to-host\n[validateReadyForSubmit, tính khấu hao + giá]
+PENDING_HOST_REVIEW --> ACTIVE : host-confirm [khu vực đã có manager]\n/ operationManagerId = manager khu, mở phòng DRAFT → AVAILABLE
+
+ACTIVE --> UNDER_RENOVATION : renovation/start (cải tạo bổ sung, đợt ≥ 2)
+UNDER_RENOVATION --> RENOVATION_COMPLETED : renovation/complete [đợt bổ sung, sessionNumber ≥ 2]
+UNDER_RENOVATION --> ACTIVE : renovation/complete [đợt đầu, đã có operationManager]
+UNDER_RENOVATION --> PENDING_HOST_REVIEW : renovation/complete [đợt đầu, chưa có operationManager]
+
+ACTIVE --> PENDING_OPERATION_MANAGER : Gỡ manager khỏi khu vực (releaseZoneOperationManager)\n/ operationManagerId = null, phòng AVAILABLE → DRAFT
+PENDING_OPERATION_MANAGER --> ACTIVE : Gán manager cho khu vực / nhà\n(assignOperationManager)
+
+DRAFT --> DISABLED : disable (từ bất kỳ trạng thái nào)\n[không còn hợp đồng ACTIVE / phòng RENTED]
+ACTIVE --> DISABLED : disable [không còn khách thuê]
+DISABLED --> DRAFT : enable [previousStatus = null]
+DISABLED --> ACTIVE : enable [previousStatus = ACTIVE]\n(khôi phục đúng trạng thái đã lưu)
+
+DISABLED --> [*] : purge (xoá hẳn, dọn dữ liệu import sai)
+
+note right of ACTIVE
+  ACTIVE mới cho tạo hợp đồng thuê, bảo trì, hoá đơn.
+  RENTED, MAINTENANCE, INACTIVE có trong enum và được kiểm tra khi đọc
+  (vd. xin gia hạn, gán manager) nhưng chưa có đường nào ghi vào.
+end note
+
+note left of DISABLED
+  disable lưu previousStatus để enable khôi phục đúng chỗ.
+end note
+
+@enduml

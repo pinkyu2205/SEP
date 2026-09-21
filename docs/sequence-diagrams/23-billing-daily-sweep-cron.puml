@@ -1,0 +1,144 @@
+@startuml BillingDailySweep
+title Figure — Billing: Cron quét hoá đơn hằng ngày (nhắc hạn, quá hạn, phí trễ, đề nghị chấm dứt HĐ) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+participant "Scheduler (08:00 hằng ngày)\n/ ApplicationReady / Admin" as TRG
+participant "BillingCronServiceImpl" as S
+participant "UnitPriceServiceImpl" as UPS
+participant "TenantInvoiceRepository" as TIR
+participant "InvoiceDisputeService" as IDS
+participant "TenantContractRepository" as TCR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "HostNotificationRepository" as HNR
+database DB
+
+note over TRG
+  Kích hoạt bởi: @Scheduled cron 0 0 8 * * * (Asia/Ho_Chi_Minh),
+  ApplicationReadyEvent (catch-up khi khởi động lại, nếu bật billing.startup-sweep-enabled),
+  hoặc admin gọi POST /api/v1/admin/billing/run-daily-sweep.
+end note
+
+TRG -> S : (1) dailyBillingSweepTask() → runDailySweep()
+activate S
+S -> DB : (2) BeginTransaction()
+activate DB
+DB --> S : (3) Success
+
+S -> UPS : (4) applyDueEscalations()\n(tăng giá thuê theo lộ trình đến hạn)
+activate UPS
+UPS -> DB : (5) UPDATE giá thuê / hợp đồng đến hạn tăng giá
+DB --> UPS : (6) OK
+UPS --> S : (7) số HĐ đã tăng giá
+deactivate UPS
+S -> UPS : (8) notifyUpcomingAnnualEscalations()
+activate UPS
+UPS -> NR : (9) INSERT Notification báo trước tăng giá hằng năm
+UPS --> S : (10) số thông báo
+deactivate UPS
+
+S -> S : (11) generateDueRentInvoices(today)\n→ tạo hoá đơn tiền phòng tới kỳ\n(INSERT TenantInvoice RENT)
+S -> S : (12) remindPendingMeterReadings(today)\n→ nhắc manager chốt chỉ số điện nước
+S -> S : (13) remindUpcomingRent(today)\n→ nhắc trước ngày phát hành hoá đơn tiền phòng
+
+S -> TIR : (14) findByStatusInAndDueDateIsNotNull(\nPENDING, PARTIAL, OVERDUE)
+activate TIR
+TIR -> DB : (15) SELECT TenantInvoice
+DB --> TIR : (16) invoices
+TIR --> S : (17) List<TenantInvoice>
+deactivate TIR
+S -> IDS : (18) openDisputeTenantInvoiceIds()\n(hoá đơn đang khiếu nại bị "đóng băng")
+activate IDS
+IDS --> S : (19) Set<Long>
+deactivate IDS
+
+loop [Mỗi hoá đơn]
+  alt [Đang bị khiếu nại OPEN]
+    S -> S : (20) bỏ qua
+  else [Đã nhắc hôm nay (lastReminderDate = today)]
+    S -> S : (20') bỏ qua (idempotent)
+  else [RENT loại FIRST đã thu qua QR onboard]
+    S -> TIR : (20'') save(status = CANCELLED)
+  else [RENT]
+    alt [Còn ≤ N ngày tới hạn / đúng ngày hạn]
+      S -> NR : (21) sendNotification BILLING_REMINDER (+ push tenant)
+      activate NR
+      NR -> DB : (22) INSERT Notification
+      DB --> NR : (23) OK
+      deactivate NR
+    else [Quá hạn lần đầu]
+      S -> S : (24) status = OVERDUE
+      alt [Quá hạn ≥ terminationAfterDays và chưa đề nghị chấm dứt]
+        S -> NR : (25) sendNotification "Hợp đồng có thể bị chấm dứt"
+        S -> HNR : (26) notifyManagerAndHostsOverdue()\n→ Notification manager + HostNotification owner
+        S -> TCR : (27) proposeContractTermination(contract)\nterminationProposed = true
+        activate TCR
+        TCR -> DB : (28) UPDATE TenantContract
+        DB --> TCR : (29) OK
+        deactivate TCR
+      else [Đủ ngày nhắc lần cuối]
+        S -> NR : (25') sendNotification "Nhắc lần cuối" + gom vào digest manager
+      else [Còn lại]
+        S -> NR : (25'') sendNotification "Hoá đơn tiền phòng quá hạn" + digest manager
+      end
+    else [Đã OVERDUE, các mốc nhắc tiếp theo]
+      S -> NR : (30) nhắc quá hạn / nhắc lần cuối / đề nghị chấm dứt\ntheo số ngày quá hạn
+    end
+  else [Loại khác — điện / nước / bảo trì]
+    alt [OVERDUE]
+      alt [BẢO TRÌ quá hạn ≥ terminationAfterDays, chưa đề nghị chấm dứt]
+        S -> TCR : (31) proposeContractTermination() + notifyManagerAndHostsOverdue()
+      else [Nhắc lại mỗi 7 ngày (overdueRenotifyDays)]
+        S -> NR : (31') sendNotification BILLING_OVERDUE
+      end
+    else [PENDING / PARTIAL]
+      alt [Đã quá hạn]
+        S -> S : (32) status = OVERDUE\ncộng phí trễ = totalAmount × lateFeePercent%,\nlàm tròn nghìn, grandTotal += phí trễ\nxoá thông tin PayOS cũ (buộc tạo QR mới theo số tiền mới)
+        S -> NR : (33) sendNotification "Hoá đơn quá hạn"\n(hoặc đề nghị chấm dứt nếu là BẢO TRÌ đủ ngày)
+      else [Còn reminderDaysBefore ngày hoặc đúng hạn]
+        S -> NR : (33') sendNotification BILLING_REMINDER
+      end
+    end
+  end
+  opt [Trạng thái hoá đơn thay đổi]
+    S -> TIR : (34) save(invoice: status, lateFee, lastReminderDate, …)
+    activate TIR
+    TIR -> DB : (35) UPDATE TenantInvoice
+    DB --> TIR : (36) OK
+    deactivate TIR
+  end
+end
+
+S -> NR : (37) flushManagerUnpaidDigest() +\nflushManagerUtilityUnpaidDigest()\n→ 1 thông báo / manager / ngày (gộp các phòng chưa thanh toán)
+activate NR
+NR -> DB : (38) INSERT Notification (manager)
+DB --> NR : (39) OK
+deactivate NR
+S -> UPT : (40) sendToUser(tenant, manager…)
+activate UPT
+UPT --> S : (41) Expo push
+deactivate UPT
+
+break [Lỗi hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+end
+
+S -> DB : (42) CommitTransaction()
+DB --> S : (43) Committed
+deactivate DB
+S --> TRG : (44) Map thống kê: reminded, overdueMarked, renotified,\nrentIssued, rentEscalated, meterReminded, managerUnpaidNotified…
+deactivate S
+
+note over S
+  Ngoài sweep này còn 2 cron riêng trong BillingCronServiceImpl:
+  00:05 generateMonthlyRentInvoices() — sinh hoá đơn tiền phòng theo tháng;
+  00:10 remindUpcomingRent() — nhắc trước kỳ phát hành hoá đơn.
+end note
+
+@enduml

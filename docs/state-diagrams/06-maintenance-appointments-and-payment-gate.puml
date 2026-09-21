@@ -1,0 +1,51 @@
+@startuml MaintenanceAppointmentsAndPaymentGateState
+title Figure — Maintenance: lịch hẹn xem, lịch hẹn sửa và cổng thanh toán trước khi sửa State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Lịch hẹn xem (phiếu đang OPEN)" as VISIT {
+  [*] --> DaHenXem : Tenant tạo phiếu, chọn visitAppointmentAt\n(7h–18h, slot 30 phút, không trùng lịch manager)
+  DaHenXem --> DaHenXem : reschedule-visit\n[chưa xác nhận có mặt, còn trước ngày hẹn]
+  DaHenXem --> DaXacNhanCoMat : confirm-arrival\n(manager quét QR đúng thiết bị, ghi visitArrivalConfirmedAt)
+  DaHenXem --> TuHuy : Cron 10 phút\n[quá hạn hẹn 2 giờ, chưa xác nhận]
+  DaXacNhanCoMat --> [*] : diagnose / reject-fault / send-for-inspection / approve\n(chỉ được làm sau bước này)
+  TuHuy --> [*] : phiếu → CANCELLED
+  note right of DaHenXem
+    Phiếu cũ không có visitAppointmentAt
+    bỏ qua bước xác nhận có mặt.
+  end note
+}
+
+state "Lịch hẹn sửa (REPAIR_SCHEDULED)" as REPAIR {
+  [*] --> ChoChanDoan : send-for-inspection\n(mang đi kiểm tra, chưa hẹn giờ)
+  [*] --> DaHenSua : diagnose / reject-fault kèm repairAppointmentAt\n(slot 60 phút, không trùng lịch)
+  ChoChanDoan --> DaHenSua : diagnose, bắt buộc repairAppointmentAt
+  DaHenSua --> DaHenSua : reschedule-repair [còn trước ngày hẹn]
+  DaHenSua --> BanGiao : handover
+  DaHenSua --> DangSua : start-repair [qua cổng thanh toán]
+  DaHenSua --> GhiNhanThietHai : Cron 09:00\n[quá hẹn 3 ngày, hoá đơn thu phí chưa PAID]
+  BanGiao --> [*] : phiếu → CLOSED
+  DangSua --> [*] : phiếu → IN_REPAIR / TENANT_FAULT
+  GhiNhanThietHai --> [*] : phiếu → OUTSTANDING_DAMAGE
+}
+
+state "Cổng thanh toán trước khi sửa / hoàn tất" as GATE {
+  [*] --> CongTyTra : Hao mòn (WEAR)\nhoặc lỗi khách nhưng khách từ chối trả (companyAbsorbedFault)
+  [*] --> ChuaBaoGia : Lỗi khách, khách đồng ý trả, MANAGER_REPAIR
+  ChuaBaoGia --> ChoThanhToan : charge (chargeBeforeRepair, chỉ lập được một lần)\n/ sinh hoá đơn PayOS + QR cho tenant
+  ChoThanhToan --> DaThanhToan : Tenant thanh toán (file 16)
+  CongTyTra --> [*] : không chặn start-repair / complete
+  DaThanhToan --> [*] : mở khoá start-repair và complete
+  ChuaBaoGia --> ChuaBaoGia : start-repair / complete bị chặn\n"Cần báo giá và tenant thanh toán hoá đơn"
+  ChoThanhToan --> ChoThanhToan : start-repair / complete bị chặn\n"Cần tenant thanh toán hoá đơn"
+}
+
+@enduml

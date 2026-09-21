@@ -1,0 +1,160 @@
+@startuml MaintenanceStartRepair
+title Figure — Maintenance: Đổi lịch sửa & Manager bắt đầu sửa (start-repair) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "TenantInvoiceRepository" as TIR
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+== Đổi lịch sửa / bàn giao ==
+Manager -> FE : (1) Chọn giờ mới → "Đổi lịch sửa"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/reschedule-repair
+activate C
+C -> S : (3) rescheduleRepair(id, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> S : (6) findActive(id), requireManagerAccess,\nrequireStatus(REPAIR_SCHEDULED),\nnếu đã có lịch → chưa tới ngày hẹn
+alt [Sai status / đã tới ngày hẹn / thiếu repairAppointmentAt]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> MR : (7) validateAndAssertSlotAvailable(managerId,\nnewAt, 60 phút, loại trừ phiếu này)
+activate MR
+MR -> DB : (8) SELECT lịch của manager
+DB --> MR : (9) slots
+MR --> S : (10) OK / ConflictException
+deactivate MR
+S -> MR : (11) save(repairAppointmentAt mới)
+activate MR
+MR -> DB : (12) UPDATE MaintenanceRequest
+DB --> MR : (13) OK
+deactivate MR
+S -> DB : (14) INSERT MaintenanceTimeline ("Đổi lịch sửa: cũ → mới")
+DB --> S : (15) OK
+S -> NR : (16) notifyTenant("Đổi lịch sửa bảo trì")
+activate NR
+NR -> DB : (17) INSERT Notification MAINTENANCE_SCHEDULE_CHANGED
+DB --> NR : (18) OK
+deactivate NR
+S -> UPT : (19) sendToUser(tenant)
+activate UPT
+UPT --> S : (20) Expo push
+deactivate UPT
+S -> RT : (21) publishMaintenanceEvent(SCHEDULE_CHANGED)
+activate RT
+RT --> S : (22) STOMP event
+deactivate RT
+S -> DB : (23) CommitTransaction()
+DB --> S : (24) Committed
+deactivate DB
+S --> C : (25) MaintenanceRequestResponse
+deactivate S
+C --> FE : (26) 200 OK
+deactivate C
+FE --> Manager : (27) Hiển thị lịch sửa mới
+
+== Bắt đầu sửa ==
+Manager -> FE : (28) Quét QR thiết bị → "Bắt đầu sửa"
+FE -> C : (29) PUT /api/v1/maintenance/{id}/start-repair
+activate C
+C -> S : (30) startRepair(id)
+activate S
+S -> DB : (31) BeginTransaction()
+activate DB
+DB --> S : (32) Success
+
+S -> MR : (33) findActive(id)
+activate MR
+MR -> DB : (34) SELECT MaintenanceRequest
+DB --> MR : (35) MaintenanceRequest
+MR --> S : (36) req
+deactivate MR
+S -> S : (37) requireManagerAccess(req)\nrequireStatus(REPAIR_SCHEDULED)
+
+alt [Chưa có damageCause (chưa chẩn đoán)]
+  S --> C : BusinessException "gọi /diagnose trước khi bắt đầu sửa"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [Không phải công ty trả hộ và chưa bypass thanh toán]
+  alt [Có chargeInvoiceId]
+    S -> TIR : (38) findById(chargeInvoiceId)
+    activate TIR
+    TIR -> DB : (39) SELECT TenantInvoice
+    DB --> TIR : (40) TenantInvoice
+    TIR --> S : (41) invoice
+    deactivate TIR
+    alt [invoice chưa PAID]
+      S --> C : BusinessException "Cần tenant thanh toán trước khi bắt đầu sửa"
+      C --> FE : Error response
+      FE --> Manager : Hiển thị lỗi
+    end
+  else [Lỗi khách + MANAGER_REPAIR nhưng chưa có hoá đơn]
+    S --> C : BusinessException "Cần báo giá và tenant thanh toán trước"
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+end
+
+S -> S : (42) next = IN_REPAIR nếu công ty trả hộ hoặc không phải lỗi khách,\nngược lại TENANT_FAULT\nrepairStartedAt = now
+S -> RR : (43) markRoomMaintenance() → Room.status = MAINTENANCE
+activate RR
+RR -> DB : (44) UPDATE Room
+DB --> RR : (45) OK
+deactivate RR
+S -> MR : (46) save(req)
+activate MR
+MR -> DB : (47) UPDATE MaintenanceRequest
+DB --> MR : (48) OK
+deactivate MR
+S -> DB : (49) INSERT MaintenanceTimeline (REPAIR_SCHEDULED → next)
+DB --> S : (50) OK
+S -> NR : (51) notifyTenant("Bắt đầu sửa chữa")
+activate NR
+NR -> DB : (52) INSERT Notification
+DB --> NR : (53) OK
+deactivate NR
+S -> UPT : (54) sendToUser(tenant)
+activate UPT
+UPT --> S : (55) Expo push
+deactivate UPT
+S -> RT : (56) publishMaintenanceEvent(SCHEDULE_CHANGED)
+activate RT
+RT --> S : (57) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (58) CommitTransaction()
+DB --> S : (59) Committed
+deactivate DB
+S --> C : (60) MaintenanceRequestResponse
+deactivate S
+C --> FE : (61) 200 OK
+deactivate C
+FE --> Manager : (62) Phiếu ở IN_REPAIR / TENANT_FAULT — sẵn sàng hoàn tất
+
+@enduml

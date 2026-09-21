@@ -1,0 +1,134 @@
+@startuml MaintenanceHandover
+title Figure — Maintenance: Manager bàn giao thiết bị sau kiểm tra thêm (handover) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "TenantInvoiceRepository" as TIR
+participant "EquipmentRepository" as ER
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+Manager -> FE : (1) Chụp ảnh bàn giao thiết bị → "Bàn giao"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/handover\nMaintenanceHandoverRequest
+activate C
+C -> S : (3) handover(id, request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+S -> S : (10) requireManagerAccess(req)
+
+alt [status ≠ REPAIR_SCHEDULED / chưa có damageCause]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [Không bypass thanh toán và không phải công ty trả hộ]
+  alt [Có chargeInvoiceId]
+    S -> TIR : (11) findById(chargeInvoiceId)
+    activate TIR
+    TIR -> DB : (12) SELECT TenantInvoice
+    DB --> TIR : (13) TenantInvoice
+    TIR --> S : (14) invoice
+    deactivate TIR
+    alt [invoice chưa PAID]
+      S --> C : BusinessException "Cần tenant thanh toán trước khi bàn giao"
+      C --> FE : Error response
+      FE --> Manager : Hiển thị lỗi
+    end
+  else [Lỗi khách + MANAGER_REPAIR nhưng chưa có hoá đơn]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+end
+
+S -> DB : (15) appendCsv + INSERT MaintenancePhotoHistory (AFTER)
+DB --> S : (16) OK
+alt [Không có ảnh AFTER]
+  S --> C : BusinessException "Bắt buộc ảnh bàn giao"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [equipmentReplacementFlagged = true]
+  S -> S : (17) chargeToTenant = !companyAbsorbedFault\n&& TENANT_FAULT && MANAGER_REPAIR
+  S -> ER : (18) applyEquipmentReplacementOnComplete():\nfindById + save(status = NEW, installationDate = today,\nrecommendReplacement = false, maintenanceCount + 1)
+  activate ER
+  ER -> DB : (19) SELECT + UPDATE Equipment
+  DB --> ER : (20) OK
+  ER --> S : (21) saved
+  deactivate ER
+end
+
+S -> MR : (22) save(req: status = CLOSED, doneAt, resolvedAt)
+activate MR
+MR -> DB : (23) UPDATE MaintenanceRequest
+DB --> MR : (24) OK
+MR --> S : (25) saved
+deactivate MR
+S -> RR : (26) restoreRoomStatus(req)
+activate RR
+RR -> DB : (27) UPDATE Room
+DB --> RR : (28) OK
+RR --> S : (29) done
+deactivate RR
+S -> DB : (30) INSERT MaintenanceTimeline\n("Manager bàn giao thiết bị…")
+DB --> S : (31) OK
+
+S -> NR : (32) notifyTenantOnComplete(req, false)\nMAINTENANCE_COMPLETED
+activate NR
+NR -> DB : (33) INSERT Notification
+DB --> NR : (34) OK
+NR --> S : (35) saved
+deactivate NR
+S -> UPT : (36) sendToUser(tenant)
+activate UPT
+UPT --> S : (37) Expo push
+deactivate UPT
+S -> RT : (38) publishMaintenanceEvent(COMPLETED)
+activate RT
+RT --> S : (39) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (40) CommitTransaction()
+DB --> S : (41) Committed
+deactivate DB
+
+S --> C : (42) MaintenanceRequestResponse
+deactivate S
+C --> FE : (43) 200 OK
+deactivate C
+FE --> Manager : (44) Phiếu CLOSED
+
+@enduml

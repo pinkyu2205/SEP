@@ -1,0 +1,42 @@
+@startuml RoomState
+title Figure — Room: vòng đời phòng (RoomStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> DRAFT : Thêm phòng khi nhà đang onboarding\n(nhà nguyên căn: bỏ giá và cọc của phòng)
+
+DRAFT --> AVAILABLE : Nhà chuyển ACTIVE (host-confirm / gán manager)\n[phòng có kết quả tính giá; thiếu giá → bỏ qua và báo skipped]\nNhà nguyên căn: mở tất cả phòng DRAFT
+AVAILABLE --> DRAFT : Gỡ manager khỏi khu vực\n(chỉ phòng trống AVAILABLE)
+
+AVAILABLE --> RENTED : Hợp đồng kích hoạt (confirm hoặc tạo ACTIVE ngay)
+RENTED --> AVAILABLE : Hợp đồng kết thúc / huỷ / thanh lý / NO_SHOW\n(releaseContractOccupancy)
+
+AVAILABLE --> MAINTENANCE : Đổi trạng thái tay (nhà onboarding / ACTIVE)\nPhiếu bảo trì vào sửa (markRoomMaintenance)
+MAINTENANCE --> AVAILABLE : Đổi tay\nĐóng / huỷ phiếu bảo trì [không còn phiếu mở khác,\nkhông có hợp đồng ACTIVE]
+RENTED --> MAINTENANCE : Phiếu bảo trì vào sửa (IN_REPAIR / TENANT_FAULT)
+MAINTENANCE --> RENTED : Đóng / huỷ phiếu bảo trì\n[phòng còn hợp đồng ACTIVE]
+
+AVAILABLE --> DISABLED : Đổi trạng thái tay (ngưng khai thác)
+MAINTENANCE --> DISABLED : Đổi trạng thái tay
+DISABLED --> AVAILABLE : Đổi trạng thái tay
+DISABLED --> MAINTENANCE : Đổi trạng thái tay
+
+DRAFT --> [*] : Xoá phòng (xoá mềm, thiết bị về kho)\nchỉ khi nhà onboarding
+AVAILABLE --> [*] : Xoá phòng [nhà onboarding, chưa RENTED]
+
+note right of RENTED
+  Không đổi tay được khi RENTED hoặc DRAFT.
+  Bảng chuyển tay hợp lệ chỉ gồm AVAILABLE, MAINTENANCE, DISABLED
+  (đổi tay được sang nhau, xem isAllowedStatusTransition).
+  DISABLED không tạo hoá đơn, không nhận khách.
+end note
+
+@enduml

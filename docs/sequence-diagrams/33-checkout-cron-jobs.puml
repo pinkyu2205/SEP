@@ -1,0 +1,114 @@
+@startuml CheckoutCronJobs
+title Figure — Checkout: Các cron tự động (tự chấp nhận quyết toán, khoá tài khoản sau hoàn cọc im lặng, nhắc quá hạn) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+participant "Scheduler" as CRON
+participant "CheckoutCronServiceImpl" as S
+participant "CheckoutRequestRepository" as CRR
+participant "CheckoutSettlementRepository" as CSR
+participant "CheckoutProcessServiceImpl" as PS
+participant "TenantOnboardingServiceImpl" as TOS
+participant "TenantInvoiceRepository" as TIR
+participant "UserRepository" as UR
+participant "NotificationRepository +\nPushNotificationService" as NP
+participant "TwilioService" as TW
+database DB
+
+== 00:00 hằng ngày — tự chấp nhận quyết toán sau 7 ngày ==
+CRON -> S : (1) autoAcceptSettlementTask()
+activate S
+S -> DB : (2) BeginTransaction()
+activate DB
+DB --> S : (3) Success
+S -> CRR : (4) findByStatusOrderByCreatedAtDesc(WAITING_TENANT)
+activate CRR
+CRR -> DB : (5) SELECT CheckoutRequest
+DB --> CRR : (6) waitingRequests
+CRR --> S : (7) List<CheckoutRequest>
+deactivate CRR
+loop [Mỗi yêu cầu đang chờ khách]
+  S -> CSR : (8) findByCheckoutRequestId(requestId)
+  activate CSR
+  CSR -> DB : (9) SELECT CheckoutSettlement
+  DB --> CSR : (10) settlement
+  CSR --> S : (11) Optional<CheckoutSettlement>
+  deactivate CSR
+  opt [Bản quyết toán tạo / cập nhật cách đây > 7 ngày]
+    S -> PS : (12) acceptSettlement(requestId, tenantUserId)\n(giống khách bấm "Đồng ý" — file 31)
+    activate PS
+    PS -> DB : (13) UPDATE CheckoutRequest status = SETTLING
+    DB --> PS : (14) OK
+    PS --> S : (15) done (lỗi từng phiếu chỉ log, không dừng vòng lặp)
+    deactivate PS
+  end
+end
+S -> DB : (16) CommitTransaction()
+DB --> S : (17) Committed
+deactivate DB
+deactivate S
+
+== 00:15 hằng ngày — khoá tài khoản khi khách im lặng sau hoàn cọc ==
+CRON -> S : (18) disableAccountsAfterSilentRefund()
+activate S
+S -> CSR : (19) findSilentRefundAwaitingAccountDisable(now − REFUND_SILENCE_DISABLE_DAYS)
+activate CSR
+CSR -> DB : (20) SELECT CheckoutSettlement\n(đã hoàn cọc quá N ngày, khách chưa xác nhận / khiếu nại)
+DB --> CSR : (21) settlements
+CSR --> S : (22) List<CheckoutSettlement>
+deactivate CSR
+loop [Mỗi bản quyết toán]
+  S -> TOS : (23) disableTenantAccountIfNoActiveContracts(tenantUserId, contractId)
+  activate TOS
+  TOS -> DB : (24) UPDATE User.status = DISABLE (nếu hết hợp đồng còn hiệu lực)
+  DB --> TOS : (25) OK
+  TOS --> S : (26) done
+  deactivate TOS
+end
+S --> CRON : (27) log số ứng viên / số đã xử lý
+deactivate S
+
+== 08:30 hằng ngày — nhắc quá hạn hoàn cọc và cảnh báo cấn trừ cọc ==
+CRON -> S : (28) overdueAndWarningTask()
+activate S
+S -> CSR : (29) findAll() — mọi bản quyết toán
+activate CSR
+CSR -> DB : (30) SELECT CheckoutSettlement
+DB --> CSR : (31) settlements
+CSR --> S : (32) List<CheckoutSettlement>
+deactivate CSR
+loop [Mỗi bản quyết toán của yêu cầu chưa COMPLETED / CANCELLED / REJECTED]
+  opt [Có refundDueDate, chưa hoàn cọc, đã quá hạn đúng 1 / 3 / 7 ngày]
+    S -> UR : (33) findByRole(ROLE_OWNER), findByRole(ROLE_ADMIN)
+    activate UR
+    UR --> S : (34) users
+    deactivate UR
+    S -> NP : (35) sendNotification(CHECKOUT_DEPOSIT_REFUND_OVERDUE)\n(INSERT Notification + push nếu có token)
+    activate NP
+    NP -> DB : (36) INSERT Notification
+    DB --> NP : (37) OK
+    NP --> S : (38) done
+    deactivate NP
+  end
+  S -> TIR : (39) findByTenantContractIdAndStatusNotIn(PAID, CANCELLED)
+  activate TIR
+  TIR -> DB : (40) SELECT TenantInvoice
+  DB --> TIR : (41) unpaid
+  TIR --> S : (42) List<TenantInvoice>
+  deactivate TIR
+  opt [Còn nợ và số ngày còn lại tới mốc 30 ngày = 3 hoặc 1]
+    S -> NP : (43) sendNotification(tenant, CHECKOUT_FORCE_SETTLE_WARNING)
+    S -> TW : (44) sendSms(SĐT tenant, "Bạn sắp bị cấn trừ cọc…")
+    activate TW
+    TW --> S : (45) sent
+    deactivate TW
+  end
+end
+S --> CRON : (46) done
+deactivate S
+
+@enduml

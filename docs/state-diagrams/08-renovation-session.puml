@@ -1,0 +1,28 @@
+@startuml RenovationSessionState
+title Figure — Property: đợt cải tạo (RenovationSessionStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> IN_PROGRESS : Mở đợt cải tạo\n(onboarding-options hasRenovation = true → đợt #1;\nrenovation/start → đợt #2, #3, …)
+
+IN_PROGRESS --> ACTIVE : renovation/complete\n(finalizeCurrentRenovationSession, đặt endDate)
+
+ACTIVE --> DISABLED : Đợt cải tạo sau (sessionNumber ≥ 2) hoàn tất\n(disableSupersededRenovationSessions, ghi disabledAt)
+
+DISABLED --> [*]
+
+note right of ACTIVE
+  Tại mỗi thời điểm chỉ một đợt ACTIVE:
+  danh mục hạng mục và thiết bị của đợt mới thay thế đợt cũ,
+  đợt cũ giữ lại để tra lịch sử.
+end note
+
+@enduml

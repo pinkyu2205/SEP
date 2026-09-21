@@ -22,6 +22,7 @@ const BE_STATUS_MAP: Record<string, MaintenanceStatus> = {
   TENANT_FAULT: 'tenant_fault',
   PENDING_TENANT_REPAIR: 'pending_tenant_repair',
   OUTSTANDING_DAMAGE: 'outstanding_damage',
+  WAITING_PAYMENT: 'waiting_payment',
   CLOSED: 'closed',
   CANCELLED: 'cancelled',
   // Legacy (trước migrate 01/09 — BE tự map PENDING→OPEN, APPROVED/WAITING/REJECTED→IN_REPAIR
@@ -131,6 +132,8 @@ export const dtoToTenantRequest = (dto: MaintenanceRequestDto): MaintenanceReque
   companyAbsorbedNote: dto.companyAbsorbedNote,
   expectedReturnAt: dto.expectedReturnAt,
   equipmentReplacementFlagged: dto.equipmentReplacementFlagged,
+  equipment: dto.equipment,
+  qrScanRequiredToProcess: dto.qrScanRequiredToProcess,
 });
 
 /** DTO -> MaintenanceTicket (manager model) */
@@ -191,6 +194,8 @@ export const dtoToTicket = (dto: MaintenanceRequestDto): MaintenanceTicket => ({
   companyAbsorbedNote: dto.companyAbsorbedNote,
   expectedReturnAt: dto.expectedReturnAt,
   equipmentReplacementFlagged: dto.equipmentReplacementFlagged,
+  equipment: dto.equipment,
+  qrScanRequiredToProcess: dto.qrScanRequiredToProcess,
 });
 
 /**

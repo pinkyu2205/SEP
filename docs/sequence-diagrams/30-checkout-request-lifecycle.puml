@@ -1,0 +1,211 @@
+@startuml CheckoutRequestLifecycle
+title Figure — Checkout: Yêu cầu trả phòng (Tenant / Manager tạo, Manager duyệt, hợp đồng hết hạn tự tạo) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+actor Manager
+participant "Front-end" as FE
+participant "TenantMeLifecycleController /\nCheckoutRequestController" as C
+participant "TenantCheckoutServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "CheckoutRequestRepository" as CRR
+participant "TenantInvoiceRepository" as TIR
+participant "NotificationRepository +\nPushNotificationService" as NP
+participant "ContractLifecycleCron\n(00:00 hằng ngày)" as CRON
+database DB
+
+== Tenant gửi yêu cầu trả phòng ==
+Tenant -> FE : (1) Chọn ngày dọn đi, lý do, tài khoản nhận hoàn cọc → "Gửi yêu cầu"
+FE -> C : (2) POST /api/v1/tenant/me/checkout-requests\nCreateCheckoutRequest
+activate C
+C -> S : (3) createRequest(tenantUserId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> TCR : (6) findById(contractId)
+activate TCR
+TCR -> DB : (7) SELECT TenantContract
+DB --> TCR : (8) contract
+TCR --> S : (9) contract
+deactivate TCR
+alt [HĐ không thuộc khách / không ACTIVE / ngày dọn đi ở quá khứ]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> CRR : (10) existsByTenantContractIdAndStatusIn(OPEN_STATUSES)
+activate CRR
+CRR -> DB : (11) SELECT EXISTS CheckoutRequest
+DB --> CRR : (12) true / false
+CRR --> S : (13) boolean
+deactivate CRR
+alt [Đã có yêu cầu trả phòng đang xử lý]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> CRR : (14) save(CheckoutRequest status = PENDING, expectedMoveOutDate,\nreason, thông tin ngân hàng hoàn cọc)
+activate CRR
+CRR -> DB : (15) INSERT CheckoutRequest
+DB --> CRR : (16) OK
+CRR --> S : (17) saved
+deactivate CRR
+S -> NP : (18) sendNotification(manager, CHECKOUT_REQUESTED)
+activate NP
+NP -> DB : (19) INSERT Notification
+DB --> NP : (20) OK
+NP --> S : (21) done (+ Expo push)
+deactivate NP
+S -> DB : (22) CommitTransaction()
+DB --> S : (23) Committed
+deactivate DB
+S --> C : (24) CheckoutRequestResponse
+deactivate S
+C --> FE : (25) 200 OK
+deactivate C
+FE --> Tenant : (26) Yêu cầu ở trạng thái PENDING
+
+== Manager tạo yêu cầu thay cho khách ==
+Manager -> FE : (27) Tạo yêu cầu trả phòng cho hợp đồng
+FE -> C : (28) POST /api/v1/checkout-requests
+activate C
+C -> S : (29) createRequestForManager(managerId, request)
+activate S
+S -> CRR : (30) kiểm tra HĐ ACTIVE + chưa có yêu cầu mở → save(PENDING)
+activate CRR
+CRR -> DB : (31) INSERT CheckoutRequest
+DB --> CRR : (32) OK
+deactivate CRR
+S -> NP : (33) sendNotification(tenant, CHECKOUT_REQUESTED_BY_MANAGER)
+S --> C : (34) CheckoutRequestResponse
+deactivate S
+C --> FE : (35) 200 OK
+deactivate C
+FE --> Manager : (36) Đã tạo yêu cầu
+
+== Manager duyệt ==
+Manager -> FE : (37) "Duyệt" (+ ghi chú)
+FE -> C : (38) POST /api/v1/checkout-requests/{id}/approve
+activate C
+C -> S : (39) approveRequest(requestId, managerId, request)
+activate S
+S -> DB : (40) BeginTransaction()
+activate DB
+DB --> S : (41) Success
+S -> CRR : (42) loadById(requestId) + assertPending()
+activate CRR
+CRR -> DB : (43) SELECT CheckoutRequest
+DB --> CRR : (44) checkoutRequest
+CRR --> S : (45) checkoutRequest
+deactivate CRR
+alt [Không còn PENDING / HĐ không còn ACTIVE]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> CRR : (46) save(status = APPROVED, reviewedAt, reviewedBy, managerNote)
+activate CRR
+CRR -> DB : (47) UPDATE CheckoutRequest
+DB --> CRR : (48) OK
+deactivate CRR
+S -> TCR : (49) save(contract.endDate = expectedMoveOutDate)
+activate TCR
+TCR -> DB : (50) UPDATE TenantContract
+DB --> TCR : (51) OK
+deactivate TCR
+S -> TIR : (52) tìm hoá đơn RENT của tháng dọn đi, chưa PAID →\ntính lại tiền theo số ngày ở (pro-rata), xoá thông tin PayOS cũ
+activate TIR
+TIR -> DB : (53) SELECT / UPDATE TenantInvoice
+DB --> TIR : (54) OK
+deactivate TIR
+S -> NP : (55) sendNotification(tenant, CHECKOUT_APPROVED)
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> DB : (56) CommitTransaction()
+DB --> S : (57) Committed
+deactivate DB
+S --> C : (58) CheckoutRequestResponse
+deactivate S
+C --> FE : (59) 200 OK
+deactivate C
+FE --> Manager : (60) Yêu cầu APPROVED — sang kiểm tra phòng (file 31)
+
+== Manager từ chối / Tenant huỷ ==
+Manager -> FE : (61) Nhập lý do → "Từ chối"
+FE -> C : (62) POST /api/v1/checkout-requests/{id}/reject
+activate C
+C -> S : (63) rejectRequest(requestId, managerId, request)
+activate S
+S -> CRR : (64) assertPending → save(status = REJECTED, rejectReason, reviewedAt)
+activate CRR
+CRR -> DB : (65) UPDATE CheckoutRequest
+DB --> CRR : (66) OK
+deactivate CRR
+S -> TCR : (67) nếu endDate đã bị gán bằng ngày dọn đi → trả về null
+S -> NP : (68) sendNotification(tenant, CHECKOUT_REJECTED)
+S --> C : (69) CheckoutRequestResponse
+deactivate S
+C --> FE : (70) 200 OK
+deactivate C
+FE --> Manager : (71) Yêu cầu REJECTED
+
+Tenant -> FE : (72) "Huỷ yêu cầu" (chỉ khi PENDING)
+FE -> C : (73) DELETE /api/v1/tenant/me/checkout-requests/{id}
+activate C
+C -> S : (74) cancelRequest(tenantUserId, requestId)
+activate S
+alt [Không PENDING / phiếu do hệ thống tạo vì hết hạn (CONTRACT_EXPIRED)]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> CRR : (75) save(status = REJECTED, rejectReason = "Khách hủy yêu cầu")
+S -> NP : (76) sendNotification(manager, CHECKOUT_CANCELLED)
+S --> C : (77) CheckoutRequestResponse
+deactivate S
+C --> FE : (78) 200 OK
+deactivate C
+FE --> Tenant : (79) Đã huỷ
+
+== Cron 00:00: hợp đồng hết hạn tự tạo phiếu trả phòng ==
+CRON -> S : (80) processExpiredContracts()
+activate S
+S -> TCR : (81) findByStatus(ACTIVE)
+activate TCR
+TCR -> DB : (82) SELECT TenantContract
+DB --> TCR : (83) contracts
+TCR --> S : (84) List<TenantContract>
+deactivate TCR
+loop [Mỗi hợp đồng có endDate]
+  alt [Có đơn gia hạn PENDING và đã quá endDate + 7 ngày]
+    S -> DB : (85) UPDATE ExtensionRequest status = EXPIRED ("Quá hạn xử lý")
+    S -> NP : (86) sendNotification(tenant, EXTENSION_EXPIRED)
+  else [Có đơn gia hạn PENDING, hôm nay = endDate]
+    S -> NP : (85') nhắc manager + admin + owner "tạm hoãn tạo phiếu trả phòng"
+  end
+  opt [Không còn đơn gia hạn chờ]
+    S -> TCR : (87) endDate < hôm nay → status = EXPIRED + syncExpiredIfNeeded()
+    S -> CRR : (88) từ endDate trở đi: nếu chưa có yêu cầu mở →\nsave(CheckoutRequest PENDING, origin = CONTRACT_EXPIRED,\nreason "Hợp đồng hết hạn tự nhiên")
+    activate CRR
+    CRR -> DB : (89) INSERT CheckoutRequest
+    DB --> CRR : (90) OK
+    deactivate CRR
+    S -> NP : (91) sendNotification(tenant + manager, CHECKOUT_REQUESTED_AUTO)
+  end
+end
+CRON -> S : (92) processContractExpirationReminders()\nnhắc D-30 / D-15 / D-7 / D-1 / D-0 cho tenant + manager\n(owner chỉ D-30 và D-0)
+S --> CRON : (93) done
+deactivate S
+
+@enduml
