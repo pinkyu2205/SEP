@@ -1,0 +1,211 @@
+@startuml PropertyOnboardingWizard
+title Figure — Property: Admin onboard nhà từng bước (tạo nháp → ký HĐ đầu vào → cải tạo → thiết bị → hoàn thành cải tạo) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+participant "Front-end" as FE
+participant "PropertyOnboardingController /\nInboundContractController" as C
+participant "PropertyOnboardingServiceImpl" as S
+participant "InboundContractServiceImpl" as ICS
+participant "ZoneRepository" as ZR
+participant "PropertyRepository" as PR
+participant "InboundContractRepository" as ICR
+participant "EquipmentManifestRepository /\nEquipmentRepository" as EMR
+participant "RenovationSessionRepository /\nRenovationLineRepository" as RSR
+database DB
+
+== Bước 0 — Tạo nhà nháp (DRAFT) ==
+Admin -> FE : (1) Nhập tên, địa chỉ, khu vực, diện tích, số tầng / phòng, mã điện nước → "Tạo nhà"
+FE -> C : (2) POST /api/v1/properties/draft\nPropertyDraftRequest
+activate C
+C -> S : (3) createDraft(request)
+activate S
+S -> ZR : (4) findById(zoneId)
+activate ZR
+ZR -> DB : (5) SELECT Zone
+DB --> ZR : (6) zone
+ZR --> S : (7) zone
+deactivate ZR
+S -> S : (8) fullAddress = địa chỉ + zone;\nassertAddressAvailable(fullAddress)
+alt [Không có khu vực / địa chỉ đã tồn tại]
+  S --> C : ResourceNotFoundException / BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> PR : (9) save(Property status = DRAFT, propertyCode tự sinh)
+activate PR
+PR -> DB : (10) INSERT Property
+DB --> PR : (11) OK
+PR --> S : (12) property
+deactivate PR
+S --> C : (13) PropertyResponse
+deactivate S
+C --> FE : (14) 200 OK
+deactivate C
+FE --> Admin : (15) Nhà DRAFT
+
+== Quy trình 1 — Ký hợp đồng đầu vào (DRAFT → PENDING) ==
+Admin -> FE : (16) Nhập mã HĐ, chủ nhà, tiền thuê, ngày, file scan → "Ký hợp đồng"
+FE -> C : (17) POST /api/v1/properties/{propertyId}/inbound-contract
+activate C
+C -> ICS : (18) signContract(propertyId, request)
+activate ICS
+ICS -> DB : (19) SELECT Property
+DB --> ICS : (20) property
+alt [Ngày kết thúc ≤ ngày bắt đầu / nhà không ở DRAFT]
+  ICS --> C : BusinessException (nhà đã qua bước này thì trả lại HĐ hiện có)
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+ICS -> ICR : (21) save(InboundContract ACTIVE)
+activate ICR
+ICR -> DB : (22) INSERT / UPDATE InboundContract
+DB --> ICR : (23) OK
+deactivate ICR
+ICS -> PR : (24) save(property.status = PENDING)
+activate PR
+PR -> DB : (25) UPDATE Property
+DB --> PR : (26) OK
+deactivate PR
+ICS --> C : (27) InboundContractResponse
+deactivate ICS
+C --> FE : (28) 200 OK
+deactivate C
+FE --> Admin : (29) Nhà PENDING
+
+== Quy trình 2 — Chọn loại hình + cải tạo (PENDING → UNDER_RENOVATION) ==
+Admin -> FE : (30) Chọn nguyên căn / chia phòng, có cải tạo hay không
+FE -> C : (31) POST /api/v1/properties/{propertyId}/onboarding-options
+activate C
+C -> S : (32) setOnboardingOptions(propertyId, request)
+activate S
+alt [Nhà không ở PENDING]
+  S --> C : BusinessException "Phải hoàn thành quy trình 1"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> PR : (33) save(wholeHouse, hasRenovation,\nrenovationCompleted = !hasRenovation,\nstatus = UNDER_RENOVATION)
+activate PR
+PR -> DB : (34) UPDATE Property
+DB --> PR : (35) OK
+deactivate PR
+S --> C : (36) PropertyResponse
+deactivate S
+C --> FE : (37) 200 OK
+deactivate C
+FE --> Admin : (38) Nhà UNDER_RENOVATION
+
+Admin -> FE : (39) Thêm hạng mục cải tạo (loại, chi phí) + lịch cải tạo
+FE -> C : (40) POST /properties/{id}/renovation-lines\nPUT /properties/{id}/renovation-schedule
+activate C
+C -> S : (41) addRenovationLine() / setRenovationSchedule()
+activate S
+alt [Nhà không ở quy trình 2 / không chọn cải tạo / ngày kết thúc ≤ ngày bắt đầu]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> RSR : (42) findOrCreateCurrentSession(property)\n→ save(RenovationLine: category, cost, note)\n→ cập nhật ngày bắt đầu / kết thúc của đợt
+activate RSR
+RSR -> DB : (43) INSERT / UPDATE RenovationSession, RenovationLine
+DB --> RSR : (44) OK
+deactivate RSR
+S --> C : (45) RenovationLineResponse / PropertyResponse
+deactivate S
+C --> FE : (46) 200 OK
+deactivate C
+FE --> Admin : (47) Danh sách hạng mục
+
+== Quy trình 3 — Khai báo và gán thiết bị ==
+Admin -> FE : (48) Khai báo thiết bị bàn giao / mua mới (catalog, số lượng, tình trạng, giá)
+FE -> C : (49) PUT /api/v1/properties/{propertyId}/equipment-manifest
+activate C
+C -> S : (50) saveEquipmentManifest(propertyId, request)
+activate S
+alt [Nhà không ở UNDER_RENOVATION / PENDING_EQUIPMENT_INSTALLATION]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> EMR : (51) deleteByPropertyId() + save từng EquipmentManifest\n(nguồn INITIAL_HANDOVER thì giá = 0)
+activate EMR
+EMR -> DB : (52) DELETE / INSERT EquipmentManifest
+DB --> EMR : (53) OK
+deactivate EMR
+S -> PR : (54) status UNDER_RENOVATION → PENDING_EQUIPMENT_INSTALLATION
+activate PR
+PR -> DB : (55) UPDATE Property
+DB --> PR : (56) OK
+deactivate PR
+S --> C : (57) List<EquipmentManifestResponse>
+deactivate S
+C --> FE : (58) 200 OK
+deactivate C
+
+Admin -> FE : (59) Gán từng thiết bị vào phòng / khu vực
+FE -> C : (60) POST /api/v1/properties/{propertyId}/equipments/assign
+activate C
+C -> S : (61) assignEquipment(propertyId, request)
+activate S
+alt [Nhà không ở PENDING_EQUIPMENT_INSTALLATION / vượt số lượng manifest /\nmua mới thiếu giá / THAY_THE mà không đủ thiết bị đang ACTIVE]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+opt [Nguồn PURCHASED và importAction = THAY_THE]
+  S -> EMR : (62) disableReplacedPurchasedEquipment(): các thiết bị cũ tại vị trí →\noperationalStatus = DISABLED, disabledAt = now
+  activate EMR
+  EMR -> DB : (63) UPDATE Equipment
+  DB --> EMR : (64) OK
+  deactivate EMR
+end
+S -> EMR : (65) save(Equipment × quantity: property, room, catalog, manifest,\nrenovationSession hiện tại, giá, bảo hành, penaltyFee,\nreplacedEquipmentId nếu thay thế)
+activate EMR
+EMR -> DB : (66) INSERT Equipment
+DB --> EMR : (67) OK
+deactivate EMR
+S --> C : (68) EquipmentResponse
+deactivate S
+C --> FE : (69) 200 OK
+deactivate C
+FE --> Admin : (70) Thiết bị đã gán
+
+== Hoàn thành cải tạo ==
+Admin -> FE : (71) "Hoàn thành cải tạo"
+FE -> C : (72) POST /api/v1/properties/{propertyId}/renovation/complete
+activate C
+C -> S : (73) completeRenovation(propertyId)
+activate S
+alt [PENDING_EQUIPMENT_INSTALLATION]
+  S -> RSR : (74) finalizeCurrentRenovationSession(endDate)
+  S -> PR : (75) renovationCompleted = true,\nstatus = RENOVATION_COMPLETED
+else [UNDER_RENOVATION (cải tạo lại)]
+  S -> RSR : (74') finalizeCurrentRenovationSession(hôm nay)
+  alt [Đợt bổ sung (sessionNumber ≥ 2)]
+    S -> PR : (75') status = RENOVATION_COMPLETED
+  else [Đợt đầu, đã có operationManager]
+    S -> PR : (75'') status = ACTIVE + mở phòng DRAFT → AVAILABLE
+  else [Đợt đầu, chưa có operationManager]
+    S -> PR : (75''') status = PENDING_HOST_REVIEW
+  end
+else [Trạng thái khác / không có cải tạo]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+activate PR
+PR -> DB : (76) UPDATE Property
+DB --> PR : (77) OK
+deactivate PR
+S --> C : (78) PropertyResponse
+deactivate S
+C --> FE : (79) 200 OK
+deactivate C
+FE --> Admin : (80) Sang bước gửi Host duyệt giá (file 35)
+
+@enduml

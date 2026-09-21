@@ -396,7 +396,7 @@ export const realTenantSelfService = {
   },
 
   updateProfile: async (body: UpdateProfileRequest): Promise<AuthMe> => {
-    const { data } = await realApiClient.put<AuthMe>('/api/v1/users/me', body);
+    const { data } = await realApiClient.put<AuthMe>('/api/v1/user/me', body);
     return data;
   },
 

@@ -1,0 +1,139 @@
+@startuml ViewingLeadAndPublicListing
+title Figure — Lead xem nhà: khách xem danh sách nhà công khai, Admin ghi nhận lead, khách xem lại wishlist Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Guest
+actor Admin
+actor Customer
+participant "Front-end" as FE
+participant "PublicPropertyController" as PC
+participant "PublicPropertyServiceImpl" as PS
+participant "AdminViewingLeadController /\nViewingWishlistController" as C
+participant "ViewingLeadServiceImpl" as S
+participant "PropertyRepository /\nRoomRepository" as PR
+participant "UserRepository" as UR
+participant "PropertyViewingLeadRepository" as LR
+database DB
+
+== Khách xem danh sách nhà và phòng đang cho thuê (không cần đăng nhập) ==
+Guest -> FE : (1) Mở trang tìm nhà
+FE -> PC : (2) GET /api/v1/public/properties\nGET /public/properties/{id}\nGET /public/properties/{id}/rooms
+activate PC
+PC -> PS : (3) truy vấn nhà / phòng đang khai thác
+activate PS
+PS -> PR : (4) findByStatusInAndOperationManagerIdIsNotNull(ACTIVE, RENTED)\n(chỉ nhà đã có quản lý); phòng chỉ lấy status = AVAILABLE;\nnguyên căn đã có HĐ ACTIVE được đánh dấu đã thuê
+activate PR
+PR -> DB : (5) SELECT Property, Room, TenantContract
+DB --> PR : (6) dữ liệu
+PR --> PS : (7) entities
+deactivate PR
+PS --> PC : (8) danh sách / chi tiết công khai
+deactivate PS
+PC --> FE : (9) 200 OK
+deactivate PC
+FE --> Guest : (10) Hiển thị nhà và phòng còn trống
+
+== Admin ghi nhận yêu cầu xem nhà của khách ==
+Admin -> FE : (11) Nhập tên, SĐT khách, giờ muốn xem, danh sách nhà / phòng quan tâm → "Tạo lead"
+FE -> C : (12) POST /api/v1/admin/viewing-leads\nCreateViewingLeadRequest
+activate C
+C -> S : (13) createLead(adminId, request)
+activate S
+S -> DB : (14) BeginTransaction()
+activate DB
+DB --> S : (15) Success
+S -> S : (16) normalizeLocal(SĐT); validateUniqueProperties()\n(không trùng nhà:phòng trong danh sách)
+alt [Danh sách quan tâm bị trùng]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> UR : (17) linkExistingUser(): tìm User theo SĐT (local / quốc tế)
+activate UR
+UR -> DB : (18) SELECT User
+DB --> UR : (19) user / empty
+UR --> S : (20) Optional<User> → gắn linkedUserId nếu có
+deactivate UR
+loop [Mỗi căn nhà quan tâm]
+  S -> PR : (21) findById(propertyId) (+ roomId nếu chọn phòng)
+  activate PR
+  PR -> DB : (22) SELECT Property / Room
+  DB --> PR : (23) property, room
+  PR --> S : (24) entities
+  deactivate PR
+  S -> S : (25) resolveRoomForInterest(): nhà nguyên căn phải chọn WHOLE_HOUSE\nvà không chọn phòng; nhà chia phòng phải chọn ROOM + roomId\nthuộc đúng nhà
+  alt [Sai loại quan tâm so với loại nhà / phòng không thuộc nhà]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Admin : Hiển thị lỗi
+  end
+end
+S -> LR : (26) save(PropertyViewingLead status = NEW,\ninterestedProperties (ViewingLeadProperty))
+activate LR
+LR -> DB : (27) INSERT PropertyViewingLead, ViewingLeadProperty
+DB --> LR : (28) OK
+LR --> S : (29) lead
+deactivate LR
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> DB : (30) CommitTransaction()
+DB --> S : (31) Committed
+deactivate DB
+S --> C : (32) ViewingLeadResponse
+deactivate S
+C --> FE : (33) 200 OK
+deactivate C
+FE --> Admin : (34) Lead mới trạng thái NEW
+
+== Admin xem danh sách / chi tiết lead ==
+Admin -> FE : (35) Lọc theo trạng thái, SĐT, từ khoá
+FE -> C : (36) GET /api/v1/admin/viewing-leads?status=&phone=&keyword=
+activate C
+C -> S : (37) listLeadsForAdmin(status, phone, keyword, pageable)
+activate S
+S -> LR : (38) findAll(Specification: trạng thái, SĐT, tên / SĐT / ghi chú chứa từ khoá)
+activate LR
+LR -> DB : (39) SELECT PropertyViewingLead (distinct)
+DB --> LR : (40) page
+LR --> S : (41) Page<PropertyViewingLead>
+deactivate LR
+S --> C : (42) Page<ViewingLeadResponse>
+deactivate S
+C --> FE : (43) 200 OK
+deactivate C
+FE --> Admin : (44) Danh sách lead
+
+== Khách đã có tài khoản xem lại wishlist của mình ==
+Customer -> FE : (45) Mở "Nhà đã quan tâm"
+FE -> C : (46) GET /api/v1/me/viewing-wishlist\nGET /me/viewing-wishlist/{id}
+activate C
+C -> S : (47) listWishlistForCustomer(userId, userPhone, pageable)\ngetWishlistItemForCustomer(userId, userPhone, leadId)
+activate S
+S -> LR : (48) findForCustomer(userId, các biến thể SĐT, pageable)
+activate LR
+LR -> DB : (49) SELECT PropertyViewingLead\nWHERE linkedUserId = userId OR customerPhone IN (biến thể SĐT)
+DB --> LR : (50) leads
+LR --> S : (51) Page<PropertyViewingLead>
+deactivate LR
+alt [Xem 1 lead không thuộc khách]
+  S --> C : ResourceNotFoundException
+  C --> FE : 404
+  FE --> Customer : Hiển thị lỗi
+end
+S --> C : (52) Page<ViewingLeadResponse>
+deactivate S
+C --> FE : (53) 200 OK
+deactivate C
+FE --> Customer : (54) Danh sách nhà đã quan tâm
+
+@enduml

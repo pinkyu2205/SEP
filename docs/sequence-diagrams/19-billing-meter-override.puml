@@ -1,0 +1,132 @@
+@startuml MeterOverride
+title Figure — Billing: Admin cấp mã override → Manager nhập chỉ số không cần ảnh công tơ Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+actor Manager
+participant "Front-end" as FE
+participant "MeterOverrideController" as C
+participant "MeterOverrideServiceImpl" as S
+participant "MeterOverridePasscodeRepository" as PR
+participant "MeterOverrideFailCounterRepository" as FR
+participant "MeterOverrideTokenRepository" as TR
+participant "MeterOverrideLogRepository" as LR
+participant "MeterReadingServiceImpl" as MRS
+database DB
+
+== Bước A — Admin sinh mã override ==
+Admin -> FE : (1) "Tạo mã override" (ghi chú, thời hạn)
+FE -> C : (2) POST /api/v1/admin/meter-override/passcodes
+activate C
+C -> S : (3) generatePasscode(adminId, request)
+activate S
+S -> PR : (4) countByCreatedByAndCreatedAtAfter(admin, now − 1h)
+activate PR
+PR -> DB : (5) SELECT COUNT
+DB --> PR : (6) count
+PR --> S : (7) count
+deactivate PR
+alt [≥ 20 mã / giờ]
+  S --> C : 429 TOO_MANY_REQUESTS
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> PR : (8) generateUniqueCode() (6 số) + save(passcode,\nexpiresAt = now + ttl (mặc định 10 phút, tối đa 60))
+activate PR
+PR -> DB : (9) INSERT MeterOverridePasscode
+DB --> PR : (10) OK
+PR --> S : (11) passcode
+deactivate PR
+S --> C : (12) MeterOverridePasscodeResponse
+deactivate S
+C --> FE : (13) 200 OK
+deactivate C
+FE --> Admin : (14) Hiển thị mã, gửi cho manager
+
+== Bước B — Manager nhập mã để xin overrideToken ==
+Manager -> FE : (15) Không chụp được ảnh công tơ → nhập mã admin đưa
+FE -> C : (16) POST /api/v1/manager/meter-override/verify\n(passcode, meterKind, contractId?)
+activate C
+C -> S : (17) verifyPasscode(managerId, request)
+activate S
+S -> DB : (18) BeginTransaction()
+activate DB
+DB --> S : (19) Success
+opt [Có contractId]
+  S -> DB : (20) SELECT TenantContract (phải tồn tại)
+  DB --> S : (21) contract
+end
+S -> FR : (22) findById(managerId)
+activate FR
+FR -> DB : (23) SELECT MeterOverrideFailCounter
+DB --> FR : (24) counter
+FR --> S : (25) counter
+deactivate FR
+alt [Đang bị khoá]
+  S --> C : 429 "Đã nhập sai quá nhiều lần. Thử lại sau 5 phút"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> PR : (26) findUsableByCode(code, now)
+activate PR
+PR -> DB : (27) SELECT MeterOverridePasscode
+DB --> PR : (28) passcode / null
+PR --> S : (29) passcode?
+deactivate PR
+alt [Mã sai / hết hạn]
+  S -> FR : (30) failCount + 1 (đủ 5 lần → khoá 5 phút)
+  S --> C : 403 "Mã không đúng hoặc đã hết hạn"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> PR : (31) save(passcode: usedAt, usedBy)  ← dùng 1 lần là chết
+S -> FR : (32) reset failCount = 0, lockedUntil = null
+S -> TR : (33) save(MeterOverrideToken UUID, contractId?,\nmeterKind ELEC/WATER, hạn 15 phút)
+activate TR
+TR -> DB : (34) INSERT MeterOverrideToken
+DB --> TR : (35) OK
+deactivate TR
+S -> DB : (36) CommitTransaction()
+DB --> S : (37) Committed
+deactivate DB
+S --> C : (38) MeterOverrideVerifyResponse (overrideToken)
+deactivate S
+C --> FE : (39) 200 OK
+deactivate C
+FE --> Manager : (40) Cho nhập chỉ số thủ công (bắt buộc ghi lý do)
+
+== Bước C — Dùng token khi chốt chỉ số (không có ảnh) ==
+Manager -> FE : (41) Nhập chỉ số + lý do → "Chốt chỉ số"
+FE -> MRS : (42) POST /api/v1/manager/meter-readings (overrideToken, reason)\n→ saveLockedReading() (xem file 20)
+activate MRS
+MRS -> S : (43) consumeOverrideIfPresent(managerId, contractId,\nkind, overrideToken, newReading, reason)
+activate S
+S -> TR : (44) findByToken(overrideToken)
+activate TR
+TR -> DB : (45) SELECT MeterOverrideToken
+DB --> TR : (46) token
+TR --> S : (47) token
+deactivate TR
+alt [Token không tồn tại / đã dùng / hết hạn /\nkhông thuộc manager / sai hợp đồng / sai loại đồng hồ /\nthiếu lý do]
+  S --> MRS : BusinessException
+  MRS --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> TR : (48) save(token: usedAt = now)
+S -> LR : (49) save(MeterOverrideLog: managerId, contractId, kind,\nenteredValue, reason)
+activate LR
+LR -> DB : (50) INSERT MeterOverrideLog
+DB --> LR : (51) OK
+deactivate LR
+S --> MRS : (52) true
+deactivate S
+MRS --> FE : (53) SavedMeterReadingItem
+deactivate MRS
+FE --> Manager : (54) Chỉ số đã chốt (có dấu vết override để admin đối soát)
+
+@enduml

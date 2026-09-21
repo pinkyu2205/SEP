@@ -1,0 +1,42 @@
+@startuml TenantContractState
+title Figure — Contract: vòng đời hợp đồng thuê (ContractStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> DRAFT : Tạo hợp đồng nháp (isDraft)
+[*] --> PENDING : Tạo hợp đồng có thu cọc\nhoặc chờ Host duyệt giá
+[*] --> ACTIVE : Tạo hợp đồng không cọc,\nkhông duyệt giá (phòng → RENTED ngay)
+
+DRAFT --> PENDING : createDepositPayment\n[phòng còn trống, ngày vào ở ≥ hôm nay]\n/ sinh QR PayOS
+
+DRAFT --> ACTIVE : confirm [paymentStatus = PAID]\n/ phòng → RENTED, sinh tài khoản khách
+PENDING --> ACTIVE : confirm [paymentStatus = PAID,\nđủ OTP hai bên (file 27)]\n/ phòng → RENTED, activatedAt = now
+
+ACTIVE --> ACTIVE : extend (gia hạn, đổi endDate)\n/ duyệt đơn xin gia hạn (file 29)
+
+ACTIVE --> EXPIRED : cron 00:00 / syncExpiredIfNeeded\n[endDate < hôm nay, không có đơn gia hạn PENDING]
+
+ACTIVE --> TERMINATED : terminate (thanh lý)\nhoặc hoàn tất checkout (EARLY_MOVE_OUT)
+EXPIRED --> TERMINATED : terminate / hoàn tất checkout\n(chỉ thanh lý được ACTIVE hoặc EXPIRED)
+
+DRAFT --> TERMINATED : cancel (/tenant-contracts/{id}/cancel)\ncron 08:05 khách không đến (NO_SHOW)
+PENDING --> TERMINATED : cancel / cron NO_SHOW\n[quá moveInDate + noShowGraceDays]\n/ paymentStatus PENDING → CANCELLED
+
+TERMINATED --> [*]
+EXPIRED --> [*] : (chỉ đọc sau khi thanh lý)
+
+note right of ACTIVE
+  ACTIVE không được cancel — phải dùng /terminate.
+  Khi rời ACTIVE / PENDING / DRAFT, phòng RENTED → AVAILABLE
+  và thiết bị bị vô hiệu theo hợp đồng được khôi phục.
+end note
+
+@enduml

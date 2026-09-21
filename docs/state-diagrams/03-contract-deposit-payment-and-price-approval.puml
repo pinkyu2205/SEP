@@ -1,0 +1,34 @@
+@startuml ContractDepositAndPriceApprovalState
+title Figure — Contract: thu cọc onboard (PaymentStatus) và duyệt giá của Host (PriceApprovalStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Thanh toán cọc + tiền nhà kỳ đầu (paymentStatus)" as PAY {
+  [*] --> PENDING : createDepositPayment\n(tạo payosOrderCode, QR, snapshot số tiền)
+  PENDING --> PENDING : tạo lại QR (đơn mới, mã orderCode mới)
+  PENDING --> PAID : webhook PayOS code "00" / đối soát PayOS\n(completeDepositPayment, idempotent)
+  PENDING --> CANCELLED : huỷ hợp đồng / thanh lý / cron NO_SHOW
+  PAID --> [*] : sinh hoá đơn FIRST + giao dịch cọc
+  CANCELLED --> [*]
+  note right of PENDING
+    FAILED có trong enum nhưng chưa có đường ghi.
+  end note
+}
+
+state "Host duyệt giá hợp đồng (priceApprovalStatus)" as APP {
+  [*] --> PENDING_PRICE_APPROVAL : Tạo hợp đồng requireHostPriceApproval
+  PENDING_PRICE_APPROVAL --> APPROVED_AWAITING_DEPOSIT : Host duyệt\n(/host/contracts/{id}/approve)
+  PENDING_PRICE_APPROVAL --> PRICE_REJECTED : Host từ chối + lý do
+  PRICE_REJECTED --> PENDING_PRICE_APPROVAL : Manager sửa rentAmount / deposit\nvà gửi lại (resubmitApproval)\n[chưa có QR PENDING, chưa PAID]
+  APPROVED_AWAITING_DEPOSIT --> [*] : khách quét QR thanh toán → PAY.PAID
+}
+
+@enduml

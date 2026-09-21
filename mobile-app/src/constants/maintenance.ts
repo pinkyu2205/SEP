@@ -23,6 +23,7 @@ export type MaintenanceStatusKey =
   | 'tenant_fault'              // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'    // giao tenant tự sửa trước deadline
   | 'outstanding_damage'       // quá hạn/không đạt — chờ checkout trừ cọc
+  | 'waiting_payment'          // đã sửa/bàn giao xong, chờ khách thanh toán — trả xong BE tự đóng phiếu
   | 'closed'                   // hoàn tất
   | 'cancelled';
 
@@ -55,6 +56,7 @@ export const MAINTENANCE_STATUS_META: Record<MaintenanceStatusKey, StatusMeta> =
   tenant_fault:            { label: 'Lỗi do khách',      color: '#DC2626', bg: '#FEF2F2', icon: '⚠️', step: -1 },
   pending_tenant_repair:  { label: 'Khách tự sửa',      color: '#F97316', bg: '#FFF7ED', icon: '🛠', step: -1 },
   outstanding_damage:     { label: 'Chờ trừ cọc',       color: '#B91C1C', bg: '#FEF2F2', icon: '💸', step: -1 },
+  waiting_payment:         { label: 'Chờ thanh toán',    color: '#B45309', bg: '#FFFBEB', icon: '💳', step: -1 },
   closed:                 { label: 'Hoàn tất',          color: '#10B981', bg: '#F0FDF4', icon: '✅', step: 2 },
   cancelled:              { label: 'Đã hủy',            color: '#6B7280', bg: '#F3F4F6', icon: '✕',  step: -1 },
 };
@@ -113,6 +115,7 @@ export const MAINTENANCE_NEXT_STATUS: Record<MaintenanceStatusKey, MaintenanceSt
   tenant_fault:            'closed',      // manager sửa hộ xong (complete — tự tạo charge)
   pending_tenant_repair:  'closed',      // verify-repair accepted — hoặc outstanding_damage nếu reject/quá hạn
   outstanding_damage:     null,
+  waiting_payment:         'closed',      // khách thanh toán hoá đơn bảo trì → BE tự đóng phiếu
   closed:                 null,
   cancelled:              null,
 };

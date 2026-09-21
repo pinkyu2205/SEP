@@ -1,0 +1,43 @@
+@startuml UnlockAndOverridePasscodeState
+title Figure — Billing: mã mở khoá hoá đơn và mã nhập chỉ số không cần ảnh (passcode → token) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Mã do Admin cấp (passcode)" as PASS {
+  [*] --> CREATED : Admin tạo mã\nInvoice-unlock: gắn invoiceId + purpose, hạn 15 phút (tối đa 60), ≤ 20 mã / giờ\nMeter-override: hạn 10 phút (manager.override.passcode-ttl-minutes)
+  CREATED --> USED : Manager nhập đúng trước hạn\n/ usedAt, usedBy, ghi log, phát token
+  CREATED --> EXPIRED : Quá expiresAt (không dùng được)
+  USED --> [*]
+  EXPIRED --> [*]
+}
+
+state "Token cấp cho Manager (token)" as TOKEN {
+  [*] --> ISSUED : Verify thành công\nInvoice-unlock: hạn 15 phút, gắn managerId + invoiceId + purpose
+  ISSUED --> CONSUMED : Manager dùng token\n(tạo QR thu hộ / lưu chỉ số không ảnh)\n/ usedAt = now
+  ISSUED --> EXPIRED_T : Quá expiresAt
+  ISSUED --> ISSUED : Bước sau verify thất bại (vd. tạo QR lỗi):\nnhập lại đúng mã cũ → trả lại token còn hạn chưa dùng
+  CONSUMED --> [*]
+  EXPIRED_T --> [*]
+  note right of ISSUED
+    Token chỉ dùng được đúng manager, đúng hoá đơn, đúng mục đích;
+    sai một trong ba hoặc đã dùng thì bị từ chối.
+  end note
+}
+
+state "Đếm nhập sai (fail counter)" as FAIL {
+  [*] --> BinhThuong : failCount = 0
+  BinhThuong --> BinhThuong : Nhập sai [failCount + 1 < giới hạn]
+  BinhThuong --> BiKhoa : Nhập sai đủ giới hạn\nInvoice-unlock: 3 lần → khoá 15 phút (theo manager + hoá đơn)\nMeter-override: 5 lần → khoá 5 phút\n/ failCount về 0, đặt lockedUntil
+  BiKhoa --> BinhThuong : Hết lockedUntil\n(trong lúc khoá trả 429 TOO_MANY_REQUESTS)
+  BinhThuong --> BinhThuong : Nhập đúng / dùng token → failCount = 0, lockedUntil = null
+}
+
+@enduml

@@ -1,0 +1,183 @@
+@startuml PropertyRoomManagement
+title Figure — Property & Room: thêm / sửa / đổi trạng thái / xoá phòng, vô hiệu hoá / bật lại / xoá hẳn nhà Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Admin / Manager" as U
+participant "Front-end" as FE
+participant "RoomController" as RC
+participant "RoomServiceImpl" as RS
+participant "PropertyOnboardingController" as PC
+participant "PropertyOnboardingServiceImpl" as PS
+participant "PropertyDeletionServiceImpl" as PD
+participant "PropertyRepository" as PR
+participant "RoomRepository" as RR
+participant "EquipmentRepository" as ER
+participant "JdbcTemplate" as JDBC
+database DB
+
+== Thêm phòng (chỉ khi nhà đang onboarding) ==
+U -> FE : (1) Nhập số phòng, tầng, diện tích, giá, cọc → "Thêm phòng"
+FE -> RC : (2) POST /api/v1/properties/{propertyId}/rooms\nAddRoomRequest
+activate RC
+RC -> RS : (3) addRoom(propertyId, request)
+activate RS
+RS -> PR : (4) findById(propertyId)
+activate PR
+PR -> DB : (5) SELECT Property
+DB --> PR : (6) property
+PR --> RS : (7) property
+deactivate PR
+alt [Nhà không ở trạng thái onboarding / chưa chọn loại hình thuê /\ntầng vượt tổng số tầng / đã đủ số phòng khai báo / trùng số phòng]
+  RS --> RC : BusinessException
+  RC --> FE : Error response
+  FE --> U : Hiển thị lỗi
+end
+opt [Nhà nguyên căn]
+  RS -> RS : (8) bỏ giá và cọc của phòng (giá quản lý ở cấp nhà)
+end
+RS -> RR : (9) save(Room status = DRAFT)
+activate RR
+RR -> DB : (10) INSERT Room
+DB --> RR : (11) OK
+RR --> RS : (12) room
+deactivate RR
+RS --> RC : (13) RoomResponse
+deactivate RS
+RC --> FE : (14) 200 OK
+deactivate RC
+FE --> U : (15) Phòng mới (DRAFT — mở khi nhà ACTIVE, file 35)
+
+== Đổi trạng thái phòng (AVAILABLE / MAINTENANCE / DISABLED) ==
+U -> FE : (16) Chọn trạng thái mới
+FE -> RC : (17) PATCH /api/v1/properties/{propertyId}/rooms/{roomId}/status
+activate RC
+RC -> RS : (18) updateRoomStatus(propertyId, roomId, request)
+activate RS
+RS -> RR : (19) findByIdAndPropertyIdWithProperty()
+activate RR
+RR -> DB : (20) SELECT Room
+DB --> RR : (21) room
+RR --> RS : (22) room
+deactivate RR
+alt [Nhà không onboarding / ACTIVE, nhà nguyên căn, phòng RENTED hoặc DRAFT,\ntrạng thái đích không hợp lệ, hoặc chuyển trạng thái không cho phép]
+  RS --> RC : BusinessException
+  RC --> FE : Error response
+  FE --> U : Hiển thị lỗi
+end
+RS -> RR : (23) save(room.status)
+activate RR
+RR -> DB : (24) UPDATE Room
+DB --> RR : (25) OK
+deactivate RR
+RS --> RC : (26) RoomResponse
+deactivate RS
+RC --> FE : (27) 200 OK
+deactivate RC
+FE --> U : (28) Trạng thái phòng mới
+
+== Sửa phòng / xoá phòng (chỉ khi nhà đang onboarding, phòng chưa cho thuê) ==
+U -> FE : (29) Sửa thông tin hoặc xoá phòng
+FE -> RC : (30) PUT /properties/{propertyId}/rooms/{roomId}\nDELETE /properties/{propertyId}/rooms/{roomId}
+activate RC
+RC -> RS : (31) updateRoom() / deleteRoom()
+activate RS
+alt [Nhà không onboarding / phòng đang RENTED / trùng số phòng / tầng vượt quá]
+  RS --> RC : BusinessException
+  RC --> FE : Error response
+  FE --> U : Hiển thị lỗi
+end
+opt [Xoá phòng]
+  RS -> ER : (32) findByRoomId(roomId) → room = null, houseArea = null (thiết bị về kho)
+  activate ER
+  ER -> DB : (33) UPDATE Equipment
+  DB --> ER : (34) OK
+  deactivate ER
+  RS -> RR : (35) save(room.deleted = true) — xoá mềm
+end
+opt [Sửa phòng]
+  RS -> RR : (32') save(Room); nếu phòng chưa có khách thì appliedPrice = price
+end
+activate RR
+RR -> DB : (36) UPDATE Room
+DB --> RR : (37) OK
+deactivate RR
+RS --> RC : (38) RoomResponse / void
+deactivate RS
+RC --> FE : (39) 200 OK
+deactivate RC
+FE --> U : (40) Danh sách phòng cập nhật
+
+== Vô hiệu hoá / bật lại nhà ==
+U -> FE : (41) "Vô hiệu hoá nhà" hoặc "Bật lại"
+FE -> PC : (42) POST /api/v1/properties/{propertyId}/disable\nPOST /properties/{propertyId}/enable
+activate PC
+PC -> PS : (43) disableProperty(propertyId) / enableProperty(propertyId)
+activate PS
+opt [Vô hiệu hoá]
+  PS -> PD : (44) assertNoActiveTenants(propertyId)
+  activate PD
+  PD -> DB : (45) nguyên căn: existsBy HĐ ACTIVE; chia phòng: đếm phòng RENTED
+  DB --> PD : (46) kết quả
+  alt [Còn khách thuê]
+    PD --> PS : BusinessException "Còn khách thuê — không thể vô hiệu / xoá"
+    PS --> PC : BusinessException
+    PC --> FE : Error response
+    FE --> U : Hiển thị lỗi
+  end
+  PD --> PS : (47) OK
+  deactivate PD
+  PS -> PR : (48) save(previousStatus = status hiện tại, status = DISABLED)
+end
+opt [Bật lại]
+  alt [Nhà không ở DISABLED]
+    PS --> PC : BusinessException
+    PC --> FE : Error response
+    FE --> U : Hiển thị lỗi
+  end
+  PS -> PR : (48') save(status = previousStatus (mặc định DRAFT), previousStatus = null)
+end
+activate PR
+PR -> DB : (49) UPDATE Property
+DB --> PR : (50) OK
+deactivate PR
+PS --> PC : (51) PropertyResponse
+deactivate PS
+PC --> FE : (52) 200 OK
+deactivate PC
+FE --> U : (53) Trạng thái nhà mới
+
+== Xoá hẳn nhà (purge) ==
+U -> FE : (54) "Xoá hẳn nhà" (chỉ dùng khi dọn dữ liệu import sai)
+FE -> PC : (55) DELETE /api/v1/properties/{propertyId}/purge
+activate PC
+PC -> PS : (56) purgeProperty(propertyId)
+activate PS
+PS -> PD : (57) purgeProperty(propertyId)
+activate PD
+PD -> PD : (58) assertNoActiveTenants(propertyId); đếm số bản ghi sẽ xoá\n(thiết bị, manifest, hạng mục & đợt cải tạo, phòng, kết quả tính giá, chỉ số điện nước)
+alt [Còn khách thuê]
+  PD --> PS : BusinessException
+  PS --> PC : BusinessException
+  PC --> FE : Error response
+  FE --> U : Hiển thị lỗi
+end
+PD -> JDBC : (59) bulkDeleteDependentRecords(propertyId): xoá theo thứ tự con → cha:\nthanh toán / PayOS order / khiếu nại hoá đơn → hồ sơ trả phòng →\nphiếu bảo trì và liên quan → hoá đơn điện nước, chi phí, lead →\nhoá đơn khách, thành viên, thiết bị HĐ → hợp đồng khách →\nkết quả tính giá, thiết bị, HĐ đầu vào, cải tạo, ảnh, phòng → nhà
+activate JDBC
+JDBC -> DB : (60) DELETE … (nhiều câu lệnh, cùng một transaction)
+DB --> JDBC : (61) OK
+JDBC --> PD : (62) done
+deactivate JDBC
+PD --> PS : (63) PropertyPurgeResponse (số bản ghi đã xoá)
+deactivate PD
+PS --> PC : (64) PropertyPurgeResponse
+deactivate PS
+PC --> FE : (65) 200 OK
+deactivate PC
+FE --> U : (66) Nhà đã bị xoá hẳn
+
+@enduml

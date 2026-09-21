@@ -1,0 +1,143 @@
+@startuml PublishUtilityBill
+title Figure — Billing: Admin phát hành hoá đơn điện/nước của nhà → tự phát hành hoá đơn từng phòng Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+participant "Front-end" as FE
+participant "AdminUtilityBillController" as C
+participant "UtilityBillServiceImpl" as S
+participant "UtilityBillRepository" as UBR
+participant "UtilityInvoiceServiceImpl" as UIS
+participant "MeterReadingRepository" as MRR
+participant "TenantBillingServiceImpl" as TBS
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+database DB
+
+Admin -> FE : (1) Chọn nhà, loại (điện / nước), kỳ, tổng tiêu thụ,\ntổng tiền, ảnh giấy, mã khách hàng → "Phát hành"
+FE -> C : (2) POST /api/v1/admin/utility-bills\nCreateUtilityBillRequest
+activate C
+C -> S : (3) createUtilityBill(request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> DB : (6) SELECT Property (phải tồn tại)
+DB --> S : (7) property
+
+alt [Nhà đã có mã KH điện/nước mà mã trên giấy thiếu hoặc khác]
+  S --> C : BusinessException CUSTOMER_CODE_REQUIRED / CUSTOMER_CODE_MISMATCH
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi, cho sửa mã + chỉ số rồi gửi lại
+end
+
+S -> UBR : (8) findByPropertyIdAndMonthAndYearAndTypeAndStatus(\n..., PUBLISHED)
+activate UBR
+UBR -> DB : (9) SELECT UtilityBill
+DB --> UBR : (10) existing / empty
+UBR --> S : (11) Optional<UtilityBill>
+deactivate UBR
+alt [Đã có hoá đơn PUBLISHED cùng kỳ / loại]
+  S --> C : BusinessException UTILITY_BILL_ALREADY_EXISTS
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+
+opt [Nhà nguyên căn]
+  S -> S : (12) validateWholeHouseReadings():\ncần chỉ số cũ / mới, mới − cũ = tổng tiêu thụ
+  alt [Thiếu chỉ số / không khớp / sai thứ tự]
+    S --> C : BusinessException READINGS_REQUIRED / CONSUMPTION_MISMATCH / READING_ORDER_INVALID
+    C --> FE : Error response
+    FE --> Admin : Hiển thị lỗi
+  end
+end
+
+S -> S : (13) unitPrice = totalAmount / totalQuantity
+S -> UBR : (14) save(UtilityBill status = PUBLISHED, createdBy)
+activate UBR
+UBR -> DB : (15) INSERT UtilityBill
+DB --> UBR : (16) OK
+UBR --> S : (17) bill
+deactivate UBR
+
+alt [Nhà nguyên căn]
+  S -> UIS : (18) createFromWholeHouseBill(bill, prevReading, newReading)
+  activate UIS
+  UIS -> DB : (19) INSERT UtilityInvoice → TenantInvoice cho HĐ đang ACTIVE
+  DB --> UIS : (20) OK
+  UIS --> S : (21) UtilityInvoiceResponse
+  deactivate UIS
+  S -> NR : (22) notifyManagerBillPublished(property, bill)
+  activate NR
+  NR -> DB : (23) INSERT Notification (manager)
+  DB --> NR : (24) OK
+  deactivate NR
+else [Nhà chia phòng — điện]
+  S -> UIS : (18') issueElectricFromSavedReadings(bill)
+  activate UIS
+  UIS -> MRR : (19') loadUnissuedReadings(propertyId, kỳ)\n(các bản chốt chưa gắn utilityInvoiceId)
+  activate MRR
+  MRR -> DB : (20') SELECT MeterReading
+  DB --> MRR : (21') readings
+  MRR --> UIS : (22') List<MeterReading>
+  deactivate MRR
+  UIS -> UIS : (23') Lọc phòng có HĐ ACTIVE trong kỳ, tiêu thụ > 0\nassertBatchRoomSumWithinBill() — tổng phòng ≤ tổng trên giấy (+ dung sai)
+  loop [Mỗi bản chốt hợp lệ]
+    UIS -> UIS : (24') issueOneFromReading() → createAndSend()
+    UIS -> DB : (25') INSERT UtilityInvoice (SENT)\nUPDATE MeterReading.utilityInvoiceId
+    DB --> UIS : (26') OK
+    UIS -> TBS : (27') createFromUtilityInvoice(invoice, contract)\n→ INSERT TenantInvoice
+    activate TBS
+    TBS --> UIS : (28') TenantInvoice
+    deactivate TBS
+    UIS -> NR : (29') save Notification UTILITY_INVOICE_AUTO_ISSUED (tenant)\n(chống trùng bằng dedupeKey)
+    activate NR
+    NR -> DB : (30') INSERT Notification
+    DB --> NR : (31') OK
+    deactivate NR
+    UIS -> UPT : (32') sendToUser(tenant)
+    activate UPT
+    UPT --> UIS : (33') Expo push
+    deactivate UPT
+  end
+  UIS -> UIS : (34') reconcileIfComplete() — đối soát khi đã đủ phòng
+  UIS -> NR : (35') notifyManagerAutoIssued(\n"Đã phát hành N/M phòng")
+  activate NR
+  NR -> DB : (36') INSERT Notification (manager)
+  DB --> NR : (37') OK
+  deactivate NR
+  UIS --> S : (38') số hoá đơn đã phát hành
+  deactivate UIS
+else [Nhà chia phòng — nước]
+  S -> UIS : (18'') issueWaterFromSavedReadings(bill)\n(tương tự nhánh điện, lấy các bản chốt nước chưa phát hành)
+  activate UIS
+  UIS --> S : (19'') số hoá đơn đã phát hành
+  deactivate UIS
+end
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+
+S -> DB : (39) CommitTransaction()
+DB --> S : (40) Committed
+deactivate DB
+
+S --> C : (41) UtilityBillResponse
+deactivate S
+C --> FE : (42) 200 OK
+deactivate C
+FE --> Admin : (43) Hiển thị hoá đơn đã phát hành\n(phòng nào chưa chốt số sẽ được phát hành tự động\nkhi manager chốt — xem file 20)
+
+@enduml

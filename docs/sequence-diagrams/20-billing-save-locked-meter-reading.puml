@@ -1,0 +1,121 @@
+@startuml SaveLockedMeterReading
+title Figure — SaveLockedMeterReading Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MeterReadingController" as C
+participant "MeterReadingServiceImpl" as S
+participant "PropertyAccessService" as PAS
+participant "TenantContractRepository" as TCR
+participant "MeterOverrideService" as MOS
+participant "MeterReadingRepository" as MRR
+participant "UtilityBillRepository" as UBR
+participant "UtilityInvoiceService" as UIS
+database DB
+
+Manager -> FE : (1) Click "Chốt chỉ số"\n(điền kỳ, prev/new, ảnh hoặc override)
+FE -> C : (2) POST /api/v1/manager/meter-readings\nSaveMeterReadingRequest
+activate C
+C -> S : (3) saveLockedReading(request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> S : (6) validate()\n(period, newReading > prevReading)
+
+S -> PAS : (7) assertCanManageProperty(propertyId)
+activate PAS
+PAS --> S : (8) OK / Forbidden
+deactivate PAS
+
+S -> TCR : (9) find ACTIVE contract\n(propertyId, roomId)
+activate TCR
+TCR -> DB : (10) SELECT TenantContract
+DB --> TCR : (11) Contract / empty
+TCR --> S : (12) TenantContract
+deactivate TCR
+
+alt [NO_ACTIVE_CONTRACT / CONTRACT_NOT_IN_PERIOD / INVALID_READING]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+alt [Không có ảnh công tơ]
+  opt [Có overrideToken]
+    S -> MOS : (13) consumeOverrideIfPresent(\nmanagerId, contractId, kind,\noverrideToken, newReading, reason)
+    activate MOS
+    MOS -> DB : (14) UPDATE MeterOverrideToken\nINSERT MeterOverrideLog
+    DB --> MOS : (15) OK
+    MOS --> S : (16) true / false
+    deactivate MOS
+  else [Thiếu overrideToken]
+    S --> C : METER_PHOTO_REQUIRED
+  end
+else [Có meterImageUrl]
+  S -> S : (13') Bỏ qua override — dùng ảnh
+end
+
+S -> MRR : (17) findReading(property, room, type, period)
+activate MRR
+MRR -> DB : (18) SELECT MeterReading
+DB --> MRR : (19) existing / null
+MRR --> S : (20) MeterReading?
+deactivate MRR
+
+alt [Đã gắn utilityInvoiceId]
+  S --> C : READING_ALREADY_ISSUED
+else [Insert hoặc Update]
+  S -> MRR : (21) save(MeterReading)
+  activate MRR
+  MRR -> DB : (22) INSERT / UPDATE MeterReading
+  DB --> MRR : (23) Model state
+  MRR --> S : (24) saved reading
+  deactivate MRR
+end
+
+opt [Không phải whole-house AND chưa có invoice]
+  S -> UBR : (25) find PUBLISHED UtilityBill\n(điện theo kỳ / nước mới nhất)
+  activate UBR
+  UBR -> DB : (26) SELECT UtilityBill
+  DB --> UBR : (27) bill?
+  UBR --> S : (28) Optional<UtilityBill>
+  deactivate UBR
+
+  opt [Có bill PUBLISHED]
+    S -> UIS : (29) issueElectric/WaterFromSavedReading(bill, readingId)
+    activate UIS
+    UIS -> DB : (30) INSERT UtilityInvoice\nUPDATE MeterReading.utilityInvoiceId
+    DB --> UIS : (31) OK
+    UIS --> S : (32) UtilityInvoiceResponse
+    deactivate UIS
+  end
+end
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (33) CommitTransaction()
+DB --> S : (34) Committed
+deactivate DB
+
+S --> C : (35) SavedMeterReadingItem
+deactivate S
+C --> FE : (36) 201 Created + result
+deactivate C
+FE --> Manager : (37) Hiển thị chỉ số đã chốt\n(+ invoice nếu auto-issue)
+
+@enduml

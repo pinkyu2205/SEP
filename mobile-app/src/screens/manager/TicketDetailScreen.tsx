@@ -34,7 +34,7 @@ import {
   type EvidenceAsset, type EvidenceMediaType,
 } from '@/utils';
 import { serverNow, todayIso } from '@/utils/serverTime';
-import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
+import { extractEquipmentIdFromQr, toEquipmentQrCode } from '@/utils/equipmentQr';
 import { toLocalDateTime, toApiDateTime, isBeforeAppointmentDay } from '@/utils/maintenanceAppointment';
 import {
   MAINTENANCE_STATUS_META, StatusMeta, MAINTENANCE_BILLING_HINT_META,
@@ -456,7 +456,7 @@ export const TicketDetailScreen: React.FC = () => {
       });
       await refreshReal();
       setInvoiceAmountText('');
-      showAlert('🧾 Đã lập hoá đơn', 'Hệ thống đã tạo hoá đơn — khách cần thanh toán trước khi tiếp tục sửa/bàn giao.');
+      showAlert('🧾 Đã lập hoá đơn', 'Hệ thống đã tạo hoá đơn — khách thanh toán trong 3 ngày, bạn vẫn sửa/bàn giao được ngay.');
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể lập hoá đơn. Vui lòng thử lại.')); }
     finally { setCharging(false); }
   };
@@ -474,8 +474,11 @@ export const TicketDetailScreen: React.FC = () => {
       // uploadPhotos, giống hệt cơ chế của handleComplete()) — gửi lại `ticket.afterImages`
       // ở đây sẽ bị BE nối CSV thêm 1 lần nữa (appendCsv KHÔNG dedupe), ra ảnh trùng lặp.
       // Để trống để BE tự đọc từ `req.getAfterImageUrls()` đã lưu sẵn.
-      await realMaintenanceService.handover(idNum, { handoverImages: [] });
+      const handedOver = await realMaintenanceService.handover(idNum, { handoverImages: [] });
       await refreshReal();
+      if (handedOver?.status === 'WAITING_PAYMENT') {
+        showAlert('📦 Đã bàn giao', 'Phiếu chuyển sang "Chờ thanh toán" — phiếu tự đóng khi khách thanh toán hoá đơn (hạn 3 ngày).');
+      }
     } catch (e: any) {
       showAlert('Không thể bàn giao', apiErrMsg(e, 'Vui lòng thử lại.'));
     } finally {
@@ -602,11 +605,11 @@ export const TicketDetailScreen: React.FC = () => {
   const [rescheduleRepairTime, setRescheduleRepairTime] = useState<string | null>(null);
   const [rescheduleRepairBusy, setRescheduleRepairBusy] = useState(false);
 
-  const doConfirmArrival = async () => {
+  const doConfirmArrival = async (qrCode?: string) => {
     if (arrivalBusy) return;
     try {
       setArrivalBusy(true);
-      await realMaintenanceService.confirmArrival(idNum);
+      await realMaintenanceService.confirmArrival(idNum, qrCode);
       // BE no-op nếu đã confirm trước đó (không cập nhật lại mốc giờ) — mốc "mới quét"
       // thật sự nằm ở đây, lưu cục bộ để tính hạn 30' (xem ARRIVAL_CONFIRM_TTL_MS).
       const now = serverNow().getTime();
@@ -634,7 +637,7 @@ export const TicketDetailScreen: React.FC = () => {
       );
       return;
     }
-    void doConfirmArrival();
+    void doConfirmArrival(toEquipmentQrCode(scannedId));
   };
 
   if (!ticket) {
@@ -650,66 +653,11 @@ export const TicketDetailScreen: React.FC = () => {
     );
   }
 
-  // Phiếu OPEN có hẹn xem nhưng CHƯA xác nhận có mặt → chặn hẳn màn xử lý, thay bằng
-  // gate quét QR (phiếu cũ visitAppointmentAt=null bỏ qua, khớp bypass phía BE).
-  if (ticket.status === 'open' && ticket.visitAppointmentAt && (!ticket.visitArrivalConfirmedAt || arrivalNeedsRescan)) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.header}>
-          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={s.backIcon}>‹</Text>
-          </TouchableOpacity>
-          <Text style={s.headerTitle}>Xác nhận có mặt</Text>
-        </View>
-        <View style={arrivalGateStyles.container}>
-          <Text style={arrivalGateStyles.emoji}>📍</Text>
-          <Text style={arrivalGateStyles.title}>{ticket.title}</Text>
-          <Text style={arrivalGateStyles.meta}>{ticket.ticketCode} · {ticket.roomName}</Text>
-          <Text style={arrivalGateStyles.appointment}>
-            Lịch hẹn: {formatDateTime(ticket.visitAppointmentAt)}
-          </Text>
-          {arrivalNeedsRescan && (
-            <Text style={[arrivalGateStyles.hint, { color: '#B45309', fontWeight: '700' }]}>
-              ⏱ Đã quá 30 phút kể từ lúc quét xác nhận có mặt mà chưa duyệt/báo lỗi xong —
-              vui lòng quét lại để tiếp tục.
-            </Text>
-          )}
-          {realEquipmentId ? (
-            <>
-              <Text style={arrivalGateStyles.hint}>
-                Quét đúng mã QR trên thiết bị{ticket.equipmentName ? ` "${ticket.equipmentName}"` : ''} để xác
-                nhận đã có mặt tại hiện trường trước khi xử lý phiếu này.
-              </Text>
-              <TouchableOpacity
-                style={arrivalGateStyles.btn}
-                onPress={() => setArrivalScanOpen(true)}
-                disabled={arrivalBusy}
-              >
-                <Text style={arrivalGateStyles.btnText}>📷 Quét QR xác nhận có mặt</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={arrivalGateStyles.hint}>
-                Phiếu này không gắn thiết bị cụ thể — xác nhận đã có mặt tại hiện trường để tiếp tục xử lý.
-              </Text>
-              <TouchableOpacity style={arrivalGateStyles.btn} onPress={doConfirmArrival} disabled={arrivalBusy}>
-                <Text style={arrivalGateStyles.btnText}>
-                  {arrivalBusy ? 'Đang xác nhận...' : '✅ Xác nhận đã đến'}
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-        <EquipmentQrScanModal
-          visible={arrivalScanOpen}
-          title="Quét QR xác nhận có mặt"
-          onClose={() => setArrivalScanOpen(false)}
-          onScan={handleArrivalScan}
-        />
-      </SafeAreaView>
-    );
-  }
+  // Phiếu OPEN có hẹn xem nhưng CHƯA xác nhận có mặt (hoặc mốc quét cục bộ đã quá 30'):
+  // XEM phiếu tự do (BE 21/09/2026 — không còn màn chặn toàn bộ), chỉ chặn nút xử lý và
+  // thay bằng thẻ quét QR. Phiếu cũ visitAppointmentAt=null bỏ qua (khớp bypass phía BE).
+  const arrivalGateActive = ticket.status === 'open' && !!ticket.visitAppointmentAt
+    && (!ticket.visitArrivalConfirmedAt || arrivalNeedsRescan);
 
   const cfg         = STATUS_CONFIG[ticket.status];
   // category/priority null khi OPEN chưa duyệt → ẩn badge tương ứng.
@@ -725,20 +673,19 @@ export const TicketDetailScreen: React.FC = () => {
   const beforeUrls = ticket.beforeImages?.length ? ticket.beforeImages : ticket.images;
   // Luồng B (sửa tại chỗ — Nhánh A của thanh-toán-trước-khi-sửa): status đã là tenant_fault
   // NGAY từ diagnose() (TENANT_MISUSE + tenantAgreesToPay=true, không kèm repairAppointmentAt
-  // — 16/09/2026, thay reject-fault cũ). Phải charge() rồi tenant thanh toán XONG mới cho
-  // "Báo sửa xong" — khớp đúng complete() phía BE (ném lỗi nếu chargeInvoiceId null, hoặc
-  // hoá đơn đó chưa PAID — xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md).
+  // — 16/09/2026, thay reject-fault cũ). BE 21/09/2026: diagnose() tự lập hoá đơn (hạn 3 ngày)
+  // ngay lúc chẩn đoán và KHÔNG còn chặn sửa/báo xong vì chưa thanh toán — complete()/handover()
+  // chỉ cần chargeInvoiceId đã có; chưa trả thì phiếu sang waiting_payment, trả xong BE tự đóng.
   const isTenantFaultManagerRepair = ticket.status === 'tenant_fault' && ticket.faultResolutionPath === 'manager_repair';
   const needsChargeBeforeRepair = isTenantFaultManagerRepair && !ticket.chargeInvoiceId;
   // `issuedInvoice` chỉ còn có mặt trong khi hoá đơn CHƯA PAID/CANCELLED (mọi GET) — còn
   // set nghĩa là còn chờ khách trả tiền; chargeInvoiceId có mà issuedInvoice không còn
   // (undefined) nghĩa là đã thanh toán xong.
   const hasUnpaidCharge = !!ticket.chargeInvoiceId && !!ticket.issuedInvoice;
-  const chargeIsPaid = !!ticket.chargeInvoiceId && !ticket.issuedInvoice;
+  const hasIssuedCharge = !!ticket.chargeInvoiceId;
   const canComplete = ['in_repair', 'tenant_fault'].includes(ticket.status)
     && (ticket.status !== 'tenant_fault' || ticket.faultResolutionPath === 'manager_repair')
-    && !needsChargeBeforeRepair
-    && !hasUnpaidCharge;
+    && !needsChargeBeforeRepair;
 
   /** Tổng ảnh/video hiện có (server + local) theo từng loại — dùng để chặn thêm khi đã
    * đủ EVIDENCE_MAX_FILES (yêu cầu mentor 14/09/2026: tối đa 5 ảnh/video mỗi bộ, ảnh/
@@ -927,8 +874,8 @@ export const TicketDetailScreen: React.FC = () => {
     }
     const rawAmount = diagnoseQuotedAmountText.replace(/[^0-9]/g, '');
     const enteredAmount = rawAmount ? Number(rawAmount) : NaN;
-    // Không thay thiết bị: ô tiền là "giá thợ báo", bắt buộc. Thay thiết bị: ô tiền đổi
-    // thành "chi phí phát sinh thêm", tuỳ chọn — số chính lấy từ diagnoseAutoDamageAmount
+    // 1 lần chi phí duy nhất (BE 21/09/2026). Không thay thiết bị: nhập chi phí sửa chữa,
+    // bắt buộc. Thay thiết bị: không có ô nhập — số đền bù lấy từ diagnoseAutoDamageAmount
     // (tự tính, không cho nhập tay, xem checkbox trong renderDiagnoseForm).
     let quotedRepairAmount: number | undefined;
     if (diagnoseNeedsReplacement) {
@@ -939,10 +886,11 @@ export const TicketDetailScreen: React.FC = () => {
         );
         return;
       }
-      quotedRepairAmount = Number.isFinite(enteredAmount) && enteredAmount > 0 ? enteredAmount : undefined;
+      // Thay mới: BE lấy số đền bù (estimatedDamageAmount) — không còn "chi phí phát sinh thêm".
+      quotedRepairAmount = undefined;
     } else {
       if (!Number.isFinite(enteredAmount) || enteredAmount < 0) {
-        showAlert('Thiếu giá thợ báo', 'Vui lòng nhập giá thợ báo hợp lệ (>= 0).');
+        showAlert('Thiếu chi phí', 'Vui lòng nhập chi phí sửa chữa hợp lệ (>= 0).');
         return;
       }
       quotedRepairAmount = enteredAmount;
@@ -960,13 +908,13 @@ export const TicketDetailScreen: React.FC = () => {
       const reason = diagnoseFaultReason.trim();
       if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
       const evidenceUrls = ticket?.faultEvidenceImages ?? [];
-      if (evidenceUrls.length === 0) { showAlert('Thiếu ảnh', 'Cần ít nhất 1 ảnh/video bằng chứng lỗi.'); return; }
       if (diagnoseTenantAgreesToPay == null) {
         showAlert('Chưa chọn', 'Vui lòng chọn khách có đồng ý trả chi phí hay không.');
         return;
       }
       faultReasonBody = reason;
-      faultEvidenceImages = evidenceUrls;
+      // Ảnh bằng chứng không còn bắt buộc (BE 21/09/2026): đã có ảnh tenant + xác nhận hiện trường.
+      faultEvidenceImages = evidenceUrls.length > 0 ? evidenceUrls : undefined;
       tenantAgreesToPay = diagnoseTenantAgreesToPay;
       companyAbsorbedNote = !diagnoseTenantAgreesToPay ? (diagnoseCompanyAbsorbedNote.trim() || undefined) : undefined;
     }
@@ -1014,7 +962,7 @@ export const TicketDetailScreen: React.FC = () => {
         repairAppointmentAt
           ? 'Đã đặt lịch sửa/giao máy — chờ tới đúng lịch hẹn.'
           : diagnoseCause === 'TENANT_MISUSE' && tenantAgreesToPay
-            ? 'Lập hoá đơn thiệt hại để khách thanh toán trước khi sửa.'
+            ? 'Đã lập hoá đơn cho khách (hạn 3 ngày) — bạn có thể sửa ngay.'
             : 'Đang tiến hành sửa chữa.',
       );
     } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể ghi nhận chẩn đoán. Vui lòng thử lại.')); }
@@ -1085,7 +1033,7 @@ export const TicketDetailScreen: React.FC = () => {
     if (isReal) {
       try {
         setBusy(true);
-        await realMaintenanceService.complete(idNum, {
+        const completed = await realMaintenanceService.complete(idNum, {
           resolutionNote: noteInput.trim() || undefined,
           repairDescription: noteInput.trim() || 'Đã sửa xong',
           // Đã charge() trước rồi thì complete() không dùng các field hoá đơn này nữa —
@@ -1113,12 +1061,16 @@ export const TicketDetailScreen: React.FC = () => {
         await refreshReal();
         setNoteInput(''); setInvoiceAmountText('');
         setChargeToTenant(false); setNeedsReplacement(false);
+        // BE 21/09/2026: có thu khách mà chưa trả → WAITING_PAYMENT, trả xong BE tự đóng phiếu.
+        const waitingPayment = completed?.status === 'WAITING_PAYMENT';
         const willCharge = !ticket.chargeInvoiceId && (ticket.status === 'tenant_fault' || chargeToTenant);
         showAlert(
           '🛠 Đã báo sửa xong',
-          willCharge
-            ? 'Hệ thống đã tự tạo hoá đơn — khách thanh toán trong màn chi tiết yêu cầu.'
-            : 'Phiếu đã hoàn tất.',
+          waitingPayment
+            ? 'Phiếu chuyển sang "Chờ thanh toán" — khách thanh toán hoá đơn trong 3 ngày, phiếu tự đóng khi khách trả xong.'
+            : willCharge
+              ? 'Hệ thống đã tự tạo hoá đơn — khách thanh toán trong màn chi tiết yêu cầu.'
+              : 'Phiếu đã hoàn tất.',
         );
       } catch (e: any) { showAlert('Lỗi', apiErrMsg(e, 'Không thể báo sửa xong. Vui lòng thử lại.')); }
       finally { setBusy(false); }
@@ -1218,17 +1170,21 @@ export const TicketDetailScreen: React.FC = () => {
         </>
       )}
 
-      <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>
-        {diagnoseNeedsReplacement ? 'Chi phí phát sinh thêm (đ) — để trống nếu không có' : 'Giá thợ báo (đ)'}
-      </Text>
-      <TextInput
-        style={[s.textInput, s.moneyInput]}
-        value={diagnoseQuotedAmountText}
-        onChangeText={t => setDiagnoseQuotedAmountText(formatMoneyInput(t))}
-        placeholder={diagnoseNeedsReplacement ? 'Vd: công lắp đặt...' : 'Nhập giá thợ báo...'}
-        placeholderTextColor={Colors.textMuted}
-        keyboardType="numeric"
-      />
+      {/* BE 21/09/2026: chỉ 1 lần chi phí. Thay mới → số đền bù tự tính ở trên (không nhập thêm
+          "chi phí phát sinh"); không thay → nhập chi phí sửa chữa. */}
+      {!diagnoseNeedsReplacement && (
+        <>
+          <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Chi phí sửa chữa (đ)</Text>
+          <TextInput
+            style={[s.textInput, s.moneyInput]}
+            value={diagnoseQuotedAmountText}
+            onChangeText={t => setDiagnoseQuotedAmountText(formatMoneyInput(t))}
+            placeholder="Nhập chi phí sửa chữa..."
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="numeric"
+          />
+        </>
+      )}
 
       <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Nguyên nhân</Text>
       <View style={s.reviewRow}>
@@ -1257,6 +1213,9 @@ export const TicketDetailScreen: React.FC = () => {
             placeholderTextColor={Colors.textMuted}
             multiline
           />
+          <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+            Ảnh/video bằng chứng — không bắt buộc (đã có ảnh của khách và xác nhận tại hiện trường).
+          </Text>
           <View style={{ marginTop: Spacing.sm }}>
             <PhotoEvidenceRow
               type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}
@@ -1502,17 +1461,17 @@ export const TicketDetailScreen: React.FC = () => {
    * handover() — cần lập hoá đơn + đặt lịch bàn giao + chờ thanh toán trước khi quét QR
    * bàn giao, xem docs/BE-YEUCAU-thanh-toan-truoc-khi-sua-2026-09-15.md.
    * Từ 16/09/2026, ticket ở đây LUÔN có damageCause=TENANT_MISUSE (branch phía trên đã
-   * chặn hết case damageCause null) — có thể là khách đồng ý trả (chargeIsPaid gate như
+   * chặn hết case damageCause null) — có thể là khách đồng ý trả (gate theo chargeInvoiceId như
    * cũ) hoặc khách từ chối trả/công ty trả hộ (companyAbsorbedFault=true, bỏ qua gate
    * thanh toán — xem readyToHandover bên dưới).
    */
   if (ticket.status === 'repair_scheduled' && ticket.faultResolutionPath === 'manager_repair') {
     const canSetHandoverDate = !ticket.repairAppointmentAt || isBeforeAppointmentDay(ticket.repairAppointmentAt);
     // companyAbsorbedFault (16/09/2026): charge() bị BE chặn cứng cho case này (ném lỗi)
-    // nên chargeInvoiceId/chargeIsPaid sẽ MÃI MÃI false — phải tự bỏ qua gate thanh toán,
+    // nên chargeInvoiceId sẽ MÃI MÃI null — phải tự bỏ qua gate hoá đơn,
     // không thì nút bàn giao không bao giờ bật được (xem 2 khối "Lập hoá đơn"/"Đang chờ
     // thanh toán" bên dưới cũng bị ẩn hẳn cho case này).
-    const readyToHandover = (chargeIsPaid || ticket.companyAbsorbedFault) && !!ticket.repairAppointmentAt;
+    const readyToHandover = (hasIssuedCharge || ticket.companyAbsorbedFault) && !!ticket.repairAppointmentAt;
     return (
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
@@ -1534,7 +1493,7 @@ export const TicketDetailScreen: React.FC = () => {
               Lỗi do khách — {ticket.faultReason || 'không có ghi chú'}.{' '}
               {ticket.companyAbsorbedFault
                 ? 'Khách từ chối trả — công ty đã trả hộ, không cần lập hoá đơn. Đặt lịch bàn giao rồi quét QR bàn giao.'
-                : 'Khi có kết quả kiểm tra/báo giá: lập hoá đơn thiệt hại, đặt lịch bàn giao, rồi quét QR bàn giao sau khi khách đã thanh toán.'}
+                : 'Khi có kết quả kiểm tra/báo giá: lập hoá đơn thiệt hại, đặt lịch bàn giao, rồi quét QR bàn giao (khách thanh toán trong 3 ngày, không chặn bàn giao).'}
             </Text>
           </View>
 
@@ -1550,14 +1509,16 @@ export const TicketDetailScreen: React.FC = () => {
                   </Text>
                 </View>
               ) : null}
+              {!hasReplacementAmount && (
               <TextInput
                 style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
                 value={invoiceAmountText}
                 onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
-                placeholder={hasReplacementAmount ? 'Chi phí phát sinh thêm (VNĐ) — để trống nếu không có' : 'Số tiền hoá đơn (VNĐ)'}
+                placeholder="Số tiền hoá đơn (VNĐ)"
                 placeholderTextColor={Colors.textMuted}
                 keyboardType="numeric"
               />
+              )}
               <TouchableOpacity
                 style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }, charging && s.btnDisabled]}
                 onPress={submitCharge}
@@ -1584,7 +1545,7 @@ export const TicketDetailScreen: React.FC = () => {
           {/* Bước 3: đang chờ khách thanh toán */}
           {hasUnpaidCharge && ticket.issuedInvoice && !ticket.companyAbsorbedFault && (
             <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
-              <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Đang chờ khách thanh toán</Text>
+              <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Hoá đơn đã lập — khách thanh toán trong 3 ngày</Text>
               <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
                 {fmt(ticket.issuedInvoice.grandTotal)}
               </Text>
@@ -1600,11 +1561,11 @@ export const TicketDetailScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Bước 4: đã thanh toán (hoặc công ty trả hộ) — chụp ảnh bàn giao rồi quét QR bàn giao */}
-          {(chargeIsPaid || ticket.companyAbsorbedFault) && (
+          {/* Bước 4: đã lập hoá đơn (hoặc công ty trả hộ) — chụp ảnh bàn giao rồi quét QR bàn giao */}
+          {(hasIssuedCharge || ticket.companyAbsorbedFault) && (
             <View style={[s.card, { borderColor: Colors.success, borderWidth: 1.5 }]}>
               <Text style={s.cardSectionTitle}>
-                {ticket.companyAbsorbedFault ? '✅ Công ty trả hộ — sẵn sàng bàn giao' : '✅ Đã thanh toán — sẵn sàng bàn giao'}
+                {ticket.companyAbsorbedFault ? '✅ Công ty trả hộ — sẵn sàng bàn giao' : '✅ Đã lập hoá đơn — sẵn sàng bàn giao (phiếu đóng khi khách trả xong)'}
               </Text>
               {!ticket.repairAppointmentAt && (
                 <Text style={s.pickHint}>Vui lòng đặt lịch bàn giao ở trên trước khi quét QR.</Text>
@@ -1910,6 +1871,33 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* ── Thông tin thiết bị (BE 21/09/2026: snapshot trên phiếu, xem được không cần quét QR) ── */}
+        {!!ticket.equipment && (
+          <View style={s.card}>
+            <Text style={s.cardSectionTitle}>🧰 Thiết bị trên phiếu</Text>
+            <Text style={s.descText}>
+              {ticket.equipment.equipmentName || ticket.equipment.catalogName || ticket.equipmentName || `#${ticket.equipment.id}`}
+              {ticket.equipment.roomNumber ? ` · Phòng ${ticket.equipment.roomNumber}` : ''}
+            </Text>
+            <View style={s.sectionDivider} />
+            <Text style={s.descText}>🔧 Đã bảo trì: {ticket.equipment.maintenanceCount ?? 0} lần</Text>
+            {!!ticket.equipment.purchasedAt && (
+              <Text style={s.descText}>🛒 Ngày mua / lắp: {ticket.equipment.purchasedAt.slice(0, 10)}</Text>
+            )}
+            {!!ticket.equipment.remainingWarrantyLabel && (
+              <Text style={s.descText}>
+                🛡 Bảo hành: {ticket.equipment.remainingWarrantyLabel}
+                {ticket.equipment.warrantyMonths ? ` (thời hạn ${ticket.equipment.warrantyMonths} tháng)` : ''}
+              </Text>
+            )}
+            {ticket.equipment.remainingDepreciationAmount != null && (
+              <Text style={s.descText}>
+                💰 Khấu hao / giá trị đền còn lại: {fmt(ticket.equipment.remainingDepreciationAmount)}
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* ── Ảnh sau sửa chữa + Ghi chú (gộp khi đang có thể báo sửa xong) ── */}
         {canComplete && (
           <View style={s.card}>
@@ -1977,7 +1965,7 @@ export const TicketDetailScreen: React.FC = () => {
             {ticket.status === 'tenant_fault' && (
               <Text style={s.costHint}>
                 {needsReplacement
-                  ? 'Thiết bị thay mới — khách trả tiền đền bù ở khối bên dưới; chỉ cộng thêm số tiền hoá đơn nếu bạn có nhập (để trống nếu không phát sinh chi phí nào khác).'
+                  ? 'Thiết bị thay mới — khách trả tiền đền bù đã tự tính (không cộng thêm chi phí khác).'
                   : 'Hoàn tất sẽ tự tạo hoá đơn thu khách theo số tiền trên.'}
               </Text>
             )}
@@ -2007,7 +1995,7 @@ export const TicketDetailScreen: React.FC = () => {
             {chargeToTenant && (
               <Text style={s.costHint}>
                 {needsReplacement
-                  ? 'Thiết bị thay mới — khách trả tiền đền bù ở khối bên dưới; chỉ cộng thêm số tiền hoá đơn nếu bạn có nhập (để trống nếu không phát sinh chi phí nào khác), có 3 ngày để thanh toán.'
+                  ? 'Thiết bị thay mới — khách trả tiền đền bù đã tự tính (không cộng thêm chi phí khác). có 3 ngày để thanh toán.'
                   : 'Hoàn tất sẽ tạo hoá đơn thu khách theo số tiền hoá đơn ở trên — khách có 3 ngày để thanh toán.'}
               </Text>
             )}
@@ -2022,7 +2010,7 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={[s.card, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
             <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⚠️ Thiết bị thay mới — đã đền bù</Text>
             <Text style={s.descText}>
-              Khách đã thanh toán {fmt(ticket.estimatedDamageAmount)} tiền đền bù thay thiết bị (chốt lúc chẩn đoán).
+              Tiền đền bù thay thiết bị {fmt(ticket.estimatedDamageAmount)} (chốt lúc chẩn đoán, khách thanh toán trong 3 ngày).
               Bấm "Báo sửa xong" sẽ tự cập nhật lại thiết bị.
             </Text>
           </View>
@@ -2145,8 +2133,8 @@ export const TicketDetailScreen: React.FC = () => {
           <View style={[s.card, { borderColor: '#DC2626', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>🧾 Lập hoá đơn thiệt hại (thu trước khi sửa)</Text>
             <Text style={s.pickHint}>
-              Bắt buộc lập hoá đơn để khách thanh toán TRƯỚC khi sửa — hệ thống sẽ chặn "Báo sửa xong" cho tới khi
-              khách trả xong.
+              Bắt buộc lập hoá đơn trước khi sửa. Khách thanh toán trong 3 ngày kể từ lúc lập hoá đơn — không chặn sửa;
+              nếu khách chưa trả khi báo xong, phiếu chuyển "Chờ thanh toán" và tự đóng khi khách trả.
             </Text>
             {hasReplacementAmount ? (
               <View style={[s.textInput, s.readonlyAmountBox, { marginTop: Spacing.sm }]}>
@@ -2155,14 +2143,16 @@ export const TicketDetailScreen: React.FC = () => {
                 </Text>
               </View>
             ) : null}
+            {!hasReplacementAmount && (
             <TextInput
               style={[s.textInput, s.moneyInput, { marginTop: Spacing.sm }]}
               value={invoiceAmountText}
               onChangeText={t => setInvoiceAmountText(formatMoneyInput(t))}
-              placeholder={hasReplacementAmount ? 'Chi phí phát sinh thêm (VNĐ) — để trống nếu không có' : 'Số tiền hoá đơn (VNĐ)'}
+              placeholder="Số tiền hoá đơn (VNĐ)"
               placeholderTextColor={Colors.textMuted}
               keyboardType="numeric"
             />
+            )}
             <TouchableOpacity
               style={[s.advanceBtn, { backgroundColor: '#DC2626', marginTop: Spacing.md }, charging && s.btnDisabled]}
               onPress={submitCharge}
@@ -2173,10 +2163,21 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* ── Đã sửa/bàn giao xong, chờ khách trả tiền (BE 21/09/2026) ── */}
+        {ticket.status === 'waiting_payment' && (
+          <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>💳 Đã sửa xong — chờ khách thanh toán</Text>
+            <Text style={s.pickHint}>
+              Việc sửa/bàn giao đã hoàn tất. Phiếu tự đóng ngay khi khách thanh toán hoá đơn (hạn 3 ngày kể từ lúc lập).
+              Quá hạn, hoá đơn chuyển quá hạn và bị tính phí trễ như hoá đơn thường — phiếu vẫn giữ "Chờ thanh toán" tới khi khách trả.
+            </Text>
+          </View>
+        )}
+
         {/* ── Đang chờ khách thanh toán hoá đơn thiệt hại (charge, 15/09/2026) ── */}
         {hasUnpaidCharge && ticket.issuedInvoice && (
           <View style={[s.card, { borderColor: '#B45309', borderWidth: 1.5, backgroundColor: '#FFFBEB' }]}>
-            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Đang chờ khách thanh toán</Text>
+            <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>⏳ Hoá đơn đã lập — chờ khách thanh toán</Text>
             <Text style={[s.descText, { textAlign: 'center', fontWeight: '800', fontSize: 20, color: '#B45309' }]}>
               {fmt(ticket.issuedInvoice.grandTotal)}
             </Text>
@@ -2207,7 +2208,56 @@ export const TicketDetailScreen: React.FC = () => {
         )}
 
         {/* ── 2 lựa chọn cấp cao nhất khi OPEN (16/09/2026, bỏ "Giao khách tự sửa") ── */}
-        {ticket.status === 'open' && !diagnoseFormOpen && !inspectionFormOpen && (
+        {/* ── Bắt đầu xử lý: quét QR thiết bị (BE 21/09/2026 — xem phiếu không cần quét) ── */}
+        {arrivalGateActive && (
+          <View style={[s.card, { borderColor: Colors.primary, borderWidth: 1.5 }]}>
+            <Text style={s.cardSectionTitle}>📍 Bắt đầu xử lý tại hiện trường</Text>
+            <Text style={s.pickHint}>
+              Lịch hẹn: {formatDateTime(ticket.visitAppointmentAt)}
+            </Text>
+            {arrivalNeedsRescan && (
+              <Text style={[s.pickHint, { color: '#B45309', fontWeight: '700', marginTop: Spacing.sm }]}>
+                ⏱ Đã quá 30 phút kể từ lúc xác nhận có mặt mà chưa chẩn đoán xong — quét lại để tiếp tục.
+              </Text>
+            )}
+            {realEquipmentId ? (
+              <>
+                <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+                  Quét đúng mã QR trên thiết bị{ticket.equipmentName ? ` "${ticket.equipmentName}"` : ''} để bắt
+                  đầu xử lý. Bạn vẫn xem được toàn bộ thông tin phiếu ở trên và bên dưới.
+                </Text>
+                <TouchableOpacity
+                  style={[s.advanceBtn, { marginTop: Spacing.md, marginBottom: 0 }]}
+                  onPress={() => setArrivalScanOpen(true)}
+                  disabled={arrivalBusy}
+                >
+                  <Text style={s.advanceBtnText}>📷 Quét QR bắt đầu xử lý</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
+                  Phiếu này không gắn thiết bị cụ thể — xác nhận đã có mặt tại hiện trường để bắt đầu xử lý.
+                </Text>
+                <TouchableOpacity
+                  style={[s.advanceBtn, { marginTop: Spacing.md, marginBottom: 0 }]}
+                  onPress={() => { void doConfirmArrival(); }}
+                  disabled={arrivalBusy}
+                >
+                  <Text style={s.advanceBtnText}>{arrivalBusy ? 'Đang xác nhận...' : '✅ Xác nhận đã đến'}</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
+        <EquipmentQrScanModal
+          visible={arrivalScanOpen}
+          title="Quét QR bắt đầu xử lý"
+          onClose={() => setArrivalScanOpen(false)}
+          onScan={handleArrivalScan}
+        />
+
+        {ticket.status === 'open' && !arrivalGateActive && !diagnoseFormOpen && !inspectionFormOpen && (
           <View style={s.card}>
             <Text style={s.cardSectionTitle}>Chọn hướng xử lý</Text>
             <Text style={s.pickHint}>

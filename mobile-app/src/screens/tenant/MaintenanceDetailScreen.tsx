@@ -570,6 +570,21 @@ export const MaintenanceDetailScreen: React.FC = () => {
           </View>
         )}
 
+        {/* Đã sửa/bàn giao xong, chờ khách thanh toán — trả xong BE tự đóng phiếu (21/09/2026) */}
+        {request.status === 'waiting_payment' && (
+          <View style={styles.actionSection}>
+            <View style={[styles.helpCard, { backgroundColor: '#FFFBEB' }]}>
+              <Text style={[styles.helpText, { color: '#B45309' }]}>
+                💳 Quản lý đã sửa xong. Vui lòng thanh toán hoá đơn để hoàn tất yêu cầu
+                {request.issuedInvoice?.dueDate
+                  ? ` — hạn ${formatDateTime(request.issuedInvoice.dueDate)}`
+                  : ' (hạn 3 ngày kể từ lúc lập hoá đơn)'}.
+                Quá hạn hoá đơn sẽ bị tính phí trễ như các hoá đơn khác.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Nút liên hệ nếu đang xử lý */}
         {(request.status === 'open' || request.status === 'repair_scheduled'
           || request.status === 'in_repair' || request.status === 'tenant_fault') && (
@@ -581,7 +596,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   : request.status === 'repair_scheduled'
                     ? `📅 Đã lên lịch sửa${request.repairAppointmentAt ? `: ${formatDateTime(request.repairAppointmentAt)}` : ''}.`
                     : request.status === 'tenant_fault'
-                      ? '🔧 Quản lý sẽ sửa hộ — bạn sẽ nhận hoá đơn sau khi hoàn tất.'
+                      ? '🔧 Quản lý sẽ sửa hộ. Hoá đơn chi phí đã được lập — vui lòng thanh toán trong 3 ngày.'
                       : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
               </Text>
             </View>

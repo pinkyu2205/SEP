@@ -1,0 +1,35 @@
+@startuml UtilityBillAndInvoiceState
+title Figure — Billing: hoá đơn điện nước của nhà (UtilityBillStatus) và hoá đơn từng phòng (UtilityInvoiceStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Hoá đơn tiện ích của nhà (UtilityBill)" as BILL {
+  [*] --> PUBLISHED : Admin phát hành hoá đơn điện / nước của nhà kỳ này\n(POST /admin/utility-bills)
+  PUBLISHED --> REVOKED : Admin thu hồi\n[chưa có hoá đơn phòng nào đã gửi khách trong kỳ]
+  PUBLISHED --> PUBLISHED : Manager chốt chỉ số từng phòng\n(mỗi phòng sinh UtilityInvoice — file 20)
+  REVOKED --> [*]
+  note right of PUBLISHED
+    Chỉ hoá đơn PUBLISHED mới cho manager chốt chỉ số.
+    Thu hồi lần hai là no-op.
+  end note
+}
+
+state "Hoá đơn điện / nước của phòng (UtilityInvoice)" as INV {
+  [*] --> SENT : Manager chốt chỉ số (SaveLockedMeterReading)\nQuyết toán trả phòng (chỉ số cuối)\n/ sinh TenantInvoice ELECTRICITY / WATER kèm theo
+  SENT --> PAID : Hoá đơn khách tương ứng được thanh toán (markPaid)
+  PAID --> [*]
+  note right of SENT
+    CANCELLED có trong enum và được lọc khi đọc
+    nhưng chưa có đường nào ghi.
+  end note
+}
+
+@enduml

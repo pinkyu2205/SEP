@@ -1,0 +1,145 @@
+@startuml TenantActivation
+title Figure — Tenant Activation (kích hoạt tài khoản bằng OTP + tạo mật khẩu) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+participant "Front-end" as FE
+participant "AuthController" as C
+participant "TenantActivationServiceImpl" as S
+participant "UserRepository" as UR
+participant "TenantContractRepository" as TCR
+participant "OtpServiceImpl" as OTP
+participant "TwilioService" as TW
+participant "PasswordEncoder" as PE
+participant "JwtUtil" as JWT
+database DB
+
+== Bước A — Kiểm tra trạng thái tài khoản ==
+Tenant -> FE : (1) Nhập SĐT → "Tiếp tục"
+FE -> C : (2) POST /api/v1/auth/tenant-activate/check
+activate C
+C -> S : (3) check(phoneNumber)
+activate S
+S -> UR : (4) tìm user theo SĐT (local / quốc tế / username)
+activate UR
+UR -> DB : (5) SELECT User
+DB --> UR : (6) User?
+UR --> S : (7) Optional<User>
+deactivate UR
+
+alt [Không có user / không phải ROLE_TENANT / status DISABLE]
+  S --> C : NOT_FOUND / NOT_ELIGIBLE + message
+else [firstLogin = false]
+  S --> C : READY_TO_LOGIN
+else [firstLogin = true]
+  S -> TCR : (8) findByTenantId(userId)
+  activate TCR
+  TCR -> DB : (9) SELECT TenantContract
+  DB --> TCR : (10) contracts
+  TCR --> S : (11) List<TenantContract>
+  deactivate TCR
+  alt [Có HĐ ACTIVE, hoặc PENDING + đã PAID cọc]
+    S --> C : NEEDS_ACTIVATION
+  else [Chưa có HĐ đủ điều kiện]
+    S --> C : NOT_ELIGIBLE "Chưa có hợp đồng đã thanh toán"
+  end
+end
+deactivate S
+C --> FE : (12) 200 OK + status
+deactivate C
+FE --> Tenant : (13) Theo status: đăng nhập / liên hệ quản lý / sang bước OTP
+
+== Bước B — Gửi OTP ==
+Tenant -> FE : (14) "Gửi mã OTP"
+FE -> C : (15) POST /tenant-activate/send-otp
+activate C
+C -> S : (16) sendOtp(phoneNumber)
+activate S
+S -> S : (17) requireActivatableTenant()\n(chạy lại check, phải = NEEDS_ACTIVATION)
+S -> OTP : (18) sendOtp(OtpDeliveryOverride.PHONE,\nTENANT_ACTIVATION, referenceId)
+activate OTP
+OTP -> DB : (19) INSERT OtpVerification\n(code 6 số, hết hạn sau 5 phút)
+DB --> OTP : (20) OK
+OTP -> TW : (21) sendOtp(phone, code)
+activate TW
+TW --> OTP : (22) sent / bỏ qua nếu chưa cấu hình\n(log OTP ở môi trường DEV)
+deactivate TW
+OTP --> S : (23) done
+deactivate OTP
+S --> C : (24) done
+deactivate S
+C --> FE : (25) 200 OK
+deactivate C
+FE --> Tenant : (26) Hiển thị ô nhập OTP
+
+== Bước C — Xác nhận OTP + đặt mật khẩu ==
+Tenant -> FE : (27) Nhập OTP + mật khẩu mới + xác nhận
+FE -> C : (28) POST /tenant-activate/confirm\nTenantActivateConfirmRequest
+activate C
+C -> S : (29) confirm(request)
+activate S
+S -> DB : (30) BeginTransaction()
+activate DB
+DB --> S : (31) Success
+
+alt [newPassword ≠ confirmPassword]
+  S --> C : BusinessException "Xác nhận mật khẩu không khớp"
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> S : (32) requireActivatableTenant()
+S -> OTP : (33) verifyOrThrow(phone, otp,\nTENANT_ACTIVATION, referenceId)
+activate OTP
+OTP -> DB : (34) SELECT OtpVerification mới nhất\nchưa verified
+DB --> OTP : (35) OtpVerification
+alt [OTP hết hạn / quá 5 lần sai / sai mã]
+  OTP -> DB : tăng attemptCount (nếu sai mã)
+  OTP --> S : BusinessException
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi OTP
+end
+OTP -> DB : (36) UPDATE OtpVerification verified = true
+DB --> OTP : (37) OK
+OTP --> S : (38) OK
+deactivate OTP
+
+S -> PE : (39) encode(newPassword)
+activate PE
+PE --> S : (40) hash
+deactivate PE
+S -> UR : (41) save(user: password, firstLogin = false)
+activate UR
+UR -> DB : (42) UPDATE User
+DB --> UR : (43) OK
+UR --> S : (44) saved
+deactivate UR
+S -> JWT : (45) generateToken(userDetails)
+activate JWT
+JWT --> S : (46) jwt
+deactivate JWT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> DB : (47) CommitTransaction()
+DB --> S : (48) Committed
+deactivate DB
+S --> C : (49) AuthResponse(jwt, role, firstLogin=false)
+deactivate S
+C --> FE : (50) 200 OK
+deactivate C
+FE --> Tenant : (51) Đăng nhập luôn, vào màn chính
+
+@enduml

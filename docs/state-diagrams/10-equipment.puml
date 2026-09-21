@@ -1,0 +1,40 @@
+@startuml EquipmentState
+title Figure — Equipment: tình trạng thiết bị (EquipmentStatus) và trạng thái khai thác (EquipmentOperationalStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+state "Tình trạng thiết bị (status)" as COND {
+  [*] --> NEW : Thêm mới / gán thiết bị mua mới (mặc định)
+  [*] --> GOOD : Import bàn giao / thiết bị nhận từ chủ nhà
+  NEW --> GOOD : Manager đổi tình trạng (PATCH /equipment/{id}/status)
+  GOOD --> DAMAGED : Manager đổi tình trạng
+  GOOD --> MAINTENANCE : Manager đổi tình trạng\n(tăng maintenanceCount, ghi lastMaintenanceDate)
+  GOOD --> BROKEN : Manager đổi tình trạng (tăng maintenanceCount)\nChẩn đoán bảo trì equipmentNeedsReplacement\n/ recommendReplacement = true, báo admin
+  DAMAGED --> GOOD : Manager đổi tình trạng
+  MAINTENANCE --> GOOD : Manager đổi tình trạng
+  BROKEN --> NEW : complete phiếu bảo trì có thay mới\n/ installationDate = hôm nay, recommendReplacement = false
+  NEW --> BROKEN : Chẩn đoán cần thay
+  DAMAGED --> BROKEN : Chẩn đoán cần thay
+  MAINTENANCE --> BROKEN : Chẩn đoán cần thay
+  note right of BROKEN
+    updateEquipmentStatus nhận mọi giá trị, không ràng buộc chuyển đổi;
+    chỉ các mũi tên chính được vẽ. DISPOSED có trong enum
+    nhưng chưa có đường nào ghi.
+  end note
+}
+
+state "Trạng thái khai thác (operationalStatus)" as OPS {
+  [*] --> ACTIVE : Mặc định
+  ACTIVE --> DISABLED : Vô hiệu hoá thủ công (kèm lý do)\nThay thế thiết bị cũ khi gán thiết bị mới cùng vị trí\nHợp đồng "khách không nhận" thiết bị (disabledByContractId)
+  DISABLED --> ACTIVE : Bật lại thủ công\nHợp đồng kết thúc / huỷ (restoreDisabledByContract)
+}
+
+@enduml

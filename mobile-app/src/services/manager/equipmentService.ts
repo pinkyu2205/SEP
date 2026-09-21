@@ -9,10 +9,12 @@ import type {
  * Equipment service (real backend).
  *
  * ⚠ Đường dẫn ở đây đã được đối chiếu trực tiếp với source BE
- * (EquipmentController, GlobalEquipmentController, MaintenanceEquipmentController,
- * EquipmentQrController) ngày 15/08/2026. Nhóm endpoint không gắn property nằm ở
- * MaintenanceEquipmentController và ĐỀU có hậu tố `-feature` / `/feature` —
- * trước đây FE gọi thiếu hậu tố nên toàn bộ sửa thiết bị + đổi trạng thái 404 im lặng.
+ * (EquipmentController, GlobalEquipmentController, EquipmentQrController) ngày 21/09/2026.
+ * MaintenanceEquipmentController (các route `/feature` / `-feature`) đã bị BE xoá ở commit
+ * f6e693d — gọi vào các route đó là 404. Nhóm không gắn property giờ nằm ở
+ * GlobalEquipmentController: GET /equipment/{id}, PATCH /equipment/{id}/status,
+ * GET /equipment/{id}/maintenance-history. BE không còn endpoint sửa thông tin thiết bị lẻ
+ * hay lọc thiết bị theo phòng (dùng `getByProperty` rồi lọc theo `roomId` ở FE).
  */
 
 /** Body của POST /properties/{id}/equipments — khớp CreateAddedEquipmentRequest của BE. */
@@ -24,14 +26,6 @@ export interface CreateEquipmentBody {
 }
 
 export const realEquipmentService = {
-  /** Thiết bị theo phòng — GET /api/v1/equipment/feature?roomId= */
-  getByRoom: async (roomId: number): Promise<EquipmentDto[]> => {
-    const { data } = await realApiClient.get<EquipmentDto[]>('/api/v1/equipment/feature', {
-      params: { roomId },
-    });
-    return data;
-  },
-
   /** Thiết bị theo property */
   getByProperty: async (propertyId: number): Promise<EquipmentDto[]> => {
     const { data } = await realApiClient.get<EquipmentDto[]>(
@@ -40,8 +34,9 @@ export const realEquipmentService = {
     return data;
   },
 
+  /** GET /api/v1/equipment/{id} — chi tiết + khấu hao / bảo hành còn lại. */
   getById: async (id: number): Promise<EquipmentDto> => {
-    const { data } = await realApiClient.get<EquipmentDto>(`/api/v1/equipment/${id}/feature`);
+    const { data } = await realApiClient.get<EquipmentDto>(`/api/v1/equipment/${id}`);
     return data;
   },
 
@@ -54,18 +49,13 @@ export const realEquipmentService = {
     return data;
   },
 
-  /** Sửa thông tin thiết bị — BE nhận nguyên EquipmentResponse, gửi phần thay đổi là đủ. */
-  update: async (id: number, body: Partial<EquipmentDto>): Promise<EquipmentDto> => {
-    const { data } = await realApiClient.put<EquipmentDto>(`/api/v1/equipment/${id}/feature`, body);
-    return data;
-  },
-
+  /** PATCH /api/v1/equipment/{id}/status — đổi tình trạng thiết bị (MANAGER/ADMIN). */
   updateStatus: async (
     id: number,
     status: EquipmentLifecycleStatus,
   ): Promise<EquipmentDto> => {
     const { data } = await realApiClient.patch<EquipmentDto>(
-      `/api/v1/equipment/${id}/status-feature`,
+      `/api/v1/equipment/${id}/status`,
       { status },
     );
     return data;
@@ -90,17 +80,12 @@ export const realEquipmentService = {
   },
 
   /**
-   * Lịch sử bảo trì của 1 thiết bị.
-   * Lưu ý BE có 2 endpoint gần giống nhau: `/maintenance-history` (trả
-   * MaintenanceRequestResponse — phiếu bảo trì) và `/maintenance-history-feature`
-   * (trả EquipmentMaintenanceHistoryResponse — đúng shape FE cần). Dùng cái sau.
+   * GET /api/v1/equipment/{id}/maintenance-history — lịch sử bảo trì của 1 thiết bị, trả
+   * EquipmentMaintenanceHistoryResponse (có `photoUrls`). Danh sách phiếu bảo trì của thiết
+   * bị nằm ở `/maintenance-tickets`, không dùng ở đây.
    */
   getMaintenanceHistory: async (id: number): Promise<EquipmentMaintenanceHistoryDto[]> => {
     const { data } = await realApiClient.get<EquipmentMaintenanceHistoryDto[]>(
-      // Route thật của BE là `/maintenance-history` — hậu tố `-feature` là do FE tự thêm,
-      // không controller nào phía BE nhận. Kết quả: 404 và `GlobalExceptionHandler` trả
-      // "Route không tồn tại", hiện thẳng vào khối Lịch sử bảo trì.
-      // (`GlobalEquipmentController` dòng 26: @GetMapping("/{id}/maintenance-history"))
       `/api/v1/equipment/${id}/maintenance-history`,
     );
     return data;

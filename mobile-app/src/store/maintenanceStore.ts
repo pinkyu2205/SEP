@@ -4,7 +4,7 @@ import { MaintenanceRequest, MaintenanceStatus, MaintenanceBillingHint, Maintena
 // ===================== TENANT MAINTENANCE REQUESTS =====================
 
 const ACTIVE_STATUSES: MaintenanceStatus[] =
-  ['open', 'repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage'];
+  ['open', 'repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage', 'waiting_payment'];
 const HISTORY_STATUSES: MaintenanceStatus[] = ['closed', 'cancelled'];
 
 /**
@@ -51,6 +51,7 @@ export type TicketStatus =
   | 'tenant_fault'            // lỗi tenant, manager sẽ sửa hộ rồi charge
   | 'pending_tenant_repair'  // giao tenant tự sửa trước deadline
   | 'outstanding_damage'     // quá hạn/không đạt — chờ checkout trừ cọc
+  | 'waiting_payment'        // đã sửa/bàn giao xong, chờ khách thanh toán hoá đơn — trả xong BE tự đóng
   | 'closed'
   | 'cancelled';
 export type TicketCategory = 'appliance' | 'furniture' | 'plumbing' | 'electrical';
@@ -164,6 +165,10 @@ export interface MaintenanceTicket {
   expectedReturnAt?: string;
   /** true = diagnose() đã chốt thiết bị cần thay mới (16/09/2026). */
   equipmentReplacementFlagged?: boolean;
+  /** Snapshot thiết bị trên phiếu (BE 21/09/2026) — xem được không cần quét QR. */
+  equipment?: import('@/types').EquipmentDto;
+  /** true = phải quét QR (confirm-arrival) trước khi xử lý — chỉ khi phiếu có thiết bị. */
+  qrScanRequiredToProcess?: boolean;
 }
 
 

@@ -1,0 +1,168 @@
+@startuml MaintenanceComplete
+title Figure — Maintenance: Manager hoàn tất sửa chữa (complete) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "TenantInvoiceRepository" as TIR
+participant "EquipmentRepository" as ER
+participant "TenantPendingChargeServiceImpl" as TPC
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+Manager -> FE : (1) Chụp ảnh sau sửa + ảnh hoá đơn,\nmô tả việc đã làm, tick "thay thiết bị" (nếu có) → "Hoàn tất"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/complete\nMaintenanceCompleteRequest
+activate C
+C -> S : (3) complete(id, request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+S -> S : (10) requireManagerAccess(req)\nnormalFlow = IN_REPAIR\nmanagerRepairFault = TENANT_FAULT + MANAGER_REPAIR
+
+alt [Không thuộc IN_REPAIR / TENANT_FAULT (manager sửa hộ)]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+opt [Không bypass thanh toán và không phải công ty trả hộ]
+  alt [managerRepairFault và có chargeInvoiceId]
+    S -> TIR : (11) findById(chargeInvoiceId)
+    activate TIR
+    TIR -> DB : (12) SELECT TenantInvoice
+    DB --> TIR : (13) TenantInvoice
+    TIR --> S : (14) invoice
+    deactivate TIR
+    alt [invoice chưa PAID]
+      S --> C : BusinessException "Cần tenant thanh toán trước khi hoàn tất"
+      C --> FE : Error response
+      FE --> Manager : Hiển thị lỗi
+    end
+  else [managerRepairFault nhưng chưa có hoá đơn]
+    S --> C : BusinessException "Cần báo giá và tenant thanh toán"
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+end
+
+S -> DB : (15) appendCsv + INSERT MaintenancePhotoHistory\n(AFTER, INVOICE)
+DB --> S : (16) OK
+
+alt [Thiếu ảnh AFTER]
+  S --> C : BusinessException "Bắt buộc ảnh sau sửa chữa"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+alt [Chưa có chargeInvoiceId]
+  alt [Thiếu ảnh hoá đơn / vendor / ngày / amount / repairDescription]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+  S -> S : (17) applyInvoiceOnComplete(): ghi thông tin hoá đơn lên phiếu
+else [Đã có hoá đơn thu trước]
+  S -> S : (17') chỉ cập nhật repairDescription
+end
+
+opt [equipmentNeedsReplacement = true]
+  S -> ER : (18) findById(equipmentId)
+  activate ER
+  ER -> DB : (19) SELECT Equipment
+  DB --> ER : (20) Equipment
+  ER --> S : (21) Equipment
+  deactivate ER
+  alt [Không có equipmentId / chargeToTenant nhưng chưa có mức đền bù]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+  S -> ER : (22) save(Equipment: status = NEW, installationDate = today,\nrecommendReplacement = false, maintenanceCount + 1, note)
+  activate ER
+  ER -> DB : (23) UPDATE Equipment
+  DB --> ER : (24) OK
+  ER --> S : (25) saved
+  deactivate ER
+end
+
+S -> MR : (26) save(req: status = CLOSED, doneAt, resolvedAt,\nresolutionNote, repairDescription)
+activate MR
+MR -> DB : (27) UPDATE MaintenanceRequest
+DB --> MR : (28) OK
+MR --> S : (29) saved
+deactivate MR
+
+S -> RR : (30) restoreRoomStatus(req)\n(nếu không còn phiếu mở khác → RENTED / AVAILABLE)
+activate RR
+RR -> DB : (31) UPDATE Room
+DB --> RR : (32) OK
+RR --> S : (33) done
+deactivate RR
+
+opt [chargeToTenant và chưa có chargeInvoiceId (Luồng A)]
+  S -> TPC : (34) createAndIssueMaintenanceCharge(contract, amount, requestId, note)
+  activate TPC
+  TPC -> DB : (35) INSERT TenantPendingCharge + TenantInvoice (+ PayOS link nếu cấu hình)
+  DB --> TPC : (36) OK
+  TPC --> S : (37) TenantInvoiceResponse
+  deactivate TPC
+end
+
+S -> DB : (38) INSERT MaintenanceTimeline (old → CLOSED, mô tả hoàn tất)
+DB --> S : (39) OK
+
+S -> NR : (40) notifyTenantOnComplete():\nMAINTENANCE_COMPLETED (+ MAINTENANCE_CHARGE_ISSUED nếu thu phí)
+activate NR
+NR -> DB : (41) INSERT Notification
+DB --> NR : (42) OK
+NR --> S : (43) saved
+deactivate NR
+S -> UPT : (44) sendToUser(tenant)
+activate UPT
+UPT --> S : (45) Expo push
+deactivate UPT
+S -> RT : (46) publishMaintenanceEvent(COMPLETED)
+activate RT
+RT --> S : (47) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (48) CommitTransaction()
+DB --> S : (49) Committed
+deactivate DB
+
+S --> C : (50) MaintenanceRequestResponse (+ issuedInvoice nếu có)
+deactivate S
+C --> FE : (51) 200 OK + result
+deactivate C
+FE --> Manager : (52) Phiếu CLOSED (+ hoá đơn nếu thu phí)
+
+@enduml

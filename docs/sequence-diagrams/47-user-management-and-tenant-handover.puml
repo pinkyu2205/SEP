@@ -1,0 +1,160 @@
+@startuml UserManagementAndTenantHandover
+title Figure — User: Admin tạo / sửa / khoá tài khoản, cập nhật hồ sơ cá nhân, Tenant xác nhận biên bản bàn giao Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+actor "Any User" as U
+actor Tenant
+participant "Front-end" as FE
+participant "UserController" as C
+participant "UserServiceImpl" as S
+participant "UserRepository" as UR
+participant "PasswordEncoder" as PE
+participant "TenantMeLifecycleController" as TC
+participant "TenantHandoverServiceImpl" as HS
+participant "TenantContractRepository" as TCR
+database DB
+
+== Admin tạo tài khoản (manager / admin / owner) ==
+Admin -> FE : (1) Nhập username, mật khẩu, SĐT, họ tên, vai trò → "Tạo tài khoản"
+FE -> C : (2) POST /api/v1/user\nUser
+activate C
+C -> S : (3) createUser(user)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+S -> UR : (6) existsByUsername(username) / existsByPhoneNumber(phone)
+activate UR
+UR -> DB : (7) SELECT User
+DB --> UR : (8) exists / not exists
+UR --> S : (9) boolean
+deactivate UR
+alt [Username hoặc SĐT đã tồn tại]
+  S --> C : RuntimeException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> PE : (10) encode(password)
+activate PE
+PE --> S : (11) hash
+deactivate PE
+S -> S : (12) status mặc định ACTIVE;\ntạo hồ sơ theo vai trò: ROLE_MANAGER → OperationManagement,\nROLE_ADMIN → Admin (startAt = now), ROLE_OWNER → Owner
+S -> UR : (13) save(user + profile)
+activate UR
+UR -> DB : (14) INSERT User + OperationManagement / Admin / Owner
+DB --> UR : (15) OK
+UR --> S : (16) user
+deactivate UR
+S -> DB : (17) CommitTransaction()
+DB --> S : (18) Committed
+deactivate DB
+S --> C : (19) User
+deactivate S
+C --> FE : (20) 200 OK
+deactivate C
+FE --> Admin : (21) Tài khoản mới
+
+== Admin sửa thông tin / khoá / mở khoá tài khoản ==
+Admin -> FE : (22) Sửa SĐT, họ tên, mật khẩu, vai trò hoặc đổi trạng thái (ACTIVE / DISABLE)
+FE -> C : (23) PUT /api/v1/user/{id}\nPATCH /api/v1/user/{id}/status
+activate C
+C -> S : (24) updateUser(id, userDetails) / changeUserStatus(id, newStatus)
+activate S
+S -> UR : (25) getUserById(id)
+activate UR
+UR -> DB : (26) SELECT User
+DB --> UR : (27) user
+UR --> S : (28) user
+deactivate UR
+alt [Không tìm thấy user / SĐT mới đã tồn tại]
+  S --> C : RuntimeException
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+opt [Có mật khẩu mới]
+  S -> PE : (29) encode(password mới)
+end
+S -> UR : (30) save(user)
+activate UR
+UR -> DB : (31) UPDATE User
+DB --> UR : (32) OK
+deactivate UR
+S --> C : (33) User
+deactivate S
+C --> FE : (34) 200 OK
+deactivate C
+FE --> Admin : (35) Đã cập nhật (tài khoản DISABLE không đăng nhập được — file 02)
+
+== Người dùng tự cập nhật hồ sơ ==
+U -> FE : (36) Sửa họ tên, email, ảnh đại diện → "Lưu"
+FE -> C : (37) PUT /api/v1/user/me\nUpdateProfileRequest
+activate C
+C -> S : (38) updateMyProfile(request)
+activate S
+S -> UR : (39) findById(currentUserId) → set fullName / email / avatarUrl nếu có gửi
+activate UR
+UR -> DB : (40) SELECT + UPDATE User
+DB --> UR : (41) OK
+UR --> S : (42) user
+deactivate UR
+S --> C : (43) AuthMeResponse
+deactivate S
+C --> FE : (44) 200 OK
+deactivate C
+FE --> U : (45) Hồ sơ mới
+
+== Tenant xác nhận biên bản bàn giao nhà ==
+Tenant -> FE : (46) Mở "Biên bản bàn giao" (chỉ số công tơ ban đầu, ảnh hiện trạng, ghi chú)
+FE -> TC : (47) GET /api/v1/tenant/me/handover?contractId=
+activate TC
+TC -> HS : (48) getHandover(tenantUserId, contractId)
+activate HS
+HS -> TCR : (49) findByTenantId(tenantUserId) → lọc HĐ còn đọc được, sắp theo ngày bắt đầu
+activate TCR
+TCR -> DB : (50) SELECT TenantContract
+DB --> TCR : (51) contracts
+TCR --> HS : (52) List<TenantContract>
+deactivate TCR
+alt [Không có HĐ / HĐ không thuộc khách / thuê nhiều nhà mà không truyền contractId]
+  HS --> TC : ResourceNotFoundException / BusinessException
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+HS --> TC : (53) TenantHandoverResponse (điện nước ban đầu, ảnh, ghi chú hiện trạng)
+deactivate HS
+TC --> FE : (54) 200 OK
+deactivate TC
+FE --> Tenant : (55) Nội dung biên bản
+
+Tenant -> FE : (56) "Tôi đã kiểm tra và xác nhận"
+FE -> TC : (57) POST /api/v1/tenant/me/handover/acknowledge
+activate TC
+TC -> HS : (58) acknowledgeHandover(tenantUserId, contractId)
+activate HS
+HS -> TCR : (59) resolve HĐ ACTIVE của khách
+activate TCR
+TCR --> HS : (60) contract
+deactivate TCR
+alt [Đã xác nhận trước đó]
+  HS --> TC : BusinessException "Bạn đã xác nhận biên bản bàn giao trước đó"
+  TC --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+HS -> TCR : (61) save(handoverAcknowledgedAt = now)
+activate TCR
+TCR -> DB : (62) UPDATE TenantContract
+DB --> TCR : (63) OK
+deactivate TCR
+HS --> TC : (64) TenantHandoverResponse
+deactivate HS
+TC --> FE : (65) 200 OK
+deactivate TC
+FE --> Tenant : (66) Đã xác nhận — dùng làm căn cứ khi kiểm tra phòng lúc trả (file 31)
+
+@enduml

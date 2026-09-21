@@ -1,0 +1,92 @@
+@startuml Register
+title Figure — Register (đăng ký tài khoản khách thuê) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Guest
+participant "Front-end" as FE
+participant "AuthController" as C
+participant "AuthServiceImpl" as S
+participant "PasswordEncoder" as PE
+participant "UserRepository" as UR
+database DB
+
+Guest -> FE : (1) Điền username, password,\nSĐT, họ tên → "Đăng ký"
+FE -> C : (2) POST /api/v1/auth/register\nAuthRequest
+activate C
+C -> S : (3) register(request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> UR : (6) existsByUsername(username)
+activate UR
+UR -> DB : (7) SELECT User
+DB --> UR : (8) exists / not exists
+UR --> S : (9) boolean
+deactivate UR
+
+alt [Username đã tồn tại]
+  S --> C : RuntimeException\n"Username đã tồn tại"
+  C --> FE : Error response
+  FE --> Guest : Hiển thị lỗi
+end
+
+S -> UR : (10) existsByPhoneNumber(phoneNumber)
+activate UR
+UR -> DB : (11) SELECT User
+DB --> UR : (12) exists / not exists
+UR --> S : (13) boolean
+deactivate UR
+
+alt [SĐT đã đăng ký]
+  S --> C : RuntimeException\n"Số điện thoại đã được đăng ký"
+  C --> FE : Error response
+  FE --> Guest : Hiển thị lỗi
+end
+
+alt [role khác ROLE_TENANT]
+  S --> C : RuntimeException\n"Chỉ được đăng ký ROLE_TENANT"
+  C --> FE : Error response
+  FE --> Guest : Hiển thị lỗi
+end
+
+S -> PE : (14) encode(password)
+activate PE
+PE --> S : (15) hash
+deactivate PE
+
+S -> S : (16) new User(status=ACTIVE,\nrole=ROLE_TENANT)
+
+S -> UR : (17) save(user)
+activate UR
+UR -> DB : (18) INSERT User
+DB --> UR : (19) Model state
+UR --> S : (20) saved user
+deactivate UR
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Guest : Hiển thị lỗi
+end
+
+S -> DB : (21) CommitTransaction()
+DB --> S : (22) Committed
+deactivate DB
+
+S --> C : (23) "Đăng ký tài khoản thành công!"
+deactivate S
+C --> FE : (24) 200 OK
+deactivate C
+FE --> Guest : (25) Thông báo đăng ký thành công
+
+@enduml

@@ -1,0 +1,129 @@
+@startuml MaintenanceCreateRequest
+title Figure — Maintenance: Tenant tạo yêu cầu bảo trì (hẹn lịch xem) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "EquipmentRepository" as ER
+participant "MaintenanceRequestRepository" as MR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+Tenant -> FE : (1) Điền tiêu đề, mô tả, thiết bị,\nảnh hiện trạng, chọn giờ hẹn → "Gửi yêu cầu"
+FE -> C : (2) POST /api/v1/maintenance\nMaintenanceCreateRequest
+activate C
+C -> S : (3) createRequest(request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TCR : (6) findByTenantId(userId) → lọc HĐ ACTIVE
+activate TCR
+TCR -> DB : (7) SELECT TenantContract
+DB --> TCR : (8) contracts
+TCR --> S : (9) TenantContract ACTIVE / empty
+deactivate TCR
+
+alt [Không có HĐ ACTIVE / HĐ không gắn nhà / phòng không khớp HĐ]
+  S --> C : ResourceNotFoundException / BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> S : (10) Validate tiêu đề (bắt buộc, ≤ 200 ký tự)\nvalidateNoPurchaseIntent(title, description)
+
+opt [Có equipmentId]
+  S -> ER : (11) findById(equipmentId)
+  activate ER
+  ER -> DB : (12) SELECT Equipment
+  DB --> ER : (13) Equipment
+  ER --> S : (14) Equipment
+  deactivate ER
+  S -> S : (15) Kiểm tra thiết bị thuộc đúng nhà/phòng
+  S -> MR : (16) findFirstByEquipmentIdAndStatusNotIn(\nCLOSED, CANCELLED, OUTSTANDING_DAMAGE)
+  activate MR
+  MR -> DB : (17) SELECT MaintenanceRequest
+  DB --> MR : (18) existing / null
+  MR --> S : (19) Optional<MaintenanceRequest>
+  deactivate MR
+  alt [Thiết bị đã có phiếu chưa xử lý xong]
+    S --> C : BusinessException DUPLICATE_EQUIPMENT_TICKET
+    C --> FE : Error response
+    FE --> Tenant : Hiển thị lỗi (kèm existingRequestId)
+  end
+end
+
+alt [Thiếu ảnh BEFORE / nhà chưa có operationManager / thiếu visitAppointmentAt]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> MR : (20) findActiveAppointmentSlotsByManager(managerId)\n→ validateAndAssertSlotAvailable(visitAt, 30 phút)
+activate MR
+MR -> DB : (21) SELECT MaintenanceRequest (OPEN / REPAIR_SCHEDULED)
+DB --> MR : (22) slots
+MR --> S : (23) List<MaintenanceRequest>
+deactivate MR
+alt [Giờ ở quá khứ / ngoài 07:00–18:00 / trùng lịch manager]
+  S --> C : BusinessException / ConflictException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi, chọn giờ khác
+end
+
+S -> MR : (24) save(MaintenanceRequest status=OPEN,\nflowType=NORMAL_WEAR)
+activate MR
+MR -> DB : (25) INSERT MaintenanceRequest
+DB --> MR : (26) Model state
+MR --> S : (27) saved request
+deactivate MR
+
+S -> DB : (28) INSERT MaintenancePhotoHistory (BEFORE)\nINSERT MaintenanceTimeline (null → OPEN)
+DB --> S : (29) OK
+
+S -> NR : (30) notifyPropertyManager():\nsave(Notification MAINTENANCE_CREATED)
+activate NR
+NR -> DB : (31) INSERT Notification
+DB --> NR : (32) OK
+NR --> S : (33) saved
+deactivate NR
+S -> UPT : (34) sendToUser(managerId, title, body, data)
+activate UPT
+UPT --> S : (35) Expo push đã gửi (nếu có token)
+deactivate UPT
+S -> RT : (36) publishMaintenanceEvent(CREATED)\n+ (SCHEDULE_CHANGED)
+activate RT
+RT --> S : (37) STOMP /user/queue/maintenance
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> DB : (38) CommitTransaction()
+DB --> S : (39) Committed
+deactivate DB
+
+S --> C : (40) MaintenanceRequestResponse
+deactivate S
+C --> FE : (41) 200 OK + result
+deactivate C
+FE --> Tenant : (42) Hiển thị phiếu vừa tạo (trạng thái OPEN)
+
+@enduml

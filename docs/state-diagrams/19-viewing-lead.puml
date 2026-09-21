@@ -1,0 +1,34 @@
+@startuml ViewingLeadState
+title Figure — Viewing: lead xem nhà (ViewingLeadStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> NEW : Admin ghi nhận khách muốn xem nhà (tên, SĐT, ghi chú)\n(POST /admin/viewing-leads)
+
+state "Chưa có đường ghi trong BE" as UNUSED #EEEEEE {
+  state ASSIGNED
+  state SCHEDULED
+  state COMPLETED
+  state CANCELLED
+  state NO_SHOW
+}
+
+NEW -[dashed]-> UNUSED : (dự kiến) phân manager, hẹn lịch, kết quả
+
+note right of NEW
+  BE chỉ tạo lead với status NEW; danh sách admin lọc theo status,
+  khách xem lại lead của mình ở /me/viewing-wishlist,
+  nhưng chưa có API nào đổi status.
+  ASSIGNED, SCHEDULED, COMPLETED, CANCELLED, NO_SHOW là giá trị enum
+  dành cho bước tiếp theo, chưa được ghi ở đâu.
+end note
+
+@enduml

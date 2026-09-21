@@ -1,0 +1,95 @@
+@startuml MaintenanceSendForInspection
+title Figure — Maintenance: Manager mang thiết bị đi kiểm tra thêm (send-for-inspection) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+database DB
+
+Manager -> FE : (1) Chọn "Mang đi kiểm tra thêm"\n(giờ dự kiến trả, danh mục, ghi chú)
+FE -> C : (2) PUT /api/v1/maintenance/{id}/send-for-inspection\nMaintenanceSendForInspectionRequest
+activate C
+C -> S : (3) sendForInspection(id, request)
+activate S
+
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+S -> S : (10) requireManagerAccess(req)\nrequireStatus(OPEN)\nrequireVisitArrivalConfirmed(req)
+
+alt [Không phải manager phụ trách / status ≠ OPEN /\nchưa xác nhận có mặt]
+  S --> C : BusinessException / ForbiddenException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+alt [Phiếu đã có damageCause]
+  S --> C : BusinessException\n"Không thể gửi đi kiểm tra lại theo luồng này"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> S : (11) Cập nhật phiếu:\nstatus = REPAIR_SCHEDULED, acknowledgedAt = now,\nflowType / damageCause / faultResolutionPath = null,\ncompanyAbsorbedFault = false,\nexpectedReturnAt (nếu có), category (nếu có)
+
+S -> MR : (12) save(req)
+activate MR
+MR -> DB : (13) UPDATE MaintenanceRequest
+DB --> MR : (14) OK
+MR --> S : (15) saved
+deactivate MR
+S -> DB : (16) INSERT MaintenanceTimeline\n(OPEN → REPAIR_SCHEDULED, "Mang thiết bị đi kiểm tra thêm")
+DB --> S : (17) OK
+
+S -> NR : (18) notifyTenant("Thiết bị đang được mang đi kiểm tra")
+activate NR
+NR -> DB : (19) INSERT Notification MAINTENANCE_SCHEDULE_CHANGED
+DB --> NR : (20) OK
+NR --> S : (21) saved
+deactivate NR
+S -> UPT : (22) sendToUser(tenant)
+activate UPT
+UPT --> S : (23) Expo push
+deactivate UPT
+S -> RT : (24) publishMaintenanceEvent(SCHEDULE_CHANGED)
+activate RT
+RT --> S : (25) STOMP event
+deactivate RT
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (26) CommitTransaction()
+DB --> S : (27) Committed
+deactivate DB
+
+S --> C : (28) MaintenanceRequestResponse
+deactivate S
+C --> FE : (29) 200 OK
+deactivate C
+FE --> Manager : (30) Phiếu chuyển REPAIR_SCHEDULED,\nchờ nhập kết quả chẩn đoán (diagnose)
+
+@enduml

@@ -222,9 +222,20 @@ const DetailModal = ({ request, onClose }: {
               ) : (
                 <div className="space-y-1.5">
                   {history.map(h => (
-                    <div key={h.id} className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                      <span className="text-slate-600">{fmtDate(h.maintenanceDate)} · <span className="font-mono">{h.requestCode}</span> {h.note ? `· ${h.note}` : ''}</span>
-                      <span className="font-semibold text-slate-800">{h.repairCost != null ? formatCurrency(h.repairCost) : '—'}</span>
+                    <div key={h.id} className="text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">{fmtDate(h.maintenanceDate)} · <span className="font-mono">{h.requestCode}</span> {h.note ? `· ${h.note}` : ''}</span>
+                        <span className="font-semibold text-slate-800">{h.repairCost != null ? formatCurrency(h.repairCost) : '—'}</span>
+                      </div>
+                      {(h.photoUrls?.length ?? 0) > 0 && (
+                        <div className="flex gap-1.5 mt-2 overflow-x-auto">
+                          {h.photoUrls!.map((url, i) => (
+                            <a key={`${h.id}-${i}`} href={url} target="_blank" rel="noreferrer">
+                              <img src={url} alt={`Ảnh bảo trì ${i + 1}`} className="w-16 h-16 object-cover rounded-md border border-slate-200" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

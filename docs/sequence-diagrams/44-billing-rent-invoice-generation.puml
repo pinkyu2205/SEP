@@ -1,0 +1,152 @@
+@startuml RentInvoiceGeneration
+title Figure — Billing: Phát hành hoá đơn tiền phòng (cron hằng tháng, kỳ đầu khi kích hoạt HĐ, manager phát hành tay) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+participant "Front-end" as FE
+participant "RentInvoiceController" as C
+participant "TenantBillingServiceImpl" as TBS
+participant "BillingCronServiceImpl" as CRON
+participant "PropertyAccessService" as PAS
+participant "TenantContractRepository" as TCR
+participant "TenantInvoiceRepository" as TIR
+participant "NotificationRepository +\nUserPushTokenService" as NP
+participant "TenantOnboardingServiceImpl" as TOS
+database DB
+
+== Cron 00:05 hằng ngày — phát hành hoá đơn tiền phòng tới kỳ ==
+CRON -> CRON : (1) generateMonthlyRentInvoices() → generateDueRentInvoices(hôm nay)
+activate CRON
+CRON -> DB : (2) BeginTransaction()
+activate DB
+DB --> CRON : (3) Success
+CRON -> TCR : (4) findByStatusWithPropertyAndTenant(ACTIVE)
+activate TCR
+TCR -> DB : (5) SELECT TenantContract
+DB --> TCR : (6) contracts
+TCR --> CRON : (7) List<TenantContract>
+deactivate TCR
+loop [Mỗi hợp đồng ACTIVE (lỗi từng HĐ chỉ log, không dừng vòng lặp)]
+  CRON -> CRON : (8) ContractBillingCalendar.shouldIssueRegularRent(hôm nay, tháng, HĐ)\n— chưa tới ngày phát hành thì bỏ qua
+  CRON -> TIR : (9) findByTenantContractIdAndInvoiceTypeAndBillingYearAndBillingMonth(RENT)
+  activate TIR
+  TIR -> DB : (10) SELECT TenantInvoice
+  DB --> TIR : (11) existing / empty
+  TIR --> CRON : (12) Optional
+  deactivate TIR
+  opt [Chưa có hoá đơn tháng này và HĐ đã có tenant]
+    CRON -> CRON : (13) amount = RentFirstCycleCalculator.regularRentAmount(HĐ, tháng)\n(bỏ qua nếu ≤ 0); dueDate = regularDueDate(tháng)
+    CRON -> TIR : (14) save(TenantInvoice "HD-RENT-{contractId}-{yyyy-MM}",\ncycleType REGULAR, status PENDING, autoIssued = true)
+    activate TIR
+    TIR -> DB : (15) INSERT TenantInvoice
+    DB --> TIR : (16) OK
+    TIR --> CRON : (17) invoice
+    deactivate TIR
+    CRON -> NP : (18) sendNotification(RENT_ISSUED, "Hoá đơn tiền phòng đã có — cần thanh toán")
+    activate NP
+    NP -> DB : (19) INSERT Notification
+    DB --> NP : (20) OK
+    NP --> CRON : (21) done (+ Expo push)
+    deactivate NP
+  end
+end
+CRON -> DB : (22) CommitTransaction()
+DB --> CRON : (23) Committed
+deactivate DB
+deactivate CRON
+
+== Cron 00:10 — nhắc trước ngày phát hành ==
+CRON -> CRON : (24) remindUpcomingRent(hôm nay)
+activate CRON
+CRON -> CRON : (25) Tính daysUntilIssue tới ngày phát hành kỳ sau;\nchỉ chạy khi 1 ≤ ngày còn lại ≤ issueReminderLeadDays (mặc định 2)
+CRON -> TCR : (26) findByStatusWithPropertyAndTenant(ACTIVE)
+activate TCR
+TCR --> CRON : (27) contracts
+deactivate TCR
+loop [Mỗi HĐ chưa nhắc hôm nay (lastIssueReminderDate) và sẽ được phát hành kỳ tới]
+  CRON -> NP : (28) Notification nhắc khách chuẩn bị (chống trùng bằng dedupeKey)
+  CRON -> TCR : (29) save(lastIssueReminderDate = hôm nay)
+end
+deactivate CRON
+
+== Kích hoạt hợp đồng → phát hành tiền nhà kỳ đầu / bù các tháng thiếu ==
+TOS -> TBS : (30) generateProratedRentForNewContract(contract)\n(gọi từ onboardTenant ACTIVE ngay hoặc activateContract — file 25, 27)
+activate TBS
+TBS -> TBS : (31) Xác định tháng của startDate (firstCycleMonth)
+alt [firstCycleMonth ở tương lai]
+  TBS -> TBS : (32) không phát hành (tiền nhà đã / sẽ thu qua QR onboard)
+else [firstCycleMonth trước tháng hiện tại]
+  loop [Mỗi tháng từ firstCycleMonth + 1 đến tháng hiện tại]
+    TBS -> TIR : (32') issueRegularRentIfAbsent(): bỏ qua nếu quá endDate / đã có;\nsave(TenantInvoice REGULAR, cộng dồn số ngày bị hoãn từ kỳ đầu nếu có)
+    activate TIR
+    TIR -> DB : (33') INSERT TenantInvoice
+    DB --> TIR : (34') OK
+    deactivate TIR
+  end
+else [firstCycleMonth = tháng hiện tại]
+  TBS -> TIR : (32'') Đã thu kỳ đầu qua HD-ONBOARD hoặc đã có hoá đơn tháng này → bỏ qua
+  TBS -> TBS : (33'') RentFirstCycleCalculator.calculate(): số ngày thuê / số ngày trong tháng;\nnếu bị hoãn sang tháng sau hoặc số tiền ≤ 0 → không phát hành
+  TBS -> TIR : (34'') save(TenantInvoice cycleType FIRST, status PENDING,\ndueDate = hôm nay + firstCycleGraceDays, note chứa công thức)
+  activate TIR
+  TIR -> DB : (35'') INSERT TenantInvoice
+  DB --> TIR : (36'') OK
+  deactivate TIR
+end
+TBS --> TOS : (37) done
+deactivate TBS
+
+== Manager phát hành hoá đơn tiền nhà thủ công ==
+Manager -> FE : (38) Chọn tháng, số tiền, hạn thanh toán → "Phát hành hoá đơn tiền nhà"
+FE -> C : (39) POST /api/v1/properties/{propertyId}/rooms/{roomId}/rent-invoices\nhoặc /properties/{propertyId}/rent-invoices
+activate C
+C -> TBS : (40) createManagerRentInvoice(propertyId, roomId, request)
+activate TBS
+TBS -> PAS : (41) assertCanManageProperty(propertyId)
+activate PAS
+PAS --> TBS : (42) OK / Forbidden
+deactivate PAS
+TBS -> TCR : (43) loadAndValidateContract(propertyId, roomId, contractId)
+activate TCR
+TCR -> DB : (44) SELECT TenantContract
+DB --> TCR : (45) contract
+TCR --> TBS : (46) contract
+deactivate TCR
+alt [Tháng hiện tại nhưng đã quá hạn chót phát hành / HĐ không hợp lệ]
+  TBS --> C : BusinessException UTILITY_WINDOW_CLOSED …
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> TIR : (47) findByTenantContractIdAndInvoiceTypeAndBillingYearAndBillingMonth(RENT)
+activate TIR
+TIR -> DB : (48) SELECT TenantInvoice
+DB --> TIR : (49) existing / empty
+TIR --> TBS : (50) Optional
+deactivate TIR
+alt [Kỳ đã PAID / đã có hoá đơn chưa huỷ]
+  TBS --> C : BusinessException PERIOD_ALREADY_SETTLED / INVOICE_ALREADY_EXISTS
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+alt [Số tiền ≠ giá thuê trong hợp đồng]
+  TBS --> C : BusinessException "Số tiền không khớp với giá thuê trong hợp đồng"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> TIR : (51) save(TenantInvoice REGULAR, status PENDING,\nautoIssued = false, dueDate theo request)
+activate TIR
+TIR -> DB : (52) INSERT TenantInvoice
+DB --> TIR : (53) OK
+TIR --> TBS : (54) invoice
+deactivate TIR
+TBS --> C : (55) TenantInvoiceResponse
+deactivate TBS
+C --> FE : (56) 200 OK
+deactivate C
+FE --> Manager : (57) Hoá đơn tiền nhà đã phát hành (khách thanh toán — file 16)
+
+@enduml

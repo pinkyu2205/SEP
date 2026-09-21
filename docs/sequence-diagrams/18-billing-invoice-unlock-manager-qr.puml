@@ -1,0 +1,161 @@
+@startuml InvoiceUnlockManagerQr
+title Figure — Billing: Admin cấp mã mở khoá → Manager tạo QR thu hộ (tiền mặt / trả hộ) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Admin
+actor Manager
+participant "Front-end" as FE
+participant "InvoiceUnlockController" as UC
+participant "InvoiceUnlockServiceImpl" as US
+participant "ManagerBillingController" as BC
+participant "TenantBillingServiceImpl" as TBS
+participant "InvoiceUnlockPasscodeRepository" as PR
+participant "InvoiceUnlockTokenRepository" as TR
+participant "InvoiceUnlockFailCounterRepository" as FR
+participant "PayosService" as PAYOS
+database DB
+
+== Bước A — Admin sinh mã mở khoá ==
+Admin -> FE : (1) Chọn hoá đơn + mục đích (CASH_COLLECT / PROXY_PAY) → "Tạo mã"
+FE -> UC : (2) POST /api/v1/admin/invoice-unlock/passcodes
+activate UC
+UC -> US : (3) generatePasscode(adminId, request)
+activate US
+US -> DB : (4) SELECT TenantInvoice (phải tồn tại)
+DB --> US : (5) invoice
+US -> PR : (6) countByCreatedByAndCreatedAtAfter(admin, now − 1h)
+activate PR
+PR -> DB : (7) SELECT COUNT
+DB --> PR : (8) số mã đã tạo
+PR --> US : (9) count
+deactivate PR
+alt [≥ 20 mã trong 1 giờ]
+  US --> UC : 429 TOO_MANY_REQUESTS
+  UC --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+US -> PR : (10) generateUniqueCode() (6 chữ số) + save(passcode,\nexpiresAt = now + ttl (mặc định 15 phút, tối đa 60))
+activate PR
+PR -> DB : (11) INSERT InvoiceUnlockPasscode
+DB --> PR : (12) OK
+PR --> US : (13) passcode
+deactivate PR
+US --> UC : (14) InvoiceUnlockPasscodeResponse (mã 6 số)
+deactivate US
+UC --> FE : (15) 200 OK
+deactivate UC
+FE --> Admin : (16) Hiển thị mã — gửi cho manager
+
+== Bước B — Manager nhập mã để mở khoá ==
+Manager -> FE : (17) Nhập mã 6 số cho hoá đơn
+FE -> UC : (18) POST /api/v1/manager/invoice-unlock/verify
+activate UC
+UC -> US : (19) verifyPasscode(managerId, request)
+activate US
+US -> DB : (20) BeginTransaction()
+activate DB
+DB --> US : (21) Success
+US -> DB : (22) SELECT TenantInvoice\n+ assertManagerCanAccessInvoice (đúng manager phụ trách nhà)
+DB --> US : (23) invoice
+US -> FR : (24) findById(managerId, invoiceId) — bộ đếm nhập sai
+activate FR
+FR -> DB : (25) SELECT InvoiceUnlockFailCounter
+DB --> FR : (26) counter
+FR --> US : (27) counter
+deactivate FR
+alt [Đang bị khoá (lockedUntil > now)]
+  US --> UC : 429 "Đã nhập sai quá nhiều lần. Thử lại sau 15 phút"
+  UC --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+US -> PR : (28) findUsableByCode(code, now)
+activate PR
+PR -> DB : (29) SELECT InvoiceUnlockPasscode
+DB --> PR : (30) passcode / null
+PR --> US : (31) passcode?
+deactivate PR
+alt [Mã đúng và đúng hoá đơn]
+  US -> PR : (32) save(passcode: usedAt, usedBy)
+  US -> FR : (33) reset failCount = 0, lockedUntil = null
+  US -> TR : (34) save(InvoiceUnlockToken UUID, hạn 15 phút,\npurpose, unlockedByAdmin)
+  activate TR
+  TR -> DB : (35) INSERT InvoiceUnlockToken
+  DB --> TR : (36) OK
+  deactivate TR
+  US -> DB : (37) INSERT InvoiceUnlockLog (UNLOCKED)
+  DB --> US : (38) OK
+else [Mã sai / hết hạn nhưng có token cũ còn hạn chưa dùng]
+  US -> TR : (32') findReusable(...) → trả lại token cũ
+else [Mã sai / hết hạn]
+  US -> FR : (32'') failCount + 1 (đủ 3 lần → khoá 15 phút)
+  US --> UC : 403 "Mã không đúng hoặc đã hết hạn"
+  UC --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+US -> DB : (39) CommitTransaction()
+DB --> US : (40) Committed
+deactivate DB
+US --> UC : (41) InvoiceUnlockVerifyResponse (unlockToken)
+deactivate US
+UC --> FE : (42) 200 OK
+deactivate UC
+FE --> Manager : (43) Mở khoá thành công
+
+== Bước C — Manager tạo QR thu hộ ==
+Manager -> FE : (44) Chọn "Thu tiền mặt" hoặc "Trả hộ" (tên + SĐT người trả)
+FE -> BC : (45) POST /api/v1/manager/invoices/{id}/payment-qr\nManagerPaymentQrRequest (unlockToken)
+activate BC
+BC -> TBS : (46) createManagerPaymentQr(managerId, invoiceId, request)
+activate TBS
+TBS -> DB : (47) BeginTransaction()
+activate DB
+DB --> TBS : (48) Success
+TBS -> DB : (49) SELECT TenantInvoice + assertManagerCanAccessInvoice
+DB --> TBS : (50) invoice
+alt [Hoá đơn đã PAID / CANCELLED]
+  TBS --> BC : BusinessException
+  BC --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> TR : (51) findByToken(unlockToken)
+activate TR
+TR -> DB : (52) SELECT InvoiceUnlockToken
+DB --> TR : (53) token
+TR --> TBS : (54) token
+deactivate TR
+alt [Token không tồn tại / đã dùng / hết hạn /\nkhông thuộc manager / không khớp hoá đơn / không khớp mục đích /\nPROXY_PAY thiếu tên người trả]
+  TBS --> BC : BusinessException
+  BC --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> PAYOS : (55) createPayosOrder(): vô hiệu QR ACTIVE cũ,\ncreatePaymentLink(orderCode, amount, code, expiredAt)
+activate PAYOS
+PAYOS --> TBS : (56) checkoutUrl + qrCode
+deactivate PAYOS
+TBS -> DB : (57) INSERT TenantInvoicePayosOrder\n(purpose CASH_COLLECT / PROXY_PAY, payerName, payerPhone)\nUPDATE TenantInvoice (payos fields)
+DB --> TBS : (58) OK
+TBS -> TR : (59) save(token: usedAt = now)
+TBS -> DB : (60) INSERT InvoiceUnlockLog (QR_CREATED)
+DB --> TBS : (61) OK
+break [Lỗi nghiệp vụ / hệ thống]
+  TBS -> DB : RollbackTransaction()
+  DB --> TBS : Rolled back
+  TBS --> BC : Exception
+  BC --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+TBS -> DB : (62) CommitTransaction()
+DB --> TBS : (63) Committed
+deactivate DB
+TBS --> BC : (64) ManagerPaymentQrResponse\n(qrCode, checkoutUrl, orderCode, expiresAt)
+deactivate TBS
+BC --> FE : (65) 200 OK
+deactivate BC
+FE --> Manager : (66) Hiển thị QR cho khách quét\n(khi PayOS báo về → xem file 16, bước B–C:\ncontext MANAGER_CASH / PROXY được ghi vào TenantPayment)
+
+@enduml

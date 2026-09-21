@@ -1,0 +1,30 @@
+@startuml InvoiceDisputeState
+title Figure — Billing: khiếu nại hoá đơn điện nước (InvoiceDisputeStatus) State Diagram
+
+skinparam shadowing false
+skinparam ArrowFontSize 11
+skinparam maxMessageSize 170
+skinparam state {
+  BackgroundColor #F8FAFC
+  BorderColor #475569
+  ArrowColor #334155
+}
+hide empty description
+
+[*] --> OPEN : Tenant khiếu nại hoá đơn điện / nước\n(POST /tenant/me/invoices/{id}/dispute)\n/ hoá đơn OVERDUE → PENDING, đóng băng nhắc nợ và phí trễ
+
+OPEN --> WITHDRAWN : Tenant tự rút khiếu nại\n/ ghi resolvedAt, "Khách tự rút khiếu nại."
+OPEN --> ACCEPTED : Admin duyệt (outcome = ACCEPTED)\n/ có thể sửa chỉ số + đơn giá → tính lại tiền\n[đã trả, tổng giảm] → sinh khoản tín dụng hoàn\n[đã trả, tổng tăng] → hoá đơn PENDING lại\n[chưa trả] → gia hạn ân hạn
+OPEN --> REJECTED : Admin bác (outcome = REJECTED)\n/ gia hạn ân hạn (REJECT_GRACE_DAYS) để khách trả
+
+WITHDRAWN --> [*]
+ACCEPTED --> [*]
+REJECTED --> [*]
+
+note right of OPEN
+  Khi còn OPEN: hoá đơn bị "đóng băng" — cron không đánh OVERDUE,
+  không nhắc, không đề nghị chấm dứt hợp đồng.
+  Kết luận bắt buộc là ACCEPTED hoặc REJECTED, giá trị khác bị từ chối.
+end note
+
+@enduml

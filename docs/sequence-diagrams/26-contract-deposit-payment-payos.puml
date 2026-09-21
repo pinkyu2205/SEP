@@ -1,0 +1,155 @@
+@startuml ContractDepositPayment
+title Figure — Contract: Thu cọc + tiền nhà kỳ đầu qua PayOS (onboard) Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+actor Tenant
+participant "Front-end" as FE
+participant "TenantContractActionController" as C
+participant "TenantOnboardingServiceImpl" as S
+participant "TenantContractRepository" as TCR
+participant "PayosService" as PAYOS
+participant "PayosWebhookController" as WH
+participant "TenantInvoiceRepository /\nTenantPaymentRepository" as TIR
+participant "TenantBillingServiceImpl" as TBS
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+database DB
+
+== Bước A — Manager tạo QR thu cọc ==
+Manager -> FE : (1) Mở hợp đồng DRAFT / PENDING → "Thu cọc"
+FE -> C : (2) POST /api/v1/tenant-contracts/{id}/deposit-payment
+activate C
+C -> S : (3) createDepositPayment(contractId)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TCR : (6) findContract(contractId)
+activate TCR
+TCR -> DB : (7) SELECT TenantContract
+DB --> TCR : (8) contract
+TCR --> S : (9) contract
+deactivate TCR
+
+opt [Hợp đồng đang DRAFT]
+  S -> S : (10) ensureRoomAvailableForDeposit(); moveInDate ≥ hôm nay\n→ status = PENDING
+  alt [Phòng không còn trống / ngày vào ở không hợp lệ]
+    S --> C : BusinessException
+    C --> FE : Error response
+    FE --> Manager : Hiển thị lỗi
+  end
+end
+S -> S : (11) ensureDepositPaymentAllowed(contract)\n(chưa PAID, đã qua duyệt giá nếu có…)
+S -> S : (12) deposit = resolveDepositAmount()\nfirstRent = resolveFirstRentAmount() (pro-rata kỳ đầu)\ntotal = deposit + firstRent
+alt [total ≤ 0]
+  S --> C : BusinessException "Số tiền thanh toán onboard không hợp lệ"
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> PAYOS : (13) createPaymentLink(orderCode = now(ms), total, "Onboard HD {id}")
+activate PAYOS
+PAYOS --> S : (14) checkoutUrl + qrCode
+deactivate PAYOS
+S -> TCR : (15) save(contract: payosOrderCode, paymentStatus = PENDING,\nonboardQrAmount / DepositAmount / FirstRentAmount)
+activate TCR
+TCR -> DB : (16) UPDATE TenantContract
+DB --> TCR : (17) OK
+deactivate TCR
+S -> DB : (18) CommitTransaction()
+DB --> S : (19) Committed
+deactivate DB
+S --> C : (20) TenantContractResponse (+ payosCheckoutUrl, payosQrCode)
+deactivate S
+C --> FE : (21) 200 OK
+deactivate C
+FE --> Manager : (22) Hiển thị QR cho khách quét
+
+== Bước B — Khách chuyển khoản, PayOS gọi webhook ==
+Tenant -> PAYOS : (23) Quét QR và thanh toán
+PAYOS -> WH : (24) POST /api/v1/payos/webhook (code "00", chữ ký HMAC)
+activate WH
+WH -> PAYOS : (25) verifyWebhookSignature()
+activate PAYOS
+PAYOS --> WH : (26) true
+deactivate PAYOS
+WH -> S : (27) markDepositPaid(orderCode)
+activate S
+S -> DB : (28) BeginTransaction()
+activate DB
+DB --> S : (29) Success
+S -> TCR : (30) findByPayosOrderCode(orderCode)
+activate TCR
+TCR -> DB : (31) SELECT TenantContract
+DB --> TCR : (32) contract / empty
+TCR --> S : (33) Optional<TenantContract>
+deactivate TCR
+
+S -> S : (34) completeDepositPayment(contract, orderCode, "PAYOS")\n(idempotent — PayOS có thể retry)
+S -> TCR : (35) save(contract: paymentStatus = PAID,\npaidAt, depositPaidAt, depositMethod)
+activate TCR
+TCR -> DB : (36) UPDATE TenantContract
+DB --> TCR : (37) OK
+deactivate TCR
+opt [Hợp đồng nháp — chưa có tenant nhưng có SĐT nháp]
+  S -> DB : (38) getOrCreateTenant(phone, họ tên, CCCD, …)\nINSERT User + Tenant (tài khoản chưa kích hoạt)
+  DB --> S : (39) Tenant
+end
+S -> TIR : (40) findByCode("HD-ONBOARD-{contractId}") — đã có thì bỏ qua
+activate TIR
+TIR -> DB : (41) SELECT TenantInvoice
+DB --> TIR : (42) exists / empty
+TIR --> S : (43) Optional
+deactivate TIR
+opt [Chưa có hoá đơn onboard]
+  S -> DB : (44) INSERT TenantInvoice (type OTHER, status PAID, cọc + tiền nhà kỳ đầu)\nINSERT TenantPayment
+  DB --> S : (45) OK
+  S -> TBS : (46) recordPaidFirstRentFromOnboard(contract, orderCode, method, paidAt)
+  activate TBS
+  TBS -> DB : (47) ghi hoá đơn RENT kỳ FIRST đã thu
+  DB --> TBS : (48) OK
+  deactivate TBS
+end
+S -> NR : (49) notifyDepositPaid(contract) → manager / tenant / admin
+activate NR
+NR -> DB : (50) INSERT Notification
+DB --> NR : (51) OK
+deactivate NR
+S -> UPT : (52) sendToUser(...)
+activate UPT
+UPT --> S : (53) Expo push
+deactivate UPT
+S -> DB : (54) CommitTransaction()
+DB --> S : (55) Committed
+deactivate DB
+S --> WH : (56) done
+deactivate S
+WH --> PAYOS : (57) 200 {success: true}
+deactivate WH
+
+== Bước C — Manager bấm "Kiểm tra thanh toán" khi webhook chưa tới ==
+Manager -> FE : (58) "Kiểm tra thanh toán"
+FE -> C : (59) POST /api/v1/tenant-contracts/{id}/check-payment
+activate C
+C -> S : (60) syncPaymentStatus(contractId)
+activate S
+S -> PAYOS : (61) getPaymentStatus(payosOrderCode)
+activate PAYOS
+PAYOS --> S : (62) PAID / khác
+deactivate PAYOS
+opt [PAID]
+  S -> S : (63) completeDepositPayment() — như bước 34–55
+end
+S --> C : (64) TenantContractResponse
+deactivate S
+C --> FE : (65) 200 OK
+deactivate C
+FE --> Manager : (66) paymentStatus = PAID → sang bước OTP xác nhận (file 27)
+
+@enduml

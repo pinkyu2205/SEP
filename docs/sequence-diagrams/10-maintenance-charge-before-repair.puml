@@ -1,0 +1,111 @@
+@startuml MaintenanceChargeBeforeRepair
+title Figure — Maintenance: Manager lập hoá đơn thu khách trước khi sửa (charge) + khách thanh toán Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Manager
+actor Tenant
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "TenantPendingChargeServiceImpl" as TPC
+participant "PayosService" as PAYOS
+participant "TenantPendingChargeRepository" as PCR
+participant "TenantInvoiceRepository" as TIR
+participant "PayosWebhookController" as WH
+database DB
+
+== Manager lập hoá đơn ==
+Manager -> FE : (1) Nhập hãng/số/ngày hoá đơn, số tiền → "Lập hoá đơn"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/charge\nMaintenanceChargeRequest
+activate C
+C -> S : (3) chargeBeforeRepair(id, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> S : (6) findActive(id) + requireManagerAccess(req)
+
+alt [companyAbsorbedFault = true / đã có chargeInvoiceId /\nthiếu vendor, ngày HĐ / amount ≤ 0 khi không thay thiết bị]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> S : (7) Ghi invoiceVendor, invoiceNumber,\ninvoiceDate, invoiceAmount lên phiếu\nresolveMaintenanceChargeAmount():\nthay thiết bị → estimatedDamageAmount + invoiceAmount\nkhông thay → invoiceAmount
+
+S -> TPC : (8) createAndIssueMaintenanceCharge(\ncontract, amount, requestId, note)
+activate TPC
+TPC -> PCR : (9) save(TenantPendingCharge\ncategory=MAINTENANCE, status=PENDING)
+activate PCR
+PCR -> DB : (10) INSERT TenantPendingCharge
+DB --> PCR : (11) OK
+PCR --> TPC : (12) charge
+deactivate PCR
+TPC -> TIR : (13) save(TenantInvoice type=MAINTENANCE,\nstatus=PENDING, dueDate = +N ngày)
+activate TIR
+TIR -> DB : (14) INSERT TenantInvoice
+DB --> TIR : (15) OK
+TIR --> TPC : (16) invoice
+deactivate TIR
+TPC -> PCR : (17) charge.status = INVOICED, gắn invoice
+activate PCR
+PCR -> DB : (18) UPDATE TenantPendingCharge
+DB --> PCR : (19) OK
+deactivate PCR
+opt [PayOS đã cấu hình]
+  TPC -> PAYOS : (20) createPaymentLink(orderCode, grandTotal, code)
+  activate PAYOS
+  PAYOS --> TPC : (21) checkoutUrl + qrCode\n(lỗi chỉ bị log.warn, không rollback)
+  deactivate PAYOS
+  TPC -> TIR : (22) save(payosOrderCode, checkoutUrl, qrCode)
+  activate TIR
+  TIR -> DB : (23) UPDATE TenantInvoice
+  DB --> TIR : (24) OK
+  deactivate TIR
+end
+TPC --> S : (25) TenantInvoiceResponse
+deactivate TPC
+
+S -> S : (26) req.chargeInvoiceId = invoice.id\nsave(req) + INSERT MaintenanceTimeline\n("tạo hoá đơn tạm tính, chờ thanh toán")
+S -> DB : (27) UPDATE MaintenanceRequest\nINSERT MaintenanceTimeline
+DB --> S : (28) OK
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+
+S -> DB : (29) CommitTransaction()
+DB --> S : (30) Committed
+deactivate DB
+S --> C : (31) MaintenanceRequestResponse + issuedInvoice
+deactivate S
+C --> FE : (32) 200 OK
+deactivate C
+FE --> Manager : (33) Hiển thị QR / link thanh toán cho khách
+
+== Khách thanh toán ==
+Tenant -> FE : (34) Mở hoá đơn bảo trì → quét QR PayOS
+FE -> WH : (35) PayOS gọi POST /api/v1/payos/webhook\n(code "00" khi thanh toán thành công, có chữ ký HMAC)
+activate WH
+WH -> WH : (36) verifyWebhookSignature(data, signature)
+WH -> TIR : (37) TenantBillingService.markInvoicePaidByPayosOrderCode(orderCode)\n(chi tiết xem file 16, bước B)
+activate TIR
+TIR -> DB : (38) UPDATE TenantInvoice → PAID, paidAt, method\nINSERT TenantPayment
+DB --> TIR : (39) OK
+TIR --> WH : (40) done
+deactivate TIR
+WH --> FE : (41) 200 {success: true}
+deactivate WH
+FE --> Tenant : (42) Hoá đơn chuyển PAID —\nManager có thể bắt đầu sửa / bàn giao
+
+@enduml

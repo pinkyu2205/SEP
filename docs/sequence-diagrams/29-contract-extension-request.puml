@@ -1,0 +1,237 @@
+@startuml ContractExtensionRequest
+title Figure — Contract: Tenant xin gia hạn hợp đồng — Manager ghi ý kiến — Admin duyệt / từ chối Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor Tenant
+actor Manager
+actor Admin
+participant "Front-end" as FE
+participant "ExtensionRequestController" as C
+participant "ExtensionRequestServiceImpl" as S
+participant "ExtensionRequestRepository" as ER
+participant "TenantContractRepository" as TCR
+participant "InboundContractRepository" as ICR
+participant "TenantOnboardingServiceImpl" as TOS
+participant "UserRepository" as UR
+participant "NotificationRepository +\nPushNotificationService" as NP
+database DB
+
+== Tenant xin gia hạn ==
+Tenant -> FE : (1) Chọn số tháng muốn gia hạn (≤ maxMonths) + ghi chú → "Gửi đơn"
+FE -> C : (2) POST /api/v1/tenant/me/contracts/{contractId}/extension-requests\nCreateExtensionRequest
+activate C
+C -> S : (3) createRequest(tenantUserId, contractId, request)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> TCR : (6) loadOwnedContract(contractId, tenantUserId)
+activate TCR
+TCR -> DB : (7) SELECT TenantContract
+DB --> TCR : (8) contract
+TCR --> S : (9) contract
+deactivate TCR
+
+alt [HĐ không thuộc khách / không ACTIVE / đã hết hạn nộp đơn\n(từ ngày cuối − 1 của HĐ)]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> ER : (10) existsByTenantContractIdAndStatus(PENDING)
+activate ER
+ER -> DB : (11) SELECT EXISTS ExtensionRequest
+DB --> ER : (12) true / false
+ER --> S : (13) boolean
+deactivate ER
+alt [Đã có đơn đang chờ duyệt]
+  S --> C : BusinessException "Đã có đơn xin gia hạn đang chờ duyệt"
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> ICR : (14) findFirstByPropertyIdOrderByIdDesc(propertyId)
+activate ICR
+ICR -> DB : (15) SELECT InboundContract
+DB --> ICR : (16) lease
+ICR --> S : (17) lease
+deactivate ICR
+S -> S : (18) newEndDate = endDate + N tháng\nInboundLeaseRules.assertOccupancyWindow(moveIn, newEndDate, lease)
+alt [Vượt cửa sổ hợp đồng đầu vào]
+  S --> C : BusinessException "Hiện chưa gia hạn thêm được thời hạn này"
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+
+S -> ER : (19) save(ExtensionRequest status = PENDING, months, newEndDate, note)
+activate ER
+ER -> DB : (20) INSERT ExtensionRequest
+DB --> ER : (21) OK
+ER --> S : (22) saved
+deactivate ER
+
+S -> UR : (23) findByRole(ROLE_ADMIN) / findByRole(ROLE_OWNER)
+activate UR
+UR -> DB : (24) SELECT User
+DB --> UR : (25) admins, owners
+UR --> S : (26) users
+deactivate UR
+S -> NP : (27) sendNotification(EXTENSION_REQUESTED)\ncho manager phụ trách + mọi admin + mọi owner\n(INSERT Notification + push)
+activate NP
+NP -> DB : (28) INSERT Notification
+DB --> NP : (29) OK
+NP --> S : (30) done
+deactivate NP
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> DB : (31) CommitTransaction()
+DB --> S : (32) Committed
+deactivate DB
+S --> C : (33) ExtensionRequestResponse
+deactivate S
+C --> FE : (34) 200 OK
+deactivate C
+FE --> Tenant : (35) Đơn ở trạng thái PENDING
+
+== Tenant rút đơn ==
+Tenant -> FE : (36) "Rút đơn"
+FE -> C : (37) DELETE /api/v1/tenant/me/extension-requests/{requestId}
+activate C
+C -> S : (38) withdrawRequest(tenantUserId, requestId)
+activate S
+S -> ER : (39) findByIdAndTenantUserId()
+activate ER
+ER -> DB : (40) SELECT ExtensionRequest
+DB --> ER : (41) request
+ER --> S : (42) request
+deactivate ER
+alt [Không còn PENDING]
+  S --> C : BusinessException "Chỉ có thể rút đơn đang chờ duyệt"
+  C --> FE : Error response
+  FE --> Tenant : Hiển thị lỗi
+end
+S -> ER : (43) save(status = WITHDRAWN)
+activate ER
+ER -> DB : (44) UPDATE ExtensionRequest
+DB --> ER : (45) OK
+deactivate ER
+S -> NP : (46) sendNotification(EXTENSION_WITHDRAWN) cho manager + mọi admin
+S --> C : (47) ExtensionRequestResponse
+deactivate S
+C --> FE : (48) 200 OK
+deactivate C
+FE --> Tenant : (49) Đơn đã rút
+
+== Manager ghi ý kiến ==
+Manager -> FE : (50) Nhập ý kiến vào đơn đang chờ
+FE -> C : (51) POST /api/v1/manager/extension-requests/{requestId}/note
+activate C
+C -> S : (52) addManagerNote(managerUserId, requestId, request)
+activate S
+S -> ER : (53) findById(requestId)
+activate ER
+ER --> S : (54) request
+deactivate ER
+alt [Không còn PENDING]
+  S --> C : BusinessException
+  C --> FE : Error response
+  FE --> Manager : Hiển thị lỗi
+end
+S -> ER : (55) save(managerNote)
+activate ER
+ER -> DB : (56) UPDATE ExtensionRequest
+DB --> ER : (57) OK
+deactivate ER
+S --> C : (58) ExtensionRequestResponse
+deactivate S
+C --> FE : (59) 200 OK
+deactivate C
+FE --> Manager : (60) Đã lưu ý kiến (khách không thấy ý kiến này)
+
+== Admin duyệt ==
+Admin -> FE : (61) "Duyệt"
+FE -> C : (62) POST /api/v1/admin/extension-requests/{requestId}/approve
+activate C
+C -> S : (63) approveRequest(adminUserId, requestId)
+activate S
+S -> DB : (64) BeginTransaction()
+activate DB
+DB --> S : (65) Success
+S -> ER : (66) findById(requestId)
+activate ER
+ER --> S : (67) request
+deactivate ER
+alt [Không còn PENDING]
+  S --> C : BusinessException "Chỉ có thể duyệt đơn đang chờ (PENDING)"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> S : (68) status = APPROVED, reviewedAt, reviewedBy
+S -> TOS : (69) extendContract(contractId, newEndDate, newRent = null)\n(giữ nguyên tiền thuê — xem file 28)
+activate TOS
+TOS -> DB : (70) UPDATE TenantContract.endDate + thông báo gia hạn
+DB --> TOS : (71) OK
+TOS --> S : (72) TenantContractResponse
+deactivate TOS
+S -> ER : (73) save(request)
+activate ER
+ER -> DB : (74) UPDATE ExtensionRequest
+DB --> ER : (75) OK
+deactivate ER
+S -> NP : (76) sendNotification(EXTENSION_APPROVED) cho tenant\n+ EXTENSION_APPROVED_MGR cho manager
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> DB : (77) CommitTransaction()
+DB --> S : (78) Committed
+deactivate DB
+S --> C : (79) ExtensionRequestResponse
+deactivate S
+C --> FE : (80) 200 OK
+deactivate C
+FE --> Admin : (81) Đơn APPROVED, hợp đồng đã gia hạn
+
+== Admin từ chối ==
+Admin -> FE : (82) Nhập lý do → "Từ chối"
+FE -> C : (83) POST /api/v1/admin/extension-requests/{requestId}/reject
+activate C
+C -> S : (84) rejectRequest(adminUserId, requestId, request)
+activate S
+S -> ER : (85) findById(requestId)
+activate ER
+ER --> S : (86) request
+deactivate ER
+alt [Không còn PENDING]
+  S --> C : BusinessException "Chỉ có thể từ chối đơn đang chờ (PENDING)"
+  C --> FE : Error response
+  FE --> Admin : Hiển thị lỗi
+end
+S -> ER : (87) save(status = REJECTED, reviewedAt, reviewedBy, rejectReason)
+activate ER
+ER -> DB : (88) UPDATE ExtensionRequest
+DB --> ER : (89) OK
+deactivate ER
+S -> NP : (90) sendNotification(EXTENSION_REJECTED) cho tenant\n+ EXTENSION_REJECTED_MGR cho manager
+S --> C : (91) ExtensionRequestResponse
+deactivate S
+C --> FE : (92) 200 OK
+deactivate C
+FE --> Admin : (93) Đơn REJECTED
+
+@enduml

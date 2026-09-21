@@ -1,0 +1,168 @@
+@startuml MaintenanceCancel
+title Figure — Maintenance: Huỷ phiếu (Tenant / Manager) và Cron tự huỷ khi manager không tới Sequence Diagram
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 180
+skinparam ParticipantPadding 8
+skinparam BoxPadding 6
+
+actor "Tenant / Manager" as Actor
+participant "Front-end" as FE
+participant "MaintenanceController" as C
+participant "MaintenanceServiceImpl" as S
+participant "MaintenanceRequestRepository" as MR
+participant "RoomRepository" as RR
+participant "NotificationRepository" as NR
+participant "UserPushTokenService" as UPT
+participant "RealtimeEventService" as RT
+participant "Scheduler (cron 10 phút)" as CRON
+database DB
+
+== Huỷ thủ công ==
+Actor -> FE : (1) Nhập lý do → "Huỷ yêu cầu"
+FE -> C : (2) PUT /api/v1/maintenance/{id}/cancel?reason=...
+activate C
+C -> S : (3) cancel(id, reason)
+activate S
+S -> DB : (4) BeginTransaction()
+activate DB
+DB --> S : (5) Success
+
+S -> MR : (6) findActive(id)
+activate MR
+MR -> DB : (7) SELECT MaintenanceRequest
+DB --> MR : (8) MaintenanceRequest
+MR --> S : (9) req
+deactivate MR
+
+alt [Role = TENANT]
+  S -> S : (10) requireTenantOwner(req)
+  alt [status ≠ OPEN]
+    S --> C : BusinessException "Chỉ huỷ được yêu cầu đang chờ (OPEN)"
+    C --> FE : Error response
+    FE --> Actor : Hiển thị lỗi
+  end
+else [Role = MANAGER / ADMIN]
+  S -> S : (10') requireManagerAccess(req)
+  alt [status = CLOSED / CANCELLED]
+    S --> C : BusinessException "Không thể huỷ ở trạng thái này"
+    C --> FE : Error response
+    FE --> Actor : Hiển thị lỗi
+  end
+end
+
+S -> MR : (11) save(req: status = CANCELLED)
+activate MR
+MR -> DB : (12) UPDATE MaintenanceRequest
+DB --> MR : (13) OK
+MR --> S : (14) saved
+deactivate MR
+
+S -> RR : (15) restoreRoomStatus(req)\n(trả phòng về trạng thái trước bảo trì)
+activate RR
+RR -> DB : (16) UPDATE Room
+DB --> RR : (17) OK
+RR --> S : (18) done
+deactivate RR
+S -> DB : (19) INSERT MaintenanceTimeline (old → CANCELLED)
+DB --> S : (20) OK
+
+alt [Manager huỷ]
+  S -> NR : (21) notifyTenant("Yêu cầu bảo trì đã bị huỷ")
+  activate NR
+  NR -> DB : (22) INSERT Notification MAINTENANCE_CANCELLED
+  DB --> NR : (23) OK
+  NR --> S : (24) saved
+  deactivate NR
+  S -> UPT : (25) sendToUser(tenant)
+  activate UPT
+  UPT --> S : (26) Expo push
+  deactivate UPT
+  S -> RT : (27) publishMaintenanceEvent(CANCELLED_BY_MANAGER)
+  activate RT
+  RT --> S : (28) STOMP event
+  deactivate RT
+else [Tenant tự huỷ]
+  S -> NR : (21') notifyPropertyManager("Khách thuê đã huỷ yêu cầu")
+  activate NR
+  NR -> DB : (22') INSERT Notification MAINTENANCE_CANCELLED
+  DB --> NR : (23') OK
+  NR --> S : (24') saved
+  deactivate NR
+  S -> UPT : (25') sendToUser(manager)
+  activate UPT
+  UPT --> S : (26') Expo push
+  deactivate UPT
+  S -> RT : (27') publishMaintenanceEvent(CANCELLED_BY_TENANT)
+  activate RT
+  RT --> S : (28') STOMP event
+  deactivate RT
+end
+
+break [Lỗi nghiệp vụ / hệ thống]
+  S -> DB : RollbackTransaction()
+  DB --> S : Rolled back
+  S --> C : Exception
+  C --> FE : Error response
+  FE --> Actor : Hiển thị lỗi
+end
+
+S -> DB : (29) CommitTransaction()
+DB --> S : (30) Committed
+deactivate DB
+S --> C : (31) MaintenanceRequestResponse
+deactivate S
+C --> FE : (32) 200 OK
+deactivate C
+FE --> Actor : (33) Phiếu chuyển sang CANCELLED
+
+== Cron tự huỷ — manager không xác nhận có mặt sau 2 giờ ==
+CRON -> S : (34) autoCancelNoShowVisitsTask() → autoCancelNoShowVisits()
+activate S
+S -> DB : (35) BeginTransaction()
+activate DB
+DB --> S : (36) Success
+S -> MR : (37) findNoShowVisitsForAutoCancel(now − 2h)
+activate MR
+MR -> DB : (38) SELECT MaintenanceRequest\nstatus=OPEN, visitAppointmentAt < now−2h,\nvisitArrivalConfirmedAt IS NULL
+DB --> MR : (39) danh sách phiếu
+MR --> S : (40) List<MaintenanceRequest>
+deactivate MR
+
+loop [Mỗi phiếu no-show]
+  S -> MR : (41) save(status = CANCELLED)
+  activate MR
+  MR -> DB : (42) UPDATE MaintenanceRequest
+  DB --> MR : (43) OK
+  MR --> S : (44) saved
+  deactivate MR
+  S -> RR : (45) restoreRoomStatus(req)
+  activate RR
+  RR --> S : (46) done
+  deactivate RR
+  S -> DB : (47) INSERT MaintenanceTimeline\n("Tự động huỷ — quá 2 giờ chưa xác nhận có mặt")
+  DB --> S : (48) OK
+  S -> NR : (49) notifyTenant() + notifyPropertyManager()\nMAINTENANCE_CANCELLED
+  activate NR
+  NR -> DB : (50) INSERT Notification ×2
+  DB --> NR : (51) OK
+  NR --> S : (52) saved
+  deactivate NR
+  S -> UPT : (53) sendToUser(tenant, manager)
+  activate UPT
+  UPT --> S : (54) Expo push
+  deactivate UPT
+  S -> RT : (55) publishMaintenanceEvent(SCHEDULE_CHANGED)
+  activate RT
+  RT --> S : (56) STOMP event
+  deactivate RT
+end
+
+S -> DB : (57) CommitTransaction()
+DB --> S : (58) Committed
+deactivate DB
+S --> CRON : (59) số phiếu đã huỷ
+deactivate S
+
+@enduml

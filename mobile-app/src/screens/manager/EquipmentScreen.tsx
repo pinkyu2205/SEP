@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -31,8 +31,8 @@ import {
  * Nguồn dữ liệu hiện tại:
  *   • Nhà      → managerPropertyService.getScopedProperties()  (lọc theo manager đăng nhập)
  *   • Thiết bị → GET /api/v1/properties/{id}/equipments
- *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status-feature
- *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-history-feature
+ *   • Đổi TT   → PATCH /api/v1/equipment/{id}/status
+ *   • Lịch sử  → GET   /api/v1/equipment/{id}/maintenance-history
  *
  * Trạng thái dùng thẳng enum EquipmentStatus của BE (6 giá trị) thay vì bộ 5 nhãn cũ
  * của FE — bộ cũ phải map lossy (replaced/retired đều thành DISPOSED) nên bấm xong
@@ -290,6 +290,17 @@ const EquipmentDetailModal: React.FC<{
                       <Text style={detailStyles.historyCost}>
                         {formatCurrency(Number(record.repairCost))}
                       </Text>
+                    )}
+                    {(record.photoUrls?.length ?? 0) > 0 && (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
+                        {record.photoUrls!.map((uri, i) => (
+                          <Image
+                            key={`${record.id}-${i}`}
+                            source={{ uri }}
+                            style={{ width: 72, height: 72, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider }}
+                          />
+                        ))}
+                      </ScrollView>
                     )}
                   </View>
                 ))
