@@ -9,7 +9,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto, CreateMaintenanceRequestDto } from '@/types';
 import {
   formatDate, showAlert, readApiError,
-  validateEquipmentPhoto, classifyEquipment, requireLiveCapture,
+  validateEquipmentPhoto, classifyEquipment,
   pickEvidenceFromCamera, pickEvidenceFromLibrary, remainingEvidenceSlots,
   formatDurationLabel, EVIDENCE_MAX_FILES, type EvidenceAsset,
 } from '@/utils';
@@ -96,8 +96,16 @@ export const MaintenanceCreateScreen: React.FC = () => {
   // đúng thiết bị đó — không thì chụp đại một tấm gì cũng gửi được yêu cầu.
   const equipmentName = equipment ? equipName(equipment) : undefined;
   const equipClass = equipment ? classifyEquipment(equipmentName) : null;
-  /** Đồ dễ kiếm ảnh sẵn trên mạng (giường, tủ, bàn ghế) — chỉ nhận ảnh chụp tại chỗ. */
-  const liveOnly = !!equipment && requireLiveCapture(equipmentName);
+  /**
+   * 22/09/2026: đổi theo yêu cầu — đã CHỌN thiết bị (dù vào từ quét QR hay từ danh sách
+   * thiết bị) thì cho tải ảnh từ thư viện, KHÔNG gắn thiết bị (báo sự cố chung) mới bắt
+   * buộc chụp/quay tại chỗ. Trước đây còn phân biệt theo loại thiết bị (giường/tủ/bàn ghế
+   * luôn bắt chụp trực tiếp dù có chọn thiết bị, xem `requireLiveCapture`/
+   * `EquipmentClass.liveOnly` trong equipmentPhoto.ts) — bỏ phân biệt đó theo yêu cầu
+   * 22/09/2026; hàm requireLiveCapture/classifyEquipment.liveOnly vẫn giữ lại trong
+   * equipmentPhoto.ts phòng khi cần dùng lại, chỉ không dùng ở màn này nữa.
+   */
+  const liveOnly = !equipment;
   /** Có gắn thiết bị = có căn cứ để đối chiếu ảnh. */
   const needsVerifiedPhoto = !!equipment;
 
