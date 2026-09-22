@@ -717,6 +717,19 @@ export const TicketDetailScreen: React.FC = () => {
   // số này (công ty tự chịu, chỉ lưu tham khảo), không riêng gì lỗi khách.
   const diagnoseAutoDamageAmount = diagnoseNeedsReplacement
     ? computeAutoDamageAmount(replacementEquipment) : null;
+  // 22/09/2026: cảnh báo (không ép buộc) khi chi phí sửa tự nhập vượt giá trị còn lại
+  // của thiết bị — dùng đúng số BE trả (ticket.equipment.remainingDepreciationAmount,
+  // khớp số đang hiện ở thẻ "Thông tin thiết bị" bên trên) để khỏi lệch với số khác
+  // (computeAutoDamageAmount ở trên tính theo ngày, còn BE tính theo tháng).
+  const diagnoseQuotedAmountNum = Number(diagnoseQuotedAmountText.replace(/[^0-9]/g, '')) || 0;
+  const diagnoseRemainingValue = ticket.equipment?.remainingDepreciationAmount ?? null;
+  // Chỉ còn ô nhập cho nhánh "Lỗi do khách" (xem renderDiagnoseForm) — hao mòn tự nhiên
+  // không còn ô này nữa nên không thể vượt gì để cảnh báo.
+  const diagnoseQuotedExceedsValue = diagnoseCause === 'TENANT_MISUSE'
+    && !diagnoseNeedsReplacement
+    && diagnoseQuotedAmountNum > 0
+    && diagnoseRemainingValue != null && diagnoseRemainingValue > 0
+    && diagnoseQuotedAmountNum > diagnoseRemainingValue;
 
   // Cập nhật store + append timeline (đường mock).
   const patchStore = (updates: Partial<MaintenanceTicket>, entry: TimelineEntry) =>
@@ -874,11 +887,18 @@ export const TicketDetailScreen: React.FC = () => {
       showAlert('Chưa phân loại', 'Vui lòng chọn danh mục sự cố trước khi chẩn đoán.');
       return;
     }
+    if (!diagnoseCause) {
+      showAlert('Chưa chọn nguyên nhân', 'Vui lòng chọn "Hao mòn tự nhiên" hoặc "Lỗi do khách".');
+      return;
+    }
     const rawAmount = diagnoseQuotedAmountText.replace(/[^0-9]/g, '');
     const enteredAmount = rawAmount ? Number(rawAmount) : NaN;
-    // 1 lần chi phí duy nhất (BE 21/09/2026). Không thay thiết bị: nhập chi phí sửa chữa,
-    // bắt buộc. Thay thiết bị: không có ô nhập — số đền bù lấy từ diagnoseAutoDamageAmount
-    // (tự tính, không cho nhập tay, xem checkbox trong renderDiagnoseForm).
+    // 22/09/2026: bỏ "chi phí sửa chữa" cho nhánh Hao mòn tự nhiên — chi phí thật (bao
+    // công) giờ chỉ nhập 1 lần duy nhất, lúc nhập ảnh hoá đơn ở bước hoàn tất sửa chữa.
+    // Vẫn phải gửi BE một số hợp lệ (>= 0) cho tham số quotedRepairAmount vì API bắt
+    // buộc field này — 0 chỉ là placeholder, KHÔNG dùng để tính tiền (BE ghi đè bằng số
+    // hoá đơn thật lúc complete()). Nhánh Lỗi do khách vẫn giữ nguyên ô nhập — BE dùng
+    // đúng số này để lập hoá đơn SỚM cho khách (hạn 3 ngày), không thể bỏ ở nhánh này.
     let quotedRepairAmount: number | undefined;
     if (diagnoseNeedsReplacement) {
       if (!diagnoseAutoDamageAmount || diagnoseAutoDamageAmount <= 0) {
@@ -890,16 +910,14 @@ export const TicketDetailScreen: React.FC = () => {
       }
       // Thay mới: BE lấy số đền bù (estimatedDamageAmount) — không còn "chi phí phát sinh thêm".
       quotedRepairAmount = undefined;
+    } else if (diagnoseCause === 'WEAR') {
+      quotedRepairAmount = 0;
     } else {
       if (!Number.isFinite(enteredAmount) || enteredAmount < 0) {
         showAlert('Thiếu chi phí', 'Vui lòng nhập chi phí sửa chữa hợp lệ (>= 0).');
         return;
       }
       quotedRepairAmount = enteredAmount;
-    }
-    if (!diagnoseCause) {
-      showAlert('Chưa chọn nguyên nhân', 'Vui lòng chọn "Hao mòn tự nhiên" hoặc "Lỗi do khách".');
-      return;
     }
 
     let tenantAgreesToPay: boolean | undefined;
@@ -1172,22 +1190,6 @@ export const TicketDetailScreen: React.FC = () => {
         </>
       )}
 
-      {/* BE 21/09/2026: chỉ 1 lần chi phí. Thay mới → số đền bù tự tính ở trên (không nhập thêm
-          "chi phí phát sinh"); không thay → nhập chi phí sửa chữa. */}
-      {!diagnoseNeedsReplacement && (
-        <>
-          <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Chi phí sửa chữa (đ)</Text>
-          <TextInput
-            style={[s.textInput, s.moneyInput]}
-            value={diagnoseQuotedAmountText}
-            onChangeText={t => setDiagnoseQuotedAmountText(formatMoneyInput(t))}
-            placeholder="Nhập chi phí sửa chữa..."
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="numeric"
-          />
-        </>
-      )}
-
       <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Nguyên nhân</Text>
       <View style={s.reviewRow}>
         <TouchableOpacity
@@ -1206,6 +1208,30 @@ export const TicketDetailScreen: React.FC = () => {
 
       {diagnoseCause === 'TENANT_MISUSE' && (
         <>
+          {/* 22/09/2026: chỉ còn ô này cho nhánh "Lỗi do khách" — BE dùng đúng số này để
+              lập hoá đơn SỚM (trước khi sửa, hạn 3 ngày) ngay lúc chẩn đoán, nên vẫn bắt
+              buộc nhập tại đây. Nhánh "Hao mòn tự nhiên" đã bỏ hẳn ô này — chi phí thật
+              lấy từ ảnh hoá đơn nhập lúc hoàn tất sửa chữa (bao công, 1 lần duy nhất). */}
+          {!diagnoseNeedsReplacement && (
+            <>
+              <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Chi phí sửa chữa (đ)</Text>
+              <TextInput
+                style={[s.textInput, s.moneyInput]}
+                value={diagnoseQuotedAmountText}
+                onChangeText={t => setDiagnoseQuotedAmountText(formatMoneyInput(t))}
+                placeholder="Nhập chi phí sửa chữa..."
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="numeric"
+              />
+              {diagnoseQuotedExceedsValue && (
+                <Text style={[s.costHint, { color: '#B45309', fontWeight: '600', marginTop: Spacing.xs }]}>
+                  ⚠️ Chi phí sửa ({fmt(diagnoseQuotedAmountNum)}) đang cao hơn giá trị còn lại của thiết bị
+                  ({fmt(diagnoseRemainingValue)}). Cân nhắc tick "Thiết bị hỏng hoàn toàn — cần thay mới" ở trên
+                  thay vì sửa tiếp.
+                </Text>
+              )}
+            </>
+          )}
           <Text style={[s.cardSectionTitle, { marginTop: Spacing.sm }]}>Lý do</Text>
           <TextInput
             style={s.textInput}
@@ -1876,7 +1902,7 @@ export const TicketDetailScreen: React.FC = () => {
         {/* ── Thông tin thiết bị (BE 21/09/2026: snapshot trên phiếu, xem được không cần quét QR) ── */}
         {!!ticket.equipment && (
           <View style={s.card}>
-            <Text style={s.cardSectionTitle}>🧰 Thiết bị trên phiếu</Text>
+            <Text style={s.cardSectionTitle}>🧰 Thông tin thiết bị</Text>
             <Text style={s.descText}>
               {ticket.equipment.equipmentName || ticket.equipment.catalogName || ticket.equipmentName || `#${ticket.equipment.id}`}
               {ticket.equipment.roomNumber ? ` · Phòng ${ticket.equipment.roomNumber}` : ''}
@@ -2282,11 +2308,16 @@ export const TicketDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* ── "Sửa được ngay" → form Chẩn đoán & báo giá (diagnose(), case OPEN) ── */}
-        {ticket.status === 'open' && diagnoseFormOpen && renderDiagnoseForm(false)}
+        {/* ── "Sửa được ngay" → form Chẩn đoán & báo giá (diagnose(), case OPEN) ──
+             22/09/2026: phải ẩn luôn khi arrivalGateActive (quá 30' chưa chẩn đoán xong,
+             xem ARRIVAL_CONFIRM_TTL_MS) — trước đây chỉ ẩn thẻ "Chọn hướng xử lý" lúc mở
+             form lần đầu, form đã mở rồi thì đứng yên bất chấp gate bật lại, khiến 2 thẻ
+             hiện chồng nhau (thẻ "quét lại" + form chẩn đoán bên dưới). Form tự hiện lại
+             với dữ liệu đã nhập khi gate tắt (quét lại xong). ── */}
+        {ticket.status === 'open' && !arrivalGateActive && diagnoseFormOpen && renderDiagnoseForm(false)}
 
         {/* ── "Mang đi kiểm tra thêm" (sendForInspection()) ─────────── */}
-        {ticket.status === 'open' && inspectionFormOpen && (
+        {ticket.status === 'open' && !arrivalGateActive && inspectionFormOpen && (
           <View style={[s.card, { borderColor: '#0369A1', borderWidth: 1.5 }]}>
             <Text style={s.cardSectionTitle}>📦 Mang thiết bị đi kiểm tra thêm</Text>
             <Text style={s.pickHint}>
