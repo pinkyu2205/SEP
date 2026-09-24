@@ -4,6 +4,7 @@ import type {
   MaintenanceRequestResponse,
   MaintenanceDashboardResponse,
   MaintenanceAdminReviewRequest,
+  RefusalReviewStatus,
 } from '@/types/api.types';
 
 const BASE = '/api/v1/maintenance';
@@ -14,6 +15,8 @@ export interface MaintenanceListFilters {
   category?: string;
   propertyId?: number;
   roomId?: number;
+  /** true = chỉ phiếu khách từ chối trả (công ty trả hộ). */
+  companyAbsorbedFault?: boolean;
 }
 
 export interface MaintenanceDashboardFilters {
@@ -41,6 +44,18 @@ export const maintenanceService = {
     size = 10,
   ): Promise<Page<MaintenanceRequestResponse>> => {
     return api.get(BASE, { params: { ...filters, page, size } });
+  },
+
+  /**
+   * PUT /api/v1/maintenance/{id}/refusal-review — admin xem xét cờ đỏ "khách từ chối trả".
+   * ⚠️ BE CHƯA CÓ (đề xuất trong docs/BE-YEUCAU-co-do-khach-tu-choi-tra-2026-09-25.md). Trang
+   * `RefusedPayments` khoá 2 nút Bỏ cờ / Trừ cọc bằng `REFUSAL_REVIEW_BE_READY` tới khi BE ship.
+   */
+  reviewRefusal: (
+    id: number,
+    body: { decision: Exclude<RefusalReviewStatus, 'PENDING'>; note: string },
+  ): Promise<MaintenanceRequestResponse> => {
+    return api.put(`${BASE}/${id}/refusal-review`, body);
   },
 
   /** GET /api/v1/maintenance/{id} */
