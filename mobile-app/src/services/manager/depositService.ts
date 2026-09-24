@@ -27,7 +27,7 @@ export interface ManagerDeposit {
   /** PAYOS | CASH | undefined (chưa thu). */
   method?: string;
   paidAt?: string;
-  /** ContractStatus của BE: DRAFT | PENDING | ACTIVE | EXPIRED | TERMINATED. */
+  /** ContractStatus của BE: DRAFT | AWAITING_ONBOARD | AWAITING_PAYMENT | AWAITING_CONFIRM | PENDING | ACTIVE | EXPIRED | TERMINATED. */
   contractStatus: string;
   moveInDate?: string;
 }
@@ -78,6 +78,8 @@ export const managerDepositService = {
       { params: { status, size: 200 } },
     );
     // Hợp đồng nháp chưa phát sinh nghĩa vụ thu cọc.
-    return unwrap(data).map(toDeposit).filter(d => d.contractStatus !== 'DRAFT');
+    // BE 24/09/2026: chưa tới AWAITING_PAYMENT (DRAFT, AWAITING_ONBOARD) thì chưa có nghĩa vụ thu cọc.
+    return unwrap(data).map(toDeposit)
+      .filter(d => d.contractStatus !== 'DRAFT' && d.contractStatus !== 'AWAITING_ONBOARD');
   },
 };

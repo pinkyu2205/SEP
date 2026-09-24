@@ -524,7 +524,7 @@ export const realTenantSelfService = {
 };
 
 /**
- * Map enum status của BE (DRAFT|PENDING|ACTIVE|EXPIRED|TERMINATED) -> ContractStatus của FE.
+ * Map enum status của BE (DRAFT|AWAITING_ONBOARD|AWAITING_PAYMENT|AWAITING_CONFIRM|PENDING|ACTIVE|EXPIRED|TERMINATED) -> ContractStatus của FE.
  * BE không có 'expiring_soon' → tự suy từ endDate (còn ≤ 30 ngày & chưa hết hạn).
  *
  * LƯU Ý: tenant KHÔNG tự ký/kích hoạt hợp đồng qua app — toàn bộ action liên quan
@@ -539,7 +539,11 @@ export const mapBeContractStatus = (
 ): 'draft' | 'pending_host_approval' | 'active' | 'expiring_soon' | 'expired' | 'terminated' => {
   switch ((beStatus || '').toUpperCase()) {
     case 'DRAFT': return 'draft';
-    case 'PENDING': return 'pending_host_approval';
+    case 'PENDING':
+    // BE 24/09/2026: pipeline đón khách — tenant chỉ xem, không có action tự làm.
+    case 'AWAITING_ONBOARD':
+    case 'AWAITING_PAYMENT':
+    case 'AWAITING_CONFIRM': return 'pending_host_approval';
     case 'TERMINATED': return 'terminated';
     case 'EXPIRED': return 'expired';
     case 'ACTIVE':

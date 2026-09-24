@@ -19,6 +19,7 @@ import { normalizeVi } from '@/utils/helpers';
 import { todayIso } from '@/utils/serverTime';
 import { hostService, type DepositItem, type HostContractDto } from '@/services/host.service';
 import { exportToExcel } from '@/utils/exportExcel';
+import { isNotYetActive } from '@/components/contract/contractLabels';
 import {
   ChipFilter, FilterBar, Pagination, SearchBox, SelectFilter, TableState,
   cmpIsoDesc, fmtDate, matchVi, pageSlice,
@@ -149,7 +150,8 @@ interface DepositRow {
 const contractToRow = (c: HostContractDto): DepositRow | null => {
   const amount = c.deposit ?? 0;
   if (amount <= 0) return null;
-  if (c.status === 'PENDING' || c.status === 'DRAFT') return null;
+  // Chưa ACTIVE (DRAFT/AWAITING_*/PENDING — BE 24/09/2026 tách PENDING) thì chưa có cọc để ghi sổ.
+  if (isNotYetActive(c.status)) return null;
   return {
     key: c.id,
     code: c.code,

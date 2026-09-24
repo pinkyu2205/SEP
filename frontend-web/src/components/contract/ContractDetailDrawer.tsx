@@ -11,7 +11,7 @@ import { formatCurrency } from '@/utils';
 import type { PropertyResponse, TenantContractResponse } from '@/types/api.types';
 import {
   EQUIPMENT_CONDITION, ESCALATION_LABEL, daysLeft, depositMonthsLabel,
-  fmtDate, fmtDateTime, isEndedContract, isNeverOnboarded, paymentMeta, snapshotToLines,
+  fmtDate, fmtDateTime, isEndedContract, isNeverOnboarded, isOnboardStatus, paymentMeta, snapshotToLines,
   statusMeta, termLabel, terminationTypeLabel,
 } from './contractLabels';
 
@@ -267,7 +267,7 @@ export const ContractDetailDrawer = ({
                   label="Tình trạng"
                   tone={detail.status === 'TERMINATED' ? 'rose' : 'slate'}
                   value={status.label}
-                  hint={detail.status === 'DRAFT' || detail.status === 'PENDING' ? 'Chưa bắt đầu tính thời hạn' : undefined}
+                  hint={isOnboardStatus(detail.status) || detail.status === 'PENDING' ? 'Chưa bắt đầu tính thời hạn' : undefined}
                 />
               )}
             </div>
