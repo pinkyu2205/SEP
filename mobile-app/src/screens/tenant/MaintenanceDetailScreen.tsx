@@ -578,8 +578,8 @@ export const MaintenanceDetailScreen: React.FC = () => {
                 💳 Quản lý đã sửa xong. Vui lòng thanh toán hoá đơn để hoàn tất yêu cầu
                 {request.issuedInvoice?.dueDate
                   ? ` — hạn ${formatDateTime(request.issuedInvoice.dueDate)}`
-                  : ' (hạn 3 ngày kể từ lúc lập hoá đơn)'}.
-                Quá hạn hoá đơn sẽ bị tính phí trễ như các hoá đơn khác.
+                  : ' (hạn 5 ngày kể từ lúc lập hoá đơn)'}.
+                Không tính phí trễ hạn, nhưng quá hạn quản lý được quyền đề nghị chấm dứt hợp đồng.
               </Text>
             </View>
           </View>
@@ -596,7 +596,7 @@ export const MaintenanceDetailScreen: React.FC = () => {
                   : request.status === 'repair_scheduled'
                     ? `📅 Đã lên lịch sửa${request.repairAppointmentAt ? `: ${formatDateTime(request.repairAppointmentAt)}` : ''}.`
                     : request.status === 'tenant_fault'
-                      ? '🔧 Quản lý sẽ sửa hộ. Hoá đơn chi phí đã được lập — vui lòng thanh toán trong 3 ngày.'
+                      ? '🔧 Quản lý sẽ sửa hộ. Hoá đơn chi phí sẽ được gửi sau khi sửa xong — bạn có 5 ngày để thanh toán.'
                       : '🔧 Đang sửa chữa. Cần hỗ trợ gấp? Liên hệ quản lý.'}
               </Text>
             </View>
