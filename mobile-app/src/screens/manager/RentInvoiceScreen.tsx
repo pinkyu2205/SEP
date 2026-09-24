@@ -357,7 +357,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerSide}>
-          <Text style={s.backText}>← Quay lại</Text>
+          <Text style={[s.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <Text style={s.headerTitle}>Tiền phòng tự động</Text>
         <View style={s.headerSide} />

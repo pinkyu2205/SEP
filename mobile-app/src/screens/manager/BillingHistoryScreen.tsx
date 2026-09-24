@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl,
-  TextInput,
+  TextInput, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -9,7 +9,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { billMonthLabel } from '@/utils';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import {
-  realManagerInvoiceService, ManagerInvoice, ManagerInvoiceType, ManagerInvoiceStatus,
+  realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
 } from '@/services/manager/invoiceService';
 
 /**
@@ -55,19 +55,6 @@ const STATUS_CFG: Record<string, { label: string; color: string; bg: string }> =
 };
 const statusCfg = (s?: string) => STATUS_CFG[(s || '').toUpperCase()] ?? STATUS_CFG.PENDING;
 
-const TYPE_FILTERS: { key: 'all' | ManagerInvoiceType; label: string }[] = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'RENT', label: '🏠 Tiền phòng' },
-  { key: 'ELECTRICITY', label: '⚡ Điện' },
-  { key: 'WATER', label: '💧 Nước' },
-];
-const STATUS_FILTERS: { key: 'all' | ManagerInvoiceStatus; label: string }[] = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'PAID', label: 'Đã thu' },
-  { key: 'PENDING', label: 'Chưa thu' },
-  { key: 'OVERDUE', label: 'Quá hạn' },
-];
-
 interface PropItem { id: number; name: string; wholeHouse: boolean }
 /** Một đơn vị thu tiền: 1 phòng, hoặc cả căn với nhà nguyên căn. */
 interface UnitGroup { key: string; title: string; invoices: ManagerInvoice[] }
@@ -83,7 +70,6 @@ export const BillingHistoryScreen: React.FC = () => {
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<'all' | ManagerInvoiceType>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ManagerInvoiceStatus>('all');
   /** Phòng đang mở rộng — mặc định đóng để nhìn được toàn cảnh trước. */
   const [openUnit, setOpenUnit] = useState<string | null>(null);
@@ -98,7 +84,9 @@ export const BillingHistoryScreen: React.FC = () => {
         id: p.id, name: p.propertyName, wholeHouse: p.wholeHouse === true,
       }));
       setProps(items);
-      setInvoices(list);
+      // CHỈ TIỀN PHÒNG (24/09/2026): điện/nước có màn lịch sử riêng ở Ghi điện nước — trộn
+      // chung ở đây thì mỗi phòng một kỳ ra 3 hoá đơn, không nhìn ra phòng nào đã trả tiền nhà.
+      setInvoices(list.filter(i => (i.type || '').toUpperCase() === 'RENT'));
       // Chỉ khoá vào 1 nhà khi được mở kèm propertyId (bấm từ thẻ nhà cụ thể).
       // Vào từ "Lịch sử các kỳ" thì KHÔNG tự chọn nhà đầu tiên — trước đây
       // `?? items[0]?.id` làm màn luôn chỉ hiện đúng một nhà và không có cách xem hết.
@@ -128,6 +116,25 @@ export const BillingHistoryScreen: React.FC = () => {
   /** '' = kỳ mới nhất (mặc định), 'all' = mọi kỳ, còn lại là 'YYYY-MM'. */
   const [periodFilter, setPeriodFilter] = useState<string>('');
   const activePeriod = periodFilter || periods[0] || '';
+  /** Bảng chọn tháng theo năm — thay hàng chip kỳ cuộn ngang (24 kỳ là không tìm nổi). */
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  /** Kỳ còn hoá đơn chưa thu / quá hạn — chấm đỏ trên bảng chọn tháng. */
+  const unpaidPeriods = useMemo(() => {
+    const set = new Set<string>();
+    for (const i of invoices) {
+      if (selectedId !== null && i.propertyId !== selectedId) continue;
+      if (i.status === 'PENDING' || i.status === 'OVERDUE') set.add(monthKey(i));
+    }
+    return set;
+  }, [invoices, selectedId]);
+
+  /** Lùi / tiến MỘT kỳ trong các kỳ có thật (periods sắp mới → cũ). */
+  const stepPeriod = (dir: -1 | 1) => {
+    const idx = periods.indexOf(activePeriod);
+    const next = periods[idx - dir]; // dir=+1 → kỳ mới hơn (index nhỏ hơn)
+    if (next) { setPeriodFilter(next); setOpenUnit(null); }
+  };
 
   /** Tìm không dấu theo khách / phòng / nhà / mã hoá đơn. */
   const [search, setSearch] = useState('');
@@ -137,11 +144,12 @@ export const BillingHistoryScreen: React.FC = () => {
   const filtered = useMemo(() => invoices.filter(i =>
     (selectedId === null || i.propertyId === selectedId)
     && (periodFilter === 'all' || monthKey(i) === activePeriod)
-    && (typeFilter === 'all' || i.type === typeFilter)
-    && (statusFilter === 'all' || i.status === statusFilter)
+    // "Chưa thu" = còn phải thu, GỒM cả quá hạn — khớp con số trên ô "Chưa thu".
+    && (statusFilter === 'all' || i.status === statusFilter
+      || (statusFilter === 'PENDING' && i.status === 'OVERDUE'))
     && (!kw || [i.tenantName, i.roomNumber, i.propertyName, i.code]
       .some(v => norm(v || '').includes(kw))),
-  ), [invoices, selectedId, periodFilter, activePeriod, typeFilter, statusFilter, kw]);
+  ), [invoices, selectedId, periodFilter, activePeriod, statusFilter, kw]);
 
   /** Gom theo phòng (nhà nhiều phòng) hoặc gộp 1 mục (nhà nguyên căn). */
   const groups: UnitGroup[] = useMemo(() => {
@@ -226,9 +234,19 @@ export const BillingHistoryScreen: React.FC = () => {
     const byMonth = new Map<string, ManagerInvoice[]>();
     for (const inv of g.invoices) byMonth.set(monthKey(inv), [...(byMonth.get(monthKey(inv)) ?? []), inv]);
     const months = [...byMonth.keys()].sort((a, b) => b.localeCompare(a));
+    const overdueCount = g.invoices.filter(i => i.status === 'OVERDUE').length;
+    /*
+     * Tô màu CẢ THẺ theo tình trạng thu — nhìn lướt là biết phòng/nhà nào đã trả, nào chưa,
+     * khỏi đọc dòng chữ nhỏ "đã thu 0 · còn 1 chưa thu" của từng thẻ.
+     */
+    const tone = overdueCount > 0
+      ? { bar: Colors.error, bg: Colors.errorLight, text: Colors.error, label: `Quá hạn ${overdueCount}` }
+      : unpaidCount > 0
+        ? { bar: Colors.warning, bg: Colors.warningLight, text: '#B45309', label: unpaidCount > 1 ? `Chưa thu ${unpaidCount}` : 'Chưa thu' }
+        : { bar: Colors.success, bg: Colors.successLight, text: Colors.success, label: '✓ Đã thu đủ' };
 
     return (
-      <View key={g.key} style={s.groupCard}>
+      <View key={g.key} style={[s.groupCard, { borderLeftWidth: 4, borderLeftColor: tone.bar }]}>
         <TouchableOpacity
           style={s.groupHeader}
           onPress={() => setOpenUnit(open ? null : g.key)}
@@ -237,9 +255,12 @@ export const BillingHistoryScreen: React.FC = () => {
           <View style={{ flex: 1 }}>
             <Text style={s.groupTitle}>{g.title}</Text>
             <Text style={s.groupMeta}>
-              {g.invoices.length} hoá đơn · {months.length} kỳ · đã thu {paidCount}
-              {unpaidCount > 0 ? ` · còn ${unpaidCount} chưa thu` : ''}
+              {months.length > 1 ? `${months.length} kỳ · ` : ''}
+              {g.invoices[0]?.tenantName ?? ''}
             </Text>
+          </View>
+          <View style={[s.groupStatus, { backgroundColor: tone.bg }]}>
+            <Text style={[s.groupStatusText, { color: tone.text }]}>{tone.label}</Text>
           </View>
           <Text style={s.groupChevron}>{open ? '⌄' : '›'}</Text>
         </TouchableOpacity>
@@ -310,7 +331,7 @@ export const BillingHistoryScreen: React.FC = () => {
           <Text style={s.backArrow}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Lịch sử hoá đơn</Text>
+          <Text style={s.headerTitle}>Lịch sử tiền phòng</Text>
           <Text style={s.headerSub}>{selectedProp ? selectedProp.name : `Tất cả ${props.length} nhà`}</Text>
         </View>
       </View>
@@ -354,24 +375,32 @@ export const BillingHistoryScreen: React.FC = () => {
           )}
 
           {/* Tổng quan nhà đang chọn */}
+          {/* Ba ô số liệu KIÊM bộ lọc trạng thái — bấm để lọc, bấm lại để bỏ. Thay hàng chip
+              trạng thái riêng (lặp đúng ba con số này). */}
           <View style={s.summaryCard}>
             <View style={s.summaryRow}>
-              <View style={s.summaryItem}>
-                <Text style={[s.summaryNum, { color: Colors.success }]}>{totals.paidCount}</Text>
-                <Text style={s.summaryLbl}>Đã thu</Text>
-              </View>
-              <View style={s.summarySep} />
-              <View style={s.summaryItem}>
-                <Text style={[s.summaryNum, { color: Colors.warning }]}>{totals.unpaidCount}</Text>
-                <Text style={s.summaryLbl}>Chưa thu</Text>
-              </View>
-              <View style={s.summarySep} />
-              <View style={s.summaryItem}>
-                <Text style={[s.summaryNum, { color: totals.overdueCount > 0 ? Colors.error : Colors.textMuted }]}>
-                  {totals.overdueCount}
-                </Text>
-                <Text style={s.summaryLbl}>Quá hạn</Text>
-              </View>
+              {([
+                { key: 'PAID' as const, n: totals.paidCount, label: 'Đã thu', color: Colors.success },
+                { key: 'PENDING' as const, n: totals.unpaidCount, label: 'Chưa thu', color: Colors.warning },
+                { key: 'OVERDUE' as const, n: totals.overdueCount, label: 'Quá hạn', color: totals.overdueCount > 0 ? Colors.error : Colors.textMuted },
+              ]).map((x, idx) => {
+                const on = statusFilter === x.key;
+                return (
+                  <React.Fragment key={x.key}>
+                    {idx > 0 && <View style={s.summarySep} />}
+                    <TouchableOpacity
+                      style={[s.summaryItem, on && s.summaryItemOn]}
+                      onPress={() => setStatusFilter(on ? 'all' : x.key)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[s.summaryNum, { color: x.color }]}>{x.n}</Text>
+                      <Text style={[s.summaryLbl, on && { color: Colors.primary, fontWeight: '800' }]}>
+                        {x.label}{on ? ' ✓' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  </React.Fragment>
+                );
+              })}
             </View>
             {/* Nói rõ đang xem kỳ nào, và tổng cộng có bao nhiêu kỳ để tra tiếp —
                 không thì lọc về 1 kỳ xong lại tưởng cả lịch sử chỉ có bấy nhiêu. */}
@@ -402,58 +431,42 @@ export const BillingHistoryScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Chọn kỳ — nhà thuê 1–2 năm là 12–24 kỳ, mặc định chỉ xem kỳ mới nhất. */}
-          {periods.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
-              <View style={s.chipRow}>
-                <TouchableOpacity
-                  style={[s.filterChip, periodFilter === 'all' && s.filterChipActive]}
-                  onPress={() => { setPeriodFilter('all'); setOpenUnit(null); }}
-                >
-                  <Text style={[s.filterText, periodFilter === 'all' && s.filterTextActive]}>
-                    Tất cả {periods.length} kỳ
-                  </Text>
-                </TouchableOpacity>
-                {periods.map(p => (
-                  <TouchableOpacity
-                    key={p}
-                    style={[s.filterChip, periodFilter !== 'all' && activePeriod === p && s.filterChipActive]}
-                    onPress={() => { setPeriodFilter(p); setOpenUnit(null); }}
-                  >
-                    <Text style={[s.filterText, periodFilter !== 'all' && activePeriod === p && s.filterTextActive]}>
-                      {periodText(p)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </ScrollView>
+          {/*
+            CHỌN KỲ — "‹ Tháng 10/2026 ▾ ›" (24/09/2026).
+            Bản cũ là một hàng chip mỗi kỳ một chip: nhà thuê 1–2 năm ra 12–24 chip cuộn ngang,
+            tìm "tháng 3 năm ngoái" là vuốt mỏi tay. Nay: mũi tên lùi/tiến từng kỳ có hoá đơn,
+            bấm tên tháng mở bảng theo NĂM (lưới 12 tháng) — nhảy thẳng tới tháng nào cũng 2 chạm.
+          */}
+          {periods.length > 0 && (
+            <View style={s.periodBar}>
+              <TouchableOpacity
+                style={s.periodArrow}
+                disabled={periodFilter === 'all' || periods.indexOf(activePeriod) >= periods.length - 1}
+                onPress={() => stepPeriod(-1)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[s.periodArrowText,
+                  (periodFilter === 'all' || periods.indexOf(activePeriod) >= periods.length - 1) && s.periodArrowOff]}>‹</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.periodCenter} onPress={() => setPickerOpen(true)} activeOpacity={0.7}>
+                <Text style={s.periodLabel}>
+                  {periodFilter === 'all' ? `Tất cả ${periods.length} kỳ` : `Tháng ${Number(activePeriod.slice(5))}/${activePeriod.slice(0, 4)}`}
+                </Text>
+                <Text style={s.periodCaret}>▾</Text>
+                {periodFilter !== 'all' && unpaidPeriods.has(activePeriod) && <View style={s.periodDot} />}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.periodArrow}
+                disabled={periodFilter === 'all' || periods.indexOf(activePeriod) <= 0}
+                onPress={() => stepPeriod(1)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={[s.periodArrowText,
+                  (periodFilter === 'all' || periods.indexOf(activePeriod) <= 0) && s.periodArrowOff]}>›</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
-          {/* Bộ lọc */}
-          <View style={s.filterBlock}>
-            <View style={s.filterRow}>
-              {TYPE_FILTERS.map(f => (
-                <TouchableOpacity
-                  key={f.key}
-                  style={[s.filterChip, typeFilter === f.key && s.filterChipActive]}
-                  onPress={() => setTypeFilter(f.key)}
-                >
-                  <Text style={[s.filterText, typeFilter === f.key && s.filterTextActive]}>{f.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={s.filterRow}>
-              {STATUS_FILTERS.map(f => (
-                <TouchableOpacity
-                  key={f.key}
-                  style={[s.filterChip, statusFilter === f.key && s.filterChipActive]}
-                  onPress={() => setStatusFilter(f.key)}
-                >
-                  <Text style={[s.filterText, statusFilter === f.key && s.filterTextActive]}>{f.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
 
           {groups.length === 0 ? (
             <View style={s.emptyBox}>
@@ -471,6 +484,51 @@ export const BillingHistoryScreen: React.FC = () => {
           <View style={{ height: 40 }} />
         </ScrollView>
       )}
+
+      {/* Bảng chọn kỳ theo năm */}
+      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
+        <TouchableOpacity style={s.pickerOverlay} activeOpacity={1} onPress={() => setPickerOpen(false)}>
+          <View style={s.pickerSheet} onStartShouldSetResponder={() => true}>
+            <Text style={s.pickerTitle}>Chọn kỳ hoá đơn</Text>
+            <TouchableOpacity
+              style={[s.pickerAll, periodFilter === 'all' && s.pickerAllOn]}
+              onPress={() => { setPeriodFilter('all'); setOpenUnit(null); setPickerOpen(false); }}
+            >
+              <Text style={[s.pickerAllText, periodFilter === 'all' && { color: Colors.white }]}>
+                Xem tất cả {periods.length} kỳ
+              </Text>
+            </TouchableOpacity>
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {[...new Set(periods.map(p => p.slice(0, 4)))].map(year => (
+                <View key={year} style={{ marginTop: Spacing.md }}>
+                  <Text style={s.pickerYear}>Năm {year}</Text>
+                  <View style={s.pickerGrid}>
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const key = `${year}-${String(i + 1).padStart(2, '0')}`;
+                      const has = periods.includes(key);
+                      const on = periodFilter !== 'all' && activePeriod === key;
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          disabled={!has}
+                          style={[s.pickerCell, !has && s.pickerCellOff, on && s.pickerCellOn]}
+                          onPress={() => { setPeriodFilter(key); setOpenUnit(null); setPickerOpen(false); }}
+                        >
+                          <Text style={[s.pickerCellText, !has && { color: Colors.textMuted }, on && { color: Colors.white }]}>
+                            T{i + 1}
+                          </Text>
+                          {has && unpaidPeriods.has(key) && <View style={[s.pickerDot, on && { backgroundColor: Colors.white }]} />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            <Text style={s.pickerHint}>● chấm đỏ = kỳ còn hoá đơn chưa thu</Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -514,13 +572,46 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
   summaryRow: { flexDirection: 'row', alignItems: 'center' },
-  summaryItem: { flex: 1, alignItems: 'center' },
+  summaryItem: { flex: 1, alignItems: 'center', paddingVertical: 4, borderRadius: BorderRadius.md },
+  summaryItemOn: { backgroundColor: Colors.primaryBg },
   summaryNum: { fontSize: 15, fontWeight: '800' },
   summaryLbl: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   summarySep: { width: 1, height: 28, backgroundColor: Colors.divider },
   summaryFoot: { fontSize: 11, color: Colors.textMuted, textAlign: 'center', marginTop: Spacing.sm },
 
   filterBlock: { gap: Spacing.sm },
+  periodBar: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  periodArrow: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
+  periodArrowText: { fontSize: 24, fontWeight: '700', color: Colors.primary },
+  periodArrowOff: { color: Colors.border },
+  periodCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: Spacing.md },
+  periodLabel: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  periodCaret: { fontSize: 12, color: Colors.textMuted },
+  periodDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.error },
+
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: Spacing.lg },
+  pickerSheet: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.lg },
+  pickerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  pickerAll: {
+    marginTop: Spacing.md, paddingVertical: 10, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border, alignItems: 'center',
+  },
+  pickerAllOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  pickerAllText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  pickerYear: { fontSize: 12, fontWeight: '800', color: Colors.textSecondary, marginBottom: 6 },
+  pickerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  pickerCell: {
+    width: '23%', paddingVertical: 10, borderRadius: BorderRadius.md, alignItems: 'center',
+    backgroundColor: Colors.primaryBg,
+  },
+  pickerCellOff: { backgroundColor: Colors.background },
+  pickerCellOn: { backgroundColor: Colors.primary },
+  pickerCellText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
+  pickerDot: { position: 'absolute', top: 5, right: 7, width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.error },
+  pickerHint: { marginTop: Spacing.md, fontSize: 11, color: Colors.textMuted, textAlign: 'center' },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full,
@@ -530,6 +621,8 @@ const s = StyleSheet.create({
   filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   filterTextActive: { color: Colors.primary },
 
+  groupStatus: { borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 4 },
+  groupStatusText: { fontSize: 11, fontWeight: '800' },
   groupCard: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,

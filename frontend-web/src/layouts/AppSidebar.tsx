@@ -40,6 +40,13 @@ export interface SidebarNavItem {
   badge?: number;
   /** Badge cảnh báo (đỏ) thay vì badge màu nhấn. */
   badgeAlert?: boolean;
+  /**
+   * Badge ĐỎ nhấp nháy — việc đã trễ (VD công nợ quá hạn). Mạnh hơn `badgeAlert`,
+   * dùng dè xẻn: cái gì cũng đỏ thì không còn cái gì nổi.
+   */
+  badgeDanger?: boolean;
+  /** Chú thích khi rê chuột lên badge, VD "3 hoá đơn quá hạn". */
+  badgeTitle?: string;
 }
 
 export interface SidebarSection {
@@ -196,14 +203,21 @@ export const AppSidebar = ({
                         {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
 
                         {!!item.badge && (
-                          <span className={clsx(
-                            'flex flex-shrink-0 items-center justify-center rounded-full text-[10px] font-black tabular-nums',
-                            collapsed
-                              ? 'absolute right-2 top-1.5 h-4 min-w-4 px-1'
-                              : 'h-5 min-w-5 px-1.5',
-                            item.badgeAlert ? 'bg-amber-400 text-slate-900' : a.badge,
-                          )}>
-                            {item.badge > 99 ? '99+' : item.badge}
+                          <span
+                            title={item.badgeTitle}
+                            className={clsx(
+                              'flex flex-shrink-0 items-center justify-center rounded-full text-[10px] font-black tabular-nums',
+                              collapsed
+                                ? 'absolute right-2 top-1.5 h-4 min-w-4 px-1'
+                                : 'relative h-5 min-w-5 px-1.5',
+                              item.badgeDanger ? 'bg-rose-500 text-white'
+                                : item.badgeAlert ? 'bg-amber-400 text-slate-900' : a.badge,
+                            )}
+                          >
+                            {item.badgeDanger && (
+                              <span className="absolute inset-0 animate-ping rounded-full bg-rose-500 opacity-40" />
+                            )}
+                            <span className="relative">{item.badge > 99 ? '99+' : item.badge}</span>
                           </span>
                         )}
 

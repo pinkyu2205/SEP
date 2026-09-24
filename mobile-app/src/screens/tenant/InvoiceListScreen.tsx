@@ -1,111 +1,56 @@
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, SectionList, TouchableOpacity,
-  ScrollView, ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TouchableOpacity,
+  ScrollView, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  BILL_PAYMENT_DAYS, canTerminateForUnpaidInvoice,
 } from '@/constants';
 import { billMonthLabel, formatCurrency, formatDate, getDaysUntil } from '@/utils';
-import { SharedBill, BillStatus, InvoiceType } from '@/types/bill';
+import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 import { isDisputeOpen } from '@/types/invoiceDispute';
 
 type Invoice = SharedBill;
-type InvoiceStatus = BillStatus;
-type StatusFilter = 'all' | 'unpaid' | InvoiceStatus;
-type TypeFilter = 'all' | InvoiceType;
+/** MỘT bộ lọc duy nhất: tất cả / quá hạn / từng loại phí. */
+type Filter = 'all' | 'overdue' | InvoiceType;
 
 /**
- * MÀN HOÁ ĐƠN = HỘP THƯ ĐẦY ĐỦ — chốt 13/08/2026.
+ * MÀN HOÁ ĐƠN (tenant) — làm lại 24/09/2026.
  *
- * Đây là nơi khách thấy MỌI khoản phải trả mà hệ thống gửi tới: tiền phòng, điện, nước,
- * phí bảo trì, tiền cọc. Cũng là nơi DUY NHẤT bấm thanh toán được (Thao tác nhanh không
- * có lối nào khác) — nên không được loại bớt loại nào ra khỏi đây.
+ * Đây là nơi DUY NHẤT khách bấm thanh toán, và chỉ chứa khoản CÒN PHẢI TRẢ — đã trả nằm ở
+ * màn Lịch sử (nút góc trên).
  *
- * Vấn đề cũ không phải "thừa loại" mà là "trộn lẫn": mọi hoá đơn nằm chung một danh sách
- * phẳng, phân biệt bằng hàng chip "Loại" (Tất cả/Phòng/Điện/Nước) — vừa chiếm chỗ, vừa
- * bị cắt mất chip cuối trên máy màn nhỏ, và khách phải bấm lọc mới biết mình nợ những gì.
- *
- * Giờ gom sẵn theo TỪNG LOẠI, mỗi nhóm có tiêu đề + số lượng + tổng tiền của nhóm. Nhìn
- * một phát thấy ngay "nợ gì, mỗi thứ bao nhiêu" mà không phải bấm lọc. Nhóm rỗng tự ẩn.
- *
- * Thứ tự cố định theo mức độ khách quan tâm, KHÔNG theo số tiền — để vị trí các nhóm
- * đứng yên giữa các tháng, khách quen tay.
+ * Bản trước có HAI hàng chip (loại phí × trạng thái, 11 chip, bị cắt ở mép phải) cộng tiêu
+ * đề nhóm theo loại lặp lại đúng thông tin của chip và badge trên thẻ — khách nhìn loạn.
+ * Mà trạng thái trên màn này thực ra chỉ có 2: chờ trả hoặc quá hạn ("Trả 1 phần" không bao
+ * giờ xảy ra — hệ thống chỉ thu đủ; hoá đơn huỷ không phải khoản phải trả). Nên giờ:
+ *   • 1 hàng chip: Tất cả · Quá hạn · rồi CHỈ những loại phí đang có hoá đơn.
+ *   • Danh sách phẳng, quá hạn lên đầu rồi tới hạn gần nhất — thứ cần trả trước nằm trên.
+ *   • Thẻ gọn: loại + kỳ, số tiền, hạn, nút trả. Cả thẻ bấm được để xem chi tiết.
  */
-const GROUP_ORDER: InvoiceType[] = ['rent', 'electricity', 'water', 'maintenance', 'deposit'];
 
-const STATUS_CONFIG: Record<InvoiceStatus, { label: string; color: string; bg: string }> = {
-  pending:   { label: 'Chờ thanh toán',    color: Colors.warning, bg: Colors.warningLight },
-  paid:      { label: 'Đã thanh toán',     color: Colors.success, bg: Colors.successLight },
-  overdue:   { label: 'Quá hạn',           color: Colors.error,   bg: Colors.errorLight },
-  partial:   { label: 'Thanh toán 1 phần', color: Colors.info,    bg: Colors.infoLight },
-  cancelled: { label: 'Đã huỷ',           color: Colors.textMuted, bg: Colors.background },
-};
+const TYPE_ORDER: InvoiceType[] = ['rent', 'electricity', 'water', 'maintenance', 'deposit'];
 
 const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
   rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  electricity: { label: 'Điện',       icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  water:       { label: 'Nước',       icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  maintenance: { label: 'Phí bảo trì', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
-  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts),
-  // nên nhãn không được để mỗi chữ "Tiền cọc".
+  electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí sửa chữa', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+  // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts).
   deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5' },
 };
+const FALLBACK_TYPE = { label: 'Khoản khác', icon: '📄', color: Colors.textSecondary, bg: Colors.background };
+const typeCfgOf = (t: InvoiceType) => TYPE_CONFIG[t] ?? FALLBACK_TYPE;
 
-/**
- * Bộ lọc trạng thái — ĐỦ 5 trạng thái hoá đơn của hệ thống (xem STATUS_CONFIG).
- *
- * Bản trước chỉ có 4 chip (Chưa trả / Quá hạn / Đã trả / Tất cả) nên hoá đơn ở trạng
- * thái `partial` và `cancelled` không có đường nào lọc tới — khách trả góp một phần rồi
- * thì không tìm lại được hoá đơn đó.
- *
- * Nhãn viết ĐỦ CHỮ: "Chưa TT"/"Đã TT" là tiếng lóng nội bộ, khách thuê không có nghĩa
- * vụ đoán "TT" là thanh toán.
- *
- * "Chưa trả" CỐ Ý chồng lấn với "Quá hạn" và "Chờ trả" — nó là bộ lọc mặc định gộp mọi
- * khoản còn nợ, thứ khách mở app ra là muốn thấy. Chồng lấn trong bộ lọc là chuyện bình
- * thường, y như chip "Tất cả".
- *
- * `match` dùng chung cho cả lọc lẫn đếm — trước đây điều kiện lọc viết rời trong
- * `filtered`, thêm chip mới là dễ quên đồng bộ, số trên chip lệch với danh sách.
- *
- * `color` cho mỗi chip một màu riêng khi được chọn, lấy đúng màu trạng thái ở
- * STATUS_CONFIG để chip và badge trên thẻ hoá đơn nói cùng một ngôn ngữ màu.
- */
-const STATUS_FILTER_TABS: {
-  key: StatusFilter;
-  label: string;
-  color: string;
-  match: (i: Invoice) => boolean;
-}[] = [
-  { key: 'unpaid',    label: 'Cần trả',     color: Colors.primary,   match: i => i.status === 'pending' || i.status === 'overdue' || i.status === 'partial' },
-  { key: 'pending',   label: 'Chờ trả',     color: Colors.warning,   match: i => i.status === 'pending' },
-  { key: 'overdue',   label: 'Quá hạn',     color: Colors.error,     match: i => i.status === 'overdue' },
-  { key: 'partial',   label: 'Trả 1 phần',  color: Colors.info,      match: i => i.status === 'partial' },
-  { key: 'cancelled', label: 'Đã huỷ',      color: Colors.textMuted, match: i => i.status === 'cancelled' },
-  { key: 'all',       label: 'Tất cả',      color: Colors.primary,   match: () => true },
-];
-
-/**
- * Bộ lọc LOẠI PHÍ — đủ 5 loại, dựng thẳng từ GROUP_ORDER nên không thể lệch với các
- * nhóm trong danh sách.
- *
- * Có nhóm rồi vẫn cần lọc: nhóm giúp NHÌN, lọc giúp TÌM. Khi khách có chục hoá đơn thì
- * bấm "Điện" nhanh hơn cuộn tìm nhóm Điện.
- */
-const TYPE_FILTER_TABS: { key: TypeFilter; label: string; color: string }[] = [
-  { key: 'all', label: 'Tất cả', color: Colors.primary },
-  ...GROUP_ORDER.map(t => ({
-    key: t as TypeFilter,
-    label: `${TYPE_CONFIG[t].icon} ${TYPE_CONFIG[t].label}`,
-    color: TYPE_CONFIG[t].color,
-  })),
-];
+const CHIP_LABEL: Record<InvoiceType, string> = {
+  rent: '🏠 Phòng', electricity: '⚡ Điện', water: '💧 Nước', maintenance: '🔧 Sửa chữa', deposit: '🔐 Nhận phòng',
+};
 
 type PendingCharge = Awaited<ReturnType<typeof realTenantBillingService.listPendingCharges>>[number];
 
@@ -116,16 +61,15 @@ const PENDING_CHARGE_CATEGORY: Record<string, string> = {
 export const InvoiceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [invoices, setInvoices] = useState<SharedBill[]>([]);
-  // Khoản chờ thu (đã nghiệm thu, CHƯA phát hành hóa đơn) — hiện trước để khách không
-  // bất ngờ khi hóa đơn MAINTENANCE xuất hiện kỳ tới.
+  // Khoản chờ thu (đã nghiệm thu, CHƯA phát hành hoá đơn) — báo trước để khách không bất ngờ.
   const [pendingCharges, setPendingCharges] = useState<PendingCharge[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unpaid');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<Filter>('all');
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
 
-  const reload = useCallback(() => {
-    setLoading(true);
+  const reload = useCallback((isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
     Promise.all([
       realTenantBillingService.listInvoices().catch(() => []),
       realTenantBillingService.listPendingCharges().catch(() => [] as PendingCharge[]),
@@ -134,398 +78,255 @@ export const InvoiceListScreen: React.FC = () => {
         setInvoices(inv.map(toSharedBill));
         setPendingCharges(charges.filter(c => (c.status || '').toUpperCase() === 'PENDING'));
       })
-      .finally(() => setLoading(false));
+      .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
-  /**
-   * BE bắn `INVOICE_PAID` khi khách trả xong (QR/PayOS hoặc quản lý xác nhận) → nạp lại.
-   * Refetch chứ không vá dòng: hoá đơn vừa trả có thể đang bị bộ lọc "Chưa thanh toán"
-   * loại ra, phải để danh sách tự dựng lại theo bộ lọc hiện tại.
-   */
+  // BE bắn `INVOICE_PAID` khi khách trả xong (QR/PayOS hoặc quản lý xác nhận) → nạp lại.
   useBillingRealtime({
     filter: (e) => e.event === 'INVOICE_PAID',
-    onRefresh: reload,
+    onRefresh: () => reload(),
   });
 
   const pendingChargeTotal = pendingCharges.reduce((s, c) => s + (c.amount ?? 0), 0);
 
-  /**
-   * HOÁ ĐƠN ĐÃ TRẢ KHÔNG NẰM Ở MÀN NÀY (13/08/2026).
-   *
-   * Màn Hoá đơn chỉ còn thứ khách CÒN PHẢI TRẢ. Mọi hoá đơn đã thanh toán dồn sang màn
-   * Lịch sử (nút "Lịch sử" góc trên) — nếu để lẫn thì chip "Tất cả" trộn cả đã trả lẫn
-   * chưa trả, và tổng của nhóm cộng luôn phần đã trả nên đọc ra số nợ sai gấp mấy lần.
-   *
-   * Lọc ngay từ nguồn thay vì trong từng bộ lọc: chỉ một chỗ để sau này ai đọc cũng thấy.
-   */
-  const owing = invoices.filter(i => i.status !== 'paid');
-
-  const activeTab = STATUS_FILTER_TABS.find(t => t.key === statusFilter) ?? STATUS_FILTER_TABS[0];
-  const matchType = (i: Invoice) => typeFilter === 'all' || i.invoiceType === typeFilter;
-  const filtered = owing.filter(i => activeTab.match(i) && matchType(i));
-
-  /**
-   * Số trên chip = số hoá đơn khách sẽ THẤY nếu bấm chip đó, tức đã tính cả bộ lọc kia.
-   * Đếm rời từng trục thì chip ghi "3" mà bấm vào ra 0 — số đó chỉ làm người dùng mất tin.
-   */
-  const statusCounts = useMemo(
-    () => Object.fromEntries(
-      STATUS_FILTER_TABS.map(t => [t.key, owing.filter(i => t.match(i) && matchType(i)).length]),
-    ) as Record<StatusFilter, number>,
-    [invoices, typeFilter],
-  );
-  const typeCounts = useMemo(
-    () => Object.fromEntries(
-      TYPE_FILTER_TABS.map(t => [
-        t.key,
-        owing.filter(i => activeTab.match(i) && (t.key === 'all' || i.invoiceType === t.key)).length,
-      ]),
-    ) as Record<TypeFilter, number>,
-    [invoices, statusFilter],
+  /** Chỉ khoản còn phải trả. `partial` gộp vào đây cho chắc dù BE không gán. */
+  const owing = useMemo(
+    () => invoices
+      .filter(i => i.status === 'pending' || i.status === 'overdue' || i.status === 'partial')
+      .sort((a, b) => {
+        const ao = a.status === 'overdue' ? 0 : 1;
+        const bo = b.status === 'overdue' ? 0 : 1;
+        if (ao !== bo) return ao - bo;
+        return (a.dueDate || '').localeCompare(b.dueDate || '');
+      }),
+    [invoices],
   );
 
-  /**
-   * Gom theo loại, thứ tự cố định (xem GROUP_ORDER). Mỗi nhóm mang sẵn tổng tiền để
-   * tiêu đề nhóm hiện luôn — khỏi cần thẻ tổng ở trên liệt kê lại từng loại.
-   * Loại lạ ngoài GROUP_ORDER vẫn được gom vào cuối chứ không bị nuốt mất.
-   */
-  const sections = useMemo(() => {
-    /**
-     * Tổng của nhóm CHỈ cộng khoản CÒN NỢ, không cộng hoá đơn đã trả.
-     *
-     * Trước đây cộng tất: chọn "Tất cả" thì nhóm Tiền phòng hiện "15.341.935 đ" trong
-     * khi khách chỉ còn nợ 4.677.419 đ — con số đó đọc như số tiền phải trả nên gây
-     * hiểu nhầm nặng. Nhóm nào đã trả hết thì `owed = 0` và tiêu đề ghi "Đã trả đủ".
-     */
-    const owedOf = (rows: Invoice[]) =>
-      rows.filter(i => i.status === 'pending' || i.status === 'overdue')
-        .reduce((s, i) => s + i.grandTotal, 0);
+  const overdue = owing.filter(i => i.status === 'overdue');
+  const total = owing.reduce((s, i) => s + i.grandTotal, 0);
+  const overdueTotal = overdue.reduce((s, i) => s + i.grandTotal, 0);
 
-    const seen = new Set<string>();
-    const build = (type: InvoiceType) => {
-      const data = filtered.filter(i => i.invoiceType === type);
-      seen.add(type);
-      const cfg = TYPE_CONFIG[type];
-      return { key: type, title: `${cfg.icon} ${cfg.label}`, owed: owedOf(data), data };
-    };
-    const known = GROUP_ORDER.map(build);
-    const rest = filtered.filter(i => !seen.has(i.invoiceType));
-    return [
-      ...known,
-      ...(rest.length ? [{ key: 'other', title: '📄 Khoản khác', owed: owedOf(rest), data: rest }] : []),
-    ].filter(s => s.data.length > 0);
-  }, [filtered]);
+  // Chip: chỉ hiện loại đang có hoá đơn — không còn chip "0" mờ chiếm chỗ.
+  const chips = useMemo(() => {
+    const list: { key: Filter; label: string; count: number; danger?: boolean }[] = [
+      { key: 'all', label: 'Tất cả', count: owing.length },
+    ];
+    if (overdue.length > 0) list.push({ key: 'overdue', label: 'Quá hạn', count: overdue.length, danger: true });
+    for (const t of TYPE_ORDER) {
+      const n = owing.filter(i => i.invoiceType === t).length;
+      if (n > 0) list.push({ key: t, label: CHIP_LABEL[t], count: n });
+    }
+    return list;
+  }, [owing, overdue.length]);
 
-  const unpaid = invoices.filter(i => i.status === 'pending' || i.status === 'overdue');
-  const overdueCount = invoices.filter(i => i.status === 'overdue').length;
-  const pendingTotal = unpaid.reduce((sum, i) => sum + i.grandTotal, 0);
+  // Chip đang chọn biến mất (vừa trả xong hết loại đó) → tự về "Tất cả".
+  const activeFilter: Filter = chips.some(c => c.key === filter) ? filter : 'all';
+  const visible = owing.filter(i =>
+    activeFilter === 'all' ? true
+      : activeFilter === 'overdue' ? i.status === 'overdue'
+        : i.invoiceType === activeFilter);
 
-  const handlePay = (invoice: Invoice) => setPayingInvoice(invoice);
-
-  // Cập nhật invoice đang thanh toán + đồng bộ luôn vào danh sách (không cần reload cả trang).
   const handleInvoiceUpdate = (updated: Invoice) => {
     setPayingInvoice(updated);
     setInvoices(prev => prev.map(i => (i.id === updated.id ? updated : i)));
   };
 
   const renderInvoice = ({ item }: { item: Invoice }) => {
-    const cfg     = STATUS_CONFIG[item.status];
-    const typeCfg = TYPE_CONFIG[item.invoiceType];
-    const isPaid    = item.status === 'paid';
-    // Bỏ nhánh riêng cho kỳ đầu (13/08/2026): tiền kỳ đầu thu chung với tiền cọc ở mã
-    // QR lúc đón khách nên không còn hoá đơn kỳ đầu chờ thanh toán. Mọi hoá đơn đi
-    // thẳng theo dueDate/status của BE.
+    const typeCfg = typeCfgOf(item.invoiceType);
     const isOverdue = item.status === 'overdue';
-    const dueDate = item.dueDate;
-    const daysOverdue = isOverdue ? Math.abs(getDaysUntil(dueDate)) : 0;
-    /**
-     * Hoá đơn đang được tra soát theo khiếu nại của khách.
-     *
-     * Phải hiện Ở ĐÂY chứ không chỉ trong màn chi tiết: danh sách là chỗ khách nhìn để
-     * biết "mình còn nợ gì" — thấy một hoá đơn đỏ quá hạn mà không biết nó đang bị treo
-     * vì chính yêu cầu của mình thì rất dễ hoảng và trả bừa cho xong.
-     */
+    const daysOverdue = isOverdue ? Math.abs(getDaysUntil(item.dueDate)) : 0;
+    const daysLeft = !isOverdue ? getDaysUntil(item.dueDate) : 0;
+    // Hoá đơn đang tra soát theo khiếu nại của khách — hạn tạm dừng, nói rõ để khách khỏi hoảng.
     const disputePending = isDisputeOpen(item.dispute);
+    const period = billMonthLabel(item);
+    const usage = item.invoiceType === 'electricity' && item.kwhUsed !== undefined
+      ? `${item.kwhUsed} kWh`
+      : item.invoiceType === 'water' && item.m3Used !== undefined
+        ? `${item.m3Used} m³`
+        : null;
+
+    const dueText = disputePending
+      ? 'Đang tra soát — tạm dừng hạn'
+      : isOverdue
+        ? `Quá hạn ${daysOverdue} ngày`
+        : daysLeft === 0
+          ? 'Hạn hôm nay'
+          : daysLeft > 0 && daysLeft <= 3
+            ? `Còn ${daysLeft} ngày · hạn ${formatDate(item.dueDate)}`
+            : `Hạn ${formatDate(item.dueDate)}`;
+    const dueColor = disputePending ? Colors.info
+      : isOverdue ? Colors.error
+        : daysLeft <= 3 ? Colors.warning : Colors.textMuted;
 
     return (
       <TouchableOpacity
         style={[styles.card, isOverdue && styles.cardOverdue]}
-        activeOpacity={0.75}
+        activeOpacity={0.8}
         onPress={() => navigation.navigate('InvoiceDetail', { invoice: item })}
       >
-        {isOverdue && <View style={styles.overdueStripe} />}
+        <View style={styles.cardTop}>
+          <View style={[styles.typeIcon, { backgroundColor: typeCfg.bg }]}>
+            <Text style={styles.typeIconText}>{typeCfg.icon}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {typeCfg.label}{period ? ` ${period}` : ''}
+            </Text>
+            <Text style={styles.cardSub} numberOfLines={1}>
+              {[item.roomName && `Phòng ${item.roomName}`, usage].filter(Boolean).join(' · ') || item.propertyName}
+            </Text>
+          </View>
+          <Text style={styles.chevron}>›</Text>
+        </View>
 
-        {/* Header: type badge + month + status */}
-        <View style={styles.cardHeader}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View style={[styles.typeBadge, { backgroundColor: typeCfg.bg }]}>
-              <Text style={[styles.typeBadgeText, { color: typeCfg.color }]}>
-                {typeCfg.icon} {typeCfg.label}
-              </Text>
-            </View>
-            {/* Hoá đơn onboard không thuộc kỳ nào → billMonthLabel trả null, ẩn luôn. */}
-            {!!billMonthLabel(item) && (
-              <Text style={styles.invoiceMonth}>{billMonthLabel(item)}</Text>
+        <View style={styles.amountRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.amount, isOverdue && { color: Colors.error }]}>
+              {formatCurrency(item.grandTotal)}
+            </Text>
+            {(item.lateFee ?? 0) > 0 && (
+              <Text style={styles.lateFee}>gồm phí trả chậm {formatCurrency(item.lateFee)}</Text>
             )}
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-            <Text style={[styles.statusText, { color: cfg.color }]}>
-              {cfg.label}
-            </Text>
-          </View>
+          <Text style={[styles.due, { color: dueColor }]}>{dueText}</Text>
         </View>
-
-        {/* Room info */}
-        <Text style={styles.invoiceRoom}>{item.roomName} · {item.propertyName}</Text>
-
-        {disputePending && (
-          <Text style={styles.disputeChip}>⏳ Đang tra soát — tạm dừng hạn thanh toán</Text>
-        )}
-
-        {/* Utility detail line */}
-        {item.invoiceType === 'electricity' && item.kwhUsed !== undefined && (
-          <Text style={styles.utilityDetail}>⚡ {item.kwhUsed} kWh · {item.billingPeriod ?? '—'}</Text>
-        )}
-        {item.invoiceType === 'water' && item.m3Used !== undefined && (
-          <Text style={styles.utilityDetail}>💧 {item.m3Used} m³ · {item.billingPeriod ?? '—'}</Text>
-        )}
-
-        {/* Amount row + due date */}
-        <View style={styles.amountRow}>
-          <Text style={[styles.amountVal, isOverdue && { color: Colors.error }, isPaid && { color: Colors.success }]}>
-            {formatCurrency(item.grandTotal)}
-          </Text>
-          {isPaid ? (
-            <Text style={styles.paidDateText}>✅ {item.paidAt ? formatDate(item.paidAt) : 'Đã TT'}</Text>
-          ) : (
-            <Text style={[styles.dueDateText, isOverdue && !disputePending && { color: Colors.error }]}>
-              {disputePending
-                ? 'Chờ kết luận'
-                : isOverdue
-                  ? `Quá hạn ${daysOverdue} ngày`
-                  : `Hạn: ${formatDate(dueDate)}`}
-            </Text>
-          )}
-        </View>
-
-        {(item.lateFee ?? 0) > 0 && (
-          <Text style={styles.lateFeeText}>+ Phí trả chậm: {formatCurrency(item.lateFee)}</Text>
-        )}
 
         {/* Tiền phòng quá hạn: không phạt tiền, nhưng leo thang tới chấm dứt HĐ. */}
         {isOverdue && item.invoiceType === 'rent' && (
-          <Text style={styles.riskText}>
+          <Text style={styles.risk}>
             {daysOverdue >= RENT_TERMINATION_AFTER_DAYS
-              ? '⚠️ Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng.'
-              : `⚠️ Tới ngày ${RENT_CYCLE.terminationFromDay} chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
+              ? 'Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng.'
+              : `Tới ngày ${RENT_CYCLE.terminationFromDay} chưa trả thì quản lý được quyền chấm dứt hợp đồng.`}
           </Text>
         )}
 
-        {/* Action buttons */}
-        {item.status === 'pending' && (
-          <TouchableOpacity style={styles.payBtn} onPress={() => handlePay(item)}>
-            <Text style={styles.payBtnText}>💳 Thanh toán ngay</Text>
-          </TouchableOpacity>
-        )}
-        {isOverdue && (
-          <TouchableOpacity style={[styles.payBtn, { backgroundColor: Colors.error }]} onPress={() => handlePay(item)}>
-            <Text style={styles.payBtnText}>🚨 Thanh toán ngay (Quá hạn)</Text>
-          </TouchableOpacity>
-        )}
+        {/* Điện, nước, phí sửa chữa, dịch vụ (24/09/2026): KHÔNG phí trễ hạn, hạn 5 ngày kể từ
+            ngày phát hành, quá hạn là quản lý được quyền chấm dứt HĐ ngay — nói trước cho khách. */}
+        {item.invoiceType !== 'rent' && item.invoiceType !== 'deposit' && !disputePending && (() => {
+          const deadline = item.dueDate;
+          const canTerm = canTerminateForUnpaidInvoice({
+            type: item.invoiceType, status: item.status, dueDate: item.dueDate, createdAt: item.createdAt,
+          });
+          return (
+            <Text style={[styles.risk, !canTerm && styles.riskSoft]}>
+              {canTerm
+                ? `Đã quá ${BILL_PAYMENT_DAYS} ngày kể từ ngày phát hành — quản lý được quyền chấm dứt hợp đồng. Thanh toán ngay.`
+                : `Trả trước ${deadline ? formatDate(deadline) : 'hạn'} (${BILL_PAYMENT_DAYS} ngày kể từ ngày phát hành). Quá hạn này quản lý được quyền chấm dứt hợp đồng.`}
+            </Text>
+          );
+        })()}
 
-        <View style={styles.detailFooter}>
-          <Text style={styles.detailLink}>Xem chi tiết →</Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.payBtn, isOverdue && { backgroundColor: Colors.error }]}
+          onPress={() => setPayingInvoice(item)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.payBtnText}>Thanh toán</Text>
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Hóa đơn</Text>
-          <Text style={styles.subtitle}>Khoản còn phải trả · đã trả xem ở Lịch sử</Text>
-        </View>
-        {/* Trỏ về PaymentHistory — cùng màn với ô "Lịch sử TT" ngoài Thao tác nhanh.
-            Trước 13/08/2026 nút này mở InvoiceHistoryScreen riêng, dẫn tới hai màn lịch
-            sử chồng nhau (màn kia là tập cha). Nay một màn, hai lối vào. */}
-        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('PaymentHistory')}>
-          <Text style={styles.historyBtnText}>Lịch sử</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Tổng phải trả ──
-          Trước đây đây là một ScrollView ngang đặt thẳng trong SafeAreaView (cột flex):
-          ScrollView không có chiều cao nội dung cố định nên bị kéo giãn, chừa một
-          mảng trắng to giữa tiêu đề và bộ lọc. Giờ bọc trong View và cho ScrollView
-          `flexGrow: 0` nên khối chỉ cao đúng bằng nội dung.
-
-          Nội dung cũng gộp lại: mỗi loại một thẻ to xếp dọc (icon/nhãn/tiền) vừa cao
-          vừa lặp lại đúng con số của thẻ hoá đơn ngay bên dưới. Giờ là một dòng
-          "Cần thanh toán + tổng tiền", loại phí thu nhỏ thành chip lọc nhanh. */}
-      {(overdueCount > 0 || pendingTotal > 0) && (
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryTop}>
-            <View style={styles.summaryTotalBox}>
-              <Text style={styles.summaryTotalLabel}>Cần thanh toán</Text>
-              <Text style={styles.summaryTotalValue}>{formatCurrency(pendingTotal)}</Text>
-            </View>
-            {overdueCount > 0 && (
-              <TouchableOpacity
-                style={[styles.overduePill, statusFilter === 'overdue' && styles.overduePillActive]}
-                onPress={() => setStatusFilter('overdue')}
-              >
-                <Text style={[styles.overduePillText, statusFilter === 'overdue' && { color: Colors.white }]}>
-                  ⚠️ {overdueCount} quá hạn
+  const listHeader = (
+    <View style={{ gap: Spacing.md }}>
+      {/* Tổng phải trả */}
+      {/* Thẻ trắng, chỉ phần quá hạn mang màu đỏ — tô đỏ cả khối thì 300k quá hạn trông
+          như cả 6 triệu đều trễ, khách hoảng không cần thiết. */}
+      <View style={styles.summary}>
+        <Text style={styles.summaryLabel}>{owing.length > 0 ? 'Tổng cần thanh toán' : 'Bạn không còn nợ khoản nào'}</Text>
+        <Text style={styles.summaryValue}>{formatCurrency(total)}</Text>
+        {owing.length > 0 && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summarySub}>{owing.length} hoá đơn</Text>
+            {overdue.length > 0 && (
+              <TouchableOpacity style={styles.overduePill} onPress={() => setFilter('overdue')} activeOpacity={0.8}>
+                <Text style={styles.overduePillText}>
+                  {overdue.length} quá hạn · {formatCurrency(overdueTotal)}
                 </Text>
               </TouchableOpacity>
             )}
           </View>
+        )}
+      </View>
 
-          {/* Cố tình KHÔNG liệt kê từng loại ở đây nữa: tiêu đề mỗi nhóm bên dưới đã
-              mang tổng của nhóm, liệt kê lại là cùng một con số hiện hai lần. */}
+      {pendingCharges.length > 0 && (
+        <View style={styles.pendingCharge}>
+          <Text style={styles.pendingChargeTitle}>
+            Sắp tính vào kỳ tới · {formatCurrency(pendingChargeTotal)}
+          </Text>
+          {pendingCharges.map(c => (
+            <View key={c.id} style={styles.pendingChargeRow}>
+              <Text style={styles.pendingChargeName} numberOfLines={1}>
+                {PENDING_CHARGE_CATEGORY[(c.category || '').toUpperCase()] ?? c.category ?? 'Khoản thu khác'}
+                {c.createdAt ? ` · ${formatDate(c.createdAt)}` : ''}
+              </Text>
+              <Text style={styles.pendingChargeAmount}>{formatCurrency(c.amount)}</Text>
+            </View>
+          ))}
         </View>
       )}
 
-      {/* ── Lọc LOẠI PHÍ ── */}
-      <View style={styles.filterBlock}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-          {TYPE_FILTER_TABS.map(f => {
-            const isActive = typeFilter === f.key;
-            const count = typeCounts[f.key] ?? 0;
-            const empty = count === 0 && !isActive;
+      {/* Một hàng lọc duy nhất */}
+      {owing.length > 0 && chips.length > 2 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {chips.map(c => {
+            const active = activeFilter === c.key;
+            const activeColor = c.danger ? Colors.error : Colors.primary;
             return (
               <TouchableOpacity
-                key={f.key}
-                style={[
-                  styles.filterChip,
-                  isActive && { backgroundColor: f.color, borderColor: f.color },
-                  empty && styles.filterChipEmpty,
-                ]}
-                onPress={() => setTypeFilter(f.key)}
+                key={c.key}
+                style={[styles.chip, active && { backgroundColor: activeColor, borderColor: activeColor }]}
+                onPress={() => setFilter(c.key)}
+                activeOpacity={0.8}
               >
-                <Text style={[styles.filterText, isActive && styles.filterTextActive, empty && styles.filterTextEmpty]}>
-                  {f.label}
-                </Text>
-                <Text style={[styles.filterCount, isActive && styles.filterCountActive, empty && styles.filterTextEmpty]}>
-                  {count}
+                <Text style={[styles.chipText, c.danger && !active && { color: Colors.error }, active && styles.chipTextActive]}>
+                  {c.label} {c.count}
                 </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
+      )}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Hoá đơn</Text>
+        {/* Trỏ về PaymentHistory — nơi xem mọi khoản đã trả. */}
+        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('PaymentHistory')}>
+          <Text style={styles.historyBtnText}>🕘 Đã trả</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Lọc TRẠNG THÁI ── */}
-      <View style={[styles.filterBlock, styles.filterBlockLast]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
-          {STATUS_FILTER_TABS.map(f => {
-            const isActive = statusFilter === f.key;
-            const count = statusCounts[f.key] ?? 0;
-            // Chip rỗng vẫn bấm được, chỉ mờ đi — ẩn hẳn thì hàng chip nhảy chỗ mỗi lần
-            // khách trả xong một hoá đơn, bấm nhầm liên tục.
-            const empty = count === 0 && !isActive;
-            return (
-              <TouchableOpacity
-                key={f.key}
-                style={[
-                  styles.filterChip,
-                  isActive && { backgroundColor: f.color, borderColor: f.color },
-                  empty && styles.filterChipEmpty,
-                ]}
-                onPress={() => setStatusFilter(f.key)}
-              >
-                <Text style={[styles.filterText, isActive && styles.filterTextActive, empty && styles.filterTextEmpty]}>
-                  {f.label}
-                </Text>
-                <Text style={[styles.filterCount, isActive && styles.filterCountActive, empty && styles.filterTextEmpty]}>
-                  {count}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      <SectionList
-        sections={sections}
-        renderItem={renderInvoice}
-        keyExtractor={i => i.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.groupHead}>
-            <Text style={styles.groupTitle}>{section.title}</Text>
-            <Text style={styles.groupCount}>{section.data.length}</Text>
-            <View style={{ flex: 1 }} />
-            {/* Chỉ nêu số CÒN NỢ. Nhóm đã trả hết ghi thẳng "Đã trả đủ" thay vì một số
-                tiền — số tiền ở đây luôn bị đọc thành "phải trả". */}
-            {section.owed > 0
-              ? <Text style={styles.groupTotal}>Còn nợ {formatCurrency(section.owed)}</Text>
-              : <Text style={styles.groupPaidOff}>✓ Đã trả đủ</Text>}
-          </View>
-        )}
-        ListHeaderComponent={
-          pendingCharges.length > 0 ? (
-            <View style={styles.pendingChargeCard}>
-              <Text style={styles.pendingChargeTitle}>
-                ⏳ Khoản chờ thu kỳ tới — {formatCurrency(pendingChargeTotal)}
-              </Text>
-              <Text style={styles.pendingChargeDesc}>
-                Các khoản dưới đây đã được xác nhận và sẽ được đưa vào hóa đơn kỳ tới.
-              </Text>
-              {pendingCharges.map(c => (
-                <View key={c.id} style={styles.pendingChargeRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.pendingChargeName}>
-                      {PENDING_CHARGE_CATEGORY[(c.category || '').toUpperCase()] ?? c.category ?? 'Khoản thu khác'}
-                    </Text>
-                    {!!c.note && <Text style={styles.pendingChargeNote} numberOfLines={2}>{c.note}</Text>}
-                    {!!c.createdAt && <Text style={styles.pendingChargeNote}>Ghi nhận {formatDate(c.createdAt)}</Text>}
-                  </View>
-                  <Text style={styles.pendingChargeAmount}>{formatCurrency(c.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null
-        }
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.base }} />}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.empty}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={[styles.emptyDesc, { marginTop: Spacing.md }]}>Đang tải hóa đơn...</Text>
-            </View>
-          ) : (
-            <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>
-                {statusFilter === 'unpaid' || statusFilter === 'all' ? '✅' : '📄'}
-              </Text>
-              {/* Câu trạng thái rỗng bám theo NHÃN chip đang chọn. Rỗng ở màn này là
-                  TIN VUI (hết nợ), không phải "không tìm thấy gì" — nên nói cho đúng. */}
-              <Text style={styles.emptyTitle}>
-                {statusFilter === 'unpaid' || statusFilter === 'all'
-                  ? 'Bạn không còn khoản nào phải trả'
-                  : 'Không có hóa đơn'}
-              </Text>
-              <Text style={styles.emptyDesc}>
-                {statusFilter === 'unpaid' || statusFilter === 'all'
-                  ? 'Mọi hoá đơn đã thanh toán xong. Xem lại các khoản đã trả ở mục Lịch sử.'
-                  : statusFilter === 'overdue'
-                    ? 'Không có hoá đơn nào quá hạn — bạn đang đóng đúng hạn.'
-                    : statusFilter === 'partial'
-                      ? 'Không có hoá đơn nào trả dở dang.'
-                      : statusFilter === 'cancelled'
-                        ? 'Không có hoá đơn nào bị huỷ.'
-                        : 'Không có hoá đơn nào đang chờ thanh toán.'}
-              </Text>
-            </View>
-          )
-        }
-      />
+      {loading && invoices.length === 0 ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={visible}
+          keyExtractor={i => i.id}
+          renderItem={renderInvoice}
+          ListHeaderComponent={listHeader}
+          ListHeaderComponentStyle={{ marginBottom: Spacing.md }}
+          contentContainerStyle={styles.list}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => reload(true)} tintColor={Colors.primary} />}
+          ListEmptyComponent={
+            owing.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyEmoji}>✅</Text>
+                <Text style={styles.emptyTitle}>Đã thanh toán hết</Text>
+                <Text style={styles.emptyDesc}>Xem lại các khoản đã trả ở mục "Đã trả".</Text>
+              </View>
+            ) : null
+          }
+        />
+      )}
 
       <InvoicePaymentModal
         visible={!!payingInvoice}
@@ -539,151 +340,84 @@ export const InvoiceListScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.background },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.md,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.sm,
   },
-  title: { fontSize: 26, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 14, color: Colors.textSecondary, marginTop: 2 },
+  title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
   historyBtn: {
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.full,
   },
   historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 
-  // Summary chips
-  summaryCard: {
-    marginHorizontal: Spacing.lg, marginBottom: Spacing.sm,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    paddingTop: Spacing.sm, paddingBottom: Spacing.sm, paddingLeft: Spacing.md,
-    borderWidth: 1, borderColor: Colors.border,
+  list: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xs, paddingBottom: 110 },
+
+  // Tổng
+  summary: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
+    padding: Spacing.base, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  summaryTop: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingRight: Spacing.md,
-  },
-  summaryTotalBox: { flex: 1 },
-  summaryTotalLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted },
-  summaryTotalValue: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary, marginTop: 1 },
-  // flexGrow: 0 — không có nó thì ScrollView ngang bị kéo giãn theo chiều dọc.
-  // Tiêu đề nhóm "🏠 Tiền phòng" / "⚡ Điện, nước & phí khác".
-  groupHead: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingTop: Spacing.lg, paddingBottom: Spacing.sm,
-  },
-  groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginRight: 6 },
-  /*
-    SỐ CÒN NỢ là thứ khách mở màn này ra để tìm, nên nó phải là chỗ sáng nhất của dòng.
-    Trước đó nó dùng `textSecondary` — cùng tông xám với số đếm bên trái, tức là chìm
-    ngang với thông tin phụ. Cho vào viên nền đỏ nhạt: nổi mà không hét như chữ đỏ trần.
-  */
-  groupTotal: {
-    fontSize: 13, fontWeight: '900', color: '#B91C1C',
-    backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA',
-    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 3,
-    overflow: 'hidden',
-  },
-  groupPaidOff: {
-    fontSize: 12, fontWeight: '800', color: '#047857',
-    backgroundColor: '#ECFDF5', borderRadius: BorderRadius.full,
-    paddingHorizontal: 10, paddingVertical: 3, overflow: 'hidden',
-  },
-  groupCount: {
-    fontSize: 12, fontWeight: '700', color: Colors.textSecondary,
-    backgroundColor: Colors.background, borderRadius: BorderRadius.full,
-    minWidth: 22, textAlign: 'center', paddingHorizontal: 7, paddingVertical: 2,
-  },
+  summaryLabel: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
+  summaryValue: { fontSize: 28, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.sm },
+  summarySub: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
   overduePill: {
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs,
-    borderWidth: 1, borderColor: Colors.error + '40',
+    paddingHorizontal: 10, paddingVertical: 4,
   },
-  overduePillActive: { backgroundColor: Colors.error },
-  overduePillText: { fontSize: 11, fontWeight: '700', color: Colors.error },
+  overduePillText: { fontSize: 12, fontWeight: '700', color: Colors.error },
 
-  // Filter rows
-  filterBlock: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingLeft: Spacing.lg, paddingBottom: Spacing.xs,
+  // Khoản chờ thu kỳ tới
+  pendingCharge: {
+    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: '#FDE68A', gap: 4,
   },
-  filterBlockLast: { paddingBottom: Spacing.sm },
-  filterChips: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, paddingRight: Spacing.lg },
-  filterChip: {
-    height: 32, paddingHorizontal: 12, borderRadius: BorderRadius.full,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+  pendingChargeTitle: { fontSize: 13, fontWeight: '800', color: '#92400E' },
+  pendingChargeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  pendingChargeName: { flex: 1, fontSize: 12, color: '#B45309' },
+  pendingChargeAmount: { fontSize: 12, fontWeight: '700', color: '#92400E' },
+
+  // Chip lọc
+  chips: { gap: Spacing.sm, paddingRight: Spacing.lg },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: BorderRadius.full,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
-  // Trạng thái không có hoá đơn nào: mờ đi nhưng VẪN bấm được (xem chú thích chỗ render).
-  filterChipEmpty: { opacity: 0.45 },
-  // Số đếm — nền nhạt để tách khỏi nhãn mà không cần thêm dấu ngoặc.
-  filterCount: {
-    fontSize: 11, fontWeight: '800', color: Colors.textSecondary,
-    backgroundColor: Colors.background, borderRadius: BorderRadius.full,
-    minWidth: 18, textAlign: 'center', paddingHorizontal: 5, paddingVertical: 1,
-    overflow: 'hidden',
+  chipText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
+  chipTextActive: { color: Colors.white },
+
+  // Thẻ hoá đơn
+  card: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  filterCountActive: { color: Colors.white, backgroundColor: '#FFFFFF33' },
-  filterTextEmpty: { color: Colors.textMuted },
-  // Màu chip khi được chọn nay lấy từ `color` của từng tab (STATUS_FILTER_TABS /
-  // TYPE_FILTER_TABS) nên không còn ba style cứng cho primary/error/success.
-  filterText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
-  filterTextActive: { color: Colors.white },
-
-  list: { paddingHorizontal: Spacing.lg, paddingBottom: 100 },
-
-  // Khoản chờ thu (pending charges — chưa thành hóa đơn)
-  pendingChargeCard: {
-    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg,
-    borderWidth: 1, borderColor: '#FDE68A',
-    padding: Spacing.base, marginBottom: Spacing.base,
+  cardOverdue: { borderColor: '#FCA5A5', borderLeftWidth: 4, borderLeftColor: Colors.error },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  typeIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  typeIconText: { fontSize: 18 },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  cardSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  chevron: { fontSize: 22, color: Colors.textMuted },
+  amountRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: Spacing.md, gap: Spacing.sm },
+  amount: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
+  lateFee: { fontSize: 11, color: Colors.error, marginTop: 1 },
+  due: { fontSize: 12, fontWeight: '700', textAlign: 'right' },
+  risk: {
+    fontSize: 12, color: '#991B1B', backgroundColor: Colors.errorLight,
+    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: 6,
+    marginTop: Spacing.sm, lineHeight: 17,
   },
-  pendingChargeTitle: { fontSize: 14, fontWeight: '700', color: '#92400E' },
-  pendingChargeDesc: { fontSize: 12, color: '#B45309', marginTop: 2, lineHeight: 18 },
-  pendingChargeRow: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    marginTop: Spacing.sm, paddingTop: Spacing.sm,
-    borderTopWidth: 1, borderTopColor: '#FDE68A',
-  },
-  pendingChargeName: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary },
-  pendingChargeNote: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-  pendingChargeAmount: { fontSize: 14, fontWeight: '800', color: '#B45309' },
-  card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.md, overflow: 'hidden' },
-  cardOverdue: { borderWidth: 1.5, borderColor: Colors.error + '60' },
-  overdueStripe: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, backgroundColor: Colors.error },
-
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  typeBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
-  typeBadgeText: { fontSize: 11, fontWeight: '700' },
-  invoiceMonth: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  invoiceRoom: { fontSize: 12, color: Colors.textMuted, marginBottom: Spacing.xs },
-  utilityDetail: { fontSize: 12, color: Colors.textSecondary, marginBottom: Spacing.xs },
-  statusBadge: { paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2, borderRadius: BorderRadius.full },
-  statusText: { fontSize: 11, fontWeight: '700' },
-
-  amountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: Spacing.sm },
-  amountVal: { fontSize: 22, fontWeight: '800', color: Colors.primary },
-  dueDateText: { fontSize: 12, color: Colors.textSecondary },
-  paidDateText: { fontSize: 12, color: Colors.success, fontWeight: '600' },
-  lateFeeText: { fontSize: 12, color: Colors.error, fontWeight: '600', marginTop: 3 },
-  disputeChip: {
-    fontSize: 11, fontWeight: '700', color: '#92400E',
-    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.sm,
-    paddingHorizontal: 8, paddingVertical: 4,
-    alignSelf: 'flex-start', marginTop: 6, overflow: 'hidden',
-  },
-  riskText: { fontSize: 11, color: Colors.error, fontWeight: '700', marginTop: 4, lineHeight: 16 },
-
+  riskSoft: { color: '#92400E', backgroundColor: '#FFFBEB' },
   payBtn: {
-    backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.md, alignItems: 'center', marginTop: Spacing.md,
+    marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.md,
+    paddingVertical: 11, alignItems: 'center',
   },
-  payBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
+  payBtnText: { fontSize: 14, fontWeight: '800', color: Colors.white },
 
-  detailFooter: { marginTop: Spacing.sm, alignItems: 'flex-end' },
-  detailLink: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
-
-  empty: { paddingTop: 60, alignItems: 'center' },
-  emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center' },
+  empty: { alignItems: 'center', paddingVertical: 48, gap: 6 },
+  emptyEmoji: { fontSize: 44 },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

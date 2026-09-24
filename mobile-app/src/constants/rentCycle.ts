@@ -234,3 +234,38 @@ export const canTerminateForUnpaidRent = (
   return daysOverdue(dueDate || '', now) >= RENT_TERMINATION_AFTER_DAYS;
 };
 
+
+/*
+ * ── HOÁ ĐƠN KHÁC TIỀN NHÀ (điện, nước, phí sửa chữa, dịch vụ) — chốt 24/09/2026 ──────
+ *
+ *   • KHÔNG còn phí trễ hạn 2% (trước đây BE cộng 2% khi quá hạn).
+ *   • Hạn thanh toán = NGÀY PHÁT HÀNH + 5 ngày (trước: điện/nước +2, sửa chữa +3,
+ *     dịch vụ cuối tháng +5).
+ *   • Qua hạn đó mà chưa trả → báo admin + host + manager + chính khách, và manager
+ *     ĐƯỢC QUYỀN chấm dứt hợp đồng NGAY (không có thêm mốc nhắc cuối như tiền nhà).
+ *   • Tiền nhà giữ nguyên chu kỳ 1 → 5 → 7 → 8 ở trên.
+ *
+ * ✅ BE ĐÃ KHỚP (commit 51ef899, 24/09/2026): dueDate = phát hành + 5, late-fee-percent 0,
+ * quá hạn → OVERDUE + báo khách/manager/host/admin + terminationProposed; VIOLATION chấp
+ * nhận nợ khác RENT. Nên FE đọc thẳng `status`/`dueDate` của BE (hoá đơn cũ phát hành
+ * trước 24/09 vẫn mang hạn cũ — BE cũng xét theo hạn đó, hai bên khớp nhau).
+ */
+export const BILL_PAYMENT_DAYS = 5;
+
+/**
+ * Hoá đơn này đã mở quyền chấm dứt hợp đồng chưa — MỌI loại hoá đơn.
+ *   • Tiền nhà (RENT): theo chu kỳ tiền nhà (`canTerminateForUnpaidRent`).
+ *   • Loại khác: BE đã đánh OVERDUE, hoặc đã qua `dueDate` (= phát hành + 5) — lúc BE quét
+ *     8:00 chưa chạy thì vẫn mở đúng ngày.
+ */
+export const canTerminateForUnpaidInvoice = (
+  inv: { type?: string | null; status?: string | null; dueDate?: string | null; createdAt?: string | null },
+  now: Date = serverNow(),
+): boolean => {
+  const st = (inv.status || '').toUpperCase();
+  if (st === 'PAID' || st === 'CANCELLED') return false;
+  if ((inv.type || '').toUpperCase() === 'RENT') {
+    return canTerminateForUnpaidRent(inv.dueDate ?? undefined, inv.status ?? undefined, now);
+  }
+  return st === 'OVERDUE' || daysOverdue(inv.dueDate ?? '', now) > 0;
+};

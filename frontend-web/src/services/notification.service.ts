@@ -34,7 +34,8 @@ export interface AppNotificationDto {
  * Bỏ `RENT_FIRST_CYCLE_OVERDUE` (13/08/2026): tiền chu kỳ đầu thu chung với tiền cọc ở
  * mã QR lúc đón khách nên không còn kỳ đầu nào quá hạn được.
  */
-export const HOST_OVERDUE_TYPES = ['RENT_OVERDUE_HOST'];
+// + INVOICE_OVERDUE_HOST (BE 24/09/2026): điện/nước/sửa chữa/dịch vụ quá hạn (phát hành + 5 ngày).
+export const HOST_OVERDUE_TYPES = ['RENT_OVERDUE_HOST', 'INVOICE_OVERDUE_HOST', 'MAINTENANCE_OVERDUE_HOST'];
 
 export const notificationService = {
   list: (params: { unreadOnly?: boolean; page?: number; size?: number } = {}): Promise<Page<AppNotificationDto>> =>

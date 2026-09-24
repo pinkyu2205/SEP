@@ -21,7 +21,7 @@ import {
 import type { PropertyResponse } from '@/types/api.types';
 import { parseEvnInvoice, monthPeriod, onlyDigits, periodProblem, arrearsPeriod } from '@/utils/evnInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
-import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
+import { SectionShell, StatusPill, EmptyState, formatVnd, MissingBillsBanner } from './shared';
 import { serverNow } from '@/utils/serverTime';
 
 /**
@@ -512,6 +512,8 @@ export const EvnBillPublishing = () => {
   );
 
   /** Gắn nhãn "Đã phát hành" ngay trong danh sách chọn — thấy trước khi chọn, đỡ mất công. */
+  /** Đầu form — khối "nhà còn thiếu hoá đơn" cuộn về đây sau khi chọn nhà. */
+  const formTopRef = useRef<HTMLDivElement>(null);
   const publishedIds = useMemo(
     () => new Set(bills.filter((b) => b.status !== 'REVOKED').map((b) => b.propertyId)),
     [bills],
@@ -1023,6 +1025,18 @@ export const EvnBillPublishing = () => {
           </div>
         }
       >
+        <MissingBillsBanner
+          kindLabel="điện EVN"
+          periodLabel={`${month}/${year}`}
+          loading={loadingProps || loadingBills}
+          missing={occupiedProperties
+            .filter(p => !publishedIds.has(p.id))
+            .map(p => ({ id: p.id, name: p.propertyName }))}
+          onPick={(id) => {
+            setPropertyId(id);
+            formTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+        />
         {justPublished && (
           <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -1067,7 +1081,7 @@ export const EvnBillPublishing = () => {
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div ref={formTopRef} className="grid gap-6 lg:grid-cols-2 scroll-mt-24">
           {/* ── Cột trái: chọn nhà + ảnh hoá đơn ── */}
           <div className="space-y-4">
             <div>

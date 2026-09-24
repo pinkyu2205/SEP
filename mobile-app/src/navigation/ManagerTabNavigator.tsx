@@ -1,7 +1,7 @@
-import React, { memo, useEffect, useMemo, useRef } from 'react';
+import React, { memo, useEffect, useRef } from 'react';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import {
-  Animated, LayoutAnimation, Pressable, StyleSheet, Text, View,
+  Animated, Pressable, StyleSheet, Text, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ManagerHomeScreen } from '@/screens/manager/ManagerHomeScreen';
@@ -14,8 +14,6 @@ import { Colors, BorderRadius, Shadow, Spacing } from '@/constants';
 const Tab = createBottomTabNavigator();
 
 const HOME_ROUTE = 'ManagerHome';
-const PROFILE_ROUTE = 'ManagerProfile';
-const FEATURE_ROUTES = ['BuildingList', 'ManagerBilling', 'ManagerMaintenance'];
 
 /**
  * ─── Badge đã BỎ 01/09/2026 ──────────────────────────────────────────────────
@@ -38,35 +36,16 @@ const TAB_META: Record<string, { label: string; icon: string; badge?: number }> 
 // New Architecture (newArchEnabled: true) đã bật LayoutAnimation sẵn — không cần
 // gọi UIManager.setLayoutAnimationEnabledExperimental (nó là no-op và gây warning).
 
-const getVisibleRouteNames = (activeRouteName: string) => {
-  if (FEATURE_ROUTES.includes(activeRouteName)) {
-    return [HOME_ROUTE, activeRouteName, PROFILE_ROUTE];
-  }
-
-  return [HOME_ROUTE, ...FEATURE_ROUTES, PROFILE_ROUTE];
-};
-
+/**
+ * Thanh tab LUÔN hiện đủ 5 mục (24/09/2026).
+ *
+ * Bản trước ẩn cả thanh khi đứng ở Tòa nhà / Hóa đơn / Bảo trì (và thu còn 3 mục khi
+ * quay về) — người dùng bấm một tab là mất luôn đường sang tab khác, phải bấm "‹" về
+ * Tổng quan rồi mới đi tiếp. Thanh tab là lối đi chính của app, không được biến mất.
+ */
 const ManagerTabBar = memo(({ state, descriptors, navigation }: BottomTabBarProps) => {
   const insets = useSafeAreaInsets();
-  const activeRoute = state.routes[state.index];
-  const shouldHideBar = FEATURE_ROUTES.includes(activeRoute.name);
-  const visibleRouteNames = useMemo(
-    () => getVisibleRouteNames(activeRoute.name),
-    [activeRoute.name],
-  );
-
-  useEffect(() => {
-    LayoutAnimation.configureNext({
-      duration: 220,
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-      create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-      delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-    });
-  }, [visibleRouteNames.join('|')]);
-
-  const visibleRoutes = state.routes.filter(route => visibleRouteNames.includes(route.name));
-
-  if (shouldHideBar) return null;
+  const visibleRoutes = state.routes;
 
   return (
     <View style={[styles.barSafeArea, { paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -226,7 +205,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
     borderWidth: 1,
     borderColor: Colors.border,
-    paddingHorizontal: Spacing.sm,
+    paddingHorizontal: 4,
     paddingVertical: Spacing.sm,
     ...Shadow.md,
   },
@@ -237,11 +216,12 @@ const styles = StyleSheet.create({
   },
   item: {
     minHeight: 46,
-    marginHorizontal: 3,
+    marginHorizontal: 1,
     borderRadius: BorderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    // 5 mục trên màn hẹp: đệm ngang lớn làm "Tổng quan" bị cắt thành "Tổng qu…".
+    paddingHorizontal: 2,
     paddingVertical: 5,
   },
   itemActive: {

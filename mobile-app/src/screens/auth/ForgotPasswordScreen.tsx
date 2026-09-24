@@ -25,7 +25,7 @@ export const ForgotPasswordScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Quay lại</Text>
+          <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
 
         <View style={styles.header}>

@@ -1337,7 +1337,7 @@ export const TicketDetailScreen: React.FC = () => {
       </TouchableOpacity>
       {!fromInspection && (
         <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setDiagnoseFormOpen(false)}>
-          <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>← Quay lại</Text>
+          <Text style={[{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -2351,7 +2351,7 @@ export const TicketDetailScreen: React.FC = () => {
               <Text style={s.advanceBtnText}>{sendingForInspection ? 'Đang gửi...' : '📦 Xác nhận mang đi kiểm tra'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ alignItems: 'center', paddingVertical: Spacing.sm }} onPress={() => setInspectionFormOpen(false)}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }}>← Quay lại</Text>
+              <Text style={[{ fontSize: 13, fontWeight: '600', color: Colors.textSecondary }, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
             </TouchableOpacity>
           </View>
         )}

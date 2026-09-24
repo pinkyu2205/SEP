@@ -77,6 +77,12 @@ export interface OpRoom {
   /** HĐ thô của khách đang thuê — để mở đúng sheet "chi tiết khách thuê" dùng chung.
    *  `getRooms` vốn đã tải danh sách hợp đồng nên không phát sinh request nào. */
   contract?: TenantContractResponse;
+  /**
+   * Phòng CÓ KHÁCH ở mà BE đang để MAINTENANCE — BE tự đẩy cả phòng sang MAINTENANCE khi
+   * có phiếu sửa thiết bị mở (MaintenanceServiceImpl.markRoomMaintenance), và tự trả về khi
+   * đóng phiếu. Khi đó `status` vẫn là 'occupied' (khách vẫn ở), cờ này chỉ để hiện nhãn phụ.
+   */
+  fixing?: boolean;
 }
 
 // ── Mapping trạng thái BE <-> UI ─────────────────────────────────────────────
@@ -107,12 +113,22 @@ const deriveFloor = (roomNumber?: string): number => {
   return digits.length >= 3 ? Math.max(1, Math.floor(n / 100)) : 1;
 };
 
-const countByStatus = (rooms: ApiRoom[]): OpRoomCounts => ({
+/**
+ * Trạng thái vận hành THẬT của phòng: MAINTENANCE mà có khách ở (HĐ ACTIVE) thì vẫn là
+ * "Đang thuê" — xem `OpRoom.fixing`. Đếm theo status thô thì phòng có người ở rơi vào ô
+ * "Bảo trì", ô "Đang thuê" hụt đi một phòng.
+ */
+const effectiveStatus = (r: ApiRoom, occupiedIds?: Set<number>): OpStatus => {
+  const s = toOpStatus(r.status);
+  return s === 'maintenance' && occupiedIds?.has(r.id) ? 'occupied' : s;
+};
+
+const countByStatus = (rooms: ApiRoom[], occupiedIds?: Set<number>): OpRoomCounts => ({
   total: rooms.length,
-  available: rooms.filter(r => toOpStatus(r.status) === 'available').length,
-  occupied: rooms.filter(r => toOpStatus(r.status) === 'occupied').length,
-  maintenance: rooms.filter(r => toOpStatus(r.status) === 'maintenance').length,
-  disabled: rooms.filter(r => toOpStatus(r.status) === 'disabled').length,
+  available: rooms.filter(r => effectiveStatus(r, occupiedIds) === 'available').length,
+  occupied: rooms.filter(r => effectiveStatus(r, occupiedIds) === 'occupied').length,
+  maintenance: rooms.filter(r => effectiveStatus(r, occupiedIds) === 'maintenance').length,
+  disabled: rooms.filter(r => effectiveStatus(r, occupiedIds) === 'disabled').length,
 });
 
 // Khoá để ghép hợp đồng khách thuê ACTIVE vào phòng (ưu tiên roomId, fallback roomNumber).
@@ -139,7 +155,10 @@ const mapProperty = (
     propertyId: p.id,
     name: p.propertyName,
     address: p.fullAddress || p.shortAddress || '',
-    counts: countByStatus(rooms),
+    counts: countByStatus(rooms, (() => {
+      const { byId, byNumber } = activeTenantsByRoom(contracts);
+      return new Set(rooms.filter(r => byId.has(r.id) || byNumber.has(r.roomNumber)).map(r => r.id));
+    })()),
     wholeHouse,
     whole: wholeHouse
       ? {
@@ -174,7 +193,8 @@ const mapRoom = (
   maxOccupants: r.maxOccupants ?? 0,
   rentPrice: r.price ?? 0,
   deposit: r.deposit ?? 0,
-  status: toOpStatus(r.status),
+  status: tenant && toOpStatus(r.status) === 'maintenance' ? 'occupied' : toOpStatus(r.status),
+  fixing: !!tenant && toOpStatus(r.status) === 'maintenance',
   tenantName: tenant?.tenantFullName,
   tenantPhone: tenant?.tenantPhone,
   contractId: tenant?.id,

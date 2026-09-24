@@ -29,7 +29,39 @@ export interface MeterOverrideVerifyResult {
   message?: string;
 }
 
+/** Manager xin mã ở màn nào — admin cần biết để đánh giá rủi ro. */
+export type MeterOverridePurpose = 'ONBOARDING' | 'RESUME_CONTRACT' | 'MONTHLY_READING';
+
+export interface MeterOverrideRequestInput {
+  meterKind: MeterOverrideKind;
+  purpose: MeterOverridePurpose;
+  /** null khi đang đón khách mới (hợp đồng chưa tạo). */
+  contractId: number | null;
+  propertyId?: number | null;
+  roomId?: number | null;
+  /** Lý do không chụp được ảnh — cùng câu sẽ gửi kèm lúc nhập mã. */
+  reason: string;
+}
+
 export const meterOverrideService = {
+  /**
+   * GỬI YÊU CẦU XIN MÃ cho admin (24/09/2026 — BE CHƯA LÀM, 404).
+   *
+   * Trước đây chỉ có gọi điện: admin không biết ai xin, đồng hồ nào, nhà/phòng nào. Gửi
+   * qua app thì admin thấy ngay trên web (có số trên menu "Cấp mã đồng hồ") kèm đủ thông
+   * tin, cấp mã gắn đúng yêu cầu. Mã vẫn do admin ĐỌC cho manager — không gửi mã qua app,
+   * giữ nguyên rào "phải nói chuyện với admin" của mentor.
+   *
+   * 404 = BE chưa có → nơi gọi báo manager gọi điện như cũ.
+   * Xem doc-be/BE-YEUCAU-yeu-cau-xin-ma-dong-ho-2026-09-24.md
+   */
+  requestPasscode: async (input: MeterOverrideRequestInput): Promise<void> => {
+    await realApiClient.post('/api/v1/manager/meter-override/requests', {
+      ...input,
+      reason: input.reason.trim(),
+    });
+  },
+
   /**
    * Đổi mã 6 số admin vừa cấp lấy token dùng một lần.
    *

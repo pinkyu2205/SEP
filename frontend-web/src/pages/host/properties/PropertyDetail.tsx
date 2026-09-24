@@ -1,3 +1,4 @@
+import { useWebAuth } from '@/auth/WebAuthContext';
 import { MaskedField } from '@/components/MaskedField';
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -5,7 +6,7 @@ import {
   ArrowLeft, Building2, MapPin, DoorOpen, Users, Ruler,
   Zap, RefreshCw, Home, UserCog, X, CheckCircle2,
   Wrench, CircleCheck, Layers, BadgeDollarSign, Wallet, Phone, CalendarClock, UserRound,
-  Package, Image as ImageIcon, ChevronLeft, ChevronRight, Search, Lock, Pencil, History,
+  Package, Image as ImageIcon, ChevronDown, ChevronLeft, ChevronRight, Search, Lock, Pencil, History,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { propertyService } from '@/services/property.service';
@@ -14,7 +15,9 @@ import { hostService, type HostContractDto } from '@/services/host.service';
 import type {
   PropertyResponse, RoomResponse, TenantContractResponse, ContractStatus,
 } from '@/types/api.types';
-import { OperationalEquipmentPanel } from '@/pages/admin/onboarding/OperationalEquipmentPanel';
+import {
+  EquipmentAlertStrip, OperationalEquipmentPanel, RoomEquipmentSection,
+} from '@/pages/admin/onboarding/OperationalEquipmentPanel';
 import { PropertyMap } from '@/components/PropertyMap';
 import {
   WholeHousePriceActions, AllRoomsPriceHistoryButton, RoomPriceModal, RoomPriceHistoryModal,
@@ -102,7 +105,16 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
   // Chỉ dùng khi đang xem một THÁNG ĐÃ QUA mà phòng không có hợp đồng nào nằm trong tháng đó.
   // Không gọi "Phòng trống": lúc đó phòng có thể chưa mở, đang cải tạo… — chỉ biết chắc là chưa có khách.
   PAST_EMPTY:  { label: 'Chưa có khách', cls: 'bg-slate-100 text-slate-500',    dot: 'bg-slate-300',   border: 'border-slate-200 hover:border-slate-300' },
+  /**
+   * Phòng chưa có khách ở nhưng ĐÃ có hồ sơ đón khách (HĐ DRAFT "chờ đón" hoặc PENDING "đã chốt,
+   * chưa dọn vào"). BE vẫn để phòng AVAILABLE nên trước đây thẻ ghi "Phòng trống" — ngoài danh
+   * sách nhà thì báo "1 chờ đón" mà vào đây không biết là phòng nào. Cùng màu tím với danh sách.
+   */
+  INCOMING:    { label: 'Chờ đón khách', cls: 'bg-violet-100 text-violet-700',  dot: 'bg-violet-500',  border: 'border-violet-200 hover:border-violet-400' },
 };
+
+/** Hồ sơ đón khách của phòng: HĐ chờ đón (DRAFT) hoặc đã chốt chưa dọn vào (PENDING). */
+const isIncomingContract = (c: TenantContractResponse) => c.status === 'DRAFT' || c.status === 'PENDING';
 
 /**
  * Hợp đồng có khách ở trong tháng `ym` ("YYYY-MM") không: đã vào ở trước hoặc trong tháng đó, và
@@ -272,6 +284,13 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
   denied: boolean;
   roomNumber: string;
 }) {
+  /** Tháng đang mở — mặc định gập hết, bấm tháng nào mở tháng đó. */
+  const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
+  const toggleMonth = (k: string) => setOpenMonths(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
   const rows = useMemo(() => {
     if (!allRows) return null;
     const want = normalizeRoomNumber(roomNumber);
@@ -308,8 +327,9 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
       {[...byPeriod.entries()].map(([key, list]) => {
+        const monthOpen = openMonths.has(key);
         const entries = groupOnboardPayments(list, r => r.isOnboardEnvelope, r => r.collectedInInvoiceCode);
         /** Tiền khách THỰC trả trong kỳ: phiếu gộp tính trọn (đã gồm tiền nhà kỳ đầu), không cộng lại dòng con. */
         const paidCash = entries.reduce((s, e) => {
@@ -322,9 +342,12 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
         const unpaidSum = unpaidRows.reduce((s, r) => s + r.amount, 0);
         return (
           <div key={key}>
-            <div className="mb-1 flex items-center justify-between gap-2 px-1">
-              <p className="text-xs font-black text-slate-500">
+            <button type="button" onClick={() => toggleMonth(key)} aria-expanded={monthOpen}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50">
+              <p className="flex items-center gap-1.5 text-xs font-black text-slate-600">
+                <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${monthOpen ? 'rotate-180' : '-rotate-90'}`} />
                 {key === '—' ? 'Không rõ kỳ' : `Tháng ${Number(key.slice(5))}/${key.slice(0, 4)}`}
+                <span className="font-semibold text-slate-400">· {entries.length} hoá đơn</span>
               </p>
               <p className={`text-right text-[11px] font-bold ${unpaidRows.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
                 {paidCash > 0 && <>Đã thu {formatCurrency(paidCash)}</>}
@@ -332,8 +355,9 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
                   ? <>{paidCash > 0 && ' · '}còn {formatCurrency(unpaidSum)} chưa thu</>
                   : paidCash > 0 ? ' · đủ' : 'Đã thu đủ'}
               </p>
-            </div>
-            <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+            </button>
+            {monthOpen && (
+            <div className="mx-3 mb-3 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
               {entries.map(e => {
                 if (e.kind === 'onboard') {
                   const { envelope, rents, deposit } = e.payment;
@@ -394,6 +418,7 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
                 );
               })}
             </div>
+            )}
           </div>
         );
       })}
@@ -402,10 +427,12 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
 }
 
 function RoomDetailModal({
-  room, tenant, pastTenants, propertyId, canChange, onClose, onConfirmStatus,
+  room, tenant, incoming, pastTenants, propertyId, canChange, onClose, onConfirmStatus,
 }: {
   room: RoomResponse;
   tenant: TenantContractResponse | null;
+  /** Hồ sơ khách SẮP dọn vào (chờ đón / đã chốt) — chỉ khi phòng chưa có khách ở. */
+  incoming: TenantContractResponse | null;
   /** Hợp đồng ĐÃ kết thúc của chính phòng này — các đời khách trước. */
   pastTenants: TenantContractResponse[];
   propertyId: number;
@@ -413,7 +440,11 @@ function RoomDetailModal({
   onClose: () => void;
   onConfirmStatus: (roomId: number, status: string) => Promise<void>;
 }) {
-  const st = roomStatusMap[room.status] ?? roomStatusMap.DRAFT;
+  /** BE đẩy CẢ PHÒNG sang MAINTENANCE khi có phiếu sửa mở (MaintenanceServiceImpl.markRoomMaintenance). */
+  const fixing = room.status === 'MAINTENANCE';
+  const st = (incoming && !tenant ? roomStatusMap.INCOMING
+    : fixing && tenant ? roomStatusMap.RENTED
+      : roomStatusMap[room.status]) ?? roomStatusMap.DRAFT;
   const [selected, setSelected] = useState<string>(room.status);
   const [saving, setSaving] = useState(false);
   const dirty = selected !== room.status;
@@ -444,8 +475,15 @@ function RoomDetailModal({
             <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center shrink-0"><DoorOpen className="w-5 h-5 text-indigo-500" /></div>
             <div>
               <h2 className="text-lg font-black text-slate-900 leading-tight">Phòng {room.roomNumber}</h2>
-              <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full mt-0.5 ${st.cls}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} /> {st.label}
+              <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${st.cls}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} /> {st.label}
+                </span>
+                {fixing && tenant && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-bold text-sky-700">
+                    <Wrench className="h-3 w-3" /> Đang sửa thiết bị
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -524,6 +562,54 @@ function RoomDetailModal({
             </div>
           )}
 
+          {/* Thiết bị trong phòng — kèm trạng thái bảo trì, lịch sử và mã QR từng món,
+              để host xem phòng nào thì thấy luôn đồ của phòng đó, khỏi sang tab Thiết bị lọc lại. */}
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-bold text-slate-800">
+              <Package className="h-4 w-4 text-slate-400" /> Thiết bị trong phòng
+            </p>
+            <RoomEquipmentSection propertyId={propertyId} roomId={room.id} roomLabel={`Phòng ${room.roomNumber}`}
+              roomUnderMaintenance={room.status === 'MAINTENANCE'} />
+          </div>
+
+          {/* Khách sắp dọn vào — hồ sơ đón khách đang giữ phòng này */}
+          {incoming && !tenant && (
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
+              <p className="mb-2.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-violet-700">
+                <CalendarClock className="h-3.5 w-3.5" />
+                {incoming.status === 'DRAFT' ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100 font-bold text-violet-700">
+                  {(incoming.tenantFullName || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-slate-900">{incoming.tenantFullName || '(chưa có tên)'}</p>
+                  <MaskedField value={incoming.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <p className="text-xs text-slate-400">Dự kiến vào ở</p>
+                  <p className="mt-0.5 text-xs font-bold text-slate-800">{fmtDate(incoming.moveInDate || incoming.startDate)}</p>
+                </div>
+                <div className="rounded-lg bg-white/70 px-3 py-2">
+                  <p className="text-xs text-slate-400">Giá thuê</p>
+                  <p className="font-bold text-slate-800">{formatCurrency(incoming.rentAmount)}</p>
+                </div>
+                {incoming.contractCode && (
+                  <div className="col-span-2 rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-xs text-slate-400">Mã hợp đồng</p>
+                    <p className="mt-0.5 text-xs font-bold text-slate-800">{incoming.contractCode}</p>
+                  </div>
+                )}
+              </div>
+              <p className="mt-2.5 text-[11px] text-violet-700">
+                Phòng đã có người giữ chỗ — không xếp thêm khách khác vào phòng này.
+              </p>
+            </div>
+          )}
+
           {/* Các đời khách trước của CHÍNH phòng này.
               Cùng một phòng qua nhiều đời khách, mà trước đây modal chỉ biết đến hợp
               đồng ACTIVE — phòng vừa trả là sạch trơn, không còn dấu vết ai từng ở. */}
@@ -589,9 +675,13 @@ function RoomDetailModal({
             </div>
           ) : (
             <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs font-medium text-slate-500">
-              {room.status === 'RENTED'
-                ? 'Phòng đang cho thuê — không thể đổi trạng thái.'
-                : 'Tòa nhà ở trạng thái hiện tại không cho đổi trạng thái phòng.'}
+              {tenant || room.status === 'RENTED'
+                ? 'Phòng đang có khách ở — trạng thái tự cập nhật theo hợp đồng.'
+                : room.status === 'MAINTENANCE'
+                  ? 'Phòng đang có phiếu sửa chữa — hệ thống tự trả về "Phòng trống" khi quản lý đóng phiếu.'
+                  : incoming
+                    ? 'Phòng đã có khách chờ đón — trạng thái tự cập nhật khi khách nhận phòng.'
+                    : 'Trạng thái phòng do quản lý vận hành cập nhật khi cần (khoá phòng, sửa chữa…).'}
             </div>
           )}
         </div>
@@ -604,6 +694,7 @@ function RoomDetailModal({
 export const PropertyDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useWebAuth();
 
   const [property, setProperty] = useState<PropertyResponse | null>(null);
   const [rooms, setRooms] = useState<RoomResponse[]>([]);
@@ -638,9 +729,24 @@ export const PropertyDetail = () => {
       .filter(c => contractCoversMonth(c, period))
       .sort((a, b) => (b.moveInDate || b.startDate || '').localeCompare(a.moveInDate || a.startDate || ''))[0] ?? null;
   };
+  /** Phòng đang có khách ở (HĐ ACTIVE) — dùng để tách "đang sửa có khách" khỏi "bảo trì bỏ trống". */
+  const hasTenantNow = (roomId: number) => contracts.some(c => c.roomId === roomId && c.status === 'ACTIVE');
+  /** Hồ sơ đón khách đang giữ phòng (chỉ có nghĩa ở kỳ hiện tại / tương lai). */
+  const incomingFor = (roomId: number): TenantContractResponse | null =>
+    contracts.find(c => c.roomId === roomId && isIncomingContract(c)) ?? null;
   /** Trạng thái hiển thị của phòng theo kỳ đang xem. */
-  const roomStatusInPeriod = (room: RoomResponse): string =>
-    isNowPeriod ? room.status : (tenantInPeriod(room.id) ? 'RENTED' : 'PAST_EMPTY');
+  const roomStatusInPeriod = (room: RoomResponse): string => {
+    if (!isNowPeriod) return tenantInPeriod(room.id) ? 'RENTED' : 'PAST_EMPTY';
+    // Chưa có khách ở mà đã có hồ sơ đón → "Chờ đón khách", thắng status AVAILABLE/DRAFT của phòng.
+    /*
+     * BE đặt CẢ PHÒNG = MAINTENANCE khi có phiếu sửa thiết bị mở, kể cả lúc khách vẫn đang ở.
+     * Hiện "Bảo trì" cho phòng có người là sai: đọc như phòng trống để sửa, và phòng rớt khỏi
+     * số "Đang thuê". Có khách thì nhãn chính là "Đang thuê", việc sửa thành nhãn phụ trên thẻ.
+     */
+    if (room.status === 'MAINTENANCE' && hasTenantNow(room.id)) return 'RENTED';
+    if (room.status !== 'RENTED' && incomingFor(room.id)) return 'INCOMING';
+    return room.status;
+  };
   const [bills, setBills] = useState<PropertyBillBreakdown | null>(null);
   const [billsLoading, setBillsLoading] = useState(true);
   /** Lưới phòng chỉ hiện phòng còn hoá đơn chưa trả trong kỳ. */
@@ -731,7 +837,7 @@ export const PropertyDetail = () => {
       }
       if (onlyUnpaid && !unpaidRoomKeys.has(normalizeRoomNumber(r.roomNumber))) return false;
       if (kw) {
-        const tenant = tenantInPeriod(r.id);
+        const tenant = tenantInPeriod(r.id) ?? (isNowPeriod ? incomingFor(r.id) : null);
         const hay = [r.roomNumber, r.structureDescription, tenant?.tenantFullName, tenant?.tenantPhone]
           .filter(Boolean).map(v => normalizeVi(String(v))).join(' ');
         if (!hay.includes(kw)) return false;
@@ -776,11 +882,15 @@ export const PropertyDetail = () => {
     );
   }
 
-  const available   = rooms.filter(r => r.status === 'AVAILABLE').length;
-  const rented      = rooms.filter(r => r.status === 'RENTED').length;
-  const maintenance = rooms.filter(r => r.status === 'MAINTENANCE').length;
+  /** Phòng chưa có khách ở nhưng đã có hồ sơ đón khách — tính riêng, KHÔNG phải phòng trống. */
+  // Phòng MAINTENANCE mà có khách ở vẫn là "Đang thuê" — xem `roomStatusInPeriod`.
+  const occupiedFixing = (r: RoomResponse) => r.status === 'MAINTENANCE' && hasTenantNow(r.id);
+  const incoming    = rooms.filter(r => r.status !== 'RENTED' && !occupiedFixing(r) && incomingFor(r.id)).length;
+  const available   = rooms.filter(r => r.status === 'AVAILABLE' && !incomingFor(r.id)).length;
+  const rented      = rooms.filter(r => r.status === 'RENTED' || occupiedFixing(r)).length;
+  const maintenance = rooms.filter(r => r.status === 'MAINTENANCE' && !occupiedFixing(r) && !incomingFor(r.id)).length;
   // Phòng đã tạo nhưng chưa mở cho thuê — phần dư, để thanh tỉ lệ cộng đủ 100%.
-  const notReady    = rooms.length - available - rented - maintenance;
+  const notReady    = rooms.length - available - rented - maintenance - incoming;
   const propStatus  = propertyStatusLabel[property.status] ?? propertyStatusLabel.DRAFT;
 
   // Tách UI theo loại hình: nhà nguyên căn vs nhà chia phòng
@@ -793,11 +903,23 @@ export const PropertyDetail = () => {
         { label: 'Diện tích',  value: fmtArea(property.areaSize), icon: Ruler,      color: 'text-indigo-500',  bg: 'bg-indigo-50' },
         { label: 'Số tầng',    value: property.totalFloor ?? property.floorCount ?? '—',   icon: Layers,     color: 'text-slate-600',   bg: 'bg-slate-50' },
         { label: 'Số phòng',   value: property.totalRooms || '—',                          icon: DoorOpen,   color: 'text-violet-600',  bg: 'bg-violet-50' },
-        { label: 'Cho thuê',   value: activeContract ? 'Đang thuê' : 'Còn trống',          icon: activeContract ? Users : CircleCheck, color: activeContract ? 'text-blue-600' : 'text-emerald-600', bg: activeContract ? 'bg-blue-50' : 'bg-emerald-50' },
+        (() => {
+          // "Còn trống" chỉ khi không ai ở VÀ không có hồ sơ chờ đón — trước đây căn đã có
+          // khách chốt ngày vào vẫn hiện "Còn trống".
+          const incomingC = !activeContract ? contracts.find(isIncomingContract) : undefined;
+          return activeContract
+            ? { label: 'Cho thuê', value: 'Đang thuê', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' }
+            : incomingC
+              ? { label: 'Cho thuê', value: 'Chờ đón khách', icon: CalendarClock, color: 'text-violet-600', bg: 'bg-violet-50' }
+              : { label: 'Cho thuê', value: 'Còn trống', icon: CircleCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' };
+        })(),
       ]
     : [
         { label: 'Tổng phòng',  value: rooms.length, icon: DoorOpen,    color: 'text-indigo-500',  bg: 'bg-indigo-50' },
         { label: 'Phòng trống', value: available,    icon: CircleCheck, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+        ...(incoming > 0
+          ? [{ label: 'Chờ đón khách', value: incoming, icon: CalendarClock, color: 'text-violet-600', bg: 'bg-violet-50' }]
+          : []),
         { label: 'Đang thuê',   value: rented,       icon: Users,       color: 'text-blue-600',    bg: 'bg-blue-50' },
         { label: 'Bảo trì',     value: maintenance,  icon: Wrench,      color: 'text-amber-600',   bg: 'bg-amber-50' },
         { label: 'Số tầng',     value: property.totalFloor ?? property.floorCount ?? '—', icon: Layers, color: 'text-slate-600', bg: 'bg-slate-50' },
@@ -810,10 +932,21 @@ export const PropertyDetail = () => {
     ? { total: rooms.length, rented, available, maintenance, notReady }
     : { total: rooms.length, rented: rentedInPeriod, available: rooms.length - rentedInPeriod, maintenance: 0, notReady: 0 };
   const houseTenant = tenantInPeriod();
+  /** Nguyên căn: hồ sơ đón khách đang giữ căn (chưa có ai ở). */
+  const houseIncoming = isWholeHouse && isNowPeriod && !houseTenant
+    ? contracts.find(isIncomingContract) ?? null
+    : null;
+  /** Nguyên căn: các đời khách đã ở — cùng kiểu mục "Khách đã ở" trong hộp phòng. */
+  const housePast = isWholeHouse
+    ? contracts
+      .filter(c => c.status === 'EXPIRED' || c.status === 'TERMINATED')
+      .sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))
+    : [];
 
   const FILTER_TABS = [
     { value: 'all',         label: 'Tất cả',    count: rooms.length },
     { value: 'AVAILABLE',   label: isNowPeriod ? 'Phòng trống' : 'Chưa có khách', count: periodCounts.available },
+    ...(isNowPeriod && incoming > 0 ? [{ value: 'INCOMING', label: 'Chờ đón khách', count: incoming }] : []),
     { value: 'RENTED',      label: 'Đang thuê',   count: periodCounts.rented },
     ...(isNowPeriod ? [{ value: 'MAINTENANCE', label: 'Bảo trì', count: maintenance }] : []),
   ];
@@ -889,7 +1022,7 @@ export const PropertyDetail = () => {
 
         {/* Thông số nhanh */}
         <div className={`grid grid-cols-2 divide-x divide-y divide-slate-100 border-t border-slate-100 sm:divide-y-0 ${
-          isWholeHouse ? 'sm:grid-cols-4' : 'sm:grid-cols-5'
+          isWholeHouse ? 'sm:grid-cols-4' : heroStats.length >= 6 ? 'sm:grid-cols-6' : 'sm:grid-cols-5'
         }`}>
           {heroStats.map(s => (
             <div key={s.label} className="flex items-center gap-3 px-5 py-3.5">
@@ -941,6 +1074,9 @@ export const PropertyDetail = () => {
           onPeriodChange={setPeriod}
           loading={billsLoading}
         />
+      )}
+      {tab === 'overview' && (
+        <EquipmentAlertStrip propertyId={Number(id)} onOpenEquipment={() => setTab('equipment')} />
       )}
 
       {/* ═══════════ Vị trí trên bản đồ (cả 2 loại hình) ═══════════ */}
@@ -1149,6 +1285,39 @@ export const PropertyDetail = () => {
                   )}
                 </div>
               </div>
+            ) : houseIncoming ? (
+              /* Có hồ sơ đón khách — căn KHÔNG trống dù chưa ai dọn vào */
+              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
+                <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-violet-700">
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  {houseIncoming.status === 'DRAFT' ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-100 font-bold text-violet-700">
+                    {(houseIncoming.tenantFullName || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-slate-900">{houseIncoming.tenantFullName || '(chưa có tên)'}</p>
+                    <MaskedField value={houseIncoming.tenantPhone} icon={Phone} emptyText="" className="text-sm text-slate-500" />
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-xs text-slate-400">Dự kiến vào ở</p>
+                    <p className="mt-0.5 font-bold text-slate-800">{fmtDate(houseIncoming.moveInDate || houseIncoming.startDate)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <p className="text-xs text-slate-400">Giá thuê</p>
+                    <p className="mt-0.5 font-bold text-slate-800">{formatCurrency(houseIncoming.rentAmount)}</p>
+                  </div>
+                  {houseIncoming.contractCode && (
+                    <div className="col-span-2 rounded-lg bg-white/70 px-3 py-2">
+                      <p className="text-xs text-slate-400">Mã hợp đồng</p>
+                      <p className="mt-0.5 text-xs font-bold text-slate-800">{houseIncoming.contractCode}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : isNowPeriod ? (
               <div className="text-center py-10">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-3">
@@ -1162,6 +1331,33 @@ export const PropertyDetail = () => {
                 <p className="font-bold text-slate-500">{monthLabel(period)} chưa có khách thuê</p>
                 <p className="mt-1 text-sm text-slate-400">Không có hợp đồng thuê nào nằm trong tháng này.</p>
               </div>
+            )}
+
+            {/* Các đời khách trước của căn — trước đây nguyên căn không có mục này */}
+            {housePast.length > 0 && (
+              <details className="mt-4 rounded-xl border border-slate-200">
+                <summary className="flex cursor-pointer items-center gap-1.5 px-3 py-2.5 text-sm font-bold text-slate-700">
+                  <History className="h-4 w-4 text-slate-400" /> Khách đã ở ({housePast.length})
+                </summary>
+                <div className="divide-y divide-slate-100 border-t border-slate-100">
+                  {housePast.map(c => (
+                    <div key={c.id} className="flex items-center gap-3 px-3 py-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-500">
+                        {(c.tenantFullName || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-slate-800">{c.tenantFullName || '(chưa có tên)'}</p>
+                        <p className="truncate text-xs text-slate-400">
+                          {fmtDate(c.startDate)} → {c.endDate ? fmtDate(c.endDate) : '—'}{c.contractCode && ` · ${c.contractCode}`}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">
+                        {c.status === 'EXPIRED' ? 'Hết hạn' : 'Đã thanh lý'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
           </div>
         </div>
@@ -1272,6 +1468,7 @@ export const PropertyDetail = () => {
           {filteredRooms.map(room => {
             const st = roomStatusMap[roomStatusInPeriod(room)] ?? roomStatusMap.DRAFT;
             const tenant = tenantInPeriod(room.id);
+            const coming = !tenant && isNowPeriod ? incomingFor(room.id) : null;
             return (
               <button key={room.id} onClick={() => setSelectedRoom(room)}
                 className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-white text-left transition-all hover:shadow-md ${st.border}`}>
@@ -1287,9 +1484,17 @@ export const PropertyDetail = () => {
                         {room.floor != null ? `Tầng ${room.floor}` : 'Chưa rõ tầng'}
                       </p>
                     </div>
-                    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>
-                      <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                      {st.label}
+                    <span className="flex shrink-0 flex-col items-end gap-1">
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${st.cls}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                        {st.label}
+                      </span>
+                      {isNowPeriod && room.status === 'MAINTENANCE' && tenant && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700"
+                          title="Có thiết bị trong phòng đang được sửa — khách vẫn ở bình thường">
+                          <Wrench className="h-3 w-3" /> Đang sửa thiết bị
+                        </span>
+                      )}
                     </span>
                   </div>
 
@@ -1320,6 +1525,18 @@ export const PropertyDetail = () => {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-bold leading-tight text-slate-800">{tenant.tenantFullName}</p>
                         <MaskedField value={tenant.tenantPhone} emptyText="" className="text-[11px] text-slate-500" />
+                      </div>
+                    </div>
+                  ) : coming ? (
+                    <div className="flex items-center gap-2 rounded-xl bg-violet-50 px-2.5 py-2">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-bold text-violet-700">
+                        {(coming.tenantFullName || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-bold leading-tight text-slate-800">{coming.tenantFullName || '(chưa có tên)'}</p>
+                        <p className="text-[11px] font-semibold text-violet-700">
+                          {coming.status === 'DRAFT' ? 'Chờ đón' : 'Đã chốt'} · vào ở {fmtDate(coming.moveInDate || coming.startDate)}
+                        </p>
                       </div>
                     </div>
                   ) : !isNowPeriod ? (
@@ -1439,12 +1656,25 @@ export const PropertyDetail = () => {
         <RoomDetailModal
           room={selectedRoom}
           tenant={contracts.find(c => c.roomId === selectedRoom.id && c.status === 'ACTIVE') ?? null}
+          incoming={incomingFor(selectedRoom.id)}
           pastTenants={contracts
             .filter(c => c.roomId === selectedRoom.id && c.status !== 'ACTIVE'
               && c.status !== 'DRAFT' && c.status !== 'PENDING')
             .sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''))}
           propertyId={property.id}
-          canChange={['DRAFT', 'ACTIVE'].includes(property.status) && selectedRoom.status !== 'RENTED'}
+          /*
+            BE chỉ cho MANAGER/ADMIN đổi trạng thái phòng (RoomController.updateRoomStatus) — host
+            bấm Lưu là 403 "Access Denied". Và phòng có khách / có phiếu sửa / có khách chờ đón thì
+            trạng thái do hệ thống tự quản: đổi tay thành "Phòng trống" là sai dữ liệu.
+          */
+          canChange={
+            user?.role === 'admin'
+            && ['DRAFT', 'ACTIVE'].includes(property.status)
+            && selectedRoom.status !== 'RENTED'
+            && selectedRoom.status !== 'MAINTENANCE'
+            && !hasTenantNow(selectedRoom.id)
+            && !incomingFor(selectedRoom.id)
+          }
           onClose={() => setSelectedRoom(null)}
           onConfirmStatus={handleUpdateRoomStatus}
         />

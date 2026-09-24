@@ -141,7 +141,7 @@ const InvoiceDetailModal: React.FC<{
 
             <Text style={ds.note}>
               Khách tự trả xong thì trạng thái ở đây tự đổi. Xác nhận khoản khách báo đã
-              chuyển thì làm ở màn Tiền khách đã trả.
+              chuyển thì làm ở Tiền khách thuê → Chờ duyệt.
             </Text>
           </ScrollView>
         </View>
@@ -198,20 +198,23 @@ const InvoiceCard: React.FC<{ invoice: ManagerInvoice; onPress: () => void }> = 
 export const TenantInvoicesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { tenantName, roomName, propertyId, propertyName, contractId, autoOpenFirst } =
+  const { tenantName, roomName, propertyId, propertyName, contractId, autoOpenFirst, openInvoiceId, initialFilter } =
     route.params as {
       tenantId: string; tenantName: string; roomId: string; roomName: string;
       propertyId: string; propertyName: string;
       /** Có thì lọc thẳng theo hợp đồng — chính xác hơn mọi cách suy từ số phòng. */
       contractId?: number;
       autoOpenFirst?: boolean;
+      /** Mở sẵn đúng hoá đơn này (vào từ tab "Đang nợ" — bấm dòng nào mở hoá đơn đó). */
+      openInvoiceId?: number;
+      initialFilter?: FilterKey;
     };
 
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+  const [activeFilter, setActiveFilter] = useState<FilterKey>(initialFilter ?? 'all');
   const [selected, setSelected] = useState<ManagerInvoice | null>(null);
   /** Hoá đơn + hình thức đang mở luồng thu hộ — null là đang đóng. */
   const [collecting, setCollecting] = useState<
@@ -294,10 +297,11 @@ export const TenantInvoicesScreen: React.FC = () => {
 
   // Mở sẵn hoá đơn chưa thu đầu tiên khi vào từ cảnh báo nợ — chỉ làm MỘT lần.
   React.useEffect(() => {
-    if (!autoOpenFirst || autoOpened || loading) return;
-    const first = sorted.find(i => matchFilter(i, 'unpaid'));
+    if ((!autoOpenFirst && openInvoiceId == null) || autoOpened || loading) return;
+    const first = (openInvoiceId != null ? sorted.find(i => i.id === openInvoiceId) : undefined)
+      ?? sorted.find(i => matchFilter(i, 'unpaid'));
     if (first) { setSelected(first); setAutoOpened(true); }
-  }, [autoOpenFirst, autoOpened, loading, sorted]);
+  }, [autoOpenFirst, openInvoiceId, autoOpened, loading, sorted]);
 
   return (
     <SafeAreaView style={ss.safe} edges={['top', 'left', 'right']}>

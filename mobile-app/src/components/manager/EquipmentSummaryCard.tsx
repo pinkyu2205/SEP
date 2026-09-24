@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'rea
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import type { EquipmentDto } from '@/types';
 
 /**
@@ -15,7 +16,10 @@ import type { EquipmentDto } from '@/types';
  *
  * Không đếm đồ đã thanh lý hay đã gỡ khỏi phòng: chúng không còn trong nhà nữa.
  */
-const NEEDS_ATTENTION = new Set(['DAMAGED', 'BROKEN', 'MAINTENANCE']);
+/** Hỏng hẳn, cần thay — manager báo tay (không có phiếu). */
+const NEEDS_REPLACE = new Set(['DAMAGED', 'BROKEN']);
+/** Phiếu chưa đóng = thiết bị đang được sửa. */
+const CLOSED_TICKET = new Set(['CLOSED', 'CANCELLED']);
 
 const isInUse = (e: EquipmentDto) =>
   e.status !== 'DISPOSED' && (e.operationalStatus ?? '').toUpperCase() !== 'DISABLED';
@@ -31,6 +35,8 @@ export const EquipmentSummaryCard: React.FC<{
 }> = ({ propertyId, onOpen, title = 'Thiết bị', icon = '📦', prefix }) => {
   const [items, setItems] = useState<EquipmentDto[] | null>(null);
   const [failed, setFailed] = useState(false);
+  /** id thiết bị đang có phiếu chưa đóng. */
+  const [fixingIds, setFixingIds] = useState<Set<number>>(new Set());
 
   // Nạp lại mỗi lần quay về: vừa đổi trạng thái thiết bị bên màn kia thì con số ở đây phải theo.
   useFocusEffect(useCallback(() => {
@@ -38,11 +44,24 @@ export const EquipmentSummaryCard: React.FC<{
     realEquipmentService.getByProperty(propertyId)
       .then(list => { if (alive) { setItems(list ?? []); setFailed(false); } })
       .catch(() => { if (alive) setFailed(true); });
+    /*
+     * "Đang sửa" phải đếm từ PHIẾU, không từ `status` thiết bị: BE không đổi status khi mở
+     * phiếu (đo 03/10/2026 — nhà #5 có 3 phiếu mở mà thẻ này báo 0). Lỗi thì bỏ qua.
+     */
+    realMaintenanceService.listForManager({ propertyId, size: 500 } as never)
+      .then(page => {
+        if (!alive) return;
+        setFixingIds(new Set((page.content ?? [])
+          .filter(t => t.equipmentId != null && !CLOSED_TICKET.has(String(t.status)))
+          .map(t => t.equipmentId as number)));
+      })
+      .catch(() => { /* không đọc được phiếu thì chỉ còn số "cần thay" */ });
     return () => { alive = false; };
   }, [propertyId]));
 
   const inUse = (items ?? []).filter(isInUse);
-  const attention = inUse.filter(e => NEEDS_ATTENTION.has(e.status)).length;
+  const fixing = inUse.filter(e => fixingIds.has(e.id) || e.status === 'MAINTENANCE').length;
+  const replace = inUse.filter(e => NEEDS_REPLACE.has(e.status) && !fixingIds.has(e.id)).length;
 
   const count = failed
     ? 'Không tải được — bấm để mở danh sách'
@@ -62,11 +81,18 @@ export const EquipmentSummaryCard: React.FC<{
           ? <ActivityIndicator size="small" color={Colors.primary} style={st.loader} />
           : <Text style={st.sub}>{sub}</Text>}
       </View>
-      {attention > 0 && (
-        <View style={st.badge}>
-          <Text style={st.badgeText}>{attention} cần sửa/thay</Text>
-        </View>
-      )}
+      <View style={st.badges}>
+        {fixing > 0 && (
+          <View style={[st.badge, st.badgeFix]}>
+            <Text style={[st.badgeText, st.badgeFixText]}>🔧 {fixing} đang sửa</Text>
+          </View>
+        )}
+        {replace > 0 && (
+          <View style={st.badge}>
+            <Text style={st.badgeText}>{replace} cần thay</Text>
+          </View>
+        )}
+      </View>
       <Text style={st.chevron}>›</Text>
     </TouchableOpacity>
   );
@@ -92,5 +118,8 @@ const st = StyleSheet.create({
     paddingHorizontal: Spacing.sm, paddingVertical: 3,
   },
   badgeText: { fontSize: 11, fontWeight: '700', color: Colors.error },
+  badges: { alignItems: 'flex-end', gap: 4 },
+  badgeFix: { backgroundColor: Colors.infoLight },
+  badgeFixText: { color: Colors.info },
   chevron: { fontSize: 18, color: Colors.textMuted },
 });

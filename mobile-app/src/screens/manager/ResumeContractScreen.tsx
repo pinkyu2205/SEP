@@ -1688,6 +1688,14 @@ const InspectionSection: React.FC<{
         visible={overrideTarget !== null}
         meterKind={overrideTarget ?? 'ELEC'}
         contractId={contract.id}
+        purpose="RESUME_CONTRACT"
+        propertyId={contract.propertyId}
+        roomId={contract.roomId ?? null}
+        contextLabel={[
+          contract.propertyName,
+          contract.roomNumber ? `Phòng ${contract.roomNumber}` : null,
+          contract.contractCode,
+        ].filter(Boolean).join(' · ')}
         onCancel={() => setOverrideTarget(null)}
         onGranted={(token, reason) => {
           const kind = overrideTarget === 'WATER' ? 'water' : 'elec'
@@ -2104,7 +2112,7 @@ const DepositOtpPanel: React.FC<{
 const Header: React.FC<{ onBack: () => void; title?: string }> = ({ onBack, title }) => (
   <View style={styles.header}>
     <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-      <Text style={styles.backText}>← Back</Text>
+      <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
     </TouchableOpacity>
     <Text style={styles.headerTitle}>{title ?? 'Hợp đồng chờ xử lý'}</Text>
     <View style={{ width: 70 }} />

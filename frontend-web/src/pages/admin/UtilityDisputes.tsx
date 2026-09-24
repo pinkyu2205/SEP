@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle, RefreshCw, CheckCircle2, XCircle, Flag, Zap, Droplets, Camera,
+  ChevronDown, ChevronsDownUp, ChevronsUpDown, Gavel, ReceiptText, Search,
 } from 'lucide-react';
+import { refreshAdminBadges } from '@/utils/adminBadges';
 import { Overlay } from '@/components/Overlay';
 import { formatCurrency } from '@/utils';
 import { HistoryList } from './HistoryList';
@@ -149,8 +151,11 @@ const fmtDateTime = (iso?: string | null) =>
 const daysSince = (iso?: string): number | null => {
   if (!iso) return null;
   const t = Date.parse(iso);
-  return Number.isNaN(t) ? null : Math.floor((Date.now() - t) / 86_400_000);
+  // Kẹp về 0: máy chủ trả giờ lệch múi thì hiệu có thể âm → từng hiện "treo -7 ngày".
+  return Number.isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 };
+
+const pendingLabel = (days: number) => (days === 0 ? 'gửi hôm nay' : `treo ${days} ngày`);
 
 const isElectric = (d: AdminInvoiceDispute) =>
   (d.invoiceType ?? '').toUpperCase().startsWith('ELECTRIC');
@@ -220,31 +225,96 @@ const UtilityDisputes = () => {
   const [kind, setKind] = useState<'all' | 'ELECTRIC' | 'WATER'>('all');
 
   const tabList = tab === 'open' ? openList : closedList;
-  const list = useMemo(
+  const byKind = useMemo(
     () => (kind === 'all'
       ? tabList
       : tabList.filter(d => (isElectric(d) ? 'ELECTRIC' : 'WATER') === kind)),
     [tabList, kind],
   );
 
-  return (
-    <div className="mx-auto max-w-6xl px-6 py-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Khiếu nại hoá đơn điện / nước</h1>
-          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-500">
-            Khách thuê báo hoá đơn không phải của nhà mình, hoặc chỉ số không khớp với ảnh
-            đồng hồ. Đối chiếu ảnh gốc rồi kết luận — trong lúc chờ, hoá đơn đã tạm ngừng
-            tính quá hạn nên đừng để treo lâu.
-          </p>
-        </div>
-        <button onClick={load}
-          className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">
-          <RefreshCw className="h-4 w-4" /> Làm mới
-        </button>
-      </div>
+  /**
+   * Tìm nhanh ở tab ĐANG CHỜ. Tab lịch sử đã có ô tìm riêng trong `HistoryList`, để
+   * thêm ô ở đây nữa thì hai ô lọc chồng lên nhau, gõ ô này mà quên ô kia.
+   */
+  const [query, setQuery] = useState('');
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (tab !== 'open' || !q) return byKind;
+    return byKind.filter(d => [
+      d.tenantName, d.tenantPhone, d.invoiceCode, d.propertyName, d.roomNumber, d.billingPeriod, d.managerName,
+    ].filter(Boolean).join(' ').toLowerCase().includes(q));
+  }, [byKind, query, tab]);
 
-      <div className="mt-5 flex gap-2">
+  /**
+   * Vụ nào đang mở chi tiết. Mặc định THU GỌN hết: mỗi thẻ đầy đủ cao gần một màn hình
+   * (ảnh đồng hồ, tờ hoá đơn gốc, số liệu), mười vụ là phải cuộn mười màn mới thấy vụ
+   * cuối. Thu thành một dòng thì nhìn một lượt là biết có gì, bấm vụ nào mở vụ đó.
+   */
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const toggle = (id: number) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allOpen = list.length > 0 && list.every(d => expanded.has(d.id));
+
+  const kindCount = (k: 'all' | 'ELECTRIC' | 'WATER') => (k === 'all'
+    ? tabList.length
+    : tabList.filter(d => (isElectric(d) ? 'ELECTRIC' : 'WATER') === k).length);
+
+  return (
+    <div className="space-y-5">
+      {/* ── Đầu trang: cùng khuôn thẻ với các trang admin khác (Đơn gia hạn…) ── */}
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-5 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-cyan-50 p-2.5">
+              <ReceiptText className="h-5 w-5 text-cyan-700" />
+            </div>
+            <div>
+              <h2 className="text-base font-extrabold text-slate-950">Khiếu nại hoá đơn điện / nước</h2>
+              <p className="mt-1 max-w-3xl text-sm text-slate-500">
+                Khách báo hoá đơn không phải của nhà mình, hoặc chỉ số không khớp ảnh đồng hồ.
+                Hoá đơn đang tạm ngừng tính quá hạn trong lúc chờ — đừng để treo lâu.
+              </p>
+            </div>
+          </div>
+          <button onClick={load}
+            className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 md:self-center">
+            <RefreshCw className="h-4 w-4" /> Làm mới
+          </button>
+        </div>
+
+        {/* Ba ô đếm = ba bộ lọc loại: bấm ô nào lọc theo ô đó. Đếm TRONG tab đang mở,
+            không phải toàn bộ dữ liệu: số phải nói đúng "bấm vào thì thấy bao nhiêu dòng". */}
+        <div className="grid gap-3 p-5 sm:grid-cols-3">
+          {([
+            { k: 'all' as const, label: 'Tất cả khiếu nại', Icon: Gavel, on: 'border-slate-900 bg-slate-900', ic: 'bg-slate-100 text-slate-700' },
+            { k: 'ELECTRIC' as const, label: 'Khiếu nại điện', Icon: Zap, on: 'border-amber-400 bg-amber-50 ring-2 ring-amber-100', ic: 'bg-amber-100 text-amber-700' },
+            { k: 'WATER' as const, label: 'Khiếu nại nước', Icon: Droplets, on: 'border-sky-400 bg-sky-50 ring-2 ring-sky-100', ic: 'bg-sky-100 text-sky-700' },
+          ]).map(({ k, label, Icon, on, ic }) => {
+            const n = kindCount(k);
+            const active = kind === k;
+            const dark = active && k === 'all';
+            return (
+              <button key={k} onClick={() => setKind(k)}
+                className={`flex items-center gap-3 rounded-xl border p-3.5 text-left transition ${
+                  active ? on : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'}`}>
+                <span className={`rounded-lg p-2 ${dark ? 'bg-white/15 text-white' : ic}`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-xs font-semibold ${dark ? 'text-white/70' : 'text-slate-500'}`}>{label}</span>
+                  <span className={`block text-xl font-extrabold tabular-nums ${dark ? 'text-white' : 'text-slate-900'}`}>{n}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── Thanh công cụ: tab trạng thái · tìm · mở/thu tất cả ── */}
+      <div className="flex flex-wrap items-center gap-2">
         {([
           ['open', 'Đang chờ xử lý', openList.length],
           ['closed', 'Lịch sử đã xử lý', closedList.length],
@@ -253,45 +323,56 @@ const UtilityDisputes = () => {
             className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
               tab === k
                 ? 'bg-slate-900 text-white'
-                : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-            {label} <span className={tab === k ? 'text-white/70' : 'text-slate-400'}>{n}</span>
+                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+            {label}{' '}
+            <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+              tab === k ? 'bg-white/20 text-white'
+                : k === 'open' && n > 0 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>
+              {n}
+            </span>
           </button>
         ))}
 
-        {/* Lọc loại tiện ích — đếm TRONG tab đang mở, không phải trên toàn bộ dữ liệu:
-            số đếm phải nói đúng "bấm vào thì thấy bao nhiêu dòng". */}
-        <div className="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 p-1">
-          {([
-            ['all', 'Tất cả', null],
-            ['ELECTRIC', 'Điện', <Zap key="e" className="h-3.5 w-3.5" />],
-            ['WATER', 'Nước', <Droplets key="w" className="h-3.5 w-3.5" />],
-          ] as const).map(([k, label, icon]) => {
-            const n = k === 'all'
-              ? tabList.length
-              : tabList.filter(d => (isElectric(d) ? 'ELECTRIC' : 'WATER') === k).length;
-            const on = kind === k;
-            return (
-              <button key={k} onClick={() => setKind(k)} disabled={n === 0 && !on}
-                className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-bold transition disabled:opacity-40 ${
-                  on ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>
-                {icon}{label}
-                <span className={on ? 'text-white/60' : 'text-slate-400'}>{n}</span>
+        {tab === 'open' && (
+          <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
+            <div className="relative flex-1 sm:w-72 sm:flex-none">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="Tìm khách, SĐT, mã hoá đơn, nhà…"
+                className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" />
+            </div>
+            {list.length > 1 && (
+              <button
+                onClick={() => setExpanded(allOpen ? new Set() : new Set(list.map(d => d.id)))}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                {allOpen
+                  ? <><ChevronsDownUp className="h-4 w-4" /> Thu gọn tất cả</>
+                  : <><ChevronsUpDown className="h-4 w-4" /> Mở tất cả</>}
               </button>
-            );
-          })}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (
-        <p className="mt-10 text-center text-sm text-slate-400">Đang tải…</p>
+        <p className="py-10 text-center text-sm text-slate-400">Đang tải…</p>
       ) : loadError ? (
-        <div className="mt-8 rounded-2xl border border-rose-200 bg-rose-50 py-14 text-center">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 py-14 text-center">
           <AlertTriangle className="mx-auto h-10 w-10 text-rose-500" />
           <p className="mt-3 font-bold text-rose-800">Không tải được dữ liệu</p>
           <p className="mx-auto mt-1 max-w-xl text-sm text-rose-700">{loadError}</p>
         </div>
+      ) : list.length === 0 && query.trim() && tab === 'open' ? (
+        <div className="rounded-2xl border border-slate-200 bg-white py-12 text-center">
+          <Search className="mx-auto h-8 w-8 text-slate-300" />
+          <p className="mt-3 font-bold text-slate-700">Không có vụ nào khớp từ khoá "{query.trim()}"</p>
+          <button onClick={() => setQuery('')}
+            className="mt-3 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50">
+            Xoá từ khoá
+          </button>
+        </div>
       ) : list.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-slate-200 bg-white py-16 text-center">
+        <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
           {/* Rỗng vì BỘ LỌC và rỗng vì KHÔNG CÓ VỤ NÀO là hai chuyện khác hẳn. Nói nhầm
               thì admin đóng trang và tin rằng chẳng có khiếu nại nào, trong khi vẫn còn
@@ -318,13 +399,14 @@ const UtilityDisputes = () => {
           <p className="mt-4 text-xs text-slate-400">Đã quét <b>{rows.length}</b> khiếu nại</p>
         </div>
       ) : tab === 'open' ? (
-        // Đang chờ: vài vụ, mỗi vụ là một việc phải làm → bày hết chi tiết.
-        <div className="mt-6 space-y-4">
+        // Đang chờ: mỗi vụ một dòng thu gọn, bấm mở chi tiết — xem `expanded`.
+        <div className="space-y-3">
           {list.map(d => (
-            <DisputeCard
+            <DisputeRow
               key={d.id}
               d={d}
-              open
+              expanded={expanded.has(d.id)}
+              onToggle={() => toggle(d.id)}
               onResolve={() => setTarget(d)}
               onZoom={(url, caption) => setZoom({ url, caption })}
             />
@@ -379,7 +461,7 @@ const UtilityDisputes = () => {
         <ResolveDialog
           row={target}
           onClose={() => setTarget(null)}
-          onDone={() => { setTarget(null); load(); }}
+          onDone={() => { setTarget(null); load(); refreshAdminBadges(); }}
         />
       )}
 
@@ -388,10 +470,96 @@ const UtilityDisputes = () => {
   );
 };
 
+// ── Một dòng khiếu nại đang chờ (thu gọn / mở rộng) ─────────────────────────
+/**
+ * Dòng thu gọn chỉ giữ thứ đủ để XẾP THỨ TỰ việc: loại, ai, nhà nào, lý do, treo bao
+ * lâu, bao nhiêu tiền. Mọi bằng chứng để PHÂN XỬ (ảnh, số liệu, tờ gốc) nằm trong phần
+ * mở rộng — chỉ cần khi đã chọn xử vụ đó.
+ */
+const DisputeRow = ({ d, expanded, onToggle, onResolve, onZoom }: {
+  d: AdminInvoiceDispute;
+  expanded: boolean;
+  onToggle: () => void;
+  onResolve: () => void;
+  onZoom: (url: string, caption: string) => void;
+}) => {
+  const electric = isElectric(d);
+  const Icon = electric ? Zap : Droplets;
+  const days = daysSince(d.createdAt);
+  const urgent = days !== null && days >= 3;
+
+  return (
+    <div className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+      expanded ? 'border-slate-300 ring-1 ring-slate-200' : urgent ? 'border-rose-200' : 'border-slate-200'}`}>
+      <div className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
+        <button type="button" onClick={onToggle} aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left sm:gap-4">
+          <span className={`shrink-0 rounded-xl p-2.5 ${electric ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'}`}>
+            <Icon className="h-4 w-4" />
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-bold text-slate-900">{d.tenantName ?? '(chưa có tên)'}</span>
+              {days !== null && (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  urgent ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {pendingLabel(days)}
+                </span>
+              )}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                d.wholeHouse ? 'bg-cyan-100 text-cyan-700' : 'bg-violet-100 text-violet-700'}`}>
+                {d.wholeHouse ? 'Nguyên căn' : 'Chia phòng'}
+              </span>
+              {d.invoiceStatus === 'PAID' && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+                  Đã thanh toán
+                </span>
+              )}
+            </span>
+            <span className="mt-0.5 block truncate text-sm text-slate-500">
+              {[
+                d.propertyName,
+                d.roomNumber ? `P.${d.roomNumber}` : null,
+                d.invoiceCode,
+                d.billingPeriod ? `kỳ ${d.billingPeriod}` : null,
+              ].filter(Boolean).join(' · ')}
+            </span>
+            <span className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-rose-600">
+              <Flag className="h-3 w-3 shrink-0" />
+              <span className="truncate">{REASON_LABEL[d.reason]}{d.note ? ` — ${d.note}` : ''}</span>
+            </span>
+          </span>
+
+          <span className="hidden shrink-0 text-right sm:block">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Số tiền</span>
+            <span className="block text-lg font-extrabold tabular-nums text-slate-900">{formatCurrency(d.amount)}</span>
+          </span>
+
+          <ChevronDown className={`h-5 w-5 shrink-0 text-slate-400 transition ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+
+        <button onClick={onResolve}
+          className="hidden shrink-0 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 md:block">
+          Kết luận
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-slate-100">
+          <DisputeCard d={d} open bare onResolve={onResolve} onZoom={onZoom} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Một thẻ khiếu nại ────────────────────────────────────────────────────────
-const DisputeCard = ({ d, open, onResolve, onZoom }: {
+const DisputeCard = ({ d, open, bare = false, onResolve, onZoom }: {
   d: AdminInvoiceDispute;
   open: boolean;
+  /** Bỏ viền + đầu thẻ — dùng bên trong `DisputeRow`, nơi dòng thu gọn đã là đầu thẻ. */
+  bare?: boolean;
   onResolve: () => void;
   onZoom: (url: string, caption: string) => void;
 }) => {
@@ -407,8 +575,9 @@ const DisputeCard = ({ d, open, onResolve, onZoom }: {
     : 'Ảnh đồng hồ quản lý chụp';
 
   return (
-    <div className={`rounded-2xl border bg-white shadow-sm ${open ? 'border-rose-200' : 'border-slate-200'}`}>
+    <div className={bare ? 'bg-slate-50/40' : `rounded-2xl border bg-white shadow-sm ${open ? 'border-rose-200' : 'border-slate-200'}`}>
       {/* ── Đầu thẻ: ai · nhà nào · bao nhiêu tiền ── */}
+      {!bare && (
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -418,7 +587,7 @@ const DisputeCard = ({ d, open, onResolve, onZoom }: {
             {open ? (days !== null && (
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
                 days >= 3 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
-                treo {days} ngày
+                {pendingLabel(days)}
               </span>
             )) : (
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
@@ -461,6 +630,16 @@ const DisputeCard = ({ d, open, onResolve, onZoom }: {
           )}
         </div>
       </div>
+      )}
+
+      {/* Thẻ thu gọn không còn đầu thẻ → đưa SĐT khách và "ai đọc số" xuống đây. */}
+      {bare && (!!d.tenantPhone || (!!d.managerName && !d.wholeHouse)) && (
+        <p className="px-6 pt-4 text-xs text-slate-500">
+          {d.tenantPhone ? <>SĐT khách: <b className="text-slate-700">{d.tenantPhone}</b></> : null}
+          {d.tenantPhone && d.managerName && !d.wholeHouse ? ' · ' : null}
+          {d.managerName && !d.wholeHouse ? <>Quản lý đọc số: <b className="text-slate-700">{d.managerName}</b></> : null}
+        </p>
+      )}
 
       {/* ── Lời khách + việc cần kiểm ── */}
       <div className="grid gap-4 px-6 py-4 md:grid-cols-2">
