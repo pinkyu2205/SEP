@@ -683,6 +683,12 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
   useEffect(() => { loadHistory(); }, [utilReloadKey, loadHistory]);
 
   const selectedProperty = properties.find(p => p.id === selectedPropertyId);
+  /** "Nhà ABC · Phòng 301" cho hộp xin mã — admin nhận yêu cầu cũng thấy đúng dòng này. */
+  const overrideContext = (rows: RoomMeterReading[], roomId: string | null) => {
+    const row = roomId ? rows.find(r => r.roomId === roomId) : undefined;
+    return [selectedProperty?.name, row?.roomCode ? `Phòng ${row.roomCode}` : null]
+      .filter(Boolean).join(' · ');
+  };
   const waterProperty    = properties.find(p => p.id === waterPropertyId);
   const isWholeHouse     = selectedProperty?.type === 'whole_house';
 
@@ -2506,7 +2512,7 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Quay lại</Text>
+          <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Ghi chỉ số & Hóa đơn</Text>
         <View style={{ width: 70 }} />
@@ -2588,6 +2594,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         contractId={
           roomElecReadings.find(r => r.roomId === overrideRoomId)?.contractId ?? null
         }
+        purpose="MONTHLY_READING"
+        propertyId={selectedProperty ? Number(selectedProperty.id) : null}
+        roomId={overrideRoomId ? Number(overrideRoomId) : null}
+        contextLabel={overrideContext(roomElecReadings, overrideRoomId)}
         onCancel={() => setOverrideRoomId(null)}
         onGranted={(token, reason) => {
           const roomId = overrideRoomId;
@@ -2604,6 +2614,10 @@ export const UtilityBillingScreen: React.FC<any> = ({ navigation }) => {
         contractId={
           roomWaterReadings.find(r => r.roomId === waterOverrideRoomId)?.contractId ?? null
         }
+        purpose="MONTHLY_READING"
+        propertyId={selectedProperty ? Number(selectedProperty.id) : null}
+        roomId={waterOverrideRoomId ? Number(waterOverrideRoomId) : null}
+        contextLabel={overrideContext(roomWaterReadings, waterOverrideRoomId)}
         onCancel={() => setWaterOverrideRoomId(null)}
         onGranted={(token, reason) => {
           const roomId = waterOverrideRoomId;

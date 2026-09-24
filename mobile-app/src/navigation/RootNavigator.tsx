@@ -10,6 +10,7 @@ import { ManagerTabNavigator } from './ManagerTabNavigator';
 import { OnboardingSuccessScreen } from '@/screens/manager/OnboardingSuccessScreen';
 import { UtilityBillingScreen } from '@/screens/manager/UtilityBillingScreen';
 import { MeterReadingPendingScreen } from '@/screens/manager/MeterReadingPendingScreen';
+import { ManagerTasksScreen } from '@/screens/manager/ManagerTasksScreen';
 import { RentInvoiceScreen } from '@/screens/manager/RentInvoiceScreen';
 import { RoomManageScreen } from '@/screens/manager/RoomManageScreen';
 import { BuildingDetailScreen } from '@/screens/manager/BuildingDetailScreen';
@@ -107,6 +108,7 @@ export const RootNavigator: React.FC = () => {
             <Stack.Screen name="OnboardingSuccess" component={OnboardingSuccessScreen} options={{ gestureEnabled: false }} />
             <Stack.Screen name="UtilityBilling" component={UtilityBillingScreen} />
             <Stack.Screen name="MeterReadingPending" component={MeterReadingPendingScreen} />
+            <Stack.Screen name="ManagerTasks" component={ManagerTasksScreen} />
             <Stack.Screen name="RentInvoice" component={RentInvoiceScreen} />
             <Stack.Screen name="RoomManage" component={RoomManageScreen} />
             <Stack.Screen

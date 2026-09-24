@@ -119,7 +119,10 @@ const RoomCard: React.FC<{
       ) : null}
 
       {room.status === 'maintenance' && (
-        <Text style={cardSt.maintNote}>🔧 Đang tiến hành bảo trì</Text>
+        <Text style={cardSt.maintNote}>🔧 Phòng đang khoá để sửa chữa</Text>
+      )}
+      {room.fixing && (
+        <Text style={cardSt.maintNote}>🔧 Có thiết bị đang sửa — khách vẫn ở bình thường</Text>
       )}
       {isDisabled && (
         <Text style={cardSt.disabledNote}>⛔ Phòng ngưng khai thác — không nhận khách / hóa đơn</Text>
@@ -410,8 +413,8 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
 
   const handleFinishMaintenance = (room: Room) => {
     showAlert(
-      'Hoàn tất bảo trì',
-      `Xác nhận phòng ${room.code} đã sửa xong và chuyển về trạng thái Trống?`,
+      'Mở lại cho thuê',
+      `Phòng ${room.code} đã sửa xong, mở lại để nhận khách?`,
       [
         { text: 'Hủy', style: 'cancel' },
         { text: 'Xác nhận', onPress: () => applyStatus(room, 'available') },
@@ -419,19 +422,22 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
     );
   };
 
+  /**
+   * KHOÁ PHÒNG ĐỂ SỬA — chỉ cho phòng TRỐNG.
+   *
+   * Bản cũ tên "Báo bảo trì · Tạo yêu cầu" nhưng KHÔNG tạo phiếu nào (BE chỉ cho khách thuê
+   * tạo phiếu — MaintenanceController POST hasRole TENANT), chỉ đổi status phòng — kể cả
+   * phòng đang có khách ở. Nay gọi đúng tên việc nó làm: không nhận khách vào phòng này cho
+   * tới khi mở lại. Sửa đồ trong phòng CÓ khách thì khách báo qua app, BE tự quản trạng thái.
+   */
   const handleReportMaintenance = (room: Room) => {
     closeAction();
     showAlert(
-      'Báo bảo trì',
-      `Tạo yêu cầu bảo trì và chuyển phòng ${room.code} sang trạng thái Đang bảo trì?`,
+      'Khoá phòng để sửa chữa',
+      `Phòng ${room.code} sẽ không nhận khách cho tới khi bạn mở lại. Tiếp tục?`,
       [
         { text: 'Hủy', style: 'cancel' },
-        {
-          text: 'Tạo yêu cầu',
-          onPress: () => {
-            applyStatus(room, 'maintenance');
-          },
-        },
+        { text: 'Khoá phòng', onPress: () => applyStatus(room, 'maintenance') },
       ],
     );
   };
@@ -444,7 +450,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-          <Text style={styles.headerBackText}>← Quay lại</Text>
+          <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -500,7 +506,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-            <Text style={styles.headerBackText}>← Quay lại</Text>
+            <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
@@ -611,7 +617,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-          <Text style={styles.headerBackText}>← Quay lại</Text>
+          <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
@@ -742,57 +748,48 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 </View>
                 <View style={styles.sheetDivider} />
 
-                {/* Always-available ops */}
-                <ActionItem icon="📋" label="Xem chi tiết phòng"       onPress={() => setActionView('detail')} />
-                <ActionItem icon="🔄" label="Cập nhật trạng thái"      onPress={() => setActionView('status')} />
-                <ActionItem icon="📦" label="Xem thiết bị trong phòng" onPress={() => { closeAction(); navigation.navigate('Equipment', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
-                <ActionItem icon="📜" label="Xem lịch sử thuê"         onPress={() => { closeAction(); navigation.navigate('BuildingContract', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
+                {/*
+                  MENU THEO TÌNH TRẠNG PHÒNG (24/09/2026). Bỏ "Cập nhật trạng thái" (một menu
+                  con lặp lại đúng các nút bên dưới) — mỗi nút giờ nói thẳng việc nó làm.
+                  Thứ tự: việc chính của phòng lên đầu, xem thông tin xuống dưới.
+                */}
 
-                {/* Phòng đang có khách: mở ĐÚNG sheet chi tiết khách thuê của màn Khách
-                    thuê (components/manager/TenantDetailSheet) — không điều hướng sang màn
-                    khác nữa, để cùng một thứ chỉ có một hình dạng. */}
+                {/* ── Phòng CÓ khách ── */}
                 {actionRoom.status === 'occupied' && !!actionRoom.contract && (
                   <ActionItem
                     icon="👤"
-                    label="Xem chi tiết khách thuê"
-                    sublabel={actionRoom.tenantName}
+                    label="Khách thuê"
+                    sublabel={`${actionRoom.tenantName ?? ''} · hợp đồng, hoá đơn, báo hỏng`}
                     primary
                     onPress={() => openTenantSheet(actionRoom)}
                   />
                 )}
+                {actionRoom.fixing && (
+                  <View style={styles.sheetInfo}>
+                    <Text style={styles.sheetInfoText}>
+                      🔧 Phòng có thiết bị đang sửa theo phiếu khách báo. Khách vẫn ở bình thường —
+                      trạng thái tự về như cũ khi đóng phiếu.
+                    </Text>
+                  </View>
+                )}
 
-                {/* Status-conditional ops */}
-                {/* Hồ sơ khách do admin soạn sẵn — nút này chỉ mở danh sách hồ sơ đang chờ đón. */}
+                {/* ── Phòng TRỐNG ── */}
                 {actionRoom.status === 'available' && (
                   <ActionItem
                     icon="🤝"
-                    label="Xem khách chờ đón"
+                    label="Khách chờ đón"
+                    sublabel="Hồ sơ khách admin đã soạn, chờ bạn đi bàn giao"
                     primary
                     onPress={() => handleCheckIn(actionRoom)}
-                  />
-                )}
-                {actionRoom.status === 'occupied' && (
-                  <ActionItem
-                    icon="🚪"
-                    label="Trả phòng (Check-out)"
-                    sublabel="Lập biên bản hiện trạng và kết thúc hợp đồng"
-                    onPress={() => handleCheckOut(actionRoom)}
                   />
                 )}
                 {actionRoom.status === 'maintenance' && (
                   <ActionItem
                     icon="✅"
-                    label="Hoàn tất bảo trì → Chuyển về Trống"
+                    label="Mở lại cho thuê"
+                    sublabel="Đã sửa xong — phòng nhận khách trở lại"
                     primary
                     onPress={() => handleFinishMaintenance(actionRoom)}
-                  />
-                )}
-                {actionRoom.status !== 'disabled' && actionRoom.status !== 'maintenance' && (
-                  <ActionItem
-                    icon="🔧"
-                    label="Báo bảo trì"
-                    sublabel="Tạo yêu cầu và chuyển phòng sang Đang bảo trì"
-                    onPress={() => handleReportMaintenance(actionRoom)}
                   />
                 )}
                 {actionRoom.status === 'disabled' && (
@@ -802,6 +799,40 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                     primary
                     onPress={() => applyStatus(actionRoom, 'available')}
                   />
+                )}
+
+                {/* ── Xem thông tin (mọi phòng) ── */}
+                <ActionItem icon="📦" label="Thiết bị trong phòng" sublabel="Tình trạng, lịch sử sửa, mã QR"
+                  onPress={() => { closeAction(); navigation.navigate('Equipment', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
+                <ActionItem icon="📜" label="Lịch sử thuê" sublabel="Các đời khách đã ở phòng này"
+                  onPress={() => { closeAction(); navigation.navigate('BuildingContract', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
+                <ActionItem icon="📋" label="Thông tin phòng" sublabel="Diện tích, sức chứa, mô tả"
+                  onPress={() => setActionView('detail')} />
+
+                {/* ── Thao tác đổi trạng thái (ít dùng, để cuối) ── */}
+                {actionRoom.status === 'occupied' && (
+                  <ActionItem
+                    icon="🚪"
+                    label="Trả phòng (Check-out)"
+                    sublabel="Lập biên bản hiện trạng và kết thúc hợp đồng"
+                    onPress={() => handleCheckOut(actionRoom)}
+                  />
+                )}
+                {actionRoom.status === 'available' && (
+                  <>
+                    <ActionItem
+                      icon="🔧"
+                      label="Khoá phòng để sửa chữa"
+                      sublabel="Tạm không nhận khách cho tới khi mở lại"
+                      onPress={() => handleReportMaintenance(actionRoom)}
+                    />
+                    <ActionItem
+                      icon="⛔"
+                      label="Ngưng khai thác"
+                      sublabel="Không nhận khách, không tạo hoá đơn"
+                      onPress={() => applyStatus(actionRoom, 'disabled')}
+                    />
+                  </>
                 )}
 
                 <TouchableOpacity style={styles.sheetCancel} onPress={closeAction}>
@@ -814,7 +845,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
             {actionRoom && actionView === 'status' && (
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <TouchableOpacity style={styles.sheetBackRow} onPress={() => setActionView('menu')}>
-                  <Text style={styles.sheetBackText}>‹ Quay lại</Text>
+                  <Text style={[styles.sheetBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">‹</Text>
                 </TouchableOpacity>
                 <Text style={styles.statusTitle}>Cập nhật trạng thái</Text>
                 <Text style={styles.statusSub}>
@@ -861,7 +892,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
             {actionRoom && actionView === 'detail' && (
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <TouchableOpacity style={styles.sheetBackRow} onPress={() => setActionView('menu')}>
-                  <Text style={styles.sheetBackText}>‹ Quay lại</Text>
+                  <Text style={[styles.sheetBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">‹</Text>
                 </TouchableOpacity>
 
                 <View style={styles.detailTop}>
@@ -1010,6 +1041,8 @@ const styles = StyleSheet.create({
   sheetBadge:     { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BorderRadius.full },
   sheetBadgeText: { fontSize: 11, fontWeight: '700' },
   sheetDivider:   { height: 1, backgroundColor: Colors.divider, marginBottom: Spacing.sm },
+  sheetInfo:      { backgroundColor: '#EFF6FF', borderRadius: 12, padding: Spacing.md, marginVertical: Spacing.xs },
+  sheetInfoText:  { fontSize: 12, color: '#1D4ED8', lineHeight: 18 },
   sheetBackRow:   { marginBottom: Spacing.md },
   sheetBackText:  { fontSize: 14, fontWeight: '600', color: Colors.primary },
   sheetCancel:    { paddingVertical: 14, alignItems: 'center', marginTop: Spacing.sm },

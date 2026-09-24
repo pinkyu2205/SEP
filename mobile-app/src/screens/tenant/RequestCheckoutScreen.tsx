@@ -208,7 +208,7 @@ export const RequestCheckoutScreen: React.FC = () => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>← Quay lại</Text>
+            <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Yêu cầu trả phòng</Text>
           <View style={{ width: 72 }} />

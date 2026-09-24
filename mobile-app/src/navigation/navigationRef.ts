@@ -79,6 +79,17 @@ const fixForRole = (screen: string): string => {
  */
 export function navigateFromNotification(data: NotificationData): void {
   if (!navigationRef.isReady()) return;
+  /**
+   * Nợ quá hạn → manager mở thẳng tab "Đang nợ" của Tiền khách thuê (24/09/2026). BE gửi
+   * kèm screen 'RentInvoice' (màn tiền nhà) cho cả INVOICE_OVERDUE_MANAGER — tức nợ điện,
+   * nước, sửa chữa — mở ra đó thì không thấy khoản nợ nào và cũng không có nút chấm dứt HĐ.
+   */
+  const rawType = (data?.type || '').toUpperCase();
+  if (currentRole === 'manager'
+    && (/_OVERDUE_MANAGER$/.test(rawType) || rawType === 'RENT_UNPAID_MANAGER')) {
+    try { (navigationRef as any).navigate('ManagerPaymentHistory', { filter: 'DEBT' }); } catch { /* bỏ qua */ }
+    return;
+  }
   const target = data?.screen ?? fallbackScreen(data?.type);
   if (!target) return;
   const screen = fixForRole(target);

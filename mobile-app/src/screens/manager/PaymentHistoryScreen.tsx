@@ -6,7 +6,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors, Spacing, BorderRadius, Shadow, canTerminateForUnpaidInvoice, daysOverdue } from '@/constants';
+import { checkoutService } from '@/services/manager/checkoutService';
+import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { formatCurrency, showAlert } from '@/utils';
 import {
   realManagerInvoiceService, ManagerPayment, ManagerInvoice, ManagerPaymentHistoryEntry,
@@ -14,7 +16,7 @@ import {
 import { managerDepositService, ManagerDeposit } from '@/services/manager/depositService';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
-import { serverNow } from '@/utils/serverTime';
+import { serverNow, todayIso } from '@/utils/serverTime';
 
 /**
  * THU & ĐỐI SOÁT — toàn bộ giao dịch của khách thuê trong phạm vi manager quản lý.
@@ -34,16 +36,8 @@ import { serverNow } from '@/utils/serverTime';
  *   • Điện, nước, dịch vụ — HIỆN số tiền.
  */
 
-type Filter = 'all' | 'VERIFIED' | 'PENDING_VERIFY' | 'REJECTED' | 'DEPOSIT';
+type Filter = 'DEBT' | 'all' | 'PENDING_VERIFY' | 'DEPOSIT';
 
-// Bỏ emoji trong nhãn chip cho khớp các màn hoá đơn khác; icon đã nằm ở từng dòng.
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: 'all',            label: 'Tất cả' },
-  { key: 'VERIFIED',       label: 'Đã xác nhận' },
-  { key: 'PENDING_VERIFY', label: 'Chờ xác nhận' },
-  { key: 'REJECTED',       label: 'Từ chối' },
-  { key: 'DEPOSIT',        label: 'Tiền cọc' },
-];
 
 const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
   QR:            { label: 'QR VietQR',    icon: '📱' },
@@ -80,13 +74,15 @@ const CONTRACT_STATUS_LABEL: Record<string, string> = {
  *   • `INV00022-202608-R` / `-E` / `-W` / `-S`
  * Không khớp mẫu nào thì coi như tiền nhà (ẩn tiền) cho an toàn.
  */
-type InvoiceKind = 'ONBOARD' | 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'UNKNOWN';
+type InvoiceKind = 'ONBOARD' | 'RENT' | 'ELECTRICITY' | 'WATER' | 'SERVICE' | 'MAINTENANCE' | 'UNKNOWN';
 const invoiceKindOf = (code?: string): InvoiceKind => {
   const c = (code || '').toUpperCase();
   // Khoản thu lúc đón khách: BE để `invoiceType = OTHER` nên phải nhận theo mã, không
   // thì rơi vào UNKNOWN và hiện trơ là "Hoá đơn" — đúng dòng khách chuyển tiền đầu tiên
   // mà đọc vào không biết là khoản gì.
   if (c.startsWith('HD-ONBOARD')) return 'ONBOARD';
+  // Phí sửa chữa do khách làm hư (BE gom khoản đền bù thành hoá đơn MAINTENANCE).
+  if (c.startsWith('HD-MAINT')) return 'MAINTENANCE';
   if (c.includes('-RENT-') || /-R$/.test(c)) return 'RENT';
   if (c.includes('-ELEC') || /-E$/.test(c)) return 'ELECTRICITY';
   if (c.includes('-WATER') || /-W$/.test(c)) return 'WATER';
@@ -104,6 +100,7 @@ const invoiceKindOfType = (type?: string | null, code?: string): InvoiceKind => 
     case 'ELECTRICITY': return 'ELECTRICITY';
     case 'WATER':       return 'WATER';
     case 'SERVICE':     return 'SERVICE';
+    case 'MAINTENANCE': return 'MAINTENANCE';
     default:            return invoiceKindOf(code);
   }
 };
@@ -111,7 +108,7 @@ const invoiceKindOfType = (type?: string | null, code?: string): InvoiceKind => 
 const KIND_LABEL: Record<InvoiceKind, string> = {
   ONBOARD: 'Thu lúc đón khách (cọc + kỳ đầu)',
   RENT: 'Hoá đơn tiền nhà', ELECTRICITY: 'Hoá đơn tiền điện', WATER: 'Hoá đơn tiền nước',
-  SERVICE: 'Hoá đơn dịch vụ', UNKNOWN: 'Hoá đơn',
+  SERVICE: 'Hoá đơn dịch vụ', MAINTENANCE: 'Phí sửa chữa (khách làm hư)', UNKNOWN: 'Hoá đơn',
 };
 /**
  * Chỉ tiền nhà mới bị ẩn; loại chưa nhận ra thì ẩn cho chắc.
@@ -182,6 +179,8 @@ interface Entry {
   depositMonths?: number;
   moveInDate?: string;
   contractStatus?: string;
+  /** Tab "Đã thu": một dòng = một KHÁCH, các khoản đã thu nằm trong đây. */
+  children?: Entry[];
 }
 
 const fromPayment = (p: ManagerPayment): Entry => ({
@@ -276,47 +275,118 @@ const fromDeposit = (d: ManagerDeposit): Entry => ({
   contractStatus: d.contractStatus,
 });
 
-/** Một dòng giao dịch trong dòng thời gian. */
+/** Icon + nhãn ngắn theo loại khoản — thứ manager quét mắt tìm trước tiên. */
+const KIND_SHORT: Record<InvoiceKind, { icon: string; label: string }> = {
+  ONBOARD: { icon: '🤝', label: 'Thu lúc đón khách' },
+  RENT: { icon: '🏠', label: 'Tiền nhà' },
+  ELECTRICITY: { icon: '⚡', label: 'Tiền điện' },
+  WATER: { icon: '💧', label: 'Tiền nước' },
+  SERVICE: { icon: '🧾', label: 'Dịch vụ' },
+  MAINTENANCE: { icon: '🔧', label: 'Phí sửa chữa' },
+  UNKNOWN: { icon: '📄', label: 'Khoản khác' },
+};
+
+/**
+ * Một dòng giao dịch (làm lại 24/09/2026): dòng 1 = LOẠI KHOẢN + phòng, dòng 2 = khách +
+ * thời gian + hình thức. Bên phải: số tiền (nếu được xem), hoặc chữ "Đã thu". Badge
+ * trạng thái CHỈ hiện khi khác bình thường (chờ xác nhận / từ chối / chưa thu cọc) —
+ * trước đây dòng nào cũng mang "✓ Đã xác nhận" + "•••", nhìn như lỗi.
+ */
 const TxnRow: React.FC<{
   entry: Entry;
   onPress: (e: Entry) => void;
 }> = React.memo(({ entry, onPress }) => {
   const mc = methodOf(entry.method);
-  const st = statusOf(entry.status);
+  const up = (entry.status || '').toUpperCase();
   const isDeposit = entry.kind === 'DEPOSIT';
-  // Tiền cọc ẩn lại từ 13/08/2026 — xem @/constants/managerVisibility.
   const hidden = isDeposit || isAmountHidden(entry.invoiceKind);
-
-  const amountText = hidden ? '•••' : formatCurrency(entry.amount ?? 0);
+  const kind = isDeposit ? { icon: '🔐', label: 'Tiền cọc' } : KIND_SHORT[entry.invoiceKind];
+  const normal = up === 'VERIFIED' || up === 'PAID';
+  const st = statusOf(entry.status);
+  const when = entry.at
+    ? `${dayLabel(dayKey(entry.at))}${timeOf(entry.at) ? ` ${timeOf(entry.at)}` : ''}`
+    : 'Chưa thu';
 
   return (
     <TouchableOpacity style={s.row} activeOpacity={0.7} onPress={() => onPress(entry)}>
-      <View style={[s.rowIcon, isDeposit && { backgroundColor: Colors.primaryBg }]}>
-        <Text style={{ fontSize: 16 }}>{isDeposit ? '🔐' : mc.icon}</Text>
+      <View style={s.rowIcon}>
+        <Text style={{ fontSize: 17 }}>{kind.icon}</Text>
       </View>
-
       <View style={{ flex: 1 }}>
         <Text style={s.rowName} numberOfLines={1}>
-          {entry.tenantName}{entry.roomNumber ? ` · ${entry.roomNumber}` : ''}
+          {kind.label}{entry.roomNumber ? ` · P.${entry.roomNumber}` : ''}
         </Text>
-        <Text style={s.rowRef} numberOfLines={1}>
-          {isDeposit ? 'Tiền cọc' : KIND_LABEL[entry.invoiceKind]} · {entry.ref || '—'}
-        </Text>
-        <Text style={s.rowMeta} numberOfLines={1}>{entry.propertyName}</Text>
         <Text style={s.rowMeta} numberOfLines={1}>
-          {mc.label} · {dayLabel(dayKey(entry.at))}{timeOf(entry.at) ? ` ${timeOf(entry.at)}` : ''}
+          {entry.tenantName} · {when}{entry.method ? ` · ${mc.label}` : ''}
         </Text>
       </View>
-
       <View style={s.rowRight}>
-        <View style={[s.statusBadge, { backgroundColor: st.bg }]}>
-          <Text style={[s.statusBadgeText, { color: st.color }]}>{st.label}</Text>
-        </View>
-        <Text style={[s.rowAmount, hidden && s.rowAmountHidden]} numberOfLines={1}>
-          {amountText}
-        </Text>
+        {!hidden && <Text style={s.rowAmount} numberOfLines={1}>{formatCurrency(entry.amount ?? 0)}</Text>}
+        {normal
+          ? null
+          : (
+            <View style={[s.statusBadge, { backgroundColor: st.bg }]}>
+              <Text style={[s.statusBadgeText, { color: st.color }]}>{st.label}</Text>
+            </View>
+          )}
       </View>
     </TouchableOpacity>
+  );
+});
+
+/** "18/09 14:20" — ngắn, đủ để đối chiếu; ngày đầy đủ xem trong chi tiết. */
+const shortWhen = (iso?: string) => {
+  const k = dayKey(iso);
+  if (!k) return '';
+  const [, m, d] = k.split('-');
+  const t = timeOf(iso);
+  return `${d}/${m}${t ? ` ${t}` : ''}`;
+};
+
+/**
+ * TAB "ĐÃ THU" — mỗi KHÁCH một khối (làm lại 24/09/2026).
+ *
+ * Bản trước là danh sách phẳng từng giao dịch, dòng nào cũng "✓ Đã thu" (thừa — đang ở
+ * tab Đã thu) và tên khách bị đẩy xuống dòng phụ rồi cắt mất. Manager đối soát theo
+ * NGƯỜI: "tháng này An đã trả những gì". Nên gom theo khách, mỗi khoản một dòng nhỏ:
+ * loại · ngày giờ · hình thức, bên phải là số tiền (nếu được xem).
+ */
+const TenantGroupRow: React.FC<{ group: Entry; onPress: (e: Entry) => void }> = React.memo(({ group, onPress }) => {
+  const items = group.children ?? [];
+  return (
+    <View style={s.tg}>
+      <View style={s.tgHead}>
+        <Text style={s.tgName} numberOfLines={1}>
+          {group.tenantName}{group.roomNumber ? ` · P.${group.roomNumber}` : ''}
+        </Text>
+        <Text style={s.tgCount}>{items.length} khoản</Text>
+      </View>
+      {items.map(c => {
+        const kind = KIND_SHORT[c.invoiceKind];
+        const hidden = isAmountHidden(c.invoiceKind);
+        const up = (c.status || '').toUpperCase();
+        const st = statusOf(c.status);
+        return (
+          <TouchableOpacity key={c.key} style={s.tgLine} activeOpacity={0.7} onPress={() => onPress(c)}>
+            <Text style={s.tgIcon}>{kind.icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.tgLabel} numberOfLines={1}>{kind.label}</Text>
+              <Text style={s.tgMeta} numberOfLines={1}>
+                {shortWhen(c.at)}{c.method ? ` · ${methodOf(c.method).label}` : ''}
+              </Text>
+            </View>
+            {up !== 'VERIFIED' ? (
+              <View style={[s.statusBadge, { backgroundColor: st.bg }]}>
+                <Text style={[s.statusBadgeText, { color: st.color }]}>{st.label}</Text>
+              </View>
+            ) : !hidden ? (
+              <Text style={s.tgAmount}>{formatCurrency(c.amount ?? 0)}</Text>
+            ) : null}
+            <Text style={s.tgChevron}>›</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 });
 
@@ -324,12 +394,18 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   // Vào từ link "Tất cả tiền cọc" thì mở thẳng tab Tiền cọc, khỏi bắt bấm thêm.
-  const initialFilter = (route.params?.filter as Filter | undefined) ?? 'all';
+  // Mặc định mở tab "Đang nợ" — việc manager cần làm nhất ở màn này là đi đòi tiền.
+  const initialFilter: Filter = (['DEBT', 'all', 'PENDING_VERIFY', 'DEPOSIT'] as string[]).includes(route.params?.filter)
+    ? route.params.filter : 'DEBT';
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   /** Sổ thu thật — nguồn chính của dòng thời gian (xem fromHistory). */
   const [history, setHistory] = useState<ManagerPaymentHistoryEntry[]>([]);
   /** Hoá đơn PAID — lưới an toàn cho hoá đơn không có dòng nào trong sổ thu. */
   const [paidInvoices, setPaidInvoices] = useState<ManagerInvoice[]>([]);
+  /** Hoá đơn CHƯA thu (chờ trả + quá hạn) — nguồn của tab "Đang nợ". */
+  const [unpaidInvoices, setUnpaidInvoices] = useState<ManagerInvoice[]>([]);
+  /** Phòng còn HĐ hiệu lực — để bỏ nợ của khách đã đi (xử lý ở luồng trả phòng). */
+  const [rentingKeys, setRentingKeys] = useState<Set<string>>(new Set());
   const [deposits, setDeposits] = useState<ManagerDeposit[]>([]);
   /** id các HĐ còn hiệu lực — lọc cọc của khách đã rời đi. */
   const [activeContractIds, setActiveContractIds] = useState<Set<number>>(new Set());
@@ -354,6 +430,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         setDeposits(dep);
         setHistory(paid);
         setPaidInvoices(invs.filter(i => (i.status || '').toUpperCase() === 'PAID'));
+        setUnpaidInvoices(invs.filter(i => ['PENDING', 'OVERDUE', 'PARTIAL'].includes((i.status || '').toUpperCase())));
         /**
          * Cọc của khách ĐÃ trả phòng / chấm dứt HĐ thì không hiện ở đây nữa: khoản đó
          * đã được tất toán (hoàn lại hoặc trừ vào hư hỏng) ở luồng Trả phòng, để lại
@@ -366,6 +443,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           .listActiveByProperties(props.map(p => Number(p.id)))
           .catch(() => [] as TenantContractResponse[]);
         setActiveContractIds(new Set(cts.map(c => Number(c.id))));
+        setRentingKeys(activeRentingKeys(cts));
       })
       .finally(() => { setLoading(false); setRefreshing(false); });
   }, []);
@@ -382,9 +460,134 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   // (endpoint /manager/deposits không trả số tiền). Nay cọc ẩn số nên bỏ hẳn,
   // đỡ một loạt request mỗi lần cuộn danh sách.
 
+  /**
+   * KHÁCH ĐANG NỢ (24/09/2026) — gom MỌI hoá đơn chưa thu theo từng KHÁCH (hợp đồng).
+   *
+   * Trước đây nợ nằm rải: tiền nhà ở tab Hoá đơn (và chỉ theo từng kỳ — nợ tháng trước
+   * phải chọn đúng tháng mới thấy), điện nước ở màn Ghi điện nước → Lịch sử. Một khách
+   * nợ cả hai thì manager phải tự ghép. Ở đây mỗi khách một thẻ, nợ lâu nhất lên đầu.
+   * Tiền nhà vẫn KHÔNG hiện số tiền (BE mask) — chỉ nêu các tháng còn nợ.
+   */
+  const debtors = useMemo(() => {
+    const groups = new Map<string, ManagerInvoice[]>();
+    for (const i of unpaidInvoices) {
+      if (!belongsToActiveTenant(i, rentingKeys)) continue;
+      const k = i.contractId != null ? `c${i.contractId}` : `${i.propertyId}|${i.roomNumber ?? ''}|${i.tenantName ?? ''}`;
+      groups.set(k, [...(groups.get(k) ?? []), i]);
+    }
+    return [...groups.entries()].map(([key, items]) => {
+      const first = items[0];
+      const overdueDays = Math.max(0, ...items
+        .filter(i => (i.status || '').toUpperCase() === 'OVERDUE')
+        .map(i => daysOverdue(i.dueDate || '')));
+      const nextDue = items.map(i => i.dueDate).filter(Boolean).sort()[0];
+      const byKind = new Map<InvoiceKind, ManagerInvoice[]>();
+      for (const i of items) {
+        const kind = invoiceKindOfType(i.type, i.code);
+        byKind.set(kind, [...(byKind.get(kind) ?? []), i]);
+      }
+      return {
+        key,
+        tenantName: first.tenantName || '—',
+        roomNumber: first.roomNumber ?? undefined,
+        propertyName: first.propertyName,
+        propertyId: first.propertyId,
+        contractId: items.find(i => i.contractId != null)?.contractId ?? undefined,
+        overdue: overdueDays > 0 || items.some(i => (i.status || '').toUpperCase() === 'OVERDUE'),
+        overdueDays,
+        nextDue,
+        // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
+        canTerminate: items.some(i => canTerminateForUnpaidInvoice(i)),
+        terminateReasons: items.filter(i => canTerminateForUnpaidInvoice(i))
+          .map(i => `${KIND_SHORT[invoiceKindOfType(i.type, i.code)].label.toLowerCase()} T${i.month}/${i.year}`),
+        lines: [...byKind.entries()].map(([kind, list]) => ({
+          kind,
+          periods: list.sort((a, b) => (a.year * 100 + a.month) - (b.year * 100 + b.month))
+            .map(i => `T${i.month}`).join(', '),
+          amount: isAmountHidden(kind) ? null : list.reduce((sum, i) => sum + (i.amount ?? 0), 0),
+          // Hoá đơn cũ nhất của loại này — bấm dòng là mở đúng nó (đòi từ khoản lâu nhất).
+          firstId: list[0].id,
+        })),
+      };
+    }).sort((a, b) => (b.overdueDays - a.overdueDays) || (a.nextDue || '').localeCompare(b.nextDue || ''));
+  }, [unpaidInvoices, rentingKeys]);
+
+  /** Sổ hoá đơn của MỘT khách — nơi xem chi tiết và ghi nhận thu tiền mặt / trả hộ. */
+  /**
+   * CHẤM DỨT HĐ VÌ NỢ QUÁ HẠN — ngay trên thẻ khách (24/09/2026). Trước đây chỉ làm được
+   * với tiền nhà ở tab Hoá đơn; luật mới mở quyền cho MỌI hoá đơn quá 5 ngày kể từ ngày phát
+   * hành nên cần một chỗ chung. Giống luồng bên tab Hoá đơn: chấm dứt xong mở luôn yêu cầu
+   * trả phòng để kiểm kê + tất toán cọc.
+   */
+  const [terminatingKey, setTerminatingKey] = useState<string | null>(null);
+  const terminateDebtor = (d: (typeof debtors)[number]) => {
+    if (d.contractId == null) {
+      showAlert('Thiếu dữ liệu', 'Khoản nợ này không gắn với hợp đồng nào nên không chấm dứt được từ đây.');
+      return;
+    }
+    const what = d.terminateReasons.join(', ');
+    showAlert(
+      'Chấm dứt hợp đồng?',
+      `${d.tenantName}${d.roomNumber ? ` · phòng ${d.roomNumber}` : ''} nợ quá hạn: ${what}. `
+      + 'Sau khi chấm dứt, hệ thống mở luôn yêu cầu trả phòng để kiểm kê và tất toán cọc.',
+      [
+        { text: 'Để sau', style: 'cancel' },
+        {
+          text: 'Chấm dứt', style: 'destructive',
+          onPress: async () => {
+            setTerminatingKey(d.key);
+            try {
+              await realTenantService.terminateContract(d.contractId!, {
+                type: 'VIOLATION',
+                reason: `Không thanh toán ${what} — quá hạn, đã nhắc theo chính sách.`,
+              });
+              let checkoutId: number | null = null;
+              try {
+                const req = await checkoutService.createForTenant({
+                  contractId: d.contractId!,
+                  expectedMoveOutDate: todayIso(),
+                  reason: `Chấm dứt hợp đồng do nợ quá hạn: ${what}.`,
+                });
+                checkoutId = req?.id ?? null;
+              } catch { /* vẫn báo để manager tự mở trả phòng */ }
+              load();
+              showAlert(
+                'Đã chấm dứt hợp đồng',
+                checkoutId
+                  ? 'Đã mở yêu cầu trả phòng. Sang đó để kiểm kê thiết bị, chốt điện nước và tất toán tiền cọc.'
+                  : 'Hợp đồng đã thanh lý nhưng CHƯA mở được yêu cầu trả phòng — vào mục Trả phòng tạo thủ công.',
+                [
+                  { text: 'Để sau', style: 'cancel' },
+                  { text: 'Xử lý trả phòng', onPress: () => navigation.navigate('CheckoutRequests') },
+                ],
+              );
+            } catch (e: any) {
+              showAlert('Không chấm dứt được', e?.response?.data?.message || e?.message || 'Thử lại sau.');
+            } finally {
+              setTerminatingKey(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const openTenantInvoices = (d: (typeof debtors)[number], invoiceId?: number) =>
+    navigation.navigate('TenantInvoices', {
+      tenantId: String(d.contractId ?? ''),
+      tenantName: d.tenantName,
+      roomId: '',
+      roomName: d.roomNumber ? `Phòng ${d.roomNumber}` : '',
+      propertyId: String(d.propertyId),
+      propertyName: d.propertyName,
+      contractId: d.contractId,
+      initialFilter: 'unpaid',
+      openInvoiceId: invoiceId,
+    });
+
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
-    else navigation.navigate('ManagerBilling');
+    else navigation.navigate('ManagerTabs', { screen: 'ManagerBilling' });
   };
 
   /**
@@ -446,92 +649,104 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
     [liveDeposits],
   );
 
+  /**
+   * 3 TAB (24/09/2026) thay cho 3 ô đếm + 5 chip nói lại cùng một chuyện:
+   *   • Giao dịch   — mọi lần thu theo kỳ (không gồm cọc), gom theo tháng.
+   *   • Chờ xác nhận — việc manager PHẢI làm; có số đỏ.
+   *   • Tiền cọc    — tách riêng vì sẽ hoàn lại khi trả phòng; chưa thu lên đầu.
+   * "Từ chối" không còn tab riêng: vẫn nằm trong Giao dịch với badge đỏ.
+   */
   const filtered = useMemo(() => {
     const kw = norm(search.trim());
-    const source = filter === 'DEPOSIT' ? depositEntries : timeline;
-    return source.filter(e => {
-      if (filter !== 'all' && filter !== 'DEPOSIT'
-        && (e.kind !== 'INVOICE' || e.status.toUpperCase() !== filter)) return false;
-      if (!kw) return true;
-      return [e.tenantName, e.roomNumber, e.propertyName, e.ref]
-        .some(v => norm(v || '').includes(kw));
-    });
+    const source = filter === 'DEPOSIT'
+      ? depositEntries
+      : timeline.filter(e => e.kind === 'INVOICE'
+        && (filter !== 'PENDING_VERIFY' || e.status.toUpperCase() === 'PENDING_VERIFY'));
+    if (!kw) return source;
+    return source.filter(e => [e.tenantName, e.roomNumber, e.propertyName, e.ref]
+      .some(v => norm(v || '').includes(kw)));
   }, [timeline, depositEntries, filter, search]);
 
-  /**
-   * Gom theo KỲ (tháng), mới nhất trước — cùng cách với màn Hoá đơn tiền nhà và Lịch
-   * sử hoá đơn. Gom theo NGÀY như trước thì mỗi ngày một tiêu đề, chạy vài tháng là
-   * hàng chục tiêu đề rời rạc, không đối soát theo kỳ được.
-   * Trong mỗi kỳ vẫn xếp mới nhất trước và có nhãn ngày trên từng dòng.
-   */
-  /**
-   * TIỀN CỌC TÁCH RIÊNG, GHIM LÊN ĐẦU (13/08/2026).
-   *
-   * Trước đây cọc nằm lẫn trong các mục "Kỳ MM/YYYY" cùng tiền điện/nước/dịch vụ. Nhưng
-   * cọc khác hẳn về bản chất: thu MỘT LẦN lúc nhận nhà và sẽ HOÀN LẠI khi khách trả
-   * phòng — trộn vào dòng tiền theo kỳ thì manager đọc ra "kỳ này thu được nhiều" trong
-   * khi phần lớn là khoản sẽ phải trả lại.
-   *
-   * Ghim rồi thì cọc KHÔNG lặp lại ở mục kỳ nữa, nếu không đếm ra hai lần.
-   */
   const sections = useMemo(() => {
-    const deposits = filtered.filter(e => e.kind === 'DEPOSIT');
-    const rest     = filtered.filter(e => e.kind !== 'DEPOSIT');
-
+    if (filter === 'DEPOSIT') {
+      const unpaid = filtered.filter(e => (e.status || '').toUpperCase() !== 'PAID');
+      const paid = filtered.filter(e => (e.status || '').toUpperCase() === 'PAID');
+      return [
+        { key: 'dep-unpaid', title: 'Chưa thu cọc', sub: `${unpaid.length} khách`, data: unpaid },
+        { key: 'dep-paid', title: 'Đã thu cọc', sub: 'Hoàn lại khi khách trả phòng', data: paid },
+      ].filter(x => x.data.length > 0);
+    }
     const map = new Map<string, Entry[]>();
-    for (const e of rest) {
+    for (const e of filtered) {
       const k = (e.at || '').slice(0, 7);
       map.set(k, [...(map.get(k) ?? []), e]);
     }
-    const byPeriod = [...map.entries()]
+    return [...map.entries()]
       .sort((a, b) => (b[0] || '').localeCompare(a[0] || ''))
       .map(([key, data]) => {
         const [y, m] = key.split('-');
+        // Chỉ cộng khoản manager ĐƯỢC xem (điện, nước, dịch vụ) — tiền nhà bị ẩn.
+        const visible = data
+          .filter(e => !isAmountHidden(e.invoiceKind) && e.status.toUpperCase() === 'VERIFIED')
+          .reduce((sum, e) => sum + (e.amount ?? 0), 0);
+        const sorted = data.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+        // Tab Đã thu: gom theo KHÁCH (hợp đồng) — khách trả gần nhất lên đầu.
+        let rows: Entry[] = sorted;
+        let tenants = 0;
+        if (filter === 'all') {
+          const byTenant = new Map<string, Entry[]>();
+          for (const e of sorted) {
+            const tk = e.contractId != null ? `c${e.contractId}` : `${e.propertyName}|${e.roomNumber ?? ''}|${e.tenantName}`;
+            byTenant.set(tk, [...(byTenant.get(tk) ?? []), e]);
+          }
+          tenants = byTenant.size;
+          rows = [...byTenant.entries()].map(([tk, list]) => ({
+            ...list[0],
+            key: `g-${key}-${tk}`,
+            children: list,
+          }));
+        }
+        // Tóm tắt theo loại: "🏠 4 · 🤝 3 · 🔧 2" — nhìn tiêu đề là biết tháng đó thu những gì.
+        const byKind = new Map<InvoiceKind, number>();
+        for (const e of sorted) byKind.set(e.invoiceKind, (byKind.get(e.invoiceKind) ?? 0) + 1);
+        const kinds = [...byKind.entries()].map(([k, n]) => `${KIND_SHORT[k].icon} ${n}`).join('  ');
         return {
           key,
-          title: m ? `Kỳ ${m}/${y}` : 'Chưa thu',
-          pinned: false,
-          count: data.length,
-          deposits: 0,
-          data: data.sort((a, b) => (b.at || '').localeCompare(a.at || '')),
+          title: m ? `Tháng ${Number(m)}/${y}` : 'Không rõ thời gian',
+          sub: filter === 'all'
+            ? `${tenants} khách · ${data.length} khoản  ·  ${kinds}`
+            : `${data.length} giao dịch`,
+          extra: visible > 0 ? `Điện nước & DV: ${formatCurrency(visible)}` : '',
+          data: rows,
         };
       });
-
-    if (deposits.length === 0) return byPeriod;
-
-    return [
-      {
-        key: '__deposit__',
-        title: '🔐 Tiền cọc khách thuê',
-        pinned: true,
-        count: deposits.length,
-        deposits: deposits.length,
-        data: deposits.sort((a, b) => (b.at || '').localeCompare(a.at || '')),
-      },
-      ...byPeriod,
-    ];
-  }, [filtered]);
+  }, [filtered, filter]);
 
   /**
-   * ĐẾM TRÊN CHÍNH `timeline` — tức đúng những dòng đang hiện bên dưới.
-   *
-   * Trước 18/08/2026 hai ô đầu đếm trên `payments` (bảng `tenant_payment_claims`) trong
-   * khi danh sách dựng từ BA nguồn (claims + sổ thu + hoá đơn PAID). Khách trả bằng
-   * PayOS/QR **không sinh claim**, chỉ vào sổ thu — nên màn đầy dòng "✓ Đã xác nhận" mà
-   * ô "Đã xác nhận" vẫn đứng ở 0. Ô đếm một tập, danh sách hiện một tập khác.
-   *
-   * Đếm theo cùng điều kiện mà chip lọc dùng (`kind === 'INVOICE'` + so `status`), để ô
-   * số và số dòng bấm ra luôn khớp nhau.
+   * THÁNG GẬP LẠI (24/09/2026): mặc định mọi tháng đều gập — chỉ thấy "Tháng 9/2026 ·
+   * 10 giao dịch · tổng", bấm mới mở danh sách bên trong. Đang tìm kiếm, tab Chờ duyệt
+   * (danh sách việc phải làm) và tab Tiền cọc thì luôn mở — gập ở đó là giấu việc/kết quả.
    */
-  const counts = useMemo(() => {
-    const byStatus = (st: string) =>
-      timeline.filter(e => e.kind === 'INVOICE' && e.status.toUpperCase() === st).length;
-    return {
-      verified: byStatus('VERIFIED'),
-      pending: byStatus('PENDING_VERIFY'),
-      deposits: deposits.filter(d => (d.status || '').toUpperCase() === 'PAID').length,
-    };
-  }, [timeline, deposits]);
+  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
+  const collapsible = filter === 'all' && !search.trim();
+  const isOpen = (key: string) => !collapsible || openKeys.has(key);
+  const toggle = (key: string) => setOpenKeys(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  // Tháng đang gập thì data rỗng — không dựng dòng nào của tháng đó.
+  const visibleSections = sections.map(sec => (isOpen(sec.key) ? sec : { ...sec, data: [] as Entry[] }));
+
+  const counts = useMemo(() => ({
+    debtors: debtors.length,
+    debtorsOverdue: debtors.filter(d => d.overdue).length,
+    txns: timeline.filter(e => e.kind === 'INVOICE').length,
+    pending: timeline.filter(e => e.kind === 'INVOICE' && e.status.toUpperCase() === 'PENDING_VERIFY').length,
+    deposits: liveDeposits.length,
+    depositUnpaid: liveDeposits.filter(d => (d.status || '').toUpperCase() !== 'PAID').length,
+  }), [timeline, liveDeposits, debtors]);
+
 
   /** Xác nhận / từ chối giao dịch khách báo đã chuyển — làm ngay trong sheet chi tiết. */
   const handleVerify = (e: Entry, approved: boolean) => {
@@ -569,12 +784,32 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           <Text style={s.backBtnText}>‹</Text>
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={s.title}>Tiền khách đã trả</Text>
+          <Text style={s.title}>Tiền khách thuê</Text>
           {/* Không rao "không hiển thị tiền thuê & tiền cọc" nữa (13/08/2026): nói ra
               chính là chỉ cho manager biết có thứ đang bị giấu, mà chẳng giúp họ làm
               việc gì. Chỗ nào thật sự cần giải thích thì đã có câu trong ô chi tiết. */}
-          <Text style={s.subtitle}>Điện nước · dịch vụ · tiền cọc</Text>
+          <Text style={s.subtitle}>Đang nợ · đã thu · tiền cọc</Text>
         </View>
+      </View>
+
+      {/* ── Tab ── */}
+      <View style={s.segment}>
+        {([
+          { key: 'DEBT' as const, label: 'Đang nợ', count: counts.debtors, alert: counts.debtorsOverdue > 0 },
+          { key: 'all' as const, label: 'Đã thu', count: counts.txns, alert: false },
+          { key: 'PENDING_VERIFY' as const, label: 'Chờ duyệt', count: counts.pending, alert: counts.pending > 0 },
+          { key: 'DEPOSIT' as const, label: 'Cọc', count: counts.deposits, alert: counts.depositUnpaid > 0 },
+        ]).map(t => {
+          const on = filter === t.key;
+          return (
+            <TouchableOpacity key={t.key} style={[s.segBtn, on && s.segBtnOn]} onPress={() => setFilter(t.key)} activeOpacity={0.8}>
+              <Text style={[s.segText, on && s.segTextOn]} numberOfLines={1}>{t.label}</Text>
+              <View style={[s.segCount, t.alert && s.segCountAlert, on && !t.alert && s.segCountOn]}>
+                <Text style={[s.segCountText, (t.alert || on) && { color: Colors.white }]}>{t.count}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── Tìm kiếm ── */}
@@ -584,7 +819,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           style={s.searchInput}
           value={search}
           onChangeText={setSearch}
-          placeholder="Tìm khách thuê, phòng, nhà, mã hoá đơn..."
+          placeholder="Tìm tên khách, phòng, mã hoá đơn…"
           placeholderTextColor={Colors.textMuted}
           autoCorrect={false}
           returnKeyType="search"
@@ -596,53 +831,88 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         )}
       </View>
 
-      {/* ── Tổng quan: 3 ô bấm được để lọc, cùng kiểu với các màn hoá đơn ── */}
-      <View style={s.statsRow}>
-        {([
-          { key: 'VERIFIED' as const, num: counts.verified, label: 'Đã xác nhận', color: Colors.success },
-          { key: 'PENDING_VERIFY' as const, num: counts.pending, label: 'Chờ xác nhận', color: Colors.warning },
-          { key: 'DEPOSIT' as const, num: counts.deposits, label: 'Đã thu cọc', color: Colors.primary },
-        ]).map(st => {
-          const on = filter === st.key;
-          return (
-            <TouchableOpacity
-              key={st.key}
-              style={[s.stat, on && { backgroundColor: st.color + '14', borderColor: st.color + '55' }]}
-              onPress={() => setFilter(on ? 'all' : st.key)}
-              activeOpacity={0.7}
-            >
-              <View style={[s.statDot, { backgroundColor: st.num > 0 ? st.color : Colors.textMuted }]} />
-              <Text style={[s.statNum, { color: st.num > 0 ? st.color : Colors.textMuted }]}>{st.num}</Text>
-              <Text style={s.statLbl}>{st.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {filter === 'PENDING_VERIFY' && counts.pending > 0 && (
+        <Text style={s.hint}>Khách báo đã chuyển khoản — bấm vào từng dòng để kiểm tra và xác nhận.</Text>
+      )}
 
-      {/* ── Bộ lọc: cuộn ngang 1 hàng, không xuống dòng thành 2 tầng ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={s.filterScroll}
-        contentContainerStyle={s.filterRow}
-      >
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[s.filterChip, filter === f.key && s.filterChipOn]}
-            onPress={() => setFilter(f.key)}
-            activeOpacity={0.8}
+      {filter === 'DEBT' ? (
+        loading ? (
+          <View style={s.loading}><ActivityIndicator size="large" color={Colors.primary} /></View>
+        ) : (
+          <ScrollView
+            style={s.list}
+            contentContainerStyle={s.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
           >
-            <Text style={[s.filterChipText, filter === f.key && s.filterChipTextOn]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {loading ? (
+            {debtors.length > 0 && (
+              <Text style={s.hint}>
+                {counts.debtors} khách đang nợ{counts.debtorsOverdue > 0 ? ` · ${counts.debtorsOverdue} khách quá hạn` : ''}
+                {debtors.some(d => d.canTerminate) ? ` · ${debtors.filter(d => d.canTerminate).length} được chấm dứt HĐ` : ''}
+              </Text>
+            )}
+            {debtors
+              .filter(d => !search.trim() || [d.tenantName, d.roomNumber, d.propertyName]
+                .some(v => norm(v || '').includes(norm(search.trim()))))
+              .map(d => (
+                <View key={d.key} style={[s.debtCard, d.overdue && s.debtCardOverdue]}>
+                  <TouchableOpacity style={s.debtHead} activeOpacity={0.7} onPress={() => openTenantInvoices(d)}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.debtName} numberOfLines={1}>
+                        {d.tenantName}{d.roomNumber ? ` · P.${d.roomNumber}` : ''}
+                      </Text>
+                      <Text style={s.debtProp} numberOfLines={1}>{d.propertyName}</Text>
+                    </View>
+                    <View style={[s.statusBadge, { backgroundColor: d.overdue ? Colors.errorLight : Colors.warningLight }]}>
+                      <Text style={[s.statusBadgeText, { color: d.overdue ? Colors.error : Colors.warning }]}>
+                        {d.overdue
+                          ? (d.overdueDays > 0 ? `Quá hạn ${d.overdueDays} ngày` : 'Quá hạn')
+                          : d.nextDue ? `Hạn ${dateOnly(d.nextDue)}` : 'Chưa tới hạn'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {d.lines.map(line => (
+                    <TouchableOpacity
+                      key={line.kind}
+                      style={s.debtLine}
+                      activeOpacity={0.7}
+                      onPress={() => openTenantInvoices(d, line.firstId)}
+                    >
+                      <Text style={s.debtLineText} numberOfLines={1}>
+                        {KIND_SHORT[line.kind].icon} {KIND_SHORT[line.kind].label} {line.periods}
+                      </Text>
+                      {line.amount != null && <Text style={s.debtLineAmount}>{formatCurrency(line.amount)}</Text>}
+                      <Text style={s.debtChevron}>›</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {d.canTerminate && (
+                    <View style={s.debtTerminateBox}>
+                      <Text style={s.debtTerminate}>⛔ Nợ quá hạn — được quyền chấm dứt hợp đồng</Text>
+                      <TouchableOpacity
+                        style={[s.debtTerminateBtn, terminatingKey === d.key && { opacity: 0.5 }]}
+                        disabled={terminatingKey === d.key}
+                        activeOpacity={0.8}
+                        onPress={() => terminateDebtor(d)}
+                      >
+                        <Text style={s.debtTerminateBtnText}>{terminatingKey === d.key ? 'Đang xử lý…' : 'Chấm dứt HĐ'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ))}
+            {debtors.length === 0 && (
+              <View style={s.emptyBox}>
+                <Text style={s.emptyEmoji}>✅</Text>
+                <Text style={s.emptyText}>Không có khách nào đang nợ.</Text>
+              </View>
+            )}
+          </ScrollView>
+        )
+      ) : loading ? (
         <View style={s.loading}><ActivityIndicator size="large" color={Colors.primary} /></View>
       ) : (
         <SectionList
-          sections={sections}
+          sections={visibleSections}
           keyExtractor={item => item.key}
           stickySectionHeadersEnabled={false}
           style={s.list}
@@ -651,27 +921,44 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />
           }
-          renderSectionHeader={({ section }) => (
-            <View style={[s.monthBar, section.pinned && s.depositBar]}>
-              <Text style={[s.sectionHeader, section.pinned && s.depositBarTitle]}>{section.title}</Text>
-              {/* Mục cọc nói rõ "sẽ hoàn lại" — không thì manager đọc thành doanh thu. */}
-              <Text style={[s.monthMeta, section.pinned && s.depositBarMeta]}>
-                {section.pinned
-                  ? `${section.count} khoản · hoàn lại khi trả phòng`
-                  : `${section.count} giao dịch`}
-              </Text>
+          renderSectionHeader={({ section }) => {
+            const open = isOpen(section.key);
+            return (
+              <TouchableOpacity
+                activeOpacity={collapsible ? 0.7 : 1}
+                disabled={!collapsible}
+                onPress={() => toggle(section.key)}
+                style={[s.groupHead, !open && s.groupHeadClosed]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={s.groupTitle}>{section.title}</Text>
+                  <Text style={s.groupSub} numberOfLines={1}>{section.sub}</Text>
+                  {!!(section as { extra?: string }).extra && (
+                    <Text style={s.groupExtra}>{(section as { extra?: string }).extra}</Text>
+                  )}
+                </View>
+                {collapsible && <Text style={s.groupChevron}>{open ? '⌃' : '⌄'}</Text>}
+              </TouchableOpacity>
+            );
+          }}
+          renderItem={({ item, index }) => (
+            <View style={[s.groupBody, index === 0 && s.groupBodyFirst]}>
+              {index > 0 && <View style={s.rowDivider} />}
+              {item.children
+                ? <TenantGroupRow group={item} onPress={setSelected} />
+                : <TxnRow entry={item} onPress={setSelected} />}
             </View>
           )}
-          renderItem={({ item }) => (
-            <TxnRow entry={item} onPress={setSelected} />
-          )}
+          renderSectionFooter={({ section }) => (isOpen(section.key) ? <View style={s.groupFoot} /> : null)}
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyEmoji}>{search ? '🔍' : '💳'}</Text>
+              <Text style={s.emptyEmoji}>{search ? '🔍' : filter === 'PENDING_VERIFY' ? '✅' : '💳'}</Text>
               <Text style={s.emptyText}>
                 {search
                   ? `Không tìm thấy giao dịch nào khớp "${search.trim()}".`
-                  : 'Chưa có giao dịch thanh toán nào.'}
+                  : filter === 'PENDING_VERIFY'
+                    ? 'Không có khoản nào chờ xác nhận.'
+                    : filter === 'DEPOSIT' ? 'Chưa có tiền cọc nào.' : 'Chưa có giao dịch thanh toán nào.'}
               </Text>
             </View>
           }
@@ -711,24 +998,14 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                     <Text style={[s.statusBannerText, { color: st.color }]}>{st.label}</Text>
                   </View>
 
-                  {/* Số tiền — cọc/điện/nước/dịch vụ hiện rõ, riêng tiền nhà thì ẩn. */}
-                  <View style={s.amountBox}>
-                    <Text style={s.amountLabel}>
-                      {isDeposit
-                        ? (e.status.toUpperCase() === 'PAID' ? 'Tiền cọc đã chuyển' : 'Tiền cọc phải thu')
-                        : 'Số tiền giao dịch'}
-                    </Text>
-                    {/* Số tiền bị ẩn thì nói gọn MỘT dòng. Trước đây 3 dòng: "Không hiển
-                        thị" + câu giải thích dài + "Tương đương N tháng tiền nhà" — cả
-                        khối chỉ để nói một việc là số tiền không được xem. */}
-                    {hidden ? (
-                      <Text style={s.amountHidden}>
-                        Ẩn với quản lý{isDeposit && !!e.depositMonths ? ` · ${e.depositMonths} tháng tiền nhà` : ''}
-                      </Text>
-                    ) : (
+                  {/* Số tiền chỉ hiện khi manager được xem (điện, nước, dịch vụ). Tiền nhà & cọc
+                      thì BỎ HẲN khối này — ghi "Ẩn với quản lý" chỉ nhắc manager là có thứ bị giấu. */}
+                  {!hidden && (
+                    <View style={s.amountBox}>
+                      <Text style={s.amountLabel}>Số tiền giao dịch</Text>
                       <Text style={s.amountValue}>{formatCurrency(e.amount ?? 0)}</Text>
-                    )}
-                  </View>
+                    </View>
+                  )}
 
                   <View style={s.detailBlock}>
                     <DetailRow label={isDeposit ? 'Mã hợp đồng' : 'Mã hoá đơn'} value={e.ref || '—'} />
@@ -787,6 +1064,78 @@ const DetailRow: React.FC<{ label: string; value: string; wrap?: boolean }> = ({
 );
 
 const s = StyleSheet.create({
+  // ── Làm lại 24/09/2026 ──
+  segment: {
+    flexDirection: 'row', marginHorizontal: Spacing.base, marginBottom: Spacing.sm,
+    backgroundColor: Colors.divider, borderRadius: BorderRadius.full, padding: 3,
+  },
+  segBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 8, borderRadius: BorderRadius.full,
+  },
+  segBtnOn: { backgroundColor: Colors.white, ...Shadow.sm },
+  segText: { fontSize: 13, fontWeight: '700', color: Colors.textMuted },
+  segTextOn: { color: Colors.textPrimary },
+  segCount: {
+    minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5,
+    backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center',
+  },
+  segCountOn: { backgroundColor: Colors.primary },
+  segCountAlert: { backgroundColor: Colors.error },
+  segCountText: { fontSize: 11, fontWeight: '800', color: Colors.textMuted },
+  debtCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    marginTop: Spacing.sm, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+  },
+  debtCardOverdue: { borderLeftWidth: 4, borderLeftColor: Colors.error },
+  debtHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 4 },
+  debtName: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  debtProp: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  debtLine: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: 8, borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  debtLineText: { flex: 1, fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
+  debtLineAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
+  debtChevron: { fontSize: 18, color: Colors.textMuted },
+  debtTerminateBox: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: 4,
+    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: 6, paddingLeft: Spacing.sm,
+  },
+  debtTerminateBtn: { backgroundColor: Colors.error, borderRadius: BorderRadius.md, paddingHorizontal: 10, paddingVertical: 6 },
+  debtTerminateBtnText: { color: Colors.white, fontSize: 12, fontWeight: '800' },
+  debtTerminate: { flex: 1, fontSize: 12, color: '#991B1B', fontWeight: '600' },
+  hint: { fontSize: 12, color: Colors.textSecondary, marginHorizontal: Spacing.base, marginBottom: Spacing.sm },
+  groupHead: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    marginTop: Spacing.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
+    backgroundColor: Colors.white, borderWidth: 1, borderBottomWidth: 0, borderColor: Colors.border,
+    borderTopLeftRadius: BorderRadius.lg, borderTopRightRadius: BorderRadius.lg,
+  },
+  groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  groupSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  groupHeadClosed: { borderBottomWidth: 1, borderRadius: BorderRadius.lg },
+  groupChevron: { fontSize: 18, color: Colors.textMuted, width: 20, textAlign: 'center' },
+  groupBody: { backgroundColor: Colors.white, borderLeftWidth: 1, borderRightWidth: 1, borderColor: Colors.border },
+  groupBodyFirst: { borderTopWidth: 1, borderTopColor: Colors.divider },
+  groupFoot: {
+    height: 4, backgroundColor: Colors.white, borderWidth: 1, borderTopWidth: 0, borderColor: Colors.border,
+    borderBottomLeftRadius: BorderRadius.lg, borderBottomRightRadius: BorderRadius.lg,
+  },
+  rowDivider: { height: 1, backgroundColor: Colors.divider, marginLeft: 60 },
+  rowDone: { fontSize: 12, fontWeight: '700', color: Colors.success },
+  groupExtra: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: 2 },
+  tg: { paddingHorizontal: Spacing.md, paddingTop: Spacing.md, paddingBottom: Spacing.xs },
+  tgHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 2 },
+  tgName: { flex: 1, fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  tgCount: { fontSize: 11, color: Colors.textMuted, fontWeight: '600' },
+  tgLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingVertical: 7 },
+  tgIcon: { fontSize: 15, width: 24, textAlign: 'center' },
+  tgLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
+  tgMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  tgAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
+  tgChevron: { fontSize: 16, color: Colors.textMuted },
+
   safe: { flex: 1, backgroundColor: Colors.background },
   loading: { paddingVertical: Spacing.xl * 2, alignItems: 'center' },
 
@@ -862,10 +1211,8 @@ const s = StyleSheet.create({
   depositBarMeta:  { color: '#0891B2' },
 
   row: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, marginBottom: Spacing.sm,
-    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    backgroundColor: Colors.white, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md,
   },
   rowIcon: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.background,

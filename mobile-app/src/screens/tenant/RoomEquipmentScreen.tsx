@@ -9,6 +9,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { EquipmentDto } from '@/types';
 import { useTenantContract } from '@/hooks';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
+import { useMyEquipmentTickets, summarizeTickets, equipmentDisplayStatus } from '@/hooks/useMyEquipmentTickets';
 import {
   formatDate, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
   equipmentNeedsAttention, guessEquipmentCategory,
@@ -48,10 +49,18 @@ export const RoomEquipmentScreen: React.FC = () => {
   }, [selectedContractId]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // Trạng thái + lần sửa gần nhất suy từ phiếu của khách — BE để NEW/0 lần dù đã sửa.
+  const { byEquipment } = useMyEquipmentTickets();
+  const summaryOf = (e: EquipmentDto) => summarizeTickets(byEquipment.get(Number(e.id)));
+  const statusOf = (e: EquipmentDto) => equipmentDisplayStatus(e.status, summaryOf(e), st => ({
+    label: getEquipmentLifecycleLabel(st), ...getEquipmentLifecycleColor(st),
+  }));
+  const needsAttention = (e: EquipmentDto) => !!summaryOf(e).open || equipmentNeedsAttention(e.status);
+
   const stats = {
     total: equipment.length,
-    active: equipment.filter(e => !equipmentNeedsAttention(e.status)).length,
-    needsMaint: equipment.filter(e => equipmentNeedsAttention(e.status)).length,
+    active: equipment.filter(e => !needsAttention(e)).length,
+    needsMaint: equipment.filter(e => needsAttention(e)).length,
   };
 
   // Nhà nguyên căn có nhiều phòng khác nhau trong CÙNG 1 danh sách thiết bị — hiện thêm
@@ -61,7 +70,8 @@ export const RoomEquipmentScreen: React.FC = () => {
   const isMultiRoom = new Set(equipment.map(e => e.roomName || e.roomNumber || '')).size > 1;
 
   const renderItem = ({ item }: { item: EquipmentDto }) => {
-    const statusStyle = getEquipmentLifecycleColor(item.status);
+    const status = statusOf(item);
+    const sum = summaryOf(item);
     const icon = getIcon(item);
     const roomLabel = item.roomName || item.roomNumber;
 
@@ -80,9 +90,9 @@ export const RoomEquipmentScreen: React.FC = () => {
         <View style={styles.cardBody}>
           <View style={styles.cardTopRow}>
             <Text style={styles.equipName} numberOfLines={1}>{equipName(item)}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-              <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                {getEquipmentLifecycleLabel(item.status)}
+            <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+              <Text style={[styles.statusText, { color: status.text }]}>
+                {status.label}
               </Text>
             </View>
           </View>
@@ -98,9 +108,13 @@ export const RoomEquipmentScreen: React.FC = () => {
 
           <View style={styles.cardMeta}>
             <Text style={styles.metaText}>
-              {item.lastMaintenanceDate
-                ? `Bảo trì: ${formatDate(item.lastMaintenanceDate)}`
-                : 'Chưa bảo trì lần nào'}
+              {sum.open
+                ? `Phiếu ${sum.open.requestCode} đang xử lý`
+                : sum.lastRepairedAt
+                  ? `Sửa gần nhất: ${formatDate(sum.lastRepairedAt)}`
+                  : item.lastMaintenanceDate
+                    ? `Bảo trì: ${formatDate(item.lastMaintenanceDate)}`
+                    : 'Chưa phải sửa lần nào'}
             </Text>
             <View style={styles.qrChip}>
               <Text style={styles.qrChipText}>📷 QR</Text>

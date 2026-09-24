@@ -7,6 +7,9 @@ import {
 } from 'lucide-react';
 import { propertyService } from '@/services/property.service';
 import { equipmentService } from '@/services/equipment.service';
+import { maintenanceService } from '@/services/maintenance.service';
+import { Overlay } from '@/components/Overlay';
+import { TicketTimeline, type EquipmentTicket } from '@/pages/admin/onboarding/equipmentMaintenance';
 import { serverNow } from '@/utils/serverTime';
 import { PropertyPicker } from '@/pages/onboarding/PropertyPicker';
 import type { PropertyResponse, MaintenanceEquipmentResponse } from '@/types/api.types';
@@ -127,6 +130,10 @@ export const EquipmentCatalogPage = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [qrModal, setQrModal] = useState<MaintenanceEquipmentResponse | null>(null);
+  /** Phiếu bảo trì của nhà đang xem, gom theo thiết bị — nguồn cho số lần sửa + lịch sử. */
+  const [ticketsByEq, setTicketsByEq] = useState<Map<number, EquipmentTicket[]>>(new Map());
+  /** Thiết bị đang mở hộp lịch sử bảo trì. */
+  const [historyEq, setHistoryEq] = useState<MaintenanceEquipmentResponse | null>(null);
   const [viewMode, setViewMode] = useState<'grouped' | 'table'>('grouped');
   const [sortKey, setSortKey] = useState<SortKey>('room');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -196,8 +203,45 @@ export const EquipmentCatalogPage = () => {
     setLoadError(false);
     setSelected(new Set());
     setStatusFilter('all');
-    equipmentService.getPropertyEquipment(propertyId)
-      .then(list => { if (active) setEquipments(list ?? []); })
+    /*
+     * `maintenanceCount` và `status` BE trả về đang SAI với dữ liệu thật (đo 03/10/2026):
+     * giường P.202 nhà #5 có 2 phiếu đã xong (M-3, M-4) mà vẫn "0 lần bảo trì · Mới" — BE
+     * đếm từ bảng lịch sử riêng đang trống và không đổi status khi đóng phiếu. Trang này chỉ
+     * admin dùng, mà admin đọc được `GET /maintenance?propertyId=` → đếm lại từ phiếu thật.
+     * Lỗi thì giữ nguyên số của BE, không chặn trang.
+     */
+    Promise.all([
+      equipmentService.getPropertyEquipment(propertyId),
+      maintenanceService.getRequests({ propertyId }, 0, 500).catch(() => null),
+    ])
+      .then(([list, page]) => {
+        if (!active) return;
+        const rows = list ?? [];
+        const tickets = page?.content ?? [];
+        if (tickets.length === 0) { setTicketsByEq(new Map()); setEquipments(rows); return; }
+        const byEq = new Map<number, EquipmentTicket[]>();
+        for (const t of tickets) {
+          if (t.equipmentId == null) continue;
+          byEq.set(t.equipmentId, [...(byEq.get(t.equipmentId) ?? []), t as unknown as EquipmentTicket]);
+        }
+        byEq.forEach(arr => arr.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')));
+        setTicketsByEq(byEq);
+        const done = new Map<number, number>();
+        const open = new Set<number>();
+        for (const t of tickets) {
+          if (t.equipmentId == null) continue;
+          if (t.status === 'CLOSED') done.set(t.equipmentId, (done.get(t.equipmentId) ?? 0) + 1);
+          else if (t.status !== 'CANCELLED') open.add(t.equipmentId);
+        }
+        setEquipments(rows.map(e => {
+          const fixed = done.get(e.id) ?? 0;
+          const status = open.has(e.id) ? 'MAINTENANCE'
+            // "Mới" là còn nguyên như lúc mua — đã qua sửa chữa thì hạ xuống "Hoạt động tốt".
+            : e.status === 'NEW' && fixed > 0 ? 'GOOD'
+              : e.status;
+          return { ...e, maintenanceCount: Math.max(e.maintenanceCount ?? 0, fixed), status } as typeof e;
+        }));
+      })
       .catch(() => { if (active) { setEquipments([]); setLoadError(true); } })
       .finally(() => active && setLoadingEq(false));
     return () => { active = false; };
@@ -406,8 +450,10 @@ export const EquipmentCatalogPage = () => {
                 Bỏ chọn
               </button>
             )}
-            {/* Cỡ tem — chỉ ảnh hưởng bản IN, không đổi gì trên màn hình. */}
-            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-0.5">
+            {/* Cỡ tem — chỉ ảnh hưởng bản IN. Có nhãn "Cỡ tem" (24/09/2026): trước đó 3 nút
+                Nhỏ/Vừa/Lớn đứng trơ, không ai biết nó chỉnh cái gì. */}
+            <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white pl-2.5 p-0.5">
+              <span className="text-xs font-semibold text-slate-400 mr-1">Cỡ tem</span>
               {(Object.keys(PRINT_LAYOUT) as Array<'sm' | 'md' | 'lg'>).map(k => (
                 <button
                   key={k}
@@ -432,17 +478,19 @@ export const EquipmentCatalogPage = () => {
                 ? `In tem đã chọn (${toPrint.length})`
                 : isNarrowedByFilter
                   ? `In theo bộ lọc (${toPrint.length})`
-                  : `In tất cả tem QR (${toPrint.length})`}
+                  : `In tem QR cả nhà (${toPrint.length})`}
             </button>
-            {/* Nút in PHỤ, tách riêng: luôn in TOÀN BỘ nhà đang chọn, bất kể đang lọc/tìm/tick gì. */}
-            {printableWholeProperty.length > 0 && (
+            {/* Nút in PHỤ: luôn in TOÀN BỘ nhà, bất kể đang lọc/tìm/tick gì. CHỈ hiện khi nó
+                khác nút chính (đang tick hoặc đang lọc) — không lọc gì thì hai nút in y hệt
+                nhau, cùng số, người dùng phân vân không biết bấm cái nào (24/09/2026). */}
+            {printableWholeProperty.length > 0 && (selected.size > 0 || isNarrowedByFilter) && (
               <button
                 onClick={handlePrintWholeProperty}
                 title="In tem cho toàn bộ thiết bị của nhà này, bỏ qua bộ lọc và lựa chọn hiện tại"
                 className="inline-flex items-center gap-2 px-3.5 py-2.5 text-sm font-semibold text-primary-700 bg-primary-50 border border-primary-200 rounded-xl hover:bg-primary-100 transition-colors"
               >
                 <Printer className="w-4 h-4" />
-                In toàn bộ nhà ({printableWholeProperty.length})
+                In cả nhà ({printableWholeProperty.length})
               </button>
             )}
           </div>
@@ -651,7 +699,11 @@ export const EquipmentCatalogPage = () => {
                         ) : <span className="text-xs text-slate-300">—</span>}
                       </td>
                       <td className="px-3 py-3 text-xs text-slate-500 whitespace-nowrap">
-                        <Wrench className="inline w-3 h-3 mr-1 -mt-0.5" />{e.maintenanceCount} lần
+                        <button type="button" onClick={() => setHistoryEq(e)}
+                          className="rounded px-1 font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline"
+                          title="Xem lịch sử bảo trì">
+                          <Wrench className="inline w-3 h-3 mr-1 -mt-0.5" />{e.maintenanceCount} lần
+                        </button>
                       </td>
                       <td className="px-3 py-3 text-right">
                         <button
@@ -741,9 +793,11 @@ export const EquipmentCatalogPage = () => {
                               </span>
                             )}
                             <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
-                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                              <Wrench className="w-3 h-3" /> {e.maintenanceCount} lần bảo trì
-                            </span>
+                            <button type="button" onClick={() => setHistoryEq(e)}
+                              title="Xem lịch sử bảo trì"
+                              className="inline-flex items-center gap-1 rounded px-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50 hover:underline">
+                              <Wrench className="w-3 h-3" /> {e.maintenanceCount} lần bảo trì · xem lịch sử
+                            </button>
                             {wInfo && (
                               <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${wInfo.cls}`}>
                                 <ShieldCheck className="w-3 h-3" /> {wInfo.label}
@@ -823,6 +877,31 @@ export const EquipmentCatalogPage = () => {
       </div>
 
       {/* ============ MODAL QR ĐƠN LẺ ============ */}
+      {/* Lịch sử bảo trì của MỘT thiết bị — dùng lại phiếu đã tải để đếm, không gọi thêm API */}
+      {historyEq && (
+        <Overlay>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setHistoryEq(null)}>
+            <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl" onClick={ev => ev.stopPropagation()}>
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Lịch sử bảo trì</p>
+                  <p className="mt-0.5 truncate font-bold text-slate-900">{equipName(historyEq)}</p>
+                  <p className="text-xs text-slate-500">
+                    {roomLabel(historyEq)} · <span className="font-mono font-semibold">{equipCode(historyEq)}</span>
+                  </p>
+                </div>
+                <button onClick={() => setHistoryEq(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto px-5 py-4">
+                <TicketTimeline list={ticketsByEq.get(historyEq.id) ?? []} />
+              </div>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
       {qrModal && (
         <QrModal equipment={qrModal} propertyName={selectedProperty?.propertyName} onClose={() => setQrModal(null)} />
       )}

@@ -1,155 +1,107 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ScrollView, RefreshControl, Pressable,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { MaintenanceRequest, MaintenanceStatus } from '@/types';
-import {
-  getMaintenancePriorityLabel, getMaintenancePriorityColor, formatDate,
-} from '@/utils';
+import { formatDate } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
-import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_STATUS_FLOW, MAINTENANCE_CATEGORY_EMOJI, MAINTENANCE_CATEGORY_LABEL,
-} from '@/constants/maintenance';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
-// ─── Filter tabs (redesign 01/09: open → in_repair → closed, nhánh lỗi khách) ───
-type FilterKey = 'active' | 'completed' | MaintenanceStatus;
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'active',    label: 'Đang xử lý' },
-  { key: 'open',      label: 'Chờ kiểm tra' },
-  { key: 'in_repair', label: 'Đang sửa' },
-  { key: 'completed', label: 'Hoàn tất' },
-];
+/**
+ * SỬA CHỮA (tenant) — làm lại 24/09/2026.
+ *
+ * Bản trước: 3 ô đếm (Chờ xử lý/Đang sửa/Hoàn tất) + 4 chip lọc nói lại đúng chừng đó,
+ * nút "Lịch sử" trùng với chip "Hoàn tất", và nút "Báo hỏng" ở trạng thái rỗng bị menu
+ * FAB đè lên. Giờ:
+ *   • Khối "Báo sự cố" luôn hiện 3 lối vào (quét QR · chọn thiết bị · sự cố khác) —
+ *     không còn FAB, không còn menu che nội dung.
+ *   • 2 tab duy nhất có số đếm: Đang xử lý · Đã xong (gồm cả phiếu đã huỷ).
+ *   • Thẻ phiếu gọn: thanh tiến độ 3 bước có chữ, cập nhật mới nhất 1 dòng.
+ */
 
-const COMPLETED: MaintenanceStatus[] = ['closed'];
+type Tab = 'active' | 'done';
 
-// ─── Status config ─────────────────────────────────────────
-const STATUS_CFG: Record<string, { label: string; bg: string; text: string; dot: string }> =
-  Object.fromEntries(
-    Object.entries(MAINTENANCE_STATUS_META).map(([k, m]) => [
-      k, { label: m.label, bg: m.bg, text: m.color, dot: m.color },
-    ]),
-  );
+const DONE: MaintenanceStatus[] = ['closed', 'cancelled'];
+const isDone = (r: MaintenanceRequest) => DONE.includes(r.status as MaintenanceStatus);
 
-const CATEGORY_EMOJI = MAINTENANCE_CATEGORY_EMOJI;
+const STEPS = ['Tiếp nhận', 'Sửa chữa', 'Hoàn tất'];
+/** Bước hiện tại trên thanh tiến độ. Nhánh phụ (lỗi khách, chờ thanh toán…) nằm ở bước 2. */
+const stepOf = (s: string) => (s === 'open' ? 0 : s === 'closed' ? 2 : 1);
 
-const ACTIVE: MaintenanceStatus[] =
-  ['open', 'repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage', 'waiting_payment'];
-const STEP_ORDER = MAINTENANCE_STATUS_FLOW as MaintenanceStatus[];
+const REPORT_OPTIONS = [
+  { key: 'scan', icon: '📷', label: 'Quét QR', sub: 'trên thiết bị', route: 'Scan' },
+  { key: 'list', icon: '📦', label: 'Chọn thiết bị', sub: 'trong phòng', route: 'RoomEquipment' },
+  { key: 'other', icon: '📝', label: 'Sự cố khác', sub: 'sàn, tường, cửa…', route: 'MaintenanceCreate' },
+] as const;
 
-// ─── Card ──────────────────────────────────────────────────
 const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = ({ item, onPress }) => {
-  const cfg          = STATUS_CFG[item.status] ?? STATUS_CFG.pending;
-  const priorityColor = getMaintenancePriorityColor(item.priority);
-  const latestEntry  = item.timeline[item.timeline.length - 1];
-  const stepIdx      = STEP_ORDER.indexOf(item.status as MaintenanceStatus);
+  const meta = MAINTENANCE_STATUS_META[item.status as keyof typeof MAINTENANCE_STATUS_META]
+    ?? { label: item.status, color: Colors.textMuted, bg: Colors.divider };
+  const latest = item.timeline[item.timeline.length - 1];
+  const cancelled = item.status === 'cancelled';
+  const step = stepOf(item.status);
+  const icon = (item.category && MAINTENANCE_CATEGORY_EMOJI[item.category]) ?? '🔧';
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.72}>
-
-      {/* ── Top row: icon · title · status badge ── */}
+    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.cardTop}>
-        <View style={[styles.catIcon, { backgroundColor: cfg.bg }]}>
-          <Text style={{ fontSize: 20 }}>{(item.category && CATEGORY_EMOJI[item.category]) ?? '🔧'}</Text>
+        <View style={[styles.catIcon, { backgroundColor: meta.bg }]}>
+          <Text style={{ fontSize: 18 }}>{icon}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.cardMeta}>{item.ticketCode} · {formatDate(item.createdAt)}</Text>
-          {/* Equipment name if linked */}
-          {item.equipmentName ? (
-            <View style={styles.equipRow}>
-              <Text style={styles.equipLabel}>Thiết bị: </Text>
-              <Text style={styles.equipValue} numberOfLines={1}>{item.equipmentName}</Text>
-            </View>
-          ) : null}
+          <Text style={styles.cardTitle} numberOfLines={1}>{item.equipmentName || item.title}</Text>
+          <Text style={styles.cardMeta} numberOfLines={1}>{item.ticketCode} · {formatDate(item.createdAt)}</Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-          <View style={[styles.statusDot, { backgroundColor: cfg.dot }]} />
-          <Text style={[styles.statusText, { color: cfg.text }]}>{cfg.label}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+          <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
         </View>
       </View>
 
-      {/* ── Description ── */}
-      <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
+      {!!item.description && <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>}
 
-      {/* ── Meta chips (priority ẩn khi manager chưa gán) ── */}
-      <View style={styles.chipRow}>
-        {/* Category chỉ hiện khi KHÔNG gắn thiết bị — có thiết bị thì tên thiết bị ở trên đã đủ rõ. */}
-        {!item.equipmentName && !!item.category && (
-          <View style={styles.categoryChip}>
-            <Text style={styles.categoryChipText}>
-              {CATEGORY_EMOJI[item.category] ?? '🔧'} {MAINTENANCE_CATEGORY_LABEL[item.category] ?? item.category}
-            </Text>
-          </View>
-        )}
-        {!!item.priority && (
-          <View style={[styles.priorityChip, { backgroundColor: priorityColor + '18' }]}>
-            <Text style={[styles.priorityText, { color: priorityColor }]}>
-              {getMaintenancePriorityLabel(item.priority)}
-            </Text>
-          </View>
-        )}
-        {item.assignedTo && (
-          <Text style={styles.techText}>👷 {item.assignedTo}</Text>
-        )}
-      </View>
-
-      {/* ── Progress dots ── */}
-      <View style={styles.progressRow}>
-        {STEP_ORDER.map((s, i) => {
-          const reached = i <= stepIdx;
-          return (
-            <React.Fragment key={s}>
-              <View style={[styles.progDot, reached && { backgroundColor: Colors.primary }]} />
-              {i < STEP_ORDER.length - 1 && (
-                <View style={[styles.progLine, reached && i < stepIdx && { backgroundColor: Colors.primary }]} />
-              )}
-            </React.Fragment>
-          );
-        })}
-      </View>
-
-      {/* ── Latest update ── */}
-      {latestEntry && (
-        <View style={styles.updateBubble}>
-          <Text style={styles.updateIcon}>💬</Text>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.updateNote} numberOfLines={2}>"{latestEntry.note}"</Text>
-            <Text style={styles.updateBy}>{latestEntry.updatedBy} · {formatDate(latestEntry.updatedAt)}</Text>
-          </View>
+      {!cancelled && (
+        <View style={styles.steps}>
+          {STEPS.map((label, i) => {
+            const reached = i <= step;
+            return (
+              <View key={label} style={styles.stepCol}>
+                <View style={[styles.stepBar, reached && { backgroundColor: i === 2 ? Colors.success : Colors.primary }]} />
+                <Text style={[styles.stepLabel, reached && styles.stepLabelOn]}>{label}</Text>
+              </View>
+            );
+          })}
         </View>
       )}
 
-      {/* ── Cost banner for completed ── */}
-      {item.status === 'closed' && item.invoiceAmount ? (
-        <View style={styles.resolvedBanner}>
-          <Text style={styles.resolvedText}>
-            ✅ Hoàn tất · Chi phí: {item.invoiceAmount.toLocaleString('vi-VN')} đ
-          </Text>
-        </View>
-      ) : null}
+      {!!latest?.note && (
+        <Text style={styles.update} numberOfLines={1}>
+          💬 {latest.note} · {formatDate(latest.updatedAt)}
+        </Text>
+      )}
+
+      {item.status === 'closed' && !!item.invoiceAmount && (
+        <Text style={styles.cost}>Chi phí: {item.invoiceAmount.toLocaleString('vi-VN')} đ</Text>
+      )}
     </TouchableOpacity>
   );
 };
 
-// ─── Main screen ───────────────────────────────────────────
 export const MaintenanceListScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const [filter, setFilter] = useState<FilterKey>('active');
+  const [tab, setTab] = useState<Tab>('active');
   const [remote, setRemote] = useState<MaintenanceRequest[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [fabOpen, setFabOpen] = useState(false);
-  // Lỗi API → báo rõ ràng thay vì âm thầm hiện dữ liệu seed (mock) làm user tưởng
-  // ticket của mình biến mất / thấy ticket "Nguyễn Văn A" lạ hoắc.
+  // Lỗi API → báo rõ ràng thay vì âm thầm hiện danh sách rỗng.
   const [loadError, setLoadError] = useState(false);
 
   const silentLoad = React.useCallback(() => {
     let active = true;
-    realMaintenanceService.getMyRequests()
+    realMaintenanceService.getMyRequests({ size: 200 })
       .then(page => {
         if (!active) return;
         setRemote(page.content.map(dtoToTenantRequest));
@@ -170,320 +122,182 @@ export const MaintenanceListScreen: React.FC = () => {
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    realMaintenanceService.getMyRequests()
+    realMaintenanceService.getMyRequests({ size: 200 })
       .then(page => { setRemote(page.content.map(dtoToTenantRequest)); setLoadError(false); })
       .catch(() => { /* giữ dữ liệu hiện tại */ })
       .finally(() => setRefreshing(false));
   }, []);
 
-  // Danh sách tự cập nhật khi có ticket đổi trạng thái (manager duyệt/báo sửa xong...)
-  // — không kéo-làm-mới lộ liễu như onRefresh, chỉ nạp ngầm.
+  // Ticket đổi trạng thái (manager duyệt/báo sửa xong…) → nạp ngầm.
   useMaintenanceRealtime({ onRefresh: silentLoad });
 
   const all = remote ?? [];
+  const activeList = all.filter(r => !isDone(r));
+  const doneList = all.filter(isDone);
+  const list = (tab === 'active' ? activeList : doneList)
+    .slice()
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-  const active   = all.filter(r => ACTIVE.includes(r.status as MaintenanceStatus));
-  const filtered =
-    filter === 'active'    ? active
-    : filter === 'completed' ? all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus))
-    : all.filter(r => r.status === filter);
+  const header = (
+    <View style={{ gap: Spacing.md, marginBottom: Spacing.md }}>
+      {/* Báo sự cố — 3 lối vào luôn hiện */}
+      <View style={styles.reportCard}>
+        <Text style={styles.reportTitle}>Có gì bị hỏng?</Text>
+        <View style={styles.reportRow}>
+          {REPORT_OPTIONS.map(o => (
+            <TouchableOpacity
+              key={o.key}
+              style={styles.reportOpt}
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate(o.route)}
+            >
+              <View style={styles.reportIcon}><Text style={{ fontSize: 20 }}>{o.icon}</Text></View>
+              <Text style={styles.reportLabel}>{o.label}</Text>
+              <Text style={styles.reportSub}>{o.sub}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
 
-  const pendingCount     = all.filter(r => r.status === 'open').length;
-  const inProgressCount  = active.filter(r => r.status !== 'open').length;
-  const resolvedThisMonth = all.filter(r => COMPLETED.includes(r.status as MaintenanceStatus)).length;
+      {/* 2 tab */}
+      <View style={styles.segment}>
+        {([
+          { key: 'active', label: 'Đang xử lý', count: activeList.length },
+          { key: 'done', label: 'Đã xong', count: doneList.length },
+        ] as const).map(t => {
+          const on = tab === t.key;
+          return (
+            <TouchableOpacity key={t.key} style={[styles.segBtn, on && styles.segBtnOn]} onPress={() => setTab(t.key)}>
+              <Text style={[styles.segText, on && styles.segTextOn]}>{t.label}</Text>
+              <View style={[styles.segCount, on && styles.segCountOn]}>
+                <Text style={[styles.segCountText, on && styles.segCountTextOn]}>{t.count}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.safe}>
-
-      {/* ── Header ── */}
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Theo dõi sửa chữa</Text>
-          <Text style={styles.subtitle}>Theo dõi tiến độ bảo trì và sửa chữa phòng</Text>
-        </View>
-        <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('MaintenanceHistory')}>
-          <Text style={styles.historyBtnText}>Lịch sử</Text>
-        </TouchableOpacity>
+        <Text style={styles.title}>Sửa chữa</Text>
+        <Text style={styles.subtitle}>Báo hỏng và theo dõi tiến độ sửa</Text>
       </View>
 
-      {/* ── Summary bar ── */}
-      <View style={styles.summaryRow}>
-        <View style={[styles.summaryCard, { backgroundColor: Colors.warningLight }]}>
-          <Text style={[styles.summaryNum, { color: Colors.warning }]}>{pendingCount}</Text>
-          <Text style={[styles.summaryLbl, { color: Colors.warning }]}>Chờ xử lý</Text>
-        </View>
-        <View style={[styles.summaryCard, { backgroundColor: Colors.primaryBg }]}>
-          <Text style={[styles.summaryNum, { color: Colors.primary }]}>{inProgressCount}</Text>
-          <Text style={[styles.summaryLbl, { color: Colors.primary }]}>Đang sửa</Text>
-        </View>
-        <View style={[styles.summaryCard, { backgroundColor: Colors.successLight }]}>
-          <Text style={[styles.summaryNum, { color: Colors.success }]}>{resolvedThisMonth}</Text>
-          <Text style={[styles.summaryLbl, { color: Colors.success }]}>Hoàn tất</Text>
-        </View>
-      </View>
-
-      {/*
-        ── Thẻ "Đi đến Thiết bị phòng" đã BỎ 01/09/2026 ──────────────────────
-        Nó dẫn tới đúng `RoomEquipment` mà nút "Chọn thiết bị từ danh sách" trong FAB
-        đã dẫn tới. Cộng với nút QR ở trạng thái rỗng, màn này có BA lối vào cho cùng
-        một việc "báo hỏng" — và khi mở FAB trên danh sách rỗng thì nút QR của trạng
-        thái rỗng với mục QR trong FAB nằm ĐÈ LÊN NHAU trên màn hình.
-
-        Nay chỉ còn MỘT đường: menu của FAB. Nó là đường duy nhất phân loại đúng cả ba
-        tình huống (quét được QR · không quét được thì chọn từ danh sách · sự cố không
-        gắn thiết bị nào), nên giữ nó và bỏ hai lối tắt kia.
-      */}
-
-      {/* ── Filter chips ── */}
-      <ScrollView
-        horizontal showsHorizontalScrollIndicator={false}
-        style={styles.filterScroll}
-        contentContainerStyle={styles.filterRow}
-      >
-        {FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.key}
-            style={[styles.filterChip, filter === f.key && styles.filterChipActive]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.filterText, filter === f.key && styles.filterTextActive]}>
-              {f.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* ── List ── */}
       <FlatList
-        data={filtered}
+        data={list}
         keyExtractor={r => r.id}
         renderItem={({ item }) => (
-          <RepairCard
-            item={item}
-            onPress={() => navigation.navigate('MaintenanceDetail', { request: item })}
-          />
+          <RepairCard item={item} onPress={() => navigation.navigate('MaintenanceDetail', { request: item })} />
         )}
+        ListHeaderComponent={header}
         contentContainerStyle={styles.list}
-        style={styles.requestList}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}
         ListEmptyComponent={
           loadError ? (
             <View style={styles.empty}>
               <Text style={styles.emptyEmoji}>⚠️</Text>
               <Text style={styles.emptyTitle}>Không tải được danh sách</Text>
-              <Text style={styles.emptyDesc}>Kiểm tra kết nối mạng rồi kéo xuống để thử lại.</Text>
-              <TouchableOpacity style={styles.emptyScanBtn} onPress={onRefresh}>
-                <Text style={styles.emptyScanText}>🔄 Thử lại</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={onRefresh}>
+                <Text style={styles.retryText}>Thử lại</Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : remote == null ? null : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>🔧</Text>
-              <Text style={styles.emptyTitle}>Không có yêu cầu nào đang hoạt động</Text>
-              <Text style={styles.emptyDesc}>
-                Có gì hỏng thì báo ở đây — quét mã QR dán trên thiết bị, chọn từ danh sách
-                thiết bị trong phòng, hoặc mô tả sự cố khác.
+              <Text style={styles.emptyEmoji}>{tab === 'active' ? '✅' : '🗂️'}</Text>
+              <Text style={styles.emptyTitle}>
+                {tab === 'active' ? 'Không có sự cố nào đang xử lý' : 'Chưa có phiếu nào hoàn tất'}
               </Text>
-              {/*
-                Mở ĐÚNG menu của FAB thay vì đi thẳng vào màn quét.
-                Nút cũ ghi "📷 Quét QR thiết bị" nên đẩy mọi người vào một lối duy nhất —
-                trong khi hỏng sàn, tường, cửa thì không có QR nào để quét, và thiết bị
-                mất tem cũng vậy. Một nút, ba lựa chọn, khách tự chọn đúng việc của mình.
-              */}
-              <TouchableOpacity
-                style={styles.emptyScanBtn}
-                onPress={() => setFabOpen(true)}
-              >
-                <Text style={styles.emptyScanText}>＋ Báo hỏng</Text>
-              </TouchableOpacity>
+              {tab === 'active' && (
+                <Text style={styles.emptyDesc}>Có gì hỏng, chọn một cách báo ở khối phía trên.</Text>
+              )}
             </View>
           )
         }
       />
-
-      {/* ── FAB: Tạo mới ── */}
-      {fabOpen && (
-        <Pressable style={styles.fabBackdrop} onPress={() => setFabOpen(false)} />
-      )}
-      <View style={styles.fabWrap} pointerEvents="box-none">
-        {fabOpen && (
-          <>
-            <TouchableOpacity
-              style={styles.fabOption}
-              activeOpacity={0.8}
-              onPress={() => { setFabOpen(false); navigation.navigate('Scan'); }}
-            >
-              <Text style={styles.fabOptionLabel}>Quét mã QR thiết bị</Text>
-              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📷</Text></View>
-            </TouchableOpacity>
-            {/* Sự cố liên quan thiết bị nhưng không có/không quét được QR — chọn đúng
-                thiết bị từ danh sách thay vì gõ tay tên thiết bị (feedback demo). */}
-            <TouchableOpacity
-              style={styles.fabOption}
-              activeOpacity={0.8}
-              onPress={() => { setFabOpen(false); navigation.navigate('RoomEquipment'); }}
-            >
-              <Text style={styles.fabOptionLabel}>Chọn thiết bị từ danh sách</Text>
-              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📦</Text></View>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.fabOption}
-              activeOpacity={0.8}
-              onPress={() => { setFabOpen(false); navigation.navigate('MaintenanceCreate'); }}
-            >
-              <Text style={styles.fabOptionLabel}>Sự cố khác (sàn, tường, cửa...)</Text>
-              <View style={styles.fabOptionIcon}><Text style={{ fontSize: 15 }}>📝</Text></View>
-            </TouchableOpacity>
-          </>
-        )}
-        <TouchableOpacity
-          style={styles.fab}
-          activeOpacity={0.85}
-          onPress={() => setFabOpen(o => !o)}
-        >
-          <Text style={styles.fabIcon}>{fabOpen ? '×' : '+'}</Text>
-        </TouchableOpacity>
-      </View>
-
     </SafeAreaView>
   );
 };
 
-// ─── Styles ────────────────────────────────────────────────
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
 
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.lg, paddingBottom: Spacing.sm,
-  },
-  title:    { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  historyBtn: {
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.md,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  historyBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
+  title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
+  subtitle: { fontSize: 13, color: Colors.textMuted, marginTop: 2 },
 
-  // ── FAB (Tạo mới) ──
-  fabBackdrop: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-  },
-  fabWrap: {
-    position: 'absolute', right: Spacing.lg, bottom: Spacing.xl,
-    alignItems: 'flex-end',
-  },
-  fabOption: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-    marginBottom: Spacing.sm, ...Shadow.md,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  fabOptionLabel: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
-  fabOptionIcon: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.primaryBg,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  fab: {
-    width: 56, height: 56, borderRadius: 28, backgroundColor: Colors.primary,
-    alignItems: 'center', justifyContent: 'center', ...Shadow.md,
-  },
-  fabIcon: { fontSize: 26, fontWeight: '700', color: Colors.white, marginTop: -2 },
+  list: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xs, paddingBottom: 110 },
 
-  summaryRow: { flexDirection: 'row', paddingHorizontal: Spacing.lg, gap: Spacing.sm, marginBottom: Spacing.sm },
-  summaryCard: { flex: 1, borderRadius: BorderRadius.lg, padding: Spacing.sm, alignItems: 'center' },
-  summaryNum:  { fontSize: 22, fontWeight: '800' },
-  summaryLbl:  { fontSize: 10, fontWeight: '600', marginTop: 1 },
-
-  filterScroll: { flexGrow: 0, flexShrink: 0, maxHeight: 48 },
-  filterRow: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.sm,
-    gap: Spacing.sm,
-    alignItems: 'center',
+  // Báo sự cố
+  reportCard: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  filterChip: {
-    paddingHorizontal: Spacing.md, paddingVertical: 7,
-    borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
-    alignSelf: 'flex-start',
-    minHeight: 36,
-    justifyContent: 'center',
+  reportTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  reportRow: { flexDirection: 'row', gap: Spacing.sm },
+  reportOpt: {
+    flex: 1, alignItems: 'center', paddingVertical: Spacing.md, paddingHorizontal: 4,
+    borderRadius: BorderRadius.lg, backgroundColor: Colors.primaryBg,
   },
-  filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterText:       { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
-  filterTextActive: { color: Colors.white },
+  reportIcon: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.white,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 6,
+  },
+  reportLabel: { fontSize: 12, fontWeight: '800', color: Colors.primary, textAlign: 'center' },
+  reportSub: { fontSize: 10, color: Colors.textMuted, marginTop: 1, textAlign: 'center' },
 
-  requestList: { flex: 1 },
-  list: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl },
+  // Tab
+  segment: {
+    flexDirection: 'row', backgroundColor: Colors.divider, borderRadius: BorderRadius.full, padding: 3,
+  },
+  segBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 8, borderRadius: BorderRadius.full,
+  },
+  segBtnOn: { backgroundColor: Colors.white, ...Shadow.sm },
+  segText: { fontSize: 13, fontWeight: '700', color: Colors.textMuted },
+  segTextOn: { color: Colors.textPrimary },
+  segCount: {
+    minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5,
+    backgroundColor: Colors.white, alignItems: 'center', justifyContent: 'center',
+  },
+  segCountOn: { backgroundColor: Colors.primary },
+  segCountText: { fontSize: 11, fontWeight: '800', color: Colors.textMuted },
+  segCountTextOn: { color: Colors.white },
 
-  // ── Card ──
+  // Thẻ phiếu
   card: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, ...Shadow.sm,
-    borderWidth: 1, borderColor: Colors.border,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: Spacing.sm },
-  catIcon: { width: 44, height: 44, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  cardTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
-  cardMeta:  { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  equipRow:  { flexDirection: 'row', marginTop: 3 },
-  equipLabel:{ fontSize: 11, color: Colors.textMuted },
-  equipValue:{ fontSize: 11, fontWeight: '600', color: Colors.textSecondary, flex: 1 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  catIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  cardMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  statusBadge: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: BorderRadius.full },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  cardDesc: { fontSize: 13, color: Colors.textSecondary, marginTop: Spacing.sm, lineHeight: 19 },
 
-  statusBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: Spacing.sm, paddingVertical: 4,
-    borderRadius: BorderRadius.full, flexShrink: 0,
+  steps: { flexDirection: 'row', gap: 4, marginTop: Spacing.md },
+  stepCol: { flex: 1 },
+  stepBar: { height: 4, borderRadius: 2, backgroundColor: Colors.divider },
+  stepLabel: { fontSize: 10, color: Colors.textMuted, marginTop: 4, fontWeight: '600' },
+  stepLabelOn: { color: Colors.textPrimary },
+
+  update: { fontSize: 12, color: Colors.textSecondary, marginTop: Spacing.sm },
+  cost: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: Spacing.sm },
+
+  empty: { alignItems: 'center', paddingVertical: 40, gap: 6, paddingHorizontal: Spacing.lg },
+  emptyEmoji: { fontSize: 40 },
+  emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
+  emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
+  retryBtn: {
+    marginTop: Spacing.sm, backgroundColor: Colors.primary, borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
   },
-  statusDot:  { width: 6, height: 6, borderRadius: 3 },
-  statusText: { fontSize: 10, fontWeight: '700' },
-
-  cardDesc: { fontSize: 13, color: Colors.textSecondary, lineHeight: 19, marginBottom: Spacing.sm },
-
-  chipRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.sm },
-  priorityChip: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
-  priorityText: { fontSize: 11, fontWeight: '700' },
-  categoryChip: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full, backgroundColor: Colors.divider },
-  categoryChipText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary },
-  techText:     { fontSize: 12, color: Colors.textSecondary },
-  etaText:      { fontSize: 12, color: Colors.primary, fontWeight: '600' },
-
-  // Progress dots
-  progressRow: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.sm },
-  progDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.border },
-  progLine: { flex: 1, height: 2, backgroundColor: Colors.border },
-
-  // Latest update bubble
-  updateBubble: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm,
-    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
-    padding: Spacing.sm, marginTop: 2,
-  },
-  updateIcon: { fontSize: 14, marginTop: 1 },
-  updateNote: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18, fontStyle: 'italic' },
-  updateBy:   { fontSize: 10, color: Colors.textMuted, marginTop: 2 },
-
-  // Resolved banner
-  resolvedBanner: {
-    backgroundColor: Colors.successLight, borderRadius: BorderRadius.md,
-    padding: Spacing.sm, marginTop: Spacing.sm,
-  },
-  resolvedText: { fontSize: 12, fontWeight: '600', color: Colors.success },
-
-  // Empty
-  empty: { paddingTop: 64, alignItems: 'center', paddingHorizontal: Spacing.xl },
-  emptyEmoji: { fontSize: 48, marginBottom: Spacing.base },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm, textAlign: 'center' },
-  emptyDesc:  { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: Spacing.lg },
-  emptyScanBtn: {
-    backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, ...Shadow.sm,
-  },
-  emptyScanText: { fontSize: 14, fontWeight: '700', color: Colors.white },
-
+  retryText: { color: Colors.white, fontWeight: '700' },
 });

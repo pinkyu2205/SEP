@@ -10,79 +10,91 @@ import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 import {
   MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS,
-  type MaintenanceStatusKey,
 } from '@/constants/maintenance';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { readApiError } from '@/utils/apiError';
 
-// ── Config ──────────────────────────────────────────────────────────────────
+/**
+ * BẢO TRÌ & SỬA CHỮA — màn tổng của manager (làm lại 24/09/2026).
+ *
+ * Bản cũ xếp 5 khối nối nhau (thống kê · lỗi khách · hàng đợi · hoạt động gần đây · theo
+ * nhà) và CÙNG một phiếu hiện ở 2–3 khối — manager không biết khối nào là việc của mình.
+ * Nay chia theo VIỆC PHẢI LÀM, mỗi phiếu nằm đúng một tab:
+ *
+ *   • Cần xem   — khách mới báo (OPEN), manager phải tới kiểm tra / phân loại
+ *   • Đang sửa  — đã hẹn lịch hoặc đang sửa (REPAIR_SCHEDULED, IN_REPAIR)
+ *   • Lỗi khách — chờ khách tự sửa / trả tiền / trừ cọc, hoặc chờ admin phân xử
+ *   • Đã xong   — đóng / huỷ / lỗi khách đã được admin kết luận — trong THÁNG này
+ *
+ * Trong mỗi tab, phiếu GOM THEO NHÀ (tiêu đề nhóm bấm được → màn bảo trì của nhà đó).
+ * "Theo bất động sản" cũ ở cuối trang không còn: lọc theo nhà nằm ngay trên đầu.
+ */
 
-const PRIORITY_CONFIG: Record<string, { label: string; color: string; bg: string }> =
-  Object.fromEntries(
-    Object.entries(MAINTENANCE_PRIORITY_META).map(([k, m]) => [k, { label: m.label, color: m.color, bg: m.bg }]),
-  );
+// ── Phân nhóm ────────────────────────────────────────────────────────────────
+type TabKey = 'todo' | 'fixing' | 'fault' | 'done';
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> =
-  MAINTENANCE_STATUS_META;
+const FIXING = ['repair_scheduled', 'in_repair'];
+const FAULT = ['tenant_fault', 'pending_tenant_repair', 'outstanding_damage', 'waiting_payment'];
+const TERMINAL = ['closed', 'cancelled'];
 
-const TODAY = todayIso();
+// 'tenant_fault' đã được admin duyệt/không duyệt trên web là ĐIỂM DỪNG — BE giữ nguyên
+// status vĩnh viễn, nên coi là xong bằng adminReviewedAt, không thì nằm lì trong tab.
+const isDone = (t: { status: string; adminReviewedAt?: string }) =>
+  TERMINAL.includes(t.status) || (t.status === 'tenant_fault' && !!t.adminReviewedAt);
 
-const daysBetween = (from: string) => {
-  const ms = new Date(TODAY).getTime() - new Date(from).getTime();
-  return Math.floor(ms / 86400000);
+const tabOf = (t: MaintenanceTicket): TabKey => {
+  if (isDone(t)) return 'done';
+  if (t.status === 'open') return 'todo';
+  if (FIXING.includes(t.status)) return 'fixing';
+  if (FAULT.includes(t.status)) return 'fault';
+  return 'todo';
 };
+
+const TABS: { key: TabKey; label: string; hint: string; color: string; bg: string }[] = [
+  { key: 'todo',   label: 'Cần xem',   hint: 'Khách mới báo',        color: '#D97706', bg: '#FFFBEB' },
+  { key: 'fixing', label: 'Đang sửa',  hint: 'Đã hẹn / đang sửa',    color: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'fault',  label: 'Lỗi khách', hint: 'Chờ khách / trừ cọc',  color: '#DC2626', bg: '#FEF2F2' },
+  { key: 'done',   label: 'Đã xong',   hint: 'Trong tháng này',      color: '#059669', bg: '#ECFDF5' },
+];
 
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-const TERMINAL = ['closed', 'cancelled'];
-const WORKING = ['repair_scheduled', 'in_repair', 'tenant_fault', 'pending_tenant_repair', 'outstanding_damage', 'waiting_payment'];
-// 'tenant_fault' đã được admin duyệt/không duyệt trên web là ĐIỂM DỪNG của app — BE
-// không đổi status (vẫn giữ nguyên 'tenant_fault' vĩnh viễn, xem TicketDetailScreen),
-// nên phải tự loại khỏi "đang xử lý" bằng adminReviewedAt, không thì ticket nằm lì
-// trong hàng đợi mãi dù admin đã kết luận xong, không còn việc gì để manager làm nữa.
-const isDone = (t: { status: string; adminReviewedAt?: string }) =>
-  TERMINAL.includes(t.status) || (t.status === 'tenant_fault' && !!t.adminReviewedAt);
-// Trạng thái có thể xuất hiện trong "Hàng đợi xử lý" (mọi thứ trừ closed/cancelled),
-// theo đúng thứ tự luồng — dùng để dựng chip lọc theo trạng thái.
-const QUEUE_STATUSES: MaintenanceStatusKey[] = ['open', ...WORKING] as MaintenanceStatusKey[];
-const QUEUE_PAGE_SIZE = 8;
-// Quá hạn SLA: ticket còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên.
-// Ticket chưa duyệt (priority null) tính theo ngưỡng mặc định 7 ngày.
-const isOverdue = (t: { status: string; priority?: string; createdAt: string; adminReviewedAt?: string }) =>
+const TODAY = todayIso();
+const daysSince = (iso: string) =>
+  Math.max(0, Math.floor((new Date(TODAY).getTime() - new Date(iso).getTime()) / 86_400_000));
+
+// Quá hạn SLA: còn mở và đã vượt số ngày mục tiêu theo mức ưu tiên (chưa phân loại → 7 ngày).
+const isOverdue = (t: MaintenanceTicket) =>
   !isDone(t)
-  && daysBetween(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
+  && daysSince(t.createdAt) > (MAINTENANCE_SLA_DAYS[t.priority as keyof typeof MAINTENANCE_SLA_DAYS] ?? 7);
 
 const monthLabel = () => {
   const d = serverNow();
-  return `Tháng ${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  return `Tháng ${d.getMonth() + 1}/${d.getFullYear()}`;
 };
 
-// ── Screen ──────────────────────────────────────────────────────────────────
+const isThisMonth = (iso?: string) => {
+  if (!iso) return false;
+  const d = new Date(iso);
+  const now = serverNow();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+};
 
+const fmtMoney = (n: number) => `${n.toLocaleString('vi-VN')}đ`;
+
+// ── Màn ──────────────────────────────────────────────────────────────────────
 export const MaintenanceManagerScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const [remote, setRemote] = useState<MaintenanceTicket[] | null>(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | MaintenanceStatusKey>('all');
-  // Lọc riêng "công ty trả hộ" (companyAbsorbedFault, 16/09/2026) — orthogonal với
-  // statusFilter (một ticket absorbed có thể ở nhiều status khác nhau: in_repair,
-  // repair_scheduled...), lọc client-side như statusFilter, không gọi lại API.
-  const [absorbedOnly, setAbsorbedOnly] = useState(false);
-  const [queueExpanded, setQueueExpanded] = useState(false);
-  // Lỗi API → báo rõ thay vì âm thầm rơi về store mock (dữ liệu giả "TK-2026-001"
-  // làm manager tưởng còn ticket phải xử lý / mất ticket thật).
-  /**
-   * Câu lỗi THẬT từ server, không phải "kiểm tra mạng" đoán bừa.
-   *
-   * Bản cũ chỉ giữ một cờ boolean rồi luôn hiện "kiểm tra mạng rồi mở lại màn này".
-   * Nhưng 500 của server cũng rơi vào đúng nhánh đó — người dùng đi kiểm tra wifi trong
-   * khi lỗi nằm ở backend. `readApiError` phân biệt được mất mạng / 500 / 403 / 404.
-   */
+  /** Câu lỗi THẬT từ server (readApiError phân biệt mất mạng / 500 / 403 / 404). */
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey | null>(null);
+  const [search, setSearch] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState<string>('all');
 
   const load = React.useCallback(() => {
     let active = true;
-    realMaintenanceService.listForManager()
+    realMaintenanceService.listForManager({ size: 500 } as never)
       .then(page => {
         if (!active) return;
         setRemote(page.content.map(dtoToTicket));
@@ -90,7 +102,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
       })
       .catch((err) => {
         if (!active) return;
-        const msg = readApiError(err, 'Không tải được danh sách ticket.');
+        const msg = readApiError(err, 'Không tải được danh sách phiếu bảo trì.');
         setRemote(prev => {
           if (prev == null) setLoadError(msg);
           return prev;
@@ -100,9 +112,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
   }, []);
 
   useFocusEffect(React.useCallback(() => load(), [load]));
-
-  // Hàng đợi tự cập nhật khi có ticket mới/đổi trạng thái, không cần thoát vào lại màn
-  // — BE ship 03/09/2026 (docs/BE-YEUCAU-realtime-socket-luong-bao-tri-2026-09-03.md).
+  // Tự cập nhật khi có phiếu mới / đổi trạng thái (socket, BE 03/09/2026).
   useMaintenanceRealtime({ onRefresh: load });
 
   const tickets = remote ?? [];
@@ -112,442 +122,211 @@ export const MaintenanceManagerScreen: React.FC = () => {
     else navigation.navigate('ManagerHome');
   };
 
-  const stats = useMemo(() => {
-    const open = tickets.filter(t => !isDone(t));
-    const now = serverNow();
-    const isThisMonth = (iso: string) => {
-      const d = new Date(iso);
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    };
-    return {
-      urgentOpen:   open.filter(t => t.priority === 'urgent').length,
-      pendingNew:   tickets.filter(t => t.status === 'open').length,
-      inProgress:   tickets.filter(t => WORKING.includes(t.status) && !isDone(t)).length,
-      resolvedMonth:tickets.filter(t => t.status === 'closed' && isThisMonth(t.updatedAt)).length,
-      slaAtRisk:    tickets.filter(isOverdue).length,
-      totalOpen:    open.length,
-    };
-  }, [tickets]);
+  // Tab "Đã xong" chỉ giữ phiếu của THÁNG NÀY — kho lịch sử dài xem ở màn từng nhà.
+  const inScope = useMemo(
+    () => tickets.filter(t => tabOf(t) !== 'done' || isThisMonth(t.resolvedAt ?? t.updatedAt)),
+    [tickets],
+  );
 
-  // Ticket đang mở (chưa closed/cancelled, và chưa phải "lỗi do khách" admin đã kết
-  // luận xong) — nền cho cả chip lọc lẫn hàng đợi.
-  const openTickets = useMemo(() => tickets.filter(t => !isDone(t)), [tickets]);
-
-  // Số lượng theo từng trạng thái trong tập đang mở — hiện trên chip lọc, tính TRƯỚC
-  // khi áp search để chip vẫn phản ánh đúng toàn bộ hàng đợi chứ không phải phần đã lọc.
-  const queueStatusCounts = useMemo(() => {
-    const c: Record<string, number> = {};
-    openTickets.forEach(t => { c[t.status] = (c[t.status] ?? 0) + 1; });
+  const tabCounts = useMemo(() => {
+    const c: Record<TabKey, { n: number; urgent: number; late: number }> = {
+      todo: { n: 0, urgent: 0, late: 0 }, fixing: { n: 0, urgent: 0, late: 0 },
+      fault: { n: 0, urgent: 0, late: 0 }, done: { n: 0, urgent: 0, late: 0 },
+    };
+    for (const t of inScope) {
+      const k = tabOf(t);
+      c[k].n += 1;
+      if (t.priority === 'urgent' && k !== 'done') c[k].urgent += 1;
+      if (isOverdue(t)) c[k].late += 1;
+    }
     return c;
-  }, [openTickets]);
+  }, [inScope]);
 
-  // Hàng đợi xử lý: ticket đang mở, lọc theo trạng thái + tìm kiếm, sắp theo ưu tiên
-  // rồi theo thời gian.
-  const openQueue = useMemo(() => {
+  // Mặc định mở tab ĐẦU TIÊN có việc — vào màn là thấy ngay việc cần làm nhất.
+  const activeTab: TabKey = tab
+    ?? (['todo', 'fixing', 'fault', 'done'] as TabKey[]).find(k => tabCounts[k].n > 0)
+    ?? 'todo';
+
+  // Danh sách nhà có phiếu — chỉ vẽ bộ lọc nhà khi quản lý từ 2 nhà trở lên.
+  const properties = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; open: number }>();
+    for (const t of inScope) {
+      const cur = m.get(t.propertyId) ?? { id: t.propertyId, name: t.propertyName, open: 0 };
+      if (!isDone(t)) cur.open += 1;
+      m.set(t.propertyId, cur);
+    }
+    return [...m.values()].sort((a, b) => b.open - a.open || a.name.localeCompare(b.name, 'vi'));
+  }, [inScope]);
+
+  const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    // Nhà nguyên căn (WHOLE_HOUSE) không có roomName — BE trả null, mapper gán thẳng
-    // không có fallback (dtoToTicket) nên field này CÓ THỂ undefined dù type khai báo
-    // là string. Gõ tìm kiếm mà thiếu `?? ''` ở đây → .toLowerCase() ném TypeError,
-    // crash cả app (không phải lỗi cú pháp nên tsc không bắt được).
-    return openTickets
-      .filter(t => statusFilter === 'all' || t.status === statusFilter)
-      .filter(t => !absorbedOnly || t.companyAbsorbedFault)
+    return inScope
+      .filter(t => tabOf(t) === activeTab)
+      .filter(t => propertyFilter === 'all' || t.propertyId === propertyFilter)
+      // roomName CÓ THỂ undefined với nhà nguyên căn dù type khai báo string — luôn `?? ''`.
       .filter(t => !q
         || (t.title ?? '').toLowerCase().includes(q)
         || (t.ticketCode ?? '').toLowerCase().includes(q)
         || (t.propertyName ?? '').toLowerCase().includes(q)
         || (t.roomName ?? '').toLowerCase().includes(q)
-        || (t.tenantName ?? '').toLowerCase().includes(q))
+        || (t.tenantName ?? '').toLowerCase().includes(q)
+        || (t.equipmentName ?? '').toLowerCase().includes(q))
       .sort((a, b) => {
-        const p = (a.priority ? PRIORITY_ORDER[a.priority] ?? 9 : 9)
-          - (b.priority ? PRIORITY_ORDER[b.priority] ?? 9 : 9);
-        return p !== 0 ? p : b.updatedAt.localeCompare(a.updatedAt);
+        if (activeTab === 'done') return (b.resolvedAt ?? b.updatedAt).localeCompare(a.resolvedAt ?? a.updatedAt);
+        const late = Number(isOverdue(b)) - Number(isOverdue(a));
+        if (late !== 0) return late;
+        const p = (a.priority ? PRIORITY_ORDER[a.priority] ?? 9 : 9) - (b.priority ? PRIORITY_ORDER[b.priority] ?? 9 : 9);
+        return p !== 0 ? p : a.createdAt.localeCompare(b.createdAt);
       });
-  }, [openTickets, search, statusFilter, absorbedOnly]);
+  }, [inScope, activeTab, propertyFilter, search]);
 
-  // Đổi bộ lọc/tìm kiếm thì thu gọn lại danh sách — tránh cuộn dài dằng dặc mỗi lần
-  // gõ tìm kiếm mới sau khi đã "Xem thêm" ở lượt lọc trước.
-  React.useEffect(() => { setQueueExpanded(false); }, [search, statusFilter, absorbedOnly]);
+  // Gom theo nhà, giữ thứ tự ưu tiên đã sắp.
+  const groups = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; type?: string; items: MaintenanceTicket[] }>();
+    for (const t of visible) {
+      const g = m.get(t.propertyId) ?? { id: t.propertyId, name: t.propertyName, type: t.propertyType, items: [] };
+      g.items.push(t);
+      m.set(t.propertyId, g);
+    }
+    return [...m.values()];
+  }, [visible]);
 
-  // Số ticket "công ty trả hộ" trong hàng đợi đang mở — chỉ hiện chip khi có ít nhất 1.
-  const absorbedCount = useMemo(
-    () => openTickets.filter(t => t.companyAbsorbedFault).length,
-    [openTickets],
-  );
-
-  // Recent activity: last 4 tickets sorted by updatedAt desc
-  const recentActivity = useMemo(() =>
-    [...tickets]
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 4),
-    [tickets],
-  );
-
-  // Group by building, sorted by urgentOpen desc
-  const buildingGroups = useMemo(() => {
-    const map = new Map<string, { propertyId: string; propertyName: string; propertyType?: string; tickets: typeof tickets }>();
-    tickets.forEach(t => {
-      if (!map.has(t.propertyId)) {
-        map.set(t.propertyId, {
-          propertyId: t.propertyId,
-          propertyName: t.propertyName,
-          // Loại nhà lấy thẳng từ ticket. Trước đây còn tra thêm bảng mock
-          // MANAGED_PROPERTIES bằng id thật → luôn trượt, chỉ tốn một lượt tìm.
-          propertyType: t.propertyType,
-          tickets: [],
-        });
-      }
-      map.get(t.propertyId)!.tickets.push(t);
-    });
-    return Array.from(map.values()).sort((a, b) => {
-      const aU = a.tickets.filter(t => t.priority === 'urgent' && !isDone(t)).length;
-      const bU = b.tickets.filter(t => t.priority === 'urgent' && !isDone(t)).length;
-      return bU - aU;
-    });
-  }, [tickets]);
-
-  // Lỗi khách đang thực sự cần theo dõi — loại luôn ticket 'tenant_fault' admin đã
-  // kết luận xong (isDone), không thì mục này không bao giờ trống dù chẳng còn gì làm.
-  const faultQueue = useMemo(
-    () => tickets.filter(t =>
-      WORKING.includes(t.status) && t.status !== 'in_repair' && t.status !== 'repair_scheduled' && !isDone(t)),
-    [tickets],
-  );
+  const totalOpen = tabCounts.todo.n + tabCounts.fixing.n + tabCounts.fault.n;
+  const totalLate = tabCounts.todo.late + tabCounts.fixing.late + tabCounts.fault.late;
+  const tabMeta = TABS.find(x => x.key === activeTab)!;
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
 
-        {/* ── Header ───────────────────────────────────────────────── */}
+        {/* ── Đầu màn ── */}
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={handleBack}>
             <Text style={s.backBtnText}>‹</Text>
           </TouchableOpacity>
-          <Text style={s.title}>Bảo trì & Sửa chữa</Text>
-          <Text style={s.subtitle}>{monthLabel()}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>Bảo trì & Sửa chữa</Text>
+            <Text style={s.subtitle}>
+              {monthLabel()} · {totalOpen > 0 ? `${totalOpen} phiếu đang mở` : 'không có phiếu nào đang mở'}
+            </Text>
+          </View>
         </View>
 
-        {/* ── Stats row ────────────────────────────────────────────── */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={s.statsScroll} contentContainerStyle={s.statsContent}>
-          <View style={[s.statCard, { borderTopColor: Colors.error }]}>
-            <Text style={[s.statNum, { color: Colors.error }]}>{stats.urgentOpen}</Text>
-            <Text style={s.statLabel}>Khẩn cấp</Text>
-          </View>
-          <View style={[s.statCard, { borderTopColor: Colors.warning }]}>
-            <Text style={[s.statNum, { color: Colors.warning }]}>{stats.pendingNew}</Text>
-            <Text style={s.statLabel}>Chờ duyệt</Text>
-          </View>
-          <View style={[s.statCard, { borderTopColor: '#8B5CF6' }]}>
-            <Text style={[s.statNum, { color: '#8B5CF6' }]}>{stats.inProgress}</Text>
-            <Text style={s.statLabel}>Đang xử lý</Text>
-          </View>
-          <View style={[s.statCard, { borderTopColor: Colors.success }]}>
-            <Text style={[s.statNum, { color: Colors.success }]}>{stats.resolvedMonth}</Text>
-            <Text style={s.statLabel}>Hoàn tất T{serverNow().getMonth() + 1}</Text>
-          </View>
-          {stats.slaAtRisk > 0 && (
-            <View style={[s.statCard, { borderTopColor: Colors.error, backgroundColor: Colors.errorLight }]}>
-              <Text style={[s.statNum, { color: Colors.error }]}>{stats.slaAtRisk}</Text>
-              <Text style={[s.statLabel, { color: Colors.error }]}>SLA vi phạm</Text>
-            </View>
-          )}
-        </ScrollView>
-
-        {/* ── SLA warning banner ───────────────────────────────────── */}
-        {stats.slaAtRisk > 0 && (
-          <View style={s.slaBanner}>
-            <Text style={s.slaBannerIcon}>⚠️</Text>
-            <Text style={s.slaBannerText}>
-              {stats.slaAtRisk} ticket vượt SLA theo mức ưu tiên — cần xử lý ngay
+        {totalLate > 0 && (
+          <View style={s.lateBanner}>
+            <Text style={s.lateBannerText}>
+              ⏰ {totalLate} phiếu đã quá hạn xử lý theo mức ưu tiên — xếp đầu mỗi tab
             </Text>
           </View>
         )}
 
-        {/* ── Ticket lỗi khách đang chờ xử lý (tenant_fault / tự sửa / chờ trừ cọc) ── */}
-        {faultQueue.length > 0 && (
-          <View style={s.section}>
-            <View style={s.sectionHeaderRow}>
-              <Text style={s.sectionTitle}>⚠️ Lỗi khách đang xử lý</Text>
-              <Text style={s.sectionCount}>
-                {faultQueue.length} ticket
-              </Text>
-            </View>
-            <View style={s.activityCard}>
-              {faultQueue.map((t, i, arr) => (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[s.activityRow, i !== arr.length - 1 && s.activityRowBorder]}
-                  onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
-                  activeOpacity={0.7}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
-                    <Text style={s.activityMeta}>
-                      {t.ticketCode} · {t.propertyName}{t.roomName ? ` · ${t.roomName}` : ''}
-                      {t.estimatedDamageAmount != null ? ` · ${t.estimatedDamageAmount.toLocaleString('vi-VN')}đ` : ''}
-                    </Text>
-                  </View>
-                  <View style={[s.activityStatus, { backgroundColor: STATUS_CONFIG[t.status].bg }]}>
-                    <Text style={[s.activityStatusText, { color: STATUS_CONFIG[t.status].color }]}>
-                      {STATUS_CONFIG[t.status].label}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* ── Hàng đợi xử lý (theo ưu tiên) ────────────────────────── */}
-        <View style={s.section}>
-          <View style={s.sectionHeaderRow}>
-            <Text style={s.sectionTitle}>Hàng đợi xử lý</Text>
-            <Text style={s.sectionCount}>{openQueue.length} đang mở</Text>
-          </View>
-          <TextInput
-            style={s.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Tìm mã ticket, tiêu đề, nhà, phòng, khách..."
-            placeholderTextColor={Colors.textMuted}
-          />
-
-          {/* Chip lọc theo trạng thái — tính trên TOÀN BỘ hàng đợi (openTickets), không
-              phải phần đã lọc bởi tìm kiếm, để số trên chip luôn ổn định khi gõ tìm. */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}
-            style={s.chipScroll} contentContainerStyle={s.chipContent}>
-            <TouchableOpacity
-              style={[s.filterChip, statusFilter === 'all' && s.filterChipActive]}
-              onPress={() => setStatusFilter('all')}
-            >
-              <Text style={[s.filterChipText, statusFilter === 'all' && s.filterChipTextActive]}>
-                Tất cả {openTickets.length}
-              </Text>
-            </TouchableOpacity>
-            {QUEUE_STATUSES.filter(st => (queueStatusCounts[st] ?? 0) > 0).map(st => {
-              const cfg = STATUS_CONFIG[st];
-              const active = statusFilter === st;
-              return (
-                <TouchableOpacity
-                  key={st}
-                  style={[s.filterChip, active && { backgroundColor: cfg.color, borderColor: cfg.color }]}
-                  onPress={() => setStatusFilter(st)}
-                >
-                  <Text style={[s.filterChipText, active && s.filterChipTextActive]}>
-                    {cfg.icon} {cfg.label} {queueStatusCounts[st]}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            {absorbedCount > 0 && (
-              <TouchableOpacity
-                style={[s.filterChip, absorbedOnly && { backgroundColor: '#DC2626', borderColor: '#DC2626' }]}
-                onPress={() => setAbsorbedOnly(v => !v)}
-              >
-                <Text style={[s.filterChipText, absorbedOnly && s.filterChipTextActive]}>
-                  🏢 Công ty trả hộ {absorbedCount}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-
-          <View style={[s.activityCard, { marginTop: Spacing.sm }]}>
-            {loadError ? (
-              <View style={s.queueEmpty}>
-                <Text style={s.queueEmptyText}>⚠️ {loadError}</Text>
-              </View>
-            ) : openQueue.length === 0 ? (
-              <View style={s.queueEmpty}>
-                <Text style={s.queueEmptyText}>
-                  {search.trim() || statusFilter !== 'all' ? 'Không tìm thấy ticket phù hợp.' : '🎉 Không có ticket nào đang mở.'}
-                </Text>
-              </View>
-            ) : (queueExpanded ? openQueue : openQueue.slice(0, QUEUE_PAGE_SIZE)).map((t, i, arr) => {
-              const cfg    = STATUS_CONFIG[t.status];
-              // priority null khi chưa duyệt → badge "Chờ phân loại" trung tính.
-              const priCfg = t.priority
-                ? PRIORITY_CONFIG[t.priority]
-                : { label: 'Chưa phân loại', color: Colors.textMuted, bg: Colors.divider };
-              const isLast = i === arr.length - 1;
-              const overdue = isOverdue(t);
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[s.activityRow, !isLast && s.activityRowBorder]}
-                  onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
-                  activeOpacity={0.7}
-                >
-                  <View style={[s.activityPriBadge, { backgroundColor: priCfg.bg, marginRight: 2 }]}>
-                    <Text style={[s.activityPriText, { color: priCfg.color }]}>{priCfg.label}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
-                    <Text style={s.activityMeta}>
-                      {t.ticketCode} · {t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn nhà' : t.roomName}
-                      {overdue ? '  ⚠️ quá hạn' : ''}
-                    </Text>
-                    {t.companyAbsorbedFault && (
-                      <View style={s.absorbedBadge}>
-                        <Text style={s.absorbedBadgeText}>🏢 Công ty trả hộ</Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={[s.activityStatus, { backgroundColor: cfg.bg }]}>
-                    <Text style={[s.activityStatusText, { color: cfg.color }]}>{cfg.label}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {openQueue.length > QUEUE_PAGE_SIZE && (
-            <TouchableOpacity style={s.expandBtn} onPress={() => setQueueExpanded(v => !v)}>
-              <Text style={s.expandBtnText}>
-                {queueExpanded ? 'Thu gọn' : `Xem thêm ${openQueue.length - QUEUE_PAGE_SIZE} ticket`}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* ── Recent Activity ──────────────────────────────────────── */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Hoạt động gần đây</Text>
-          <View style={s.activityCard}>
-            {recentActivity.map((t, i) => {
-              const cfg       = STATUS_CONFIG[t.status];
-              const priCfg    = t.priority
-                ? PRIORITY_CONFIG[t.priority]
-                : { label: 'Chưa phân loại', color: Colors.textMuted, bg: Colors.divider };
-              const isLast    = i === recentActivity.length - 1;
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[s.activityRow, !isLast && s.activityRowBorder]}
-                  onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
-                  activeOpacity={0.7}
-                >
-                  <View style={[s.activityDot, { backgroundColor: cfg.bg }]}>
-                    <Text style={s.activityDotIcon}>{cfg.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={s.activityTopRow}>
-                      <Text style={s.activityCode}>{t.ticketCode}</Text>
-                      <View style={[s.activityPriBadge, { backgroundColor: priCfg.bg }]}>
-                        <Text style={[s.activityPriText, { color: priCfg.color }]}>{priCfg.label}</Text>
-                      </View>
-                    </View>
-                    <Text style={s.activityTitle} numberOfLines={1}>{t.title}</Text>
-                    <Text style={s.activityMeta}>{t.propertyName} · {t.propertyType === 'WHOLE_HOUSE' ? 'Toàn bộ nhà' : t.roomName} · {formatDateTime(t.updatedAt)}</Text>
-                  </View>
-                  <View style={[s.activityStatus, { backgroundColor: cfg.bg }]}>
-                    <Text style={[s.activityStatusText, { color: cfg.color }]}>{cfg.label}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ── Buildings section ────────────────────────────────────── */}
-        <View style={s.section}>
-          <View style={s.sectionHeaderRow}>
-            <Text style={s.sectionTitle}>Theo bất động sản</Text>
-            <Text style={s.sectionCount}>{buildingGroups.length} tài sản</Text>
-          </View>
-
-          {buildingGroups.map(group => {
-            const open      = group.tickets.filter(t => !isDone(t));
-            const urgent    = open.filter(t => t.priority === 'urgent');
-            const inProg    = group.tickets.filter(t => WORKING.includes(t.status) && !isDone(t));
-            const resolved  = group.tickets.filter(t => t.status === 'closed');
-            const pending   = group.tickets.filter(t => t.status === 'open');
-            const slaRisk   = open.filter(isOverdue);
-            const total     = group.tickets.length;
-            const doneRate  = total > 0 ? Math.round((resolved.length / total) * 100) : 100;
-
-            const healthColor = urgent.length > 0 ? Colors.error
-              : slaRisk.length > 0 ? Colors.warning
-              : pending.length > 0 ? Colors.warning
-              : Colors.success;
-            const healthLabel = urgent.length > 0 ? '🔴 Khẩn cấp'
-              : slaRisk.length > 0 ? '🟠 SLA vi phạm'
-              : pending.length > 0 ? '🟡 Có ticket mới'
-              : '🟢 Ổn định';
-
+        {/* ── 4 tab theo việc phải làm ── */}
+        <View style={s.tabGrid}>
+          {TABS.map(x => {
+            const c = tabCounts[x.key];
+            const on = activeTab === x.key;
             return (
               <TouchableOpacity
-                key={group.propertyId}
-                style={[s.buildingCard, urgent.length > 0 && s.buildingCardUrgent]}
-                onPress={() => navigation.navigate('BuildingMaintenance', {
-                  propertyId: group.propertyId,
-                  propertyName: group.propertyName,
-                  propertyType: group.propertyType,
-                })}
-                activeOpacity={0.75}
+                key={x.key}
+                style={[s.tab, on && { borderColor: x.color, backgroundColor: x.bg }]}
+                onPress={() => setTab(x.key)}
+                activeOpacity={0.8}
               >
-                {/* Name row */}
-                <View style={s.buildingCardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.buildingName}>{group.propertyName}</Text>
-                    <Text style={s.propertyTypeText}>
-                      {group.propertyType === 'WHOLE_HOUSE' ? 'Nhà nguyên căn · bảo trì toàn nhà/thiết bị' : 'Toà nhà nhiều phòng · theo phòng'}
-                    </Text>
-                    <View style={[s.healthPill, { backgroundColor: healthColor + '18' }]}>
-                      <Text style={[s.healthText, { color: healthColor }]}>{healthLabel}</Text>
-                    </View>
-                  </View>
-                  {urgent.length > 0 && (
-                    <View style={s.urgentBadge}>
-                      <Text style={s.urgentBadgeText}>🚨 {urgent.length}</Text>
+                <View style={s.tabTop}>
+                  <Text style={[s.tabNum, { color: c.n > 0 ? x.color : Colors.textMuted }]}>{c.n}</Text>
+                  {(c.urgent > 0 || c.late > 0) && (
+                    <View style={s.tabAlert}>
+                      <Text style={s.tabAlertText}>{c.urgent > 0 ? `🚨 ${c.urgent}` : `⏰ ${c.late}`}</Text>
                     </View>
                   )}
-                  <Text style={s.buildingArrow}>›</Text>
                 </View>
-
-                {/* Stats */}
-                <View style={s.buildingStats}>
-                  <View style={s.buildingStat}>
-                    <Text style={[s.buildingStatNum, { color: open.length > 0 ? Colors.warning : Colors.textMuted }]}>
-                      {open.length}
-                    </Text>
-                    <Text style={s.buildingStatLbl}>Đang mở</Text>
-                  </View>
-                  <View style={s.statSep} />
-                  <View style={s.buildingStat}>
-                    <Text style={[s.buildingStatNum, { color: pending.length > 0 ? Colors.warning : Colors.textMuted }]}>
-                      {pending.length}
-                    </Text>
-                    <Text style={s.buildingStatLbl}>Chờ duyệt</Text>
-                  </View>
-                  <View style={s.statSep} />
-                  <View style={s.buildingStat}>
-                    <Text style={[s.buildingStatNum, { color: inProg.length > 0 ? '#8B5CF6' : Colors.textMuted }]}>
-                      {inProg.length}
-                    </Text>
-                    <Text style={s.buildingStatLbl}>Xử lý</Text>
-                  </View>
-                  <View style={s.statSep} />
-                  <View style={s.buildingStat}>
-                    <Text style={[s.buildingStatNum, { color: Colors.success }]}>{resolved.length}</Text>
-                    <Text style={s.buildingStatLbl}>Hoàn tất</Text>
-                  </View>
-                </View>
-
-                {/* Progress */}
-                <View style={s.progRow}>
-                  <View style={s.progBg}>
-                    <View style={[s.progFill, {
-                      width: `${doneRate}%` as any,
-                      backgroundColor: doneRate === 100 ? Colors.success : doneRate >= 50 ? Colors.warning : Colors.error,
-                    }]} />
-                  </View>
-                  <Text style={s.progPct}>{doneRate}% hoàn tất</Text>
-                </View>
+                <Text style={[s.tabLabel, on && { color: x.color }]}>{x.label}</Text>
+                <Text style={s.tabHint}>{x.hint}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
+
+        {/* ── Tìm + lọc nhà ── */}
+        <TextInput
+          style={s.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="🔍  Tìm mã phiếu, thiết bị, phòng, khách..."
+          placeholderTextColor={Colors.textMuted}
+        />
+        {properties.length > 1 && (
+          <View style={s.chipWrap}>
+            <TouchableOpacity
+              style={[s.chip, propertyFilter === 'all' && s.chipOn]}
+              onPress={() => setPropertyFilter('all')}
+            >
+              <Text style={[s.chipText, propertyFilter === 'all' && s.chipTextOn]}>Tất cả nhà</Text>
+            </TouchableOpacity>
+            {properties.map(p => {
+              const on = propertyFilter === p.id;
+              return (
+                <TouchableOpacity key={p.id} style={[s.chip, on && s.chipOn]}
+                  onPress={() => setPropertyFilter(on ? 'all' : p.id)}>
+                  <Text style={[s.chipText, on && s.chipTextOn]} numberOfLines={1}>
+                    {p.name}{p.open > 0 ? ` · ${p.open}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* ── Danh sách: gom theo nhà ── */}
+        {loadError ? (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>⚠️</Text>
+            <Text style={s.emptyText}>{loadError}</Text>
+            <TouchableOpacity style={s.retryBtn} onPress={load}>
+              <Text style={s.retryBtnText}>Thử lại</Text>
+            </TouchableOpacity>
+          </View>
+        ) : remote == null ? (
+          <View style={s.empty}><Text style={s.emptyText}>Đang tải…</Text></View>
+        ) : groups.length === 0 ? (
+          <View style={s.empty}>
+            <Text style={s.emptyIcon}>{search.trim() || propertyFilter !== 'all' ? '🔍' : '🎉'}</Text>
+            <Text style={s.emptyText}>
+              {search.trim() || propertyFilter !== 'all'
+                ? 'Không có phiếu khớp bộ lọc.'
+                : `Không có phiếu nào ở mục "${tabMeta.label}".`}
+            </Text>
+          </View>
+        ) : (
+          groups.map(g => (
+            <View key={g.id} style={s.group}>
+              <TouchableOpacity
+                style={s.groupHead}
+                onPress={() => navigation.navigate('BuildingMaintenance', {
+                  propertyId: g.id, propertyName: g.name, propertyType: g.type,
+                })}
+                activeOpacity={0.7}
+              >
+                <Text style={s.groupName} numberOfLines={1}>
+                  {g.type === 'WHOLE_HOUSE' ? '🏡' : '🏢'} {g.name}
+                </Text>
+                <Text style={s.groupLink}>{g.items.length} phiếu · Xem theo nhà ›</Text>
+              </TouchableOpacity>
+
+              <View style={s.card}>
+                {g.items.map((t, i) => (
+                  <TicketRow
+                    key={t.id}
+                    t={t}
+                    last={i === g.items.length - 1}
+                    onPress={() => navigation.navigate('MaintenanceTicketDetail', { ticketId: t.id })}
+                  />
+                ))}
+              </View>
+            </View>
+          ))
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -555,114 +334,129 @@ export const MaintenanceManagerScreen: React.FC = () => {
   );
 };
 
-// ── Styles ──────────────────────────────────────────────────────────────────
+// ── Một phiếu ────────────────────────────────────────────────────────────────
+/**
+ * Dải màu trái = mức ưu tiên. Dòng 2 = ở đâu, của ai. Dòng 3 = điều cần biết để làm tiếp
+ * (hẹn khi nào, treo bao lâu, tiền bao nhiêu) — mỗi trạng thái nói đúng thứ của nó.
+ */
+const TicketRow: React.FC<{ t: MaintenanceTicket; last: boolean; onPress: () => void }> = ({ t, last, onPress }) => {
+  const st = MAINTENANCE_STATUS_META[t.status as keyof typeof MAINTENANCE_STATUS_META]
+    ?? MAINTENANCE_STATUS_META.open;
+  const pri = t.priority ? MAINTENANCE_PRIORITY_META[t.priority] : null;
+  const late = isOverdue(t);
+  const where = t.propertyType === 'WHOLE_HOUSE' ? 'Toàn nhà' : (t.roomName ? `P.${t.roomName}` : '—');
+  const age = daysSince(t.createdAt);
+  const cost = Number(t.invoiceAmount ?? t.estimatedDamageAmount ?? 0);
 
+  const facts: string[] = [];
+  if (t.status === 'open' && t.visitAppointmentAt) facts.push(`🗓 Hẹn xem ${formatDateTime(t.visitAppointmentAt)}`);
+  if (t.status === 'repair_scheduled' && t.repairAppointmentAt) facts.push(`🗓 Hẹn sửa ${formatDateTime(t.repairAppointmentAt)}`);
+  if (t.status === 'pending_tenant_repair' && t.selfRepairDeadline) facts.push(`⏳ Hạn khách sửa ${t.selfRepairDeadline.slice(0, 10).split('-').reverse().join('/')}`);
+  if (!isDone(t)) facts.push(age === 0 ? 'Báo hôm nay' : `Treo ${age} ngày`);
+  if (isDone(t) && t.resolvedAt) facts.push(`Xong ${formatDateTime(t.resolvedAt)}`);
+  if (cost > 0) facts.push(fmtMoney(cost));
+  if (t.companyAbsorbedFault) facts.push('🏢 Công ty trả hộ');
+
+  return (
+    <TouchableOpacity style={[s.row, !last && s.rowBorder]} onPress={onPress} activeOpacity={0.7}>
+      <View style={[s.rowStripe, { backgroundColor: pri?.color ?? Colors.border }]} />
+      <View style={{ flex: 1 }}>
+        <View style={s.rowTop}>
+          <Text style={s.rowCode}>{t.ticketCode}</Text>
+          <Text style={s.rowTitle} numberOfLines={1}>{t.title || t.equipmentName || 'Phiếu bảo trì'}</Text>
+        </View>
+        <Text style={s.rowWhere} numberOfLines={1}>
+          {where}{t.tenantName ? ` · ${t.tenantName}` : ''}{t.equipmentName ? ` · ${t.equipmentName}` : ''}
+        </Text>
+        <Text style={[s.rowFacts, late && { color: Colors.error, fontWeight: '700' }]} numberOfLines={1}>
+          {late ? '⏰ Quá hạn · ' : ''}{facts.join(' · ')}
+        </Text>
+      </View>
+      <View style={s.rowRight}>
+        <View style={[s.statusPill, { backgroundColor: st.bg }]}>
+          <Text style={[s.statusText, { color: st.color }]}>{st.label}</Text>
+        </View>
+        <Text style={[s.priText, { color: pri?.color ?? Colors.textMuted }]}>
+          {pri?.label ?? 'Chưa phân loại'}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// ── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  safe:   { flex: 1, backgroundColor: Colors.background },
+  safe: { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.base },
 
-  header:   { paddingTop: Spacing.md, paddingBottom: Spacing.base },
+  header: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingTop: Spacing.md, paddingBottom: Spacing.md },
   backBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing.sm,
   },
   backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
-  title:    { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
+  subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 
-  statsScroll:  { flexGrow: 0, marginBottom: Spacing.md },
-  statsContent: { paddingVertical: 4, gap: Spacing.sm },
-  statCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    paddingVertical: Spacing.md, paddingHorizontal: Spacing.base,
-    borderTopWidth: 3, ...Shadow.sm, minWidth: 82, alignItems: 'center',
-  },
-  statNum:   { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
-  statLabel: { fontSize: 10, color: Colors.textSecondary, marginTop: 2, textAlign: 'center' },
-
-  slaBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+  lateBanner: {
     backgroundColor: Colors.errorLight, borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md, paddingVertical: 10,
-    marginBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.error + '30',
+    paddingHorizontal: Spacing.md, paddingVertical: 9, marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: Colors.error + '30',
   },
-  slaBannerIcon: { fontSize: 18 },
-  slaBannerText: { fontSize: 13, fontWeight: '600', color: Colors.error, flex: 1 },
+  lateBannerText: { fontSize: 12, fontWeight: '600', color: Colors.error },
 
-  section:          { marginBottom: Spacing.lg },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
-  sectionTitle:     { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
-  sectionCount:     { fontSize: 12, color: Colors.textMuted, fontWeight: '500' },
+  // 4 tab — lưới 2×2, không cuộn ngang (cuộn ngang thì tab thứ 4 bị giấu mất)
+  tabGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.md },
+  tab: {
+    width: '48.5%', backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    borderWidth: 1.5, borderColor: Colors.border, padding: Spacing.md, ...Shadow.sm,
+  },
+  tabTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  tabNum: { fontSize: 24, fontWeight: '800' },
+  tabAlert: { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full, paddingHorizontal: 7, paddingVertical: 2 },
+  tabAlertText: { fontSize: 10, fontWeight: '800', color: Colors.error },
+  tabLabel: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  tabHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
 
   searchInput: {
-    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
-    borderRadius: BorderRadius.lg, paddingHorizontal: Spacing.md, paddingVertical: 10,
-    fontSize: 14, color: Colors.textPrimary,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md, paddingVertical: 10, fontSize: 13,
+    borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary, marginBottom: Spacing.sm,
   },
-  queueEmpty:     { padding: Spacing.lg, alignItems: 'center' },
-  queueEmptyText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
-
-  chipScroll:  { flexGrow: 0, marginTop: Spacing.sm },
-  chipContent: { gap: 6, paddingVertical: 2 },
-  filterChip: {
-    paddingHorizontal: Spacing.sm, paddingVertical: 6, borderRadius: BorderRadius.full,
-    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: Spacing.sm },
+  chip: {
+    maxWidth: '100%', paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border,
   },
-  filterChipActive:     { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterChipText:       { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
-  filterChipTextActive: { color: Colors.white },
+  chipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  chipTextOn: { color: Colors.white },
 
-  absorbedBadge:     { alignSelf: 'flex-start', backgroundColor: '#FFFBEB', borderRadius: BorderRadius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2, marginTop: 4 },
-  absorbedBadgeText: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
+  group: { marginTop: Spacing.md },
+  groupHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm, marginBottom: 6 },
+  groupName: { flex: 1, fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
+  groupLink: { fontSize: 11, fontWeight: '700', color: Colors.primary },
 
-  expandBtn:     { alignItems: 'center', paddingVertical: Spacing.sm, marginTop: 2 },
-  expandBtnText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
-
-  activityCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    ...Shadow.sm, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden',
+  card: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
+    borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
   },
-  activityRow:       { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingHorizontal: Spacing.base, paddingVertical: 12 },
-  activityRowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  activityDot:       { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  activityDotIcon:   { fontSize: 16 },
-  activityTopRow:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 2 },
-  activityCode:      { fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 0.3 },
-  activityPriBadge:  { paddingHorizontal: 6, paddingVertical: 2, borderRadius: BorderRadius.full },
-  activityPriText:   { fontSize: 9, fontWeight: '700' },
-  activityTitle:     { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, marginBottom: 2 },
-  activityMeta:      { fontSize: 11, color: Colors.textMuted },
-  activityStatus:    { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
-  activityStatusText:{ fontSize: 10, fontWeight: '700' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, paddingVertical: 10, paddingRight: Spacing.md },
+  rowBorder: { borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  rowStripe: { width: 4, alignSelf: 'stretch', borderTopRightRadius: 3, borderBottomRightRadius: 3, marginRight: 4 },
+  rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowCode: { fontSize: 11, fontWeight: '800', color: Colors.primary },
+  rowTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  rowWhere: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  rowFacts: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  rowRight: { alignItems: 'flex-end', gap: 4, maxWidth: 120 },
+  statusPill: { borderRadius: BorderRadius.full, paddingHorizontal: 8, paddingVertical: 3 },
+  statusText: { fontSize: 10, fontWeight: '800' },
+  priText: { fontSize: 10, fontWeight: '700' },
 
-  buildingCard: {
-    backgroundColor: Colors.white, borderRadius: BorderRadius.xl,
-    padding: Spacing.base, marginBottom: Spacing.md,
-    ...Shadow.sm, borderWidth: 1, borderColor: Colors.border,
-  },
-  buildingCardUrgent: { borderColor: Colors.error + '60', borderLeftWidth: 3, borderLeftColor: Colors.error },
-
-  buildingCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: Spacing.md },
-  buildingName:       { fontSize: 15, fontWeight: '700', color: Colors.textPrimary, marginBottom: 4 },
-  propertyTypeText:   { fontSize: 11, color: Colors.textMuted, fontWeight: '600', marginBottom: 6 },
-  healthPill:         { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: BorderRadius.full },
-  healthText:         { fontSize: 10, fontWeight: '700' },
-  urgentBadge:        {
-    backgroundColor: Colors.errorLight, borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.sm, paddingVertical: 4, marginRight: Spacing.sm,
-  },
-  urgentBadgeText: { fontSize: 12, fontWeight: '800', color: Colors.error },
-  buildingArrow:   { fontSize: 22, color: Colors.textMuted, fontWeight: '300', marginTop: 2 },
-
-  buildingStats:    { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md },
-  buildingStat:     { flex: 1, alignItems: 'center' },
-  buildingStatNum:  { fontSize: 17, fontWeight: '800' },
-  buildingStatLbl:  { fontSize: 10, color: Colors.textMuted, marginTop: 2, textAlign: 'center' },
-  statSep:          { width: 1, height: 28, backgroundColor: Colors.divider },
-
-  progRow:  { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  progBg:   { flex: 1, height: 5, backgroundColor: Colors.divider, borderRadius: 2.5 },
-  progFill: { height: 5, borderRadius: 2.5 },
-  progPct:  { fontSize: 10, fontWeight: '700', color: Colors.textSecondary, minWidth: 72 },
+  empty: { alignItems: 'center', paddingVertical: 48, gap: 8 },
+  emptyIcon: { fontSize: 36 },
+  emptyText: { fontSize: 13, fontWeight: '600', color: Colors.textMuted, textAlign: 'center' },
+  retryBtn: { marginTop: 4, backgroundColor: Colors.primary, paddingHorizontal: 22, paddingVertical: 9, borderRadius: BorderRadius.lg },
+  retryBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },
 });

@@ -52,6 +52,13 @@ const TYPE_LABEL: Record<string, string> = {
   BILLING_OVERDUE: 'Quá hạn thanh toán',
   RENT_OVERDUE_MANAGER: 'Tiền nhà quá hạn',
   RENT_OVERDUE_HOST: 'Tiền nhà quá hạn',
+  // BE 24/09/2026: điện/nước/sửa chữa/dịch vụ quá hạn (phát hành + 5 ngày) → báo cả admin,
+  // hợp đồng đã được đề nghị chấm dứt.
+  INVOICE_OVERDUE_ADMIN: 'Hoá đơn quá hạn — đề nghị chấm dứt HĐ',
+  INVOICE_OVERDUE_HOST: 'Hoá đơn quá hạn',
+  INVOICE_OVERDUE_MANAGER: 'Hoá đơn quá hạn',
+  MAINTENANCE_OVERDUE_HOST: 'Phí sửa chữa quá hạn',
+  MAINTENANCE_OVERDUE_MANAGER: 'Phí sửa chữa quá hạn',
   // RENT_FIRST_CYCLE_* đã bỏ (13/08/2026): tiền kỳ đầu thu chung với tiền cọc ở mã QR
   // lúc đón khách nên không còn kỳ đầu nào để nhắc/quá hạn. Bản ghi cũ trong DB rơi vào
   // nhánh "type lạ" bên dưới và hiện nguyên mã — đúng ý, đừng dựng lại nhãn cho chúng.

@@ -53,7 +53,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Quay lại</Text>
+          <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết giao dịch</Text>
         <View style={{ width: 80 }} />

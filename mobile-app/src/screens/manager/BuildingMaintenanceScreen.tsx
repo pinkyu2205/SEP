@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, ScrollView, TextInput, ActivityIndicator,
+  Alert, TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
@@ -213,6 +213,18 @@ export const BuildingMaintenanceScreen: React.FC = () => {
     };
   }, [allTickets]);
 
+  /** Số phiếu cho từng lựa chọn lọc — chip hiện số, và chỉ hiện lựa chọn đang có phiếu. */
+  const chipCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const t of allTickets) {
+      const b = bucketOf(t.status);
+      c[`s:${b}`] = (c[`s:${b}`] ?? 0) + 1;
+      if (t.category) c[`c:${t.category}`] = (c[`c:${t.category}`] ?? 0) + 1;
+      if (t.priority) c[`p:${t.priority}`] = (c[`p:${t.priority}`] ?? 0) + 1;
+    }
+    return c;
+  }, [allTickets]);
+
   const doneRate = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 100;
   const barColor = stats.urgent > 0 ? Colors.error : doneRate >= 70 ? Colors.success : Colors.warning;
 
@@ -260,7 +272,16 @@ export const BuildingMaintenanceScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* ── Summary card ─────────────────────────────────────────── */}
+      {/* ── Danh sách: tổng quan + tìm + lọc nằm TRONG ListHeader ──
+          Bản cũ đặt 3 hàng chip (ScrollView ngang, flexGrow 0) NGOÀI FlatList: trên Android
+          chúng bị FlatList ép chiều cao nên chip bị cắt chữ, chồng lên nhau. Cho cuộn cùng
+          danh sách thì không còn tranh chỗ, và màn nhỏ vẫn đọc được phiếu. */}
+      <FlatList
+        data={filteredTickets}
+        keyExtractor={i => i.id}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          <View>
       <View style={s.summaryCard}>
         <View style={s.summaryRow}>
           {[
@@ -303,52 +324,54 @@ export const BuildingMaintenanceScreen: React.FC = () => {
         )}
       </View>
 
-      {/* ── Status filter chips ──────────────────────────────────── */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={s.filterRow} contentContainerStyle={s.filterContent}>
-        {STATUS_FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.id}
-            style={[s.chip, statusFilter === f.id && s.chipActive]}
-            onPress={() => setStatusFilter(f.id)}
-          >
-            <Text style={[s.chipText, statusFilter === f.id && s.chipTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* ── Lọc trạng thái: kèm số, chỉ hiện trạng thái đang có phiếu ── */}
+      <View style={s.chipWrap}>
+        {STATUS_FILTERS
+          .filter(f => f.id === 'all' || (chipCounts[`s:${f.id}`] ?? 0) > 0 || statusFilter === f.id)
+          .map(f => {
+            const n = f.id === 'all' ? allTickets.length : (chipCounts[`s:${f.id}`] ?? 0);
+            const on = statusFilter === f.id;
+            return (
+              <TouchableOpacity key={f.id} style={[s.chip, on && s.chipActive]} onPress={() => setStatusFilter(f.id)}>
+                <Text style={[s.chipText, on && s.chipTextActive]}>{f.label} {n}</Text>
+              </TouchableOpacity>
+            );
+          })}
+      </View>
 
-      {/* ── Category filter chips ────────────────────────────────── */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={s.filterRow2} contentContainerStyle={s.filterContent}>
-        {CAT_FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.id}
-            style={[s.chipSm, categoryFilter === f.id && s.chipSmActive]}
-            onPress={() => setCategoryFilter(f.id)}
-          >
-            <Text style={[s.chipSmText, categoryFilter === f.id && s.chipSmTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* ── Priority filter chips ────────────────────────────────── */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}
-        style={s.filterRow2} contentContainerStyle={s.filterContent}>
-        {PRIO_FILTERS.map(f => (
-          <TouchableOpacity
-            key={f.id}
-            style={[s.chipSm, priorityFilter === f.id && s.chipSmActive]}
-            onPress={() => setPriorityFilter(f.id)}
-          >
-            <Text style={[s.chipSmText, priorityFilter === f.id && s.chipSmTextActive]}>{f.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* ── Ticket list ──────────────────────────────────────────── */}
-      <FlatList
-        data={filteredTickets}
-        keyExtractor={i => i.id}
+      {/* ── Loại + mức độ gộp MỘT hàng; chỉ lựa chọn có phiếu; không lọc được gì thì ẩn ── */}
+      {(() => {
+        const cats = CAT_FILTERS.filter(f => f.id !== 'all' && ((chipCounts[`c:${f.id}`] ?? 0) > 0 || categoryFilter === f.id));
+        const prios = PRIO_FILTERS.filter(f => f.id !== 'all' && ((chipCounts[`p:${f.id}`] ?? 0) > 0 || priorityFilter === f.id));
+        const useCats = cats.length > 1 || categoryFilter !== 'all';
+        const usePrios = prios.length > 1 || priorityFilter !== 'all';
+        if (!useCats && !usePrios) return null;
+        return (
+          <View style={s.chipWrap}>
+            {useCats && cats.map(f => {
+              const on = categoryFilter === f.id;
+              return (
+                <TouchableOpacity key={`c${f.id}`} style={[s.chipSm, on && s.chipSmActive]}
+                  onPress={() => setCategoryFilter(on ? 'all' : f.id)}>
+                  <Text style={[s.chipSmText, on && s.chipSmTextActive]}>{f.label} {chipCounts[`c:${f.id}`] ?? 0}</Text>
+                </TouchableOpacity>
+              );
+            })}
+            {useCats && usePrios && <View style={s.chipSep} />}
+            {usePrios && prios.map(f => {
+              const on = priorityFilter === f.id;
+              return (
+                <TouchableOpacity key={`p${f.id}`} style={[s.chipSm, on && s.chipSmActive]}
+                  onPress={() => setPriorityFilter(on ? 'all' : f.id)}>
+                  <Text style={[s.chipSmText, on && s.chipSmTextActive]}>{f.label} {chipCounts[`p:${f.id}`] ?? 0}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        );
+      })()}
+          </View>
+        }
         renderItem={({ item }) => (
           <TicketCard
             ticket={item}
@@ -403,7 +426,7 @@ const s = StyleSheet.create({
 
   // Summary card (compact)
   summaryCard: {
-    backgroundColor: Colors.white, marginHorizontal: Spacing.base, marginTop: 10,
+    backgroundColor: Colors.white, marginTop: 10,
     borderRadius: BorderRadius.xl, paddingVertical: 10, paddingHorizontal: Spacing.base,
     ...Shadow.sm, borderWidth: 1, borderColor: Colors.border, marginBottom: 10,
   },
@@ -422,7 +445,7 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     paddingHorizontal: Spacing.md, paddingVertical: 7,
-    ...Shadow.sm, marginHorizontal: Spacing.base, marginBottom: 6,
+    ...Shadow.sm, marginBottom: 8,
     borderWidth: 1, borderColor: Colors.border,
   },
   searchIcon:  { fontSize: 14 },
@@ -430,16 +453,16 @@ const s = StyleSheet.create({
   searchClear: { fontSize: 13, color: Colors.textMuted, fontWeight: '600', padding: 4 },
 
   // Filter chips
-  filterRow:    { flexGrow: 0, marginBottom: 4 },
-  filterRow2:   { flexGrow: 0, marginBottom: 8 },
-  filterContent:{ paddingHorizontal: Spacing.base, paddingVertical: 2, gap: 6 },
+  // Chip xuống dòng (flexWrap) thay vì cuộn ngang — không bị ép chiều cao, thấy hết lựa chọn.
+  chipWrap:     { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 },
+  chipSep:      { width: 1, height: 18, backgroundColor: Colors.border, marginHorizontal: 2 },
 
-  chip:         { height: 30, justifyContent: 'center', paddingHorizontal: 12, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border },
+  chip:         { minHeight: 32, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 5, borderRadius: BorderRadius.full, backgroundColor: Colors.white, borderWidth: 1.5, borderColor: Colors.border },
   chipActive:   { backgroundColor: Colors.primary, borderColor: Colors.primary },
   chipText:     { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
   chipTextActive:{ color: Colors.white },
 
-  chipSm:        { height: 26, justifyContent: 'center', paddingHorizontal: 10, borderRadius: BorderRadius.full, backgroundColor: Colors.divider },
+  chipSm:        { minHeight: 28, justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: BorderRadius.full, backgroundColor: Colors.divider },
   chipSmActive:  { backgroundColor: Colors.primaryBg },
   chipSmText:    { fontSize: 11, fontWeight: '600', color: Colors.textSecondary },
   chipSmTextActive:{ color: Colors.primary, fontWeight: '700' },

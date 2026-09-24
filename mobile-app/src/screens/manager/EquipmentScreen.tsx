@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { realEquipmentService } from '@/services/manager/equipmentService';
+import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import QRCode from 'react-native-qrcode-svg';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { type ApiProperty } from '@/services/manager/propertyApi';
@@ -114,6 +115,31 @@ const eqWarrantyEnd = (e: EquipmentDto): string | null | undefined =>
 const eqInstalled = (e: EquipmentDto): string | null | undefined =>
   e.installationDate ?? e.warrantyStartDate;
 
+// ===================== TRẠNG THÁI THEO PHIẾU =====================
+/**
+ * TRẠNG THÁI HIỂN THỊ = suy từ PHIẾU BẢO TRÌ, không đọc thẳng `eq.status`.
+ *
+ * BE chưa đổi `status` của thiết bị khi mở/đóng phiếu (đo 03/10/2026: nhà #5 có 3 phiếu
+ * đang mở mà mọi thiết bị vẫn NEW/GOOD, màn báo "tất cả đang tốt"). Manager đọc được phiếu
+ * của nhà mình nên tự suy:
+ *   • có phiếu CHƯA đóng        → Đang bảo trì
+ *   • NEW nhưng đã sửa xong ≥ 1 → Hoạt động tốt ("Mới" là còn nguyên như lúc mua)
+ *   • còn lại                   → giữ status BE (vd BROKEN do manager báo hỏng tay)
+ */
+const CLOSED_TICKET = new Set(['CLOSED', 'CANCELLED']);
+const openTicketOf = (list?: MaintenanceRequestDto[]) =>
+  (list ?? []).find((t) => !CLOSED_TICKET.has(String(t.status))) ?? null;
+const fixedCountOf = (list?: MaintenanceRequestDto[]) =>
+  (list ?? []).filter((t) => String(t.status) === 'CLOSED').length;
+const shownStatusOf = (e: EquipmentDto, list?: MaintenanceRequestDto[]): EquipmentLifecycleStatus => {
+  if (e.status === 'DISPOSED' || e.status === 'BROKEN') return e.status;
+  if (openTicketOf(list)) return 'MAINTENANCE';
+  if (e.status === 'NEW' && fixedCountOf(list) > 0) return 'GOOD';
+  // BE để MAINTENANCE mà không còn phiếu mở → đã sửa xong.
+  if (e.status === 'MAINTENANCE' && list) return 'GOOD';
+  return e.status;
+};
+
 // ===================== MODAL CHI TIẾT =====================
 const EquipmentDetailModal: React.FC<{
   item: EquipmentDto;
@@ -123,9 +149,10 @@ const EquipmentDetailModal: React.FC<{
   onStatusChange: (id: number, status: EquipmentLifecycleStatus) => Promise<void>;
   /** Mở phiếu bảo trì đầy đủ (ảnh, dòng thời gian) — màn này chỉ tóm tắt. */
   onOpenTicket: (ticketId: number) => void;
-}> = ({ item, wholeHouse, houseName, onClose, onStatusChange, onOpenTicket }) => {
-  const cfg = getEquipmentLifecycleColor(item.status);
-  const [showStatusPicker, setShowStatusPicker] = useState(false);
+  /** Trạng thái suy từ phiếu — xem `shownStatusOf`. */
+  shownStatus: EquipmentLifecycleStatus;
+}> = ({ item, wholeHouse, houseName, onClose, onStatusChange, onOpenTicket, shownStatus }) => {
+  const cfg = getEquipmentLifecycleColor(shownStatus);
   const [saving, setSaving] = useState(false);
 
   const [history, setHistory] = useState<MaintenanceRequestDto[]>([]);
@@ -152,8 +179,8 @@ const EquipmentDetailModal: React.FC<{
   const totalRepairCost = history.reduce((s, r) => s + (Number(r.invoiceAmount) || 0), 0);
   const disabled = item.operationalStatus === 'DISABLED';
 
+  const openTicket = openTicketOf(history);
   const pickStatus = async (status: EquipmentLifecycleStatus) => {
-    setShowStatusPicker(false);
     setSaving(true);
     try {
       await onStatusChange(item.id, status);
@@ -186,9 +213,9 @@ const EquipmentDetailModal: React.FC<{
             {/* Trạng thái + mã */}
             <View style={detailStyles.idRow}>
               <View style={[detailStyles.statusBadge, { backgroundColor: cfg.bg }]}>
-                <Text style={detailStyles.statusIcon}>{STATUS_ICON[item.status] ?? '•'}</Text>
+                <Text style={detailStyles.statusIcon}>{STATUS_ICON[shownStatus] ?? '•'}</Text>
                 <Text style={[detailStyles.statusText, { color: cfg.text }]}>
-                  {getEquipmentLifecycleLabel(item.status)}
+                  {getEquipmentLifecycleLabel(shownStatus)}
                 </Text>
               </View>
               <Text style={detailStyles.assetId}>#{item.id}</Text>
@@ -210,12 +237,17 @@ const EquipmentDetailModal: React.FC<{
               chỉ có chuỗi "EQ-251". `react-native-qrcode-svg` đã nằm sẵn trong dự án và
               đang được dùng ở 3 màn khác (thu tiền, đón khách).
             */}
-            {item.qrCode ? (
+            {/*
+              Thiết bị import không được BE cấp `qrCode` → bản cũ ẩn luôn khối QR, manager không
+              in được tem. Dùng mã dự phòng `EQ-{id}` như web (BE tra ngược được theo id — xem
+              EquipmentServiceImpl.resolveEquipmentByQrFallback), nên món nào cũng có tem.
+            */}
+            {(item.qrCode || item.id) ? (
               <View style={detailStyles.qrBox}>
                 <View style={detailStyles.qrCanvas}>
-                  <QRCode value={item.qrCode} size={120} backgroundColor="#FFFFFF" />
+                  <QRCode value={item.qrCode || `EQ-${item.id}`} size={120} backgroundColor="#FFFFFF" />
                 </View>
-                <Text style={detailStyles.qrCode}>{item.qrCode}</Text>
+                <Text style={detailStyles.qrCode}>{item.qrCode || `EQ-${item.id}`}</Text>
                 <Text style={detailStyles.qrHint}>
                   In và dán lên thiết bị — khách scan để báo hỏng đúng máy này
                 </Text>
@@ -325,25 +357,40 @@ const EquipmentDetailModal: React.FC<{
               )}
             </View>
 
-            {/* Đổi trạng thái */}
+            {/*
+              TRẠNG THÁI TỰ CHẠY THEO PHIẾU — không còn ô chọn tự do 6 giá trị.
+              Chọn tay thì trạng thái lệch phiếu (đang có phiếu sửa mà ghi "Mới"), "Hỏng hóc" và
+              "Đang hỏng" trùng nghĩa, còn "Đã thanh lý" là quyết định tài sản của admin/host.
+              Manager chỉ còn MỘT thao tác tay cho ca không có phiếu: kiểm tra thấy hỏng hẳn.
+            */}
             <View style={detailStyles.section}>
-              <Text style={detailStyles.sectionTitle}>Cập nhật trạng thái</Text>
-              <TouchableOpacity
-                style={detailStyles.statusPickerBtn}
-                disabled={saving}
-                onPress={() => setShowStatusPicker(true)}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color={Colors.primary} />
-                ) : (
-                  <>
-                    <Text style={[detailStyles.statusPickerText, { color: cfg.text }]}>
-                      {STATUS_ICON[item.status] ?? '•'} {getEquipmentLifecycleLabel(item.status)}
-                    </Text>
-                    <Text style={detailStyles.statusPickerArrow}>▼</Text>
-                  </>
+              <Text style={detailStyles.sectionTitle}>Trạng thái</Text>
+              <View style={detailStyles.autoBox}>
+                <Text style={detailStyles.autoText}>
+                  Tự cập nhật theo phiếu bảo trì: có phiếu đang mở → <Text style={{ fontWeight: '700' }}>Đang bảo trì</Text>;
+                  đóng phiếu → <Text style={{ fontWeight: '700' }}>Hoạt động tốt</Text>.
+                </Text>
+                {openTicket && (
+                  <TouchableOpacity onPress={() => onOpenTicket(openTicket.id)} style={{ marginTop: 6 }}>
+                    <Text style={detailStyles.historyOpen}>Xem phiếu đang mở #{openTicket.requestCode} ›</Text>
+                  </TouchableOpacity>
                 )}
-              </TouchableOpacity>
+              </View>
+
+              {item.status !== 'DISPOSED' && !openTicket && (
+                saving ? (
+                  <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: Spacing.md }} />
+                ) : item.status === 'BROKEN' ? (
+                  <TouchableOpacity style={[detailStyles.manualBtn, detailStyles.manualBtnOk]} onPress={() => pickStatus('GOOD')}>
+                    <Text style={[detailStyles.manualBtnText, { color: Colors.success }]}>✅ Đã thay / sửa xong — dùng lại được</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={detailStyles.manualBtn} onPress={() => pickStatus('BROKEN')}>
+                    <Text style={[detailStyles.manualBtnText, { color: Colors.error }]}>❌ Báo hỏng — cần thay</Text>
+                    <Text style={detailStyles.manualBtnHint}>Dùng khi kiểm tra thấy hỏng hẳn mà không có phiếu bảo trì</Text>
+                  </TouchableOpacity>
+                )
+              )}
             </View>
 
             <View style={{ height: 40 }} />
@@ -351,36 +398,6 @@ const EquipmentDetailModal: React.FC<{
         </View>
       </View>
 
-      {/* Chọn trạng thái */}
-      {showStatusPicker && (
-        <Modal transparent animationType="fade" onRequestClose={() => setShowStatusPicker(false)}>
-          <TouchableOpacity
-            style={detailStyles.pickerOverlay}
-            activeOpacity={1}
-            onPress={() => setShowStatusPicker(false)}
-          >
-            <View style={detailStyles.pickerContent}>
-              <Text style={detailStyles.pickerTitle}>Cập nhật trạng thái</Text>
-              {STATUS_ORDER.map((key) => {
-                const c = getEquipmentLifecycleColor(key);
-                return (
-                  <TouchableOpacity
-                    key={key}
-                    style={[detailStyles.pickerOption, item.status === key && detailStyles.pickerOptionActive]}
-                    onPress={() => pickStatus(key)}
-                  >
-                    <Text style={detailStyles.pickerOptionIcon}>{STATUS_ICON[key]}</Text>
-                    <Text style={[detailStyles.pickerOptionText, { color: c.text }]}>
-                      {getEquipmentLifecycleLabel(key)}
-                    </Text>
-                    {item.status === key && <Text style={detailStyles.pickerCheck}>✓</Text>}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
     </Modal>
   );
 };
@@ -474,6 +491,15 @@ const detailStyles = StyleSheet.create({
   historyFault: { fontSize: 11, fontWeight: '700', color: Colors.error },
   historyCost: { fontSize: 13, fontWeight: '700', color: Colors.error },
   historyOpen: { fontSize: 12, fontWeight: '700', color: Colors.primary, marginTop: 2, alignSelf: 'flex-end' },
+  autoBox: { backgroundColor: Colors.background, borderRadius: BorderRadius.md, padding: Spacing.md },
+  autoText: { fontSize: 12, color: Colors.textSecondary, lineHeight: 18 },
+  manualBtn: {
+    marginTop: Spacing.md, borderWidth: 1.5, borderColor: Colors.errorLight, borderRadius: BorderRadius.lg,
+    padding: Spacing.md, backgroundColor: Colors.white,
+  },
+  manualBtnOk: { borderColor: Colors.successLight },
+  manualBtnText: { fontSize: 14, fontWeight: '700' },
+  manualBtnHint: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: Spacing.xl },
   pickerContent: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.xl },
   pickerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.lg },
@@ -645,13 +671,28 @@ const HouseEquipment: React.FC<{
   const [selectedStatus, setSelectedStatus] = useState<EquipmentLifecycleStatus | 'all'>('all');
   const [search, setSearch] = useState<string>(initialSearch);
   const [selectedItem, setSelectedItem] = useState<EquipmentDto | null>(null);
+  /** Phiếu bảo trì của nhà, gom theo thiết bị. `null` = không tải được → dùng status BE. */
+  const [tickets, setTickets] = useState<Map<number, MaintenanceRequestDto[]> | null>(null);
 
   const loadEquipment = useCallback(async (silent = false) => {
     if (!silent) setListLoading(true);
     setError(null);
     try {
-      const eqs = await realEquipmentService.getByProperty(house.id);
+      const [eqs, page] = await Promise.all([
+        realEquipmentService.getByProperty(house.id),
+        realMaintenanceService.listForManager({ propertyId: house.id, size: 500 } as never).catch(() => null),
+      ]);
       setEquipments(eqs ?? []);
+      if (page) {
+        const map = new Map<number, MaintenanceRequestDto[]>();
+        for (const t of page.content ?? []) {
+          if (t.equipmentId == null) continue;
+          map.set(t.equipmentId, [...(map.get(t.equipmentId) ?? []), t]);
+        }
+        setTickets(map);
+      } else {
+        setTickets(null);
+      }
     } catch (err) {
       setEquipments([]);
       setError(readApiError(err, 'Không tải được danh sách thiết bị.'));
@@ -661,6 +702,11 @@ const HouseEquipment: React.FC<{
   }, [house.id]);
 
   useEffect(() => { loadEquipment(); }, [loadEquipment]);
+
+  const statusOf = useCallback(
+    (e: EquipmentDto) => (tickets ? shownStatusOf(e, tickets.get(e.id)) : e.status),
+    [tickets],
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -678,7 +724,7 @@ const HouseEquipment: React.FC<{
     const q = normalizeVi(search.trim());
     return equipments.filter((e) => {
       const matchCat = selectedCategory === 'Tất cả' || eqCategory(e) === selectedCategory;
-      const matchStatus = selectedStatus === 'all' || e.status === selectedStatus;
+      const matchStatus = selectedStatus === 'all' || statusOf(e) === selectedStatus;
       const matchSearch =
         !q ||
         normalizeVi(eqName(e)).includes(q) ||
@@ -687,7 +733,7 @@ const HouseEquipment: React.FC<{
         String(e.id) === q;
       return matchCat && matchStatus && matchSearch;
     });
-  }, [equipments, selectedCategory, selectedStatus, search, isWholeHouse]);
+  }, [equipments, selectedCategory, selectedStatus, search, isWholeHouse, statusOf]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, EquipmentDto[]> = {};
@@ -701,10 +747,10 @@ const HouseEquipment: React.FC<{
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { all: equipments.length };
     STATUS_ORDER.forEach((s) => {
-      counts[s] = equipments.filter((e) => e.status === s).length;
+      counts[s] = equipments.filter((e) => statusOf(e) === s).length;
     });
     return counts;
-  }, [equipments]);
+  }, [equipments, statusOf]);
 
   /**
    * Chỉ vẽ chip có thiết bị — cộng chip đang chọn (để còn thấy đường bỏ chọn khi lọc
@@ -863,8 +909,12 @@ const HouseEquipment: React.FC<{
                 </View>
                 <View style={styles.roomCard}>
                   {items.map((eq, idx) => {
-                    const cfg = getEquipmentLifecycleColor(eq.status);
+                    const st = statusOf(eq);
+                    const cfg = getEquipmentLifecycleColor(st);
                     const w = warrantyFlag(eqWarrantyEnd(eq));
+                    const list = tickets?.get(eq.id);
+                    const open = openTicketOf(list);
+                    const fixed = tickets ? fixedCountOf(list) : eq.maintenanceCount;
                     return (
                       <TouchableOpacity
                         key={eq.id}
@@ -874,7 +924,7 @@ const HouseEquipment: React.FC<{
                       >
                         <View style={styles.eqRowLeft}>
                           <Text style={styles.eqName} numberOfLines={1}>
-                            {eq.status !== 'GOOD' && eq.status !== 'NEW' ? `${STATUS_ICON[eq.status]} ` : ''}
+                            {st !== 'GOOD' && st !== 'NEW' ? `${STATUS_ICON[st]} ` : ''}
                             {eqName(eq)}
                           </Text>
                           {/*
@@ -887,14 +937,20 @@ const HouseEquipment: React.FC<{
                               eq.qrCode?.trim() || `#${eq.id}`,
                               eq.category?.trim(),
                               eq.operationalStatus === 'DISABLED' ? 'Đã gỡ' : null,
-                              eq.maintenanceCount > 0 ? `🔧 ${eq.maintenanceCount} lần sửa` : null,
+                              fixed > 0 ? `đã sửa ${fixed} lần` : null,
                             ].filter(Boolean).join(' · ')}
                           </Text>
+                          {/* Đang sửa: nói luôn phiếu nào, tới bước nào — khỏi mở chi tiết */}
+                          {open && (
+                            <Text style={styles.eqOpenTicket} numberOfLines={1}>
+                              🔧 #{open.requestCode} · {MAINTENANCE_STATUS_META[mapBeStatus(open.status) as keyof typeof MAINTENANCE_STATUS_META]?.label ?? 'Đang xử lý'}
+                            </Text>
+                          )}
                         </View>
                         <View style={styles.eqRowRight}>
                           <View style={[styles.eqStatus, { backgroundColor: cfg.bg }]}>
                             <Text style={[styles.eqStatusText, { color: cfg.text }]}>
-                              {getEquipmentLifecycleLabel(eq.status)}
+                              {getEquipmentLifecycleLabel(st)}
                             </Text>
                           </View>
                           {/* Bảo hành CHỈ hiện khi sắp hết hoặc đã hết — xem `warrantyFlag`. */}
@@ -918,6 +974,7 @@ const HouseEquipment: React.FC<{
           houseName={house.propertyName}
           onClose={() => setSelectedItem(null)}
           onStatusChange={handleStatusChange}
+          shownStatus={statusOf(selectedItem)}
           // Đóng bảng trước rồi mới sang phiếu — Modal còn mở thì phủ lên màn mới.
           onOpenTicket={(ticketId) => {
             setSelectedItem(null);
@@ -1022,6 +1079,7 @@ const styles = StyleSheet.create({
   eqRowRight: { alignItems: 'flex-end', gap: 2 },
   eqName: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   eqMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  eqOpenTicket: { fontSize: 11, fontWeight: '700', color: Colors.info, marginTop: 2 },
   eqStatus: { paddingHorizontal: Spacing.sm, paddingVertical: 3, borderRadius: BorderRadius.full },
   eqStatusText: { fontSize: 11, fontWeight: '600' },
   eqWarranty: { fontSize: 10, color: Colors.textMuted },

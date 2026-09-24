@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import {
 
   BarChart3,
   CreditCard, ShieldAlert,
   FileText, CalendarPlus,
   FilePlus,
-  Gavel,
   MapPin,
   Menu,
   KeyRound,
@@ -27,6 +26,14 @@ import {
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { NotificationBell } from '@/components/NotificationBell';
 import { maintenanceService } from '@/services/maintenance.service';
+import { extensionRequestService } from '@/services/extensionRequest.service';
+import { invoiceDisputeService } from '@/services/invoiceDispute.service';
+import { isNotFound, meterOverrideService } from '@/services/meterOverride.service';
+import { ADMIN_BADGES_EVENT } from '@/utils/adminBadges';
+import { handoverService } from '@/services/handover.service';
+import { evnBillService } from '@/services/evnBill.service';
+import { waterBillService } from '@/services/waterBill.service';
+import { arrearsPeriod } from '@/utils/evnInvoiceParser';
 import { UnreadNotificationsProvider } from '@/contexts/UnreadNotificationsContext';
 import { AppSidebar, type SidebarSection } from './AppSidebar';
 import { UserMenu } from './UserMenu';
@@ -69,7 +76,41 @@ import { UserMenu } from './UserMenu';
  * khách" (01/09/2026) đứng cùng nhóm vì cùng bản chất: admin phân xử lời manager tố
  * khách gây hư hỏng, không phải việc vận hành hằng ngày.
  */
-const buildSections = (openMaintenance: number, pendingFaultReview: number): SidebarSection[] => [
+/**
+ * Số việc đang chờ admin ở từng mục menu. 0 = không gắn badge.
+ * Mỗi số lấy từ đúng API của trang đó, cùng điều kiện lọc với tab "chờ" của trang — số
+ * trên menu phải bằng số dòng admin thấy khi bấm vào.
+ */
+interface AdminBadgeCounts {
+  openMaintenance: number;
+  /** Yêu cầu xin mã đồng hồ manager gửi, chưa được cấp/từ chối. */
+  meterRequests: number;
+  /** Đơn gia hạn PENDING. */
+  extensionRequests: number;
+  /** Khiếu nại hoá đơn điện/nước OPEN. */
+  utilityDisputes: number;
+  /**
+   * Nhà ĐANG CÓ KHÁCH mà chưa tải hoá đơn tổng điện / nước của KỲ TRƯỚC.
+   * Điện nước trả sau (xem `arrearsPeriod`) — cùng kỳ mặc định với trang phát hành.
+   * "Có khách" theo `handover-status` giống ô chọn nhà của trang đó, để số trên menu bằng
+   * số nhà admin thấy khi bấm vào.
+   */
+  evnMissing: number;
+  waterMissing: number;
+}
+
+const NO_BADGES: AdminBadgeCounts = {
+  openMaintenance: 0, meterRequests: 0, extensionRequests: 0, utilityDisputes: 0,
+  evnMissing: 0, waterMissing: 0,
+};
+
+/** Hỏi lại mỗi phút — việc mới (manager xin mã, khách khiếu nại) tới bất kỳ lúc nào. */
+const BADGE_POLL_MS = 60_000;
+
+const buildSections = ({
+  openMaintenance, meterRequests, extensionRequests, utilityDisputes,
+  evnMissing, waterMissing,
+}: AdminBadgeCounts): SidebarSection[] => [
   {
     // Không tiêu đề — một mục thì tiêu đề không phân loại thêm được gì.
     items: [{ label: 'Bảng điều hành', path: '/admin', icon: BarChart3, end: true }],
@@ -94,7 +135,8 @@ const buildSections = (openMaintenance: number, pendingFaultReview: number): Sid
       { label: 'Tình trạng nhà & phòng', path: '/admin/handover', icon: PackageCheck },
       { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
       // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
-      { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound },
+      // Badge = yêu cầu xin mã manager gửi từ app, chưa ai cấp (24/09/2026).
+      { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound, badge: meterRequests || undefined },
       { label: 'Phân công khu vực', path: '/admin/zones/assignment', icon: UserCog },
     ],
   },
@@ -105,13 +147,14 @@ const buildSections = (openMaintenance: number, pendingFaultReview: number): Sid
       { label: 'Hợp đồng', path: '/admin/contracts', icon: FileText },
       // Đơn xin gia hạn: khách đề nghị, ADMIN duyệt — quản lý chỉ góp ý. Xem
       // services/extensionRequest.service.ts để biết vì sao không để quản lý duyệt.
-      { label: 'Đơn gia hạn', path: '/admin/extension-requests', icon: CalendarPlus },
+      { label: 'Đơn gia hạn', path: '/admin/extension-requests', icon: CalendarPlus, badge: extensionRequests || undefined },
       // Từ 13/08/2026 admin là người tải hoá đơn EVN lên, không còn là manager —
       // xem services/evnBill.service.ts để biết vì sao đổi.
-      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap },
+      // Badge = nhà có khách chưa tải hoá đơn điện kỳ trước (vàng: việc cần làm, chưa trễ).
+      { label: 'Hoá đơn điện EVN', path: '/admin/evn-bills', icon: Zap, badge: evnMissing || undefined, badgeAlert: true, badgeTitle: `${evnMissing} nhà chưa tải hoá đơn điện kỳ trước` },
       // Nước đi cùng mô hình với điện từ 14/08/2026 — trước đó manager tự khai đơn giá
       // nước trong app, không ai đối chiếu được với hoá đơn giấy.
-      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets },
+      { label: 'Hoá đơn nước', path: '/admin/water-bills', icon: Droplets, badge: waterMissing || undefined, badgeAlert: true, badgeTitle: `${waterMissing} nhà chưa tải hoá đơn nước kỳ trước` },
     ],
   },
   {
@@ -120,13 +163,11 @@ const buildSections = (openMaintenance: number, pendingFaultReview: number): Sid
     items: [
       // Chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
       { label: 'Hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
-      // Manager báo lỗi do khách (report-fault, 01/09/2026) — admin phân xử đúng/sai,
-      // cùng bản chất xét xử như 2 mục trên, không phải việc vận hành hằng ngày.
-      { label: 'Báo lỗi do khách', path: '/admin/maintenance/fault-review', icon: Gavel, badge: pendingFaultReview || undefined },
+      // "Báo lỗi do khách" đã gộp vào Bảo trì & thiết bị → nhóm "Lỗi do khách" (24/09/2026).
       // Khiếu nại hoá đơn điện/nước (24/08/2026) — cùng lý do: là lời tố nhắm vào chính
       // người phát hành hoá đơn (admin) hoặc người đọc đồng hồ (quản lý), nên không để
       // hai vai đó tự phân xử. Admin cũng là vai duy nhất huỷ được hoá đơn đã phát hành.
-      { label: 'Hoá đơn điện nước', path: '/admin/utility-disputes', icon: ReceiptText },
+      { label: 'Hoá đơn điện nước', path: '/admin/utility-disputes', icon: ReceiptText, badge: utilityDisputes || undefined },
     ],
   },
   {
@@ -157,33 +198,67 @@ const initialsOf = (name?: string) =>
 
 export const AdminLayout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openMaintenance, setOpenMaintenance] = useState(0);
-  const [pendingFaultReview, setPendingFaultReview] = useState(0);
+  const [badges, setBadges] = useState<AdminBadgeCounts>(NO_BADGES);
   const { user, logout } = useWebAuth();
+  const { pathname } = useLocation();
+  /** Endpoint yêu cầu xin mã trả 404 (BE chưa làm) → thôi hỏi cho tới khi tải lại trang. */
+  const meterUnsupportedRef = useRef(false);
 
-  // Badge bảo trì = yêu cầu chờ + đang xử lý (số thật, cùng nguồn với Bảng điều hành).
-  useEffect(() => {
-    let active = true;
-    maintenanceService.getDashboard()
-      .then(d => { if (active && d) setOpenMaintenance((d.pending ?? 0) + (d.inProgress ?? 0)); })
-      .catch(() => { /* lỗi mạng: không gắn badge còn hơn gắn số sai */ });
-    return () => { active = false; };
+  /**
+   * Đếm lại mọi badge. Mỗi nguồn chạy độc lập (`allSettled`): một API lỗi hay chưa có
+   * (404) thì chỉ mục đó mất badge — giữ số cũ, không gắn số sai — các mục khác vẫn đếm.
+   */
+  const refreshBadges = useCallback(async () => {
+    const [maint, meter, ext, disputes] = await Promise.allSettled([
+      // Bảo trì = yêu cầu chờ + đang xử lý (số thật, cùng nguồn với Bảng điều hành).
+      maintenanceService.getDashboard().then(d => (d?.pending ?? 0) + (d?.inProgress ?? 0)),
+      meterUnsupportedRef.current
+        ? Promise.resolve(0)
+        : meterOverrideService.listRequests('PENDING')
+          .then(rows => rows.filter(r => r.status === 'PENDING').length)
+          .catch(e => { if (isNotFound(e)) meterUnsupportedRef.current = true; throw e; }),
+      extensionRequestService.list('PENDING').then(rows => rows.filter(r => r.status === 'PENDING').length),
+      invoiceDisputeService.list().then(rows => rows.filter(r => r.status === 'OPEN').length),
+    ]);
+
+    // Hoá đơn tổng điện/nước kỳ trước còn thiếu ở nhà nào đang có khách.
+    const { month, year } = arrearsPeriod();
+    const [occ, evn, water] = await Promise.allSettled([
+      handoverService.list().then(rows =>
+        new Set(rows.filter(r => (r.roomsHandedOver ?? 0) > 0).map(r => r.propertyId))),
+      evnBillService.list({ month, year }),
+      waterBillService.list({ month, year }),
+    ]);
+    const missing = (bills: PromiseSettledResult<{ propertyId: number; status?: string }[]>): number | null => {
+      if (occ.status !== 'fulfilled' || bills.status !== 'fulfilled') return null;
+      const has = new Set(bills.value.filter(b => b.status !== 'REVOKED').map(b => b.propertyId));
+      return [...occ.value].filter(id => !has.has(id)).length;
+    };
+    const evnMissing = missing(evn as PromiseSettledResult<{ propertyId: number; status?: string }[]>);
+    const waterMissing = missing(water as PromiseSettledResult<{ propertyId: number; status?: string }[]>);
+    setBadges(prev => {
+      const pick = (r: PromiseSettledResult<number>, old: number) => (r.status === 'fulfilled' ? r.value : old);
+      return {
+        openMaintenance: pick(maint, prev.openMaintenance),
+        meterRequests: pick(meter, prev.meterRequests),
+        extensionRequests: pick(ext, prev.extensionRequests),
+        utilityDisputes: pick(disputes, prev.utilityDisputes),
+        evnMissing: evnMissing ?? prev.evnMissing,
+        waterMissing: waterMissing ?? prev.waterMissing,
+      };
+    });
   }, []);
 
-  // Badge "Báo lỗi do khách" = phiếu report-fault (faultResolutionPath null) chưa admin-review.
+  // Đếm lại khi đổi trang (vừa xử xong việc ở trang cũ), mỗi phút, và khi trang con báo.
+  useEffect(() => { void refreshBadges(); }, [pathname, refreshBadges]);
   useEffect(() => {
-    let active = true;
-    maintenanceService.getRequests({ status: 'TENANT_FAULT' }, 0, 200)
-      .then(page => {
-        if (!active) return;
-        const n = (page.content ?? []).filter(r => !r.faultResolutionPath && !r.adminReviewedAt).length;
-        setPendingFaultReview(n);
-      })
-      .catch(() => { /* lỗi mạng: không gắn badge còn hơn gắn số sai */ });
-    return () => { active = false; };
-  }, []);
+    const t = setInterval(() => { void refreshBadges(); }, BADGE_POLL_MS);
+    const onRefresh = () => { void refreshBadges(); };
+    window.addEventListener(ADMIN_BADGES_EVENT, onRefresh);
+    return () => { clearInterval(t); window.removeEventListener(ADMIN_BADGES_EVENT, onRefresh); };
+  }, [refreshBadges]);
 
-  const sections = buildSections(openMaintenance, pendingFaultReview);
+  const sections = buildSections(badges);
   const sidebarUser = {
     name: user?.fullName ?? 'Admin',
     subtitle: user?.username ? `@${user.username}` : 'Toàn quyền hệ thống',

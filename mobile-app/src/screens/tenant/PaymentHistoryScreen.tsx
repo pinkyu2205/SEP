@@ -228,13 +228,6 @@ const METHOD_CONFIG: Record<string, { label: string; emoji: string }> = {
   other: { label: 'Khác', emoji: '💳' },
 };
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  pending: { label: 'Chờ xác nhận', color: Colors.warning, bg: Colors.warningLight },
-  processing: { label: 'Đang xử lý', color: Colors.info, bg: Colors.infoLight },
-  verified: { label: 'Đã xác nhận', color: Colors.success, bg: Colors.successLight },
-  rejected: { label: 'Bị từ chối', color: Colors.error, bg: Colors.errorLight },
-};
-
 /** Đồng bộ với TYPE_CONFIG ở màn Hoá đơn để hai màn nhìn ra cùng một loại phí. */
 const TYPE_CONFIG: Record<PayKind, { label: string; icon: string; color: string; bg: string }> = {
   RENT: { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
@@ -253,12 +246,11 @@ const ONBOARD_TYPE_CFG = {
 const typeCfg = (t: PayKind) => TYPE_CONFIG[t] ?? TYPE_CONFIG.OTHER;
 
 type TypeFilter = 'all' | PayKind;
-type MethodFilter = 'all' | PaymentTransaction['method'];
 
 const TYPE_TABS: { key: TypeFilter; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
-  { key: 'RENT', label: '🏠 Tiền phòng' },
-  { key: 'DEPOSIT', label: '🔐 Tiền cọc' },
+  { key: 'RENT', label: '🏠 Phòng' },
+  { key: 'DEPOSIT', label: '🔐 Cọc' },
   { key: 'ELECTRICITY', label: '⚡ Điện' },
   { key: 'WATER', label: '💧 Nước' },
   { key: 'MAINTENANCE', label: '🔧 Bảo trì' },
@@ -268,12 +260,6 @@ const TYPE_TABS: { key: TypeFilter; label: string }[] = [
 const DEPOSIT_METHOD_MAP: Record<string, PaymentTransaction['method']> = {
   PAYOS: 'bank_transfer', CASH: 'cash', QR: 'qr', BANK_TRANSFER: 'bank_transfer',
 };
-const METHOD_TABS: { key: MethodFilter; label: string }[] = [
-  { key: 'all', label: 'Mọi hình thức' },
-  { key: 'qr', label: '📱 QR' },
-  { key: 'bank_transfer', label: '🏦 Chuyển khoản' },
-  { key: 'cash', label: '💵 Tiền mặt' },
-];
 
 const monthLabel = (key: string) => {
   const [y, m] = key.split('-');
@@ -292,7 +278,6 @@ export const PaymentHistoryScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [methodFilter, setMethodFilter] = useState<MethodFilter>('all');
   const [query, setQuery] = useState('');
 
   /**
@@ -397,15 +382,33 @@ export const PaymentHistoryScreen: React.FC = () => {
     };
   }, [transactions]);
 
+  /**
+   * MỘT hàng lọc (24/09/2026): chỉ những loại khách thực sự đã trả, kèm số giao dịch.
+   * Bản cũ có 2 hàng (6 loại cố định + 4 hình thức) — chip rỗng, bị cắt mép, lọc theo
+   * hình thức gần như không ai dùng (tìm mã giao dịch ở ô tìm kiếm là đủ).
+   */
+  const typeChips = useMemo(() => {
+    const chips: { key: TypeFilter; label: string; count: number }[] = [
+      { key: 'all', label: 'Tất cả', count: countTxns(transactions) },
+    ];
+    for (const tab of TYPE_TABS) {
+      if (tab.key === 'all') continue;
+      const n = countTxns(transactions.filter(t => t.invoiceType === tab.key));
+      if (n > 0) chips.push({ key: tab.key, label: tab.label, count: n });
+    }
+    return chips;
+  }, [transactions]);
+  // Loại đang chọn không còn giao dịch nào → tự về "Tất cả".
+  const activeType: TypeFilter = typeChips.some(c => c.key === typeFilter) ? typeFilter : 'all';
+
   const filtered = useMemo(() => {
     const q = norm(query.trim());
     return transactions.filter(t =>
-      (typeFilter === 'all' || t.invoiceType === typeFilter) &&
-      (methodFilter === 'all' || t.method === methodFilter) &&
+      (activeType === 'all' || t.invoiceType === activeType) &&
       (!q || [t.invoiceCode, t.transferContent, t.propertyName, t.roomName]
         .some(v => v && norm(String(v)).includes(q))),
     );
-  }, [transactions, typeFilter, methodFilter, query]);
+  }, [transactions, activeType, query]);
 
   /**
    * TIỀN CỌC GHIM LÊN ĐẦU, phần còn lại gom theo tháng (mới nhất trước).
@@ -460,7 +463,7 @@ export const PaymentHistoryScreen: React.FC = () => {
     ];
   }, [filtered]);
 
-  const hasFilter = typeFilter !== 'all' || methodFilter !== 'all' || !!query.trim();
+  const hasFilter = activeType !== 'all' || !!query.trim();
 
   /**
    * ── NHÓM THÁNG GẬP LẠI ĐƯỢC ──────────────────────────────────────────────
@@ -499,143 +502,60 @@ export const PaymentHistoryScreen: React.FC = () => {
     return next;
   });
 
-  const renderTransaction = ({ item }: { item: Txn }) => {
-    const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
-    const status = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending;
-    const place = [item.propertyName, item.roomName].filter(Boolean).join(' · ');
-    // Hoá đơn onboard mang `type = OTHER` nên rơi vào nhãn "Khác" — vô nghĩa với khách.
-    // Nhận diện theo MÃ và dùng đúng nhãn như các màn hoá đơn khác.
-    const onboard = isOnboardCode(item.invoiceCode);
-    const onboardInvoice = onboard ? invoiceByCode.get(item.invoiceCode) : undefined;
-    // Dòng đã tách thì gắn nhãn theo đúng khoản của nó (Tiền cọc / Tiền phòng), chứ
-    // không dùng nhãn gộp "Thu khi nhận phòng" nữa — tách ra mà vẫn chung một nhãn thì
-    // nhìn hệt như bị hiển thị lặp.
-    const cfg = item.splitPart
-      ? typeCfg(item.invoiceType)
-      : onboard ? ONBOARD_TYPE_CFG : typeCfg(item.invoiceType);
-
-    return (
-      <TouchableOpacity
-        style={[styles.card, item.duplicate && styles.cardDuplicate]}
-        activeOpacity={0.75}
-        onPress={() => {
-          // Khoản thu lúc nhận phòng là khoản GỘP (cọc + tiền nhà chu kỳ đầu) → mở màn
-          // hoá đơn để khách thấy nó gồm những gì. Màn "Chi tiết giao dịch" chỉ nói được
-          // đã chuyển bao nhiêu, bằng cách nào — không tách được khoản gộp.
-          if (onboardInvoice) {
-            navigation.navigate('InvoiceDetail', { invoice: onboardInvoice });
-          } else if (item.contractId) {
-            // Cọc không có bản ghi giao dịch riêng → mở thẳng hợp đồng chứa nó.
-            navigation.navigate('ContractDetail', { contractId: item.contractId });
-          } else {
-            navigation.navigate('PaymentHistoryDetail', { transaction: item });
-          }
-        }}
-      >
-        <View style={styles.cardTop}>
-          {/* Icon theo LOẠI PHÍ chứ không theo phương thức: khách quan tâm
-              "trả tiền gì" trước, "trả bằng cách nào" là thông tin phụ ở dưới. */}
-          <View style={[styles.typeIcon, { backgroundColor: cfg.bg }]}>
-            <Text style={{ fontSize: 18 }}>{cfg.icon}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <View style={styles.codeRow}>
-              {/* Dòng tách ra hiện TÊN KHOẢN THU thay vì mã hoá đơn: hai nửa dùng chung
-                  một mã HD-ONBOARD-*, để mã lên đầu thì hai thẻ nhìn y hệt nhau. */}
-              <Text style={styles.invoiceCode} numberOfLines={1}>
-                {item.splitLabel ?? item.invoiceCode}
-              </Text>
-              <View style={[styles.typeTag, { backgroundColor: cfg.bg }]}>
-                <Text style={[styles.typeTagText, { color: cfg.color }]}>{cfg.label}</Text>
-              </View>
-            </View>
-            {!!place && <Text style={styles.place} numberOfLines={1}>{place}</Text>}
-            {!!item.splitNote && (
-              <Text style={styles.splitNote} numberOfLines={2}>{item.splitNote}</Text>
-            )}
-          </View>
-          <Text style={[styles.amountValue, item.duplicate && styles.amountMuted]}>
-            {formatCurrency(item.amount)}
-          </Text>
-        </View>
-
-        {item.duplicate && (
-          <View style={styles.dupNote}>
-            <Text style={styles.dupNoteText}>
-              ⚠️ Hoá đơn này đã được ghi nhận thanh toán ở giao dịch trước — khoản này
-              không cộng vào tổng. Nếu bạn đã bị trừ tiền hai lần, hãy báo quản lý.
-            </Text>
-          </View>
-        )}
-
-
-        {item.splitPart && (
-          <View style={styles.splitBox}>
-            <Text style={styles.splitBoxText}>
-              🔗 Trả chung một lần khi nhận phòng · {item.invoiceCode}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.divider} />
-
-        <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Hình thức</Text>
-            <Text style={styles.metaValue}>{method.emoji} {method.label}</Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Thời gian</Text>
-            <Text style={styles.metaValue}>{formatDateTime(item.createdAt)}</Text>
-          </View>
-        </View>
-
-        {!!item.transferContent && (
-          <View style={styles.transferRow}>
-            <Text style={styles.metaLabel}>Mã giao dịch / Nội dung CK</Text>
-            <Text style={styles.transferContent} numberOfLines={1}>{item.transferContent}</Text>
-          </View>
-        )}
-
-        {item.status === 'rejected' && (
-          <View style={styles.rejectedNote}>
-            <Text style={styles.rejectedText}>
-              ❌ Giao dịch bị từ chối. Vui lòng liên hệ quản lý để biết thêm chi tiết.
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.cardFoot}>
-          <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-            <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-          </View>
-          <Text style={styles.detailLink}>
-            {onboardInvoice ? 'Xem hoá đơn →' : item.contractId ? 'Xem hợp đồng →' : 'Xem chi tiết →'}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
+  const openTxn = (item: Txn) => {
+    // Khoản thu lúc nhận phòng là khoản GỘP → mở hoá đơn để thấy nó gồm những gì.
+    const onboardInvoice = isOnboardCode(item.invoiceCode) ? invoiceByCode.get(item.invoiceCode) : undefined;
+    if (onboardInvoice) navigation.navigate('InvoiceDetail', { invoice: onboardInvoice });
+    // Cọc không có bản ghi giao dịch riêng → mở thẳng hợp đồng chứa nó.
+    else if (item.contractId) navigation.navigate('ContractDetail', { contractId: item.contractId });
+    else navigation.navigate('PaymentHistoryDetail', { transaction: item });
   };
 
   /**
-   * Thẻ giao dịch nằm TRONG khung của tháng.
-   *
-   * Hai viền hai bên do lớp bọc này vẽ, nối liền với nắp trên (tiêu đề tháng) và nắp
-   * dưới (footer) thành một cái khung khép kín — nhìn là biết mấy hoá đơn này thuộc về
-   * tháng nào, thay vì một dãy thẻ trôi tự do dưới một dòng chữ.
+   * Một giao dịch = MỘT DÒNG gọn (làm lại 24/09/2026): icon loại · tên khoản + kỳ ·
+   * "hình thức · thời gian" · số tiền. Bản cũ mỗi giao dịch là một thẻ ~180px với ô
+   * Hình thức/Thời gian/Mã CK/badge "Đã xác nhận" (mọi dòng đều đã xác nhận) — màn hình
+   * chỉ chứa được 2 giao dịch. Mã giao dịch, nội dung CK xem ở màn chi tiết.
    */
-  const renderInsideMonth = ({ item, index }: { item: Txn; index: number }) => (
-    <View style={styles.sectionBody}>
-      {/* Vạch ngăn mảnh giữa các giao dịch, KHÔNG phải mỗi giao dịch một thẻ nổi. */}
-      {index > 0 && <View style={styles.rowDivider} />}
-      {renderTransaction({ item })}
-    </View>
-  );
+  const renderTransaction = ({ item, index }: { item: Txn; index: number }) => {
+    const method = METHOD_CONFIG[item.method] || METHOD_CONFIG.other;
+    const onboard = isOnboardCode(item.invoiceCode);
+    const cfg = item.splitPart
+      ? typeCfg(item.invoiceType)
+      : onboard ? ONBOARD_TYPE_CFG : typeCfg(item.invoiceType);
+    const title = item.splitLabel ?? (onboard ? ONBOARD_TYPE_CFG.label : cfg.label);
 
-  /**
-   * Tháng đang gập thì `data` rỗng — SectionList không dựng thẻ nào của tháng đó.
-   * Dựng hết rồi ẩn bằng style thì vẫn trả đủ giá, mà đây có thể là hàng chục giao dịch.
-   */
+    return (
+      <View style={styles.sectionBody}>
+        {index > 0 && <View style={styles.rowDivider} />}
+        <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => openTxn(item)}>
+          <View style={[styles.typeIcon, { backgroundColor: cfg.bg }]}>
+            <Text style={{ fontSize: 17 }}>{cfg.icon}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
+            <Text style={styles.rowSub} numberOfLines={1}>
+              {method.emoji} {method.label} · {formatDateTime(item.createdAt)}
+            </Text>
+            {!!item.splitNote && <Text style={styles.rowNote} numberOfLines={2}>{item.splitNote}</Text>}
+            {item.duplicate && (
+              <Text style={styles.rowWarn}>
+                Ghi nhận trùng — không cộng vào tổng. Nếu bị trừ tiền 2 lần, hãy báo quản lý.
+              </Text>
+            )}
+            {item.status === 'rejected' && (
+              <Text style={styles.rowWarn}>Giao dịch bị từ chối — liên hệ quản lý.</Text>
+            )}
+          </View>
+          <Text style={[styles.rowAmount, item.duplicate && styles.amountMuted]}>
+            {formatCurrency(item.amount)}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  /** Tháng đang gập thì `data` rỗng — không dựng thẻ nào của tháng đó. */
   const visibleSections = useMemo(
     () => sections.map(s => (isOpen(s.key) ? s : { ...s, data: [] as Txn[] })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -643,19 +563,18 @@ export const PaymentHistoryScreen: React.FC = () => {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>← Quay lại</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
+          <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Lịch sử thanh toán</Text>
-        <View style={{ width: 80 }} />
+        <Text style={styles.headerTitle}>Đã thanh toán</Text>
       </View>
 
       <SectionList
         sections={visibleSections}
         keyExtractor={t => t.id}
-        renderItem={renderInsideMonth}
+        renderItem={renderTransaction}
         stickySectionHeadersEnabled={false}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -668,36 +587,25 @@ export const PaymentHistoryScreen: React.FC = () => {
           />
         }
         ListHeaderComponent={
-          <>
-            {/* ── Tổng quan ── */}
+          <View style={{ gap: Spacing.md, marginBottom: Spacing.xs }}>
+            {/* ── Tổng quan: thẻ trắng, cùng kiểu màn Hoá đơn ── */}
             <View style={styles.summaryCard}>
               <Text style={styles.summaryLabel}>Tổng đã thanh toán</Text>
               <Text style={styles.summaryAmount}>{formatCurrency(stats.total)}</Text>
-              <View style={styles.summaryStats}>
-                <View style={styles.summaryStat}>
-                  <Text style={styles.summaryStatNum}>{stats.count}</Text>
-                  <Text style={styles.summaryStatLbl}>giao dịch</Text>
+              <Text style={styles.summarySub}>
+                {stats.count} giao dịch
+                {stats.monthCount > 0 ? `  ·  tháng này ${formatCurrency(stats.monthTotal)}` : ''}
+              </Text>
+              {stats.depositCount > 0 && (
+                <View style={styles.depositPill}>
+                  <Text style={styles.depositPillText}>
+                    🔐 Gồm {formatCurrency(stats.depositTotal)} tiền cọc — hoàn lại khi trả phòng
+                  </Text>
                 </View>
-                <View style={styles.summarySep} />
-                <View style={styles.summaryStat}>
-                  <Text style={styles.summaryStatNum}>{formatCurrency(stats.monthTotal)}</Text>
-                  <Text style={styles.summaryStatLbl}>tháng này ({stats.monthCount})</Text>
-                </View>
-              </View>
+              )}
               {stats.duplicateCount > 0 && (
                 <Text style={styles.summaryWarn}>
-                  ⚠️ {stats.duplicateCount} giao dịch bị ghi trùng ({formatCurrency(stats.duplicateAmount)})
-                  — đã trừ khỏi tổng ở trên
-                </Text>
-              )}
-              {stats.depositCount > 0 && (
-                <Text style={styles.summaryNote}>
-                  🔐 Trong đó {formatCurrency(stats.depositTotal)} là tiền cọc — sẽ được hoàn khi trả phòng
-                </Text>
-              )}
-              {!!stats.latest && (
-                <Text style={styles.summaryLatest}>
-                  Gần nhất: {formatDateTime(stats.latest)}
+                  ⚠️ {stats.duplicateCount} giao dịch ghi trùng ({formatCurrency(stats.duplicateAmount)}) — đã trừ khỏi tổng
                 </Text>
               )}
             </View>
@@ -708,7 +616,7 @@ export const PaymentHistoryScreen: React.FC = () => {
               <TextInput
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Tìm mã hoá đơn, mã giao dịch, phòng..."
+                placeholder="Tìm mã hoá đơn, mã giao dịch…"
                 placeholderTextColor={Colors.textMuted}
                 style={styles.searchInput}
               />
@@ -719,102 +627,60 @@ export const PaymentHistoryScreen: React.FC = () => {
               )}
             </View>
 
-            {/* ── Lọc theo loại phí ── */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              style={styles.chipScroll} contentContainerStyle={styles.chipRow}>
-              {TYPE_TABS.map(f => (
-                <TouchableOpacity key={f.key}
-                  style={[styles.chip, typeFilter === f.key && styles.chipActive]}
-                  onPress={() => setTypeFilter(f.key)}>
-                  <Text style={[styles.chipText, typeFilter === f.key && styles.chipTextActive]}>
-                    {f.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {/* ── Lọc theo hình thức ── */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              style={styles.chipScroll} contentContainerStyle={styles.chipRow}>
-              {METHOD_TABS.map(f => (
-                <TouchableOpacity key={f.key}
-                  style={[styles.chip, methodFilter === f.key && styles.chipActive]}
-                  onPress={() => setMethodFilter(f.key)}>
-                  <Text style={[styles.chipText, methodFilter === f.key && styles.chipTextActive]}>
-                    {f.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* ── MỘT hàng lọc: chỉ những loại khách thực sự đã trả ── */}
+            {typeChips.length > 2 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                {typeChips.map(f => {
+                  const active = activeType === f.key;
+                  return (
+                    <TouchableOpacity key={f.key}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => setTypeFilter(f.key)}
+                      activeOpacity={0.8}>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {f.label} {f.count}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
 
             {hasFilter && (
               <View style={styles.filterSummary}>
                 <Text style={styles.filterSummaryText}>
                   {countTxns(filtered)} giao dịch · {formatCurrency(sumReal(filtered))}
                 </Text>
-                <TouchableOpacity onPress={() => { setTypeFilter('all'); setMethodFilter('all'); setQuery(''); }}>
-                  <Text style={styles.filterReset}>Xóa lọc</Text>
+                <TouchableOpacity onPress={() => { setTypeFilter('all'); setQuery(''); }}>
+                  <Text style={styles.filterReset}>Xoá lọc</Text>
                 </TouchableOpacity>
               </View>
             )}
-          </>
+          </View>
         }
         renderSectionHeader={({ section }) => {
           const open = isOpen(section.key);
           return (
-            /*
-              Tiêu đề là NÚT GẬP, và cũng là nắp trên của khung bọc cả nhóm: bo góc trên
-              khi đang mở, bo cả bốn góc khi đã gập (lúc đó nó là toàn bộ cái thẻ).
-            */
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => toggleSection(section.key)}
-              style={[
-                styles.sectionHeader,
-                open ? styles.sectionHeaderOpen : styles.sectionHeaderClosed,
-                section.pinned && styles.sectionHeaderPinned,
-              ]}
+              style={[styles.sectionHeader, open ? styles.sectionHeaderOpen : styles.sectionHeaderClosed]}
             >
-              {/*
-                Ô biểu tượng bên trái — thẻ giao dịch bên trong đều mở đầu bằng một ô
-                vuông bo tròn có nền nhạt (⚡ điện, 💧 nước). Thanh tháng không có gì ở
-                đó nên nhìn như một cái gạch ngang lạc loài giữa dãy thẻ; thêm vào là nó
-                thành anh em cùng một họ.
-              */}
-              <View style={[styles.sectionIcon, section.pinned && styles.sectionIconPinned]}>
-                <Text style={styles.sectionIconGlyph}>{section.pinned ? '🔐' : '📅'}</Text>
-              </View>
-              <View style={styles.sectionHeaderText}>
-                <Text style={[styles.sectionTitle, section.pinned && styles.sectionTitlePinned]}>
-                  {section.title}
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>
+                  {section.pinned ? '🔐 Tiền cọc' : section.title}
                 </Text>
-                <Text style={[styles.sectionMeta, section.pinned && styles.sectionMetaPinned]}>
-                  {/* Cọc nói rõ "được hoàn khi trả phòng" — khách hay tưởng đây là khoản mất hẳn. */}
-                  {section.pinned ? 'hoàn lại khi trả phòng' : `${section.count} giao dịch`}
+                <Text style={styles.sectionMeta}>
+                  {section.pinned ? 'Hoàn lại khi trả phòng' : `${section.count} giao dịch`}
                 </Text>
               </View>
-              {/*
-                SỐ TIỀN tách ra khỏi dòng chữ nhỏ và cho đứng riêng.
-                Gập lại rồi thì cả tháng chỉ còn đúng dòng này, mà thứ khách quét mắt tìm
-                là con số — chôn nó giữa "1 giao dịch · 2.000.000 đ" cỡ 11px thì phải đọc
-                cả dòng mới lọc ra được.
-              */}
-              <Text style={[styles.sectionTotal, section.pinned && styles.sectionTotalPinned]}>
+              <Text style={[styles.sectionTotal, section.pinned && { color: '#0E7490' }]}>
                 {formatCurrency(section.total)}
               </Text>
-              {/* Mũi tên trong nền tròn — dấu hiệu quy ước cho "bấm được, còn nội dung bên trong". */}
-              <View style={[styles.chevronWrap, section.pinned && styles.chevronWrapPinned]}>
-                <Text style={[styles.chevron, section.pinned && styles.chevronPinned]}>
-                  {open ? '⌃' : '⌄'}
-                </Text>
-              </View>
+              <Text style={styles.chevron}>{open ? '⌃' : '⌄'}</Text>
             </TouchableOpacity>
           );
         }}
-        /*
-          Gập = KHÔNG dựng thẻ nào của tháng đó. Không dùng cách ẩn bằng style: danh sách
-          này có thể hàng chục giao dịch, dựng hết rồi giấu đi thì vẫn trả giá đủ.
-        */
         renderSectionFooter={({ section }) => (
           isOpen(section.key) ? <View style={styles.sectionFooterOpen} /> : null
         )}
@@ -830,7 +696,7 @@ export const PaymentHistoryScreen: React.FC = () => {
               </Text>
               <Text style={styles.emptyDesc}>
                 {hasFilter
-                  ? 'Thử bỏ bớt bộ lọc hoặc từ khóa tìm kiếm.'
+                  ? 'Thử bỏ bộ lọc hoặc từ khoá tìm kiếm.'
                   : 'Các khoản bạn đã thanh toán sẽ hiển thị ở đây.'}
               </Text>
             </View>
@@ -844,212 +710,88 @@ export const PaymentHistoryScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm,
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  backBtn: { padding: Spacing.sm },
-  backBtnText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backArrow: { fontSize: 30, lineHeight: 34, color: Colors.textPrimary },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
 
-  list: { paddingHorizontal: Spacing.lg, paddingBottom: 40 },
+  list: { padding: Spacing.base, paddingBottom: 60 },
 
-  // Tổng quan
   summaryCard: {
-    marginTop: Spacing.lg, backgroundColor: Colors.primary, borderRadius: BorderRadius.xl,
-    padding: Spacing.lg, ...Shadow.md,
+    backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base,
+    borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
-  summaryLabel: { fontSize: 12, color: 'rgba(255,255,255,0.75)' },
-  summaryAmount: { fontSize: 26, fontWeight: '800', color: Colors.white, marginTop: 2 },
-  summaryStats: {
-    flexDirection: 'row', alignItems: 'center', marginTop: Spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: BorderRadius.md,
-    paddingVertical: Spacing.sm,
+  summaryLabel: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
+  summaryAmount: { fontSize: 28, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
+  summarySub: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginTop: 4 },
+  depositPill: {
+    alignSelf: 'flex-start', marginTop: Spacing.sm, backgroundColor: '#ECFEFF',
+    borderRadius: BorderRadius.full, paddingHorizontal: 10, paddingVertical: 4,
   },
-  summaryStat: { flex: 1, alignItems: 'center' },
-  summaryStatNum: { fontSize: 14, fontWeight: '800', color: Colors.white },
-  summaryStatLbl: { fontSize: 10, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
-  summarySep: { width: 1, height: 26, backgroundColor: 'rgba(255,255,255,0.2)' },
-  summaryWarn: { fontSize: 11, fontWeight: '600', color: '#FEF08A', marginTop: Spacing.sm, lineHeight: 16 },
-  summaryNote: { fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: Spacing.sm, lineHeight: 16 },
-  summaryLatest: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 4 },
+  depositPillText: { fontSize: 12, fontWeight: '600', color: '#0E7490' },
+  summaryWarn: { fontSize: 12, color: Colors.error, marginTop: Spacing.sm, fontWeight: '600' },
 
-  // Tìm kiếm + lọc
   searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
-    backgroundColor: Colors.white, borderRadius: BorderRadius.full,
-    borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: Spacing.md, height: 42, marginTop: Spacing.md,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.white,
+    borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: Spacing.md, height: 44,
   },
-  searchIcon: { fontSize: 13 },
-  searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary, paddingVertical: 0 },
+  searchIcon: { fontSize: 14, marginRight: Spacing.sm },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 0 },
   searchClear: { padding: 4 },
-  searchClearText: { fontSize: 12, color: Colors.textMuted, fontWeight: '700' },
-  // flexGrow: 0 — thiếu là ScrollView ngang bị kéo giãn theo chiều dọc.
-  chipScroll: { flexGrow: 0, marginTop: Spacing.sm },
-  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  searchClearText: { fontSize: 14, color: Colors.textMuted },
+
+  chipRow: { gap: Spacing.sm, paddingRight: Spacing.base },
   chip: {
-    height: 30, paddingHorizontal: 12, borderRadius: BorderRadius.full,
-    justifyContent: 'center', backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
   chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  chipText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
+  chipText: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary },
   chipTextActive: { color: Colors.white },
-  filterSummary: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: Spacing.sm,
-  },
-  filterSummaryText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
-  filterReset: { fontSize: 12, fontWeight: '700', color: Colors.primary },
 
-  /*
-    ── KHUNG BỌC MỘT THÁNG ────────────────────────────────────────────────────
-    Ba mảnh ghép lại thành một khung khép kín: `sectionHeader` là nắp trên (cũng là nút
-    gập), `sectionBody` vẽ hai viền hai bên quanh từng thẻ giao dịch, `sectionFooterOpen`
-    là nắp dưới. Phải tách làm ba vì SectionList dựng header / item / footer thành ba
-    khối anh em, không có chỗ nào bọc chung được cả nhóm.
+  filterSummary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  filterSummaryText: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  filterReset: { fontSize: 12, color: Colors.primary, fontWeight: '700' },
 
-    Nền của thân khung là `background` (xám) chứ không phải trắng: thẻ giao dịch màu
-    trắng, để trắng trên trắng thì mất đường viền của từng thẻ.
-  */
-  /*
-    Mềm hơn = ba thứ cùng lúc: bo góc rộng (xl thay vì lg), viền nhạt hơn hẳn màu
-    `border` mặc định, và bỏ nét đậm 900. Một hình chữ nhật góc nhọn + chữ đậm nhất +
-    màu bão hoà nhất đứng cạnh nhau là công thức chắc chắn ra "thô".
-  */
-  /*
-    KHÔNG có bóng đổ ở đây.
-
-    Bóng đổ chỉ vẽ được quanh MỘT view, mà khung tháng là ba view ghép lại (nắp trên /
-    thân / nắp dưới). Đặt bóng lên nắp trên thì lúc mở ra nắp có bóng còn thân không —
-    nắp trông như nổi hẳn lên trên phần thân, đúng cái cảm giác "đóng một kiểu mở một
-    kiểu". Cả khung đi bằng viền, phẳng, giống hệt nhau ở cả hai trạng thái.
-  */
+  // Nhóm tháng: tiêu đề là nắp trên, footer là nắp dưới của cùng một khung.
   sectionHeader: {
-    flexDirection: 'row', alignItems: 'center',
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm + 2,
-    backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: '#EFF2F7',
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.md, marginTop: Spacing.md,
   },
-  sectionHeaderText: { flex: 1 },
-  /** Đang mở: chỉ bo góc trên, viền dưới để `sectionBody` nối tiếp xuống. */
   sectionHeaderOpen: {
-    borderTopLeftRadius: BorderRadius.xl, borderTopRightRadius: BorderRadius.xl,
-    borderBottomWidth: 0,
+    borderTopLeftRadius: BorderRadius.lg, borderTopRightRadius: BorderRadius.lg,
+    borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  /** Đã gập: cả nhóm chỉ còn đúng dòng này, nên bo đủ bốn góc. */
-  sectionHeaderClosed: { borderRadius: BorderRadius.xl },
-
-  sectionIcon: {
-    width: 36, height: 36, borderRadius: BorderRadius.md,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.primaryBg, marginRight: Spacing.sm + 2,
-  },
-  sectionIconPinned: { backgroundColor: '#CFFAFE' },
-  sectionIconGlyph: { fontSize: 17 },
-  /*
-    Khoảng cách giữa các thẻ nằm TRONG lớp bọc (paddingTop), không dùng
-    `ItemSeparatorComponent`: dải cách của SectionList là một View anh em nằm NGOÀI lớp
-    bọc, nên hai viền hai bên sẽ đứt một đoạn ở mỗi khe — khung hở thành từng khúc.
-  */
-  /*
-    Thân khung dùng CHUNG nền trắng với nắp trên, không phải một máng xám lồng bên trong.
-
-    Bản trước để nền xám rồi thả thẻ trắng có bóng đổ vào giữa: bấm mở ra là màu nền đổi,
-    xuất hiện thêm một lớp thẻ nữa, và một cái viền nữa — nhìn ra hai vật thể khác nhau
-    chứ không phải cùng một thẻ vừa cao lên. Giờ mở hay đóng cũng chỉ là một thẻ trắng,
-    các giao dịch nằm trong đó như những DÒNG ngăn bằng vạch mảnh.
-  */
+  sectionHeaderClosed: { borderRadius: BorderRadius.lg },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  sectionMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  sectionTotal: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
+  chevron: { fontSize: 16, color: Colors.textMuted, width: 18, textAlign: 'center' },
   sectionBody: {
-    backgroundColor: Colors.white,
-    borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#EFF2F7',
-    paddingHorizontal: Spacing.base,
+    backgroundColor: Colors.white, borderLeftWidth: 1, borderRightWidth: 1, borderColor: Colors.border,
   },
-  rowDivider: { height: 1, backgroundColor: '#F1F5F9' },
   sectionFooterOpen: {
-    height: Spacing.sm,
-    backgroundColor: Colors.white,
-    borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: '#EFF2F7',
-    borderBottomLeftRadius: BorderRadius.xl, borderBottomRightRadius: BorderRadius.xl,
+    height: 6, backgroundColor: Colors.white, borderWidth: 1, borderTopWidth: 0, borderColor: Colors.border,
+    borderBottomLeftRadius: BorderRadius.lg, borderBottomRightRadius: BorderRadius.lg,
   },
-  /* Mũi tên để màu XÁM, không phải primary: nó là nút phụ, tô cùng màu với con số tiền
-     là hai thứ cùng giành sự chú ý trên một dòng chỉ có bốn phần tử. */
-  chevronWrap: {
-    width: 28, height: 28, borderRadius: 14, marginLeft: Spacing.sm,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#F1F5F9',
-  },
-  chevron: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary, lineHeight: 17 },
+  rowDivider: { height: 1, backgroundColor: Colors.divider, marginLeft: 62 },
 
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, letterSpacing: 0.1 },
-  sectionMeta: { fontSize: 12, fontWeight: '500', color: Colors.textMuted, marginTop: 1 },
-  sectionTotal: { fontSize: 15, fontWeight: '800', color: Colors.primary, marginLeft: Spacing.sm },
-
-  // Mục Tiền cọc ghim đầu — nền riêng để tách khỏi dãy nhóm-theo-tháng bên dưới,
-  // nếu không nó trông như "một tháng nào đó" và mất luôn ý nghĩa ghim.
-  sectionHeaderPinned: { backgroundColor: '#F0FDFF', borderColor: '#CFF3F8' },
-  sectionTitlePinned: { color: '#0E7490' },
-  sectionMetaPinned:  { color: '#0891B2' },
-  sectionTotalPinned: { color: '#0E7490' },
-  chevronWrapPinned:  { backgroundColor: '#DFF7FB' },
-  chevronPinned:      { color: '#0891B2' },
-
-  // Thẻ giao dịch
-  /* Giao dịch là DÒNG trong thẻ tháng, không còn là thẻ nổi riêng: bỏ nền trắng, bỏ bóng
-     đổ, bỏ bo góc — ba thứ đó chỉ có nghĩa khi nó tự đứng trên nền xám. */
-  card: { paddingVertical: Spacing.base },
-  cardDuplicate: {
-    borderWidth: 1, borderColor: Colors.warning + '66', backgroundColor: '#FFFDF5',
-    borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, marginVertical: Spacing.xs,
-  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  typeIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  rowTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  rowSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  rowNote: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
+  rowWarn: { fontSize: 11, color: Colors.error, marginTop: 3 },
+  rowAmount: { fontSize: 14, fontWeight: '800', color: Colors.success },
   amountMuted: { color: Colors.textMuted, textDecorationLine: 'line-through' },
-  dupNote: {
-    backgroundColor: Colors.warningLight, borderRadius: BorderRadius.md,
-    padding: Spacing.sm, marginTop: Spacing.sm,
-  },
-  dupNoteText: { fontSize: 11, color: Colors.warning, fontWeight: '600', lineHeight: 16 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  typeIcon: { width: 38, height: 38, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center' },
-  codeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  invoiceCode: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, flexShrink: 1 },
-  typeTag: { borderRadius: BorderRadius.full, paddingHorizontal: 7, paddingVertical: 2 },
-  typeTagText: { fontSize: 10, fontWeight: '700' },
-  place: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  // Dòng phụ của khoản tách ra: kỳ tính tiền nhà / ghi chú cọc được hoàn.
-  splitNote: { fontSize: 10.5, color: Colors.textSecondary, marginTop: 3, lineHeight: 15 },
-  // Dải nhắc "cùng một lần chuyển" — để khách không tưởng mình bị thu hai lần.
-  splitBox: {
-    backgroundColor: Colors.background, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.sm, paddingVertical: 6, marginTop: Spacing.sm,
-  },
-  splitBoxText: { fontSize: 10.5, color: Colors.textMuted, fontWeight: '600' },
-  amountValue: { fontSize: 15, fontWeight: '800', color: Colors.primary },
 
-  divider: { height: 1, backgroundColor: Colors.divider, marginVertical: Spacing.sm },
-
-  metaRow: { flexDirection: 'row', gap: Spacing.md },
-  metaItem: { flex: 1 },
-  metaLabel: { fontSize: 10, color: Colors.textMuted, marginBottom: 2 },
-  metaValue: { fontSize: 12, fontWeight: '600', color: Colors.textPrimary },
-
-  transferRow: { marginTop: Spacing.sm },
-  transferContent: { fontSize: 12, fontWeight: '500', color: Colors.textSecondary, marginTop: 2 },
-
-  rejectedNote: { backgroundColor: Colors.errorLight, borderRadius: BorderRadius.md, padding: Spacing.sm, marginTop: Spacing.sm },
-  rejectedText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
-
-  cardFoot: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: Spacing.md,
-  },
-  statusBadge: { paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full },
-  statusText: { fontSize: 10, fontWeight: '700' },
-  detailLink: { fontSize: 12, fontWeight: '700', color: Colors.primary },
-
-  empty: { paddingTop: 48, alignItems: 'center' },
-  emptyEmoji: { fontSize: 44, marginBottom: Spacing.base },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.xs },
-  emptyDesc: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center' },
+  empty: { alignItems: 'center', paddingVertical: 48, gap: 6 },
+  emptyEmoji: { fontSize: 44 },
+  emptyTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

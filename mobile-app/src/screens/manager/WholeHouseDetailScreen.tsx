@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { MaskedValue } from '@/components/common/MaskedValue';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow,
   HIDDEN_AMOUNT_TEXT, RENT_AMOUNT_HIDDEN_NOTE,
-  maskTenantPhone, maskTenantCccd,
 } from '@/constants';
 import { ManagedProperty, WholeHouseRentalStatus } from '@/types/managedProperty';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
@@ -249,14 +249,15 @@ export const WholeHouseDetailScreen: React.FC<any> = ({ navigation, route }) => 
             </View>
             <View style={s.card}>
               <InfoRow label="Họ tên" value={activeContract.tenantFullName} />
-              {/*
-                SĐT/CCCD của khách CHE với quản lý (xem `constants/managerVisibility`) —
-                bản cũ in trọn số ra màn hình. Giữ 3 số cuối là đủ để đối chiếu ai vừa
-                gọi cho mình, còn muốn liên lạc thì bấm "Gọi khách" — nút đó mở app điện
-                thoại bằng số lấy từ dữ liệu, không hiện số ra.
-              */}
-              <InfoRow label="Điện thoại" value={maskTenantPhone(activeContract.tenantPhone)} />
-              <InfoRow label="CCCD / MST" value={maskTenantCccd(activeContract.tenantCccd)} last />
+              {/* SĐT/CCCD khách: hiện dạng che, bấm vào mới xem đủ (24/09/2026). */}
+              <View style={s.infoRow}>
+                <Text style={s.infoLabel}>Điện thoại</Text>
+                <MaskedValue kind="phone" value={activeContract.tenantPhone} style={s.infoValue} />
+              </View>
+              <View style={[s.infoRow, { borderBottomWidth: 0 }]}>
+                <Text style={s.infoLabel}>CCCD / MST</Text>
+                <MaskedValue kind="cccd" value={activeContract.tenantCccd} style={s.infoValue} />
+              </View>
             </View>
 
             {/* Hợp đồng */}

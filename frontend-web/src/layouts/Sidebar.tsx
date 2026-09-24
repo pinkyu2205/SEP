@@ -3,9 +3,14 @@ import {
   DollarSign, BarChart3, Bell, Settings,
   Coins, PiggyBank, CreditCard, MapPin, SlidersHorizontal, Banknote,
 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { useWebAuth } from '@/auth/WebAuthContext';
-import { AppSidebar, type SidebarSection } from './AppSidebar';
+import { extensionRequestService } from '@/services/extensionRequest.service';
+import { hostService } from '@/services/host.service';
+import { currentMonth } from '@/utils/period';
+import { AppSidebar, type SidebarNavItem, type SidebarSection } from './AppSidebar';
 
 /**
  * Sidebar Cổng Host — chỉ khai báo menu, phần hiển thị dùng chung AppSidebar
@@ -89,6 +94,22 @@ const SECTIONS: SidebarSection[] = [
   },
 ];
 
+/**
+ * Số việc cần host để mắt tới, đếm từ đúng API của trang tương ứng — số trên menu phải
+ * bằng số dòng host thấy khi bấm vào.
+ */
+interface HostBadgeCounts {
+  /** Đơn gia hạn PENDING (host chỉ xem, nhưng cần biết để gia hạn HĐ gốc kịp). */
+  extensionPending: number;
+  /** Hoá đơn kỳ này CHƯA THU (UNPAID + OVERDUE) — cùng nguồn trang Công nợ. */
+  debtOpen: number;
+  /** Trong số đó, bao nhiêu đã QUÁ HẠN → badge đỏ nhấp nháy. */
+  debtOverdue: number;
+}
+
+/** Hỏi lại mỗi phút — khách trả tiền / quá hạn / gửi đơn lúc nào cũng được. */
+const BADGE_POLL_MS = 60_000;
+
 const initialsOf = (name?: string) =>
   (name || 'HB').split(' ').filter(Boolean).slice(-2).map(w => w[0]).join('').toUpperCase() || 'HB';
 
@@ -96,15 +117,79 @@ export const Sidebar = () => {
   const { count: unread } = useUnreadNotifications();
   const { user, logout } = useWebAuth();
   const isHost = user?.role === 'host';
+  const { pathname } = useLocation();
+  const [counts, setCounts] = useState<HostBadgeCounts>({ extensionPending: 0, debtOpen: 0, debtOverdue: 0 });
+
+  /**
+   * Mỗi nguồn độc lập (`allSettled`): một API lỗi thì giữ số cũ của mục đó, không gắn
+   * số sai. Công nợ chỉ đếm khi là host thật — admin xem cổng host không thấy mục này.
+   */
+  const refreshCounts = useCallback(async () => {
+    // TUẦN TỰ, không song song: `currentMonth()` đọc giờ SERVER, mà giờ đó chỉ đồng bộ
+    // sau response đầu tiên. Gọi song song lúc vừa mở trang thì kỳ tính theo giờ máy
+    // (VD 2026-09 trong khi server đã sang 2026-10) → đếm nhầm kỳ, badge lệch trang.
+    const [ext] = await Promise.allSettled([extensionRequestService.list('PENDING')]);
+    const [inv] = await Promise.allSettled([
+      isHost ? hostService.getInvoices({ month: currentMonth(), size: 500 }) : Promise.reject(new Error('skip')),
+    ]);
+    setCounts(prev => {
+      const next = { ...prev };
+      if (ext.status === 'fulfilled') {
+        next.extensionPending = ext.value.filter(r => r.status === 'PENDING').length;
+      }
+      if (inv.status === 'fulfilled') {
+        const open = (inv.value?.content ?? []).filter(i => i.status !== 'PAID');
+        next.debtOpen = open.length;
+        next.debtOverdue = open.filter(i => i.status === 'OVERDUE').length;
+      }
+      return next;
+    });
+  }, [isHost]);
+
+  useEffect(() => { void refreshCounts(); }, [pathname, refreshCounts]);
+  useEffect(() => {
+    const t = setInterval(() => { void refreshCounts(); }, BADGE_POLL_MS);
+    return () => clearInterval(t);
+  }, [refreshCounts]);
+
+  const withBadge = (item: SidebarNavItem): SidebarNavItem => {
+    switch (item.path) {
+      // Badge thông báo lấy từ số chưa đọc THẬT của tài khoản đang đăng nhập.
+      case '/host/notifications':
+        return { ...item, badge: unread || undefined, badgeAlert: true };
+      case '/host/extension-requests':
+        return {
+          ...item,
+          badge: counts.extensionPending || undefined,
+          badgeAlert: true,
+          badgeTitle: `${counts.extensionPending} đơn gia hạn đang chờ duyệt`,
+        };
+      // Công nợ: có quá hạn → ĐỎ nhấp nháy, đếm số quá hạn (việc phải xử ngay);
+      // chỉ còn nợ chưa tới hạn → vàng, đếm số hoá đơn chưa thu.
+      case '/host/receivables':
+        return counts.debtOverdue > 0
+          ? {
+              ...item,
+              badge: counts.debtOverdue,
+              badgeDanger: true,
+              badgeTitle: `${counts.debtOverdue} hoá đơn quá hạn · ${counts.debtOpen} hoá đơn chưa thu`,
+            }
+          : {
+              ...item,
+              badge: counts.debtOpen || undefined,
+              badgeAlert: true,
+              badgeTitle: `${counts.debtOpen} hoá đơn chưa thu`,
+            };
+      default:
+        return item;
+    }
+  };
 
   const sections: SidebarSection[] = SECTIONS.map(s => ({
     ...s,
     items: s.items
       .filter(item => isHost || !HOST_ONLY.has(item.path))
-      // Badge thông báo lấy từ số chưa đọc THẬT của tài khoản đang đăng nhập.
-      .map(item => (item.path === '/host/notifications'
-        ? { ...item, badge: unread || undefined, badgeAlert: true }
-        : item)),
+      .map(withBadge),
   })).filter(s => s.items.length > 0);
 
   return (

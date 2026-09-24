@@ -11,7 +11,7 @@ import {
 } from '@/services/utilityCycle';
 import type { PropertyResponse } from '@/types/api.types';
 import { monthPeriod, onlyDigits, periodProblem, arrearsPeriod } from '@/utils/evnInvoiceParser';
-import { SectionShell, StatusPill, EmptyState, formatVnd } from './shared';
+import { SectionShell, StatusPill, EmptyState, formatVnd, MissingBillsBanner } from './shared';
 import { PropertyCombobox, ReadingProgress } from './EvnBillPublishing';
 import { parseWaterInvoice } from '@/utils/waterInvoiceParser';
 import { matchBillToProperty } from '@/utils/billPropertyMatch';
@@ -190,6 +190,8 @@ export const WaterBillPublishing = () => {
   const unitPrice = waterUnitPrice(amount, quantity);
 
   /** Nhà đã có hoá đơn nước kỳ này — combobox gắn nhãn để admin khỏi chọn trùng. */
+  /** Đầu form — khối "nhà còn thiếu hoá đơn" cuộn về đây sau khi chọn nhà. */
+  const formTopRef = useRef<HTMLDivElement>(null);
   const publishedIds = useMemo(
     () => new Set(bills.filter((b) => b.status !== 'REVOKED').map((b) => b.propertyId)),
     [bills],
@@ -515,7 +517,19 @@ export const WaterBillPublishing = () => {
           </div>
         )}
       >
-        <div className="grid gap-5 lg:grid-cols-2">
+        <MissingBillsBanner
+          kindLabel="nước"
+          periodLabel={`${month}/${year}`}
+          loading={loadingProps || loadingBills}
+          missing={occupiedProperties
+            .filter(p => !publishedIds.has(p.id))
+            .map(p => ({ id: p.id, name: p.propertyName }))}
+          onPick={(id) => {
+            setPropertyId(id);
+            formTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+        />
+        <div ref={formTopRef} className="grid gap-5 lg:grid-cols-2 scroll-mt-24">
           <div className="space-y-4">
             <div>
               <label className="mb-1.5 block text-sm font-bold text-slate-700">
