@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius, canTerminateForUnpaidInvoice, isMeterReadingDay } from '@/constants';
+import { Colors, Spacing, BorderRadius, canTerminateForUnpaidInvoice, isMeterReadingDay, isPreCollectStatus } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
@@ -119,7 +119,10 @@ export const ManagerHomeScreen: React.FC = () => {
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
-        realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
+        // BE 24/09/2026: pipeline đón khách — xem hooks/useManagerTasks.ts.
+        realTenantService.listManagedContracts('RECEPTION')
+          .then(list => list.filter(c => isPreCollectStatus(c.status)))
+          .catch(() => [] as TenantContractResponse[]),
         checkoutService.list().catch(() => [] as CheckoutRequestDto[]),
         /*
           Phòng còn thiếu ảnh công tơ — việc có hạn, đưa vào "Cần xử lý" bên dưới.
@@ -220,7 +223,7 @@ export const ManagerHomeScreen: React.FC = () => {
 
   /**
    * Lịch đón khách — hợp đồng nháp đã gán cho manager này, đến hạn đón hôm nay
-   * (hoặc đã quá hạn mà chưa đón). Dữ liệu thật từ /tenant-contracts/managed?status=DRAFT.
+   * (hoặc đã quá hạn mà chưa đón). Dữ liệu thật từ /tenant-contracts/managed?status=RECEPTION (lọc DRAFT/AWAITING_ONBOARD/AWAITING_PAYMENT).
    *
    * Ngày đối chiếu lấy theo thứ tự `moveInDate → expectedReceptionDate → startDate`,
    * GIỐNG ResumeContractScreen. Trước 15/08/2026 chỗ này chỉ so `expectedReceptionDate`

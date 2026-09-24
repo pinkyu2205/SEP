@@ -82,8 +82,9 @@ const statusFromApi = (raw: string, endDate?: string): ContractStatus => {
   const st = (raw || '').toUpperCase();
   if (st === 'TERMINATED' || st === 'CANCELLED') return 'terminated';
   if (st === 'EXPIRED') return 'expired';
-  if (st === 'DRAFT') return 'draft';
-  if (st === 'PENDING') return 'pending';
+  if (st === 'DRAFT' || st === 'AWAITING_ONBOARD') return 'draft';
+  // BE 24/09/2026: PENDING tách thành AWAITING_PAYMENT / AWAITING_CONFIRM (chờ thu tiền / chờ OTP).
+  if (st === 'PENDING' || st === 'AWAITING_PAYMENT' || st === 'AWAITING_CONFIRM') return 'pending';
   // ACTIVE: còn ≤ 30 ngày thì coi là sắp hết hạn để manager kịp xử lý.
   if (st === 'ACTIVE' && endDate) {
     const left = getDaysRemaining(endDate);
