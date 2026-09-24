@@ -27,7 +27,14 @@ export type EquipmentStatus = 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
 /** Trạng thái thiết bị khi khai báo manifest inbound (chỉ 2 giá trị) */
 export type ManifestEquipmentStatus = 'NEW' | 'GOOD';
 
-export type ContractStatus = 'DRAFT' | 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
+/**
+ * Trạng thái hợp đồng. Pipeline đón khách tenant (BE 24/09/2026):
+ *   DRAFT → AWAITING_ONBOARD → AWAITING_PAYMENT → AWAITING_CONFIRM → ACTIVE
+ * `PENDING` chỉ còn cho HĐ inbound (master lease) — tenant onboard mới KHÔNG set.
+ */
+export type ContractStatus =
+  | 'DRAFT' | 'AWAITING_ONBOARD' | 'AWAITING_PAYMENT' | 'AWAITING_CONFIRM'
+  | 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 
 export type UserRole = 'ROLE_ADMIN' | 'ROLE_OWNER' | 'ROLE_MANAGER' | 'ROLE_TENANT';
 
@@ -1098,6 +1105,8 @@ export interface TenantContractResponse {
   startDate: string;
   endDate?: string;
   status: ContractStatus;
+  /** Nhãn tiếng Việt BE sinh sẵn cho `status` (BE 24/09/2026) — CHỈ có ở `TenantContractResponse`, không có ở `HostContractDto`. */
+  statusLabel?: string;
   // Text BE sinh cho PDF, vd "Giường (Tốt) x1, Tủ lạnh (Mới) x1" (+ dòng "Lắp thêm: ...").
   equipmentSnapshot?: string;
   // Nội thất HĐ — đều read-only, BE tự gắn toàn bộ EXISTING ACTIVE (FE-contract-equipment-auto.md):

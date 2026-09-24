@@ -75,10 +75,18 @@ export const tenantService = {
       : api.post(`${BASE}/${propertyId}/tenant-contract`, body);
   },
 
-  /** GET /tenant-contracts?status=DRAFT — DS hợp đồng nháp (admin). */
+  /**
+   * GET /tenant-contracts?status=RECEPTION — DS hồ sơ ĐANG TRONG PIPELINE ĐÓN KHÁCH (admin).
+   *
+   * BE 24/09/2026 tách `PENDING` thành 4 bước: DRAFT → AWAITING_ONBOARD → AWAITING_PAYMENT →
+   * AWAITING_CONFIRM (trước ACTIVE). `status=RECEPTION` (alias ONBOARD/PIPELINE) trả đủ 4 bước —
+   * hỏi riêng `DRAFT` thì hồ sơ biến mất ngay khi cron 00:10 chuyển sang AWAITING_ONBOARD.
+   * Giữ tên `listDrafts` vì nhiều màn đang gọi (kiểm trùng phòng/khách, sức chứa nhà...) và tất cả
+   * đều cần đúng tập "hồ sơ đang giữ chỗ" này. Phân biệt bước bằng `status` / `statusLabel`.
+   */
   listDrafts: (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
     return api.get('/api/v1/tenant-contracts', {
-      params: { status: 'DRAFT', ...(params ?? {}) },
+      params: { status: 'RECEPTION', ...(params ?? {}) },
       skipErrorToast: true,
     } as never);
   },

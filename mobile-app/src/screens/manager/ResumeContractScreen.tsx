@@ -18,7 +18,11 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import QRCode from 'react-native-qrcode-svg'
 import * as Sharing from 'expo-sharing'
 import * as ImagePicker from 'expo-image-picker'
-import { BorderRadius, Colors, Shadow, Spacing } from '@/constants'
+import {
+  BorderRadius, Colors, Shadow, Spacing,
+  ONBOARD_EARLY_DAYS, ONBOARD_NO_SHOW_GRACE_DAYS, ONBOARD_STATUS_META,
+  isCaptureStage, isOnboardStatus, onboardDueDate, receptionWindow,
+} from '@/constants'
 import { uploadImageToCloudinary } from '@/services/core/cloudinary'
 import { CameraCaptureModal } from '@/components/common'
 import {
@@ -105,19 +109,20 @@ const explainDescribeError = (err: any): { title: string; message: string } => {
 }
 
 /** Đón sớm tối đa mấy ngày so với ngày vào ở — khớp `contract.max-early-move-in-days` của BE. */
-const MAX_EARLY_ONBOARD_DAYS = 3
+const MAX_EARLY_ONBOARD_DAYS = ONBOARD_EARLY_DAYS
 
 /**
- * Số ngày còn lại tới ngày vào ở (âm = đã qua).
+ * Số ngày còn lại tới ngày đón (âm = đã qua).
  *
  * Để ở module-level vì DANH SÁCH và PANEL THAO TÁC phải dùng chung một cách tính —
  * lệch nhau là thẻ báo "chưa tới hạn" nhưng mở ra vẫn thao tác được như thường.
  *
- * Tính theo `moveInDate` chứ không phải `expectedReceptionDate`: BE ràng buộc trên ngày
- * vào ở (`contract.max-early-move-in-days`), ngày hẹn đón chỉ là lịch làm việc.
+ * BE 24/09/2026 tính cửa sổ đón trên `expectedReceptionDate ?? moveInDate` (cron promote,
+ * completeCapture, tạo QR, no-show đều dùng chung mốc này) — nên FE cũng phải theo đúng
+ * thứ tự đó (trước đây ưu tiên `moveInDate`, lệch khi manager đã đặt lịch hẹn riêng).
  */
 const daysUntilOnboard = (c: TenantContractResponse): number | null => {
-  const raw = c.moveInDate || c.expectedReceptionDate
+  const raw = onboardDueDate(c)
   if (!raw) return null
   const d = new Date(`${String(raw).slice(0, 10)}T00:00:00`)
   if (Number.isNaN(d.getTime())) return null
@@ -126,8 +131,13 @@ const daysUntilOnboard = (c: TenantContractResponse): number | null => {
   return Math.round((d.getTime() - today.getTime()) / 86_400_000)
 }
 
-/** Chưa tới cửa sổ đón: còn hơn MAX_EARLY_ONBOARD_DAYS ngày nữa mới tới ngày vào ở. */
+/**
+ * Chưa tới cửa sổ đón: còn hơn MAX_EARLY_ONBOARD_DAYS ngày nữa mới tới ngày đón.
+ * Chỉ áp cho bước còn ở khâu chụp (DRAFT/AWAITING_ONBOARD) — HĐ đã sang AWAITING_PAYMENT/
+ * AWAITING_CONFIRM là đã chụp xong (và có thể đã trả tiền), không được khoá lại theo ngày.
+ */
 const isTooEarly = (c: TenantContractResponse): boolean => {
+  if (!isCaptureStage(c.status)) return false
   const d = daysUntilOnboard(c)
   return d != null && d > MAX_EARLY_ONBOARD_DAYS
 }
@@ -142,14 +152,15 @@ type StatusKey =
   | 'wait_tenant_ok'  // đã thu tiền, chờ khách kích hoạt tài khoản + đồng ý hợp đồng
   | 'wait_price'
   | 'price_rejected'
-  | 'wait_transfer'
-  | 'draft'
+  | 'wait_transfer'   // AWAITING_PAYMENT: đã chụp xong, chờ tạo QR / khách chuyển tiền
+  | 'onboard'         // AWAITING_ONBOARD: tới ngày đón, manager chụp hiện trạng + chỉ số
+  | 'draft'           // DRAFT: chưa tới ngày đón
 
 // Thứ tự = độ ưu tiên hiển thị. `my_otp` đứng đầu vì đó là việc quản lý bấm một cái
 // là xong; ba nhóm "chờ người khác" xếp sau việc của chính mình.
 const STATUS_KEYS: StatusKey[] = [
   'my_otp', 'wait_tenant_otp', 'wait_tenant_ok',
-  'wait_price', 'price_rejected', 'wait_transfer', 'draft',
+  'wait_price', 'price_rejected', 'wait_transfer', 'onboard', 'draft',
 ]
 
 const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string; bg: string }> = {
@@ -161,13 +172,17 @@ const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string
   wait_tenant_ok:  { label: '✅ Đã thu — chờ khách xác nhận', short: 'Chờ khách', color: '#0891B2', bg: '#ECFEFF' },
   wait_price:     { label: 'Chờ Host duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
   price_rejected: { label: 'Host từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
-  wait_transfer:  { label: 'Chờ khách chuyển tiền',  short: 'Chờ chuyển tiền', color: '#0891B2', bg: '#ECFEFF' },
-  draft:          { label: 'Chờ đón khách',          short: 'Chờ đón',      color: '#D97706', bg: '#FFFBEB' },
+  // Nhãn/màu 3 bước đầu lấy đúng nhãn BE (`statusLabel`) — xem constants/tenantOnboard.ts.
+  wait_transfer:  { label: ONBOARD_STATUS_META.AWAITING_PAYMENT.label, short: 'Chờ thu tiền', color: '#0891B2', bg: '#ECFEFF' },
+  onboard:        { label: ONBOARD_STATUS_META.AWAITING_ONBOARD.label, short: 'Chờ onboard', color: ONBOARD_STATUS_META.AWAITING_ONBOARD.color, bg: ONBOARD_STATUS_META.AWAITING_ONBOARD.bg },
+  draft:          { label: ONBOARD_STATUS_META.DRAFT.label,            short: 'Chờ tới ngày', color: '#D97706', bg: '#FFFBEB' },
 }
 
 const statusKeyOf = (c: TenantContractResponse): StatusKey => {
   const paid = c.paymentStatus === 'PAID' || !!c.depositPaidAt
-  if (c.status === 'PENDING' && paid) {
+  // BE 24/09/2026: "đã thu tiền, chờ OTP" là AWAITING_CONFIRM (trước là PENDING + PAID).
+  // Giữ PENDING + PAID cho hợp đồng cũ chưa kịp migrate.
+  if ((c.status === 'AWAITING_CONFIRM' || c.status === 'PENDING') && paid) {
     // Đã thu tiền → tách theo hai "chữ ký" OTP.
     //
     // Khách đã ký mà quản lý chưa → việc của chính quản lý, ưu tiên cao nhất. Ngược
@@ -180,7 +195,9 @@ const statusKeyOf = (c: TenantContractResponse): StatusKey => {
   }
   if (c.priceApprovalStatus === 'PENDING_PRICE_APPROVAL') return 'wait_price'
   if (c.priceApprovalStatus === 'PRICE_REJECTED') return 'price_rejected'
-  if (c.status === 'PENDING' || c.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT') return 'wait_transfer'
+  if (c.status === 'AWAITING_PAYMENT' || c.status === 'AWAITING_CONFIRM' || c.status === 'PENDING'
+    || c.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT') return 'wait_transfer'
+  if (c.status === 'AWAITING_ONBOARD') return 'onboard'
   return 'draft'
 }
 
@@ -421,13 +438,19 @@ export const ResumeContractScreen: React.FC = () => {
       //
       // Thiếu nhánh PENDING chính là lỗi mentor nêu 07/08/2026: manager thoát app giữa
       // chừng rồi vào lại là mất dấu khách đang đón dở, tìm kiểu gì cũng không ra.
-      const [approval, drafts, pendings] = await Promise.all([
+      // BE 24/09/2026: `PENDING` (tenant) đã tách thành AWAITING_ONBOARD / AWAITING_PAYMENT /
+      // AWAITING_CONFIRM — một lệnh `status=RECEPTION` lấy đủ 4 bước (DRAFT → AWAITING_CONFIRM)
+      // thay cho hai lệnh DRAFT + PENDING (PENDING giờ chỉ còn cho HĐ inbound, luôn rỗng ở đây).
+      const [approval, pipeline] = await Promise.all([
         realTenantService.listManagedContracts(),
-        realTenantService.listManagedContracts('DRAFT'),
-        realTenantService.listManagedContracts('PENDING'),
+        realTenantService.listManagedContracts('RECEPTION'),
       ])
-      // Thứ tự gộp = thứ tự ưu tiên xử lý: đang chờ tiền/OTP gấp nhất, rồi tới nháp.
-      const data = [...pendings, ...drafts, ...approval].filter(
+      // Thứ tự gộp = thứ tự ưu tiên xử lý: đang chờ OTP/tiền gấp nhất, rồi tới chờ chụp, rồi nháp.
+      const rank = (c: TenantContractResponse) => {
+        const i = ['AWAITING_CONFIRM', 'AWAITING_PAYMENT', 'AWAITING_ONBOARD', 'DRAFT'].indexOf(c.status)
+        return i < 0 ? 9 : i
+      }
+      const data = [...[...pipeline].sort((a, b) => rank(a) - rank(b)), ...approval].filter(
         (c, i, arr) => arr.findIndex((x) => x.id === c.id) === i,
       )
       setList(data)
@@ -498,7 +521,7 @@ export const ResumeContractScreen: React.FC = () => {
         */}
         <Header
           onBack={() => { setSelected(null); load() }}
-          title={selected.status === 'DRAFT' ? 'Đón khách' : 'Tiếp tục hợp đồng'}
+          title={isCaptureStage(selected.status) ? 'Đón khách' : 'Tiếp tục hợp đồng'}
         />
         {selected.contractFileAvailable ? (
           <TouchableOpacity
@@ -759,12 +782,12 @@ const ContractActionPanel: React.FC<{
           <Text style={styles.bannerIcon}>🗓</Text>
           <Text style={styles.bannerTitle}>Chưa tới hạn đón khách</Text>
           <Text style={styles.bannerDesc}>
-            {contract.tenantFullName} vào ở ngày {formatDateVi(contract.moveInDate)} — còn {early} ngày.
+            {contract.tenantFullName} có lịch đón ngày {formatDateVi(onboardDueDate(contract) ?? contract.moveInDate)} — còn {early} ngày.
             Hệ thống chỉ cho đón sớm tối đa {MAX_EARLY_ONBOARD_DAYS} ngày, nên chưa chốt chỉ số
             và thu tiền được.
           </Text>
           <Text style={styles.bannerReception}>
-            Khách đổi lịch vào sớm hơn? Mở hồ sơ bên web để sửa ngày vào ở.
+            Khách đổi lịch vào sớm hơn? Mở hồ sơ bên web để sửa ngày đón / ngày vào ở.
           </Text>
         </View>
       </ScrollView>
@@ -925,6 +948,12 @@ const InspectionSection: React.FC<{
   contract: TenantContractResponse
   onChanged: (c: TenantContractResponse) => void
 }> = ({ contract, onChanged }) => {
+  /**
+   * BE chỉ cho sửa hiện trạng/chỉ số khi HĐ còn ở DRAFT hoặc AWAITING_ONBOARD (`isCaptureEditable`).
+   * Sang AWAITING_PAYMENT trở đi là ĐÃ CHỐT — PUT bị từ chối, nên khoá hẳn phần sửa ở FE.
+   */
+  const capturable = isCaptureStage(contract.status)
+  const locked = isOnboardStatus(contract.status) && !capturable
   const [expanded, setExpanded] = useState(false)
   const [elecUrl, setElecUrl] = useState(contract.electricMeterImageUrl ?? '')
   const [waterUrl, setWaterUrl] = useState(contract.waterMeterImageUrl ?? '')
@@ -1347,10 +1376,20 @@ const InspectionSection: React.FC<{
           capturedAt: photosCapturedAt[i] || nowIso(),
         })),
         roomConditionNote: note || undefined,
+        // BE 24/09/2026: lưu đủ chỉ số + ảnh xong thì chốt luôn bước chụp
+        // (AWAITING_ONBOARD → AWAITING_PAYMENT) ngay trong cùng PUT — không gửi cờ này thì
+        // hợp đồng kẹt ở DRAFT/AWAITING_ONBOARD và "Tạo mã thanh toán" bị BE từ chối.
+        // Điều kiện đủ bằng chứng đã được `saveBlockReason` chặn ở trên, khớp BE.
+        completeCapture: capturable ? true : undefined,
       })
       onChanged(updated)
       setExpanded(false)
-      showAlert('Đã lưu', 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.')
+      showAlert(
+        'Đã lưu',
+        capturable
+          ? 'Đã chốt hiện trạng phòng & chỉ số điện nước — sang bước thu tiền.'
+          : 'Hiện trạng phòng & chỉ số điện nước đã được cập nhật.',
+      )
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Không lưu được hiện trạng phòng.'))
     } finally {
@@ -1360,9 +1399,15 @@ const InspectionSection: React.FC<{
 
   return (
     <View style={styles.formCard}>
-      <TouchableOpacity style={styles.inspectionHeader} onPress={() => setExpanded((v) => !v)} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={styles.inspectionHeader}
+        onPress={() => { if (!locked) setExpanded((v) => !v) }}
+        activeOpacity={locked ? 1 : 0.7}
+      >
         <Text style={styles.inspectionTitle}>{hasData ? '✅' : '📋'} Hiện trạng phòng & điện nước</Text>
-        <Text style={styles.inspectionToggle}>{expanded ? 'Thu gọn ▲' : 'Chỉnh sửa ▼'}</Text>
+        <Text style={styles.inspectionToggle}>
+          {locked ? '🔒 Đã chốt' : expanded ? 'Thu gọn ▲' : 'Chỉnh sửa ▼'}
+        </Text>
       </TouchableOpacity>
       {!expanded && (
         <Text style={styles.inspectionSummary}>
@@ -1620,7 +1665,9 @@ const InspectionSection: React.FC<{
             onPress={save}
             disabled={saving || !!saveBlockReason}
           >
-            {saving ? <ActivityIndicator color={Colors.white} /> : <Text style={styles.primaryBtnText}>💾 Lưu hiện trạng</Text>}
+            {saving ? <ActivityIndicator color={Colors.white} /> : (
+              <Text style={styles.primaryBtnText}>{capturable ? '💾 Lưu & chốt hiện trạng' : '💾 Lưu hiện trạng'}</Text>
+            )}
           </TouchableOpacity>
           {!!saveBlockReason && !saving && (
             <Text style={styles.saveBlockHint}>⚠️ {saveBlockReason}</Text>
@@ -1751,6 +1798,28 @@ const DepositOtpPanel: React.FC<{
     && contract.initialWaterReading != null
     && ((contract.roomConditionPhotos?.length ?? 0) > 0
       || (contract.roomConditionUrls?.length ?? 0) > 0)
+
+  /**
+   * Pipeline BE 24/09/2026: chỉ tạo được QR khi HĐ ở AWAITING_PAYMENT, và trong cửa sổ
+   * [ngày đón − 3, ngày đón + 3). Trễ ≥ 3 ngày mà chưa PAID thì BE từ chối + cron hủy no-show.
+   * `PENDING` giữ lại cho hợp đồng cũ chưa kịp migrate.
+   */
+  const needsCapture = isCaptureStage(contract.status)
+  const atPaymentStage = contract.status === 'AWAITING_PAYMENT' || contract.status === 'PENDING'
+  const recWindow = receptionWindow(contract, todayIso())
+  const pastGrace = recWindow.pastGrace && !paid
+  /** Đã lưu đủ chỉ số/ảnh (dữ liệu cũ) nhưng HĐ chưa được chốt sang AWAITING_PAYMENT. */
+  const finishCapture = async () => {
+    try {
+      setBusy(true)
+      const updated = await realTenantService.updateDraftContract(contract.id, { completeCapture: true })
+      onChanged(updated)
+    } catch (err: any) {
+      showAlert('Chưa chốt được hiện trạng', readErr(err, 'Không chuyển được sang bước thu tiền.'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // Poll trạng thái thanh toán (PayOS, local không có webhook).
   useEffect(() => {
@@ -1987,11 +2056,30 @@ const DepositOtpPanel: React.FC<{
               chiếm chỗ mà không cho người dùng quyết định gì. */}
           {/* Chưa lưu hiện trạng thì KHÔNG hiện nút — một dòng nói đúng việc phải làm.
               (Lý do dài dòng đã bỏ: manager cần biết LÀM GÌ, không cần nghe giảng.) */}
+          {pastGrace && (
+            <Text style={styles.stepLockNote}>
+              ⚠️ Đã quá {ONBOARD_NO_SHOW_GRACE_DAYS} ngày kể từ ngày đón
+              {recWindow.due ? ` (${formatDateVi(recWindow.due)})` : ''} — hệ thống không cho tạo mã thanh toán
+              nữa và sẽ tự hủy hồ sơ chưa thu tiền. Liên hệ admin để dời ngày đón nếu khách vẫn vào ở.
+            </Text>
+          )}
           {!inspectionSaved ? (
             <Text style={styles.stepLockNote}>
               🔒 Lưu hiện trạng phòng xong mới thu được tiền
             </Text>
-          ) : !payInfo.payosQrCode && !payInfo.payosCheckoutUrl ? (
+          ) : needsCapture ? (
+            <TouchableOpacity
+              style={[styles.primaryBtn, busy && styles.btnDisabled]}
+              onPress={finishCapture}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.primaryBtnText}>Chốt hiện trạng — sang bước thu tiền</Text>
+              )}
+            </TouchableOpacity>
+          ) : pastGrace || !atPaymentStage ? null : !payInfo.payosQrCode && !payInfo.payosCheckoutUrl ? (
             <TouchableOpacity
               style={[styles.primaryBtn, busy && styles.btnDisabled]}
               onPress={createPayment}

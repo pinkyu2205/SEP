@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, canTerminateForUnpaidInvoice, isMeterReadingDay } from '@/constants';
+import { Colors, canTerminateForUnpaidInvoice, isMeterReadingDay, isPreCollectStatus } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import type { ManagedProperty } from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
@@ -150,7 +150,12 @@ export const useManagerTasks = () => {
         managerPropertyService.getManagedProperties(),
         realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
         realManagerInvoiceService.listPayments().catch(() => [] as ManagerPayment[]),
-        realTenantService.listManagedContracts('DRAFT').catch(() => [] as TenantContractResponse[]),
+        // BE 24/09/2026: DRAFT chỉ là "chưa tới ngày" — tới ngày đón cron chuyển sang AWAITING_ONBOARD,
+        // đã chụp xong thì AWAITING_PAYMENT. Cả 3 bước này còn việc của manager (chưa thu tiền),
+        // nên lấy cả pipeline (RECEPTION) rồi lọc — chỉ hỏi DRAFT là mất hết việc "đón khách hôm nay".
+        realTenantService.listManagedContracts('RECEPTION')
+          .then(list => list.filter(c => isPreCollectStatus(c.status)))
+          .catch(() => [] as TenantContractResponse[]),
         checkoutService.list().catch(() => [] as CheckoutRequestDto[]),
         meterReadingService.listAllPending().catch(() => [] as PendingMeterReadingItem[]),
       ]);

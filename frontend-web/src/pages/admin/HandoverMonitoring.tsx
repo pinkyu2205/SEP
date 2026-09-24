@@ -13,6 +13,7 @@ import { SectionShell, StatusPill, KpiCard, Pagination } from './shared';
 import { normalizeRoomNumber, SLOT_LABEL } from '@/services/propertyOccupancy.service';
 import { RoomsNotOpenedNote } from '@/pages/onboarding/CapacityBar';
 import type { TenantContractResponse } from '@/types/api.types';
+import { isNotYetActive } from '@/components/contract/contractLabels';
 
 /** 20 dòng/trang — cùng ngưỡng với bảng Hồ sơ đón khách cho nhất quán. */
 const ROWS_PER_PAGE = 20;
@@ -52,7 +53,11 @@ const PROPERTY_STATUS: Record<string, { label: string; color: string; dot: strin
 };
 
 const CONTRACT_STATUS: Record<string, { label: string; color: string }> = {
-  DRAFT: { label: 'Chờ đón khách', color: 'bg-sky-100 text-sky-700' },
+  // BE 24/09/2026: pipeline đón khách — nhãn khớp ContractStatus.displayLabelVi().
+  DRAFT: { label: 'Chờ đến ngày đón', color: 'bg-slate-100 text-slate-700' },
+  AWAITING_ONBOARD: { label: 'Chờ onboard', color: 'bg-blue-100 text-blue-700' },
+  AWAITING_PAYMENT: { label: 'Chờ thanh toán', color: 'bg-orange-100 text-orange-700' },
+  AWAITING_CONFIRM: { label: 'Chờ xác nhận hợp đồng', color: 'bg-violet-100 text-violet-700' },
   PENDING: { label: 'Chờ thu tiền', color: 'bg-amber-100 text-amber-800' },
   ACTIVE: { label: 'Đã giao phòng', color: 'bg-emerald-100 text-emerald-700' },
   TERMINATED: { label: 'Đã chấm dứt', color: 'bg-zinc-200 text-zinc-700' },
@@ -545,7 +550,7 @@ export const HandoverMonitoring = () => {
                                       const slot = occ?.byRoomNumber.get(key);
 
                                       const tenantName = room.tenantName || dr?.tenantFullName || null;
-                                      const status = room.contractStatus || (dr ? 'DRAFT' : null);
+                                      const status = room.contractStatus || dr?.status || (dr ? 'DRAFT' : null);
                                       // Hồ sơ nháp thì mốc đáng quan tâm là NGÀY DỰ KIẾN ĐÓN, không
                                       // phải ngày vào ở — chưa vào thì chưa có ngày vào thật.
                                       const dateLabel = room.moveInDate || dr?.expectedReceptionDate || dr?.moveInDate;
@@ -570,7 +575,7 @@ export const HandoverMonitoring = () => {
                                               // bôi đỏ "thiếu ảnh" ở đây là báo động giả. Bản trước làm
                                               // vậy nên nhà nào trống nhiều là đỏ rực cả bảng.
                                               <span className="text-slate-400">—</span>
-                                            ) : status === 'DRAFT' || status === 'PENDING' ? (
+                                            ) : isNotYetActive(status) ? (
                                               <span className="text-slate-400">Chưa đón khách</span>
                                             ) : gaps.length === 0 ? (
                                               <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
