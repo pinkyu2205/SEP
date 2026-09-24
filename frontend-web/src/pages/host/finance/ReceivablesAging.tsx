@@ -2,7 +2,7 @@ import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Clock, Wallet, Download, Receipt, RefreshCw, Building2, ArrowDownUp, Hourglass,
-  BellRing, Check, ArrowRight,
+  BellRing, Check, ArrowRight, Users, CalendarClock,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer,
@@ -70,11 +70,49 @@ const overdueBadge = (days: number) =>
   days > 90 ? 'bg-rose-100 text-rose-700'
     : days > 60 ? 'bg-orange-100 text-orange-700'
       : days > 30 ? 'bg-amber-100 text-amber-700'
-        : days > 0 ? 'bg-yellow-100 text-yellow-700'
-          : 'bg-emerald-100 text-emerald-700';
+        : days > 0 ? 'bg-rose-100 text-rose-700'
+          // Chưa tới hạn nhưng còn ≤ 3 ngày → vàng để nhắc khách trước.
+          : days >= -3 ? 'bg-amber-100 text-amber-800'
+            : 'bg-emerald-100 text-emerald-700';
 
-type SortKey = 'newest' | 'oldest' | 'overdue' | 'amount-desc' | 'amount-asc';
+/** Còn ngần này ngày là tới hạn → coi như "sắp tới hạn", tô vàng để host nhắc trước. */
+const DUE_SOON_DAYS = 3;
+
+/**
+ * Mức gấp của một khoản nợ — dùng chung cho thẻ "Khách đang nợ" và tô màu dòng bảng.
+ *   overdue  quá hạn           → đỏ
+ *   soon     tới hạn ≤ 3 ngày  → vàng
+ *   open     chưa tới hạn      → trung tính
+ */
+type Urgency = 'overdue' | 'soon' | 'open';
+const urgencyOf = (i: InvoiceDto): Urgency | null => {
+  if (i.status === 'PAID') return null;
+  const d = daysSince(i.dueDate);
+  if (i.status === 'OVERDUE' || d > 0) return 'overdue';
+  return -d <= DUE_SOON_DAYS ? 'soon' : 'open';
+};
+const URGENCY_RANK: Record<Urgency, number> = { overdue: 0, soon: 1, open: 2 };
+
+/** "Quá hạn 5 ngày" · "Hạn hôm nay" · "Còn 2 ngày" */
+const dueText = (days: number) =>
+  days > 0 ? `Quá hạn ${days} ngày` : days === 0 ? 'Tới hạn hôm nay' : `Còn ${-days} ngày tới hạn`;
+
+/** Một khách đang nợ = gộp mọi hoá đơn chưa thu của cùng khách + cùng phòng. */
+interface Debtor {
+  key: string;
+  tenantName: string;
+  propertyName: string;
+  roomCode: string;
+  amount: number;
+  count: number;
+  /** Số ngày tính từ hạn của hoá đơn TRỄ nhất (dương = đã quá hạn). */
+  worstDays: number;
+  urgency: Urgency;
+}
+
+type SortKey = 'urgent' | 'newest' | 'oldest' | 'overdue' | 'amount-desc' | 'amount-asc';
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'urgent', label: 'Cần thu gấp trước' },
   { key: 'newest', label: 'Mới nhất (hạn thu gần đây)' },
   { key: 'overdue', label: 'Quá hạn lâu nhất' },
   { key: 'amount-desc', label: 'Số tiền cao → thấp' },
@@ -93,14 +131,20 @@ export const ReceivablesAging = () => {
   const [status, setStatus] = useState<StatusKey>('all');
   const [agingFilter, setAgingFilter] = useState<AgingKey>('all');
   const [property, setProperty] = useState('all');
-  const [sort, setSort] = useState<SortKey>('newest');
+  // Mặc định đẩy nợ gấp lên đầu: vào trang là thấy ngay ai cần thu, không lẫn với hoá đơn đã thu.
+  const [sort, setSort] = useState<SortKey>('urgent');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [agingRes, invoicePage, notifyPage] = await Promise.all([
-      hostService.getReceivablesAging().catch(() => null),
+    /*
+     * Gọi aging TRƯỚC rồi mới tính kỳ: `currentMonth()` đọc giờ SERVER, mà giờ đó chỉ đồng
+     * bộ sau response đầu tiên. Gọi song song lúc vừa mở trang thì kỳ tính theo giờ máy —
+     * đo thật: tiêu đề ghi "Tháng 10/2026" mà bảng lại hỏi `month=2026-09`.
+     */
+    const agingRes = await hostService.getReceivablesAging().catch(() => null);
+    const [invoicePage, notifyPage] = await Promise.all([
       // size lớn: BE phân trang mặc định 20 → lấy trọn kỳ để tổng hợp KPI không bị hụt.
       hostService.getInvoices({ month: currentMonth(), size: 500 }).catch(() => null),
       // Cảnh báo quá hạn do cron nghiệp vụ bắn — nằm ở bảng thông báo chung.
@@ -144,6 +188,54 @@ export const ReceivablesAging = () => {
 
   const unreadAlerts = useMemo(() => alerts.filter(n => !n.read), [alerts]);
 
+  /**
+   * KHÁCH ĐANG NỢ — trước đây trang chỉ bật khối cảnh báo khi đã có hoá đơn QUÁ HẠN; còn
+   * nợ chưa tới hạn (dù cả chục triệu) thì chỉ là một con số trong ô KPI, host dễ lướt qua.
+   * Giờ cứ có khoản chưa thu là hiện danh sách theo từng KHÁCH (không phải từng hoá đơn —
+   * host đi nhắc người, không nhắc mã hoá đơn), xếp gấp nhất lên đầu.
+   */
+  const debtors = useMemo<Debtor[]>(() => {
+    const map = new Map<string, Debtor>();
+    for (const i of invoices) {
+      const u = urgencyOf(i);
+      if (!u) continue;
+      const key = `${i.tenantName}|${i.propertyName}|${i.roomCode}`;
+      const days = daysSince(i.dueDate);
+      const cur = map.get(key);
+      if (!cur) {
+        map.set(key, {
+          key, tenantName: i.tenantName?.trim() || '(chưa có tên khách)', propertyName: i.propertyName,
+          roomCode: i.roomCode, amount: i.amount, count: 1, worstDays: days, urgency: u,
+        });
+      } else {
+        cur.amount += i.amount;
+        cur.count += 1;
+        cur.worstDays = Math.max(cur.worstDays, days);
+        if (URGENCY_RANK[u] < URGENCY_RANK[cur.urgency]) cur.urgency = u;
+      }
+    }
+    return [...map.values()].sort((a, b) =>
+      URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] || b.worstDays - a.worstDays || b.amount - a.amount);
+  }, [invoices]);
+
+  const debtorStats = useMemo(() => ({
+    overdue: debtors.filter(d => d.urgency === 'overdue').length,
+    soon: debtors.filter(d => d.urgency === 'soon').length,
+  }), [debtors]);
+  const [showAllDebtors, setShowAllDebtors] = useState(false);
+  const DEBTOR_PREVIEW = 6;
+
+  /** Bấm một khách → lọc bảng chi tiết theo khách đó rồi cuộn xuống. */
+  const focusDebtor = (d: Debtor) => {
+    setQ(d.tenantName);
+    setStatus('all');
+    setAgingFilter('all');
+    setProperty('all');
+    setSort('urgent');
+    setPage(1);
+    document.getElementById('receivables-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const dismissAlert = async (id: number) => {
     setAlerts(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
     await notificationService.markRead(id).catch(() => load());
@@ -172,6 +264,14 @@ export const ReceivablesAging = () => {
 
     const sorted = [...rows];
     switch (sort) {
+      case 'urgent':
+        sorted.sort((a, b) => {
+          const ua = urgencyOf(a), ub = urgencyOf(b);
+          // Đã thu xuống cuối; còn lại: quá hạn → sắp tới hạn → chưa tới hạn, trễ lâu trước.
+          const ra = ua ? URGENCY_RANK[ua] : 9, rb = ub ? URGENCY_RANK[ub] : 9;
+          return ra - rb || daysSince(b.dueDate) - daysSince(a.dueDate);
+        });
+        break;
       case 'newest': sorted.sort((a, b) => cmpIsoDesc(a.dueDate, b.dueDate)); break;
       case 'oldest': sorted.sort((a, b) => cmpIsoDesc(b.dueDate, a.dueDate)); break;
       case 'overdue': sorted.sort((a, b) => daysSince(b.dueDate) - daysSince(a.dueDate)); break;
@@ -185,7 +285,7 @@ export const ReceivablesAging = () => {
   const paged = pageSlice(filtered, page, perPage);
 
   const activeFilters = (q ? 1 : 0) + (status !== 'all' ? 1 : 0) + (agingFilter !== 'all' ? 1 : 0) + (property !== 'all' ? 1 : 0);
-  const resetFilters = () => { setQ(''); setStatus('all'); setAgingFilter('all'); setProperty('all'); setPage(1); };
+  const resetFilters = () => { setQ(''); setStatus('all'); setAgingFilter('all'); setProperty('all'); setSort('urgent'); setPage(1); };
   // Đổi bộ lọc thì về trang 1 để không rơi vào trang trống.
   const onFilter = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setPage(1); };
 
@@ -293,6 +393,72 @@ export const ReceivablesAging = () => {
         </div>
       )}
 
+      {/* ── KHÁCH ĐANG NỢ — xem `debtors` ── */}
+      {debtors.length > 0 && (
+        <div className={`overflow-hidden rounded-2xl border-2 bg-white shadow-sm ${
+          debtorStats.overdue > 0 ? 'border-rose-300' : 'border-amber-300'}`}>
+          <div className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${
+            debtorStats.overdue > 0 ? 'bg-rose-50' : 'bg-amber-50'}`}>
+            <div className="flex items-start gap-3">
+              <div className={`relative flex-shrink-0 rounded-xl p-2.5 ${
+                debtorStats.overdue > 0 ? 'bg-rose-500 text-white' : 'bg-amber-400 text-slate-900'}`}>
+                <Users className="h-5 w-5" />
+                {debtorStats.overdue > 0 && (
+                  <span className="absolute -right-1 -top-1 h-3 w-3 animate-ping rounded-full bg-rose-500" />
+                )}
+              </div>
+              <div>
+                <p className={`text-base font-extrabold ${debtorStats.overdue > 0 ? 'text-rose-900' : 'text-amber-900'}`}>
+                  {debtors.length} khách đang nợ · {formatCurrency(totals.total)}
+                </p>
+                <p className={`mt-0.5 text-sm ${debtorStats.overdue > 0 ? 'text-rose-700' : 'text-amber-800'}`}>
+                  {debtorStats.overdue > 0 && <><b>{debtorStats.overdue} khách đã quá hạn</b> — cần liên hệ ngay. </>}
+                  {debtorStats.soon > 0 && <><b>{debtorStats.soon} khách</b> tới hạn trong {DUE_SOON_DAYS} ngày tới. </>}
+                  {debtorStats.overdue === 0 && debtorStats.soon === 0 && 'Chưa ai quá hạn — theo dõi để nhắc khách trước hạn.'}
+                </p>
+              </div>
+            </div>
+            {debtors.length > DEBTOR_PREVIEW && (
+              <button onClick={() => setShowAllDebtors(v => !v)}
+                className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 sm:self-center">
+                {showAllDebtors ? 'Thu gọn' : `Xem cả ${debtors.length} khách`}
+              </button>
+            )}
+          </div>
+
+          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+            {(showAllDebtors ? debtors : debtors.slice(0, DEBTOR_PREVIEW)).map(d => {
+              const tone = d.urgency === 'overdue'
+                ? { box: 'border-rose-200 border-l-rose-500 bg-rose-50/60 hover:bg-rose-50', pill: 'bg-rose-100 text-rose-700', amt: 'text-rose-600' }
+                : d.urgency === 'soon'
+                  ? { box: 'border-amber-200 border-l-amber-400 bg-amber-50/50 hover:bg-amber-50', pill: 'bg-amber-100 text-amber-800', amt: 'text-amber-700' }
+                  : { box: 'border-slate-200 border-l-slate-300 bg-white hover:bg-slate-50', pill: 'bg-slate-100 text-slate-600', amt: 'text-slate-900' };
+              return (
+                <button key={d.key} onClick={() => focusDebtor(d)}
+                  title="Xem các hoá đơn của khách này"
+                  className={`rounded-xl border border-l-4 p-3.5 text-left transition ${tone.box}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-bold text-slate-900">{d.tenantName}</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {d.propertyName} · {d.roomCode === 'NGUYEN_CAN' ? 'Nguyên căn' : `P.${d.roomCode}`}
+                      </p>
+                    </div>
+                    <p className={`shrink-0 text-base font-extrabold tabular-nums ${tone.amt}`}>{formatCurrency(d.amount)}</p>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${tone.pill}`}>
+                      <CalendarClock className="h-3 w-3" /> {dueText(d.worstDays)}
+                    </span>
+                    <span className="text-[11px] text-slate-400">{d.count} hoá đơn</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* KPI */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {kpis.map(k => (
@@ -352,7 +518,7 @@ export const ReceivablesAging = () => {
       </div>
 
       {/* Chi tiết công nợ — tìm kiếm + lọc + sắp xếp */}
-      <div className="card overflow-hidden">
+      <div id="receivables-detail" className="card scroll-mt-20 overflow-hidden">
         <div className="flex items-center gap-2 px-5 pt-5">
           <Receipt className="h-5 w-5 text-indigo-600" />
           <div>
@@ -405,8 +571,13 @@ export const ReceivablesAging = () => {
               {paged.map(i => {
                 const days = daysSince(i.dueDate);
                 const meta = STATUS_META[i.status] ?? STATUS_META.UNPAID;
+                const u = urgencyOf(i);
+                // Viền trái + nền nhạt để dòng nợ nổi lên giữa các dòng đã thu.
+                const rowTone = u === 'overdue' ? 'bg-rose-50/60 shadow-[inset_4px_0_0_#f43f5e] hover:bg-rose-50'
+                  : u === 'soon' ? 'bg-amber-50/50 shadow-[inset_4px_0_0_#fbbf24] hover:bg-amber-50'
+                    : 'hover:bg-slate-50';
                 return (
-                  <tr key={i.id} className="transition-colors hover:bg-slate-50">
+                  <tr key={i.id} className={`transition-colors ${rowTone}`}>
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-slate-900">{i.tenantName?.trim() || '(chưa có tên khách)'}</p>
                       <p className="text-xs text-slate-400">{i.id}</p>
@@ -421,7 +592,7 @@ export const ReceivablesAging = () => {
                     <td className="px-5 py-3.5 text-sm tabular-nums text-slate-600">{fmtDate(i.dueDate)}</td>
                     <td className="px-5 py-3.5 text-center">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${overdueBadge(i.status === 'PAID' ? 0 : days)}`}>
-                        {i.status === 'PAID' ? 'Đã tất toán' : days > 0 ? `${days} ngày` : `Còn ${Math.abs(days)} ngày`}
+                        {i.status === 'PAID' ? 'Đã tất toán' : days > 0 ? `Quá ${days} ngày` : days === 0 ? 'Hạn hôm nay' : `Còn ${Math.abs(days)} ngày`}
                       </span>
                     </td>
                     <td className="px-5 py-3.5">

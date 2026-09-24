@@ -53,6 +53,8 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
 
   const [rooms, setRooms] = useState<ApiRoom[]>([]);
   const [contracts, setContracts] = useState<TenantContractResponse[]>([]);
+  /** Phòng có khách mà đang có thiết bị được sửa (BE để MAINTENANCE) — hiện nhãn phụ. */
+  const [fixingRooms, setFixingRooms] = useState<Set<number>>(new Set());
   const [invoices, setInvoices] = useState<ManagerInvoice[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -65,7 +67,16 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
       realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
     ])
       .then(([r, c, inv]) => {
-        setRooms(r);
+        /*
+         * Phòng CÓ khách (HĐ ACTIVE) mà BE để MAINTENANCE → coi là RENTED. BE đẩy cả phòng
+         * sang MAINTENANCE khi có phiếu sửa thiết bị mở, dù khách vẫn ở — đếm theo status thô
+         * thì phòng 301 hiện "Bảo trì", ô "đang thuê" hụt một phòng. Giữ dấu để hiện nhãn phụ.
+         */
+        const occupiedNos = new Set(
+          c.filter(x => (x.status || '').toUpperCase() === 'ACTIVE').map(x => x.roomNumber).filter(Boolean),
+        );
+        setFixingRooms(new Set(r.filter(x => x.status === 'MAINTENANCE' && occupiedNos.has(x.roomNumber)).map(x => x.id)));
+        setRooms(r.map(x => (x.status === 'MAINTENANCE' && occupiedNos.has(x.roomNumber) ? { ...x, status: 'RENTED' } : x)));
         setContracts(c);
         setInvoices(inv.filter(i => i.propertyId === pid));
       })
@@ -151,7 +162,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.backText}>← Quay lại</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text></TouchableOpacity>
           <Text style={styles.title}>Toà nhà</Text>
           <View style={{ width: 60 }} />
         </View>
@@ -167,7 +178,7 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>← Quay lại</Text>
+          <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{prop?.name ?? 'Toà nhà'}</Text>
         <View style={{ width: 60 }} />
@@ -280,7 +291,9 @@ export const BuildingDetailScreen: React.FC<any> = ({ navigation, route }) => {
                     >
                       <View style={[styles.roomDot, { backgroundColor: ROOM_DOT[st] }]} />
                       <Text style={styles.roomCode}>{r.roomNumber}</Text>
-                      <Text style={styles.roomStatus}>{ROOM_STATUS_LABEL[st]}</Text>
+                      <Text style={styles.roomStatus}>
+                        {ROOM_STATUS_LABEL[st]}{fixingRooms.has(r.id) ? ' · 🔧 sửa TB' : ''}
+                      </Text>
                       {!!tenantName && <Text style={styles.roomTenant} numberOfLines={1}>{tenantName}</Text>}
                     </TouchableOpacity>
                   );

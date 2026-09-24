@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput,
   ActivityIndicator, RefreshControl, Linking, Image,
 } from 'react-native';
+import { MaskedValue } from '@/components/common/MaskedValue';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
@@ -220,13 +221,17 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
             )}
           </View>
 
-          {/* SĐT và CCCD ẨN với manager (13/08/2026) — thông tin định danh cá nhân của
-              khách, manager không cần đọc để vận hành. Nút "Gọi khách" ở trên VẪN gọi
-              được: nó mở app điện thoại với số lấy từ dữ liệu, không hiện số ra màn hình. */}
+          {/* SĐT/CCCD khách: hiện dạng che, bấm vào mới xem đủ (24/09/2026). */}
           <Section title="Khách thuê">
             <Row label="Họ tên" value={selected.tenantFullName} />
-            <Row label="Số điện thoại" value="•••" />
-            <Row label="CCCD/CMND" value="•••" />
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Số điện thoại</Text>
+              <MaskedValue kind="phone" value={selected.tenantPhone} style={styles.infoValue} />
+            </View>
+            <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.infoLabel}>CCCD/CMND</Text>
+              <MaskedValue kind="cccd" value={selected.tenantCccd} style={styles.infoValue} />
+            </View>
           </Section>
 
           {/* Không hiện số tiền thuê/cọc — hệ thống thu thẳng của khách

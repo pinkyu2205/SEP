@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius, canTerminateForUnpaidRent, isMeterReadingDay } from '@/constants';
+import { Colors, Spacing, BorderRadius, canTerminateForUnpaidInvoice, isMeterReadingDay } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
@@ -49,7 +49,8 @@ const QUICK_ACTIONS = [
   { emoji: '📝', label: 'Đơn gia hạn',    route: 'ExtensionRequests',     color: Colors.warning },
   // Mọi khoản thu ngoài tiền nhà (cọc, bảo trì, điện nước) — tách khỏi tab Hoá đơn để
   // hai việc không lẫn vào nhau.
-  { emoji: '💳', label: 'Tiền khách đã trả', route: 'ManagerPaymentHistory', color: Colors.info    },
+  // Gộp 24/09/2026: một chỗ cho mọi chuyện tiền của khách — đang nợ / đã thu / cọc.
+  { emoji: '💳', label: 'Tiền khách thuê', route: 'ManagerPaymentHistory', color: Colors.info    },
   // "Cần chụp số" từng ở đây, nay chuyển xuống "Cần xử lý": nó là một VIỆC có hạn và có
   // số lượng, không phải một nơi để đi tới. Ở lưới này nó chiếm chỗ cố định dù hầu hết
   // thời gian đếm bằng 0; ở dưới kia nó chỉ hiện khi thật sự còn phòng chưa chụp, và hiện
@@ -213,8 +214,8 @@ export const ManagerHomeScreen: React.FC = () => {
   const overdueOther = actionableInvoices.filter(i =>
     i.status === 'OVERDUE' && i.type !== 'RENT' && !isUtility(i)).length;
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
-  const rentTerminable = actionableInvoices.filter(i =>
-    i.type === 'RENT' && canTerminateForUnpaidRent(i.dueDate, i.status)).length;
+  // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
+  const rentTerminable = actionableInvoices.filter(i => canTerminateForUnpaidInvoice(i)).length;
   const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   /**
@@ -271,7 +272,7 @@ export const ManagerHomeScreen: React.FC = () => {
       urgency: checkoutPending > 0 ? 'critical' : 'warning', color: '#DC2626', route: 'CheckoutRequests' },
     // Vào màn Hoá đơn tiền nhà, KHÔNG phải màn Tiền phòng tự động: màn kia chỉ để cấu
     // hình lịch phát hành, còn thao tác chấm dứt HĐ nằm ở mục "Cần xử lý" của màn này.
-    { id: 'p5', icon: '⛔', label: 'Tiền phòng quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
+    { id: 'p5', icon: '⛔', label: 'Nợ quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
     { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
     // Không chụp được ảnh công tơ thì không phát hành được hoá đơn điện/nước — việc này
     // chặn cả kỳ thu tiền, nên xếp cùng nhóm gấp với tiền quá hạn.
@@ -339,6 +340,13 @@ export const ManagerHomeScreen: React.FC = () => {
               <Text style={s.urgentPillText}>{urgentTotal} khẩn</Text>
             </View>
           )}
+          {/* Trang chủ chỉ đủ chỗ 2 thẻ khẩn — việc thứ 3 trở đi (và việc "sắp tới") xem ở
+              màn "Việc của tôi", cùng luật đếm (hooks/useManagerTasks). */}
+          <TouchableOpacity onPress={() => navigation.navigate('ManagerTasks')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={s.allTasksLink}>
+              {activeItems.length > 0 ? `Tất cả ${activeItems.length} việc ›` : 'Xem việc ›'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {activeItems.length === 0 ? (
@@ -800,6 +808,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2,
   },
   urgentPillText: { fontSize: 10, fontWeight: '700', color: Colors.error },
+  allTasksLink: { fontSize: 12, color: Colors.primary, fontWeight: '700', marginLeft: 8 },
 
   // ── Priority center: all-clear state ─────────────────────────────
   clearCard: {

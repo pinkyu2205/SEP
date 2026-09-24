@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Image,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -12,6 +12,10 @@ import {
 } from '@/utils';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 import { useTenantContract } from '@/hooks';
+import {
+  useMyEquipmentTickets, summarizeTickets, equipmentDisplayStatus, orphanHistory,
+  TICKET_STATUS_META, ticketCost, ticketDoneDate,
+} from '@/hooks/useMyEquipmentTickets';
 import { extractEquipmentIdFromQr } from '@/utils/equipmentQr';
 import { EquipmentQrScanModal } from '@/components/common/EquipmentQrScanModal';
 
@@ -25,6 +29,14 @@ const CATEGORY_ICON: Record<string, string> = {
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
 
+/**
+ * CHI TIẾT THIẾT BỊ (tenant) — làm lại 24/09/2026.
+ *
+ * Trước đây: header tím chiếm 1/3 màn hình, bảng thông tin lặp lại phòng + "Khu vực: Khác",
+ * "Số lần bảo trì 0 lần" và không có lịch sử dù thiết bị đã có phiếu (BE trả rỗng), nút
+ * báo hỏng nằm tận cuối. Giờ: thẻ tóm tắt gọn → phiếu đang xử lý (nếu có) → thông tin cần
+ * thiết → lịch sử sửa chữa (từ phiếu của chính khách) → nút báo hỏng ghim đáy màn hình.
+ */
 export const EquipmentDetailScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -33,8 +45,7 @@ export const EquipmentDetailScreen: React.FC = () => {
   const [scanVisible, setScanVisible] = useState(false);
   const [checkingScan, setCheckingScan] = useState(false);
 
-  // Chi tiết + lịch sử bảo trì (BE 21/09/2026) — danh sách chỉ mang thông tin cơ bản, chi tiết
-  // mới có ngày mua, bảo hành còn lại, khấu hao còn lại. Lỗi mạng thì giữ dữ liệu từ danh sách.
+  // Chi tiết (ngày mua, bảo hành, khấu hao) + lịch sử của BE. Lỗi mạng thì giữ dữ liệu danh sách.
   const [detail, setDetail] = useState<EquipmentDto | null>(null);
   const [history, setHistory] = useState<EquipmentMaintenanceHistoryDto[]>([]);
   useEffect(() => {
@@ -46,9 +57,17 @@ export const EquipmentDetailScreen: React.FC = () => {
       .catch(() => { /* giữ dữ liệu từ danh sách */ });
     realTenantEquipmentService.getMyEquipmentHistory(id)
       .then(h => { if (alive) setHistory(h ?? []); })
-      .catch(() => { /* chưa có lịch sử / offline — ẩn khối lịch sử */ });
+      .catch(() => { /* BE chưa có lịch sử — dùng phiếu của khách */ });
     return () => { alive = false; };
   }, [equipment?.id]);
+
+  // Nguồn lịch sử chính: phiếu bảo trì của khách gắn với thiết bị này.
+  const { byEquipment, loaded: ticketsLoaded } = useMyEquipmentTickets();
+  const summary = useMemo(
+    () => summarizeTickets(equipment ? byEquipment.get(Number(equipment.id)) : []),
+    [byEquipment, equipment],
+  );
+  const extraHistory = useMemo(() => orphanHistory(history, summary.tickets), [history, summary.tickets]);
 
   /**
    * Bắt buộc quét đúng QR dán trên thiết bị trước khi mở form báo hỏng (06/09/2026) —
@@ -103,124 +122,180 @@ export const EquipmentDetailScreen: React.FC = () => {
     );
   }
 
-  // Chi tiết từ BE (nếu đã tải) chỉ bổ sung các trường mới — không đè dữ liệu đã có từ danh sách.
   const eq: EquipmentDto = detail ? {
     ...equipment,
-    maintenanceCount: detail.maintenanceCount ?? equipment.maintenanceCount,
-    lastMaintenanceDate: detail.lastMaintenanceDate ?? equipment.lastMaintenanceDate,
     purchasedAt: detail.purchasedAt,
     warrantyMonths: detail.warrantyMonths ?? equipment.warrantyMonths,
     remainingWarrantyLabel: detail.remainingWarrantyLabel,
     remainingDepreciationAmount: detail.remainingDepreciationAmount,
   } : equipment;
   const name = equipName(eq);
-  const statusStyle = getEquipmentLifecycleColor(equipment.status);
   const categoryIcon = CATEGORY_ICON[guessEquipmentCategory(name)] ?? '🔧';
+  const status = equipmentDisplayStatus(equipment.status, summary, st => ({
+    label: getEquipmentLifecycleLabel(st), ...getEquipmentLifecycleColor(st),
+  }));
+  const roomLabel = eq.roomName ?? eq.roomNumber;
+  const areaLabel = eq.houseArea ? getHouseAreaLabel(eq.houseArea) : '';
+  const installed = eq.purchasedAt ?? eq.installationDate;
+  const repairTotal = summary.repairedCount + extraHistory.length;
+
+  const infoRows = [
+    ...(areaLabel && areaLabel !== 'Khác' ? [{ label: 'Khu vực', value: areaLabel }] : []),
+    { label: 'Ngày lắp đặt', value: installed ? formatDate(installed as string) : 'Chưa có' },
+    ...(eq.remainingWarrantyLabel ? [{
+      label: 'Bảo hành',
+      value: eq.warrantyMonths ? `${eq.remainingWarrantyLabel} (${eq.warrantyMonths} tháng)` : eq.remainingWarrantyLabel,
+    }] : []),
+    ...(eq.remainingDepreciationAmount != null ? [{
+      label: 'Đền bù nếu làm hỏng',
+      value: formatCurrency(eq.remainingDepreciationAmount),
+      hint: 'Chỉ áp dụng khi hỏng do lỗi sử dụng',
+    }] : []),
+  ];
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" />
 
-      {/* Colored Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} accessibilityLabel="Quay lại">
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
-
-        <View style={styles.headerBody}>
-          <View style={styles.iconCircle}>
-            <Text style={styles.iconText}>{categoryIcon}</Text>
-          </View>
-          <Text style={styles.equipName}>{name}</Text>
-          <Text style={styles.equipCode}>{equipment.qrCode}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-            <Text style={[styles.statusBadgeText, { color: statusStyle.text }]}>
-              {getEquipmentLifecycleLabel(equipment.status)}
-            </Text>
-          </View>
-          <Text style={styles.locationText}>
-            📍 {equipment.roomName ?? equipment.roomNumber ?? 'Khu vực chung'}
-            {equipment.houseArea ? ` · ${getHouseAreaLabel(equipment.houseArea)}` : ''}
-          </Text>
-        </View>
+        <Text style={styles.headerTitle}>Chi tiết thiết bị</Text>
       </View>
 
-      {/*
-        Bỏ tab "Bảo hành"/"Lịch sử sửa chữa" (06/09/2026) — tenant chọn 1 thiết bị từ
-        danh sách chỉ cần đúng thông tin thiết bị đó để quyết định có báo hỏng hay
-        không, không cần xem lại lịch sử/bảo hành ở đây.
-      */}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
-        <View>
-            <View style={styles.section}>
-              {[
-                { label: 'Khu vực', value: getHouseAreaLabel(eq.houseArea) },
-                { label: 'Phòng', value: eq.roomName ?? eq.roomNumber ?? 'Khu vực chung' },
-                { label: 'Ngày mua / lắp đặt', value: (eq.purchasedAt ?? eq.installationDate) ? formatDate((eq.purchasedAt ?? eq.installationDate) as string) : 'Chưa có' },
-                ...(eq.remainingWarrantyLabel ? [{
-                  label: 'Bảo hành',
-                  value: eq.warrantyMonths ? `${eq.remainingWarrantyLabel} (${eq.warrantyMonths} tháng)` : eq.remainingWarrantyLabel,
-                }] : []),
-                ...(eq.remainingDepreciationAmount != null ? [{
-                  label: 'Giá trị đền bù còn lại',
-                  value: formatCurrency(eq.remainingDepreciationAmount),
-                }] : []),
-                { label: 'Bảo trì gần nhất', value: eq.lastMaintenanceDate ? formatDate(eq.lastMaintenanceDate) : 'Chưa có' },
-                { label: 'Số lần bảo trì', value: `${eq.maintenanceCount} lần` },
-              ].map((row, i, arr) => (
-                <View key={i} style={[styles.infoRow, i === arr.length - 1 && { borderBottomWidth: 0 }]}>
-                  <Text style={styles.infoLabel}>{row.label}</Text>
-                  <Text style={styles.infoValue}>{row.value}</Text>
-                </View>
-              ))}
-            </View>
-
-
-            {/* Lịch sử các lần bảo trì + ảnh (BE 21/09/2026) */}
-            {history.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.notesTitle}>🛠 Lịch sử bảo trì</Text>
-                {history.map((h) => (
-                  <View key={h.id} style={styles.historyItem}>
-                    <View style={styles.historyHead}>
-                      <Text style={styles.historyDate}>{formatDate(h.maintenanceDate)}</Text>
-                      {h.repairCost != null && (
-                        <Text style={styles.historyCost}>{formatCurrency(h.repairCost)}</Text>
-                      )}
-                    </View>
-                    {!!h.requestCode && <Text style={styles.historyMeta}>Phiếu {h.requestCode}</Text>}
-                    {!!h.note && <Text style={styles.historyNote}>{h.note}</Text>}
-                    {(h.photoUrls?.length ?? 0) > 0 && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.sm }}>
-                        {h.photoUrls!.map((uri, i) => (
-                          <Image key={`${h.id}-${i}`} source={{ uri }} style={styles.historyPhoto} />
-                        ))}
-                      </ScrollView>
-                    )}
-                  </View>
-                ))}
+        {/* Tóm tắt */}
+        <View style={styles.hero}>
+          <View style={styles.heroTop}>
+            <View style={styles.iconBox}><Text style={styles.iconText}>{categoryIcon}</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.equipName} numberOfLines={2}>{name}</Text>
+              <Text style={styles.equipMeta}>
+                {eq.qrCode}{roomLabel ? `  ·  Phòng ${roomLabel}` : ''}
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+                <Text style={[styles.statusBadgeText, { color: status.text }]}>{status.label}</Text>
               </View>
-            )}
-            {/* Ghi chú từ quản lý */}
-            {equipment.note && (
-              <View style={styles.notesCard}>
-                <Text style={styles.notesTitle}>📝 Ghi chú từ quản lý</Text>
-                <Text style={styles.notesText}>{equipment.note}</Text>
-              </View>
-            )}
-
-            <View style={styles.tipsCard}>
-              <Text style={styles.tipsTitle}>💡 Lưu ý chung</Text>
-              <Text style={styles.tipItem}>• Không tự ý tháo lắp, sửa chữa thiết bị</Text>
-              <Text style={styles.tipItem}>• Báo ngay cho quản lý khi phát hiện sự cố</Text>
-              <Text style={styles.tipItem}>• Tắt thiết bị khi ra khỏi phòng</Text>
             </View>
           </View>
+          <View style={styles.heroStats}>
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>{repairTotal}</Text>
+              <Text style={styles.heroStatLabel}>lần đã sửa</Text>
+            </View>
+            <View style={styles.heroDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>
+                {summary.lastRepairedAt ? formatDate(summary.lastRepairedAt) : '—'}
+              </Text>
+              <Text style={styles.heroStatLabel}>sửa gần nhất</Text>
+            </View>
+          </View>
+        </View>
 
-        {/*
-          Ẩn khối mã QR (06/09/2026) — chỉ còn nút báo hỏng; QR giờ dùng để XÁC NHẬN
-          đúng thiết bị ngay khi bấm nút, không cần hiện lại hình QR ở đây nữa.
-        */}
+        {/* Phiếu đang xử lý */}
+        {summary.open && (
+          <TouchableOpacity
+            style={styles.openBanner}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('MaintenanceDetail', { requestId: summary.open!.id })}
+          >
+            <Text style={styles.openIcon}>🔧</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.openTitle}>
+                Phiếu {summary.open.requestCode} · {TICKET_STATUS_META[summary.open.status]?.label ?? summary.open.status}
+              </Text>
+              <Text style={styles.openSub}>Thiết bị đang được xử lý — bấm để xem tiến độ</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Thông tin */}
+        <View style={styles.section}>
+          {infoRows.map((row, i) => (
+            <View key={row.label} style={[styles.infoRow, i === infoRows.length - 1 && { borderBottomWidth: 0 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoLabel}>{row.label}</Text>
+                {'hint' in row && !!row.hint && <Text style={styles.infoHint}>{row.hint}</Text>}
+              </View>
+              <Text style={styles.infoValue}>{row.value}</Text>
+            </View>
+          ))}
+        </View>
+
+        {!!equipment.note && (
+          <View style={styles.noteCard}>
+            <Text style={styles.noteLabel}>Ghi chú từ quản lý</Text>
+            <Text style={styles.noteText}>{equipment.note}</Text>
+          </View>
+        )}
+
+        {/* Lịch sử sửa chữa */}
+        <Text style={styles.sectionTitle}>Lịch sử sửa chữa</Text>
+        <View style={styles.section}>
+          {!ticketsLoaded ? (
+            <View style={styles.emptyBox}><ActivityIndicator color={Colors.primary} /></View>
+          ) : summary.tickets.length === 0 && extraHistory.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyText}>Thiết bị chưa phải sửa lần nào.</Text>
+            </View>
+          ) : (
+            <>
+              {summary.tickets.map((t, i) => {
+                const meta = TICKET_STATUS_META[t.status] ?? { label: t.status, bg: Colors.divider, text: Colors.textMuted };
+                const cost = ticketCost(t);
+                const done = t.status === 'CLOSED';
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[styles.histRow, i > 0 && styles.histBorder]}
+                    activeOpacity={0.7}
+                    onPress={() => navigation.navigate('MaintenanceDetail', { requestId: t.id })}
+                  >
+                    <View style={[styles.histDot, { backgroundColor: meta.text }]} />
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.histHead}>
+                        <Text style={styles.histCode}>{t.requestCode}</Text>
+                        <View style={[styles.histChip, { backgroundColor: meta.bg }]}>
+                          <Text style={[styles.histChipText, { color: meta.text }]}>{meta.label}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.histDesc} numberOfLines={2}>
+                        {t.repairDescription || t.resolutionNote || t.description || t.title || 'Báo hỏng thiết bị'}
+                      </Text>
+                      <Text style={styles.histMeta}>
+                        {done ? `Sửa xong ${formatDate(ticketDoneDate(t))}` : `Báo ngày ${formatDate(t.createdAt)}`}
+                        {cost != null && cost > 0 ? `  ·  ${formatCurrency(cost)}` : ''}
+                      </Text>
+                    </View>
+                    <Text style={styles.chevron}>›</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {extraHistory.map((h, i) => (
+                <View key={`h-${h.id}`} style={[styles.histRow, (summary.tickets.length > 0 || i > 0) && styles.histBorder]}>
+                  <View style={[styles.histDot, { backgroundColor: '#059669' }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.histCode}>{h.requestCode ? `Phiếu ${h.requestCode}` : 'Bảo trì'}</Text>
+                    {!!h.note && <Text style={styles.histDesc} numberOfLines={2}>{h.note}</Text>}
+                    <Text style={styles.histMeta}>
+                      {formatDate(h.maintenanceDate)}
+                      {h.repairCost != null && h.repairCost > 0 ? `  ·  ${formatCurrency(h.repairCost)}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+        </View>
+
+        <Text style={styles.tip}>Không tự tháo lắp, sửa chữa thiết bị — báo ngay cho quản lý khi có sự cố.</Text>
+      </ScrollView>
+
+      {/* Nút báo hỏng ghim đáy — không phải cuộn mới thấy */}
+      <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.reportBtn, checkingScan && { opacity: 0.6 }]}
           onPress={() => setScanVisible(true)}
@@ -228,12 +303,10 @@ export const EquipmentDetailScreen: React.FC = () => {
           activeOpacity={0.8}
         >
           <Text style={styles.reportBtnText}>
-            {checkingScan ? 'Đang kiểm tra mã QR…' : '🚨 Báo hỏng thiết bị này'}
+            {checkingScan ? 'Đang kiểm tra mã QR…' : '📷  Quét QR để báo hỏng'}
           </Text>
         </TouchableOpacity>
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
+      </View>
 
       <EquipmentQrScanModal
         visible={scanVisible}
@@ -249,73 +322,100 @@ export const EquipmentDetailScreen: React.FC = () => {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.background },
 
-  // Error state
   errorWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
   errorText: { fontSize: 15, color: Colors.textSecondary, marginBottom: Spacing.lg },
   errorBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg },
   errorBtnText: { fontSize: 14, fontWeight: '700', color: Colors.white },
 
-  // Header
-  header: { backgroundColor: Colors.primary, paddingBottom: Spacing.xl },
-  backBtn: {
-    position: 'absolute', top: 12, left: Spacing.lg, zIndex: 10,
-    width: 40, height: 40, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20,
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.xs,
+    paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
-  backArrow: { fontSize: 28, color: Colors.white, lineHeight: 32 },
-  headerBody: { alignItems: 'center', paddingTop: 56, paddingHorizontal: Spacing.xl },
-  iconCircle: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
+  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  backArrow: { fontSize: 30, lineHeight: 34, color: Colors.textPrimary },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
+
+  body: { padding: Spacing.base, gap: Spacing.md, paddingBottom: 110 },
+
+  hero: {
+    backgroundColor: Colors.white, borderRadius: BorderRadius.lg, borderWidth: 1,
+    borderColor: Colors.border, padding: Spacing.base, ...Shadow.sm,
   },
-  iconText: { fontSize: 36 },
-  equipName: { fontSize: 20, fontWeight: '800', color: Colors.white, textAlign: 'center' },
-  equipCode: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontFamily: 'monospace' },
-  statusBadge: { marginTop: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: 4, borderRadius: BorderRadius.full },
+  heroTop: { flexDirection: 'row', gap: Spacing.md, alignItems: 'center' },
+  iconBox: {
+    width: 60, height: 60, borderRadius: 16, backgroundColor: Colors.primaryBg,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  iconText: { fontSize: 30 },
+  equipName: { fontSize: 18, fontWeight: '800', color: Colors.textPrimary },
+  equipMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  statusBadge: {
+    alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 10, paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+  },
   statusBadgeText: { fontSize: 12, fontWeight: '700' },
-  locationText: { marginTop: Spacing.sm, fontSize: 13, color: 'rgba(255,255,255,0.8)' },
+  heroStats: {
+    flexDirection: 'row', marginTop: Spacing.md, paddingTop: Spacing.md,
+    borderTopWidth: 1, borderTopColor: Colors.divider,
+  },
+  heroStat: { flex: 1, alignItems: 'center' },
+  heroStatValue: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
+  heroStatLabel: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
+  heroDivider: { width: 1, backgroundColor: Colors.divider },
 
-  body: { padding: Spacing.lg, gap: Spacing.md },
+  openBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    backgroundColor: '#FFFBEB', borderRadius: BorderRadius.lg, borderWidth: 1,
+    borderColor: '#FCD34D', padding: Spacing.md,
+  },
+  openIcon: { fontSize: 20 },
+  openTitle: { fontSize: 13, fontWeight: '800', color: '#92400E' },
+  openSub: { fontSize: 12, color: '#B45309', marginTop: 2 },
 
-  // Info tab
   section: {
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     borderWidth: 1, borderColor: Colors.border, overflow: 'hidden', ...Shadow.sm,
   },
+  sectionTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginTop: Spacing.xs, marginBottom: -4 },
   infoRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm + 2,
     borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   infoLabel: { fontSize: 13, color: Colors.textMuted },
-  infoValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, textAlign: 'right', maxWidth: '55%' },
+  infoHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1, fontStyle: 'italic' },
+  infoValue: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, textAlign: 'right' },
 
-  notesCard: {
+  noteCard: {
     backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg,
-    padding: Spacing.base, borderWidth: 1, borderColor: Colors.primary + '30',
+    paddingHorizontal: Spacing.base, paddingVertical: Spacing.md,
   },
-  notesTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
-  notesText: { fontSize: 14, color: Colors.textSecondary, lineHeight: 22 },
+  noteLabel: { fontSize: 11, fontWeight: '700', color: Colors.primary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  noteText: { fontSize: 14, color: Colors.textSecondary, marginTop: 4, lineHeight: 20 },
 
-  // Lịch sử bảo trì
-  historyItem: { paddingVertical: Spacing.sm, borderTopWidth: 1, borderTopColor: Colors.divider },
-  historyHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  historyDate: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
-  historyCost: { fontSize: 13, fontWeight: '700', color: Colors.accent },
-  historyMeta: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  historyNote: { fontSize: 13, color: Colors.textSecondary, marginTop: 4, lineHeight: 20 },
-  historyPhoto: { width: 72, height: 72, borderRadius: BorderRadius.md, marginRight: Spacing.sm, backgroundColor: Colors.divider },
+  emptyBox: { paddingVertical: Spacing.lg, alignItems: 'center' },
+  emptyText: { fontSize: 13, color: Colors.textMuted },
+  histRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, padding: Spacing.md },
+  histBorder: { borderTopWidth: 1, borderTopColor: Colors.divider },
+  histDot: { width: 8, height: 8, borderRadius: 4, alignSelf: 'flex-start', marginTop: 6 },
+  histHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
+  histCode: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },
+  histChip: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full },
+  histChipText: { fontSize: 11, fontWeight: '700' },
+  histDesc: { fontSize: 13, color: Colors.textSecondary, marginTop: 3, lineHeight: 18 },
+  histMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 3 },
+  chevron: { fontSize: 20, color: Colors.textMuted },
 
-  // Usage tips
-  tipsCard: {
-    backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.base,
+  tip: { fontSize: 12, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
+
+  footer: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    padding: Spacing.base, paddingBottom: Spacing.lg,
+    backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.divider,
   },
-  tipsTitle: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginBottom: Spacing.sm },
-  tipItem: { fontSize: 14, color: Colors.textSecondary, lineHeight: 24 },
-
   reportBtn: {
-    paddingVertical: Spacing.base, borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md + 2, borderRadius: BorderRadius.lg,
     backgroundColor: Colors.error, alignItems: 'center', ...Shadow.sm,
   },
   reportBtnText: { fontSize: 15, fontWeight: '700', color: Colors.white },

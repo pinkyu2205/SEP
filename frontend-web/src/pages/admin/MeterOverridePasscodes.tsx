@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, ClipboardList, Clock, Copy, KeyRound, RefreshCw, ShieldAlert,
+  BellRing, Check, ClipboardList, Clock, Copy, Droplets, Home, KeyRound, Phone,
+  RefreshCw, ShieldAlert, X, Zap,
 } from 'lucide-react';
 import {
+  isNotFound,
   meterOverrideService,
+  PURPOSE_LABEL,
   type MeterOverrideLog,
   type MeterOverridePasscode,
+  type MeterOverrideRequest,
 } from '@/services/meterOverride.service';
 import { SectionShell, StatusPill, KpiCard, EmptyState } from './shared';
+import { refreshAdminBadges } from '@/utils/adminBadges';
 
 /**
  * CẤP MÃ NHẬP TAY CHỈ SỐ ĐỒNG HỒ (Admin).
@@ -51,6 +56,35 @@ const METER_KIND: Record<string, { label: string; color: string }> = {
   WATER: { label: 'Nước', color: 'bg-sky-100 text-sky-700' },
 };
 
+const kindOf = (k?: string | null) =>
+  METER_KIND[(k ?? '').toUpperCase()] ?? { label: k || '—', color: 'bg-slate-100 text-slate-600' };
+
+/** "Nhà A · P.301 · HĐ-12" — bỏ qua phần nào trống. */
+const placeOf = (r: MeterOverrideRequest) =>
+  [
+    r.propertyName,
+    r.roomNumber ? `P.${r.roomNumber}` : null,
+    r.contractCode ?? (r.contractId ? `HĐ #${r.contractId}` : null),
+  ].filter(Boolean).join(' · ');
+
+/** Ghi chú tự điền khi cấp mã cho một yêu cầu — để bảng "Mã đã cấp" tự nói mã của ai. */
+const noteFor = (r: MeterOverrideRequest) =>
+  `${r.managerName} xin mã ${kindOf(r.meterKind).label.toLowerCase()}${placeOf(r) ? ` — ${placeOf(r)}` : ''}`;
+
+const timeAgo = (iso?: string | null) => {
+  if (!iso) return '';
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60_000));
+  if (min < 1) return 'vừa xong';
+  if (min < 60) return `${min} phút trước`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `${h} giờ trước` : `${Math.floor(h / 24)} ngày trước`;
+};
+
+/** Hỏi lại danh sách yêu cầu mỗi 20 giây — manager đang đứng chờ ở nhà khách. */
+const REQUEST_POLL_MS = 20_000;
+/** Số dòng hiện sẵn trong khung Lịch sử trước khi bấm "Xem thêm". */
+const HIST_PREVIEW = 5;
+
 /**
  * Thẻ hiển thị mã vừa tạo — thứ admin thật sự đọc cho manager nghe.
  *
@@ -59,7 +93,11 @@ const METER_KIND: Record<string, { label: string; color: string }> = {
  * không phụ thuộc múi giờ; còn so với giờ trình duyệt thì lệch múi giờ server sẽ ra
  * những con số vô lý kiểu "còn 7 tiếng" hoặc "hết hạn rồi".
  */
-const FreshCode = ({ passcode }: { passcode: MeterOverridePasscode }) => {
+const FreshCode = ({ passcode, forRequest }: {
+  passcode: MeterOverridePasscode;
+  /** Yêu cầu mà mã này trả lời — để admin đọc đúng mã cho đúng người. */
+  forRequest?: MeterOverrideRequest | null;
+}) => {
   const ttlSeconds = useMemo(() => {
     const born = new Date(passcode.createdAt).getTime();
     const dies = new Date(passcode.expiresAt).getTime();
@@ -104,6 +142,12 @@ const FreshCode = ({ passcode }: { passcode: MeterOverridePasscode }) => {
       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
         {used ? 'Quản lý đã dùng mã này' : dead ? 'Mã đã hết hạn' : 'Đọc mã này cho quản lý'}
       </p>
+      {forRequest && (
+        <p className="mt-2 text-sm font-semibold text-slate-700">
+          Cho <b>{forRequest.managerName}</b> · đồng hồ {kindOf(forRequest.meterKind).label.toLowerCase()}
+          {placeOf(forRequest) ? ` · ${placeOf(forRequest)}` : ''}
+        </p>
+      )}
 
       <p
         className={`mt-3 font-mono text-5xl font-black tracking-[0.2em] tabular-nums ${
@@ -176,9 +220,92 @@ export const MeterOverridePasscodes = () => {
 
   const [codes, setCodes] = useState<MeterOverridePasscode[]>([]);
   const [activeOnly, setActiveOnly] = useState(false);
+  /** Khung Lịch sử: tab đang xem + đã bung hết chưa (mặc định 5 dòng mới nhất). */
+  const [histTab, setHistTab] = useState<'codes' | 'logs'>('codes');
+  const [showAll, setShowAll] = useState(false);
   const [logs, setLogs] = useState<MeterOverrideLog[]>([]);
   const [loading, setLoading] = useState(true);
   const noteRef = useRef<HTMLInputElement>(null);
+
+  /** Yêu cầu xin mã của manager. `null` = BE chưa có endpoint (404) → ẩn cả khối. */
+  const [requests, setRequests] = useState<MeterOverrideRequest[] | null>([]);
+  /** Yêu cầu đang được trả lời bằng nút "Tạo mã" phía dưới. */
+  const [answering, setAnswering] = useState<MeterOverrideRequest | null>(null);
+  /** Mã vừa tạo trả lời yêu cầu nào — để thẻ mã ghi rõ "cho ai". */
+  const [freshFor, setFreshFor] = useState<MeterOverrideRequest | null>(null);
+  const [rejecting, setRejecting] = useState<{ id: number; reason: string; busy: boolean } | null>(null);
+  const generatorRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Tải riêng, không nằm trong Promise.all của `reload`: endpoint này BE chưa làm, để
+   * chung thì một cái 404 kéo sập cả bảng mã và nhật ký vốn đang chạy tốt.
+   */
+  const loadRequests = useCallback(async () => {
+    try {
+      setRequests(await meterOverrideService.listRequests());
+    } catch (e) {
+      if (isNotFound(e)) setRequests(null);
+      // Lỗi mạng khác: giữ danh sách cũ, lượt hỏi sau sẽ tự sửa.
+    }
+  }, []);
+
+  useEffect(() => { void loadRequests(); }, [loadRequests]);
+
+  // Hỏi lại định kỳ — trừ khi BE chưa có endpoint (null): hỏi mãi một cái 404 là vô ích.
+  const requestsSupported = requests !== null;
+  useEffect(() => {
+    if (!requestsSupported) return;
+    const t = setInterval(() => { void loadRequests(); }, REQUEST_POLL_MS);
+    return () => clearInterval(t);
+  }, [loadRequests, requestsSupported]);
+
+  const pendingRequests = useMemo(
+    () => (requests ?? []).filter(r => r.status === 'PENDING')
+      // Chờ lâu nhất lên đầu — manager đó đang đứng đợi lâu nhất.
+      .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '')),
+    [requests],
+  );
+  const requestById = useMemo(
+    () => new Map((requests ?? []).map(r => [r.id, r])),
+    [requests],
+  );
+  /**
+   * BE trả `usedBy` là ID tài khoản (UUID), không phải tên — in thẳng ra thì admin đọc
+   * không hiểu. Nhật ký gõ tay có sẵn cặp managerId ↔ managerName nên tra ngược từ đó.
+   */
+  const managerNameById = useMemo(
+    () => new Map(logs.map(l => [l.managerId, l.managerName])),
+    [logs],
+  );
+  const userLabel = (id: string) =>
+    managerNameById.get(id)
+    ?? (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) ? 'Quản lý (chưa rõ tên)' : id);
+
+  const startAnswering = (r: MeterOverrideRequest) => {
+    setAnswering(r);
+    setNote(noteFor(r));
+    setError('');
+    generatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const submitReject = async () => {
+    if (!rejecting) return;
+    if (rejecting.reason.trim().length < 5) {
+      setError('Ghi lý do từ chối (ít nhất 5 ký tự) — quản lý sẽ đọc được.');
+      return;
+    }
+    setRejecting({ ...rejecting, busy: true });
+    try {
+      await meterOverrideService.rejectRequest(rejecting.id, rejecting.reason);
+      if (answering?.id === rejecting.id) { setAnswering(null); setNote(''); }
+      setRejecting(null);
+      void loadRequests();
+      refreshAdminBadges();
+    } catch {
+      setError('Không từ chối được yêu cầu. Thử lại sau.');
+      setRejecting({ ...rejecting, busy: false });
+    }
+  };
 
   /**
    * `silent` = lượt hỏi lại tự động: không bật spinner, để bảng không nhấp nháy sau lưng
@@ -246,8 +373,12 @@ export const MeterOverridePasscodes = () => {
         // Để trống / gõ bậy → không gửi, BE tự dùng mặc định 10 phút.
         ttlMinutes: Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 60) : undefined,
         note: note.trim() || undefined,
+        requestId: answering?.id,
       });
       setFresh(created);
+      setFreshFor(answering);
+      setAnswering(null);
+      if (answering) { void loadRequests(); refreshAdminBadges(); }
       // Hạn của mã tính theo đồng hồ MÁY NÀY, suy từ hiệu hai mốc của server (xem
       // FreshCode) — dùng để biết mã trước còn sống không mà không phải hỏi lại server.
       const ttlMs = new Date(created.expiresAt).getTime() - new Date(created.createdAt).getTime();
@@ -299,10 +430,11 @@ export const MeterOverridePasscodes = () => {
   };
 
   const stats = useMemo(() => ({
+    pending: pendingRequests.length,
     active: codes.filter((c) => c.usable).length,
     used: codes.filter((c) => c.usedAt).length,
     manual: logs.length,
-  }), [codes, logs]);
+  }), [codes, logs, pendingRequests]);
 
   const visibleCodes = useMemo(
     () => (activeOnly ? codes.filter((c) => c.usable) : codes),
@@ -311,7 +443,14 @@ export const MeterOverridePasscodes = () => {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className={`grid gap-4 sm:grid-cols-2 ${requests ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
+        {requests && (
+          <KpiCard
+            title="Yêu cầu chờ cấp" value={String(stats.pending)} icon={BellRing}
+            color={stats.pending ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-700'}
+            helper="Quản lý đã gửi, chưa có mã"
+          />
+        )}
         <KpiCard
           title="Mã còn hiệu lực" value={String(stats.active)} icon={KeyRound}
           color="bg-emerald-100 text-emerald-700"
@@ -329,6 +468,118 @@ export const MeterOverridePasscodes = () => {
         />
       </div>
 
+      {requests && (
+        <SectionShell
+          title={`Yêu cầu xin mã đang chờ${pendingRequests.length ? ` (${pendingRequests.length})` : ''}`}
+          subtitle="Quản lý gửi từ app khi không chụp được ảnh đồng hồ. Kiểm lý do, cấp mã rồi đọc cho đúng người."
+          icon={BellRing}
+          action={
+            <button
+              onClick={() => void loadRequests()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Tải lại
+            </button>
+          }
+        >
+          {pendingRequests.length === 0 ? (
+            <EmptyState text="Không có yêu cầu nào đang chờ. Yêu cầu mới tự hiện ở đây." />
+          ) : (
+            <div className="space-y-3">
+              {pendingRequests.map((r) => {
+                const kind = kindOf(r.meterKind);
+                const KindIcon = (r.meterKind ?? '').toUpperCase() === 'WATER' ? Droplets : Zap;
+                const isAnswering = answering?.id === r.id;
+                const isRejecting = rejecting?.id === r.id;
+                return (
+                  <div
+                    key={r.id}
+                    className={`rounded-xl border p-4 transition ${
+                      isAnswering ? 'border-indigo-400 bg-indigo-50/50 ring-2 ring-indigo-100' : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-bold text-slate-900">{r.managerName}</p>
+                          {!!r.managerPhone && (
+                            <a href={`tel:${r.managerPhone}`} className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:underline">
+                              <Phone className="h-3 w-3" /> {r.managerPhone}
+                            </a>
+                          )}
+                          <span className="text-xs text-slate-400">· {timeAgo(r.createdAt)}</span>
+                        </div>
+                        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-slate-700">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${kind.color}`}>
+                            <KindIcon className="h-3 w-3" /> Xin mã {kind.label.toLowerCase()}
+                          </span>
+                          {r.purpose && (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+                              {PURPOSE_LABEL[r.purpose] ?? r.purpose}
+                            </span>
+                          )}
+                        </p>
+                        {!!placeOf(r) && (
+                          <p className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+                            <Home className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            {placeOf(r)}{r.tenantName ? ` · khách ${r.tenantName}` : ''}
+                          </p>
+                        )}
+                        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          <span className="font-semibold text-slate-500">Lý do: </span>{r.reason || '—'}
+                        </p>
+                      </div>
+
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          onClick={() => startAnswering(r)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700"
+                        >
+                          <KeyRound className="h-4 w-4" /> {isAnswering ? 'Đang cấp…' : 'Cấp mã'}
+                        </button>
+                        <button
+                          onClick={() => setRejecting({ id: r.id, reason: '', busy: false })}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Từ chối
+                        </button>
+                      </div>
+                    </div>
+
+                    {isRejecting && (
+                      <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                        <input
+                          autoFocus
+                          value={rejecting.reason}
+                          onChange={(e) => setRejecting({ ...rejecting, reason: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === 'Enter') void submitReject(); }}
+                          placeholder="Lý do từ chối — VD: Chụp lại được, đồng hồ không bị che"
+                          className="input-field min-w-[240px] flex-1"
+                        />
+                        <button
+                          onClick={() => void submitReject()}
+                          disabled={rejecting.busy}
+                          className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-60"
+                        >
+                          {rejecting.busy ? 'Đang gửi…' : 'Xác nhận từ chối'}
+                        </button>
+                        <button
+                          onClick={() => setRejecting(null)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Huỷ
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SectionShell>
+      )}
+
+      <div ref={generatorRef} className="scroll-mt-20">
       <SectionShell
         title="Tạo mã nhập tay đồng hồ"
         subtitle="Quản lý gọi xin mã khi không chụp được ảnh đồng hồ. Tạo mã, đọc cho họ, mã tự chết sau khi dùng."
@@ -336,6 +587,22 @@ export const MeterOverridePasscodes = () => {
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="space-y-4">
+            {answering && (
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+                <p className="text-sm text-indigo-900">
+                  Đang cấp mã cho <b>{answering.managerName}</b> — đồng hồ{' '}
+                  <b>{kindOf(answering.meterKind).label.toLowerCase()}</b>
+                  {placeOf(answering) ? <> · {placeOf(answering)}</> : null}
+                </p>
+                <button
+                  onClick={() => { setAnswering(null); setNote(''); }}
+                  aria-label="Bỏ chọn yêu cầu"
+                  className="rounded p-1 text-indigo-500 hover:bg-indigo-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             <div>
               <label className="text-sm font-semibold text-slate-700">
                 Ghi chú <span className="font-normal text-slate-400">(không bắt buộc)</span>
@@ -416,7 +683,7 @@ export const MeterOverridePasscodes = () => {
 
           <div>
             {fresh ? (
-              <FreshCode passcode={fresh} />
+              <FreshCode passcode={fresh} forRequest={freshFor} />
             ) : (
               <div className="flex h-full min-h-[220px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 p-6 text-center">
                 <KeyRound className="h-8 w-8 text-slate-300" />
@@ -429,127 +696,140 @@ export const MeterOverridePasscodes = () => {
           </div>
         </div>
       </SectionShell>
+      </div>
 
+      {/*
+        LỊCH SỬ — gộp "Mã đã cấp" + "Nhật ký gõ tay chỉ số" vào MỘT khung 2 tab (24/09/2026).
+        Hai bảng là hai mặt của cùng một việc (cấp mã → quản lý dùng mã gõ tay chỉ số), để
+        riêng thì chiếm hai khung cao, bảng nào cũng 6 cột thưa. Giờ mỗi bảng 4 cột, mặc
+        định 5 dòng mới nhất, bấm "Xem thêm" mới bung hết.
+      */}
       <SectionShell
-        title="Mã đã cấp"
-        subtitle="Mã hết hạn không cần thu hồi — tới giờ là tự hỏng."
+        title="Lịch sử"
+        subtitle="Mã đã cấp và các lần quản lý gõ tay chỉ số không có ảnh đồng hồ."
         icon={ClipboardList}
         action={
-          <div className="flex items-center gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-600">
+          <button
+            onClick={() => void reload()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Tải lại
+          </button>
+        }
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            {([
+              { key: 'codes', label: 'Mã đã cấp', icon: KeyRound, count: codes.length },
+              { key: 'logs', label: 'Gõ tay chỉ số', icon: ShieldAlert, count: logs.length },
+            ] as const).map(t => (
+              <button key={t.key} onClick={() => { setHistTab(t.key); setShowAll(false); }}
+                className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-bold transition ${
+                  histTab === t.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}>
+                <t.icon className="h-4 w-4" />
+                {t.label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                  histTab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-500'
+                }`}>{t.count}</span>
+              </button>
+            ))}
+          </div>
+          {histTab === 'codes' && (
+            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-500">
               <input
                 type="checkbox"
                 checked={activeOnly}
-                onChange={(e) => setActiveOnly(e.target.checked)}
+                onChange={(e) => { setActiveOnly(e.target.checked); setShowAll(false); }}
                 className="h-4 w-4 rounded border-slate-300"
               />
               Chỉ mã còn dùng được
             </label>
-            <button
-              onClick={() => void reload()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Tải lại
-            </button>
-          </div>
-        }
-      >
-        {loading ? (
-          <p className="py-6 text-center text-sm text-slate-500">Đang tải...</p>
-        ) : visibleCodes.length === 0 ? (
-          <EmptyState text={activeOnly ? 'Không còn mã nào dùng được.' : 'Chưa cấp mã nào.'} />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <th className="pb-2 pr-4">Mã</th>
-                  <th className="pb-2 pr-4">Trạng thái</th>
-                  <th className="pb-2 pr-4">Ghi chú</th>
-                  <th className="pb-2 pr-4">Tạo lúc</th>
-                  <th className="pb-2">Hết hạn</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCodes.map((c) => (
-                  <tr key={c.id} className="border-b border-slate-100 last:border-0">
-                    <td className="py-3 pr-4">
-                      <span className={`font-mono text-base font-bold tabular-nums ${
-                        c.usable ? 'text-slate-900' : 'text-slate-400 line-through'
-                      }`}>
-                        {groupCode(c.code)}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4">
-                      {/* Dùng thẳng verdict của BE: nó tính theo giờ server, không lệch múi giờ. */}
-                      <StatusPill
-                        label={c.message || (c.usable ? 'Còn hiệu lực' : 'Không dùng được')}
-                        color={
-                          c.usable ? 'bg-emerald-100 text-emerald-700'
-                            : c.usedAt ? 'bg-slate-200 text-slate-700'
-                              : 'bg-amber-100 text-amber-800'
-                        }
-                      />
-                    </td>
-                    <td className="max-w-xs truncate py-3 pr-4 text-slate-600">{c.note || '—'}</td>
-                    <td className="py-3 pr-4 text-slate-500">{fmtDateTime(c.createdAt)}</td>
-                    <td className="py-3 text-slate-500">{fmtDateTime(c.expiresAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionShell>
+          )}
+        </div>
 
-      <SectionShell
-        title="Nhật ký gõ tay chỉ số"
-        subtitle="Mỗi dòng là một lần chỉ số được nhập mà KHÔNG có ảnh đồng hồ làm bằng chứng."
-        icon={ShieldAlert}
-      >
         {loading ? (
           <p className="py-6 text-center text-sm text-slate-500">Đang tải...</p>
+        ) : histTab === 'codes' ? (
+          visibleCodes.length === 0 ? (
+            <EmptyState text={activeOnly ? 'Không còn mã nào dùng được.' : 'Chưa cấp mã nào.'} />
+          ) : (
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+              {(showAll ? visibleCodes : visibleCodes.slice(0, HIST_PREVIEW)).map((c) => {
+                const r = c.requestId ? requestById.get(c.requestId) : undefined;
+                const forText = r ? `${r.managerName}${placeOf(r) ? ` · ${placeOf(r)}` : ''}` : c.note;
+                return (
+                  <div key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+                    <span className={`w-20 font-mono font-bold tabular-nums ${
+                      c.usable ? 'text-slate-900' : 'text-slate-400 line-through'}`}>
+                      {groupCode(c.code)}
+                    </span>
+                    {/* Dùng thẳng verdict của BE: nó tính theo giờ server, không lệch múi giờ. */}
+                    <StatusPill
+                      label={c.message || (c.usable ? 'Còn hiệu lực' : 'Không dùng được')}
+                      color={
+                        c.usable ? 'bg-emerald-100 text-emerald-700'
+                          : c.usedAt ? 'bg-slate-100 text-slate-600'
+                            : 'bg-amber-100 text-amber-800'
+                      }
+                    />
+                    <div className="min-w-0 flex-1">
+                      {c.usedBy ? (
+                        <p className="truncate text-slate-700">
+                          <span className="text-slate-400">Dùng bởi </span>
+                          <b className="font-semibold">{userLabel(c.usedBy)}</b>
+                          <span className="text-slate-400"> · {fmtDateTime(c.usedAt)}</span>
+                        </p>
+                      ) : (
+                        <p className="truncate text-slate-400">{c.usable ? 'Chưa ai dùng' : 'Không ai dùng'}</p>
+                      )}
+                      {!!forText && <p className="truncate text-xs text-slate-400" title={forText}>Ghi chú: {forText}</p>}
+                    </div>
+                    <span className="whitespace-nowrap text-xs text-slate-400" title={`Hết hạn ${fmtDateTime(c.expiresAt)}`}>
+                      Tạo {fmtDateTime(c.createdAt)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )
         ) : logs.length === 0 ? (
           <EmptyState text="Chưa có lần nào gõ tay chỉ số." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <th className="pb-2 pr-4">Thời điểm</th>
-                  <th className="pb-2 pr-4">Quản lý</th>
-                  <th className="pb-2 pr-4">Hợp đồng</th>
-                  <th className="pb-2 pr-4">Đồng hồ</th>
-                  <th className="pb-2 pr-4">Chỉ số</th>
-                  <th className="pb-2">Lý do</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((l) => {
-                  const kind = METER_KIND[l.meterKind?.toUpperCase()] ?? {
-                    label: l.meterKind, color: 'bg-slate-100 text-slate-600',
-                  };
-                  return (
-                    <tr key={l.id} className="border-b border-slate-100 last:border-0">
-                      <td className="py-3 pr-4 text-slate-500">{fmtDateTime(l.createdAt)}</td>
-                      <td className="py-3 pr-4 font-semibold text-slate-800">{l.managerName || '—'}</td>
-                      <td className="py-3 pr-4 text-slate-600">
+          <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+            {(showAll ? logs : logs.slice(0, HIST_PREVIEW)).map((l) => {
+              const kind = kindOf(l.meterKind);
+              return (
+                <div key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+                  <span className={`inline-flex w-24 items-center justify-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${kind.color}`}>
+                    {kind.label} · <span className="font-mono tabular-nums">{l.enteredValue ?? '—'}</span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-slate-700">
+                      <b className="font-semibold">{l.managerName || '—'}</b>
+                      <span className="text-slate-400">
                         {/* null = xin mã lúc hợp đồng chưa kịp tạo, giữa luồng đón khách. */}
-                        {l.contractId ? `#${l.contractId}` : 'Đang đón khách'}
-                      </td>
-                      <td className="py-3 pr-4">
-                        <StatusPill label={kind.label} color={kind.color} />
-                      </td>
-                      <td className="py-3 pr-4 font-mono tabular-nums text-slate-800">
-                        {l.enteredValue ?? '—'}
-                      </td>
-                      <td className="max-w-md py-3 text-slate-600">{l.reason}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {' · '}{l.contractId ? `HĐ #${l.contractId}` : 'đang đón khách'}
+                      </span>
+                    </p>
+                    <p className="truncate text-xs text-slate-500" title={l.reason}>Lý do: {l.reason || '—'}</p>
+                  </div>
+                  <span className="whitespace-nowrap text-xs text-slate-400">{fmtDateTime(l.createdAt)}</span>
+                </div>
+              );
+            })}
           </div>
+        )}
+
+        {!loading && (histTab === 'codes' ? visibleCodes.length : logs.length) > HIST_PREVIEW && (
+          <button
+            onClick={() => setShowAll(v => !v)}
+            className="mt-3 w-full rounded-lg py-2 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50"
+          >
+            {showAll
+              ? 'Thu gọn'
+              : `Xem thêm ${(histTab === 'codes' ? visibleCodes.length : logs.length) - HIST_PREVIEW} dòng`}
+          </button>
         )}
       </SectionShell>
     </div>

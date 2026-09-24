@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, FileSignature, Filter, MapPin, UserRound, type LucideIcon } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronLeft, ChevronRight, FileSignature, Filter, MapPin, UserRound, type LucideIcon } from 'lucide-react';
 import type { PlatformAccountStatus, PlatformBillStatus, PlatformRole } from '@/types';
 
 
@@ -485,6 +485,101 @@ export const Pagination = ({
         className={`${btn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>
         <ChevronRight className="h-4 w-4" />
       </button>
+    </div>
+  );
+};
+
+/**
+ * NHÀ CÒN THIẾU HOÁ ĐƠN TỔNG CỦA KỲ (điện EVN / nước) — 24/09/2026.
+ *
+ * Số trên menu ("Hoá đơn điện EVN 5") đếm các nhà ĐANG CÓ KHÁCH mà chưa có hoá đơn tổng
+ * của kỳ tiêu thụ (xem `AdminLayout.refreshBadges`, cùng nguồn `handover-status`). Trước đây
+ * bấm vào trang không thấy con số đó ở đâu — khối này nói rõ "5 nhà nào", bấm tên nhà là
+ * chọn sẵn nhà đó vào form để tải hoá đơn luôn.
+ */
+export const MissingBillsBanner = ({
+  kindLabel, periodLabel, missing, loading, onPick,
+}: {
+  kindLabel: string;
+  periodLabel: string;
+  missing: { id: number; name: string }[];
+  loading?: boolean;
+  onPick: (id: number) => void;
+}) => {
+  /*
+    Gập mặc định (24/09/2026): bản đầu đổ hết tên nhà thành chip — 30–50 nhà là cả một
+    mảng chip dài chiếm nửa màn hình, đẩy form xuống tận dưới. Giờ chỉ MỘT dòng tóm tắt +
+    nút "Làm nhà kế tiếp"; bấm "Xem danh sách" mới mở khung có ô tìm và tự cuộn.
+  */
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+
+  if (loading) return null;
+  if (missing.length === 0) {
+    return (
+      <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800">
+        <Check className="h-4 w-4" /> Mọi nhà đang có khách đã có hoá đơn {kindLabel} kỳ {periodLabel}.
+      </div>
+    );
+  }
+
+  const kw = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const shown = kw
+    ? missing.filter(p => p.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(kw))
+    : missing;
+
+  return (
+    <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+        <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+        <p className="min-w-0 flex-1 text-sm text-amber-900">
+          <span className="font-bold">{missing.length} nhà</span> đang có khách chưa có hoá đơn {kindLabel} kỳ {periodLabel}
+          <span className="text-amber-700"> — đây là số trên menu bên trái.</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => onPick(missing[0].id)}
+          className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-amber-700"
+          title={`Chọn sẵn ${missing[0].name}`}
+        >
+          Làm nhà kế tiếp
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
+        >
+          {open ? 'Ẩn danh sách' : 'Xem danh sách'}
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="border-t border-amber-200 px-4 pb-3 pt-2.5">
+          {missing.length > 8 && (
+            <input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Tìm nhà…"
+              className="mb-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-amber-400"
+            />
+          )}
+          <div className="grid max-h-60 gap-1 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map(p => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPick(p.id)}
+                className="group flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-amber-950 transition hover:bg-white"
+              >
+                <span className="truncate">{p.name}</span>
+                <span className="shrink-0 text-xs font-bold text-amber-600 opacity-0 transition group-hover:opacity-100">Chọn →</span>
+              </button>
+            ))}
+            {shown.length === 0 && <p className="px-2.5 py-1.5 text-sm text-amber-700">Không có nhà nào khớp.</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Loader2, Search, Wrench, X, Download, ChevronLeft, ChevronRight, RefreshCw,
-  Clock, User, MapPin, Wallet, History, AlertTriangle, Gavel, PackageSearch,
-  Hammer, CheckCircle2, Inbox, Phone, ArrowDownUp, ClipboardList, Link2,
+  Clock, User, MapPin, Wallet, History, AlertTriangle, PackageSearch,
+  Hammer, CheckCircle2, Inbox, Phone, ArrowDownUp, ClipboardList, Link2, ImageOff,
 } from 'lucide-react';
 import { Overlay } from '@/components/Overlay';
 import { maintenanceService } from '@/services/maintenance.service';
@@ -32,8 +32,11 @@ import { PageHero, StatCard, RealtimeBadge, Pagination, formatVnd } from './shar
 //     trước) thay vì mới nhất trước — phiếu tồn đọng lâu nhất mới là phiếu dễ bị
 //     bỏ quên nhất.
 //
-// Trang vẫn CHỈ GIÁM SÁT: mọi thao tác xử lý nằm ở app quản lý; việc phân xử lỗi
-// do khách ở /admin/maintenance/fault-review (có liên kết sẵn ở đầu trang).
+// Trang vẫn CHỈ GIÁM SÁT: mọi thao tác xử lý nằm ở app quản lý.
+// Phiếu lỗi do khách xem ở nhóm "Lỗi do khách" ngay trang này. Trang riêng
+// /admin/maintenance/fault-review đã GỘP về đây (24/09/2026): nút duyệt của nó bị tắt từ
+// 05/09 (TENANT_FAULT_REVIEW_ENABLED = false) nên trang luôn "0" mà vẫn chiếm 1 mục menu,
+// và trùng đúng nhóm "Lỗi do khách" ở đây. Link cũ tự chuyển sang ?bucket=tenant.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const norm = (s?: string) => (s ?? '').toLowerCase();
@@ -156,7 +159,12 @@ export const MaintenanceEquipmentMonitoring = () => {
   const [nextPage, setNextPage] = useState(1);
 
   const [search, setSearch] = useState('');
-  const [bucket, setBucket] = useState<BucketKey>('need');
+  // Vào từ link cũ /admin/maintenance/fault-review (→ ?bucket=tenant) thì mở sẵn đúng nhóm.
+  const [searchParams] = useSearchParams();
+  const [bucket, setBucket] = useState<BucketKey>(() => {
+    const b = searchParams.get('bucket');
+    return BUCKETS.some(x => x.key === b) ? (b as BucketKey) : 'need';
+  });
   const [statusFilter, setStatusFilter] = useState('all');
   const [propertyFilter, setPropertyFilter] = useState('all');
   const [sort, setSort] = useState<SortKey>('urgent');
@@ -335,15 +343,6 @@ export const MaintenanceEquipmentMonitoring = () => {
         action={(
           <div className="flex flex-wrap items-center gap-2">
             <RealtimeBadge connected={liveOn} />
-            <Link to="/admin/maintenance/fault-review"
-              className={`${linkBtn} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`}>
-              <Gavel className="h-4 w-4" /> Báo lỗi do khách
-              {kpi.pendingReview > 0 && (
-                <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-black text-white">
-                  {kpi.pendingReview}
-                </span>
-              )}
-            </Link>
             <Link to="/admin/equipments"
               className={`${linkBtn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>
               <PackageSearch className="h-4 w-4" /> Danh mục thiết bị
@@ -672,6 +671,34 @@ const Lightbox = ({ images, index, onClose, onChange }: {
   );
 };
 
+/**
+ * Ảnh thu nhỏ có đường lùi khi file KHÔNG CÒN trên máy chủ.
+ *
+ * Ảnh "sau sửa" / "hoá đơn" quản lý tải lên được BE lưu ĐĨA CỤC BỘ
+ * (`/uploads/properties/MAINT-{id}/…`) — deploy lại là mất, URL trả 404 (đo 03/10/2026 với
+ * M-3). Trình duyệt khi đó vẽ icon ảnh vỡ + chữ alt đè lên nhau như lỗi giao diện. Hiện một ô
+ * nói thẳng lý do thay vì để admin tưởng trang hỏng. Xem doc-be BE-YEUCAU-anh-bao-tri-mat-file.
+ */
+const SafeThumb = ({ url, alt, onOpen }: { url: string; alt: string; onOpen: () => void }) => {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" title={url}
+        className="flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-1.5 text-center">
+        <ImageOff className="h-5 w-5 text-slate-300" />
+        <span className="text-[10px] font-semibold leading-tight text-slate-400">Ảnh không còn trên máy chủ</span>
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={onOpen} className="overflow-hidden rounded-lg border border-slate-200">
+      <img src={url} alt={alt} onError={() => setBroken(true)}
+        className="h-24 w-24 object-cover transition hover:opacity-80" />
+    </button>
+  );
+};
+
+
 /** Chi tiết đầy đủ 1 phiếu — mô tả, ảnh mọi vòng, timeline. Dữ liệu lấy thẳng từ dòng
  * đã tải (GET /api/v1/maintenance trả full DTO, không thiếu field nào so với
  * GET /{id}) — không cần gọi API riêng, mở tức thì. */
@@ -718,25 +745,28 @@ const DetailDrawer = ({ request: r, onClose }: { request: MaintenanceRequestResp
 
   return (
     <Overlay>
-      <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-900/40 backdrop-blur-[2px]" onClick={onClose}>
+      {/* Cửa sổ GIỮA màn hình, 2 cột: trái = nội dung phiếu, phải = tiến trình. Bản cũ là
+          ngăn kéo hẹp một bên — mọi thứ xếp thành một cột dài, ảnh bé 64px, phải cuộn mãi. */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 backdrop-blur-[2px] sm:p-6" onClick={onClose}>
         <div onClick={e => e.stopPropagation()}
-          className="flex h-full w-full max-w-xl flex-col overflow-hidden bg-white shadow-2xl">
-          {/* Header dính — mã phiếu + trạng thái luôn thấy khi cuộn dài. */}
-          <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
+          className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          {/* ── Đầu: mã · trạng thái · tiêu đề · 4 ô thông tin chính ── */}
+          <div className="shrink-0 border-b border-slate-200 px-6 py-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm font-black text-slate-900">{r.requestCode}</span>
+                  <span className="rounded-md bg-slate-900 px-2 py-0.5 font-mono text-xs font-black text-white">{r.requestCode}</span>
                   <StatusBadge status={r.status} />
                   <PriorityBadge priority={r.priority} />
                   <WaitBadge request={r} />
                 </div>
-                <h3 className="mt-1.5 text-lg font-bold leading-snug text-slate-900">
+                <h3 className="mt-2 text-xl font-extrabold leading-snug text-slate-900">
                   {r.title || r.equipmentName || 'Yêu cầu sửa chữa'}
                 </h3>
                 <p className="mt-0.5 text-xs font-semibold text-slate-500">
                   {r.category ? maintenanceCategoryMap[r.category] ?? r.category : 'Chưa phân loại'}
                   {' · '}Tạo {fmtDate(r.createdAt)}
+                  {r.resolvedAt && <> · Xong {fmtDate(r.resolvedAt)}</>}
                 </p>
               </div>
               <button onClick={onClose} title="Đóng (Esc)"
@@ -744,103 +774,118 @@ const DetailDrawer = ({ request: r, onClose }: { request: MaintenanceRequestResp
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <Row icon={MapPin} label="Nhà / Phòng" value={`${r.propertyName}${r.roomName ? ` · P.${r.roomName}` : ''}`} />
+              <Row icon={Wrench} label="Thiết bị" value={r.equipmentName ?? '—'} />
+              <Row icon={Phone} label="Khách thuê" value={`${r.tenantName ?? '—'}${r.tenantPhone ? ` · ${r.tenantPhone}` : ''}`} />
+              <Row icon={User} label="Quản lý phụ trách" value={r.assignedManagerName ?? 'Chưa gán'} />
+            </div>
           </div>
 
-          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              <Row icon={MapPin} label="Nhà / Phòng" value={`${r.propertyName}${r.roomName ? ` · ${r.roomName}` : ''}`} />
-              <Row icon={Phone} label="Khách thuê" value={`${r.tenantName}${r.tenantPhone ? ` · ${r.tenantPhone}` : ''}`} />
-              <Row icon={User} label="Quản lý phụ trách" value={r.assignedManagerName ?? 'Chưa gán'} />
-              {r.equipmentName && <Row icon={Wrench} label="Thiết bị" value={r.equipmentName} />}
-              {r.selfRepairDeadline && <Row icon={Clock} label="Hạn khách tự sửa" value={fmtDate(r.selfRepairDeadline)} />}
-              {r.resolvedAt && <Row icon={CheckCircle2} label="Hoàn thành" value={fmtDate(r.resolvedAt)} />}
-            </div>
-
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Mô tả sự cố</p>
-              <p className="mt-2 whitespace-pre-wrap rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm leading-relaxed text-slate-800">
-                {r.description || '(không có mô tả)'}
-              </p>
-            </div>
-
-            {r.faultReason && (
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-rose-600">
-                  <AlertTriangle className="h-3.5 w-3.5" /> Lỗi do khách
+          {/* ── Thân: 2 cột ── */}
+          <div className="grid flex-1 gap-0 overflow-y-auto lg:grid-cols-[minmax(0,1fr)_320px] lg:overflow-hidden">
+            {/* Cột trái */}
+            <div className="space-y-5 px-6 py-5 lg:overflow-y-auto">
+              {r.selfRepairDeadline && (
+                <p className="flex items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-800">
+                  <Clock className="h-4 w-4" /> Hạn khách tự sửa: {fmtDate(r.selfRepairDeadline)}
                 </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-rose-900">{r.faultReason}</p>
-                {r.estimatedDamageAmount != null && (
-                  <p className="mt-2 text-sm font-bold text-rose-800">
-                    Ước tính thiệt hại: {formatVnd(r.estimatedDamageAmount)}
-                  </p>
-                )}
-                {r.adminReviewedAt ? (
-                  <p className="mt-2 text-xs font-semibold text-rose-700">
-                    {r.adminApproved ? '✅ Đã duyệt' : '❌ Không duyệt'} bởi {r.adminReviewedByName ?? 'admin'} lúc {fmtDate(r.adminReviewedAt)}
-                    {r.adminReviewNote ? ` — "${r.adminReviewNote}"` : ''}
-                  </p>
-                ) : (
-                  <Link to="/admin/maintenance/fault-review"
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-rose-700">
-                    <Gavel className="h-3.5 w-3.5" /> Sang trang phân xử
-                  </Link>
-                )}
-              </div>
-            )}
+              )}
 
-            {(r.invoiceAmount != null || r.repairDescription || r.resolutionNote || billingHint) && (
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <Wallet className="h-3.5 w-3.5" /> Chi phí / Kết quả xử lý
-                </p>
-                {r.invoiceAmount != null && (
-                  <p className="mt-2 text-2xl font-black text-slate-900">{formatVnd(r.invoiceAmount)}</p>
-                )}
-                {billingHint && <p className="mt-1 text-xs font-semibold text-indigo-600">{billingHint}</p>}
-                {r.repairDescription && <p className="mt-2 text-sm text-slate-700">{r.repairDescription}</p>}
-                {r.resolutionNote && <p className="mt-1 text-sm text-slate-500">{r.resolutionNote}</p>}
-              </div>
-            )}
-
-            {photoGroups.length > 0 && (
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Ảnh (mọi vòng xử lý)</p>
-                <div className="mt-2 space-y-3">
-                  {photoGroups.map(g => (
-                    <div key={g.type}>
-                      <p className="mb-1.5 text-xs font-semibold text-slate-600">{g.label} ({g.urls.length})</p>
-                      <div className="flex flex-wrap gap-2">
-                        {g.urls.map((url, i) => (
-                          <button key={i} type="button" onClick={() => setLightbox({ images: g.urls, index: i })}>
-                            <img src={url} alt={`${g.label} ${i + 1}`}
-                              className="h-16 w-16 rounded-lg border border-slate-200 object-cover transition hover:opacity-80" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Mô tả sự cố</p>
+                <p className={`mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-4 py-3 text-sm leading-relaxed ${
+                  r.description ? 'text-slate-800' : 'italic text-slate-400'}`}>
+                  {r.description || 'Khách không ghi mô tả — xem ảnh hiện trạng bên dưới.'}
+                </p>
+              </div>
+
+              {r.faultReason && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                  <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-rose-600">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Lỗi do khách
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-rose-900">{r.faultReason}</p>
+                  {r.estimatedDamageAmount != null && (
+                    <p className="mt-2 text-sm font-bold text-rose-800">
+                      Ước tính thiệt hại: {formatVnd(r.estimatedDamageAmount)}
+                    </p>
+                  )}
+                  {r.adminReviewedAt ? (
+                    <p className="mt-2 text-xs font-semibold text-rose-700">
+                      {r.adminApproved ? '✅ Đã duyệt' : '❌ Không duyệt'} bởi {r.adminReviewedByName ?? 'admin'} lúc {fmtDate(r.adminReviewedAt)}
+                      {r.adminReviewNote ? ` — "${r.adminReviewNote}"` : ''}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs font-semibold text-rose-700">Chưa có kết luận của admin.</p>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            {timeline.length > 0 && (
-              <div>
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <History className="h-3.5 w-3.5" /> Tiến trình xử lý
-                </p>
+              {(r.invoiceAmount != null || r.repairDescription || r.resolutionNote || billingHint) && (
+                <div className="flex flex-wrap items-start gap-4 rounded-xl border border-slate-200 p-4">
+                  <div className="min-w-[160px]">
+                    <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      <Wallet className="h-3.5 w-3.5" /> Chi phí sửa
+                    </p>
+                    <p className="mt-1 text-2xl font-black tabular-nums text-slate-900">
+                      {r.invoiceAmount != null ? formatVnd(r.invoiceAmount) : '—'}
+                    </p>
+                    {billingHint && <p className="mt-0.5 text-xs font-semibold text-indigo-600">{billingHint}</p>}
+                  </div>
+                  {(r.repairDescription || r.resolutionNote) && (
+                    <div className="min-w-[200px] flex-1 border-l border-slate-100 pl-4">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Kết quả xử lý</p>
+                      {r.repairDescription && <p className="mt-1 text-sm text-slate-700">{r.repairDescription}</p>}
+                      {r.resolutionNote && <p className="mt-1 text-sm text-slate-500">{r.resolutionNote}</p>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {photoGroups.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Hình ảnh</p>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    {photoGroups.map(g => (
+                      <div key={g.type} className="rounded-xl border border-slate-200 p-3">
+                        <p className="mb-2 text-xs font-bold text-slate-600">{g.label} <span className="font-semibold text-slate-400">({g.urls.length})</span></p>
+                        <div className="flex flex-wrap gap-2">
+                          {g.urls.map((url, i) => (
+                            <SafeThumb key={i} url={url} alt={`${g.label} ${i + 1}`}
+                              onOpen={() => setLightbox({ images: g.urls, index: i })} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Cột phải: tiến trình */}
+            <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-5 lg:overflow-y-auto lg:border-l lg:border-t-0">
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <History className="h-3.5 w-3.5" /> Tiến trình xử lý
+              </p>
+              {timeline.length === 0 ? (
+                <p className="mt-3 text-xs italic text-slate-400">Chưa có bước nào được ghi.</p>
+              ) : (
                 <div className="mt-3">
                   {timeline.map((t, i) => {
                     const ns = maintenanceReqStatusMap[t.newStatus] ?? maintenanceReqStatusMap.OPEN;
+                    const last = i === timeline.length - 1;
                     return (
                       <div key={i} className="flex gap-3">
                         <div className="flex flex-col items-center">
-                          <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${ns.dot}`} />
-                          {i !== timeline.length - 1 && <span className="w-px flex-1 bg-slate-200" />}
+                          <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ring-4 ring-white ${ns.dot}`} />
+                          {!last && <span className="w-px flex-1 bg-slate-200" />}
                         </div>
-                        <div className="pb-4">
+                        <div className={last ? '' : 'pb-4'}>
                           <p className="text-sm font-bold text-slate-800">{ns.label}</p>
-                          {t.note && <p className="mt-0.5 text-sm text-slate-600">{t.note}</p>}
-                          <p className="mt-0.5 text-xs text-slate-400">
+                          {t.note && <p className="mt-0.5 text-xs leading-relaxed text-slate-600">{t.note}</p>}
+                          <p className="mt-0.5 text-[11px] text-slate-400">
                             {t.changedByName ?? 'Hệ thống'} · {fmtDate(t.changedAt)}
                           </p>
                         </div>
@@ -848,8 +893,8 @@ const DetailDrawer = ({ request: r, onClose }: { request: MaintenanceRequestResp
                     );
                   })}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>

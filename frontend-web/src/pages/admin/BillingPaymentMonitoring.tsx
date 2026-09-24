@@ -1,63 +1,31 @@
 import { MaskedField } from '@/components/MaskedField';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  CreditCard, Search, Loader2, AlertCircle, ChevronDown, Receipt, Wallet,
-  Clock, AlertTriangle, PiggyBank,
+  CreditCard, Search, Loader2, AlertCircle, Receipt, Clock, PiggyBank,
 } from 'lucide-react';
 import {
   adminService,
-  type AdminInvoiceRow, type AdminInvoiceStatus, type AdminInvoiceType, type AdminPaymentRow,
-  type AdminDepositRow, type AdminDepositStatus,
+  type AdminInvoiceRow, type AdminPaymentRow, type AdminDepositRow, type AdminDepositStatus,
 } from '@/services/admin.service';
 import toast from 'react-hot-toast';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
-import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd, RealtimeBadge } from './shared';
-import { serverNow } from '@/utils/serverTime';
+import { SectionShell, StatusPill, StatCard, Pagination, PAGE_SIZE, formatVnd } from './shared';
 import { InvoiceUnlockPanel } from './InvoiceUnlockPanel';
+import { InvoiceBoard, type InvoiceBoardRow } from '@/components/billing/InvoiceBoard';
+import { currentMonth, shiftMonth, useServerPeriod } from '@/pages/host/shared';
 
 /**
  * Giám sát hoá đơn & thanh toán toàn hệ thống (admin).
  *
- * Dữ liệu là hoá đơn THẬT trong bảng `tenant_invoice` — cùng nguồn mà app khách
- * thuê và app quản lý đang dùng — lấy qua `GET /api/v1/manager/invoices` (admin gọi
- * được, và được trả về của mọi nhà). BE đã sort `createdAt DESC` nên hoá đơn mới
- * nhất luôn nằm trên đầu; FE KHÔNG sort lại để khỏi lệch với thứ tự BE trả.
+ * Tab "Hoá đơn" dùng giao diện chung với host — `components/billing/InvoiceBoard` (làm lại
+ * 24/09/2026). Dữ liệu là hoá đơn THẬT trong bảng `tenant_invoice` qua
+ * `GET /api/v1/manager/invoices`. Riêng admin có thêm khối phát mã thu hộ trong khung chi tiết.
  *
- * Trước đây màn này gọi `/api/v1/admin/invoices` — endpoint dựng hoá đơn ảo từ hợp
- * đồng (không có mã hoá đơn, không có điện/nước, hạn thu bịa). Xem chú thích đầu
- * services/admin.service.ts.
+ * Tab "Tiền cọc" giữ riêng: cọc nằm trên hợp đồng (TenantContract.deposit), không phải hoá đơn.
  */
 
-// ── Nhãn khớp enum thật của BE ───────────────────────────────────────────────
-const TYPE_META: Record<AdminInvoiceType, { label: string; color: string }> = {
-  RENT:        { label: 'Tiền phòng', color: 'bg-violet-100 text-violet-700' },
-  ELECTRICITY: { label: 'Tiền điện',  color: 'bg-amber-100 text-amber-700' },
-  WATER:       { label: 'Tiền nước',  color: 'bg-sky-100 text-sky-700' },
-  SERVICE:     { label: 'Dịch vụ',    color: 'bg-teal-100 text-teal-700' },
-  MAINTENANCE: { label: 'Phí bảo trì', color: 'bg-rose-100 text-rose-700' },
-  OTHER:       { label: 'Khác',       color: 'bg-slate-100 text-slate-600' },
-};
-
-const STATUS_META: Record<AdminInvoiceStatus, { label: string; color: string }> = {
-  PENDING:   { label: 'Chờ thanh toán',   color: 'bg-amber-100 text-amber-700' },
-  PAID:      { label: 'Đã thanh toán',    color: 'bg-emerald-100 text-emerald-700' },
-  OVERDUE:   { label: 'Quá hạn',          color: 'bg-rose-100 text-rose-700' },
-  PARTIAL:   { label: 'Thanh toán 1 phần', color: 'bg-blue-100 text-blue-700' },
-  CANCELLED: { label: 'Đã huỷ',           color: 'bg-slate-100 text-slate-600' },
-};
-
-const PAYMENT_STATUS_META: Record<AdminPaymentRow['status'], { label: string; color: string }> = {
-  PENDING_VERIFY: { label: 'Chờ đối soát', color: 'bg-amber-100 text-amber-700' },
-  VERIFIED:       { label: 'Đã xác nhận',  color: 'bg-emerald-100 text-emerald-700' },
-  REJECTED:       { label: 'Bị từ chối',   color: 'bg-rose-100 text-rose-700' },
-};
-
 const METHOD_LABEL: Record<string, string> = {
-  QR: 'QR / VietQR',
-  PAYOS: 'PayOS',
-  BANK_TRANSFER: 'Chuyển khoản',
-  CASH: 'Tiền mặt',
-  EWALLET: 'Ví điện tử',
+  QR: 'QR / VietQR', PAYOS: 'PayOS', BANK_TRANSFER: 'Chuyển khoản', CASH: 'Tiền mặt', EWALLET: 'Ví điện tử',
 };
 
 /** Khớp `PaymentStatus` của BE — trạng thái thu cọc trên hợp đồng. */
@@ -72,7 +40,6 @@ const CONTRACT_STATUS_LABEL: Record<string, string> = {
   PENDING: 'Chờ hiệu lực', ACTIVE: 'Đang thuê', EXPIRED: 'Hết hạn', TERMINATED: 'Đã thanh lý',
 };
 
-// ── Định dạng ────────────────────────────────────────────────────────────────
 /** "2026-08-05" -> "05/08/2026" */
 const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
 /** ISO datetime -> "05/08/2026 08:00" */
@@ -82,32 +49,15 @@ const fmtDateTime = (iso?: string) => {
   return `${date.split('-').reverse().join('/')}${time ? ` ${time.slice(0, 5)}` : ''}`;
 };
 
-// 12 kỳ gần nhất, dạng YYYY-MM.
-const buildPeriods = (): string[] => {
-  const now = serverNow();
-  return Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  });
-};
-const periodLabel = (p: string) => {
-  const [y, m] = p.split('-');
-  return `Tháng ${m}/${y}`;
-};
+const fromAdminRow = (r: AdminInvoiceRow): InvoiceBoardRow => ({ ...r, key: String(r.id) });
 
 type Tab = 'invoices' | 'deposits';
 
 export const BillingPaymentMonitoring = () => {
-  const periods = useMemo(buildPeriods, []);
   const [tab, setTab] = useState<Tab>('invoices');
-  /** '' = mọi kỳ (không truyền `period` cho BE). */
-  const [period, setPeriod] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | AdminInvoiceType>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | AdminInvoiceStatus>('all');
-  const [propertyFilter, setPropertyFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [openId, setOpenId] = useState<number | null>(null);
+  /** Mặc định kỳ hiện tại (giờ server); '' = mọi kỳ. */
+  const [period, setPeriod] = useServerPeriod();
+  const periods = Array.from({ length: 12 }, (_, i) => shiftMonth(currentMonth(), -i));
 
   const [invoices, setInvoices] = useState<AdminInvoiceRow[]>([]);
   const [payments, setPayments] = useState<AdminPaymentRow[]>([]);
@@ -115,27 +65,26 @@ export const BillingPaymentMonitoring = () => {
   const [loading, setLoading] = useState(true);
   const [depositsLoading, setDepositsLoading] = useState(true);
   const [error, setError] = useState(false);
-  /** Tăng lên để buộc nạp lại danh sách (dùng cho event realtime). */
+  /** Tăng lên để buộc nạp lại danh sách (event realtime / nút tải lại). */
   const [reloadKey, setReloadKey] = useState(0);
 
-  // Kỳ + loại + trạng thái lọc phía server (BE nhận đúng 3 tham số này).
+  // Tab tiền cọc: tìm + lọc nhà riêng.
+  const [search, setSearch] = useState('');
+  const [propertyFilter, setPropertyFilter] = useState('all');
+  const [page, setPage] = useState(1);
+
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(false);
-    adminService.listInvoices({
-      period: period || undefined,
-      type: typeFilter === 'all' ? undefined : typeFilter,
-      status: statusFilter === 'all' ? undefined : statusFilter,
-    })
+    adminService.listInvoicesForCollection(period || undefined)
       .then(rows => { if (active) setInvoices(rows); })
       .catch(() => { if (active) { setInvoices([]); setError(true); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [period, typeFilter, statusFilter, reloadKey]);
+  }, [period, reloadKey]);
 
-  // Giao dịch thanh toán + tiền cọc — không phụ thuộc bộ lọc hoá đơn, chỉ nạp lại khi
-  // có event realtime.
+  // Giao dịch khách tự báo + tiền cọc — không phụ thuộc kỳ, chỉ nạp lại khi có event.
   useEffect(() => {
     adminService.listPayments().then(setPayments).catch(() => setPayments([]));
     adminService.listDeposits()
@@ -145,14 +94,10 @@ export const BillingPaymentMonitoring = () => {
   }, [reloadKey]);
 
   /**
-   * Khách thanh toán → BE bắn `INVOICE_PAID` qua WebSocket → nạp lại danh sách.
-   *
-   * Refetch thay vì tự sửa dòng tại chỗ: payload cố tình KHÔNG có số tiền, mà bảng này
-   * hiện tiền — vá dòng bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới. Refetch cũng lo
-   * luôn trường hợp hoá đơn vừa PAID không nằm trong bộ lọc đang xem.
+   * Khách thanh toán → BE bắn `INVOICE_PAID` → nạp lại. Refetch chứ không vá dòng: payload
+   * cố tình không có số tiền, vá bằng dữ liệu thiếu sẽ ra bảng nửa cũ nửa mới.
    */
   const { connected: liveOn } = useBillingRealtime({
-    // Nạp lại cho CẢ 3 lớp: event WS, nhịp poll dự phòng, quay lại tab.
     onRefresh: () => setReloadKey(k => k + 1),
     onEvent: (event) => {
       if (event.event !== 'INVOICE_PAID') return;
@@ -161,70 +106,17 @@ export const BillingPaymentMonitoring = () => {
     },
   });
 
-  // Đổi bộ lọc/tab thì về trang 1 và đóng dòng đang mở.
-  useEffect(() => { setPage(1); setOpenId(null); },
-    [tab, period, typeFilter, statusFilter, propertyFilter, search]);
+  useEffect(() => { setPage(1); }, [tab, propertyFilter, search]);
 
-  /** Giao dịch của 1 hoá đơn — khớp theo mã hoá đơn (ManagerPaymentResponse.invoiceCode). */
-  const paymentsOf = useMemo(() => {
-    const map = new Map<string, AdminPaymentRow[]>();
-    for (const p of payments) {
-      if (!p.invoiceCode) continue;
-      const list = map.get(p.invoiceCode) ?? [];
-      list.push(p);
-      map.set(p.invoiceCode, list);
-    }
-    return map;
-  }, [payments]);
+  const boardRows = useMemo(() => invoices.map(fromAdminRow), [invoices]);
 
-  // Danh sách toà nhà suy từ chính dữ liệu đang hiện (hoá đơn + hợp đồng có cọc) —
-  // không cần gọi thêm API và không bao giờ lệch với bảng. Lọc theo TÊN vì phía cọc
-  // (TenantContractResponse) chỉ có propertyName, không có propertyId.
+  // ── Tiền cọc ──
   const properties = useMemo(() => {
     const set = new Set<string>();
-    for (const i of invoices) set.add(i.propertyName);
     for (const d of deposits) set.add(d.propertyName);
     return [...set].sort((a, b) => a.localeCompare(b, 'vi'));
-  }, [invoices, deposits]);
+  }, [deposits]);
 
-  // Lọc phần còn lại phía client (toà nhà + từ khoá).
-  const filtered = useMemo(() => {
-    const kw = search.trim().toLowerCase();
-    return invoices.filter(i => {
-      if (propertyFilter !== 'all' && i.propertyName !== propertyFilter) return false;
-      if (!kw) return true;
-      return [i.code, i.propertyName, i.roomNumber, i.tenantName, i.periodLabel]
-        .some(v => v?.toLowerCase().includes(kw));
-    });
-  }, [invoices, propertyFilter, search]);
-
-  /**
-   * Tổng tiền BỎ QUA vỏ bọc `HD-ONBOARD-*`.
-   *
-   * Lúc đón khách, khách chuyển MỘT lần 14.709.677 gồm hai thứ khác bản chất:
-   *   • tiền cọc         9.500.000 → GIỮ HỘ, hoàn lại khi trả phòng (công nợ, không phải doanh thu)
-   *   • tiền nhà kỳ đầu  5.209.677 → doanh thu thật, đã có hoá đơn HD-RENT-* riêng
-   *
-   * Cộng cả `HD-ONBOARD-1` lẫn `HD-RENT-1-2026-08` ra 19.919.354 — vừa tính trùng tiền
-   * nhà, vừa coi tiền cọc là doanh thu. Nên vỏ bọc không được cộng; tiền nhà đã nằm ở
-   * hoá đơn riêng, tiền cọc nằm ở tab "Tiền cọc".
-   */
-  const sumMoney = (rows: AdminInvoiceRow[]) =>
-    rows.reduce((s, i) => (i.isOnboardEnvelope ? s : s + i.amount), 0);
-
-  const stats = useMemo(() => {
-    const paid = filtered.filter(i => i.status === 'PAID');
-    const pending = filtered.filter(i => i.status === 'PENDING' || i.status === 'PARTIAL');
-    const overdue = filtered.filter(i => i.status === 'OVERDUE');
-    return {
-      total: filtered.length, totalAmt: sumMoney(filtered),
-      paid: paid.length, paidAmt: sumMoney(paid),
-      pending: pending.length, pendingAmt: sumMoney(pending),
-      overdue: overdue.length, overdueAmt: sumMoney(overdue),
-    };
-  }, [filtered]);
-
-  // ── Tiền cọc: lọc theo từ khoá + toà nhà, đã sort mới-trước ở service ──
   const filteredDeposits = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return deposits.filter(d => {
@@ -246,61 +138,19 @@ export const BillingPaymentMonitoring = () => {
     };
   }, [filteredDeposits]);
 
-  // Hoá đơn: BE đã trả mới nhất trước — chỉ cắt trang, KHÔNG sort lại.
-  // Cọc: BE `findAll()` không sort nên service đã tự xếp theo ngày thu cọc giảm dần.
-  /**
-   * SẮP XẾP danh sách hoá đơn.
-   *
-   * Không có nó thì thứ tự do máy chủ quyết (mới phát hành trước), và admin muốn biết
-   * "khoản nào quá hạn lâu nhất" hay "khoản nào to nhất chưa thu" thì phải tự cuộn cả
-   * danh sách để so bằng mắt — đúng việc mà máy làm trong một phần nghìn giây.
-   *
-   * Trang hoá đơn bên host đã có ô này từ đầu; đây là chỗ admin bị thiếu so với host,
-   * dù admin mới là người đi đối soát.
-   */
-  const [sort, setSort] = useState<'newest' | 'dueSoon' | 'amountDesc'>('newest');
-
-  const sortedInvoices = useMemo(() => {
-    const rows = [...filtered];
-    if (sort === 'amountDesc') return rows.sort((a, b) => b.amount - a.amount);
-    if (sort === 'dueSoon') {
-      // Thiếu hạn thu thì đẩy xuống cuối, đừng cho lên đầu như thể sắp tới hạn.
-      return rows.sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'));
-    }
-    return rows.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-  }, [filtered, sort]);
-
-  const rows = tab === 'invoices' ? sortedInvoices : filteredDeposits;
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filteredDeposits.length / PAGE_SIZE));
   const pageDeposits = filteredDeposits.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const toggleStatus = (s: AdminInvoiceStatus) =>
-    setStatusFilter(prev => (prev === s ? 'all' : s));
 
   return (
     <SectionShell
       title="Hoá đơn & Thanh toán"
       subtitle={tab === 'invoices'
-        ? 'Toàn bộ hoá đơn thật của hệ thống (tiền phòng, điện, nước, dịch vụ, bảo trì) — mới phát hành nằm trên đầu'
+        ? 'Mọi khoản thu của khách thuê: tiền nhà, điện, nước, dịch vụ, phí sửa chữa. Bấm một dòng để xem chi tiết.'
         : 'Tiền cọc thu theo hợp đồng, không phải hoá đơn — mới thu nằm trên đầu'}
       icon={CreditCard}
-      action={(
-        <div className="flex items-center gap-3">
-          {/* Nói rõ trang đang cập nhật bằng lớp nào — xem RealtimeBadge. */}
-          <RealtimeBadge connected={liveOn} />
-          {tab === 'invoices' && (
-            <select value={period} onChange={e => setPeriod(e.target.value)} className="input-field w-44">
-              <option value="">Tất cả các kỳ</option>
-              {periods.map(p => <option key={p} value={p}>{periodLabel(p)}</option>)}
-            </select>
-          )}
-        </div>
-      )}
     >
-      {/* Cọc nằm trên hợp đồng (TenantContract.deposit), hoá đơn nằm ở bảng riêng —
-          2 dòng tiền khác nhau nên tách tab thay vì trộn chung một bảng. */}
-      <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+      {/* Cọc nằm trên hợp đồng, hoá đơn ở bảng riêng — 2 dòng tiền khác nhau nên tách tab. */}
+      <div className="mb-5 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
         {([
           { key: 'invoices', label: 'Hoá đơn', icon: Receipt, count: invoices.length },
           { key: 'deposits', label: 'Tiền cọc', icon: PiggyBank, count: deposits.length },
@@ -318,355 +168,130 @@ export const BillingPaymentMonitoring = () => {
         ))}
       </div>
 
-      {error && !loading && tab === 'invoices' && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-700">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Không tải được hoá đơn từ máy chủ. Kiểm tra kết nối hoặc quyền truy cập (cần vai trò ADMIN).</span>
-        </div>
-      )}
-
-      {/* Thẻ số liệu — bấm để lọc nhanh theo trạng thái */}
       {tab === 'invoices' ? (
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Tổng hoá đơn" value={stats.total} icon={Receipt} tone="indigo"
-          helper={formatVnd(stats.totalAmt)} />
-        <StatCard title="Đã thanh toán" value={stats.paid} icon={Wallet} tone="emerald"
-          helper={formatVnd(stats.paidAmt)}
-          progress={stats.total ? stats.paid / stats.total : 0}
-          active={statusFilter === 'PAID'} onClick={() => toggleStatus('PAID')} />
-        <StatCard title="Chờ thu" value={stats.pending} icon={Clock} tone="amber"
-          helper={formatVnd(stats.pendingAmt)}
-          progress={stats.total ? stats.pending / stats.total : 0}
-          active={statusFilter === 'PENDING'} onClick={() => toggleStatus('PENDING')} />
-        <StatCard title="Quá hạn" value={stats.overdue} icon={AlertTriangle} tone="rose"
-          helper={formatVnd(stats.overdueAmt)}
-          progress={stats.total ? stats.overdue / stats.total : 0}
-          active={statusFilter === 'OVERDUE'} onClick={() => toggleStatus('OVERDUE')} />
-      </div>
+        <InvoiceBoard
+          rows={boardRows}
+          payments={payments}
+          loading={loading}
+          liveOn={liveOn}
+          onReload={() => setReloadKey(k => k + 1)}
+          period={period}
+          onPeriodChange={setPeriod}
+          periods={periods}
+          maintenancePath="/admin/maintenance?bucket=tenant"
+          exportName="HoaDon_Admin_HoangBinhLand"
+          notice={error && !loading && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Không tải được hoá đơn từ máy chủ. Kiểm tra kết nối hoặc quyền truy cập (cần vai trò ADMIN).</span>
+            </div>
+          )}
+          // Phát mã cho quản lý thu hộ (tiền mặt / trả hộ) — gắn đúng hoá đơn đang mở.
+          renderDetailActions={r => (r.id != null ? (
+            <InvoiceUnlockPanel
+              invoiceId={r.id}
+              invoiceCode={r.code}
+              canCollect={r.status === 'PENDING' || r.status === 'OVERDUE' || r.status === 'PARTIAL'}
+            />
+          ) : null)}
+        />
       ) : (
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <StatCard title="Hợp đồng có cọc" value={depositStats.total} icon={Receipt} tone="indigo"
-          helper={formatVnd(depositStats.totalAmt)} />
-        <StatCard title="Đã thu cọc" value={depositStats.paid} icon={PiggyBank} tone="emerald"
-          helper={formatVnd(depositStats.paidAmt)}
-          progress={depositStats.total ? depositStats.paid / depositStats.total : 0} />
-        <StatCard title="Chưa thu cọc" value={depositStats.pending} icon={Clock} tone="amber"
-          helper={formatVnd(depositStats.pendingAmt)}
-          progress={depositStats.total ? depositStats.pending / depositStats.total : 0} />
-      </div>
-      )}
+        <>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <StatCard title="Hợp đồng có cọc" value={depositStats.total} icon={Receipt} tone="indigo"
+              helper={formatVnd(depositStats.totalAmt)} />
+            <StatCard title="Đã thu cọc" value={depositStats.paid} icon={PiggyBank} tone="emerald"
+              helper={formatVnd(depositStats.paidAmt)}
+              progress={depositStats.total ? depositStats.paid / depositStats.total : 0} />
+            <StatCard title="Chưa thu cọc" value={depositStats.pending} icon={Clock} tone="amber"
+              helper={formatVnd(depositStats.pendingAmt)}
+              progress={depositStats.total ? depositStats.pending / depositStats.total : 0} />
+          </div>
 
-      <div className="mb-4 grid gap-3 lg:grid-cols-4">
-        <div className="relative lg:col-span-2">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9"
-            placeholder={tab === 'invoices'
-              ? 'Tìm mã hoá đơn, toà nhà, phòng, khách thuê...'
-              : 'Tìm mã hợp đồng, toà nhà, phòng, khách thuê, SĐT...'} />
-        </div>
-        {tab === 'invoices' && (
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as typeof typeFilter)}
-            className="input-field">
-            <option value="all">Tất cả loại hoá đơn</option>
-            {(Object.keys(TYPE_META) as AdminInvoiceType[]).map(t => (
-              <option key={t} value={t}>{TYPE_META[t].label}</option>
-            ))}
-          </select>
-        )}
-        <select value={propertyFilter} onChange={e => setPropertyFilter(e.target.value)} className="input-field">
-          <option value="all">Tất cả toà nhà</option>
-          {properties.map(name => <option key={name} value={name}>{name}</option>)}
-        </select>
-        {tab === 'invoices' && (
-          <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className="input-field">
-            <option value="newest">Mới phát hành nhất</option>
-            <option value="dueSoon">Hạn thu gần nhất</option>
-            <option value="amountDesc">Số tiền lớn nhất</option>
-          </select>
-        )}
-      </div>
+          <div className="mb-4 grid gap-3 lg:grid-cols-3">
+            <div className="relative lg:col-span-2">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9"
+                placeholder="Tìm mã hợp đồng, toà nhà, phòng, khách thuê, SĐT..." />
+            </div>
+            <select value={propertyFilter} onChange={e => setPropertyFilter(e.target.value)} className="input-field">
+              <option value="all">Tất cả toà nhà</option>
+              {properties.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
 
-      {tab === 'invoices' ? (
-      <div className="overflow-x-auto rounded-xl border border-slate-200">
-        <table className="w-full min-w-[1040px] text-left text-sm">
-          <thead className="table-header">
-            <tr>
-              <th className="px-4 py-3">Mã hoá đơn</th>
-              <th className="px-4 py-3">Kỳ thanh toán</th>
-              <th className="px-4 py-3">Toà nhà / Phòng</th>
-              <th className="px-4 py-3">Khách thuê</th>
-              <th className="px-4 py-3 text-right">Số tiền</th>
-              <th className="px-4 py-3">Phát hành</th>
-              <th className="px-4 py-3">Hạn thu</th>
-              <th className="px-4 py-3">Trạng thái</th>
-              <th className="w-10 px-2 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {loading ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-16 text-center text-slate-400">
-                  <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Đang tải hoá đơn...
-                </td>
-              </tr>
-            ) : pageRows.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-16 text-center text-slate-500">
-                  {search ? `Không tìm thấy kết quả cho "${search}"` : 'Không có hoá đơn nào khớp bộ lọc.'}
-                </td>
-              </tr>
-            ) : pageRows.map(inv => {
-              const type = TYPE_META[inv.type];
-              const status = STATUS_META[inv.status];
-              const claims = paymentsOf.get(inv.code) ?? [];
-              const open = openId === inv.id;
-
-              return (
-                <Fragment key={inv.id}>
-                  <tr onClick={() => setOpenId(open ? null : inv.id)}
-                    className={`cursor-pointer hover:bg-slate-50 ${open ? 'bg-slate-50' : ''}`}>
-                    <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{inv.code}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${type.color}`}>
-                        {type.label}
-                      </span>
-                      {inv.isOnboardEnvelope && (
-                        <span className="ml-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">
-                          Khoản gộp — không tính vào tổng
-                        </span>
-                      )}
-                      {inv.collectedAtOnboard && (
-                        <span className="ml-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
-                          Thu cùng cọc lúc nhận phòng
-                        </span>
-                      )}
-                      <p className="mt-1 text-xs text-slate-500">{inv.periodLabel}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="font-bold text-slate-900">{inv.propertyName}</p>
-                      <p className="text-xs text-slate-500">
-                        {inv.roomNumber && inv.roomNumber !== inv.propertyName
-                          ? `Phòng ${inv.roomNumber}` : 'Nguyên căn'}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">{inv.tenantName}</td>
-                    {/* Vỏ bọc thanh toán: làm mờ để thấy ngay là KHÔNG nằm trong tổng phía
-                        trên — hai phần của nó đã được ghi ở hoá đơn tiền nhà và sổ cọc. */}
-                    <td className={`px-4 py-3 text-right font-bold ${
-                      inv.isOnboardEnvelope ? 'text-slate-400' : 'text-slate-950'}`}>
-                      {formatVnd(inv.amount)}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(inv.createdAt)}</td>
-                    <td className={`px-4 py-3 text-xs ${inv.status === 'OVERDUE' ? 'font-bold text-rose-600' : 'text-slate-500'}`}>
-                      {fmtDate(inv.dueDate)}
-                    </td>
-                    <td className="px-4 py-3"><StatusPill label={status.label} color={status.color} /></td>
-                    <td className="px-2 py-3 text-slate-400">
-                      <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead className="table-header">
+                <tr>
+                  <th className="px-4 py-3">Mã hợp đồng</th>
+                  <th className="px-4 py-3">Toà nhà / Phòng</th>
+                  <th className="px-4 py-3">Khách thuê</th>
+                  <th className="px-4 py-3 text-right">Tiền cọc</th>
+                  <th className="px-4 py-3">Hình thức</th>
+                  <th className="px-4 py-3">Ngày thu</th>
+                  <th className="px-4 py-3">Hợp đồng</th>
+                  <th className="px-4 py-3">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {depositsLoading ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-16 text-center text-slate-400">
+                      <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Đang tải tiền cọc...
                     </td>
                   </tr>
-
-                  {/* Chi tiết: kỳ này thu cho khoảng nào + các giao dịch đã ghi nhận */}
-                  {open && (
-                    <tr className="bg-slate-50/60">
-                      <td colSpan={9} className="px-4 pb-4 pt-1">
-                        <div className="grid gap-4 rounded-xl border border-slate-200 bg-white p-4 lg:grid-cols-2">
-                          <div>
-                            <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">
-                              Hoá đơn này thu cho khoảng nào
-                            </p>
-                            <dl className="mt-2 space-y-1.5 text-sm">
-                              <div className="flex justify-between gap-4">
-                                <dt className="text-slate-500">Kỳ thanh toán</dt>
-                                <dd className="font-semibold text-slate-800">{inv.periodLabel}</dd>
-                              </div>
-                              <div className="flex justify-between gap-4">
-                                <dt className="text-slate-500">Loại khoản thu</dt>
-                                <dd className="font-semibold text-slate-800">{type.label}</dd>
-                              </div>
-                              <div className="flex justify-between gap-4">
-                                <dt className="text-slate-500">Ngày phát hành</dt>
-                                <dd className="font-semibold text-slate-800">{fmtDateTime(inv.createdAt)}</dd>
-                              </div>
-                              <div className="flex justify-between gap-4">
-                                <dt className="text-slate-500">Hạn thu</dt>
-                                <dd className={`font-semibold ${inv.status === 'OVERDUE' ? 'text-rose-600' : 'text-slate-800'}`}>
-                                  {fmtDate(inv.dueDate)}
-                                </dd>
-                              </div>
-                              <div className="flex justify-between gap-4 border-t border-slate-100 pt-1.5">
-                                <dt className="text-slate-500">Tổng phải thu</dt>
-                                <dd className="font-black text-slate-950">{formatVnd(inv.amount)}</dd>
-                              </div>
-                            </dl>
-
-                            {inv.collectedAtOnboard && (
-                              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-800">
-                                Tiền nhà chu kỳ đầu, khách trả <b>chung một lần với tiền cọc</b> lúc nhận
-                                phòng (mã gộp {inv.collectedInInvoiceCode}) nên hoá đơn này không có giao
-                                dịch riêng. Đây là <b>doanh thu thật</b> và đã được tính vào tổng phía trên.
-                              </p>
-                            )}
-                            {inv.isOnboardEnvelope && (
-                              <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
-                                Đây là <b>khoản thu gộp</b> lúc nhận phòng, không phải một khoản thu riêng:
-                                <br />• <b>Tiền cọc</b> — giữ hộ, hoàn lại khi khách trả phòng, xem tab
-                                &quot;Tiền cọc&quot;. Không phải doanh thu.
-                                <br />• <b>Tiền nhà chu kỳ đầu</b> — đã có hoá đơn riêng
-                                <b> HD-RENT-…</b> cùng kỳ.
-                                <br />Hai phần đã được tính ở đúng chỗ của nó, nên dòng này
-                                <b> không cộng vào tổng</b> để khỏi tính trùng.
-                              </p>
-                            )}
-                          </div>
-
-                          <div>
-                            <p
-                              className="text-[11px] font-black uppercase tracking-wider text-slate-400"
-                              title="Chỉ gồm những lần khách TỰ BÁO đã chuyển khoản để người khác xác nhận bằng tay. Trả qua QR/PayOS được đối soát tự động nên không xuất hiện ở đây."
-                            >
-                              Khách tự báo đã chuyển khoản ({claims.length})
-                            </p>
-                            {/*
-                              Ô này KHÔNG phải lịch sử thu tiền — nó là hàng chờ ĐỐI SOÁT.
-
-                              Nguồn là `GET /manager/payments`, mà chính BE ghi chú là
-                              "hàng chờ đối soát claim"; lịch sử thu thật nằm ở endpoint
-                              khác (`/manager/payments/history`). Bản ghi ở đây chỉ sinh ra
-                              khi khách TỰ BÁO "tôi đã chuyển khoản" để người khác vào xác
-                              nhận bằng tay.
-
-                              Khách trả qua QR/PayOS thì hệ thống đối soát tự động, hoá đơn
-                              thành PAID mà không đẻ ra claim nào. Nên rỗng ở đây là chuyện
-                              BÌNH THƯỜNG, thậm chí là dấu hiệu tốt.
-
-                              Câu cũ "Chưa có giao dịch nào cho hoá đơn này" nói ngược lại
-                              điều đó: đứng dưới một hoá đơn đã thu đủ, nó đọc thành "tiền
-                              chưa về". Nên câu chữ phải rẽ theo trạng thái hoá đơn.
-                            */}
-                            {claims.length === 0 ? (
-                              <p className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs leading-relaxed text-slate-400">
-                                {inv.status === 'PAID'
-                                  ? 'Khách trả qua QR/PayOS — hệ thống tự đối soát, không cần báo tay.'
-                                  : 'Khách chưa báo đã chuyển khoản. Trả qua QR/PayOS thì cũng không cần báo.'}
-                              </p>
-                            ) : (
-                              <ul className="mt-2 space-y-2">
-                                {claims.map(c => (
-                                  <li key={c.id} className="rounded-lg border border-slate-200 px-3 py-2">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className="font-bold text-slate-900">{formatVnd(c.amount)}</span>
-                                      <StatusPill label={PAYMENT_STATUS_META[c.status].label}
-                                        color={PAYMENT_STATUS_META[c.status].color} />
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                      {c.method ? (METHOD_LABEL[c.method.toUpperCase()] ?? c.method) : 'Không rõ hình thức'}
-                                      {' · báo lúc '}{fmtDateTime(c.createdAt)}
-                                      {c.verifiedAt ? ` · xác nhận ${fmtDateTime(c.verifiedAt)}` : ''}
-                                    </p>
-                                    {c.transferContent && (
-                                      <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
-                                        {c.transferContent}
-                                      </p>
-                                    )}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Phát mã cho quản lý thu hộ (tiền mặt / trả hộ) — gắn theo
-                            đúng hoá đơn đang mở để không phát nhầm sang hoá đơn khác. */}
-                        <InvoiceUnlockPanel
-                          invoiceId={inv.id}
-                          invoiceCode={inv.code}
-                          canCollect={inv.status === 'PENDING'
-                            || inv.status === 'OVERDUE'
-                            || inv.status === 'PARTIAL'}
-                        />
+                ) : pageDeposits.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-16 text-center text-slate-500">
+                      {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có hợp đồng nào phát sinh tiền cọc.'}
+                    </td>
+                  </tr>
+                ) : pageDeposits.map(d => {
+                  const st = DEPOSIT_STATUS_META[d.status];
+                  return (
+                    <tr key={d.contractId} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{d.contractCode}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-bold text-slate-900">{d.propertyName}</p>
+                        <p className="text-xs text-slate-500">
+                          {d.roomNumber && d.roomNumber !== d.propertyName ? `Phòng ${d.roomNumber}` : 'Nguyên căn'}
+                        </p>
                       </td>
+                      <td className="px-4 py-3">
+                        <p className="text-slate-700">{d.tenantName}</p>
+                        {d.tenantPhone && <MaskedField value={d.tenantPhone} emptyText="" className="text-xs text-slate-400" />}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <p className="font-bold text-slate-950">{formatVnd(d.amount)}</p>
+                        {d.depositMonths ? (
+                          <p className="text-xs text-slate-400">{d.depositMonths} tháng tiền phòng</p>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {d.method ? (METHOD_LABEL[d.method.toUpperCase()] ?? d.method) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {d.paidAt ? fmtDateTime(d.paidAt) : <span className="text-slate-400">Chưa thu</span>}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        <p>{CONTRACT_STATUS_LABEL[d.contractStatus] ?? d.contractStatus}</p>
+                        {d.moveInDate && <p className="text-slate-400">Nhận phòng {fmtDate(d.moveInDate)}</p>}
+                      </td>
+                      <td className="px-4 py-3"><StatusPill label={st.label} color={st.color} /></td>
                     </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      ) : (
-      /* ── Tiền cọc ───────────────────────────────────────────────────────── */
-      <div className="overflow-x-auto rounded-xl border border-slate-200">
-        <table className="w-full min-w-[980px] text-left text-sm">
-          <thead className="table-header">
-            <tr>
-              <th className="px-4 py-3">Mã hợp đồng</th>
-              <th className="px-4 py-3">Toà nhà / Phòng</th>
-              <th className="px-4 py-3">Khách thuê</th>
-              <th className="px-4 py-3 text-right">Tiền cọc</th>
-              <th className="px-4 py-3">Hình thức</th>
-              <th className="px-4 py-3">Ngày thu</th>
-              <th className="px-4 py-3">Hợp đồng</th>
-              <th className="px-4 py-3">Trạng thái</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {depositsLoading ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-16 text-center text-slate-400">
-                  <Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" /> Đang tải tiền cọc...
-                </td>
-              </tr>
-            ) : pageDeposits.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-16 text-center text-slate-500">
-                  {search ? `Không tìm thấy kết quả cho "${search}"` : 'Chưa có hợp đồng nào phát sinh tiền cọc.'}
-                </td>
-              </tr>
-            ) : pageDeposits.map(d => {
-              const st = DEPOSIT_STATUS_META[d.status];
-              return (
-                <tr key={d.contractId} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{d.contractCode}</td>
-                  <td className="px-4 py-3">
-                    <p className="font-bold text-slate-900">{d.propertyName}</p>
-                    <p className="text-xs text-slate-500">
-                      {d.roomNumber && d.roomNumber !== d.propertyName ? `Phòng ${d.roomNumber}` : 'Nguyên căn'}
-                    </p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-slate-700">{d.tenantName}</p>
-                    {d.tenantPhone && <MaskedField value={d.tenantPhone} emptyText="" className="text-xs text-slate-400" />}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <p className="font-bold text-slate-950">{formatVnd(d.amount)}</p>
-                    {d.depositMonths ? (
-                      <p className="text-xs text-slate-400">{d.depositMonths} tháng tiền phòng</p>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">
-                    {d.method ? (METHOD_LABEL[d.method.toUpperCase()] ?? d.method) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">
-                    {d.paidAt ? fmtDateTime(d.paidAt) : <span className="text-slate-400">Chưa thu</span>}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">
-                    <p>{CONTRACT_STATUS_LABEL[d.contractStatus] ?? d.contractStatus}</p>
-                    {d.moveInDate && <p className="text-slate-400">Nhận phòng {fmtDate(d.moveInDate)}</p>}
-                  </td>
-                  <td className="px-4 py-3"><StatusPill label={st.label} color={st.color} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      )}
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-      {!(tab === 'invoices' ? loading : depositsLoading) && rows.length > 0 && (
-        <div className="mt-4">
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-        </div>
+          {!depositsLoading && filteredDeposits.length > 0 && (
+            <div className="mt-4">
+              <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+            </div>
+          )}
+        </>
       )}
     </SectionShell>
   );

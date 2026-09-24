@@ -341,6 +341,9 @@ export const invoiceKind = (
   inv: Pick<ManagerInvoice, 'code' | 'type'>,
 ): { icon: string; label: string } => {
   if (isOnboardEnvelope(inv)) return { icon: '🔑', label: 'Cọc + tiền nhà kỳ đầu' };
+  // HD-MAINT-{contractId}-{ts}: BE gom các khoản đền bù sửa chữa (khách làm hư) thành một
+  // hoá đơn loại MAINTENANCE — manager nhận về dạng OTHER nên phải nhận theo mã.
+  if ((inv.code || '').toUpperCase().startsWith('HD-MAINT')) return { icon: '🔧', label: 'Phí sửa chữa (khách làm hư)' };
   switch (inv.type) {
     case 'RENT':        return { icon: '🏠', label: 'Tiền nhà' };
     case 'ELECTRICITY': return { icon: '⚡', label: 'Tiền điện' };

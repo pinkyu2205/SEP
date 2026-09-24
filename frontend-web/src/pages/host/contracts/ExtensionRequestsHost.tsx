@@ -6,6 +6,7 @@ import {
 } from '@/services/extensionRequest.service';
 import { SectionShell, EmptyState } from '@/pages/admin/shared';
 import { HistoryList } from '@/pages/admin/HistoryList';
+import { ExtensionRequestRow, toggleInSet } from '@/components/contract/ExtensionRequestRow';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Đơn xin gia hạn — cổng HOST, CHỈ ĐỌC.
@@ -42,7 +43,14 @@ export const ExtensionRequestsHost = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const pending = useMemo(() => rows.filter(r => r.status === 'PENDING'), [rows]);
+  // Cũ nhất lên đầu: đơn gửi lâu nhất là đơn sắp tự đóng nhất.
+  const pending = useMemo(
+    () => rows.filter(r => r.status === 'PENDING')
+      .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '')),
+    [rows],
+  );
+  /** Đơn nào đang mở chi tiết — mặc định thu gọn hết (xem ExtensionRequestRow). */
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const closed = useMemo(() => rows.filter(r => r.status !== 'PENDING'), [rows]);
 
   return (
@@ -86,49 +94,36 @@ export const ExtensionRequestsHost = () => {
             ) : (
               <div className="mt-3 space-y-3">
                 {pending.map(r => (
-                  <div key={r.id} className="rounded-2xl border border-amber-200 bg-white shadow-sm">
-                    <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-4">
-                      <div className="min-w-0">
-                        <p className="font-bold text-slate-900">{r.tenantFullName ?? '(chưa có tên)'}</p>
-                        <p className="mt-0.5 text-sm text-slate-500">
-                          {[
-                            r.propertyName,
-                            r.roomNumber ? `Phòng ${r.roomNumber}` : 'Nguyên căn',
-                            r.contractCode,
-                          ].filter(Boolean).join(' · ')}
+                  <ExtensionRequestRow
+                    key={r.id}
+                    r={r}
+                    expanded={expanded.has(r.id)}
+                    onToggle={() => setExpanded(prev => toggleInSet(prev, r.id))}
+                  >
+                    <div className="grid gap-3 bg-slate-50/40 px-6 py-4 md:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-4">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Khách nhắn · {fmtDate(r.createdAt)}
                         </p>
-                        <p className="mt-1 text-xs text-slate-400">Gửi ngày {fmtDate(r.createdAt)}</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{r.note || '(không ghi gì)'}</p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Xin thêm</p>
-                        <p className="text-2xl font-extrabold text-slate-900">{r.months} tháng</p>
-                        {!!r.newEndDate && (
-                          <p className="text-xs text-slate-500">→ {fmtDate(r.newEndDate)}</p>
-                        )}
+                      <div className={`rounded-xl border p-4 ${
+                        r.managerNote ? 'border-sky-200 bg-sky-50' : 'border-dashed border-slate-200 bg-white'}`}>
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          Ý kiến quản lý
+                        </p>
+                        <p className={`mt-1 whitespace-pre-wrap text-sm ${r.managerNote ? 'text-sky-900' : 'text-slate-400'}`}>
+                          {r.managerNote || 'Quản lý chưa góp ý.'}
+                        </p>
                       </div>
+                      {!!r.newEndDate && (
+                        <p className="text-sm text-slate-600 md:col-span-2">
+                          Nếu được duyệt, hợp đồng kéo dài tới <b className="text-slate-900">{fmtDate(r.newEndDate)}</b>
+                          {' '}— kiểm tra hợp đồng gốc với chủ nhà còn đủ hạn không.
+                        </p>
+                      )}
                     </div>
-
-                    {(!!r.note || !!r.managerNote) && (
-                      <div className="grid gap-3 border-t border-slate-100 px-6 py-4 md:grid-cols-2">
-                        {!!r.note && (
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                              Khách nhắn
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{r.note}</p>
-                          </div>
-                        )}
-                        {!!r.managerNote && (
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                              Ý kiến quản lý
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-sky-900">{r.managerNote}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  </ExtensionRequestRow>
                 ))}
 
                 {/* Việc duy nhất host có thể làm với đơn đang chờ — nói thẳng ra thay vì

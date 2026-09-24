@@ -31,6 +31,11 @@ const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
   MAINTENANCE: 'maintenance_delay',
   BILLING_REMINDER: 'unpaid_invoice',
   BILLING_OVERDUE: 'unpaid_invoice',
+  // Quá hạn → báo host (BE 24/09/2026: mọi loại hoá đơn, không chỉ tiền nhà). Trước đây
+  // RENT_OVERDUE_HOST cũng không có ở đây nên rơi vào fallback "Chờ phê duyệt".
+  RENT_OVERDUE_HOST: 'unpaid_invoice',
+  INVOICE_OVERDUE_HOST: 'unpaid_invoice',
+  MAINTENANCE_OVERDUE_HOST: 'unpaid_invoice',
 };
 const dtoToNotification = (d: HostNotificationDto): PortalNotification => ({
   id: d.id,

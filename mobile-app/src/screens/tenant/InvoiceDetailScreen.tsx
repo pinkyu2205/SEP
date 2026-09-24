@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import {
   Colors, Spacing, BorderRadius, Shadow, RENT_CYCLE, RENT_TERMINATION_AFTER_DAYS,
+  BILL_PAYMENT_DAYS, canTerminateForUnpaidInvoice,
 } from '@/constants';
 import { formatCurrency, formatDate, getDaysUntil, onboardChargeLines, showAlert } from '@/utils';
 import { tenantInvoiceDisputeService } from '@/services/tenant/invoiceDisputeService';
@@ -358,6 +359,16 @@ export const InvoiceDetailScreen: React.FC = () => {
                   {daysOver >= RENT_TERMINATION_AFTER_DAYS
                     ? 'Đã quá ngày nhắc cuối — quản lý được quyền chấm dứt hợp đồng. Vui lòng thanh toán ngay.'
                     : `Không tính phí phạt, nhưng nếu tới ngày ${RENT_CYCLE.terminationFromDay} vẫn chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
+                </Text>
+              )}
+              {/* Hoá đơn khác tiền nhà (24/09/2026): không phí phạt, quá 5 ngày kể từ ngày phát hành là mất quyền giữ HĐ. */}
+              {invoice.invoiceType !== 'rent' && invoice.invoiceType !== 'deposit' && (
+                <Text style={s.overdueSub}>
+                  {canTerminateForUnpaidInvoice({
+                    type: invoice.invoiceType, status: invoice.status, dueDate: invoice.dueDate, createdAt: invoice.createdAt,
+                  })
+                    ? `Đã quá ${BILL_PAYMENT_DAYS} ngày kể từ ngày phát hành — quản lý được quyền chấm dứt hợp đồng. Vui lòng thanh toán ngay.`
+                    : `Không tính phí phạt, nhưng quá ${BILL_PAYMENT_DAYS} ngày kể từ ngày phát hành (${formatDate(invoice.dueDate)}) mà chưa thanh toán thì quản lý được quyền chấm dứt hợp đồng.`}
                 </Text>
               )}
             </View>

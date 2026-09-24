@@ -43,6 +43,16 @@ const FILTER_DEFS: { key: FilterKey; label: string }[] = [
   { key: 'whole_house', label: 'Nguyên căn' },
 ];
 
+/**
+ * Chip THẬT SỰ hiện trên hàng lọc (24/09/2026).
+ *
+ * Bỏ 3 chip trùng 3 ô thống kê ngay phía trên ("Đang ở", "Chưa thu cọc", "Sắp hết HĐ") —
+ * ô thống kê bấm được và lọc y hệt, để hai chỗ cùng làm một việc chỉ làm hàng chip dài
+ * phải vuốt ngang. Bỏ "Nguyên căn": danh sách đã GOM THEO NHÀ, tên nhóm nói sẵn loại nhà.
+ * Còn lại là các việc cần xử lý không có ô riêng — và chỉ hiện chip nào đang có khách.
+ */
+const CHIP_KEYS: FilterKey[] = ['pending_activation', 'expired', 'no_inspection'];
+
 const matchesFilter = (t: Tenant, filter: FilterKey): boolean => {
   const daysLeft = t.contractEndDate ? getDaysRemaining(t.contractEndDate) : null;
   switch (filter) {
@@ -397,6 +407,11 @@ export const TenantListScreen: React.FC = () => {
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * Số hồ sơ chờ đón — đếm y như màn `ResumeContract` mà nút này mở ra (gộp 3 rổ: chờ
+   * duyệt giá · DRAFT · PENDING, bỏ trùng id), để số trên nút khớp số dòng bên trong.
+   */
+  const [waitingCount, setWaitingCount] = useState(0);
 
   // Tải khách thuê THẬT: gom hợp đồng của tất cả nhà manager phụ trách.
   const load = useCallback(async () => {
@@ -422,6 +437,13 @@ export const TenantListScreen: React.FC = () => {
         }),
       );
       setTenants(lists.flat());
+      Promise.all([
+        realTenantService.listManagedContracts(),
+        realTenantService.listManagedContracts('DRAFT'),
+        realTenantService.listManagedContracts('PENDING'),
+      ])
+        .then(([a, d, p]) => setWaitingCount(new Set([...a, ...d, ...p].map(c => c.id)).size))
+        .catch(() => { /* lỗi thì không gắn số, nút vẫn bấm được */ });
     } catch {
       setTenants([]);
     } finally {
@@ -643,7 +665,12 @@ export const TenantListScreen: React.FC = () => {
           đến thì không nên mỗi chỗ một icon.
         */}
         <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('ResumeContract')}>
-          <Text style={styles.addBtnText}>🤝  Khách chờ đón</Text>
+          <Text style={styles.addBtnText}>Khách chờ đón</Text>
+          {waitingCount > 0 && (
+            <View style={styles.addBtnBadge}>
+              <Text style={styles.addBtnBadgeText}>{waitingCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -688,7 +715,12 @@ export const TenantListScreen: React.FC = () => {
         contentContainerStyle={styles.filterContent}
         decelerationRate="fast"
       >
-        {FILTER_DEFS.map(f => {
+        {FILTER_DEFS.filter(f =>
+          (f.key === 'all' && activeFilter !== 'all')
+          || (CHIP_KEYS.includes(f.key) && ((filterCounts[f.key] ?? 0) > 0 || activeFilter === f.key))
+          // Đang lọc bằng ô thống kê thì hiện chip của ô đó để thấy mình đang lọc gì.
+          || (f.key === activeFilter && f.key !== 'all'),
+        ).map(f => {
           const active = activeFilter === f.key;
           const count = filterCounts[f.key];
           return (
@@ -785,8 +817,16 @@ const styles = StyleSheet.create({
   backBtnText: { fontSize: 28, color: '#0F172A', lineHeight: 32 },
   title: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
   subtitle: { fontSize: 12, color: '#64748B', marginTop: 1 },
-  addBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.md, paddingVertical: 9, borderRadius: 12 },
+  addBtn: {
+    backgroundColor: Colors.primary, paddingHorizontal: Spacing.md, paddingVertical: 9, borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+  },
   addBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+  addBtnBadge: {
+    minWidth: 20, height: 20, paddingHorizontal: 6, borderRadius: 10,
+    backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center',
+  },
+  addBtnBadgeText: { color: Colors.primary, fontWeight: '800', fontSize: 12 },
 
   statsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: Spacing.lg, marginBottom: Spacing.md },
 

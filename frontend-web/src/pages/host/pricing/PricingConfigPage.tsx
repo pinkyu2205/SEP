@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, Cloud, DollarSign,
-  HardDrive, Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp,
+  AlertTriangle, ArrowLeft, Calculator, CheckCircle2, ChevronDown, Cloud, DollarSign,
+  HardDrive, Info, Loader2, Pencil, Percent, Save, ShieldCheck, Target, TrendingUp,
   UserCog, Wallet,
 } from 'lucide-react';
 import {
@@ -121,22 +121,81 @@ const VacancyMath = ({ cfg, opex }: { cfg: PricingConfig; opex: number }) => {
   );
 };
 
-const Card = ({ title, icon: Icon, children, tone = 'plain' }: {
+/**
+ * Thẻ một nhóm cấu hình. `summary` = giá trị đang đặt, hiện ngay trên đầu thẻ để lúc
+ * THU GỌN vẫn đọc được cả trang trong một màn — chỉ mở thẻ nào cần sửa.
+ * Không truyền `summary` thì thẻ luôn mở (không có nút thu gọn).
+ */
+const Card = ({ title, icon: Icon, children, tone = 'plain', summary, defaultOpen = true }: {
   title: string;
   icon: React.ElementType;
   children: React.ReactNode;
   tone?: 'plain' | 'accent';
-}) => (
-  <section className={`rounded-2xl border bg-white p-5 shadow-sm ${
-    tone === 'accent' ? 'border-indigo-200' : 'border-slate-200'
-  }`}>
-    <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-600">
-      <Icon className={`h-4 w-4 ${tone === 'accent' ? 'text-indigo-600' : 'text-slate-400'}`} />
-      {title}
-    </h2>
-    {children}
-  </section>
-);
+  summary?: React.ReactNode;
+  defaultOpen?: boolean;
+}) => {
+  const [open, setOpen] = useState(defaultOpen);
+  const collapsible = summary !== undefined;
+  const isOpen = !collapsible || open;
+  const iconCls = `h-4 w-4 shrink-0 ${tone === 'accent' ? 'text-indigo-600' : 'text-slate-400'}`;
+
+  return (
+    <section className={`overflow-hidden rounded-2xl border bg-white shadow-sm ${
+      tone === 'accent' ? 'border-indigo-200' : 'border-slate-200'
+    }`}>
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setOpen(v => !v)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2 px-5 py-4 text-left transition hover:bg-slate-50"
+        >
+          <Icon className={iconCls} />
+          <span className="text-sm font-bold uppercase tracking-wide text-slate-600">{title}</span>
+          <span className="ml-auto truncate pl-3 text-right text-sm font-bold text-slate-900">{summary}</span>
+          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
+        </button>
+      ) : (
+        <h2 className="flex items-center gap-2 px-5 pt-5 text-sm font-bold uppercase tracking-wide text-slate-600">
+          <Icon className={iconCls} />
+          {title}
+        </h2>
+      )}
+      {isOpen && (
+        <div className={collapsible ? 'border-t border-slate-100 p-5' : 'p-5 pt-4'}>{children}</div>
+      )}
+    </section>
+  );
+};
+
+/** Giải thích phụ — mặc định gập, bấm mới mở. Giữ trang gọn mà không mất thông tin. */
+const Fold = ({ title, children, tone = 'slate' }: {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  tone?: 'slate' | 'amber' | 'emerald';
+}) => {
+  const [open, setOpen] = useState(false);
+  const cls = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    amber: 'border-amber-300 bg-amber-50 text-amber-900',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+  }[tone];
+  return (
+    <div className={`mt-3 overflow-hidden rounded-xl border ${cls}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-bold"
+      >
+        <span className="flex-1">{title}</span>
+        <span className="shrink-0 text-[11px] font-semibold opacity-60">{open ? 'Thu gọn' : 'Tìm hiểu thêm'}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-60 transition ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="px-3 pb-3 text-xs leading-relaxed">{children}</div>}
+    </div>
+  );
+};
 
 const ModeBtn = ({ active, onClick, icon: Icon, label, sub }: {
   active: boolean; onClick: () => void; icon: React.ElementType; label: string; sub: string;
@@ -183,6 +242,8 @@ export const PricingConfigPage = () => {
   /** Ô thử lịch tăng giá — mặc định lấy hôm nay theo giờ máy chủ, giá tròn 10tr cho dễ đọc. */
   const [tryStart, setTryStart] = useState(() => todayIso());
   const [tryPrice, setTryPrice] = useState(10_000_000);
+  /** Ô thử tính mặc định THU GỌN — chỉ là công cụ kiểm tra, không phải cấu hình cần sửa. */
+  const [tryOpen, setTryOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -268,8 +329,7 @@ export const PricingConfigPage = () => {
         <div>
           <h1 className="text-xl font-black text-slate-900">Cấu hình duyệt giá</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Áp dụng cho <b>tất cả</b> căn nhà. Màn duyệt giá của từng căn sẽ dùng đúng những
-            số này — không phải nhập lại ở đó nữa.
+            Áp dụng cho <b>mọi căn nhà</b> — màn duyệt giá từng căn dùng đúng các số này.
           </p>
         </div>
         <SourceBadge source={source} />
@@ -279,12 +339,8 @@ export const PricingConfigPage = () => {
         <div className="mb-5 flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
           <div className="text-sm text-amber-800">
-            <p className="font-bold">Cấu hình chỉ đang nằm trên trình duyệt này.</p>
-            <p className="mt-0.5 leading-relaxed">
-              Máy chủ chưa có nơi lưu cấu hình duyệt giá (endpoint đang chờ Backend làm). Đổi máy,
-              đổi trình duyệt hoặc xoá dữ liệu duyệt web là mất. Khi Backend hoàn thành, trang này
-              tự chuyển sang dùng máy chủ, không cần làm gì thêm.
-            </p>
+            <p className="font-bold">Cấu hình mới chỉ lưu trên trình duyệt này.</p>
+            <p className="mt-0.5">Đổi máy hoặc xoá dữ liệu trình duyệt là mất — máy chủ chưa nhận được.</p>
           </div>
         </div>
       )}
@@ -292,7 +348,10 @@ export const PricingConfigPage = () => {
       <div className="grid gap-5 lg:grid-cols-[1fr_minmax(0,320px)]">
         <div className="space-y-5">
           {/* ── 1. Mục tiêu lợi nhuận ─────────────────────────────────────── */}
-          <Card title="Mục tiêu lợi nhuận" icon={Target} tone="accent">
+          <Card
+            title="Mục tiêu lợi nhuận" icon={Target} tone="accent"
+            summary={cfg.mode === 'FORWARD' ? `${formatVND(cfg.pDesired)}/tháng` : `${cfg.roiExpected}%/năm`}
+          >
             <p className="mb-2 text-sm font-bold text-slate-700">Định giá theo cách nào?</p>
             <div className="mb-4 grid grid-cols-2 gap-2">
               <ModeBtn active={cfg.mode === 'FORWARD'} onClick={() => set('mode', 'FORWARD')}
@@ -304,15 +363,14 @@ export const PricingConfigPage = () => {
             {cfg.mode === 'FORWARD' ? (
               <Field
                 label="Tiền lãi muốn thu mỗi tháng"
-                hint={<>Tiền lời <b>thực nhận</b> mỗi tháng của <b>mỗi căn</b>, sau khi đã trừ chi phí
-                  vận hành và phần thu hồi vốn.</>}
+                hint={<>Lãi <b>thực nhận</b> của <b>mỗi căn</b>/tháng, sau khi trừ chi phí và thu hồi vốn.</>}
               >
                 <MoneyInput value={cfg.pDesired} onChange={(v) => set('pDesired', v)} placeholder="VD: 10.000.000" />
               </Field>
             ) : (
               <Field
                 label="Tỷ lệ sinh lời mong muốn mỗi năm"
-                hint="Phần trăm lời trên tổng vốn đầu tư của từng căn, tính theo năm."
+                hint="% lời trên vốn đầu tư của mỗi căn, tính theo năm."
               >
                 <div className="relative">
                   <input type="number" min={0} value={cfg.roiExpected || ''} placeholder="VD: 15"
@@ -325,11 +383,14 @@ export const PricingConfigPage = () => {
           </Card>
 
           {/* ── 2. Chi phí vận hành ───────────────────────────────────────── */}
-          <Card title="Chi phí vận hành mỗi tháng" icon={Wallet}>
+          <Card
+            title="Chi phí vận hành" icon={Wallet} defaultOpen={false}
+            summary={`${formatVND(opex)}/tháng`}
+          >
             <div className="space-y-4">
               <Field
-                label="Chi phí vận hành khác (không gồm lương quản lý)"
-                hint="Internet, vệ sinh, bảo trì định kỳ… — tiền mặt chi ra hằng tháng cho mỗi căn."
+                label="Chi phí khác mỗi căn / tháng"
+                hint="Internet, vệ sinh, bảo trì định kỳ… (chưa gồm lương quản lý)."
               >
                 <MoneyInput value={cfg.oOperation} onChange={(v) => set('oOperation', v)} placeholder="0" />
               </Field>
@@ -352,8 +413,9 @@ export const PricingConfigPage = () => {
                     <Pencil className="h-3 w-3" /> Sửa bảng lương
                   </button>
                 </div>
-                <p className="mb-3 text-xs leading-relaxed text-slate-500">
-                  Chỉ hiển thị để đối chiếu. Mỗi căn gánh <b>lương ÷ số nhà</b> người đó đang phụ trách.
+                <p className="mb-3 text-xs text-slate-500">
+                  Mỗi căn gánh <b>lương ÷ số nhà</b> người đó phụ trách · bình quân{' '}
+                  <b className="text-indigo-700">{formatVND(blended)}</b>/căn.
                 </p>
 
                 {payroll.filter((m) => m.salary > 0).length === 0 ? (
@@ -361,6 +423,7 @@ export const PricingConfigPage = () => {
                     Chưa nhập lương cho quản lý nào — mở <b>Sửa bảng lương</b> để nhập.
                   </p>
                 ) : (
+                  <Fold title={`Lương từng quản lý (${payroll.filter((m) => m.salary > 0).length} người)`}>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[380px] text-sm">
                       <thead>
@@ -408,13 +471,13 @@ export const PricingConfigPage = () => {
                       </tfoot>
                     </table>
                   </div>
+                  </Fold>
                 )}
 
                 {idlePaid.length > 0 && (
                   <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-                    <b>{idlePaid.map((m) => m.fullName).join(', ')}</b> có lương nhưng chưa phụ trách nhà
-                    nào — công ty đang tự chịu{' '}
-                    <b>{formatVND(idlePaid.reduce((s, m) => s + m.salary, 0))}/tháng</b>.
+                    <b>{idlePaid.map((m) => m.fullName).join(', ')}</b> chưa phụ trách nhà nào — lương{' '}
+                    <b>{formatVND(idlePaid.reduce((s, m) => s + m.salary, 0))}/tháng</b> chưa tính vào giá căn nào.
                   </p>
                 )}
               </div>
@@ -422,11 +485,14 @@ export const PricingConfigPage = () => {
           </Card>
 
           {/* ── 3. Tăng giá theo năm ──────────────────────────────────────── */}
-          <Card title="Tăng giá thuê hằng năm" icon={TrendingUp}>
+          <Card
+            title="Tăng giá hằng năm" icon={TrendingUp} defaultOpen={false}
+            summary={cfg.annualIncreasePct > 0 ? `+${cfg.annualIncreasePct}% vào 01/01` : 'Không tăng'}
+          >
             <div className="grid gap-3 sm:grid-cols-2">
               <Field
                 label="Tăng mỗi năm dương lịch"
-                hint={<>Áp vào <b>01/01</b>, cộng dồn. Để 0 nếu không tăng.</>}
+                hint={<>Áp vào <b>01/01</b>, cộng dồn. 0 = không tăng.</>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={100} step={0.5} value={cfg.annualIncreasePct}
@@ -437,7 +503,7 @@ export const PricingConfigPage = () => {
               </Field>
               <Field
                 label="Ân hạn cho khách mới"
-                hint={<>Tính tới 01/01 mà thuê chưa đủ bấy nhiêu tháng thì <b>hoãn</b> kỳ đó sang năm sau.</>}
+                hint={<>Thuê chưa đủ số tháng này tới 01/01 thì <b>chưa tăng</b>.</>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={24} value={cfg.escalationGraceMonths}
@@ -448,7 +514,7 @@ export const PricingConfigPage = () => {
               </Field>
               <Field
                 label="Báo giá năm sau trước"
-                hint={<>Từ mốc này quản lý chốt giá với khách theo mức <b>năm sau</b>.</>}
+                hint={<>Cuối năm, còn bấy nhiêu tháng thì báo khách giá <b>năm sau</b>.</>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={11} value={cfg.newYearPriceLeadMonths}
@@ -459,35 +525,59 @@ export const PricingConfigPage = () => {
               </Field>
             </div>
 
-            {/* Hai ô trên trông giống nhau (đều là "mấy tháng") nhưng làm hai việc khác hẳn.
-                Không nói rõ thì kiểu gì cũng có người sửa nhầm ô. */}
-            <p className="mt-2 rounded-lg bg-slate-100 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-              <b>Ân hạn</b> quyết định <u>ai được miễn</u> kỳ tăng 01/01 — để {cfg.escalationGraceMonths} thì
-              ai ký từ <b>02/{`0${12 - cfg.escalationGraceMonths}`.slice(-2)}</b> trở đi được hoãn sang năm
-              sau. <b>Báo giá năm sau</b> quyết định <u>quản lý báo con số nào</u> khi đi chốt giá cuối
-              năm — không liên quan tới việc tăng.
+            {/* Tình trạng + điều kiện pháp lý gộp một dòng; lý do chi tiết gập lại. Hai ô
+                "mấy tháng" trông giống nhau nhưng làm việc khác hẳn — giải thích trong Fold. */}
+            <p className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-900">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <span>
+                <b>Đang chạy tự động:</b> tăng vào 01/01, báo khách trước 15 ngày, điều khoản in sẵn
+                trong hợp đồng. Sửa ở đây chỉ áp cho hợp đồng ký sau.
+              </span>
             </p>
 
-            {/* Điều kiện pháp lý — KHÔNG được để lẫn vào chú thích nhỏ. Tăng giá khách đang
-                thuê chỉ hợp lệ khi hợp đồng đã ghi sẵn điều khoản đó. */}
-            <div className="mt-3 flex gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
-              <ShieldCheck className="h-4 w-4 shrink-0 text-amber-600" />
-              <div className="text-xs leading-relaxed text-amber-900">
-                <p className="font-bold">Điều khoản này phải có trong hợp đồng khách ký.</p>
-                <p className="mt-0.5">
-                  Hợp đồng chỉ ghi mỗi &quot;10.000.000 đ/tháng&quot; rồi sau đó báo tăng là <b>sửa hợp
-                  đồng đơn phương</b> — khách có quyền từ chối. Mẫu hợp đồng phải in rõ mức tăng
-                  ({cfg.annualIncreasePct}%/năm) và mốc tăng (01/01) để khách đọc trước khi ký.
-                </p>
-              </div>
-            </div>
+            <Fold tone="amber" title="Vì sao hợp đồng phải ghi sẵn điều khoản tăng giá?">
+              Hợp đồng chỉ ghi &quot;10.000.000 đ/tháng&quot; rồi sau đó báo tăng là <b>sửa hợp đồng đơn
+              phương</b> — khách có quyền từ chối. Mẫu hợp đồng phải in rõ mức tăng
+              ({cfg.annualIncreasePct}%/năm) và mốc 01/01 để khách đọc trước khi ký.
+            </Fold>
+
+            <Fold title={<><Info className="mr-1 inline h-3.5 w-3.5" />Ân hạn khác Báo giá năm sau thế nào?</>}>
+              <p>
+                <b>Ân hạn</b> quyết định <u>ai được miễn</u> kỳ tăng 01/01 — để {cfg.escalationGraceMonths} thì
+                ai ký từ <b>02/{`0${12 - cfg.escalationGraceMonths}`.slice(-2)}</b> trở đi được hoãn sang năm sau.
+              </p>
+              <p className="mt-1">
+                <b>Báo giá năm sau</b> quyết định <u>quản lý báo con số nào</u> khi chốt giá cuối năm —
+                không liên quan tới việc tăng.
+              </p>
+            </Fold>
 
             {/* Ô thử: gõ ngày bắt đầu thuê bất kỳ, xem ngay kỳ nào tăng kỳ nào hoãn.
                 Quy tắc ân hạn tính theo NGÀY nên "thuê tháng 7" chưa đủ để kết luận —
                 01/07 thì tròn 6 tháng nên tăng, 15/07 thì chưa đủ nên hoãn. Bắt Host tự
                 nhẩm chỗ này là kiểu gì cũng có người hiểu nhầm. */}
             {cfg.annualIncreasePct > 0 && (
-              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setTryOpen(v => !v)}
+                  aria-expanded={tryOpen}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition hover:bg-slate-100"
+                >
+                  <Calculator className="h-4 w-4 shrink-0 text-indigo-500" />
+                  <span className="flex-1 text-xs font-bold text-slate-700">
+                    Thử tính giá theo ngày bắt đầu thuê
+                    {!tryOpen && (
+                      <span className="ml-1.5 font-medium text-slate-400">
+                        — xem kỳ nào tăng, kỳ nào hoãn
+                      </span>
+                    )}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition ${tryOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {tryOpen && (
+                <div className="border-t border-slate-200 p-3">
                 <div className="mb-2 flex flex-wrap items-end gap-3">
                   <label className="block">
                     <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
@@ -536,29 +626,23 @@ export const PricingConfigPage = () => {
                   Kỳ bị hoãn là <b>bỏ hẳn</b>, không nợ rồi trả bù vào năm sau. Lãi kép chỉ nhân trên
                   những kỳ thật sự tăng.
                 </p>
+                </div>
+                )}
               </div>
             )}
 
-            {/* BE đã chạy thật từ 26/08/2026: cron 01/01 áp tăng (có ân hạn + chống áp trùng
-                theo `lastEscalationYear`), điều khoản in vào file hợp đồng, và báo khách
-                trước 15 ngày. Nói rõ là ĐANG CHẠY, vì đây là thứ đụng vào tiền của khách. */}
-            <div className="mt-3 flex gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-              <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-              <p className="text-xs leading-relaxed text-emerald-900">
-                <b>Đang chạy thật.</b> Hệ thống tự tăng giá vào 01/01 hằng năm, bỏ qua khách còn
-                trong ân hạn, và <b>báo cho khách trước 15 ngày</b>. Điều khoản được in sẵn vào file
-                hợp đồng. Sửa ở đây là đổi chính sách cho các hợp đồng ký sau khi lưu.
-              </p>
-            </div>
           </Card>
 
           {/* ── 4. Dự phòng ───────────────────────────────────────────────── */}
-          <Card title="Dự phòng rủi ro" icon={Calculator}>
+          <Card
+            title="Dự phòng rủi ro" icon={Calculator} defaultOpen={false}
+            summary={`Trống ${cfg.vRatePct}% · bàn giao ${cfg.handoverBufferMonths} tháng`}
+          >
             <div className="space-y-4">
               <div>
                 <Field
                   label="Biên dự phòng trống phòng"
-                  hint={<>Bù những tháng phòng bỏ trống. Thường để 10%.</>}
+                  hint="Bù tháng phòng bỏ trống. Thường 10%."
                 >
                   <div className="relative">
                     <input type="number" min={0} max={99} value={cfg.vRatePct}
@@ -574,9 +658,7 @@ export const PricingConfigPage = () => {
 
               <Field
                 label="Trừ cửa sổ bàn giao cuối kỳ"
-                hint={<>Số tháng cuối hợp đồng chủ nhà <b>không tính doanh thu</b>: khách dọn đi, tháo
-                  nội thất, sơn sửa hoàn trả hiện trạng — nhà trống, không thu được tiền. Để 0 nếu
-                  không cần chừa tháng nào.</>}
+                hint={<>Số tháng cuối HĐ chủ nhà <b>không có doanh thu</b> (dọn đi, sơn sửa trả nhà). 0 = không chừa.</>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={12} value={cfg.handoverBufferMonths}
@@ -588,14 +670,10 @@ export const PricingConfigPage = () => {
 
               {/* BE nhận `handoverBufferMonths` từ 26/08/2026. Nhưng chốt chặn hợp đồng ngắn
                   vẫn còn, và đó là chỗ Host dễ tưởng hệ thống bỏ qua số mình chọn. */}
-              <div className="flex gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-slate-400" />
-                <p className="text-xs leading-relaxed text-slate-600">
-                  Máy chủ đã nhận số này khi tính giá. Riêng hợp đồng còn <b>dưới 6 tháng</b> khai
-                  thác thì vẫn không trừ tháng nào — trừ 1 tháng trên 3 tháng là mất 1/3 thời gian
-                  thu tiền, nên chốt chặn đó giữ nguyên dù bạn chọn bao nhiêu.
-                </p>
-              </div>
+              <Fold title="Ngoại lệ: hợp đồng còn dưới 6 tháng">
+                Hợp đồng còn <b>dưới 6 tháng</b> khai thác thì không trừ tháng nào — trừ 1 tháng trên 3
+                tháng là mất 1/3 thời gian thu tiền, nên chốt chặn này giữ nguyên dù bạn chọn bao nhiêu.
+              </Fold>
             </div>
           </Card>
         </div>
@@ -640,9 +718,8 @@ export const PricingConfigPage = () => {
               </div>
             </dl>
 
-            <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
-              Máy chủ chỉ có một ô chi phí vận hành, nên lương quản lý được cộng gộp vào trước khi
-              gửi. Tách hai dòng ở đây là để bạn nhìn thấy tiền đi đâu.
+            <p className="mt-3 text-[11px] text-slate-400">
+              Lương quản lý được cộng gộp vào chi phí vận hành khi gửi lên máy chủ.
             </p>
 
             <button

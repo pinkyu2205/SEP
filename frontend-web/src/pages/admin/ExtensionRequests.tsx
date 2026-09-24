@@ -8,6 +8,8 @@ import {
 } from '@/services/extensionRequest.service';
 import { SectionShell, EmptyState } from './shared';
 import { HistoryList } from './HistoryList';
+import { refreshAdminBadges } from '@/utils/adminBadges';
+import { ExtensionRequestRow, toggleInSet } from '@/components/contract/ExtensionRequestRow';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Đơn xin gia hạn hợp đồng — admin duyệt.
@@ -50,13 +52,21 @@ export const ExtensionRequests = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const openList = useMemo(() => rows.filter(r => r.status === 'PENDING'), [rows]);
+  // Cũ nhất lên đầu: đơn gửi lâu nhất là đơn sắp tự đóng nhất.
+  const openList = useMemo(
+    () => rows.filter(r => r.status === 'PENDING')
+      .sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? '')),
+    [rows],
+  );
+  /** Đơn nào đang mở chi tiết — mặc định thu gọn hết (xem ExtensionRequestRow). */
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const closedList = useMemo(() => rows.filter(r => r.status !== 'PENDING'), [rows]);
 
   const approve = async (r: AdminExtensionRequest) => {
     setBusyId(r.id);
     try {
       await extensionRequestService.approve(r.id);
+      refreshAdminBadges();
       toast.success(`Đã gia hạn hợp đồng thêm ${r.months} tháng.`);
       await load();
     } catch (e: unknown) {
@@ -114,15 +124,22 @@ export const ExtensionRequests = () => {
             </p>
           </div>
         ) : (
-          <div className="mt-6 space-y-4">
+          <div className="mt-6 space-y-3">
             {openList.map(r => (
-              <RequestCard
+              <ExtensionRequestRow
                 key={r.id}
                 r={r}
-                busy={busyId === r.id}
-                onApprove={() => approve(r)}
-                onReject={() => setRejecting(r)}
-              />
+                expanded={expanded.has(r.id)}
+                onToggle={() => setExpanded(prev => toggleInSet(prev, r.id))}
+              >
+                <RequestCard
+                  r={r}
+                  bare
+                  busy={busyId === r.id}
+                  onApprove={() => approve(r)}
+                  onReject={() => setRejecting(r)}
+                />
+              </ExtensionRequestRow>
             ))}
           </div>
         )
@@ -152,7 +169,7 @@ export const ExtensionRequests = () => {
         <RejectDialog
           row={rejecting}
           onClose={() => setRejecting(null)}
-          onDone={() => { setRejecting(null); void load(); }}
+          onDone={() => { setRejecting(null); void load(); refreshAdminBadges(); }}
         />
       )}
     </SectionShell>
@@ -160,16 +177,24 @@ export const ExtensionRequests = () => {
 };
 
 /** Thẻ một đơn — dùng cho cả tab chờ duyệt lẫn phần mở rộng của lịch sử. */
-const RequestCard = ({ r, busy, readOnly, onApprove, onReject }: {
+const RequestCard = ({ r, busy, readOnly, bare = false, onApprove, onReject }: {
   r: AdminExtensionRequest;
   busy?: boolean;
   readOnly?: boolean;
+  /** Bỏ viền + đầu thẻ — dùng trong `ExtensionRequestRow`, nơi dòng thu gọn đã là đầu thẻ. */
+  bare?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
 }) => {
   const meta = EXTENSION_STATUS_META[r.status];
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className={bare ? 'bg-slate-50/40' : 'rounded-2xl border border-slate-200 bg-white shadow-sm'}>
+      {bare && !!r.tenantPhone && (
+        <p className="px-6 pt-4 text-xs text-slate-500">
+          SĐT khách: <b className="text-slate-700">{r.tenantPhone}</b>
+        </p>
+      )}
+      {!bare && (
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -195,6 +220,7 @@ const RequestCard = ({ r, busy, readOnly, onApprove, onReject }: {
           )}
         </div>
       </div>
+      )}
 
       <div className="grid gap-4 px-6 py-4 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200 p-4">

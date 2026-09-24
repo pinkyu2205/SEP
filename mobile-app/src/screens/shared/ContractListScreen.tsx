@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, FlatList,
   TextInput, Dimensions, ActivityIndicator, RefreshControl,
 } from 'react-native';
+import { MaskedValue } from '@/components/common/MaskedValue';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
@@ -359,7 +360,7 @@ const ContractDetailView: React.FC<{
       {/* Top bar */}
       <View style={detailStyles.topBar}>
         <TouchableOpacity style={detailStyles.backBtn} onPress={onBack}>
-          <Text style={detailStyles.backBtnText}>← Quay lại</Text>
+          <Text style={[detailStyles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
         </TouchableOpacity>
         <Text style={detailStyles.topBarTitle} numberOfLines={1}>{contract.code}</Text>
         <View style={{ width: 80 }} />
@@ -418,8 +419,15 @@ const ContractDetailView: React.FC<{
           <View style={detailStyles.section}>
             <SectionHeader title="Thông tin bên thuê (Bên B)" />
             <InfoRow label="Họ tên" value={contract.lesseeName} />
-            <InfoRow label="CCCD/CMND" value={contract.lesseeCccd} />
-            <InfoRow label="Số điện thoại" value={contract.lesseePhone} />
+            {/* SĐT/CCCD khách: hiện dạng che, bấm vào mới xem đủ (24/09/2026). */}
+            <View style={detailStyles.infoRow}>
+              <Text style={detailStyles.infoLabel}>CCCD/CMND</Text>
+              <MaskedValue kind="cccd" value={contract.lesseeCccd} style={detailStyles.infoValue} />
+            </View>
+            <View style={detailStyles.infoRow}>
+              <Text style={detailStyles.infoLabel}>Số điện thoại</Text>
+              <MaskedValue kind="phone" value={contract.lesseePhone} style={detailStyles.infoValue} />
+            </View>
           </View>
 
           {/* Property info */}
@@ -708,7 +716,7 @@ export const ContractListScreen: React.FC<Props> = () => {
       case 'activate':
         showAlert(
           'Kích hoạt hợp đồng',
-          `Kích hoạt hợp đồng ${contract.code}?\nOTP xác nhận sẽ được gửi đến ${contract.lesseePhone}.`,
+          `Kích hoạt hợp đồng ${contract.code}?\nOTP xác nhận sẽ được gửi đến số điện thoại của khách.`,
           [
             { text: 'Hủy', style: 'cancel' },
             {

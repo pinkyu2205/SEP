@@ -61,6 +61,10 @@ interface ManagerInvoiceDto {
    * Xem `ManagerBillingServiceImpl`: note bắt đầu `ONBOARD|` hoặc chứa `onboardPaid=true`.
    */
   onboardPaid?: boolean | null;
+  /** Có khi hoá đơn đã thu — lúc thu, hình thức, mã giao dịch (cùng field app manager đang đọc). */
+  paidAt?: string | null;
+  paymentMethod?: string | null;
+  transactionId?: string | null;
 }
 
 /** Hoá đơn thu gộp lúc nhận phòng — nơi tiền THẬT SỰ chuyển. */
@@ -111,6 +115,9 @@ export interface AdminInvoiceRow {
   collectedAtOnboard: boolean;
   /** Mã hoá đơn gộp đã thu khoản này (chỉ có khi `collectedAtOnboard`). */
   collectedInInvoiceCode?: string;
+  paidAt?: string;
+  paymentMethod?: string;
+  transactionId?: string;
 }
 
 export interface AdminInvoiceQuery {
@@ -161,6 +168,9 @@ const invoiceToRow = (d: ManagerInvoiceDto): AdminInvoiceRow => {
     status: INVOICE_STATUSES.includes(status) ? status : 'PENDING',
     dueDate: d.dueDate ?? undefined,
     createdAt: d.createdAt ?? undefined,
+    paidAt: d.paidAt ?? undefined,
+    paymentMethod: d.paymentMethod ?? undefined,
+    transactionId: d.transactionId ?? undefined,
   };
 };
 
@@ -356,6 +366,26 @@ export const adminService = {
       { params, skipErrorToast: true } as object,
     );
     return Array.isArray(res) ? res.map(invoiceToRow) : [];
+  },
+
+  /**
+   * Hoá đơn của một KỲ THU (tháng tiền về), 24/09/2026.
+   *
+   * Điện/nước TRẢ SAU: hoá đơn điện tiêu thụ tháng 9 phát hành và thu trong tháng 10, nhưng BE
+   * ghi kỳ (month/year) là tháng 9. Lọc thẳng `period=2026-10` thì màn Hoá đơn tháng 10 chỉ
+   * còn tiền nhà + phí sửa chữa, điện nước biến mất (admin tưởng không có). Nên kỳ thu tháng M
+   * = mọi khoản kỳ M, TRỪ điện/nước lấy của kỳ M-1. Bỏ trống `period` = mọi kỳ như cũ.
+   */
+  listInvoicesForCollection: async (period?: string): Promise<AdminInvoiceRow[]> => {
+    if (!period) return adminService.listInvoices({});
+    const [y, m] = period.split('-').map(Number);
+    const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    const isUtility = (t: AdminInvoiceType) => t === 'ELECTRICITY' || t === 'WATER';
+    const [cur, before] = await Promise.all([
+      adminService.listInvoices({ period }),
+      adminService.listInvoices({ period: prev }),
+    ]);
+    return [...cur.filter(r => !isUtility(r.type)), ...before.filter(r => isUtility(r.type))];
   },
 
   /**
