@@ -1231,7 +1231,10 @@ export const TicketDetailScreen: React.FC = () => {
                 placeholderTextColor={Colors.textMuted}
                 multiline
               />
-              <Text style={s.pickHint}>Công ty sẽ trả hộ chi phí này — không lập hoá đơn thu khách.</Text>
+              <Text style={s.pickHint}>
+                Công ty sẽ trả hộ chi phí này — không lập hoá đơn thu khách. 🚩 Khách sẽ bị GẮN CỜ ĐỎ: admin xem xét
+                (chấm dứt hợp đồng / trừ cọc lúc trả phòng) ở trang "Khách từ chối trả" trên web.
+              </Text>
             </>
           )}
         </>

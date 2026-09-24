@@ -164,6 +164,17 @@ export const tenantService = {
     return api.patch(`/api/v1/tenant-contracts/${id}/assign-manager`, data);
   },
 
+  /**
+   * POST /tenant-contracts/{id}/terminate — thanh lý HĐ đang hiệu lực (ADMIN/MANAGER).
+   * type: EARLY_MOVE_OUT | VIOLATION | MUTUAL_AGREEMENT | OTHER; reason bắt buộc.
+   */
+  terminate: (
+    id: number,
+    body: { type: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'OTHER'; reason: string; note?: string },
+  ): Promise<TenantContractResponse> => {
+    return api.post(`/api/v1/tenant-contracts/${id}/terminate`, body);
+  },
+
   /** POST /tenant-contracts/{id}/cancel — hủy hợp đồng nháp. */
   cancel: (id: number): Promise<void> => {
     return api.post(`/api/v1/tenant-contracts/${id}/cancel`);
