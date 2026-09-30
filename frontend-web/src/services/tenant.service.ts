@@ -76,19 +76,32 @@ export const tenantService = {
   },
 
   /**
-   * GET /tenant-contracts?status=RECEPTION — DS hồ sơ ĐANG TRONG PIPELINE ĐÓN KHÁCH (admin).
+   * DS hồ sơ ĐANG TRONG PIPELINE ĐÓN KHÁCH (admin).
    *
    * BE 24/09/2026 tách `PENDING` thành 4 bước: DRAFT → AWAITING_ONBOARD → AWAITING_PAYMENT →
    * AWAITING_CONFIRM (trước ACTIVE). `status=RECEPTION` (alias ONBOARD/PIPELINE) trả đủ 4 bước —
    * hỏi riêng `DRAFT` thì hồ sơ biến mất ngay khi cron 00:10 chuyển sang AWAITING_ONBOARD.
+   *
+   * Hỏi THÊM `DRAFT` + `PENDING` (30/09/2026): BE đang deploy chưa có pipeline mới — hợp đồng
+   * admin tạo tay nằm ở PENDING và `status=RECEPTION` trả rỗng, khiến màn "Hồ sơ đón khách" báo
+   * 0 hồ sơ và ô "Chọn phòng" vẫn cho chọn phòng đã có người chờ đón. Gộp + khử trùng theo id,
+   * trạng thái nào BE không nhận thì bỏ qua. Khi BE mới lên hết thì bỏ 2 lượt hỏi phụ đi được.
+   *
    * Giữ tên `listDrafts` vì nhiều màn đang gọi (kiểm trùng phòng/khách, sức chứa nhà...) và tất cả
    * đều cần đúng tập "hồ sơ đang giữ chỗ" này. Phân biệt bước bằng `status` / `statusLabel`.
    */
-  listDrafts: (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
-    return api.get('/api/v1/tenant-contracts', {
-      params: { status: 'RECEPTION', ...(params ?? {}) },
-      skipErrorToast: true,
-    } as never);
+  listDrafts: async (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
+    const fetchStatus = (status: 'RECEPTION' | 'DRAFT' | 'PENDING') =>
+      (api.get('/api/v1/tenant-contracts', {
+        params: { status, ...(params ?? {}) },
+        skipErrorToast: true,
+      } as never) as Promise<TenantContractResponse[]>)
+        .then((r) => (Array.isArray(r) ? r : []))
+        .catch(() => [] as TenantContractResponse[]);
+    const lists = await Promise.all([fetchStatus('RECEPTION'), fetchStatus('DRAFT'), fetchStatus('PENDING')]);
+    const byId = new Map<number, TenantContractResponse>();
+    lists.flat().forEach((c) => byId.set(c.id, c));
+    return [...byId.values()];
   },
 
   /** GET /tenant-contracts[?status=] — DS TOÀN BỘ hợp đồng (mọi trạng thái nếu

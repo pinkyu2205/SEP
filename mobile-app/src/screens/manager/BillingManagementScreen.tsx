@@ -220,15 +220,16 @@ export const BillingManagementScreen: React.FC = () => {
     return { paid, pending, overdue, total, rate: total > 0 ? Math.round((paid / total) * 100) : 0 };
   }, [shownInvoices]);
 
-  const pendingVerifications = useMemo(
-    () => payments.filter(p => p.status === 'PENDING_VERIFY' && matchPayment(p)),
-    [payments, matchPayment],
-  );
-
   const rentInvoiceCodes = useMemo(
     () => new Set(invoices.map(i => i.code).filter(Boolean)),
     [invoices],
   );
+
+  /*
+    Không còn khối "Chờ bạn xác nhận" (bỏ 30/09/2026): khách trả PayOS thì webhook tự
+    ghi nhận, manager không duyệt tay khoản nào. Bấm duyệt claim của hoá đơn đã trả
+    còn bị BE báo lỗi "đã thanh toán qua kênh khác".
+  */
   const verifiedTx = useMemo(
     () => payments
       .filter(p => p.status === 'VERIFIED' && rentInvoiceCodes.has(p.invoiceCode) && matchPayment(p))
@@ -280,28 +281,6 @@ export const BillingManagementScreen: React.FC = () => {
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-
-  const handleVerify = (p: ManagerPayment, approved: boolean) => {
-    const doIt = async () => {
-      try {
-        if (approved) await realManagerInvoiceService.verifyPayment(p.id);
-        else await realManagerInvoiceService.rejectPayment(p.id);
-        load();
-      } catch (e: any) {
-        showAlert('Lỗi', e?.response?.data?.message || e?.message || 'Không xử lý được giao dịch.');
-      }
-    };
-    showAlert(
-      approved ? 'Xác nhận thanh toán?' : 'Từ chối thanh toán?',
-      approved
-        ? `Xác nhận đã nhận đủ tiền hoá đơn ${p.invoiceCode} từ ${p.tenantName}?`
-        : 'Từ chối giao dịch này?',
-      [
-        { text: 'Hủy', style: 'cancel' },
-        { text: approved ? 'Xác nhận' : 'Từ chối', style: approved ? 'default' : 'destructive', onPress: doIt },
-      ],
-    );
-  };
 
   /**
    * Chấm dứt hợp đồng vì không đóng tiền phòng.
@@ -483,34 +462,6 @@ export const BillingManagementScreen: React.FC = () => {
                 active={statusFilter === 'PAID'} onPress={() => setStatusFilter(statusFilter === 'PAID' ? 'all' : 'PAID')} />
             </View>
             <Text style={s.hiddenNote}>{RENT_AMOUNT_HIDDEN_NOTE}</Text>
-          </View>
-        )}
-
-        {/* ── Cần xử lý: giao dịch chờ xác nhận (thao tác tay) ── */}
-        {pendingVerifications.length > 0 && (
-          <View style={[s.card, s.cardWarn]}>
-            <Text style={s.sectionTitle}>⚡ Chờ bạn xác nhận ({pendingVerifications.length})</Text>
-            {pendingVerifications.slice(0, 5).map(p => {
-              const m = methodOf(p.method);
-              return (
-                <View key={p.id} style={s.verifyRow}>
-                  <View style={s.flex1}>
-                    <Text style={s.verifyName} numberOfLines={1}>
-                      {p.tenantName}{p.roomNumber ? ` · ${p.roomNumber}` : ''}
-                    </Text>
-                    <Text style={s.verifySub} numberOfLines={1}>
-                      {m.icon} {m.label} · {fmtWhen(p.createdAt)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity style={s.btnReject} onPress={() => handleVerify(p, false)}>
-                    <Text style={s.btnRejectText}>Từ chối</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.btnOk} onPress={() => handleVerify(p, true)}>
-                    <Text style={s.btnOkText}>Xác nhận</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
           </View>
         )}
 

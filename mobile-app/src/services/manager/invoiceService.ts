@@ -279,15 +279,8 @@ export const realManagerInvoiceService = {
     return unwrap(data);
   },
 
-  // POST /api/v1/manager/payments/{id}/verify  — xác nhận đã nhận tiền
-  verifyPayment: async (id: number | string): Promise<void> => {
-    await realApiClient.post(`/api/v1/manager/payments/${id}/verify`);
-  },
-
-  // POST /api/v1/manager/payments/{id}/reject  — từ chối giao dịch
-  rejectPayment: async (id: number | string, reason?: string): Promise<void> => {
-    await realApiClient.post(`/api/v1/manager/payments/${id}/reject`, { reason });
-  },
+  // verifyPayment / rejectPayment đã XOÁ 30/09/2026: manager không duyệt tay thanh toán
+  // nữa — khách trả PayOS thì webhook tự ghi nhận hoá đơn PAID.
 
   /**
    * POST /api/v1/manager/invoices/{id}/payment-qr — xin mã QR để NỘP THAY khách.

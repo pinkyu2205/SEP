@@ -219,7 +219,6 @@ export const ManagerHomeScreen: React.FC = () => {
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
   // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
   const rentTerminable = actionableInvoices.filter(i => canTerminateForUnpaidInvoice(i)).length;
-  const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   /**
    * Lịch đón khách — hợp đồng nháp đã gán cho manager này, đến hạn đón hôm nay
@@ -276,7 +275,6 @@ export const ManagerHomeScreen: React.FC = () => {
     // Vào màn Hoá đơn tiền nhà, KHÔNG phải màn Tiền phòng tự động: màn kia chỉ để cấu
     // hình lịch phát hành, còn thao tác chấm dứt HĐ nằm ở mục "Cần xử lý" của màn này.
     { id: 'p5', icon: '⛔', label: 'Nợ quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
-    { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
     // Không chụp được ảnh công tơ thì không phát hành được hoá đơn điện/nước — việc này
     // chặn cả kỳ thu tiền, nên xếp cùng nhóm gấp với tiền quá hạn.
     { id: 'p6', icon: '⚡', label: elecDueToday ? 'Chốt chỉ số điện — hạn hôm nay' : 'Chỉ số điện quá hạn chưa chốt',

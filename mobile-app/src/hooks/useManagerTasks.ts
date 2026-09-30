@@ -81,7 +81,6 @@ export const buildManagerTasks = (d: ManagerTaskInputs): ManagerTaskItem[] => {
   const overdueUtility = inv.filter(i => i.status === 'OVERDUE' && isUtility(i)).length;
   // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
   const terminable = inv.filter(i => canTerminateForUnpaidInvoice(i)).length;
-  const pendingVerify = d.payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   const receptionDue = d.draftContracts.filter(c => { const r = receptionDateOf(c); return !!r && r <= today; }).length;
   const receptionSoon = d.draftContracts.filter(c => {
@@ -125,8 +124,6 @@ export const buildManagerTasks = (d: ManagerTaskInputs): ManagerTaskItem[] => {
       count: pendingWater, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
 
     // ── Cần làm ──
-    { id: 'verify', icon: '💳', label: 'Chờ xác nhận thanh toán', hint: 'Khách báo đã chuyển khoản — kiểm tra rồi xác nhận',
-      count: pendingVerify, urgency: 'warning', color: Colors.warning, route: 'ManagerBilling' },
     { id: 'checkoutProgress', icon: '📋', label: 'Hồ sơ trả phòng đang xử lý', hint: 'Kiểm tra phòng, lập biên bản, quyết toán cọc',
       count: checkoutInProgress, urgency: 'warning', color: '#DC2626', route: 'CheckoutRequests' },
 
