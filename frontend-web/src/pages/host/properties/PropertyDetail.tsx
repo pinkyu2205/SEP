@@ -29,6 +29,7 @@ import { currentMonth, monthLabel } from '@/utils/period';
 import { normalizeRoomNumber } from '@/services/propertyOccupancy.service';
 import { adminService, type AdminInvoiceRow } from '@/services/admin.service';
 import { canUseFullInvoices } from '@/services/invoiceAccess';
+import { isNotYetActive } from '@/components/contract/contractLabels';
 import {
   INVOICE_TYPE_META, groupOnboardPayments, loadPropertyBills, type PropertyBillBreakdown,
 } from './propertyOperationStatus';
@@ -113,8 +114,14 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
   INCOMING:    { label: 'Chờ đón khách', cls: 'bg-violet-100 text-violet-700',  dot: 'bg-violet-500',  border: 'border-violet-200 hover:border-violet-400' },
 };
 
-/** Hồ sơ đón khách của phòng: HĐ chờ đón (DRAFT) hoặc đã chốt chưa dọn vào (PENDING). */
-const isIncomingContract = (c: TenantContractResponse) => c.status === 'DRAFT' || c.status === 'PENDING';
+/**
+ * Hồ sơ đón khách của phòng: HĐ chờ đón (DRAFT / AWAITING_ONBOARD) hoặc đã chốt chưa dọn vào
+ * (AWAITING_PAYMENT / AWAITING_CONFIRM / PENDING cũ). BE 24/09/2026 tách PENDING thành pipeline.
+ */
+const isIncomingContract = (c: TenantContractResponse) => isNotYetActive(c.status);
+
+/** Chưa chụp/chưa thu tiền = "khách chờ đón"; đã sang bước thu tiền trở đi = "đã chốt, chưa dọn vào". */
+const isAwaitingPickup = (c: TenantContractResponse) => c.status === 'DRAFT' || c.status === 'AWAITING_ONBOARD';
 
 /**
  * Hợp đồng có khách ở trong tháng `ym` ("YYYY-MM") không: đã vào ở trước hoặc trong tháng đó, và
@@ -123,7 +130,7 @@ const isIncomingContract = (c: TenantContractResponse) => c.status === 'DRAFT' |
  * Giới hạn: HĐ chấm dứt sớm vẫn tính tới `endDate` gốc — `/host/contracts` không trả ngày chấm dứt.
  */
 const contractCoversMonth = (c: TenantContractResponse, ym: string): boolean => {
-  if (c.status === 'DRAFT' || c.status === 'PENDING') return false;
+  if (isNotYetActive(c.status)) return false;
   const start = (c.moveInDate || c.startDate || '').slice(0, 7);
   if (!start || start > ym) return false;
   const end = (c.endDate || '').slice(0, 7);
@@ -577,7 +584,7 @@ function RoomDetailModal({
             <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
               <p className="mb-2.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-violet-700">
                 <CalendarClock className="h-3.5 w-3.5" />
-                {incoming.status === 'DRAFT' ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
+                {isAwaitingPickup(incoming) ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
               </p>
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100 font-bold text-violet-700">
@@ -1290,7 +1297,7 @@ export const PropertyDetail = () => {
               <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4">
                 <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-violet-700">
                   <CalendarClock className="h-3.5 w-3.5" />
-                  {houseIncoming.status === 'DRAFT' ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
+                  {isAwaitingPickup(houseIncoming) ? 'Khách chờ đón vào ở' : 'Khách đã chốt, chưa dọn vào'}
                 </p>
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-violet-100 font-bold text-violet-700">
@@ -1535,7 +1542,7 @@ export const PropertyDetail = () => {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-bold leading-tight text-slate-800">{coming.tenantFullName || '(chưa có tên)'}</p>
                         <p className="text-[11px] font-semibold text-violet-700">
-                          {coming.status === 'DRAFT' ? 'Chờ đón' : 'Đã chốt'} · vào ở {fmtDate(coming.moveInDate || coming.startDate)}
+                          {isAwaitingPickup(coming) ? 'Chờ đón' : 'Đã chốt'} · vào ở {fmtDate(coming.moveInDate || coming.startDate)}
                         </p>
                       </div>
                     </div>
@@ -1659,7 +1666,7 @@ export const PropertyDetail = () => {
           incoming={incomingFor(selectedRoom.id)}
           pastTenants={contracts
             .filter(c => c.roomId === selectedRoom.id && c.status !== 'ACTIVE'
-              && c.status !== 'DRAFT' && c.status !== 'PENDING')
+              && !isNotYetActive(c.status))
             .sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''))}
           propertyId={property.id}
           /*

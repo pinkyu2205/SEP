@@ -81,7 +81,8 @@ export interface TenantAccess {
  * `PENDING && PAID`, không xét mốc OTP của khách.
  */
 const isAwaitingTenantConfirm = (c: MyContractListItem): boolean => {
-  if (c.status !== 'PENDING') return false;
+  // BE 24/09/2026: "đã trả tiền, chờ dual OTP" là AWAITING_CONFIRM (trước là PENDING + PAID).
+  if (c.status !== 'AWAITING_CONFIRM' && c.status !== 'PENDING') return false;
   if (c.paymentStatus && c.paymentStatus !== 'PAID') return false;
   return true;
 };

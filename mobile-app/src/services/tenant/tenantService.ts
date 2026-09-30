@@ -473,7 +473,8 @@ export const realTenantService = {
   // nước ban đầu, ghi chú... (xem tài liệu đón khách §2c/2d).
   updateDraftContract: async (
     contractId: number,
-    body: Partial<OnboardTenantRequest>,
+    // `completeCapture: true` (BE 24/09/2026) = chụp xong → AWAITING_ONBOARD → AWAITING_PAYMENT.
+    body: Partial<OnboardTenantRequest> & { completeCapture?: boolean },
   ): Promise<TenantContractResponse> => {
     const { data } = await realApiClient.put<TenantContractResponse>(
       `/api/v1/tenant-contracts/${contractId}`,
@@ -489,7 +490,8 @@ export const realTenantService = {
   listManagedContracts: async (
     // 'ACTIVE' thêm 13/08/2026: các màn việc-cần-làm của manager cần biết phòng nào
     // CÒN khách để loại hoá đơn của khách đã chấm dứt HĐ (xem belongsToActiveTenant).
-    status?: ContractPriceApprovalStatus | 'DRAFT' | 'PENDING' | 'ACTIVE',
+    status?: ContractPriceApprovalStatus | 'DRAFT' | 'AWAITING_ONBOARD' | 'AWAITING_PAYMENT' | 'AWAITING_CONFIRM'
+      | 'RECEPTION' | 'PENDING' | 'ACTIVE',
   ): Promise<TenantContractResponse[]> => {
     const { data } = await realApiClient.get<
       TenantContractResponse[] | { content?: TenantContractResponse[] }

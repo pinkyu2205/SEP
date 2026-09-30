@@ -15,7 +15,7 @@ import { EmptyState, Pagination, StatCard } from '@/pages/admin/shared';
 import { ContractDetailDrawer, type ContractDetailSeed } from '@/components/contract/ContractDetailDrawer';
 import {
   CONTRACT_STATUS, EXPIRING_WINDOW_DAYS, SCOPE_OPTIONS, SORT_OPTIONS, daysLeft, fmtDate,
-  inScope, isEndedContract, isExpiringSoon, sortContracts, statusMeta, statusesInScope,
+  inScope, isEndedContract, isExpiringSoon, matchesStatusFilter, sortContracts, statusMeta, statusesInScope,
   type ContractScope, type SortKey, type StatusFilter,
 } from '@/components/contract/contractLabels';
 import { MASTER_LEASE_STATUS, MasterLeaseDetailDrawer, leaseStatusMeta } from './MasterLeaseDetailDrawer';
@@ -210,8 +210,9 @@ export const ContractList = () => {
     return {
       total: contracts.length,
       active: active.length,
-      draft: by('DRAFT'),
-      pending: by('PENDING'),
+      // BE 24/09/2026: PENDING tách thành pipeline — thẻ đếm THEO NHÓM (xem STATUS_GROUPS).
+      draft: by('DRAFT') + by('AWAITING_ONBOARD'),
+      pending: by('AWAITING_PAYMENT') + by('AWAITING_CONFIRM') + by('PENDING'),
       expiring: contracts.filter(isExpiringSoon).length,
       ended: by('TERMINATED') + by('EXPIRED'),
       activeRent: active.reduce((sum, c) => sum + (c.rentAmount ?? 0), 0),
@@ -221,7 +222,7 @@ export const ContractList = () => {
   /** Điều kiện lọc KHÔNG tính nhóm — dùng lại để đếm kết quả nằm ở nhóm khác. */
   const matchesContract = (c: HostContractDto) => {
     const q = search.trim().toLowerCase();
-    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+    if (!matchesStatusFilter(c.status, statusFilter)) return false;
     if (expiringOnly && !isExpiringSoon(c)) return false;
     if (propertyFilter !== 'all' && String(c.propertyId) !== propertyFilter) return false;
     if (!q) return true;
@@ -232,7 +233,7 @@ export const ContractList = () => {
 
   const matchesLease = (l: MasterLease) => {
     const q = search.trim().toLowerCase();
-    if (statusFilter !== 'all' && l.status !== statusFilter) return false;
+    if (!matchesStatusFilter(l.status, statusFilter)) return false;
     if (propertyFilter !== 'all' && String(l.propertyId) !== propertyFilter) return false;
     if (!q) return true;
     return [l.ownerName, l.contractCode, propertyOf(l.propertyId)?.propertyName]
@@ -376,13 +377,13 @@ export const ContractList = () => {
             progress={stats.total ? stats.active / stats.total : 0}
             active={statusFilter === 'ACTIVE' && !expiringOnly} onClick={() => toggleStatus('ACTIVE')} />
           <StatCard title="Chờ đón khách" value={stats.draft} icon={FileText} tone="indigo"
-            helper="Đã lập hồ sơ, chưa giao phòng"
+            helper="Chờ đến ngày đón · chờ onboard"
             progress={stats.total ? stats.draft / stats.total : 0}
-            active={statusFilter === 'DRAFT' && !expiringOnly} onClick={() => toggleStatus('DRAFT')} />
+            active={statusFilter === 'PRE_ONBOARD' && !expiringOnly} onClick={() => toggleStatus('PRE_ONBOARD' as StatusFilter)} />
           <StatCard title="Chờ kích hoạt" value={stats.pending} icon={Wallet} tone="amber"
-            helper="Đã giao phòng, chờ thu tiền"
+            helper="Chờ thanh toán · chờ xác nhận hợp đồng"
             progress={stats.total ? stats.pending / stats.total : 0}
-            active={statusFilter === 'PENDING' && !expiringOnly} onClick={() => toggleStatus('PENDING')} />
+            active={statusFilter === 'PRE_ACTIVE' && !expiringOnly} onClick={() => toggleStatus('PRE_ACTIVE' as StatusFilter)} />
           <StatCard title={`Sắp hết hạn ≤${EXPIRING_WINDOW_DAYS}n`} value={stats.expiring} icon={CalendarClock} tone="rose"
             helper="Cần chốt gia hạn sớm"
             progress={stats.active ? stats.expiring / stats.active : 0}
@@ -466,7 +467,11 @@ export const ContractList = () => {
                 <option key={s} value={s}>{CONTRACT_STATUS[s].label}</option>
               ))}
               {scope !== 'ended' && (
-                <option value="expiring">Sắp hết hạn (≤{EXPIRING_WINDOW_DAYS} ngày)</option>
+                <>
+                  <option value="PRE_ONBOARD">Nhóm: chưa đón khách (chờ tới ngày + chờ onboard)</option>
+                  <option value="PRE_ACTIVE">Nhóm: chờ kích hoạt (chờ thanh toán + chờ xác nhận)</option>
+                  <option value="expiring">Sắp hết hạn (≤{EXPIRING_WINDOW_DAYS} ngày)</option>
+                </>
               )}
             </>
           ) : (

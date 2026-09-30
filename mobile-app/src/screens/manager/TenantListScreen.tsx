@@ -432,17 +432,19 @@ export const TenantListScreen: React.FC = () => {
           //    và làm ô "Đang ở" trên đầu màn sai số.
           return contracts
             .filter(c => !isClosedContract(c.status))
-            .filter(c => (c.status || '').toUpperCase() !== 'DRAFT')
+            // BE 24/09/2026: DRAFT + AWAITING_ONBOARD đều là khách CHƯA ĐƯỢC ĐÓN (chưa chụp hiện trạng,
+            // chưa thu tiền) — không tính vào "khách đang ở".
+            .filter(c => !['DRAFT', 'AWAITING_ONBOARD'].includes((c.status || '').toUpperCase()))
             .map(c => mapContractToTenant(c, p.propertyName, isWhole));
         }),
       );
       setTenants(lists.flat());
       Promise.all([
         realTenantService.listManagedContracts(),
-        realTenantService.listManagedContracts('DRAFT'),
-        realTenantService.listManagedContracts('PENDING'),
+        // `RECEPTION` = DRAFT + AWAITING_ONBOARD + AWAITING_PAYMENT + AWAITING_CONFIRM (BE 24/09/2026)
+        realTenantService.listManagedContracts('RECEPTION'),
       ])
-        .then(([a, d, p]) => setWaitingCount(new Set([...a, ...d, ...p].map(c => c.id)).size))
+        .then(([a, r]) => setWaitingCount(new Set([...a, ...r].map(c => c.id)).size))
         .catch(() => { /* lỗi thì không gắn số, nút vẫn bấm được */ });
     } catch {
       setTenants([]);

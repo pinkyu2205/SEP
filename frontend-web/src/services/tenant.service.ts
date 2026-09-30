@@ -76,23 +76,31 @@ export const tenantService = {
   },
 
   /**
-   * DS hồ sơ CHỜ ĐÓN KHÁCH (admin) = hợp đồng DRAFT + PENDING.
+   * DS hồ sơ ĐANG TRONG PIPELINE ĐÓN KHÁCH (admin).
    *
-   * Chỉ lấy DRAFT là thiếu (30/09/2026): admin tạo tay xong, BE trả hợp đồng ở PENDING
-   * (chưa hiệu lực, chờ quản lý đón khách / thu tiền) → màn "Hồ sơ đón khách" báo 0 hồ
-   * sơ, và phòng đó vẫn hiện trong ô "Chọn phòng" dù nhà đã báo còn 2/3 phòng. App
-   * manager (ResumeContract) cũng gộp đúng hai trạng thái này.
+   * BE 24/09/2026 tách `PENDING` thành 4 bước: DRAFT → AWAITING_ONBOARD → AWAITING_PAYMENT →
+   * AWAITING_CONFIRM (trước ACTIVE). `status=RECEPTION` (alias ONBOARD/PIPELINE) trả đủ 4 bước —
+   * hỏi riêng `DRAFT` thì hồ sơ biến mất ngay khi cron 00:10 chuyển sang AWAITING_ONBOARD.
+   *
+   * Hỏi THÊM `DRAFT` + `PENDING` (30/09/2026): BE đang deploy chưa có pipeline mới — hợp đồng
+   * admin tạo tay nằm ở PENDING và `status=RECEPTION` trả rỗng, khiến màn "Hồ sơ đón khách" báo
+   * 0 hồ sơ và ô "Chọn phòng" vẫn cho chọn phòng đã có người chờ đón. Gộp + khử trùng theo id,
+   * trạng thái nào BE không nhận thì bỏ qua. Khi BE mới lên hết thì bỏ 2 lượt hỏi phụ đi được.
+   *
+   * Giữ tên `listDrafts` vì nhiều màn đang gọi (kiểm trùng phòng/khách, sức chứa nhà...) và tất cả
+   * đều cần đúng tập "hồ sơ đang giữ chỗ" này. Phân biệt bước bằng `status` / `statusLabel`.
    */
   listDrafts: async (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
-    const fetchStatus = (status: 'DRAFT' | 'PENDING') =>
+    const fetchStatus = (status: 'RECEPTION' | 'DRAFT' | 'PENDING') =>
       (api.get('/api/v1/tenant-contracts', {
         params: { status, ...(params ?? {}) },
         skipErrorToast: true,
       } as never) as Promise<TenantContractResponse[]>)
-        .then((r) => (Array.isArray(r) ? r : []));
-    const [drafts, pending] = await Promise.all([fetchStatus('DRAFT'), fetchStatus('PENDING')]);
+        .then((r) => (Array.isArray(r) ? r : []))
+        .catch(() => [] as TenantContractResponse[]);
+    const lists = await Promise.all([fetchStatus('RECEPTION'), fetchStatus('DRAFT'), fetchStatus('PENDING')]);
     const byId = new Map<number, TenantContractResponse>();
-    [...drafts, ...pending].forEach((c) => byId.set(c.id, c));
+    lists.flat().forEach((c) => byId.set(c.id, c));
     return [...byId.values()];
   },
 
@@ -167,6 +175,17 @@ export const tenantService = {
     data: { assignedManagerId: string; expectedReceptionDate?: string },
   ): Promise<TenantContractResponse> => {
     return api.patch(`/api/v1/tenant-contracts/${id}/assign-manager`, data);
+  },
+
+  /**
+   * POST /tenant-contracts/{id}/terminate — thanh lý HĐ đang hiệu lực (ADMIN/MANAGER).
+   * type: EARLY_MOVE_OUT | VIOLATION | MUTUAL_AGREEMENT | OTHER; reason bắt buộc.
+   */
+  terminate: (
+    id: number,
+    body: { type: 'EARLY_MOVE_OUT' | 'VIOLATION' | 'MUTUAL_AGREEMENT' | 'OTHER'; reason: string; note?: string },
+  ): Promise<TenantContractResponse> => {
+    return api.post(`/api/v1/tenant-contracts/${id}/terminate`, body);
   },
 
   /** POST /tenant-contracts/{id}/cancel — hủy hợp đồng nháp. */

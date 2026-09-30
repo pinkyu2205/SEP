@@ -263,11 +263,12 @@ export const realMaintenanceService = {
   },
 
   /**
-   * PUT /{id}/handover — manager bàn giao thiết bị đã sửa/kiểm tra OFF-SITE (nhánh
-   * needsOffSiteInspection của reject-fault, 15/09/2026). Chỉ gọi được khi
-   * REPAIR_SCHEDULED; nếu phiếu có chargeInvoiceId thì hoá đơn đó phải đã PAID (BE tự
-   * chặn 409, FE nên ẩn nút trước khi vậy — xem TicketDetailScreen). Bắt buộc
-   * handoverImages (AFTER) — BE set CLOSED thẳng, không qua IN_REPAIR.
+   * PUT /{id}/handover — manager bàn giao thiết bị đã sửa/kiểm tra OFF-SITE. Chỉ gọi được
+   * khi REPAIR_SCHEDULED. Bắt buộc ảnh AFTER (đã lưu trên phiếu hoặc `handoverImages`).
+   * BE 24/09/2026: lỗi do khách + đồng ý trả + chưa có hoá đơn → BẮT BUỘC thêm ảnh hoá
+   * đơn (INVOICE) + invoiceVendor/invoiceDate/invoiceAmount/repairDescription; BE lập hoá
+   * đơn MAINTENANCE lúc này (hạn 5 ngày) và phiếu sang WAITING_PAYMENT (hoặc CLOSED nếu
+   * không thu / đã PAID). Không còn gate "phải có hoá đơn trước khi bàn giao".
    */
   handover: async (
     id: number, body: MaintenanceHandoverRequestDto,

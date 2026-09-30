@@ -29,6 +29,7 @@ import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
 import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
 import { WaterBillPublishing } from '@/pages/admin/WaterBillPublishing';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
+import { RefusedPayments } from '@/pages/admin/RefusedPayments';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
 import { UserRoleManagement } from '@/pages/admin/UserRoleManagement';
 import { PropertyOnboardingWizard } from '@/pages/admin/properties/wizard/PropertyOnboardingWizard';
@@ -131,6 +132,8 @@ function App() {
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/assignment" element={<AdminZoneOverview />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />
+            {/* Cờ đỏ khách từ chối trả chi phí bảo trì (25/09/2026). */}
+            <Route path="/admin/maintenance/refused" element={<RefusedPayments />} />
             {/* Gộp về trang Bảo trì (24/09/2026) — giữ đường cũ cho link/bookmark cũ. */}
             <Route path="/admin/maintenance/fault-review" element={<Navigate to="/admin/maintenance?bucket=tenant" replace />} />
             <Route path="/admin/equipments" element={<EquipmentCatalogPage />} />

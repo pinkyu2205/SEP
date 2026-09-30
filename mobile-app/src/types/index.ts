@@ -521,9 +521,8 @@ export interface MaintenanceSendForInspectionRequestDto {
  */
 export interface MaintenanceDiagnoseRequestDto {
   /**
-   * Khi equipmentNeedsReplacement=false/undefined: giá thợ báo — bắt buộc, >=0, BE lưu
-   * vào estimatedDamageAmount. Khi =true: chi phí phát sinh thêm — TUỲ CHỌN, BE lưu vào
-   * invoiceAmount (cộng thêm bên cạnh estimatedDamageAmount, không thay thế).
+   * @deprecated BE 24/09/2026 (0653314) BỎ QUA field này — chi phí thật chỉ nhập 1 lần lúc
+   * complete()/handover(). FE không còn gửi.
    */
   quotedRepairAmount?: number;
   /**
@@ -540,8 +539,9 @@ export interface MaintenanceDiagnoseRequestDto {
   /** WEAR = hao mòn tự nhiên (công ty trả). TENANT_MISUSE = lỗi do khách. */
   damageCause: 'WEAR' | 'TENANT_MISUSE';
   /**
-   * Bắt buộc khi damageCause=TENANT_MISUSE. true = khách đồng ý trả → lập hoá đơn +
-   * gate thanh toán. false = khách từ chối → companyAbsorbedFault, công ty trả hộ.
+   * Bắt buộc khi damageCause=TENANT_MISUSE. true = khách đồng ý trả → hoá đơn lập SAU khi
+   * sửa xong (complete()/handover(), hạn 5 ngày). false = khách từ chối → companyAbsorbedFault,
+   * công ty trả hộ.
    */
   tenantAgreesToPay?: boolean;
   /** Bắt buộc khi lỗi do khách. */
@@ -570,6 +570,17 @@ export interface MaintenanceDiagnoseRequestDto {
  */
 export interface MaintenanceHandoverRequestDto {
   handoverImages: string[];
+  /**
+   * BE 24/09/2026 (commit 0653314): lỗi do khách + đồng ý trả → hoá đơn lập LÚC bàn giao
+   * (1 lần chi phí, giống complete()). Ảnh hoá đơn đã upload sẵn lúc chụp nên thường để
+   * trống — BE đọc từ ảnh INVOICE đã lưu trên phiếu.
+   */
+  invoiceImages?: string[];
+  invoiceVendor?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  invoiceAmount?: number;
+  repairDescription?: string;
 }
 
 /** PUT /{id}/reschedule-visit — đổi lịch hẹn xem. Chỉ khi OPEN, chưa confirm-arrival, còn trước ngày hẹn. */

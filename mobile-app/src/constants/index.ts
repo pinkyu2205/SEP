@@ -6,3 +6,4 @@ export * from './rentCycle';
 export * from './managerVisibility';
 export * from './checkout';
 export * from './utilityCycle';
+export * from './tenantOnboard';

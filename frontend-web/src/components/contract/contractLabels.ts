@@ -15,10 +15,19 @@ export interface Badge {
   dot: string;
 }
 
-/** ContractStatus của BE: DRAFT | PENDING | ACTIVE | EXPIRED | TERMINATED. */
+/**
+ * ContractStatus của BE: DRAFT | AWAITING_ONBOARD | AWAITING_PAYMENT | AWAITING_CONFIRM |
+ * PENDING | ACTIVE | EXPIRED | TERMINATED.
+ *
+ * Pipeline đón khách (BE 24/09/2026) — nhãn khớp `ContractStatus.displayLabelVi()` của BE, màu
+ * theo gợi ý handoff: xám · xanh dương · cam · tím · xanh lá. `PENDING` chỉ còn cho HĐ inbound.
+ */
 export const CONTRACT_STATUS: Record<string, Badge> = {
-  DRAFT: { label: 'Chờ đón khách', color: 'bg-sky-100 text-sky-700', dot: 'bg-sky-500' },
-  PENDING: { label: 'Chờ kích hoạt', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  DRAFT: { label: 'Chờ đến ngày đón', color: 'bg-slate-100 text-slate-700', dot: 'bg-slate-400' },
+  AWAITING_ONBOARD: { label: 'Chờ onboard', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
+  AWAITING_PAYMENT: { label: 'Chờ thanh toán', color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  AWAITING_CONFIRM: { label: 'Chờ xác nhận hợp đồng', color: 'bg-violet-100 text-violet-700', dot: 'bg-violet-500' },
+  PENDING: { label: 'Chờ xử lý', color: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
   ACTIVE: { label: 'Đang hiệu lực', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   EXPIRED: { label: 'Hết hạn', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
   TERMINATED: { label: 'Đã chấm dứt', color: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
@@ -26,6 +35,38 @@ export const CONTRACT_STATUS: Record<string, Badge> = {
 
 export const statusMeta = (status?: string): Badge =>
   CONTRACT_STATUS[status ?? ''] ?? { label: status || '—', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' };
+
+/** 4 bước đón khách trước ACTIVE — khớp `ContractStatus.onboardInProgress()` = alias `status=RECEPTION`. */
+export const ONBOARD_STATUSES = ['DRAFT', 'AWAITING_ONBOARD', 'AWAITING_PAYMENT', 'AWAITING_CONFIRM'] as const;
+
+/** Chưa ACTIVE: 4 bước đón khách + `PENDING` cũ (dữ liệu inbound/legacy) — khách chưa dọn vào ở. */
+export const isNotYetActive = (status?: string): boolean =>
+  isOnboardStatus(status) || status === 'PENDING';
+
+export const isOnboardStatus = (status?: string): boolean =>
+  (ONBOARD_STATUSES as readonly string[]).includes(status ?? '');
+
+/** Còn sửa được hiện trạng/chỉ số — BE `isCaptureEditable()` (PUT sang AWAITING_PAYMENT là bị từ chối). */
+export const isCaptureStage = (status?: string): boolean =>
+  status === 'DRAFT' || status === 'AWAITING_ONBOARD';
+
+/** Nhãn hiển thị: ưu tiên `statusLabel` BE sinh sẵn, thiếu (HostContractDto) thì tự map. */
+export const contractStatusLabel = (c: { status?: string; statusLabel?: string | null }): string =>
+  c.statusLabel || statusMeta(c.status).label;
+
+/**
+ * Nhóm trạng thái dùng cho thẻ số liệu/bộ lọc — một thẻ đếm nhiều trạng thái thì lọc theo nhóm,
+ * lọc một trạng thái thì số trên thẻ và số ra bảng lệch nhau.
+ *   PRE_ONBOARD — chưa đón: DRAFT + AWAITING_ONBOARD
+ *   PRE_ACTIVE  — đã đón, chưa kích hoạt: AWAITING_PAYMENT + AWAITING_CONFIRM + PENDING
+ */
+export const STATUS_GROUPS: Record<string, string[]> = {
+  PRE_ONBOARD: ['DRAFT', 'AWAITING_ONBOARD'],
+  PRE_ACTIVE: ['AWAITING_PAYMENT', 'AWAITING_CONFIRM', 'PENDING'],
+};
+
+export const matchesStatusFilter = (status: string | undefined, filter: string): boolean =>
+  filter === 'all' || (STATUS_GROUPS[filter] ? STATUS_GROUPS[filter].includes(status ?? '') : status === filter);
 
 /** Trạng thái thu tiền của hợp đồng (paymentStatus — cọc + tháng đầu lúc đón khách). */
 export const PAYMENT_STATUS: Record<string, Badge> = {

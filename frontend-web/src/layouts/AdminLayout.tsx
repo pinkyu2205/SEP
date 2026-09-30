@@ -18,6 +18,7 @@ import {
   UserPlus,
   Users,
   Wrench,
+  Flag,
   X,
   Zap,
   Droplets,
@@ -133,7 +134,9 @@ const buildSections = ({
       // còn chỉ nói về tiến độ bàn giao nữa. Đây là màn "1 dòng = 1 nhà" duy nhất —
       // trang Hồ sơ đón khách là "1 dòng = 1 hợp đồng", không gộp được vào nhau.
       { label: 'Tình trạng nhà & phòng', path: '/admin/handover', icon: PackageCheck },
-      { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined },
+      { label: 'Bảo trì & thiết bị', path: '/admin/maintenance', icon: Wrench, badge: openMaintenance || undefined, end: true },
+      // Khách làm hư mà từ chối trả → cờ đỏ để admin cân nhắc chấm dứt HĐ (25/09/2026).
+      { label: 'Khách từ chối trả', path: '/admin/maintenance/refused', icon: Flag },
       // Admin cấp mã 6 số cho quản lý khi họ không chụp được ảnh đồng hồ (mentor ý 5).
       // Badge = yêu cầu xin mã manager gửi từ app, chưa ai cấp (24/09/2026).
       { label: 'Cấp mã đồng hồ', path: '/admin/meter-override', icon: KeyRound, badge: meterRequests || undefined },

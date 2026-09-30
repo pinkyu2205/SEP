@@ -13,6 +13,7 @@ import { normalizeVi } from '../../utils/helpers';
 import { todayIso } from '../../utils/serverTime';
 import { fmtDate } from '../../utils/period';
 import { openContractBlob } from '../../utils/contractFile';
+import { statusMeta, isCaptureStage, ONBOARD_STATUSES } from '../../components/contract/contractLabels';
 import { StatCard, Pagination } from '../admin/shared';
 import { DraftContractFormModal } from './DraftContractFormModal';
 import { DraftContractImportModal } from './DraftContractImportModal';
@@ -78,8 +79,11 @@ const SCHEDULE_OPTIONS: { key: ScheduleFilter; label: string }[] = [
 /**
  * Trang "Hồ sơ đón khách" (admin).
  *
- * Liệt kê hợp đồng khách thuê đang ở trạng thái DRAFT — tức hồ sơ đã lập sau khi khách
- * xem nhà, đang chờ quản lý tới đón khách + thu cọc để chuyển sang ACTIVE.
+ * Liệt kê hợp đồng khách thuê ĐANG TRONG PIPELINE ĐÓN KHÁCH — hồ sơ đã lập sau khi khách xem nhà,
+ * đang chờ quản lý đón + thu cọc + hai bên xác nhận để chuyển sang ACTIVE. Từ BE 24/09/2026 pipeline
+ * có 4 bước (`GET /tenant-contracts?status=RECEPTION`): DRAFT (chờ đến ngày đón) → AWAITING_ONBOARD
+ * (chờ chụp hiện trạng) → AWAITING_PAYMENT (chờ thanh toán) → AWAITING_CONFIRM (chờ xác nhận HĐ/OTP).
+ * Trước đây chỉ lấy `DRAFT` nên hồ sơ biến mất ngay khi cron chuyển sang bước sau.
  *
  * Tên cũ của trang là "Hợp đồng nháp" — đó là tên trạng thái trong DB (`status = DRAFT`),
  * đọc lên nghe như bản nháp có thể bỏ, trong khi thực chất đây là việc đang chờ làm.
@@ -101,6 +105,8 @@ export const DraftOnboardingList = () => {
   const [managerFilter, setManagerFilter] = useState('all');
   const [scheduleFilter, setScheduleFilter] = useState<ScheduleFilter>('all');
   const [fileFilter, setFileFilter] = useState<FileFilter>('all');
+  /** Lọc theo BƯỚC trong pipeline (status BE) — 'all' = cả 4 bước. */
+  const [stepFilter, setStepFilter] = useState<'all' | (typeof ONBOARD_STATUSES)[number]>('all');
   const [sortBy, setSortBy] = useState<SortKey>('created_desc');
 
   /**
@@ -189,7 +195,9 @@ export const DraftOnboardingList = () => {
 
   // ─── Thống kê: tính trên TOÀN BỘ hồ sơ, không đổi theo bộ lọc ──────────────
   const stats = useMemo(() => {
-    const withDate = drafts.filter((d) => !!d.expectedReceptionDate);
+    // "Trễ đón" chỉ có nghĩa với hồ sơ CHƯA thu tiền — AWAITING_CONFIRM đã PAID, BE không tự hủy
+    // (BE 24/09/2026), việc còn lại là nhắc OTP chứ không phải đi đón khách.
+    const withDate = drafts.filter((d) => !!d.expectedReceptionDate && d.status !== 'AWAITING_CONFIRM');
     return {
       total: drafts.length,
       overdue: withDate.filter((d) => d.expectedReceptionDate! < today).length,
@@ -226,11 +234,12 @@ export const DraftOnboardingList = () => {
     if (propertyFilter !== 'all') list = list.filter((d) => d.propertyId === propertyFilter);
     if (managerFilter !== 'all') list = list.filter((d) => d.assignedManagerName === managerFilter);
 
-    if (scheduleFilter === 'overdue') list = list.filter((d) => d.expectedReceptionDate && d.expectedReceptionDate < today);
+    if (scheduleFilter === 'overdue') list = list.filter((d) => d.expectedReceptionDate && d.expectedReceptionDate < today && d.status !== 'AWAITING_CONFIRM');
     if (scheduleFilter === 'today') list = list.filter((d) => d.expectedReceptionDate === today);
     if (scheduleFilter === 'week') list = list.filter((d) => d.expectedReceptionDate && d.expectedReceptionDate > today && d.expectedReceptionDate <= weekEnd);
     if (scheduleFilter === 'no_date') list = list.filter((d) => !d.expectedReceptionDate);
 
+    if (stepFilter !== 'all') list = list.filter((d) => d.status === stepFilter);
     if (fileFilter === 'has_file') list = list.filter((d) => !!d.contractFileAvailable);
     if (fileFilter === 'no_file') list = list.filter((d) => !d.contractFileAvailable);
 
@@ -248,7 +257,7 @@ export const DraftOnboardingList = () => {
       sorted.sort((a, b) => b.id - a.id);
     }
     return sorted;
-  }, [drafts, properties, search, propertyFilter, managerFilter, scheduleFilter, fileFilter, sortBy, today, weekEnd]);
+  }, [drafts, properties, search, propertyFilter, managerFilter, scheduleFilter, fileFilter, stepFilter, sortBy, today, weekEnd]);
 
   const groups = useMemo(() => {
     const map = new Map<number, TenantContractResponse[]>();
@@ -263,7 +272,7 @@ export const DraftOnboardingList = () => {
   }, [filteredDrafts, properties]);
 
   const hasFilter = !!search.trim() || propertyFilter !== 'all' || managerFilter !== 'all'
-    || scheduleFilter !== 'all' || fileFilter !== 'all';
+    || scheduleFilter !== 'all' || fileFilter !== 'all' || stepFilter !== 'all';
 
   /**
    * PHÂN TRANG — trước đây trang này đổ HẾT (80 hồ sơ, 50 nhà) vào một lưới masonry:
@@ -275,7 +284,7 @@ export const DraftOnboardingList = () => {
   const totalPages = Math.max(1, Math.ceil(filteredDrafts.length / ROWS_PER_PAGE));
   // Đổi lọc/sắp xếp thì về trang 1, không thì đang ở trang 4 mà lọc còn 2 trang là màn trắng.
   useEffect(() => { setPage(1); },
-    [search, propertyFilter, managerFilter, scheduleFilter, fileFilter, sortBy]);
+    [search, propertyFilter, managerFilter, scheduleFilter, fileFilter, stepFilter, sortBy]);
   const pageStart = (page - 1) * ROWS_PER_PAGE;
   const pageItems = filteredDrafts.slice(pageStart, pageStart + ROWS_PER_PAGE);
 
@@ -392,7 +401,7 @@ export const DraftOnboardingList = () => {
 
   const clearFilters = () => {
     setSearch(''); setPropertyFilter('all'); setManagerFilter('all');
-    setScheduleFilter('all'); setFileFilter('all');
+    setScheduleFilter('all'); setFileFilter('all'); setStepFilter('all');
   };
 
   /** Bấm thẻ thống kê = bật/tắt đúng bộ lọc đó, đồng thời gỡ các lọc lịch khác. */
@@ -495,6 +504,12 @@ export const DraftOnboardingList = () => {
             className={selectCls}
           >
             {SCHEDULE_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+          </select>
+          <select value={stepFilter} onChange={(e) => setStepFilter(e.target.value as typeof stepFilter)} className={selectCls}>
+            <option value="all">Bước: Tất cả</option>
+            {ONBOARD_STATUSES.map((s) => (
+              <option key={s} value={s}>{statusMeta(s).label} ({drafts.filter((d) => d.status === s).length})</option>
+            ))}
           </select>
           <select value={fileFilter} onChange={(e) => setFileFilter(e.target.value as FileFilter)} className={selectCls}>
             <option value="all">File HĐ: Tất cả</option>
@@ -602,6 +617,7 @@ export const DraftOnboardingList = () => {
                   <th className="px-4 py-2.5 font-bold">Nhà · phòng</th>
                   <th className="px-4 py-2.5 font-bold">Quản lý</th>
                   <th className="px-4 py-2.5 text-right font-bold">Giá thuê · cọc</th>
+                  <th className="px-4 py-2.5 font-bold">Bước</th>
                   <th className="px-4 py-2.5 font-bold">Ngày đón</th>
                   <th className="px-4 py-2.5 font-bold">Hợp đồng</th>
                   <th className="px-4 py-2.5 text-right font-bold">Thao tác</th>
@@ -609,8 +625,10 @@ export const DraftOnboardingList = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {pageItems.map((d) => {
-                  const late = d.expectedReceptionDate && d.expectedReceptionDate < today
+                  // AWAITING_CONFIRM đã thu tiền → không có "trễ đón" / no-show (BE không tự hủy).
+                  const late = d.expectedReceptionDate && d.expectedReceptionDate < today && d.status !== 'AWAITING_CONFIRM'
                     ? overdueDays(d.expectedReceptionDate, today) : 0;
+                  const step = statusMeta(d.status);
                   const isToday = d.expectedReceptionDate === today;
                   const property = properties[d.propertyId];
                   return (
@@ -679,6 +697,17 @@ export const DraftOnboardingList = () => {
                         <p className="text-[11px] text-slate-400">cọc {formatCurrency(d.deposit)}</p>
                       </td>
 
+                      {/* Bước trong pipeline đón khách — nhãn BE (`statusLabel`) nếu có */}
+                      <td className="whitespace-nowrap px-4 py-2.5">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ${step.color}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${step.dot}`} />
+                          {d.statusLabel || step.label}
+                        </span>
+                        {d.status === 'AWAITING_CONFIRM' && (
+                          <span className="mt-0.5 block text-[11px] text-violet-600">Đã thu tiền · chờ OTP</span>
+                        )}
+                      </td>
+
                       {/* Ngày đón + nhãn trễ hạn */}
                       <td className="whitespace-nowrap px-4 py-2.5">
                         {d.expectedReceptionDate ? (
@@ -690,7 +719,9 @@ export const DraftOnboardingList = () => {
                               {fmtDate(d.expectedReceptionDate)}
                             </span>
                             {late > 0 ? (
-                              <span className="text-[11px] font-bold text-rose-600">Quá hạn {late} ngày</span>
+                              <span className="text-[11px] font-bold text-rose-600">
+                                Quá hạn {late} ngày{late >= 3 ? " · tự hủy (chưa thu tiền)" : ""}
+                              </span>
                             ) : isToday ? (
                               <span className="text-[11px] font-bold text-amber-600">Đón hôm nay</span>
                             ) : null}
@@ -714,12 +745,16 @@ export const DraftOnboardingList = () => {
                       </td>
 
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                        <button
-                          onClick={() => setEditing(d)} title="Sửa hồ sơ"
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
+                        {/* BE chỉ cho sửa hồ sơ khi còn DRAFT / AWAITING_ONBOARD (isCaptureEditable) —
+                            sang AWAITING_PAYMENT trở đi PUT bị từ chối nên ẩn nút sửa. */}
+                        {isCaptureStage(d.status) && (
+                          <button
+                            onClick={() => setEditing(d)} title="Sửa hồ sơ"
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => viewContract(d)}
                           disabled={!d.contractFileAvailable || viewingId === d.id}

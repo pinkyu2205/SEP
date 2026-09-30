@@ -27,7 +27,14 @@ export type EquipmentStatus = 'NEW' | 'GOOD' | 'DAMAGED' | 'BROKEN';
 /** Trạng thái thiết bị khi khai báo manifest inbound (chỉ 2 giá trị) */
 export type ManifestEquipmentStatus = 'NEW' | 'GOOD';
 
-export type ContractStatus = 'DRAFT' | 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
+/**
+ * Trạng thái hợp đồng. Pipeline đón khách tenant (BE 24/09/2026):
+ *   DRAFT → AWAITING_ONBOARD → AWAITING_PAYMENT → AWAITING_CONFIRM → ACTIVE
+ * `PENDING` chỉ còn cho HĐ inbound (master lease) — tenant onboard mới KHÔNG set.
+ */
+export type ContractStatus =
+  | 'DRAFT' | 'AWAITING_ONBOARD' | 'AWAITING_PAYMENT' | 'AWAITING_CONFIRM'
+  | 'PENDING' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED';
 
 export type UserRole = 'ROLE_ADMIN' | 'ROLE_OWNER' | 'ROLE_MANAGER' | 'ROLE_TENANT';
 
@@ -1098,6 +1105,8 @@ export interface TenantContractResponse {
   startDate: string;
   endDate?: string;
   status: ContractStatus;
+  /** Nhãn tiếng Việt BE sinh sẵn cho `status` (BE 24/09/2026) — CHỈ có ở `TenantContractResponse`, không có ở `HostContractDto`. */
+  statusLabel?: string;
   // Text BE sinh cho PDF, vd "Giường (Tốt) x1, Tủ lạnh (Mới) x1" (+ dòng "Lắp thêm: ...").
   equipmentSnapshot?: string;
   // Nội thất HĐ — đều read-only, BE tự gắn toàn bộ EXISTING ACTIVE (FE-contract-equipment-auto.md):
@@ -1357,9 +1366,26 @@ export interface MaintenanceRequestResponse {
   selfRepairImages?: string[];
   photoHistory?: MaintenancePhotoHistoryEntry[];
   timeline: MaintenanceTimelineEntry[];
+  /** Khách từ chối trả → công ty trả hộ (BE đã trả từ trước, chưa khai báo ở FE). */
+  companyAbsorbedFault?: boolean;
+  /** Tóm tắt thoả thuận ngoài app khi companyAbsorbedFault=true. */
+  companyAbsorbedNote?: string;
+  /**
+   * Cờ đỏ "khách từ chối trả" — admin xem xét (docs/BE-YEUCAU-co-do-khach-tu-choi-tra-2026-09-25.md).
+   * BE CHƯA có các field này: thiếu = coi như PENDING (chưa xem xét).
+   */
+  refusalReviewStatus?: RefusalReviewStatus;
+  refusalReviewedAt?: string;
+  refusalReviewedByName?: string;
+  refusalReviewNote?: string;
+  /** Id hợp đồng của phiếu (BE chưa trả — FE tạm ghép theo tenant + nhà). */
+  tenantContractId?: number;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Kết quả xem xét cờ đỏ: chưa xem xét / bỏ cờ / đã chấm dứt HĐ / trừ vào cọc lúc trả phòng. */
+export type RefusalReviewStatus = 'PENDING' | 'DISMISSED' | 'TERMINATED' | 'DEDUCT_AT_CHECKOUT';
 
 /**
  * LƯU Ý: OUTSTANDING_DAMAGE không được BE đếm vào bucket nào trong 4 field dưới

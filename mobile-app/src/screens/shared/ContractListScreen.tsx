@@ -147,7 +147,7 @@ const mapApiContractStatus = (c: TenantContractResponse): ContractStatus => {
     const d = daysUntil(c.endDate);
     return d != null && d >= 0 && d <= 30 ? 'expiring_soon' : 'active';
   }
-  if (s === 'PENDING') return 'approved'; // đã tạo, chờ thu cọc/OTP để kích hoạt
+  if (s === 'PENDING' || s === 'AWAITING_PAYMENT' || s === 'AWAITING_CONFIRM') return 'approved'; // đã tạo, chờ thu cọc/OTP để kích hoạt
   return 'draft';
 };
 

@@ -12,7 +12,7 @@ import { EmptyState, Pagination, SectionShell, StatCard, StatusPill } from './sh
 import { ContractDetailDrawer } from '@/components/contract/ContractDetailDrawer';
 import {
   CONTRACT_STATUS, EXPIRING_WINDOW_DAYS, SCOPE_OPTIONS_WITH_ABORTED, SORT_OPTIONS, daysLeft,
-  fmtDate, inScope, inScopeContract, isEndedContract, isExpiringSoon, isNeverOnboarded,
+  fmtDate, inScope, inScopeContract, isEndedContract, isExpiringSoon, isNeverOnboarded, matchesStatusFilter,
   sortContracts, statusMeta, statusesInScope,
   terminationTypeLabel, type ContractScope, type SortKey, type StatusFilter,
 } from '@/components/contract/contractLabels';
@@ -136,8 +136,9 @@ export const ContractMonitoring = () => {
     return {
       total: real.length,
       active: active.length,
-      pending: by('PENDING'),
-      draft: by('DRAFT'),
+      // BE 24/09/2026: PENDING tách thành pipeline — thẻ đếm THEO NHÓM (xem STATUS_GROUPS).
+      pending: by('AWAITING_PAYMENT') + by('AWAITING_CONFIRM') + by('PENDING'),
+      draft: by('DRAFT') + by('AWAITING_ONBOARD'),
       expiring: real.filter(isExpiringSoon).length,
       terminated: by('TERMINATED') + by('EXPIRED'),
       aborted: aborted.length,
@@ -150,7 +151,7 @@ export const ContractMonitoring = () => {
   const matchesFilters = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (c: TenantContractResponse) => {
-      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (!matchesStatusFilter(c.status, statusFilter)) return false;
       if (expiringOnly && !isExpiringSoon(c)) return false;
       if (propertyFilter !== 'all' && String(c.propertyId) !== propertyFilter) return false;
       if (zoneFilter !== 'all' && properties[c.propertyId]?.zoneName !== zoneFilter) return false;
@@ -255,17 +256,17 @@ export const ContractMonitoring = () => {
         />
         <StatCard
           title="Chờ kích hoạt" value={stats.pending} icon={Wallet} tone="amber"
-          helper="Đã ký, chờ thu tiền / đón khách"
+          helper="Chờ thanh toán · chờ xác nhận hợp đồng (OTP)"
           progress={stats.total ? stats.pending / stats.total : 0}
-          active={statusFilter === 'PENDING' && !expiringOnly}
-          onClick={() => toggleStatus('PENDING')}
+          active={statusFilter === 'PRE_ACTIVE' && !expiringOnly}
+          onClick={() => toggleStatus('PRE_ACTIVE')}
         />
         <StatCard
           title="Chờ đón khách" value={stats.draft} icon={FileText} tone="indigo"
-          helper="Đã lập hồ sơ, chưa giao phòng"
+          helper="Chờ đến ngày đón · chờ onboard (chụp hiện trạng)"
           progress={stats.total ? stats.draft / stats.total : 0}
-          active={statusFilter === 'DRAFT' && !expiringOnly}
-          onClick={() => toggleStatus('DRAFT')}
+          active={statusFilter === 'PRE_ONBOARD' && !expiringOnly}
+          onClick={() => toggleStatus('PRE_ONBOARD')}
         />
         <StatCard
           title={`Sắp hết hạn ≤${EXPIRING_WINDOW_DAYS}n`} value={stats.expiring} icon={CalendarClock} tone="rose"
@@ -339,6 +340,13 @@ export const ContractMonitoring = () => {
           {statusesInScope(scope).map((status) => (
             <option key={status} value={status}>{CONTRACT_STATUS[status].label}</option>
           ))}
+          {scope !== 'ended' && (
+            <>
+              {/* Hai nhóm khớp đúng hai thẻ số liệu phía trên (xem STATUS_GROUPS). */}
+              <option value="PRE_ONBOARD">Nhóm: chưa đón khách (chờ tới ngày + chờ onboard)</option>
+              <option value="PRE_ACTIVE">Nhóm: chờ kích hoạt (chờ thanh toán + chờ xác nhận)</option>
+            </>
+          )}
           {scope !== 'ended' && (
             <option value="expiring">Sắp hết hạn (≤{EXPIRING_WINDOW_DAYS} ngày)</option>
           )}

@@ -69,7 +69,14 @@ interface TenantLite {
   endDate?: string;
 }
 
-const LIVE_STATUSES = new Set(['ACTIVE', 'PENDING', 'DRAFT']);
+// BE 24/09/2026: PENDING tách thành AWAITING_* — vẫn là hợp đồng "còn sống" (giữ chỗ / đang ở).
+const LIVE_STATUSES = new Set(['ACTIVE', 'PENDING', 'DRAFT', 'AWAITING_ONBOARD', 'AWAITING_PAYMENT', 'AWAITING_CONFIRM']);
+
+/** Gom pipeline đón khách về 3 nhóm hiển thị sẵn có: đang ở · chưa dọn vào (đã chốt) · chờ đón (nháp). */
+const liveStatus = (s: string): TenantLite['status'] =>
+  s === 'ACTIVE' ? 'ACTIVE'
+    : s === 'PENDING' || s === 'AWAITING_PAYMENT' || s === 'AWAITING_CONFIRM' ? 'PENDING'
+      : 'DRAFT';
 
 const TENANT_STATUS: Record<TenantLite['status'], { label: string; cls: string }> = {
   ACTIVE:  { label: 'Đang ở',        cls: 'bg-emerald-50 text-emerald-700' },
@@ -1422,7 +1429,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
               id: String(c.id), propertyId: c.propertyId as number,
               name: c.lesseeName?.trim() || '(chưa có tên)', phone: c.tenantPhone,
               room: c.roomCode && c.roomCode !== 'NGUYEN_CAN' ? c.roomCode : undefined,
-              status: c.status as TenantLite['status'], endDate: c.endDate,
+              status: liveStatus(String(c.status)), endDate: c.endDate,
             }))
           : ((await tenantService.listByStatus()) ?? [])
             .filter((c) => c.propertyId != null && LIVE_STATUSES.has(String(c.status)))
@@ -1430,7 +1437,7 @@ export const ZoneOverview = ({ audience }: { audience: 'admin' | 'host' }) => {
               id: String(c.id), propertyId: c.propertyId,
               name: c.tenantFullName?.trim() || '(chưa có tên)', phone: c.tenantPhone,
               room: c.roomNumber || undefined,
-              status: String(c.status) as TenantLite['status'], endDate: c.endDate,
+              status: liveStatus(String(c.status)), endDate: c.endDate,
             }));
 
         const load = new Map<number, ContractLoad>();

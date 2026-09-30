@@ -83,12 +83,12 @@ export interface Tenant {
 // phòng vẫn là khách đang ở — bộ lọc "Sắp hết HĐ" sẽ nhặt ra để quản lý xử lý.
 export const mapTenantStatus = (s?: string): TenantStatus => {
   const u = (s || '').toUpperCase();
-  if (u.startsWith('PENDING')) return 'pending_activation';
+  if (u.startsWith('PENDING') || u === 'AWAITING_PAYMENT' || u === 'AWAITING_CONFIRM') return 'pending_activation';
   if (u === 'SUSPENDED') return 'suspended';
   // DRAFT đã bị lọc bỏ từ lúc tải (xem `loadTenants`) — nhưng vẫn chặn tường minh ở đây:
   // trước kia nó rơi vào `return 'active'` bên dưới và thành "Đang ở", đúng kiểu lỗi mà
   // nhánh mặc định âm thầm nuốt một trạng thái mới rồi gắn nhãn sai.
-  if (u === 'DRAFT') return 'pending_activation';
+  if (u === 'DRAFT' || u === 'AWAITING_ONBOARD') return 'pending_activation';
   return 'active';
 };
 

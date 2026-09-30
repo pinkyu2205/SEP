@@ -10,7 +10,7 @@ import { hostService, type HostContractDto } from '@/services/host.service';
 import type { PropertyResponse, RoomResponse } from '@/types/api.types';
 import { TenantTimelineDrawer, type TenantIdentity } from '@/components/TenantContractTimeline';
 import { MaskedField } from '@/components/MaskedField';
-import { EXPIRING_WINDOW_DAYS, daysLeft, fmtDate, termLabel } from '@/components/contract/contractLabels';
+import { EXPIRING_WINDOW_DAYS, daysLeft, fmtDate, isNotYetActive, termLabel } from '@/components/contract/contractLabels';
 import { EmptyState, StatCard } from '@/pages/admin/shared';
 import { isHostApproved } from '@/pages/host/properties/propertyListState';
 import { formatCurrency } from '@/utils';
@@ -116,7 +116,7 @@ const groupByTenant = (contracts: HostContractDto[]) => {
     row.current = row.contracts.find(isOccupying);
     row.upcoming = row.current
       ? undefined
-      : row.contracts.find((c) => c.status === 'DRAFT' || c.status === 'PENDING');
+      : row.contracts.find((c) => isNotYetActive(c.status));
   }
 
   return {
@@ -297,7 +297,7 @@ export const TenantList = () => {
   const filterActive = expiringOnly || !!search.trim();
 
   /** Hợp đồng chưa ghép được về người nào, tách theo lý do để giải thích đúng chỗ. */
-  const unlinkedUpcoming = unlinked.filter((c) => c.status === 'DRAFT' || c.status === 'PENDING');
+  const unlinkedUpcoming = unlinked.filter((c) => isNotYetActive(c.status));
   const unlinkedPast = unlinked.filter((c) => c.status === 'TERMINATED' || c.status === 'EXPIRED');
 
   const TABS = [
