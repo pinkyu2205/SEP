@@ -75,12 +75,25 @@ export const tenantService = {
       : api.post(`${BASE}/${propertyId}/tenant-contract`, body);
   },
 
-  /** GET /tenant-contracts?status=DRAFT — DS hợp đồng nháp (admin). */
-  listDrafts: (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
-    return api.get('/api/v1/tenant-contracts', {
-      params: { status: 'DRAFT', ...(params ?? {}) },
-      skipErrorToast: true,
-    } as never);
+  /**
+   * DS hồ sơ CHỜ ĐÓN KHÁCH (admin) = hợp đồng DRAFT + PENDING.
+   *
+   * Chỉ lấy DRAFT là thiếu (30/09/2026): admin tạo tay xong, BE trả hợp đồng ở PENDING
+   * (chưa hiệu lực, chờ quản lý đón khách / thu tiền) → màn "Hồ sơ đón khách" báo 0 hồ
+   * sơ, và phòng đó vẫn hiện trong ô "Chọn phòng" dù nhà đã báo còn 2/3 phòng. App
+   * manager (ResumeContract) cũng gộp đúng hai trạng thái này.
+   */
+  listDrafts: async (params?: { propertyId?: number; assignedManagerId?: string }): Promise<TenantContractResponse[]> => {
+    const fetchStatus = (status: 'DRAFT' | 'PENDING') =>
+      (api.get('/api/v1/tenant-contracts', {
+        params: { status, ...(params ?? {}) },
+        skipErrorToast: true,
+      } as never) as Promise<TenantContractResponse[]>)
+        .then((r) => (Array.isArray(r) ? r : []));
+    const [drafts, pending] = await Promise.all([fetchStatus('DRAFT'), fetchStatus('PENDING')]);
+    const byId = new Map<number, TenantContractResponse>();
+    [...drafts, ...pending].forEach((c) => byId.set(c.id, c));
+    return [...byId.values()];
   },
 
   /** GET /tenant-contracts[?status=] — DS TOÀN BỘ hợp đồng (mọi trạng thái nếu

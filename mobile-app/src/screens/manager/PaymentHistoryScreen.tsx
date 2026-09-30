@@ -36,7 +36,7 @@ import { serverNow, todayIso } from '@/utils/serverTime';
  *   • Điện, nước, dịch vụ — HIỆN số tiền.
  */
 
-type Filter = 'DEBT' | 'all' | 'PENDING_VERIFY' | 'DEPOSIT';
+type Filter = 'DEBT' | 'all' | 'DEPOSIT';
 
 
 const METHOD_CONFIG: Record<string, { label: string; icon: string }> = {
@@ -395,7 +395,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   const route = useRoute<any>();
   // Vào từ link "Tất cả tiền cọc" thì mở thẳng tab Tiền cọc, khỏi bắt bấm thêm.
   // Mặc định mở tab "Đang nợ" — việc manager cần làm nhất ở màn này là đi đòi tiền.
-  const initialFilter: Filter = (['DEBT', 'all', 'PENDING_VERIFY', 'DEPOSIT'] as string[]).includes(route.params?.filter)
+  const initialFilter: Filter = (['DEBT', 'all', 'DEPOSIT'] as string[]).includes(route.params?.filter)
     ? route.params.filter : 'DEBT';
   const [payments, setPayments] = useState<ManagerPayment[]>([]);
   /** Sổ thu thật — nguồn chính của dòng thời gian (xem fromHistory). */
@@ -414,7 +414,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Entry | null>(null);
-  const [acting, setActing] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([
@@ -426,7 +425,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
       realManagerInvoiceService.listInvoices().catch(() => [] as ManagerInvoice[]),
     ])
       .then(async ([pay, dep, props, paid, invs]) => {
-        setPayments(pay);
+        // Manager không duyệt tay khoản nào nữa (30/09/2026): khách trả PayOS thì webhook tự
+        // ghi nhận. Chỉ giữ claim ĐÃ duyệt trước đây làm lịch sử; claim chờ duyệt / bị từ
+        // chối bỏ hẳn — giữ lại còn che mất dòng thu thật trong sổ (dedupe theo claimedCodes).
+        setPayments(pay.filter(p => p.status === 'VERIFIED'));
         setDeposits(dep);
         setHistory(paid);
         setPaidInvoices(invs.filter(i => (i.status || '').toUpperCase() === 'PAID'));
@@ -660,8 +662,7 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
     const kw = norm(search.trim());
     const source = filter === 'DEPOSIT'
       ? depositEntries
-      : timeline.filter(e => e.kind === 'INVOICE'
-        && (filter !== 'PENDING_VERIFY' || e.status.toUpperCase() === 'PENDING_VERIFY'));
+      : timeline.filter(e => e.kind === 'INVOICE');
     if (!kw) return source;
     return source.filter(e => [e.tenantName, e.roomNumber, e.propertyName, e.ref]
       .some(v => norm(v || '').includes(kw)));
@@ -742,39 +743,10 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
     debtors: debtors.length,
     debtorsOverdue: debtors.filter(d => d.overdue).length,
     txns: timeline.filter(e => e.kind === 'INVOICE').length,
-    pending: timeline.filter(e => e.kind === 'INVOICE' && e.status.toUpperCase() === 'PENDING_VERIFY').length,
     deposits: liveDeposits.length,
     depositUnpaid: liveDeposits.filter(d => (d.status || '').toUpperCase() !== 'PAID').length,
   }), [timeline, liveDeposits, debtors]);
 
-
-  /** Xác nhận / từ chối giao dịch khách báo đã chuyển — làm ngay trong sheet chi tiết. */
-  const handleVerify = (e: Entry, approved: boolean) => {
-    if (e.paymentId == null) return;
-    const doIt = async () => {
-      setActing(true);
-      try {
-        if (approved) await realManagerInvoiceService.verifyPayment(e.paymentId!);
-        else await realManagerInvoiceService.rejectPayment(e.paymentId!);
-        setSelected(null);
-        load();
-      } catch (err: any) {
-        showAlert('Lỗi', err?.response?.data?.message || err?.message || 'Không xử lý được giao dịch.');
-      } finally {
-        setActing(false);
-      }
-    };
-    showAlert(
-      approved ? 'Xác nhận đã nhận tiền?' : 'Từ chối giao dịch?',
-      approved
-        ? `Xác nhận đã nhận đủ tiền hoá đơn ${e.ref} từ ${e.tenantName}?`
-        : `Từ chối giao dịch ${e.ref} của ${e.tenantName}?`,
-      [
-        { text: 'Huỷ', style: 'cancel' },
-        { text: approved ? 'Xác nhận' : 'Từ chối', style: approved ? 'default' : 'destructive', onPress: doIt },
-      ],
-    );
-  };
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
@@ -797,7 +769,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         {([
           { key: 'DEBT' as const, label: 'Đang nợ', count: counts.debtors, alert: counts.debtorsOverdue > 0 },
           { key: 'all' as const, label: 'Đã thu', count: counts.txns, alert: false },
-          { key: 'PENDING_VERIFY' as const, label: 'Chờ duyệt', count: counts.pending, alert: counts.pending > 0 },
           { key: 'DEPOSIT' as const, label: 'Cọc', count: counts.deposits, alert: counts.depositUnpaid > 0 },
         ]).map(t => {
           const on = filter === t.key;
@@ -830,10 +801,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           </TouchableOpacity>
         )}
       </View>
-
-      {filter === 'PENDING_VERIFY' && counts.pending > 0 && (
-        <Text style={s.hint}>Khách báo đã chuyển khoản — bấm vào từng dòng để kiểm tra và xác nhận.</Text>
-      )}
 
       {filter === 'DEBT' ? (
         loading ? (
@@ -952,13 +919,11 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
           renderSectionFooter={({ section }) => (isOpen(section.key) ? <View style={s.groupFoot} /> : null)}
           ListEmptyComponent={
             <View style={s.emptyBox}>
-              <Text style={s.emptyEmoji}>{search ? '🔍' : filter === 'PENDING_VERIFY' ? '✅' : '💳'}</Text>
+              <Text style={s.emptyEmoji}>{search ? '🔍' : '💳'}</Text>
               <Text style={s.emptyText}>
                 {search
                   ? `Không tìm thấy giao dịch nào khớp "${search.trim()}".`
-                  : filter === 'PENDING_VERIFY'
-                    ? 'Không có khoản nào chờ xác nhận.'
-                    : filter === 'DEPOSIT' ? 'Chưa có tiền cọc nào.' : 'Chưa có giao dịch thanh toán nào.'}
+                  : filter === 'DEPOSIT' ? 'Chưa có tiền cọc nào.' : 'Chưa có giao dịch thanh toán nào.'}
               </Text>
             </View>
           }
@@ -972,7 +937,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
         const mc = methodOf(e.method);
         const isDeposit = e.kind === 'DEPOSIT';
         const hidden = isDeposit || isAmountHidden(e.invoiceKind);
-        const canVerify = !isDeposit && e.status.toUpperCase() === 'PENDING_VERIFY';
 
         return (
           <Modal transparent animationType="slide" onRequestClose={() => setSelected(null)}>
@@ -1028,24 +992,6 @@ export const ManagerPaymentHistoryScreen: React.FC = () => {
                     {!!e.note && <DetailRow label="Nội dung chuyển khoản" value={e.note} wrap />}
                   </View>
 
-                  {canVerify && (
-                    <View style={s.actionRow}>
-                      <TouchableOpacity
-                        style={[s.actionBtn, s.rejectBtn]}
-                        disabled={acting}
-                        onPress={() => handleVerify(e, false)}
-                      >
-                        <Text style={s.rejectBtnText}>Từ chối</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[s.actionBtn, s.verifyBtn]}
-                        disabled={acting}
-                        onPress={() => handleVerify(e, true)}
-                      >
-                        <Text style={s.verifyBtnText}>{acting ? 'Đang xử lý...' : '✓ Đã nhận tiền'}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
                 </ScrollView>
               </View>
             </View>
