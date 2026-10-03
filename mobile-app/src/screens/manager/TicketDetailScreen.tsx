@@ -387,6 +387,8 @@ export const TicketDetailScreen: React.FC = () => {
   const [diagnoseFaultReason, setDiagnoseFaultReason] = useState('');
   const [diagnoseTenantAgreesToPay, setDiagnoseTenantAgreesToPay] = useState<boolean | null>(null);
   const [diagnoseCompanyAbsorbedNote, setDiagnoseCompanyAbsorbedNote] = useState('');
+  /** 03/10/2026: dùng luôn ảnh hiện trạng khách đã gửi làm bằng chứng lỗi (mặc định bật, vẫn chụp thêm được). */
+  const [useTenantPhotosAsEvidence, setUseTenantPhotosAsEvidence] = useState(true);
   // "Thiết bị hỏng hoàn toàn — cần thay mới" (16/09/2026, BE commit 49201d9+d2bc708) —
   // độc lập với damageCause, áp dụng cho cả 4 nhánh. Dùng chung replacementEquipment/
   // computeAutoDamageAmount đã có sẵn cho Luồng A (cùng 1 thiết bị của ticket này) — state
@@ -906,7 +908,9 @@ export const TicketDetailScreen: React.FC = () => {
     if (diagnoseCause === 'TENANT_MISUSE') {
       const reason = diagnoseFaultReason.trim();
       if (!reason) { showAlert('Thiếu lý do', 'Vui lòng mô tả lỗi do khách gây ra.'); return; }
-      const evidenceUrls = ticket?.faultEvidenceImages ?? [];
+      // Ảnh bằng chứng (tuỳ chọn) = ảnh manager chụp thêm + ảnh hiện trạng khách đã gửi (nếu bật), bỏ trùng.
+      const tenantPhotos = useTenantPhotosAsEvidence ? (beforeUrls ?? []).filter(u => !isVideoUrl(u)) : [];
+      const evidenceUrls = [...new Set([...(ticket?.faultEvidenceImages ?? []), ...tenantPhotos])];
       if (diagnoseTenantAgreesToPay == null) {
         showAlert('Chưa chọn', 'Vui lòng chọn khách có đồng ý trả chi phí hay không.');
         return;
@@ -1221,8 +1225,32 @@ export const TicketDetailScreen: React.FC = () => {
             multiline
           />
           <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>
-            Ảnh/video bằng chứng — không bắt buộc (đã có ảnh của khách và xác nhận tại hiện trường).
+            Ảnh/video bằng chứng — không bắt buộc.
           </Text>
+          {(beforeUrls?.length ?? 0) > 0 && (
+            <>
+              <TouchableOpacity
+                style={[s.replaceToggleRow, { marginTop: Spacing.sm }]}
+                onPress={() => setUseTenantPhotosAsEvidence(v => !v)}
+                activeOpacity={0.75}
+              >
+                <View style={[s.checkbox, useTenantPhotosAsEvidence && s.checkboxChecked]}>
+                  {useTenantPhotosAsEvidence && <Icon name="check" size={14} color={Colors.white} strokeWidth={3} />}
+                </View>
+                <Text style={s.pickHint}>Dùng {beforeUrls!.length} ảnh khách đã gửi làm bằng chứng lỗi</Text>
+              </TouchableOpacity>
+              {useTenantPhotosAsEvidence && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: Spacing.xs }}>
+                  {beforeUrls!.filter(u => !isVideoUrl(u)).map((u, i, arr) => (
+                    <TouchableOpacity key={u} onPress={() => setLightbox({ uris: arr, index: i })} activeOpacity={0.85}>
+                      <Image source={{ uri: u }} style={{ width: 56, height: 56, borderRadius: 8, marginRight: 6 }} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </>
+          )}
+          <Text style={[s.pickHint, { marginTop: Spacing.sm }]}>Chụp thêm (nếu cần):</Text>
           <View style={{ marginTop: Spacing.sm }}>
             <PhotoEvidenceRow
               type="fault_evidence" urls={ticket.faultEvidenceImages} photos={photos}

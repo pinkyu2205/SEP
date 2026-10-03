@@ -62,6 +62,9 @@ export const EquipmentDetailScreen: React.FC = () => {
     [byEquipment, equipment],
   );
   const extraHistory = useMemo(() => orphanHistory(history, summary.tickets), [history, summary.tickets]);
+  // Luật chặn tạo phiếu của BE: còn phiếu chưa CLOSED/CANCELLED/OUTSTANDING_DAMAGE, hoặc thiết bị BROKEN/DISPOSED.
+  const blockingTicket = summary.tickets.find(t => !['CLOSED', 'CANCELLED', 'OUTSTANDING_DAMAGE'].includes(String(t.status)));
+  const awaitingReplacement = ['BROKEN', 'DISPOSED'].includes(String(equipment?.status || '').toUpperCase());
 
   /**
    * Bắt buộc quét đúng QR dán trên thiết bị trước khi mở form báo hỏng (06/09/2026) —
@@ -289,17 +292,33 @@ export const EquipmentDetailScreen: React.FC = () => {
       </ScrollView>
 
       {/* Nút báo hỏng ghim đáy — không phải cuộn mới thấy */}
+      {/* 03/10/2026: cùng luật chặn báo trùng của BE — đang có phiếu chưa xong thì dẫn tới phiếu đó,
+          thiết bị hỏng chờ thay thì không cho báo (khỏi quét QR rồi mới bị từ chối). */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.reportBtn, checkingScan && { opacity: 0.6 }]}
-          onPress={() => setScanVisible(true)}
-          disabled={checkingScan}
-          activeOpacity={0.8}
-        >
-          {checkingScan
-            ? <Text style={styles.reportBtnText}>Đang kiểm tra mã QR…</Text>
-            : <IconText icon="scan-qr" style={styles.reportBtnText}>Quét QR để báo hỏng</IconText>}
-        </TouchableOpacity>
+        {awaitingReplacement ? (
+          <View style={[styles.reportBtn, { backgroundColor: Colors.divider }]}>
+            <Text style={[styles.reportBtnText, { color: Colors.textSecondary }]}>Thiết bị đang chờ thay mới</Text>
+          </View>
+        ) : blockingTicket ? (
+          <TouchableOpacity
+            style={styles.reportBtn}
+            onPress={() => navigation.navigate('MaintenanceDetail', { requestId: blockingTicket.id })}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.reportBtnText}>Đang có yêu cầu {blockingTicket.requestCode} — xem tiến độ</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.reportBtn, checkingScan && { opacity: 0.6 }]}
+            onPress={() => setScanVisible(true)}
+            disabled={checkingScan}
+            activeOpacity={0.8}
+          >
+            {checkingScan
+              ? <Text style={styles.reportBtnText}>Đang kiểm tra mã QR…</Text>
+              : <IconText icon="scan-qr" style={styles.reportBtnText}>Quét QR để báo hỏng</IconText>}
+          </TouchableOpacity>
+        )}
       </View>
 
       <EquipmentQrScanModal
