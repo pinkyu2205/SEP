@@ -919,7 +919,8 @@ export const TicketDetailScreen: React.FC = () => {
     }
 
     let repairAppointmentAt: string | undefined;
-    if (fromInspection || diagnoseWantsSchedule) {
+    // Thay mới không có lịch sửa/giao máy (03/10/2026).
+    if (!diagnoseNeedsReplacement && (fromInspection || diagnoseWantsSchedule)) {
       const dt = approveRepairTime ? toLocalDateTime(approveRepairDate, approveRepairTime) : null;
       if (!dt) {
         showAlert('Thiếu lịch hẹn', fromInspection
@@ -948,11 +949,22 @@ export const TicketDetailScreen: React.FC = () => {
         category: approveCategory.toUpperCase() as MaintenanceReqCategory,
         priority: approvePriority ? (approvePriority.toUpperCase() as MaintenanceReqPriority) : undefined,
       });
+      const replaced = diagnoseNeedsReplacement;
       await refreshReal();
       setDiagnoseFormOpen(false);
       setDiagnoseCause(null); setDiagnoseFaultReason('');
       setDiagnoseTenantAgreesToPay(null); setDiagnoseCompanyAbsorbedNote(''); setDiagnoseWantsSchedule(false);
       setDiagnoseNeedsReplacement(false);
+      if (replaced) {
+        showAlert(
+          'Đã báo thay thiết bị',
+          diagnoseCause === 'TENANT_MISUSE' && tenantAgreesToPay
+            ? 'Đã lập hoá đơn thu khách (hạn 5 ngày) — khách quét QR trong app. Admin được báo để nhập thiết bị mới.'
+            : 'Phiếu đã kết thúc. Admin được báo để nhập thiết bị mới.',
+          undefined, 'success',
+        );
+        return;
+      }
       showAlert(
         diagnoseCause === 'WEAR'
           ? 'Đã ghi nhận hao mòn tự nhiên'
@@ -1257,7 +1269,20 @@ export const TicketDetailScreen: React.FC = () => {
         </>
       )}
 
-      {fromInspection ? (
+      {/* 03/10/2026: THAY MỚI = không sửa, không lịch sửa/giao máy, không ảnh sau sửa. Chẩn đoán xong là
+          phiếu kết thúc: thiết bị đánh dấu Hỏng, admin được báo để nhập thiết bị mới (cải tạo bổ sung).
+          Khách trả → lập QR hạn 5 ngày, trả xong phiếu tự đóng. Đặc tả BE:
+          docs/BE-YEUCAU-thay-moi-ket-thuc-tai-chan-doan-2026-10-03.md */}
+      {diagnoseNeedsReplacement ? (
+        <View style={[s.card, { marginTop: Spacing.md, marginBottom: 0, backgroundColor: '#FFFBEB', borderColor: '#FDE68A', borderWidth: 1 }]}>
+          <Text style={[s.cardSectionTitle, { color: '#B45309' }]}>Không sửa — báo admin thay thiết bị</Text>
+          <Text style={[s.descText, { color: '#92400E' }]}>
+            {diagnoseCause === 'TENANT_MISUSE' && diagnoseTenantAgreesToPay
+              ? `Xác nhận xong: hệ thống lập QR thu khách ${diagnoseAutoDamageAmount ? fmt(diagnoseAutoDamageAmount) : ''} (hạn 5 ngày), thiết bị chuyển "Hỏng", admin được báo để nhập thiết bị mới. Phiếu tự đóng khi khách trả.`
+              : 'Xác nhận xong: phiếu đóng, thiết bị chuyển "Hỏng", admin được báo để nhập thiết bị mới. Không cần ảnh sau sửa chữa.'}
+          </Text>
+        </View>
+      ) : fromInspection ? (
         <>
           <Text style={[s.cardSectionTitle, { marginTop: Spacing.md }]}>Lịch hẹn giao máy / sửa chính thức (bắt buộc)</Text>
           <AppointmentSlotPicker
