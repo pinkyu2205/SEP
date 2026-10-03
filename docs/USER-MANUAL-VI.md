@@ -115,12 +115,12 @@ Hệ thống Quản lý Cho thuê lại (SLMS-2026) có 5 luồng nghiệp vụ 
 - Luồng quản lý bảo trì và thiết bị
 - Luồng dòng tiền và báo cáo tài chính
 
-Mỗi luồng được thực hiện trên hai ứng dụng. **Ứng dụng web** dành cho Admin và Host, **ứng dụng di động** dành cho Quản lý vận hành và Khách thuê. Vì vậy các mục dưới đây được tách thành "Web" và "Mobile" đúng theo cách công việc được phân chia.
+Mỗi luồng được thực hiện trên hai ứng dụng. **Ứng dụng web** dành cho Admin và Owner, **ứng dụng di động** dành cho Quản lý vận hành và Khách thuê. Vì vậy các mục dưới đây được tách thành "Web" và "Mobile" đúng theo cách công việc được phân chia.
 
 | Vai trò | Ứng dụng | Trách nhiệm |
 |---|---|---|
 | Admin | Web | Khởi tạo nhà, cấu hình khai thác, đón khách, phát hành hoá đơn điện nước, phân xử khiếu nại |
-| Host | Web | Duyệt giá, phân công khu vực, theo dõi tài chính |
+| Owner | Web | Duyệt giá, phân công khu vực, theo dõi tài chính |
 | Quản lý vận hành | Mobile | Tiếp quản toà nhà, đón khách, chốt chỉ số đồng hồ, gửi hoá đơn phòng, bảo trì, trả phòng |
 | Khách thuê | Mobile | Ký hợp đồng, thanh toán hoá đơn, báo hỏng, yêu cầu trả phòng |
 | Khách vãng lai | Web (công khai) | Xem tin cho thuê và gọi hotline |
@@ -199,103 +199,103 @@ Hệ thống báo số căn, số dòng cải tạo, số thiết bị mua mới
 
 [Ảnh: luồng cấu hình khai thác/4.jpg]
 
-##### 3.2.2.4 `<Admin>` Nhập và gửi Host
+##### 3.2.2.4 `<Admin>` Nhập và gửi Owner
 
-Admin bấm "Nhập & gửi Host" rồi xác nhận. Nhập xong cũng chính là đã gửi, nên không có nút gửi riêng.
+Admin bấm "Nhập & gửi Owner" rồi xác nhận. Nhập xong cũng chính là đã gửi, nên không có nút gửi riêng.
 
 [Ảnh: luồng cấu hình khai thác/5.jpg]
 
-Mọi căn vừa nhập chuyển sang "Đã gửi Host" và xuất hiện trong hàng chờ duyệt giá của Host.
+Mọi căn vừa nhập chuyển sang "Đã gửi Owner" và xuất hiện trong hàng chờ duyệt giá của Owner.
 
 [Ảnh: luồng cấu hình khai thác/6.jpg]
 
 ##### 3.2.2.5 `<Admin>` Xác nhận hoàn thành cải tạo
 
-Thi công xong, Admin mở toà nhà và bấm "Xác nhận hoàn thành cải tạo". Có bước này Host mới duyệt giá được.
+Thi công xong, Admin mở toà nhà và bấm "Xác nhận hoàn thành cải tạo". Có bước này Owner mới duyệt giá được.
 
 [Ảnh: nút xác nhận hoàn thành cải tạo]
 
 #### 3.2.3 Web — Cấu hình duyệt giá
 
-##### 3.2.3.1 `<Host>` Đặt mục tiêu lợi nhuận và chi phí vận hành
+##### 3.2.3.1 `<Owner>` Đặt mục tiêu lợi nhuận và chi phí vận hành
 
-Host bấm "Cấu hình giá" và nhập mục tiêu lợi nhuận cùng chi phí vận hành mỗi tháng. Các con số này chi phối mọi lần duyệt giá, nên phải lưu trước khi duyệt căn đầu tiên.
+Owner bấm "Cấu hình giá" và nhập mục tiêu lợi nhuận cùng chi phí vận hành mỗi tháng. Các con số này chi phối mọi lần duyệt giá, nên phải lưu trước khi duyệt căn đầu tiên.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/1.jpg]
 
-##### 3.2.3.2 `<Host>` Đặt mức tăng giá thuê hằng năm
+##### 3.2.3.2 `<Owner>` Đặt mức tăng giá thuê hằng năm
 
-Host đặt mức tăng mỗi năm, thời gian ân hạn cho khách mới và thời điểm báo giá năm sau, rồi xem khối mô phỏng ở cuối mục.
+Owner đặt mức tăng mỗi năm, thời gian ân hạn cho khách mới và thời điểm báo giá năm sau, rồi xem khối mô phỏng ở cuối mục.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/3.jpg]
 
-##### 3.2.3.3 `<Host>` Đặt các biên dự phòng rủi ro
+##### 3.2.3.3 `<Owner>` Đặt các biên dự phòng rủi ro
 
-Host đặt biên dự phòng trống phòng và cửa sổ bàn giao bị trừ ở cuối hợp đồng chủ nhà, đối chiếu phần tóm tắt rồi bấm "Lưu cấu hình".
+Owner đặt biên dự phòng trống phòng và cửa sổ bàn giao bị trừ ở cuối hợp đồng chủ nhà, đối chiếu phần tóm tắt rồi bấm "Lưu cấu hình".
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/4.jpg]
 
-##### 3.2.3.4 `<Host>` Nhập bảng lương quản lý
+##### 3.2.3.4 `<Owner>` Nhập bảng lương quản lý
 
-Host bấm "Lương quản lý", nhập lương của từng quản lý vận hành rồi bấm "Lưu bảng lương". Mỗi căn nhà gánh phần lương chia cho số nhà mà người đó đang phụ trách.
+Owner bấm "Lương quản lý", nhập lương của từng quản lý vận hành rồi bấm "Lưu bảng lương". Mỗi căn nhà gánh phần lương chia cho số nhà mà người đó đang phụ trách.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/màn cấu hình lương cho manager.jpg]
 
 #### 3.2.4 Web — Duyệt giá nhà nguyên căn
 
-##### 3.2.4.1 `<Host>` Mở hàng chờ duyệt giá
+##### 3.2.4.1 `<Owner>` Mở hàng chờ duyệt giá
 
-Host bấm "Xem & duyệt" ở banner đầu màn "Bất động sản".
+Owner bấm "Xem & duyệt" ở banner đầu màn "Bất động sản".
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/1.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/1.jpg]
 
-Hàng chờ tách riêng nhà mới cần duyệt giá lần đầu và nhà vừa cải tạo bổ sung cần duyệt lại giá. Host bấm "Duyệt" để mở một hồ sơ.
+Hàng chờ tách riêng nhà mới cần duyệt giá lần đầu và nhà vừa cải tạo bổ sung cần duyệt lại giá. Owner bấm "Duyệt" để mở một hồ sơ.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/2.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/2.jpg]
 
-##### 3.2.4.2 `<Host>` Xem tiền đã bỏ ra cho toà nhà
+##### 3.2.4.2 `<Owner>` Xem tiền đã bỏ ra cho toà nhà
 
-Host xem ba khối chi phí: tiền thuê trả chủ nhà, chi phí cải tạo và thiết bị mua mới. Thiết bị chủ nhà bàn giao được ghi nhận riêng và không tính vào tiền bỏ ra.
+Owner xem ba khối chi phí: tiền thuê trả chủ nhà, chi phí cải tạo và thiết bị mua mới. Thiết bị chủ nhà bàn giao được ghi nhận riêng và không tính vào tiền bỏ ra.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/3.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/3.jpg]
 
-##### 3.2.4.3 `<Host>` Xem từng khoản vốn và lịch khấu hao
+##### 3.2.4.3 `<Owner>` Xem từng khoản vốn và lịch khấu hao
 
-Host cuộn xuống khối "TỪNG KHOẢN VỐN VÀ LỊCH KHẤU HAO" để xem mỗi khoản thu hồi được bao nhiêu một tháng và phòng nào đang gánh khoản đó.
+Owner cuộn xuống khối "TỪNG KHOẢN VỐN VÀ LỊCH KHẤU HAO" để xem mỗi khoản thu hồi được bao nhiêu một tháng và phòng nào đang gánh khoản đó.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/4.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/4.jpg]
 
-##### 3.2.4.4 `<Host>` Đối chiếu mục tiêu và giá hệ thống tính ra
+##### 3.2.4.4 `<Owner>` Đối chiếu mục tiêu và giá hệ thống tính ra
 
-Host đối chiếu mục tiêu lợi nhuận lấy từ "Cấu hình giá" và đọc các bước tính dẫn tới mức giá thuê phải đạt mỗi tháng. Muốn đổi mục tiêu thì bấm "Sửa cấu hình duyệt giá", sau đó bấm "Tính lại theo cấu hình".
+Owner đối chiếu mục tiêu lợi nhuận lấy từ "Cấu hình giá" và đọc các bước tính dẫn tới mức giá thuê phải đạt mỗi tháng. Muốn đổi mục tiêu thì bấm "Sửa cấu hình duyệt giá", sau đó bấm "Tính lại theo cấu hình".
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/5.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/5.jpg]
 
-##### 3.2.4.5 `<Host>` Chốt giá thuê
+##### 3.2.4.5 `<Owner>` Chốt giá thuê
 
-Host bấm "Lấy giá đề xuất", hoặc "↑ Làm tròn 100k", hoặc tự gõ con số khác. Trang hiển thị tiếp phần lãi của cả kỳ sau khi đã trừ chi phí vận hành và dự phòng sửa chữa.
+Owner bấm "Lấy giá đề xuất", hoặc "↑ Làm tròn 100k", hoặc tự gõ con số khác. Trang hiển thị tiếp phần lãi của cả kỳ sau khi đã trừ chi phí vận hành và dự phòng sửa chữa.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/6.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/6.jpg]
 
-##### 3.2.4.6 `<Host>` Kích hoạt cho thuê
+##### 3.2.4.6 `<Owner>` Kích hoạt cho thuê
 
-Host bấm "Xác nhận & Kích hoạt", đọc hộp thoại xác nhận cuối rồi bấm "Kích hoạt cho thuê". Các chỗ trống lên website công khai và quản lý vận hành bắt đầu tiếp quản. Giá chỉ sửa được khi đơn vị còn trống, nên phải chỉnh trước khi khách ký hợp đồng.
+Owner bấm "Xác nhận & Kích hoạt", đọc hộp thoại xác nhận cuối rồi bấm "Kích hoạt cho thuê". Các chỗ trống lên website công khai và quản lý vận hành bắt đầu tiếp quản. Giá chỉ sửa được khi đơn vị còn trống, nên phải chỉnh trước khi khách ký hợp đồng.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/7.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/7.jpg]
 
 #### 3.2.5 Web — Duyệt giá nhà chia phòng
 
-##### 3.2.5.1 `<Host>` Xem tiền đã bỏ ra cho toà nhà
+##### 3.2.5.1 `<Owner>` Xem tiền đã bỏ ra cho toà nhà
 
-Host mở hồ sơ theo cách tương tự và xem ba khối chi phí như trên. Phần mô tả ghi rõ toà nhà được chia thành mấy phòng.
+Owner mở hồ sơ theo cách tương tự và xem ba khối chi phí như trên. Phần mô tả ghi rõ toà nhà được chia thành mấy phòng.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà theo phòng/3.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà theo phòng/3.jpg]
 
-##### 3.2.5.2 `<Host>` Chốt giá thuê từng phòng
+##### 3.2.5.2 `<Owner>` Chốt giá thuê từng phòng
 
-Host điền cả cột giá bằng "Lấy giá đề xuất cho tất cả" và "Làm tròn lên 100k tất cả", hoặc gõ giá riêng cho từng phòng, rồi đối chiếu tổng với dòng mục tiêu ở cuối bảng. Vốn được chia đều cho các phòng chứ không chia theo diện tích, nên hai phòng khác diện tích có cùng giá đề xuất.
+Owner điền cả cột giá bằng "Lấy giá đề xuất cho tất cả" và "Làm tròn lên 100k tất cả", hoặc gõ giá riêng cho từng phòng, rồi đối chiếu tổng với dòng mục tiêu ở cuối bảng. Vốn được chia đều cho các phòng chứ không chia theo diện tích, nên hai phòng khác diện tích có cùng giá đề xuất.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà theo phòng/6.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà theo phòng/6.jpg]
 
 #### 3.2.6 Web — Cải tạo bổ sung và duyệt lại giá
 
@@ -317,23 +317,23 @@ Admin chọn file rồi bấm "Kiểm tra file". File chỉ nhận đúng mã h�
 
 [Ảnh: luồng cải tạo bổ xung/5.jpg]
 
-Admin bấm "Nhập cải tạo bổ sung". Hệ thống nhập đợt cải tạo và tự động gửi Host duyệt lại giá, sau đó Admin bấm "Xác nhận hoàn thành cải tạo" khi thi công xong.
+Admin bấm "Nhập cải tạo bổ sung". Hệ thống nhập đợt cải tạo và tự động gửi Owner duyệt lại giá, sau đó Admin bấm "Xác nhận hoàn thành cải tạo" khi thi công xong.
 
 [Ảnh: luồng cải tạo bổ xung/7.jpg]
 
-##### 3.2.6.4 `<Host>` Xem đợt cải tạo vừa làm
+##### 3.2.6.4 `<Owner>` Xem đợt cải tạo vừa làm
 
-Host mở hồ sơ ở cột bên phải của hàng chờ và đọc phần chi phí được tách thành khoản tính vào giá và khoản công ty tự chịu. Khách đang ở giữ nguyên giá trong hợp đồng.
+Owner mở hồ sơ ở cột bên phải của hàng chờ và đọc phần chi phí được tách thành khoản tính vào giá và khoản công ty tự chịu. Khách đang ở giữ nguyên giá trong hợp đồng.
 
 [Ảnh: luồng cải tạo bổ xung/9.jpg]
 
-Host có thể mở bảng khấu hao để thấy đợt mới được cộng thêm vào đợt cũ.
+Owner có thể mở bảng khấu hao để thấy đợt mới được cộng thêm vào đợt cũ.
 
 [Ảnh: luồng cải tạo bổ xung/11.jpg]
 
-##### 3.2.6.5 `<Host>` Duyệt giá niêm yết mới
+##### 3.2.6.5 `<Owner>` Duyệt giá niêm yết mới
 
-Host bấm "Duyệt giá mới" rồi xác nhận. Hộp thoại ghi rõ giá cũ, giá mới và số phòng được áp dụng ngay.
+Owner bấm "Duyệt giá mới" rồi xác nhận. Hộp thoại ghi rõ giá cũ, giá mới và số phòng được áp dụng ngay.
 
 [Ảnh: luồng cải tạo bổ xung/13.jpg]
 
@@ -373,15 +373,15 @@ Admin bấm "Người dùng & phân quyền", bấm "Tạo tài khoản" rồi n
 
 [Ảnh: admin/màn người dùng & phân quyền.jpg]
 
-##### 3.3.1.2 `<Host>` Phân công quản lý cho khu vực
+##### 3.3.1.2 `<Owner>` Phân công quản lý cho khu vực
 
-Host bấm "Phân công khu vực", bấm "Đổi quản lý" ở một quận/huyện rồi chọn người phụ trách. Mỗi quận/huyện có đúng một quản lý, và gán cho khu vực là gán cho mọi nhà bên trong. Nhà chưa có quản lý thì không đón khách được.
+Owner bấm "Phân công khu vực", bấm "Đổi quản lý" ở một quận/huyện rồi chọn người phụ trách. Mỗi quận/huyện có đúng một quản lý, và gán cho khu vực là gán cho mọi nhà bên trong. Nhà chưa có quản lý thì không đón khách được.
 
 [Ảnh: host/màn phân công khu vực cho Manager quản lý.jpg]
 
-##### 3.3.1.3 `<Host>` Xem khối lượng việc của từng quản lý
+##### 3.3.1.3 `<Owner>` Xem khối lượng việc của từng quản lý
 
-Host bấm "Quản lý vận hành" để xem mỗi người đang phụ trách mấy khu vực, mấy toà nhà, bao nhiêu khách thuê và còn bao nhiêu phiếu bảo trì đang mở.
+Owner bấm "Quản lý vận hành" để xem mỗi người đang phụ trách mấy khu vực, mấy toà nhà, bao nhiêu khách thuê và còn bao nhiêu phiếu bảo trì đang mở.
 
 [Ảnh: host/màn quản lý manager hệ thống.jpg]
 
@@ -449,11 +449,11 @@ Quản lý bấm "Đón khách — thu tiền" để xem các hợp đồng ch�
 
 [Ảnh: mobile — danh sách chờ đón khách]
 
-##### 3.3.4.2 `<Quản lý>` Gửi Host duyệt giá mới khi cần
+##### 3.3.4.2 `<Quản lý>` Gửi Owner duyệt giá mới khi cần
 
-Nếu khách chốt mức giá khác giá niêm yết, Quản lý bấm "Nhập giá mới" và "Nhập tiền cọc" rồi gửi hợp đồng cho Host. Thẻ hợp đồng chuyển sang "Chờ Host duyệt giá", và hiện "Host từ chối giá" nếu Host không đồng ý.
+Nếu khách chốt mức giá khác giá niêm yết, Quản lý bấm "Nhập giá mới" và "Nhập tiền cọc" rồi gửi hợp đồng cho Owner. Thẻ hợp đồng chuyển sang "Chờ Owner duyệt giá", và hiện "Owner từ chối giá" nếu Owner không đồng ý.
 
-[Ảnh: mobile — nhập giá mới gửi Host duyệt]
+[Ảnh: mobile — nhập giá mới gửi Owner duyệt]
 
 ##### 3.3.4.3 `<Quản lý>` Thu cọc và tiền nhà kỳ đầu
 
@@ -551,15 +551,15 @@ Admin bấm "Hợp đồng" để theo dõi mọi hợp đồng thuê trong hệ
 
 [Ảnh: admin/màn admin xem hợp đồng của khách thuê.jpg]
 
-##### 3.3.7.3 `<Host>` Xem danh sách khách thuê
+##### 3.3.7.3 `<Owner>` Xem danh sách khách thuê
 
-Host bấm "Khách thuê" để xem ai đang ở phòng nào, phòng nào còn trống và hợp đồng nào sắp hết hạn trong 60 ngày.
+Owner bấm "Khách thuê" để xem ai đang ở phòng nào, phòng nào còn trống và hợp đồng nào sắp hết hạn trong 60 ngày.
 
 [Ảnh: host/màn quản lý khách thuê.jpg]
 
-##### 3.3.7.4 `<Host>` Xem danh sách hợp đồng
+##### 3.3.7.4 `<Owner>` Xem danh sách hợp đồng
 
-Host bấm "Hợp đồng" để xem hợp đồng khách thuê ở một tab và hợp đồng master lease ký với chủ nhà ở tab còn lại.
+Owner bấm "Hợp đồng" để xem hợp đồng khách thuê ở một tab và hợp đồng master lease ký với chủ nhà ở tab còn lại.
 
 [Ảnh: host/màn quản lý hợp đồng.jpg]
 
@@ -569,9 +569,9 @@ Admin bấm "Đơn gia hạn" rồi duyệt đơn, thao tác này chỉ dời ng
 
 [Ảnh: admin/màn admin xem đơn giai hạn ở thêm của khách thuê.jpg]
 
-##### 3.3.7.6 `<Host>` Theo dõi đơn xin gia hạn
+##### 3.3.7.6 `<Owner>` Theo dõi đơn xin gia hạn
 
-Host bấm "Đơn gia hạn" để biết khách nào xin ở thêm và đơn đã được xử lý ra sao. Quyền quyết định thuộc về Admin.
+Owner bấm "Đơn gia hạn" để biết khách nào xin ở thêm và đơn đã được xử lý ra sao. Quyền quyết định thuộc về Admin.
 
 [Ảnh: host/màn theo dõi đơn giai hạn của khách thuê.jpg]
 
@@ -722,9 +722,9 @@ Admin bấm "Thanh toán" để xem toàn bộ hoá đơn của hệ thống ở
 
 [Ảnh: admin/màn admin xem hoá đơn thanh toán.jpg]
 
-##### 3.4.6.2 `<Host>` Xem hoá đơn của khách thuê
+##### 3.4.6.2 `<Owner>` Xem hoá đơn của khách thuê
 
-Host bấm "Hoá đơn" để lọc hoá đơn đã phát hành cho khách của mình và xuất kết quả ra Excel.
+Owner bấm "Hoá đơn" để lọc hoá đơn đã phát hành cho khách của mình và xuất kết quả ra Excel.
 
 [Ảnh: host/màn theo dõi hoá đơn thanh toán.jpg]
 
@@ -798,23 +798,23 @@ Admin bấm "Danh mục thiết bị", chọn toà nhà và khổ tem, rồi b�
 
 #### 3.6.1 Web — Dòng tiền
 
-##### 3.6.1.1 `<Host>` Đối soát tiền vào và tiền ra
+##### 3.6.1.1 `<Owner>` Đối soát tiền vào và tiền ra
 
-Host bấm "Tổng quan" để đối soát tiền vào, tiền ra và lợi nhuận ròng của kỳ, theo từng toà nhà.
+Owner bấm "Tổng quan" để đối soát tiền vào, tiền ra và lợi nhuận ròng của kỳ, theo từng toà nhà.
 
 [Ảnh: host/màn theo dõi tổng quan dòng tiền của hệ thống.jpg]
 
-##### 3.6.1.2 `<Host>` Theo dõi công nợ
+##### 3.6.1.2 `<Owner>` Theo dõi công nợ
 
-Host bấm "Công nợ" để biết ai đang nợ bao nhiêu, sắp xếp theo thời gian nợ.
+Owner bấm "Công nợ" để biết ai đang nợ bao nhiêu, sắp xếp theo thời gian nợ.
 
 [Ảnh: host/màn theo dõi các khoản nợ của khách thuê.jpg]
 
 #### 3.6.2 Web — Tiền cọc
 
-##### 3.6.2.1 `<Host>` Theo dõi sổ cọc
+##### 3.6.2.1 `<Owner>` Theo dõi sổ cọc
 
-Host bấm "Sổ cọc" để xem các khoản cọc đang giữ. Cọc chỉ hoàn được khi khách đã thanh toán đủ mọi khoản, và không bao giờ dùng để trừ nợ hoá đơn.
+Owner bấm "Sổ cọc" để xem các khoản cọc đang giữ. Cọc chỉ hoàn được khi khách đã thanh toán đủ mọi khoản, và không bao giờ dùng để trừ nợ hoá đơn.
 
 [Ảnh: host/màn quản lý tiền cọc của khách thuê.jpg]
 
@@ -826,15 +826,15 @@ Admin bấm "Hoàn cọc", đọc nội dung khách khiếu nại và hồ sơ t
 
 #### 3.6.3 Web — Báo cáo
 
-##### 3.6.3.1 `<Host>` Xem báo cáo tài chính và hiệu suất vận hành
+##### 3.6.3.1 `<Owner>` Xem báo cáo tài chính và hiệu suất vận hành
 
-Host bấm "Báo cáo" để xem doanh thu, chi phí, lợi nhuận và tỷ lệ lấp đầy qua 6 hoặc 12 kỳ, kèm hiệu suất của từng quản lý vận hành.
+Owner bấm "Báo cáo" để xem doanh thu, chi phí, lợi nhuận và tỷ lệ lấp đầy qua 6 hoặc 12 kỳ, kèm hiệu suất của từng quản lý vận hành.
 
 [Ảnh: host/màn báo cáo phân tích hiệu suất vận hành của hệ thống.jpg]
 
-##### 3.6.3.2 `<Host>` Đọc thông báo
+##### 3.6.3.2 `<Owner>` Đọc thông báo
 
-Host bấm "Thông báo" để đọc các sự kiện cần xử lý, lọc theo loại và theo trạng thái đã đọc.
+Owner bấm "Thông báo" để đọc các sự kiện cần xử lý, lọc theo loại và theo trạng thái đã đọc.
 
 [Ảnh: host/màn thông báo.jpg]
 
@@ -856,11 +856,11 @@ Khách bấm "Lịch sử thanh toán" để xem lại mọi khoản đã trả,
 
 | Thông báo trên màn hình | Nghĩa là gì | Cách xử lý |
 |---|---|---|
-| "Tài khoản Quản lý vận hành vui lòng sử dụng ứng dụng di động." | Tài khoản quản lý đăng nhập trên web | Dùng ứng dụng di động, web chỉ dành cho Admin và Host |
+| "Tài khoản Quản lý vận hành vui lòng sử dụng ứng dụng di động." | Tài khoản quản lý đăng nhập trên web | Dùng ứng dụng di động, web chỉ dành cho Admin và Owner |
 | "Không kết nối được máy chủ. Kiểm tra lại backend rồi thử lại." | Không gọi được backend | Kiểm tra dịch vụ API đã chạy chưa và `VITE_API_URL` có trỏ đúng không |
 | "Có khu vực trong file chưa tồn tại trong hệ thống" | File Excel có quận/huyện chưa nằm trong danh mục | Bấm "Tạo tự động", hoặc thêm ở "Danh mục khu vực" rồi kiểm tra file lại |
-| "Chưa import được: cả {n} hợp đồng đều thuộc nhà chưa hoạt động" | Các toà nhà chưa được Host kích hoạt | Hoàn tất luồng duyệt giá trước, rồi mới import hợp đồng khách |
-| "Nhà này chưa có quản lý phụ trách…" | Khu vực của toà nhà chưa có quản lý | Nhờ Host phân công quản lý cho khu vực |
+| "Chưa import được: cả {n} hợp đồng đều thuộc nhà chưa hoạt động" | Các toà nhà chưa được Owner kích hoạt | Hoàn tất luồng duyệt giá trước, rồi mới import hợp đồng khách |
+| "Nhà này chưa có quản lý phụ trách…" | Khu vực của toà nhà chưa có quản lý | Nhờ Owner phân công quản lý cho khu vực |
 | "Cấu hình chưa có tiền lãi mục tiêu…" | Cấu hình duyệt giá chưa từng được nhập | Mở "Cấu hình giá" và lưu lại |
 | "Số danh bộ không khớp…" | Số danh bộ trên giấy khác số đã lưu | Kiểm tra lại toà nhà đang chọn, sau đó sửa ô số danh bộ rồi bấm lại |
 | "Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay." | Hệ thống không đọc được ảnh hoá đơn | Nhập tay các con số, ảnh vẫn được lưu làm bằng chứng |

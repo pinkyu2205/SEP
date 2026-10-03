@@ -22,7 +22,7 @@ import {
 } from '../shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Báo cáo & Phân tích (Host) — 100% API thật, KHÔNG mock.
+// Báo cáo & Phân tích (Owner) — 100% API thật, KHÔNG mock.
 //   • Tài chính theo kỳ  ← GET /host/reports/financial-summary?from=&to=
 //   • Hiệu suất quản lý  ← GET /host/reports/manager-performance?month=
 //   • Hiệu suất theo nhà ← GET /host/reports/property-performance?month=
@@ -33,7 +33,7 @@ import {
 // → NaN% / -Infinity%. Nay currentMonth() lấy theo giờ server (utils/period.ts).
 // Ở đây mọi tỷ lệ đều đi qua safePct(): doanh thu 0 thì hiện "—", không chia.
 //
-// ⚠ Giới hạn BE đã biết (docs/BE-NEED-host-finance-modules-2026-08-09.md):
+// ⚠ Giới hạn BE đã biết (docs/BE-NEED-owner-finance-modules-2026-08-09.md):
 //   - financial-summary trả `occupancyRate` là tỷ lệ lấp đầy HIỆN TẠI cho mọi kỳ
 //     (không có lịch sử) → không vẽ đường xu hướng lấp đầy để khỏi bịa số.
 //   - manager-performance: `resolvedMaintenance` luôn 0, `openMaintenance` thực chất
@@ -573,7 +573,7 @@ export const ReportsAnalytics = () => {
               {pagedProps.map(r => (
                 <tr key={r.id} className="transition-colors hover:bg-slate-50">
                   <td className="px-5 py-3.5">
-                    <Link to={`/host/properties/${r.id}`} className="font-medium text-slate-900 hover:text-indigo-600">
+                    <Link to={`/owner/properties/${r.id}`} className="font-medium text-slate-900 hover:text-indigo-600">
                       {r.name}
                     </Link>
                     <p className="line-clamp-1 text-xs text-slate-400">{r.address || '—'}</p>
@@ -624,9 +624,9 @@ export const ReportsAnalytics = () => {
       {/* Điều hướng nhanh */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[
-          { to: '/host/financial', label: 'Quản lý dòng tiền', desc: 'Đối soát thu chi từng nhà theo kỳ', icon: Wallet },
-          { to: '/host/receivables', label: 'Công nợ phải thu', desc: 'Hoá đơn chưa thu & tuổi nợ', icon: BarChart3 },
-          { to: '/host/operations-managers', label: 'Quản lý vận hành', desc: 'Hồ sơ & phân công quản lý', icon: UserCog },
+          { to: '/owner/financial', label: 'Quản lý dòng tiền', desc: 'Đối soát thu chi từng nhà theo kỳ', icon: Wallet },
+          { to: '/owner/receivables', label: 'Công nợ phải thu', desc: 'Hoá đơn chưa thu & tuổi nợ', icon: BarChart3 },
+          { to: '/owner/operations-managers', label: 'Quản lý vận hành', desc: 'Hồ sơ & phân công quản lý', icon: UserCog },
         ].map(item => (
           <Link key={item.to} to={item.to}
             className="card flex items-center gap-3 p-4 transition hover:border-indigo-200 hover:shadow-md">

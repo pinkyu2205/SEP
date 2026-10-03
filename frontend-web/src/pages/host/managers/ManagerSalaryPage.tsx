@@ -53,7 +53,7 @@ export const ManagerSalaryPage = () => {
   const [source, setSource] = useState<PricingConfigSource>('default');
   const [managers, setManagers] = useState<{ id: string; fullName: string }[]>([]);
   const [propsByManager, setPropsByManager] = useState<Record<string, number>>({});
-  /** Trong số đó, bao nhiêu căn còn chờ Host duyệt giá — chưa thực sự bàn giao cho quản lý. */
+  /** Trong số đó, bao nhiêu căn còn chờ Owner duyệt giá — chưa thực sự bàn giao cho quản lý. */
   const [pendingByManager, setPendingByManager] = useState<Record<string, number>>({});
   const [zonesByManager, setZonesByManager] = useState<Map<string, string[]>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -204,7 +204,7 @@ export const ManagerSalaryPage = () => {
                     <td className="w-44 py-2.5 pl-2">
                       <MoneyInput value={m.salary} onChange={(v) => setSalary(m.managerId, v)} />
                     </td>
-                    {/* "Phụ trách" chứ không phải "đang coi": nhà chờ Host duyệt giá thì chưa
+                    {/* "Phụ trách" chứ không phải "đang coi": nhà chờ Owner duyệt giá thì chưa
                         bàn giao, quản lý chưa thực sự coi cái gì. Ghi rõ phần chờ duyệt để
                         không đá nhau với màn Khu vực (màn đó đọc `operationManagerId`, nhà
                         chưa duyệt thì trống nên hiện "Chưa gán"). */}
@@ -257,12 +257,12 @@ export const ManagerSalaryPage = () => {
         )}
 
         {/* Cột "Phụ trách" đếm theo BẢNG PHÂN CÔNG KHU VỰC, còn màn Khu vực đọc
-            `property.operationManagerId` — nhà chỉ nhận id đó SAU khi Host duyệt giá. Hai
+            `property.operationManagerId` — nhà chỉ nhận id đó SAU khi Owner duyệt giá. Hai
             màn vì thế hiện khác nhau khi còn nhà chờ duyệt, và nếu không nói ra thì trông
             như hệ thống tự mâu thuẫn. */}
         {totalPending > 0 && (
           <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-            Đang có <b>{totalPending} nhà chờ Host duyệt giá</b>. Chúng được tính vào mẫu số chia
+            Đang có <b>{totalPending} nhà chờ Owner duyệt giá</b>. Chúng được tính vào mẫu số chia
             lương vì quản lý khu vực sẽ nhận chúng, nhưng <b>chưa bàn giao</b> — nên màn
             {' '}<b>Khu vực &amp; Quản lý</b> vẫn hiện &quot;Chưa gán&quot;. Hai màn không mâu thuẫn:
             một bên là <u>phân công khu vực</u>, một bên là <u>nhà đã thực sự về tay quản lý</u>.
@@ -291,14 +291,14 @@ export const ManagerSalaryPage = () => {
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => navigate('/host/pricing-config')}
+            onClick={() => navigate('/owner/pricing-config')}
             className="flex items-center justify-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
           >
             <SlidersHorizontal className="h-4 w-4" /> Cấu hình duyệt giá
           </button>
           <button
             type="button"
-            onClick={() => navigate('/host/zones')}
+            onClick={() => navigate('/owner/zones')}
             className="flex items-center justify-center gap-1.5 px-2 py-2.5 text-sm font-bold text-slate-500 transition hover:text-indigo-600"
           >
             <ArrowLeft className="h-4 w-4" /> Khu vực &amp; Quản lý

@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import { withUsageMonth } from '@/utils/helpers';
 import type { IconName } from '@/components/common/Icon';
 
 /**
@@ -63,6 +64,8 @@ export interface ManagerInvoice {
   contractId?: number | null;
   month: number;
   year: number;
+  /** Chuỗi kỳ — điện/nước dùng để đọc lại tháng tiêu thụ, xem `withUsageMonth`. */
+  billingPeriod?: string | null;
   /**
    * Tổng phải thu. BE MASK về `null` cho tài khoản MANAGER với hoá đơn tiền nhà
    * (`ManagerBillingServiceImpl`: `if (!isAdmin && type == RENT) setAmount(null)`).
@@ -254,7 +257,8 @@ export const realManagerInvoiceService = {
     const { data } = await realApiClient.get<SpringPage<ManagerInvoice> | ManagerInvoice[]>(
       '/api/v1/manager/invoices', { params: { size: 500, ...params } },
     );
-    return unwrap(data);
+    // Điện/nước trả sau — hiện đúng tháng tiêu thụ, không phải tháng phát hành.
+    return unwrap(data).map(withUsageMonth);
   },
 
   // GET /api/v1/manager/payments?status=  (giao dịch thanh toán: chờ xác nhận / đã xác nhận)

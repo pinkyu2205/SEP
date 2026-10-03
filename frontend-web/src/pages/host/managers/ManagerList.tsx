@@ -111,7 +111,7 @@ export const ManagerList = () => {
       setPerf(perfRows);
       setZoneManagerOf(new Map(zoneLinks.map(a => [String(a.zoneId), a.managerId])));
 
-      // Thử lấy phone/status — host có thể không có quyền, bỏ qua nếu lỗi
+      // Thử lấy phone/status — owner có thể không có quyền, bỏ qua nếu lỗi
       try {
         const users = await userService.getAllUsers();
         const map = new Map<string, UserResponse>();
@@ -156,12 +156,12 @@ export const ManagerList = () => {
   /**
    * Nhà thuộc quyền một quản lý — tính theo CẢ HAI đường, không chỉ `operationManagerId`.
    *
-   * Nhà chỉ nhận `operationManagerId` SAU khi Host duyệt giá. Nên ở giai đoạn admin vừa gửi
-   * nhà mà Host chưa duyệt, lọc theo mỗi trường đó thì mọi quản lý đều ra 0 nhà / 0 khu vực
+   * Nhà chỉ nhận `operationManagerId` SAU khi Owner duyệt giá. Nên ở giai đoạn admin vừa gửi
+   * nhà mà Owner chưa duyệt, lọc theo mỗi trường đó thì mọi quản lý đều ra 0 nhà / 0 khu vực
    * — trang này trắng trơn dù khu vực đã được phân công xong.
    *
    * Cộng thêm nhà nằm trong khu vực người đó phụ trách (bảng `zone_managers`): chúng sẽ về
-   * tay người này ngay khi Host duyệt, nên tính vào là đúng bức tranh phụ trách.
+   * tay người này ngay khi Owner duyệt, nên tính vào là đúng bức tranh phụ trách.
    */
   const getAssignedProps = (mgId: string) =>
     properties.filter(p =>
@@ -203,7 +203,7 @@ export const ManagerList = () => {
   const activeManagers = managers.filter(m => (userMap.get(m.id)?.status ?? 'ACTIVE') === 'ACTIVE').length;
   const totalTenants   = [...tenantsByProp.values()].reduce((a, b) => a + b, 0);
   const totalOpenMaint = perf.reduce((a, r) => a + (r.openMaintenance ?? 0), 0);
-  /** Quản lý chưa được giao khu vực nào — việc còn sót của Host sau mỗi lần đổi phân công. */
+  /** Quản lý chưa được giao khu vực nào — việc còn sót của Owner sau mỗi lần đổi phân công. */
   const idleManagers   = managers.filter(m => groupByZone(getAssignedProps(m.id)).length === 0).length;
 
   return (
@@ -308,7 +308,7 @@ export const ManagerList = () => {
                     </div>
                   </div>
 
-                  {/* Chưa có khu vực = việc còn sót của Host, phải thấy ngay trên dòng
+                  {/* Chưa có khu vực = việc còn sót của Owner, phải thấy ngay trên dòng
                       chứ không phải mở ra mới biết. */}
                   {zones.length === 0 && (
                     <span className="hidden shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 md:inline-flex">
@@ -365,7 +365,7 @@ export const ManagerList = () => {
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                         Khu vực phụ trách ({zones.length})
                       </p>
-                      <Link to="/host/zones" className="text-xs font-bold text-indigo-600 hover:underline">
+                      <Link to="/owner/zones" className="text-xs font-bold text-indigo-600 hover:underline">
                         Đổi phân công →
                       </Link>
                     </div>

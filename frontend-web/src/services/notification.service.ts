@@ -9,8 +9,8 @@ import type { Page } from '@/types/api.types';
  * duyệt, master lease sắp hết hạn.
  *
  * Các thông báo do cron nghiệp vụ bắn (BillingCronServiceImpl) — nhắc hạn / quá hạn
- * tiền phòng cho khách, cảnh báo cho quản lý & host — lại nằm ở bảng chung này.
- * App mobile đọc đúng bảng nên nhận được; web host trước giờ không gọi endpoint này
+ * tiền phòng cho khách, cảnh báo cho quản lý & owner — lại nằm ở bảng chung này.
+ * App mobile đọc đúng bảng nên nhận được; web owner trước giờ không gọi endpoint này
  * nên KHÔNG hiện. Service này lấp chỗ đó.
  */
 
@@ -29,7 +29,7 @@ export interface AppNotificationDto {
 }
 
 /**
- * Thông báo cảnh báo công nợ mà Host cần thấy trên web.
+ * Thông báo cảnh báo công nợ mà Owner cần thấy trên web.
  *
  * Bỏ `RENT_FIRST_CYCLE_OVERDUE` (13/08/2026): tiền chu kỳ đầu thu chung với tiền cọc ở
  * mã QR lúc đón khách nên không còn kỳ đầu nào quá hạn được.

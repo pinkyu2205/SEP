@@ -44,7 +44,7 @@ import {
 //
 // BE giờ có `DepositLedgerStatusResolver`: xét `paymentStatus` trước (chưa PAID →
 // NOT_COLLECTED), rồi mới tới quyết toán trả phòng thật (`refundPaidAt`, khấu trừ)
-// — và `/host/finance/deposits` đã duyệt TOÀN BỘ hợp đồng (không còn chỉ ACTIVE),
+// — và `/owner/finance/deposits` đã duyệt TOÀN BỘ hợp đồng (không còn chỉ ACTIVE),
 // trả kèm contractId/contractCode/endDate. Vì vậy endpoint đó nay là nguồn CHÍNH;
 // /host/contracts chỉ còn là dự phòng khi endpoint kia lỗi.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -55,7 +55,7 @@ type DepositStatus = 'NOT_COLLECTED' | 'HELD' | 'REFUNDED' | 'FORFEITED';
 /**
  * Trạng thái HIỂN THỊ — tách `REFUNDED` của BE làm ba (20/08/2026).
  *
- * BE coi là đã hoàn ngay khi host đánh dấu. Nhưng đó mới là lời của một bên: tiền có thật
+ * BE coi là đã hoàn ngay khi owner đánh dấu. Nhưng đó mới là lời của một bên: tiền có thật
  * sự tới tay khách hay không thì chỉ khách biết. Gộp khoản chưa ai xác nhận vào tổng
  * "đã hoàn" là tự làm đẹp số liệu của mình.
  */
@@ -73,9 +73,9 @@ const displayStatusOf = (r: {
    * vào `status` mà BE tự suy.
    *
    * Lý do: `DepositLedgerStatusResolver` thoát sớm bằng `if (!isContractClosed(...)) return
-   * HELD` nên nhánh đọc `refundPaidAt` không bao giờ chạy khi hồ sơ còn SETTLING — mà host
+   * HELD` nên nhánh đọc `refundPaidAt` không bao giờ chạy khi hồ sơ còn SETTLING — mà owner
    * ghi nhận hoàn cọc đúng lúc đó. Kết quả: đã chuyển tiền rồi sổ vẫn hiện "Đang giữ" kèm
-   * nút mời bấm lại, host bấm nữa thì ăn lỗi "đã ghi nhận trước đó".
+   * nút mời bấm lại, owner bấm nữa thì ăn lỗi "đã ghi nhận trước đó".
    *
    * FE có sẵn ba mốc thô nên tự suy lấy, không phụ thuộc BE sửa xong hay chưa.
    */
@@ -94,7 +94,7 @@ const STATUS_META: Record<DisplayStatus, { label: string; color: string; dot: st
   // phải khoản đang nắm của khách.
   NOT_COLLECTED: { label: 'Chưa thu', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
   HELD: { label: 'Đang giữ', color: 'bg-indigo-50 text-indigo-700', dot: 'bg-indigo-500' },
-  // Host đã chuyển nhưng khách chưa xác nhận — việc CHƯA xong, không phải "đã hoàn".
+  // Owner đã chuyển nhưng khách chưa xác nhận — việc CHƯA xong, không phải "đã hoàn".
   REFUND_SENT: { label: 'Đã chuyển — chờ khách xác nhận', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' },
   REFUND_DISPUTED: { label: 'Khách báo chưa nhận', color: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
   REFUNDED: { label: 'Đã hoàn', color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
@@ -136,9 +136,9 @@ interface DepositRow {
   /** Có hồ sơ trả phòng chưa — phân biệt cọc của khách đang ở với khách đang trả phòng. */
   checkoutRequestId?: number;
   checkoutNote?: string;
-  /** Host đã ghi nhận chuyển tiền chưa — mốc thô, không qua `status` của BE. */
+  /** Owner đã ghi nhận chuyển tiền chưa — mốc thô, không qua `status` của BE. */
   refundedAt?: string;
-  /** Khách đã xác nhận nhận đủ chưa — lời của KHÁCH, đối chứng với `refundedAt` của host. */
+  /** Khách đã xác nhận nhận đủ chưa — lời của KHÁCH, đối chứng với `refundedAt` của owner. */
   refundConfirmedAt?: string;
   refundDisputedAt?: string;
   refundDisputeReason?: string;
@@ -175,7 +175,7 @@ const contractToRow = (c: HostContractDto): DepositRow | null => {
 const depositItemToRow = (
   d: DepositItem,
   i: number,
-  /** contractId → trạng thái HĐ; `/host/finance/deposits` không trả trường này. */
+  /** contractId → trạng thái HĐ; `/owner/finance/deposits` không trả trường này. */
   contractStatuses: Map<string, HostContractDto['status']>,
 ): DepositRow => {
   // Status lạ (BE thêm giá trị mới) thì để nguyên chuỗi thay vì im lặng quy về HELD —
@@ -245,7 +245,7 @@ const refundBlockReason = (r: DepositRow): string | null => {
    * ĐÃ GHI NHẬN RỒI thì chặn ngay — trước cả mọi điều kiện khác.
    *
    * BE vẫn trả `status = HELD` sau khi hoàn cọc (resolver thoát sớm khi hợp đồng chưa thanh
-   * lý), nên nếu chỉ dựa vào `status` thì nút "Đánh dấu đã hoàn" còn nguyên và host bấm lại
+   * lý), nên nếu chỉ dựa vào `status` thì nút "Đánh dấu đã hoàn" còn nguyên và owner bấm lại
    * nhiều lần, mỗi lần ăn một lỗi "đã ghi nhận trước đó". Chặn bằng mốc thô `refundedAt`.
    */
   if (r.refundedAt) {
@@ -256,7 +256,7 @@ const refundBlockReason = (r: DepositRow): string | null => {
   /**
    * ĐANG CÓ HỒ SƠ TRẢ PHÒNG → xét theo tiến trình trả phòng, KHÔNG theo trạng thái hợp đồng.
    *
-   * Mô hình chốt 20/08/2026 đảo thứ tự các bước: khách trả phí cuối kỳ → **host hoàn cọc** →
+   * Mô hình chốt 20/08/2026 đảo thứ tự các bước: khách trả phí cuối kỳ → **owner hoàn cọc** →
    * khách xác nhận → quản lý mới thanh lý hợp đồng. Nên lúc hoàn cọc, hợp đồng vẫn còn
    * `ACTIVE` — đòi `TERMINATED` như luật cũ là khoá đúng bước cần mở.
    *
@@ -309,8 +309,8 @@ export const DepositLedger = () => {
     setLoading(true);
     /**
      * Hai nguồn, gọi song song:
-     *  • `/host/finance/deposits` — nguồn CHÍNH, trạng thái cọc do BE xét.
-     *  • `/host/contracts`        — lấy TRẠNG THÁI HỢP ĐỒNG, thứ endpoint cọc không trả.
+     *  • `/owner/finance/deposits` — nguồn CHÍNH, trạng thái cọc do BE xét.
+     *  • `/owner/contracts`        — lấy TRẠNG THÁI HỢP ĐỒNG, thứ endpoint cọc không trả.
      *
      * Cần trạng thái HĐ để biết thủ tục trả phòng đã xong chưa: nút "Đánh dấu đã hoàn"
      * chỉ được mở khi HĐ đã `TERMINATED`. Thiếu nó thì nút sáng cho cả khách đang thuê
@@ -351,7 +351,7 @@ export const DepositLedger = () => {
     return {
       totalHeld: held.reduce((s, r) => s + r.amount, 0),
       heldCount: held.length,
-      // Chỉ tính khoản KHÁCH ĐÃ XÁC NHẬN. Khoản host mới chuyển mà chưa ai xác nhận là
+      // Chỉ tính khoản KHÁCH ĐÃ XÁC NHẬN. Khoản owner mới chuyển mà chưa ai xác nhận là
       // việc chưa xong — cộng vào đây là tự làm đẹp số liệu của mình.
       refundedAmount: rows.filter(r => r.display === 'REFUNDED').reduce((s, r) => s + r.amount, 0),
       refundedCount: rows.filter(r => r.display === 'REFUNDED').length,
@@ -395,7 +395,7 @@ export const DepositLedger = () => {
     /**
      * ĐANG GIỮ luôn lên đầu, bất kể đang sắp theo kiểu gì.
      *
-     * Đây mới là tiền host thật sự đang nắm và sẽ phải trả lại — cũng là nhóm duy nhất
+     * Đây mới là tiền owner thật sự đang nắm và sẽ phải trả lại — cũng là nhóm duy nhất
      * có việc để làm (đánh dấu đã hoàn). Thực tế sổ có 65 khoản thì 64 khoản "Chưa thu",
      * xếp lẫn lộn là 1 khoản Đang giữ trôi mất tăm giữa danh sách, phải bấm chip lọc mới
      * thấy. Sắp xếp người dùng chọn vẫn giữ nguyên — chỉ áp trong từng nhóm.
@@ -645,7 +645,7 @@ const RefundDialog = ({ row, onClose, onDone }: {
   /**
    * Bước xác nhận LẦN HAI, đọc lại số tiền và người nhận (20/08/2026).
    *
-   * Rủi ro thật ở đây không phải host cố tình gian lận — muốn gian thì đơn giản là không
+   * Rủi ro thật ở đây không phải owner cố tình gian lận — muốn gian thì đơn giản là không
    * chuyển, tấm ảnh chẳng ngăn được gì. Rủi ro thật là **ghi nhận nhầm dòng**: sổ cọc có
    * hàng chục khoản na ná nhau, bấm nhanh là đánh dấu nhầm khách. Nhầm rồi thì khoản kia
    * hiện "Đã hoàn" trong khi khách chưa nhận đồng nào, và không ai đi soát lại nữa.
@@ -677,20 +677,20 @@ const RefundDialog = ({ row, onClose, onDone }: {
       toast.success('Đã ghi nhận hoàn cọc.');
       onDone();
     } catch (e: unknown) {
-      // 404 = BE chưa triển khai endpoint · 403 = chưa mở quyền cho host.
+      // 404 = BE chưa triển khai endpoint · 403 = chưa mở quyền cho owner.
       // Hai cái này KHÔNG phải lỗi thao tác, nói thẳng để khỏi bấm lại vô ích.
       const res = (e as { response?: { status?: number; data?: { code?: string; message?: string } } })?.response;
       const st = res?.status;
       if (st === 404 || st === 403 || st === 501) setNotReady(true);
       else if (res?.data?.code === 'DUPLICATE_PROOF') {
         // Ảnh biên lai này đã dùng cho một khoản cọc khác — gần như chắc chắn là chọn
-        // nhầm file. Giữ hộp thoại mở để host đổi ảnh ngay, đừng bắt mở lại từ đầu.
+        // nhầm file. Giữ hộp thoại mở để owner đổi ảnh ngay, đừng bắt mở lại từ đầu.
         toast.error(res.data.message ?? 'Ảnh biên lai này đã dùng cho khoản cọc khác. Chọn đúng ảnh của lần chuyển này.',
           { duration: 8000 });
         setProofUrl('');
       } else if (res?.data?.code === 'REFUND_ALREADY_RECORDED') {
         // Không phải lỗi thao tác — khoản này đã ghi nhận rồi. Đóng hộp thoại và làm mới
-        // để host thấy trạng thái đúng, thay vì đứng yên mời bấm tiếp.
+        // để owner thấy trạng thái đúng, thay vì đứng yên mời bấm tiếp.
         toast.success('Khoản này đã được ghi nhận hoàn cọc trước đó.');
         onDone();
       } else if (res?.data?.code === 'CHARGES_NOT_SETTLED') {
@@ -845,7 +845,7 @@ const RefundDialog = ({ row, onClose, onDone }: {
                   <p className="text-sm font-bold text-amber-800">Backend chưa mở chức năng này</p>
                   <p className="mt-2 text-sm leading-relaxed text-amber-700">
                     Endpoint <code className="rounded bg-amber-100 px-1">POST /api/v1/host/finance/deposits/{'{contractId}'}/refund</code>
-                    {' '}chưa có (hoặc chưa mở quyền cho Host). Trước đây bước này nằm ở app quản lý, nay đã gỡ
+                    {' '}chưa có (hoặc chưa mở quyền cho Owner). Trước đây bước này nằm ở app quản lý, nay đã gỡ
                     vì quản lý không được thấy tiền cọc — nên tạm thời chưa ai ghi nhận được.
                     Báo đội backend theo doc <em>BE-BUG-checkout-disputed…</em> phần 2.
                   </p>
@@ -959,7 +959,7 @@ const RefundDialog = ({ row, onClose, onDone }: {
                     ?
                   </p>
                   {/*
-                    Nói thẳng rằng cú bấm này KHÔNG khép được hồ sơ. Host cần biết khách còn
+                    Nói thẳng rằng cú bấm này KHÔNG khép được hồ sơ. Owner cần biết khách còn
                     một bước xác nhận nữa — để không coi đây là điểm kết thúc rồi bỏ mặc.
                   */}
                   <p className="mt-1.5 text-xs leading-relaxed text-slate-500">

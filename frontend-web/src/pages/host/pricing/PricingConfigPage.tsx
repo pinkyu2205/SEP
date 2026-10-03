@@ -22,10 +22,10 @@ import { ExplainFormula, Explainer } from '@/pages/host/review/pricingBreakdown'
  *
  * Vì sao tách khỏi màn duyệt giá: bốn con số mục tiêu (lãi, chi phí, biên trống phòng) là
  * **chính sách kinh doanh của cả công ty**, không phải thuộc tính của từng căn. Để chúng
- * nằm trong màn duyệt giá thì Host phải gõ lại ở từng căn, và chỉ cần lệch một lần là hai
+ * nằm trong màn duyệt giá thì Owner phải gõ lại ở từng căn, và chỉ cần lệch một lần là hai
  * căn giống hệt nhau ra hai mức giá khác nhau mà không ai giải thích được.
  *
- * Chốt ở đây, màn duyệt giá chỉ ĐỌC XUỐNG và hiện lại — Host bấm duyệt chứ không gõ số nữa.
+ * Chốt ở đây, màn duyệt giá chỉ ĐỌC XUỐNG và hiện lại — Owner bấm duyệt chứ không gõ số nữa.
  *
  * Trang này cố tình hiện luôn con số suy ra (lương phân bổ mỗi nhà, tổng chi phí vận hành
  * thực gửi lên máy chủ) ngay cạnh ô nhập: người nhập phải thấy hệ quả của thứ mình gõ
@@ -69,7 +69,7 @@ const Field = ({ label, hint, children }: { label: string; hint?: React.ReactNod
  *
  * Chỗ dễ hiểu sai nhất: máy chủ CHIA cho (1 − v) chứ không CỘNG v% (PricingCalculator
  * .applyVacancyBuffer bên BE). Để 10% thì giá thật tăng 11,1%. Bản cũ ghi "cộng thêm 10%
- * vào giá" nên Host đọc số nào cũng thấy lệch.
+ * vào giá" nên Owner đọc số nào cũng thấy lệch.
  */
 const VacancyMath = ({ cfg, opex }: { cfg: PricingConfig; opex: number }) => {
   const v = cfg.vRatePct / 100;
@@ -237,7 +237,7 @@ export const PricingConfigPage = () => {
   /** Quản lý THẬT của hệ thống + số nhà mỗi người đang phụ trách. */
   const [managers, setManagers] = useState<{ id: string; fullName: string }[]>([]);
   const [propsByManager, setPropsByManager] = useState<Record<string, number>>({});
-  /** Khu vực từng người đang phụ trách — hiện dưới tên để Host biết ai coi vùng nào. */
+  /** Khu vực từng người đang phụ trách — hiện dưới tên để Owner biết ai coi vùng nào. */
   const [zonesByManager, setZonesByManager] = useState<Map<string, string[]>>(new Map());
   /** Ô thử lịch tăng giá — mặc định lấy hôm nay theo giờ máy chủ, giá tròn 10tr cho dễ đọc. */
   const [tryStart, setTryStart] = useState(() => todayIso());
@@ -249,12 +249,12 @@ export const PricingConfigPage = () => {
     let alive = true;
     Promise.all([
       pricingConfigService.load(),
-      // Danh sách quản lý lấy từ hệ thống, KHÔNG cho Host tự gõ tên: gõ tay thì tên lệch
+      // Danh sách quản lý lấy từ hệ thống, KHÔNG cho Owner tự gõ tên: gõ tay thì tên lệch
       // với tài khoản thật và không cách nào biết căn nào do ai phụ trách.
       propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
       propertyService.getAllProperties().catch(() => null),
       // Số nhà mỗi người phụ trách đếm THEO KHU VỰC, không theo `operationManagerId`:
-      // nhà chỉ nhận id quản lý sau khi Host duyệt giá, nên đếm kiểu kia sẽ bỏ sót toàn bộ
+      // nhà chỉ nhận id quản lý sau khi Owner duyệt giá, nên đếm kiểu kia sẽ bỏ sót toàn bộ
       // nhà đang chờ duyệt — mẫu số thiếu thì lương chia ra cao hơn thực tế.
       zoneAssignmentService.list().catch(() => [] as ZoneManagerLink[]),
     ]).then(([{ config, source: s }, mgrs, page, links]) => {
@@ -407,7 +407,7 @@ export const PricingConfigPage = () => {
                   </p>
                   <button
                     type="button"
-                    onClick={() => navigate('/host/manager-salaries')}
+                    onClick={() => navigate('/owner/manager-salaries')}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs font-bold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50"
                   >
                     <Pencil className="h-3 w-3" /> Sửa bảng lương
@@ -554,7 +554,7 @@ export const PricingConfigPage = () => {
 
             {/* Ô thử: gõ ngày bắt đầu thuê bất kỳ, xem ngay kỳ nào tăng kỳ nào hoãn.
                 Quy tắc ân hạn tính theo NGÀY nên "thuê tháng 7" chưa đủ để kết luận —
-                01/07 thì tròn 6 tháng nên tăng, 15/07 thì chưa đủ nên hoãn. Bắt Host tự
+                01/07 thì tròn 6 tháng nên tăng, 15/07 thì chưa đủ nên hoãn. Bắt Owner tự
                 nhẩm chỗ này là kiểu gì cũng có người hiểu nhầm. */}
             {cfg.annualIncreasePct > 0 && (
               <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
@@ -636,7 +636,7 @@ export const PricingConfigPage = () => {
           {/* ── 4. Dự phòng ───────────────────────────────────────────────── */}
           <Card
             title="Dự phòng rủi ro" icon={Calculator} defaultOpen={false}
-            summary={`Trống ${cfg.vRatePct}% · bàn giao ${cfg.handoverBufferMonths} tháng`}
+            summary={`Trống ${cfg.vRatePct}% · trả nhà ${cfg.handoverBufferMonths} tháng`}
           >
             <div className="space-y-4">
               <div>
@@ -657,8 +657,12 @@ export const PricingConfigPage = () => {
               </div>
 
               <Field
-                label="Trừ cửa sổ bàn giao cuối kỳ"
-                hint={<>Số tháng cuối HĐ chủ nhà <b>không có doanh thu</b> (dọn đi, sơn sửa trả nhà). 0 = không chừa.</>}
+                label="Số tháng cuối để trả nhà cho chủ"
+                hint={<>
+                  Cuối hợp đồng thuê nhà gốc, khách dọn đi và công ty sơn sửa để trả lại nhà. Những tháng
+                  đó nhà trống, <b>không thu được tiền phòng</b>, nên giá được tính để thu hồi vốn sớm hơn.
+                  Thường 1 tháng. Nhập 0 nếu không cần chừa.
+                </>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={12} value={cfg.handoverBufferMonths}
@@ -669,7 +673,7 @@ export const PricingConfigPage = () => {
               </Field>
 
               {/* BE nhận `handoverBufferMonths` từ 26/08/2026. Nhưng chốt chặn hợp đồng ngắn
-                  vẫn còn, và đó là chỗ Host dễ tưởng hệ thống bỏ qua số mình chọn. */}
+                  vẫn còn, và đó là chỗ Owner dễ tưởng hệ thống bỏ qua số mình chọn. */}
               <Fold title="Ngoại lệ: hợp đồng còn dưới 6 tháng">
                 Hợp đồng còn <b>dưới 6 tháng</b> khai thác thì không trừ tháng nào — trừ 1 tháng trên 3
                 tháng là mất 1/3 thời gian thu tiền, nên chốt chặn này giữ nguyên dù bạn chọn bao nhiêu.
@@ -713,8 +717,8 @@ export const PricingConfigPage = () => {
                 <dd className="font-bold tabular-nums text-slate-900">{cfg.vRatePct}%</dd>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-slate-600">Cửa sổ bàn giao</dt>
-                <dd className="font-bold tabular-nums text-slate-400">−{cfg.handoverBufferMonths} tháng</dd>
+                <dt className="text-slate-600">Tháng trả nhà (không thu tiền)</dt>
+                <dd className="font-bold tabular-nums text-slate-900">{cfg.handoverBufferMonths} tháng</dd>
               </div>
             </dl>
 
@@ -733,7 +737,7 @@ export const PricingConfigPage = () => {
             </button>
             <button
               type="button"
-              onClick={() => navigate('/host/properties')}
+              onClick={() => navigate('/owner/properties')}
               className="mt-2 flex w-full items-center justify-center gap-1.5 text-xs font-bold text-slate-500 transition hover:text-indigo-600"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Về danh sách bất động sản

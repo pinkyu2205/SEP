@@ -8,8 +8,8 @@
  *   RÚT GỌN `GET /host/invoices?month=` — BE dựng on-the-fly từ hợp đồng ACTIVE của
  *           đúng một kỳ: CHỈ tiền phòng, không mã hoá đơn, không `propertyId`.
  *
- * Endpoint đầy đủ từng là `hasAnyRole('MANAGER','ADMIN')` nên host gọi bị 403. Nay đã
- * mở (kiểm tra 03/10/2026: host đọc được), nhưng vẫn giữ bước dò thay vì gọi thẳng —
+ * Endpoint đầy đủ từng là `hasAnyRole('MANAGER','ADMIN')` nên owner gọi bị 403. Nay đã
+ * mở (kiểm tra 03/10/2026: owner đọc được), nhưng vẫn giữ bước dò thay vì gọi thẳng —
  * quyền là thứ nằm ngoài tầm FE, đổi lúc nào không báo, và cái giá của việc dò sai chỉ
  * là hạ cấp xuống nguồn rút gọn thay vì vỡ màn hình.
  *
@@ -31,7 +31,7 @@ import { adminService } from './admin.service';
  */
 let probe: Promise<boolean> | null = null;
 
-/** `true` = dùng được `/manager/invoices`; `false` = phải lùi về `/host/invoices`. */
+/** `true` = dùng được `/manager/invoices`; `false` = phải lùi về `/owner/invoices`. */
 export const canUseFullInvoices = (): Promise<boolean> => {
   probe ??= adminService.listInvoices({}).then(() => true).catch(() => false);
   return probe;

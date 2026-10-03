@@ -151,3 +151,10 @@ export const fmtPeriodTag = (at?: string) => {
   const m = at.match(/^(\d{4})-(\d{2})/);
   return m ? `${m[2]}/${m[1]}` : at;
 };
+
+/** Kỳ của hoá đơn tổng: `2026-09` (dạng máy chủ lưu) → "Tháng 09/2026"; dải ngày cũ giữ nguyên. */
+export const fmtBillPeriod = (raw?: string | null) => {
+  const s = (raw ?? '').trim();
+  const m = s.match(/^(\d{4})-(\d{1,2})$/);
+  return m ? `Tháng ${m[2].padStart(2, '0')}/${m[1]}` : s;
+};

@@ -97,7 +97,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
   const stillOwed = Math.max(0, chargesTotal - chargesPaid);
   /**
    * Đã hoàn cọc chưa — nay chỉ đọc từ BE, vì manager không còn là người ghi nhận
-   * (xem khối SETTLING bên dưới). Bên host đánh dấu ở Sổ cọc thì cờ này bật.
+   * (xem khối SETTLING bên dưới). Bên owner đánh dấu ở Sổ cọc thì cờ này bật.
    */
   const refunded = !!settlement?.refundedAt;
   /**
@@ -105,7 +105,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
    * Việc hoàn cọc KHÔNG chặn — chạy song song.
    *
    * ─── Từng có điều kiện thứ hai, đã bỏ. Đừng thêm lại. ────────────────────
-   * Sáng 24/08/2026 nút này có thêm cổng `refundPaidAt` (bắt host bấm "đã chuyển cọc"
+   * Sáng 24/08/2026 nút này có thêm cổng `refundPaidAt` (bắt owner bấm "đã chuyển cọc"
    * mới cho hoàn tất). Lý do lúc đó: `terminateActiveContract` bên BE kéo theo
    * `disableTenantAccountIfNoActiveContracts`, nên thanh lý xong là khách **mất quyền
    * đăng nhập** — không bấm được "✓ đã nhận đủ" hay "✗ chưa nhận", tức mất luôn nguồn
@@ -113,7 +113,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
    *
    * Chiều 24/08/2026 BE sửa gốc: thanh lý KHÔNG còn khoá tài khoản nữa. Việc khoá đi
    * theo vòng đời cọc — khách bấm ✓ thì khoá, bấm ✗ thì giữ nguyên quyền, im lặng 30
-   * ngày sau khi host chuyển thì cron khoá (`REFUND_SILENCE_DISABLE_DAYS`).
+   * ngày sau khi owner chuyển thì cron khoá (`REFUND_SILENCE_DISABLE_DAYS`).
    *
    * Cổng kia mất lý do tồn tại, nên bỏ: giữ lại chỉ tổ neo phòng ở trạng thái RENTED
    * thêm 1–3 ngày chờ một lệnh chuyển khoản, mà không bảo vệ thêm được gì cho khách.
@@ -364,7 +364,7 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
           * (@/constants/managerVisibility). Ẩn số mà giữ form thì manager không biết
           * chuyển bao nhiêu; nên bỏ hẳn việc chuyển tiền khỏi vai này.
           *
-          * Nay: bộ phận tài chính (host/admin) chuyển trong 1–3 ngày làm việc về tài
+          * Nay: bộ phận tài chính (owner/admin) chuyển trong 1–3 ngày làm việc về tài
           * khoản khách đã điền lúc gửi yêu cầu trả phòng — app của khách nói đúng câu đó
           * (CheckoutDetailScreen). Manager chỉ còn theo dõi và bấm hoàn tất.
           */}

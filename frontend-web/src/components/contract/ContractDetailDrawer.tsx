@@ -16,7 +16,7 @@ import {
 } from './contractLabels';
 
 /**
- * Chi tiết MỘT hợp đồng thuê — DÙNG CHUNG cổng Admin và cổng Host, đọc-là-chính.
+ * Chi tiết MỘT hợp đồng thuê — DÙNG CHUNG cổng Admin và cổng Owner, đọc-là-chính.
  *
  * Gom về một chỗ toàn bộ thứ vốn nằm rải rác trong hồ sơ hợp đồng: khách chính + người
  * ở cùng, căn/phòng và ai đang vận hành nó, tiền (thuê · cọc · trạng thái thu), các mốc
@@ -26,14 +26,14 @@ import {
  * thẳng phần nào trống thay vì lặng lẽ bỏ qua.
  *
  * ⚠️ Hai cổng lấy danh sách từ hai endpoint khác nhau (`/tenant-contracts` cho admin,
- * `/host/contracts` cho host) và **bản rút gọn của host thiếu rất nhiều field**. Nên
+ * `/owner/contracts` cho owner) và **bản rút gọn của owner thiếu rất nhiều field**. Nên
  * drawer nhận `contract` là một `Partial<TenantContractResponse>` để vẽ ngay, rồi gọi
  * `GET /tenant-contracts/{id}` đắp chi tiết đầy đủ lên trên. Endpoint đó hiện chặn
  * ROLE_OWNER (403) — hỏng thì giữ nguyên phần đã có và hiện `blockedNote` thay vì báo
  * "không có dữ liệu", để không đổ oan cho quản lý là chưa lập biên bản.
  *
  * Drawer là màn ĐỌC thuần: không có nút thao tác nào. Sửa hợp đồng nháp nằm ở luồng
- * onboarding, gia hạn/chấm dứt là việc của quản lý vận hành trên mobile, và Host thì
+ * onboarding, gia hạn/chấm dứt là việc của quản lý vận hành trên mobile, và Owner thì
  * không còn duyệt giá nữa. Dữ liệu riêng theo vai chèn vào qua `extra`.
  */
 
@@ -101,7 +101,7 @@ export const ContractDetailDrawer = ({
   contract: ContractDetailSeed;
   /** Có thì hiện thêm địa chỉ / khu vực / quản lý khu vực. */
   property?: PropertyResponse;
-  /** Dùng khi chỉ biết TÊN nhà mà không có bản ghi Property (trường hợp cổng Host). */
+  /** Dùng khi chỉ biết TÊN nhà mà không có bản ghi Property (trường hợp cổng Owner). */
   propertyName?: string;
   onClose: () => void;
   /** Câu giải thích khi máy chủ không cho vai này đọc hồ sơ đầy đủ. */
@@ -118,7 +118,7 @@ export const ContractDetailDrawer = ({
     let alive = true;
     setDetail(contract);
     setBlocked(false);
-    // `/host/contracts` trả id dạng chuỗi — nếu không ép được về số thì không có gì để
+    // `/owner/contracts` trả id dạng chuỗi — nếu không ép được về số thì không có gì để
     // hỏi BE, cứ vẽ bằng phần đã có thay vì gọi `/tenant-contracts/NaN`.
     if (!Number.isFinite(contract.id)) { setBlocked(true); return; }
     setLoading(true);

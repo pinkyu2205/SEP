@@ -44,7 +44,7 @@ const PROPERTY_STATUS: Record<string, { label: string; color: string; dot: strin
   UNDER_RENOVATION: { label: 'Đang sửa chữa', color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
   PENDING_EQUIPMENT_INSTALLATION: { label: 'Chờ lắp thiết bị', color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
   RENOVATION_COMPLETED: { label: 'Sửa xong', color: 'bg-blue-100 text-blue-700', dot: 'bg-blue-500' },
-  PENDING_HOST_REVIEW: { label: 'Chờ Host duyệt', color: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500' },
+  PENDING_HOST_REVIEW: { label: 'Chờ Owner duyệt', color: 'bg-amber-100 text-amber-800', dot: 'bg-amber-500' },
   PENDING_OPERATION_MANAGER: { label: 'Chờ QL nhận nhà', color: 'bg-rose-100 text-rose-700', dot: 'bg-rose-500' },
   ACTIVE: { label: 'Đang khai thác', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
   RENTED: { label: 'Đã cho thuê', color: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },

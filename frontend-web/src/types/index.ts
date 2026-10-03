@@ -1,5 +1,5 @@
 // ==========================================
-//  TYPES - Host Management Portal (Hoàng Bình Land Sub-leasing Model)
+//  TYPES - Owner Management Portal (Hoàng Bình Land Sub-leasing Model)
 // ==========================================
 
 export type PlatformRole = 'admin' | 'host' | 'manager' | 'tenant';
@@ -133,7 +133,7 @@ export interface Property {
 /** Trạng thái tài khoản */
 export type UserStatus = 'pending_activation' | 'active' | 'moved_out';
 
-/** Thông tin người dùng (Host, Manager, Tenant) */
+/** Thông tin người dùng (Owner, Manager, Tenant) */
 export interface AppUser {
   id: string;
   fullName: string;
@@ -228,7 +228,7 @@ export interface Equipment {
 }
 
 // ==========================================
-//  NEW TYPES - Host Management Portal
+//  NEW TYPES - Owner Management Portal
 // ==========================================
 
 export type MaintenancePriority = 'critical' | 'high' | 'medium' | 'low';

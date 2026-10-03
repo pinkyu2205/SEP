@@ -1,6 +1,6 @@
 /**
  * Helper kỳ (YYYY-MM), ngày và định dạng số — dùng chung cho các màn báo cáo/tài
- * chính của cả Host lẫn Admin. Thuần tuý, không phụ thuộc React.
+ * chính của cả Owner lẫn Admin. Thuần tuý, không phụ thuộc React.
  */
 import { serverNow, currentMonthIso } from '@/utils/serverTime';
 
@@ -21,7 +21,7 @@ export const ymOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
  * HAI THÁNG (máy tháng 8, server tháng 10), và hậu quả là:
  *   • mọi trang gọi API kèm hằng đó đều xin số liệu SAI KỲ — bảng điều hành, báo cáo,
  *     công nợ vẽ tháng 8 trong khi hệ thống đã sang tháng 10, không báo gì;
- *   • `MonthPicker` lấy nó làm trần nên khoá luôn nút "kỳ sau" — host lùi về tháng
+ *   • `MonthPicker` lấy nó làm trần nên khoá luôn nút "kỳ sau" — owner lùi về tháng
  *     trước rồi không quay lại được.
  *
  * Hằng số còn hỏng thêm một kiểu nữa kể cả khi đồng hồ máy đúng: nó tính MỘT LẦN lúc

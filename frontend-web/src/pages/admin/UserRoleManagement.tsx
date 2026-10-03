@@ -32,7 +32,7 @@ import { UserDetailDrawer } from './users/UserDetailDrawer';
 import type { UserResponse, UserStatus, CreateUserRequest } from '@/types/api.types';
 
 // Hệ thống CHỈ có 4 role (mỗi role = 1 loại tài khoản):
-//   admin=ROLE_ADMIN · host=ROLE_OWNER (Chủ nhà) · manager=ROLE_MANAGER · tenant=ROLE_TENANT (Khách thuê).
+//   admin=ROLE_ADMIN · owner=ROLE_OWNER (Chủ nhà) · manager=ROLE_MANAGER · tenant=ROLE_TENANT (Khách thuê).
 // 'guest' chỉ là người xem trang public — KHÔNG có account/role.
 const roleMap: Record<string, { label: string; color: string }> = {
   'ROLE_ADMIN': { label: 'Admin Hệ Thống', color: 'bg-slate-950 text-white' },

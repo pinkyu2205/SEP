@@ -110,15 +110,15 @@ tra `MeterOverridePasscode`/token đã tiêu thụ cho hợp đồng đó thay v
 
 FE cần dựng badge + CTA từng bước cho manager (mobile) và admin (web). Xác nhận giúp:
 - a) `statusLabel` có ở **mọi** DTO trả hợp đồng tenant không, hay chỉ
-  `TenantContractResponse` của `toResponse()`? Đặc biệt các DTO: `/host/contracts`,
+  `TenantContractResponse` của `toResponse()`? Đặc biệt các DTO: `/owner/contracts`,
   `/tenant/me/contracts` (`MyContractListItem`), `/managed`, và danh sách hợp đồng theo
   tòa (`/properties/{id}/tenant-contracts`).
 - b) Response có trả `depositPaidAt`/`paymentStatus`/`tenantOtpVerifiedAt`/
   `managerOtpVerifiedAt` ở đủ các endpoint trên không (FE dùng để tách
   "chờ OTP khách" / "chờ OTP quản lý" trong `AWAITING_CONFIRM`)?
 - c) `GET /tenant-contracts?status=RECEPTION` cho Owner/Host: handoff ghi "Admin/Owner thấy
-  toàn hệ thống", nhưng ở FE hiện Host phải đi qua `/host/contracts` (Owner bị 403 với
-  `/tenant-contracts/{id}`). Alias `RECEPTION` có mở cho Host ở `/host/contracts` không?
+  toàn hệ thống", nhưng ở FE hiện Owner phải đi qua `/owner/contracts` (Owner bị 403 với
+  `/tenant-contracts/{id}`). Alias `RECEPTION` có mở cho Owner ở `/owner/contracts` không?
 
 ## 6. (Thấp) Xác nhận nhỏ để FE khỏi đoán
 

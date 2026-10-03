@@ -10,7 +10,7 @@ import { realMaintenanceService } from '@/services/shared/maintenanceService';
  * của thiết bị BE trả rỗng/0 dù thiết bị đã có phiếu — màn thiết bị của tenant vì thế luôn
  * hiện "Chưa bảo trì lần nào" + "Mới lắp đặt". Nguồn đáng tin là phiếu của chính khách
  * (`/maintenance/my-requests`, có `equipmentId`) — suy lịch sử + trạng thái từ đó, giống
- * cách host/admin đã làm với `/maintenance-tickets`.
+ * cách owner/admin đã làm với `/maintenance-tickets`.
  */
 
 /** Phiếu còn mở = thiết bị đang trong quá trình xử lý. */

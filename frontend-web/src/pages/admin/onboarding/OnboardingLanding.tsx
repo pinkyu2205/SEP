@@ -15,7 +15,7 @@ const modules = [
     path: '/admin/buildings/configuration',
     icon: Settings2,
     title: 'Cấu hình khai thác',
-    description: 'Nhập hợp đồng cải tạo từ Excel (tự động gửi Host duyệt), hoặc cấu hình cải tạo / phòng cho từng tòa nhà.',
+    description: 'Nhập hợp đồng cải tạo từ Excel (tự động gửi Owner duyệt), hoặc cấu hình cải tạo / phòng cho từng tòa nhà.',
     color: 'bg-amber-50 text-amber-600 border-amber-100',
   },
 ];

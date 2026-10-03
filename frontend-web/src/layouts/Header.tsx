@@ -10,24 +10,24 @@ const initialsOf = (name?: string) =>
   (name || 'HB').split(' ').filter(Boolean).slice(-2).map(w => w[0]).join('').toUpperCase() || 'HB';
 
 const ROUTE_LABELS: Record<string, string> = {
-  '/host': 'Bảng điều hành',
-  '/host/properties': 'Bất động sản',
-  '/host/pricing-config': 'Cấu hình duyệt giá',
-  '/host/manager-salaries': 'Lương quản lý',
-  '/host/zones': 'Khu vực & Quản lý',
-  '/host/operations-managers': 'Quản lý vận hành',
-  '/host/managers': 'Quản lý vận hành',
-  '/host/tenants': 'Khách thuê',
-  '/host/contracts': 'Quản lý hợp đồng',
-  '/host/extension-requests': 'Đơn xin gia hạn',
-  '/host/maintenance': 'Giám sát bảo trì',
-  '/host/financial': 'Quản lý tài chính',
-  '/host/billing': 'Hoá đơn & Thanh toán',
-  '/host/receivables': 'Công nợ phải thu',
-  '/host/deposits': 'Sổ cọc',
-  '/host/reports': 'Báo cáo & Phân tích',
-  '/host/notifications': 'Thông báo',
-  '/host/settings': 'Cài đặt',
+  '/owner': 'Bảng điều hành',
+  '/owner/properties': 'Bất động sản',
+  '/owner/pricing-config': 'Cấu hình duyệt giá',
+  '/owner/manager-salaries': 'Lương quản lý',
+  '/owner/zones': 'Khu vực & Quản lý',
+  '/owner/operations-managers': 'Quản lý vận hành',
+  '/owner/managers': 'Quản lý vận hành',
+  '/owner/tenants': 'Khách thuê',
+  '/owner/contracts': 'Quản lý hợp đồng',
+  '/owner/extension-requests': 'Đơn xin gia hạn',
+  '/owner/maintenance': 'Giám sát bảo trì',
+  '/owner/financial': 'Quản lý tài chính',
+  '/owner/billing': 'Hoá đơn & Thanh toán',
+  '/owner/receivables': 'Công nợ phải thu',
+  '/owner/deposits': 'Sổ cọc',
+  '/owner/reports': 'Báo cáo & Phân tích',
+  '/owner/notifications': 'Thông báo',
+  '/owner/settings': 'Cài đặt',
 };
 
 const formatVNDate = (date: Date) => {
@@ -60,25 +60,25 @@ export const Header = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const isPropertyDetail = location.pathname.startsWith('/host/properties/') && location.pathname !== '/host/properties';
+  const isPropertyDetail = location.pathname.startsWith('/owner/properties/') && location.pathname !== '/owner/properties';
   const pathLabel = isPropertyDetail
     ? 'Chi tiết bất động sản'
     : (ROUTE_LABELS[location.pathname] ?? 'Trang tổng quan');
 
-  const isRoot = location.pathname === '/host';
+  const isRoot = location.pathname === '/owner';
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10 flex-shrink-0">
       <div className="flex items-center gap-2 text-sm min-w-0">
         {!isRoot ? (
           <>
-            <Link to="/host" className="flex items-center gap-1 text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0">
+            <Link to="/owner" className="flex items-center gap-1 text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0">
               <Home className="w-3.5 h-3.5" />
             </Link>
             <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
             {isPropertyDetail && (
               <>
-                <Link to="/host/properties" className="text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0 text-xs">
+                <Link to="/owner/properties" className="text-slate-400 hover:text-primary-600 transition-colors flex-shrink-0 text-xs">
                   Bất động sản
                 </Link>
                 <ChevronRight className="w-3 h-3 text-slate-300 flex-shrink-0" />
@@ -128,7 +128,7 @@ export const Header = () => {
 
           {/* Chuông cũ chỉ là link kèm badge đếm MỘT LẦN lúc mở trang — mở app cả buổi
               số vẫn đứng yên. Giờ dùng chung khay realtime với cổng Admin. */}
-          <NotificationBell seeAllTo="/host/notifications" accent="green" />
+          <NotificationBell seeAllTo="/owner/notifications" accent="green" />
         </div>
 
         {/* Nút đăng xuất trần trước đây nằm ở đây đã gộp vào menu tài khoản —
@@ -136,9 +136,9 @@ export const Header = () => {
             vừa thừa vừa dễ bấm nhầm. */}
         <UserMenu
           name={user?.fullName ?? 'Hoàng Bình Land'}
-          subtitle={user?.username ? `@${user.username}` : 'Cổng quản lý Host'}
+          subtitle={user?.username ? `@${user.username}` : 'Cổng quản lý Owner'}
           initials={initialsOf(user?.fullName)}
-          settingsTo="/host/settings"
+          settingsTo="/owner/settings"
           onLogout={logout}
         />
       </div>

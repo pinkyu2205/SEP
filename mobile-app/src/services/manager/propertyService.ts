@@ -156,7 +156,7 @@ export const managerPropertyService = {
   },
 
   /**
-   * Danh sách bất động sản của RIÊNG manager đang đăng nhập (host đã phân quyền),
+   * Danh sách bất động sản của RIÊNG manager đang đăng nhập (owner đã phân quyền),
    * kèm số liệu phòng. Lọc theo operationManagerId suy ra từ JWT.
    */
   getManagedProperties: async (): Promise<ManagedProperty[]> => {

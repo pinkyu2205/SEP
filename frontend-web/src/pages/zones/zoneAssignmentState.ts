@@ -2,7 +2,7 @@ import type { PropertyResponse } from '@/types/api.types';
 import { isHostApproved } from '@/pages/host/properties/propertyListState';
 
 /**
- * Gom nhà theo KHU VỰC (quận/huyện) để Host gán quản lý vận hành cho cả vùng
+ * Gom nhà theo KHU VỰC (quận/huyện) để Owner gán quản lý vận hành cho cả vùng
  * thay vì gán từng căn.
  *
  * Quy tắc nghiệp vụ đã chốt: **một quận chỉ có một quản lý**. Vì vậy quản lý của
@@ -11,10 +11,10 @@ import { isHostApproved } from '@/pages/host/properties/propertyListState';
  * bằng API sẵn có, chưa cần BE lưu bảng quy tắc (xem doc/ về pha 2).
  *
  * Hệ quả: khu vực nào các nhà đang mang quản lý KHÁC nhau là di sản của thời gán
- * tay từng căn — Host phải chốt một người, đó là trạng thái `MIXED`.
+ * tay từng căn — Owner phải chốt một người, đó là trạng thái `MIXED`.
  */
 
-/** Ngưỡng cảnh báo tải của một quản lý. Chỉ cảnh báo, KHÔNG chặn Host. */
+/** Ngưỡng cảnh báo tải của một quản lý. Chỉ cảnh báo, KHÔNG chặn Owner. */
 export const WARN_PROPERTIES_PER_MANAGER = 8;
 export const WARN_ROOMS_PER_MANAGER = 40;
 
@@ -34,12 +34,12 @@ export type ZoneState =
   | 'UNASSIGNED' // chưa nhà nào có quản lý
   | 'ASSIGNED'   // mọi nhà cùng một quản lý — trạng thái đúng
   | 'PARTIAL'    // đã có một quản lý nhưng vài căn còn trống
-  | 'MIXED';     // nhiều quản lý lẫn nhau — cần Host chốt
+  | 'MIXED';     // nhiều quản lý lẫn nhau — cần Owner chốt
 
 export interface ZoneGroup {
   zoneId: string;
   zoneName: string;
-  /** MỌI nhà trong khu vực — kể cả nhà đang cải tạo/vô hiệu, để Host nhìn thấy đủ. */
+  /** MỌI nhà trong khu vực — kể cả nhà đang cải tạo/vô hiệu, để Owner nhìn thấy đủ. */
   properties: PropertyResponse[];
   /** Số đơn vị cho thuê: nguyên căn = 1, chia phòng = số phòng. */
   units: number;
@@ -75,15 +75,15 @@ export const ZONE_STATE_META: Record<ZoneState, { label: string; cls: string; do
 /**
  * Nhà thuộc phạm vi màn Khu vực.
  *
- * Gồm nhà Host đã duyệt giá, **và** nhà admin vừa gửi Host duyệt (`PENDING_HOST_REVIEW`).
+ * Gồm nhà Owner đã duyệt giá, **và** nhà admin vừa gửi Owner duyệt (`PENDING_HOST_REVIEW`).
  *
  * Vì sao thêm nhóm chờ duyệt: quản lý được gán theo KHU VỰC, và nhà tự nhận người của khu
- * vực ngay khi Host bấm duyệt. Nếu màn này chỉ hiện nhà đã duyệt thì Host mở ra thấy
+ * vực ngay khi Owner bấm duyệt. Nếu màn này chỉ hiện nhà đã duyệt thì Owner mở ra thấy
  * "Tổng khu vực 0" cho tới lúc duyệt xong căn đầu tiên — đúng lúc cần nhìn để biết khu vực
  * đó đã có ai chưa thì lại không thấy gì. Nhà chờ duyệt vẫn nằm trong khu vực và vẫn sẽ rơi
  * vào tay người đang giữ khu vực đó, nên nó thuộc về bức tranh này.
  *
- * Vẫn ẩn DRAFT và RENOVATION_COMPLETED: admin chưa gửi đi thì chưa có gì để Host quyết.
+ * Vẫn ẩn DRAFT và RENOVATION_COMPLETED: admin chưa gửi đi thì chưa có gì để Owner quyết.
  *
  * Lưu ý: nhà `PENDING_HOST_REVIEW` KHÔNG nằm trong `ASSIGNABLE_STATUSES`, nên nó đếm vào
  * `blockedCount` và không tham gia quyết định `state` — đúng như mong muốn, vì BE chưa cho
@@ -145,7 +145,7 @@ export const groupByZone = (properties: PropertyResponse[]): ZoneGroup[] => {
     });
   });
 
-  // Việc Host cần xử lý lên trước: cần chốt → còn thiếu → chưa gán → đã xong.
+  // Việc Owner cần xử lý lên trước: cần chốt → còn thiếu → chưa gán → đã xong.
   const ORDER: Record<ZoneState, number> = { MIXED: 0, PARTIAL: 1, UNASSIGNED: 2, ASSIGNED: 3 };
   return groups.sort(
     (a, b) => ORDER[a.state] - ORDER[b.state] || a.zoneName.localeCompare(b.zoneName, 'vi'),
@@ -187,10 +187,10 @@ export const loadByManager = (groups: ZoneGroup[]): Map<string, ManagerLoad> => 
      * Chưa nhà nào mang `operationManagerId` nhưng khu vực ĐÃ có người phụ trách
      * (`g.managerId` được bù từ bảng `zone_managers` — xem `groups` ở ZoneOverview).
      *
-     * Xảy ra ở đúng bước đầu quy trình: admin gửi nhà → Host gán quản lý khu vực → rồi
+     * Xảy ra ở đúng bước đầu quy trình: admin gửi nhà → Owner gán quản lý khu vực → rồi
      * mới duyệt giá. Nhà chỉ nhận id quản lý SAU khi duyệt, nên nếu chỉ đếm theo
      * `operationManagerId` thì người vừa được gán vẫn hiện "chưa phụ trách khu vực nào" —
-     * Host mở hộp thoại gán khu vực thứ hai, không thấy ai đang bận, dễ giao trùng một
+     * Owner mở hộp thoại gán khu vực thứ hai, không thấy ai đang bận, dễ giao trùng một
      * người cho quá nhiều khu vực mà không hay.
      */
     if (g.managerId) {
@@ -203,7 +203,7 @@ export const loadByManager = (groups: ZoneGroup[]): Map<string, ManagerLoad> => 
   return map;
 };
 
-/** Những gì sẽ xảy ra nếu gán `managerId` cho khu vực — dùng để cho Host xem trước. */
+/** Những gì sẽ xảy ra nếu gán `managerId` cho khu vực — dùng để cho Owner xem trước. */
 export interface AssignPreview {
   /** Nhà đã do đúng người này phụ trách — không đụng tới. */
   unchanged: PropertyResponse[];
@@ -211,7 +211,7 @@ export interface AssignPreview {
   fresh: PropertyResponse[];
   /** Nhà đang do người khác phụ trách — bàn giao, kéo theo cả hợp đồng. */
   handover: PropertyResponse[];
-  /** Nhà BE không cho đổi lúc này (đang cải tạo / vô hiệu) — bỏ khỏi lô, chỉ báo cho Host biết. */
+  /** Nhà BE không cho đổi lúc này (đang cải tạo / vô hiệu) — bỏ khỏi lô, chỉ báo cho Owner biết. */
   blocked: PropertyResponse[];
 }
 

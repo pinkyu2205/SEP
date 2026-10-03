@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { PropertyResponse } from '@/types/api.types';
+import type { PropertyResponse, TenantContractResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import {
   normalizeRoomNumber, SLOT_LABEL,
@@ -17,10 +17,10 @@ import {
  *   BE nói:    dòng 7, 8 — không tìm thấy phòng.
  *   Admin cần: nhà MTX#07 có 5 phòng, còn 2 trống, mà file đang xếp 6 khách vào.
  *
- * Chỉ có cách sau mới cho biết phải quay lại hỏi host, chứ không phải sửa file.
+ * Chỉ có cách sau mới cho biết phải quay lại hỏi owner, chứ không phải sửa file.
  *
  * ─── Tình huống cụ thể phải bắt cho được ─────────────────────────────────────
- * Host khai nhà có 6 phòng nhưng thực tế chỉ dựng được 5. File Excel host gửi sang
+ * Owner khai nhà có 6 phòng nhưng thực tế chỉ dựng được 5. File Excel owner gửi sang
  * có 6 dòng, dòng thứ 6 trỏ vào "Phòng 106" — một phòng không tồn tại trong hệ thống.
  * Hôm nay: cả file đi lên BE, 5 dòng vào, dòng 6 rơi vào bảng "lỗi dữ liệu" với câu
  * chung chung, và không ai nhận ra gốc rễ là **hồ sơ nhà khai sai số phòng**.
@@ -59,7 +59,16 @@ export type PreflightCode =
   | 'ROOM_TAKEN'
   | 'ROOM_DUPLICATED'
   | 'WHOLE_HOUSE_TAKEN'
-  | 'WHOLE_HOUSE_DUPLICATED';
+  | 'WHOLE_HOUSE_DUPLICATED'
+  /**
+   * KHÔNG phải lỗi: chính khách này đã có hồ sơ chờ đón ở đúng phòng/căn đó — file đã được
+   * nhập trước đó. Tách khỏi `ROOM_TAKEN` (phòng bị NGƯỜI KHÁC giữ) vì hai việc khác nhau:
+   * một bên là bỏ qua cho yên, một bên là phải hỏi lại owner.
+   */
+  | 'ALREADY_IMPORTED';
+
+/** Dòng có vấn đề thật (cần sửa file / hỏi owner) — `ALREADY_IMPORTED` không tính. */
+export const isIssue = (code?: PreflightCode) => !!code && code !== 'ALREADY_IMPORTED';
 
 export interface PreflightRow {
   /** Số dòng Excel (1-based, gồm header) — khớp `BulkImportError.rowNumber` của BE. */
@@ -80,7 +89,9 @@ export interface PreflightGroup {
   rows: PreflightRow[];
   okCount: number;
   issueCount: number;
-  /** Số dòng vượt quá số chỗ còn nhận được — >0 là phải quay lại hỏi host. */
+  /** Dòng đã nhập trước đó (khách đã có hồ sơ chờ đón ở đúng chỗ). */
+  alreadyCount: number;
+  /** Số dòng vượt quá số chỗ còn nhận được — >0 là phải quay lại hỏi owner. */
   overCapacity: number;
 }
 
@@ -88,6 +99,8 @@ export interface PreflightReport {
   totalRows: number;
   okCount: number;
   issueCount: number;
+  /** Dòng đã nhập trước đó — `totalRows` bằng số này nghĩa là cả file đã nhập rồi. */
+  alreadyCount: number;
   groups: PreflightGroup[];
   /** Không đọc được file (hỏng, sai định dạng, không thấy sheet) — im lặng, để BE nói. */
   parseError?: string;
@@ -96,7 +109,7 @@ export interface PreflightReport {
 }
 
 const EMPTY: PreflightReport = {
-  totalRows: 0, okCount: 0, issueCount: 0, groups: [], propertyIds: [],
+  totalRows: 0, okCount: 0, issueCount: 0, alreadyCount: 0, groups: [], propertyIds: [],
 };
 
 const norm = (v: unknown) => normalizeVi(String(v ?? '').trim()).replace(/\s+/g, ' ').trim();
@@ -159,6 +172,8 @@ export const runImportPreflight = async (
   file: File,
   properties: PropertyResponse[],
   occupancyByProperty?: Map<number, PropertyOccupancy>,
+  /** Hồ sơ chờ đón đang có — để nhận ra dòng đã được nhập ở lần trước. */
+  drafts: TenantContractResponse[] = [],
 ): Promise<PreflightReport> => {
   let rows: unknown[][];
   try {
@@ -241,6 +256,29 @@ export const runImportPreflight = async (
     }
   }
 
+  /**
+   * Hồ sơ chờ đón của CHÍNH khách trong dòng này, ở đúng phòng/căn đó — tức dòng đã được
+   * nhập ở lần trước. Khớp theo tên khách (bỏ dấu, gộp khoảng trắng) + nhà + phòng: cùng một
+   * người ở cùng một chỗ thì gần như chắc chắn là cùng một hồ sơ.
+   */
+  const ownDraft = (p: Parsed) => p.property && drafts.find((d) =>
+    d.propertyId === p.property!.id
+    && (p.wholeHouseRow
+      ? d.roomId == null
+      : normalizeRoomNumber(d.roomNumber) === normalizeRoomNumber(p.roomNumber))
+    && norm(d.tenantFullName) === norm(p.tenantName));
+
+  const alreadyImported = (p: Parsed, base: PreflightRow): PreflightRow | null => {
+    const d = ownDraft(p);
+    return d
+      ? {
+          ...base,
+          code: 'ALREADY_IMPORTED',
+          message: `Đã nhập trước đó — hồ sơ ${d.contractCode} (${(d.statusLabel ?? 'chờ đón khách').toLowerCase()}). Không tạo lại.`,
+        }
+      : null;
+  };
+
   const checked: PreflightRow[] = parsed.map((p) => {
     const base: PreflightRow = {
       excelRow: p.excelRow,
@@ -279,6 +317,8 @@ export const runImportPreflight = async (
         };
       }
       if (occ.wholeHouseTaken) {
+        const again = alreadyImported(p, base);
+        if (again) return again;
         return {
           ...base,
           code: 'WHOLE_HOUSE_TAKEN',
@@ -301,7 +341,7 @@ export const runImportPreflight = async (
       /*
        * ĐÂY là tình huống "host khai 6 phòng, nhà chỉ có 5".
        * Nói kèm số phòng thật của căn nhà, vì nếu không admin sẽ đi sửa file (sai hướng)
-       * thay vì quay lại hỏi host xem căn nhà thật ra có mấy phòng.
+       * thay vì quay lại hỏi owner xem căn nhà thật ra có mấy phòng.
        */
       return {
         ...base,
@@ -320,6 +360,8 @@ export const runImportPreflight = async (
     }
 
     if (slot.state !== 'AVAILABLE') {
+      const again = alreadyImported(p, base);
+      if (again) return again;
       return {
         ...base,
         code: 'ROOM_TAKEN',
@@ -342,10 +384,13 @@ export const runImportPreflight = async (
       rows: [],
       okCount: 0,
       issueCount: 0,
+      alreadyCount: 0,
       overCapacity: 0,
     };
     g.rows.push(row);
-    if (row.code) g.issueCount += 1; else g.okCount += 1;
+    if (row.code === 'ALREADY_IMPORTED') g.alreadyCount += 1;
+    else if (row.code) g.issueCount += 1;
+    else g.okCount += 1;
     groupMap.set(key, g);
   });
 
@@ -353,7 +398,7 @@ export const runImportPreflight = async (
     /*
      * Vượt sức chứa tính trên SỐ DÒNG so với SỐ CHỖ CÒN NHẬN ĐƯỢC, không phải trên số
      * dòng lỗi. Một file 6 dòng cho căn còn 2 phòng thì kể cả khi từng dòng đều trỏ vào
-     * phòng có thật, vẫn có 4 người không có chỗ. Đó là câu hỏi phải hỏi host, và nó
+     * phòng có thật, vẫn có 4 người không có chỗ. Đó là câu hỏi phải hỏi owner, và nó
      * không hiện ra ở bất kỳ lỗi từng-dòng nào.
      */
     const capacity = g.occupancy?.loaded
@@ -361,14 +406,16 @@ export const runImportPreflight = async (
       : null;
     return {
       ...g,
-      overCapacity: capacity == null ? 0 : Math.max(0, g.rows.length - capacity),
+      // Dòng đã nhập trước đó đang chiếm đúng chỗ của chính nó — không đòi thêm chỗ nào.
+      overCapacity: capacity == null ? 0 : Math.max(0, g.rows.length - g.alreadyCount - capacity),
     };
   }).sort((a, b) => (b.issueCount + b.overCapacity) - (a.issueCount + a.overCapacity));
 
   return {
     totalRows: checked.length,
     okCount: checked.filter((r) => !r.code).length,
-    issueCount: checked.filter((r) => !!r.code).length,
+    issueCount: checked.filter((r) => isIssue(r.code)).length,
+    alreadyCount: checked.filter((r) => r.code === 'ALREADY_IMPORTED').length,
     groups,
     propertyIds,
   };

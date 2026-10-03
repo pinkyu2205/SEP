@@ -29,7 +29,7 @@
  *   - remindUpcomingRentOn28th    : 00:10 ngày 28
  *   - runDailySweep (08:00 mỗi ngày): nhắc mỗi ngày 2–4, hạn ngày 5, nhắc lần cuối
  *     ngày 7, và từ ngày 8 (`overdueDays >= termination-after-days`) thì báo quản lý
- *     + host rồi set contract.terminationProposed = true.
+ *     + owner rồi set contract.terminationProposed = true.
  *   - Các mốc nằm ở application.yaml: billing.rent.{due-day, final-reminder-day,
  *     termination-after-days} — đúng bằng các số trong RENT_CYCLE bên dưới.
  *
@@ -241,7 +241,7 @@ export const canTerminateForUnpaidRent = (
  *   • KHÔNG còn phí trễ hạn 2% (trước đây BE cộng 2% khi quá hạn).
  *   • Hạn thanh toán = NGÀY PHÁT HÀNH + 5 ngày (trước: điện/nước +2, sửa chữa +3,
  *     dịch vụ cuối tháng +5).
- *   • Qua hạn đó mà chưa trả → báo admin + host + manager + chính khách, và manager
+ *   • Qua hạn đó mà chưa trả → báo admin + owner + manager + chính khách, và manager
  *     ĐƯỢC QUYỀN chấm dứt hợp đồng NGAY (không có thêm mốc nhắc cuối như tiền nhà).
  *   • Tiền nhà giữ nguyên chu kỳ 1 → 5 → 7 → 8 ở trên.
  *

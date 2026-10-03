@@ -2,7 +2,7 @@
 
 > **Phạm vi.** Hệ thống Hoàng Bình Land gồm hai ứng dụng. **Ứng dụng web** mô tả ở mục này phục
 > vụ ba vai trò: **Khách vãng lai** (website công khai, không cần tài khoản), **Quản trị viên**
-> (Admin — vận hành hệ thống) và **Chủ nhà** (Host — chủ sở hữu bất động sản). Hai vai trò còn
+> (Admin — vận hành hệ thống) và **Chủ nhà** (Owner — chủ sở hữu bất động sản). Hai vai trò còn
 > lại là **Quản lý vận hành** (Manager) và **Khách thuê** (Tenant) chỉ làm việc trên ứng dụng di
 > động, được mô tả ở mục 3.3. Tài khoản Quản lý vận hành đăng nhập trên web sẽ bị từ chối có chủ
 > đích (xem 3.2.2.1).
@@ -50,7 +50,7 @@
     ("Giá tối thiểu" / "Giá tối đa").
   - "Lọc nâng cao" bổ sung diện tích, "Số phòng ngủ" và "Tiện ích".
   - "Xóa bộ lọc" xoá mọi điều kiện và tải lại toàn bộ danh sách.
-  - Chỉ những bất động sản đã được Host duyệt giá và còn chỗ trống mới được đăng lên trang này;
+  - Chỉ những bất động sản đã được Owner duyệt giá và còn chỗ trống mới được đăng lên trang này;
     nhà đã kín khách không xuất hiện.
   - Thành công: kết quả hiển thị dạng thẻ, bấm vào thẻ sẽ mở trang chi tiết.
   - Thất bại: khi không có kết quả, trang hiển thị "Không tìm thấy bất động sản phù hợp" kèm gợi ý
@@ -133,7 +133,7 @@
     đính kèm theo chuẩn Bearer.
   - Thành công:
     - Vai trò `ROLE_ADMIN` → chuyển tới cổng quản trị `/admin`.
-    - Vai trò `ROLE_OWNER` (Host) → chuyển tới cổng chủ nhà `/host`.
+    - Vai trò `ROLE_OWNER` (Owner) → chuyển tới cổng chủ nhà `/owner`.
     - Nếu người dùng bị chuyển về trang đăng nhập từ một URL cần quyền, và URL đó thuộc đúng cổng
       của họ, hệ thống đưa họ về đúng URL ban đầu thay vì trang chủ của cổng.
   - Thất bại:
@@ -149,16 +149,16 @@
   thuộc vai trò của mình.
 - **Bố cục màn hình:**
 
-  `[Ảnh: khung cổng Admin và khung cổng Host đặt cạnh nhau]`
+  `[Ảnh: khung cổng Admin và khung cổng Owner đặt cạnh nhau]`
 
 - **Chi tiết chức năng:**
   - Chưa đăng nhập → chuyển về `/login`, URL vừa yêu cầu được ghi nhớ.
-  - Đăng nhập sai vai trò → chuyển về trang chủ cổng của chính họ (`/admin` với Admin, `/host` với
-    Host) thay vì hiện lỗi từ chối quyền.
+  - Đăng nhập sai vai trò → chuyển về trang chủ cổng của chính họ (`/admin` với Admin, `/owner` với
+    Owner) thay vì hiện lỗi từ chối quyền.
   - Đã đăng nhập mà mở `/login` → được đưa thẳng về cổng của mình.
-  - Admin xem được các màn của Host để giám sát, trừ ba sổ tiền ("Hoá đơn", "Công nợ", "Sổ cọc")
-    chỉ dành riêng cho Host.
-  - Phiên đăng nhập đã lưu mà vai trò không phải Admin hoặc Host sẽ bị loại bỏ khi tải trang.
+  - Admin xem được các màn của Owner để giám sát, trừ ba sổ tiền ("Hoá đơn", "Công nợ", "Sổ cọc")
+    chỉ dành riêng cho Owner.
+  - Phiên đăng nhập đã lưu mà vai trò không phải Admin hoặc Owner sẽ bị loại bỏ khi tải trang.
 
 ### 3.2.2.3 `<Đã đăng nhập>` Đăng xuất
 
@@ -187,13 +187,13 @@
   `[Ảnh: bảng điều hành Admin — thẻ KPI, biểu đồ doanh thu, danh sách việc chờ]`
 
 - **Chi tiết chức năng:**
-  - Thanh đầu trang có ô tìm kiếm toàn hệ thống ("Tìm người dùng, Host, nhà thuê, hóa đơn, hợp
+  - Thanh đầu trang có ô tìm kiếm toàn hệ thống ("Tìm người dùng, Owner, nhà thuê, hóa đơn, hợp
     đồng…"), chuông thông báo kèm số chưa đọc và menu tài khoản.
   - Số liệu hoá đơn nhóm theo trạng thái ("Đã thu", "Chưa thu", "Quá hạn", "Đã huỷ") và theo loại
     ("Tiền phòng", "Tiền điện", "Tiền nước", "Dịch vụ", "Phí bảo trì", "Khác").
   - Số liệu thanh toán nhóm theo trạng thái đối soát ("Chờ đối soát", "Đã xác nhận", "Bị từ chối")
     và theo hình thức ("Chuyển khoản", "Tiền mặt", "Ví điện tử").
-  - Số liệu tài khoản nhóm theo vai trò ("Host (chủ nhà)", "Quản lý vận hành", "Khách thuê").
+  - Số liệu tài khoản nhóm theo vai trò ("Owner (chủ nhà)", "Quản lý vận hành", "Khách thuê").
   - Số liệu bảo trì nhóm theo tiến độ ("Chờ xử lý", "Đang xử lý").
   - Thành công: mỗi thẻ đều dẫn thẳng tới màn hình xử lý được con số đứng sau nó.
   - Thất bại: khối nào không tải được sẽ có nút thử lại riêng, không chặn cả trang.
@@ -235,7 +235,7 @@
     mật khẩu.
   - Kiểm tra phía giao diện: "Vui lòng nhập tên đăng nhập.", "Mật khẩu phải có ít nhất 6 ký tự.",
     "Vui lòng nhập số điện thoại."
-  - Thành công: tài khoản được tạo và xuất hiện trong danh sách, sẵn sàng để Host phân công khu vực
+  - Thành công: tài khoản được tạo và xuất hiện trong danh sách, sẵn sàng để Owner phân công khu vực
     (3.2.32).
   - Thất bại: hộp thoại giữ nguyên dữ liệu đã nhập và hiển thị "Có lỗi xảy ra khi tạo tài khoản".
 
@@ -396,19 +396,19 @@
 - **Chi tiết chức năng:**
   - Thẻ KPI: "TỔNG TÒA NHÀ", "CHỜ CẤU HÌNH" ("chưa chọn loại hình"), "ĐÃ CẤU HÌNH" ("đã xác định
     loại hình") và "ĐANG CẢI TẠO" ("cần xác nhận hoàn thành").
-  - Chip trạng thái liệt kê tiến trình kèm số lượng: "Tất cả", "Đang cải tạo", "Chờ Host duyệt giá",
+  - Chip trạng thái liệt kê tiến trình kèm số lượng: "Tất cả", "Đang cải tạo", "Chờ Owner duyệt giá",
     "Đang kinh doanh"; các công cụ tìm kiếm, lọc, đổi kiểu xem, sắp xếp và phân trang giống 3.2.5.1.
   - Mỗi thẻ hiển thị loại hình khai thác do file Excel quyết định ("Nhà nguyên căn" / "Phòng trọ"),
     chặng hiện tại và, trong lúc thi công, dấu hiệu "Đang thi công cải tạo".
   - Dạng bảng bổ sung các cột "KHU VỰC", "LOẠI HÌNH", "PHÒNG", "TẦNG", "DIỆN TÍCH", "QUẢN LÝ"
-    ("Chưa gán" cho tới khi Host phân công khu vực) và "TRẠNG THÁI" ("Đã cải tạo xong", "Đang kinh
+    ("Chưa gán" cho tới khi Owner phân công khu vực) và "TRẠNG THÁI" ("Đã cải tạo xong", "Đang kinh
     doanh", …).
 
 ### 3.2.6.2 `<Admin>` Nhập cấu hình khai thác từ Excel
 
 - **Điều kiện kích hoạt:** Admin bấm "Nhập cải tạo từ Excel".
 - **Mô tả chức năng:** Nạp mọi thứ cần thiết để định giá toà nhà: cách khai thác, danh sách phòng,
-  hợp đồng cải tạo và thiết bị mua mới. Nhập xong là hồ sơ tự động sang Host — không có bước "gửi"
+  hợp đồng cải tạo và thiết bị mua mới. Nhập xong là hồ sơ tự động sang Owner — không có bước "gửi"
   riêng.
 - **Bố cục màn hình:**
 
@@ -417,18 +417,18 @@
 - **Chi tiết chức năng:**
   - Hộp thoại nêu rõ nội dung và hệ quả: "File gồm cấu hình khai thác (nguyên căn / chia phòng),
     danh sách phòng, hợp đồng cải tạo và thiết bị mua mới — khớp theo mã HĐ thuê của căn đã khởi
-    tạo. Nhập xong, các căn **tự động được gửi Host** duyệt." "Tải template" tải file mẫu.
+    tạo. Nhập xong, các căn **tự động được gửi Owner** duyệt." "Tải template" tải file mẫu.
   - "Kiểm tra file" kiểm tra trước khi ghi.
     - Thành công: "File hợp lệ — {n} căn · {m} dòng cải tạo · {k} thiết bị mua mới · {x} bỏ qua",
       kèm thông báo nổi "File hợp lệ — {n} căn sẵn sàng"; "Kiểm tra lại" chạy lại.
     - Thất bại: lỗi được liệt kê theo từng dòng và hệ thống không ghi gì.
-  - "Nhập & gửi Host" yêu cầu xác nhận — "Xác nhận nhập cải tạo & gửi Host? Hệ thống sẽ nhập cải tạo
-    & thiết bị mua mới cho {n} căn nhà từ file {tên file}, sau đó tự động gửi Host duyệt." — với
-    "Nhập & gửi Host" / "Huỷ".
-  - Thành công: "Đã nhập cải tạo cho {n} căn — đã gửi Host duyệt · {x} bỏ qua." Bảng kết quả hiển
-    thị "CĂN NHÀ", "MÃ HĐ" và "TRẠNG THÁI" ("Đã gửi Host", hoặc "Bỏ qua" với căn mà file khai báo
+  - "Nhập & gửi Owner" yêu cầu xác nhận — "Xác nhận nhập cải tạo & gửi Owner? Hệ thống sẽ nhập cải tạo
+    & thiết bị mua mới cho {n} căn nhà từ file {tên file}, sau đó tự động gửi Owner duyệt." — với
+    "Nhập & gửi Owner" / "Huỷ".
+  - Thành công: "Đã nhập cải tạo cho {n} căn — đã gửi Owner duyệt · {x} bỏ qua." Bảng kết quả hiển
+    thị "CĂN NHÀ", "MÃ HĐ" và "TRẠNG THÁI" ("Đã gửi Owner", hoặc "Bỏ qua" với căn mà file khai báo
     là không cần cải tạo). "Nhập file khác" khởi động lại hộp thoại.
-  - Căn bị bỏ qua vẫn giữ nguyên trạng thái cũ và có thể gửi Host ở lần sau.
+  - Căn bị bỏ qua vẫn giữ nguyên trạng thái cũ và có thể gửi Owner ở lần sau.
 
 ### 3.2.6.3 `<Admin>` Mở hồ sơ cấu hình của một toà nhà
 
@@ -450,14 +450,14 @@
 ### 3.2.6.4 `<Admin>` Xác nhận hoàn thành cải tạo
 
 - **Điều kiện kích hoạt:** Admin bấm "Xác nhận hoàn thành cải tạo" trên toà nhà đang thi công.
-- **Mô tả chức năng:** Tuyên bố việc thi công đã xong — đây là điều kiện để Host định giá toà nhà.
+- **Mô tả chức năng:** Tuyên bố việc thi công đã xong — đây là điều kiện để Owner định giá toà nhà.
 - **Bố cục màn hình:**
 
   `[Ảnh: phần đầu hồ sơ toà nhà kèm nút "Xác nhận hoàn thành cải tạo"]`
 
 - **Chi tiết chức năng:**
   - Thành công: toà nhà chuyển sang "Đã cải tạo xong" và xuất hiện trong hàng chờ duyệt giá của
-    Host (3.2.25).
+    Owner (3.2.25).
   - Thất bại: trạng thái giữ nguyên và hiển thị thông báo lỗi từ máy chủ.
 
 ### 3.2.6.5 `<Admin>` Mở đợt cải tạo bổ sung
@@ -473,9 +473,9 @@
   - Khi mở đợt, hệ thống hiển thị "Đã mở đợt cải tạo mới. Tải file cải tạo bổ sung để hoàn tất."
   - "Nhập cải tạo bổ sung từ Excel" chỉ nhận file của đúng toà nhà đó ("Chỉ nhập cho {tên nhà} — mọi
     dòng phải có mã HĐ {mã}"). File gồm hợp đồng cải tạo và thiết bị mua mới, mỗi dòng đánh dấu
-    `THÊM_MỚI` hoặc `THAY_THẾ`; nhập xong hệ thống "tự động gửi Host duyệt lại giá (vì đổi chi
+    `THÊM_MỚI` hoặc `THAY_THẾ`; nhập xong hệ thống "tự động gửi Owner duyệt lại giá (vì đổi chi
     phí/thiết bị)".
-  - Thành công: "Đã nhập cải tạo bổ sung — {n} dòng cải tạo, {m} thiết bị. Đã gửi Host duyệt lại
+  - Thành công: "Đã nhập cải tạo bổ sung — {n} dòng cải tạo, {m} thiết bị. Đã gửi Owner duyệt lại
     giá." kèm nút "Hoàn tất & quay lại".
   - Quy tắc nghiệp vụ: khách đang ở không bao giờ bị tính tiền cho đợt cải tạo bổ sung. Chỉ hạng mục
     nâng cấp (`THÊM_MỚI`) mới làm tăng giá niêm yết cho khách sau này; thay thiết bị tương đương
@@ -528,8 +528,8 @@
   - Thông tin định danh khách: "Họ và tên khách *", "Số điện thoại *", "CCCD *", "Ngày sinh",
     "Ngày cấp CCCD", "Nơi cấp CCCD", "Hộ khẩu thường trú". Người ở cùng thêm bằng "+ Thêm thành
     viên" và gỡ bằng "Xóa thành viên".
-  - Điều khoản tiền: "Giá thuê (đ/tháng) *" được điền sẵn theo giá Host đã duyệt ("Lấy theo giá niêm
-    yết Host đã duyệt"), cùng "Tiền cọc (đ) *" và "Số tháng cọc"; thời hạn thuê có sẵn các mốc
+  - Điều khoản tiền: "Giá thuê (đ/tháng) *" được điền sẵn theo giá Owner đã duyệt ("Lấy theo giá niêm
+    yết Owner đã duyệt"), cùng "Tiền cọc (đ) *" và "Số tháng cọc"; thời hạn thuê có sẵn các mốc
     "6 tháng" / "1 năm" / "2 năm".
   - Kiểm tra dữ liệu: "SĐT không đúng định dạng Việt Nam (10 số, đầu 03/05/07/08/09).", "CCCD phải
     gồm đúng 12 chữ số.", "Ngày sinh không hợp lệ — khách phải sinh từ 1930 và đủ 18 tuổi.",
@@ -702,7 +702,7 @@
 - **Điều kiện kích hoạt:** Admin bấm "Phân công khu vực" trong nhóm "Vận hành".
 - **Mô tả chức năng:** Cho biết quận/huyện nào do quản lý vận hành nào phụ trách. Quy tắc được ghi
   ngay trên trang: "Mỗi quận/huyện do **một** quản lý vận hành phụ trách — gán cho khu vực là gán
-  cho mọi nhà bên trong. Xem toàn hệ thống; việc gán/đổi quản lý do Host quyết định."
+  cho mọi nhà bên trong. Xem toàn hệ thống; việc gán/đổi quản lý do Owner quyết định."
 - **Bố cục màn hình:**
 
   `[Ảnh: "Khu vực & Quản lý" (giao diện Admin) — thẻ KPI, bộ lọc, các dòng khu vực]`
@@ -713,7 +713,7 @@
     trước".
   - Mỗi dòng hiển thị quận/huyện, nhãn phủ sóng ("Đã gán"), quy mô ("{n} nhà · {m} đơn vị") và quản
     lý kèm số khu vực người đó phụ trách. "Xem chi tiết" mở rộng danh sách nhà bên trong.
-  - Admin chỉ có quyền xem ở màn này: việc phân công là quyết định của Host (3.2.32), nên màn này
+  - Admin chỉ có quyền xem ở màn này: việc phân công là quyết định của Owner (3.2.32), nên màn này
     không có nút "Đổi quản lý".
 
 ---
@@ -938,7 +938,7 @@
 
 - **Điều kiện kích hoạt:** Admin bấm "Hoàn cọc" trong nhóm "Khiếu nại".
 - **Mô tả chức năng:** Tập hợp các vụ khách thuê cho rằng tiền cọc hoàn lại không đúng thoả thuận.
-  Chỉ Admin được phân xử, vì lời khiếu nại nhắm vào chính Host và quản lý.
+  Chỉ Admin được phân xử, vì lời khiếu nại nhắm vào chính Owner và quản lý.
 - **Bố cục màn hình:**
 
   `[Ảnh: khiếu nại hoàn cọc — tab đang chờ và tab lịch sử]`
@@ -965,7 +965,7 @@
 - **Chi tiết chức năng:**
   - Admin ghi nhận kết quả và lập luận; vụ việc sau đó hiển thị "Đã khép" kèm "Quản trị viên kết
     luận ngày {ngày}".
-  - Thành công: vụ việc chuyển sang tab lịch sử, Host và khách thuê đều thấy kết luận.
+  - Thành công: vụ việc chuyển sang tab lịch sử, Owner và khách thuê đều thấy kết luận.
   - Thất bại: vụ việc vẫn ở trạng thái chờ; "Huỷ" đóng hộp thoại mà không kết luận.
 
 ---
@@ -1120,16 +1120,16 @@
 
 ---
 
-## 3.2.23 `<Host>` Bảng điều hành
+## 3.2.23 `<Owner>` Bảng điều hành
 
-### 3.2.23.1 `<Host>` Xem tổng quan kinh doanh
+### 3.2.23.1 `<Owner>` Xem tổng quan kinh doanh
 
-- **Điều kiện kích hoạt:** Host đăng nhập, hoặc bấm "Bảng điều hành" trên sidebar.
+- **Điều kiện kích hoạt:** Owner đăng nhập, hoặc bấm "Bảng điều hành" trên sidebar.
 - **Mô tả chức năng:** Cho chủ nhà biết trong một màn hình: tháng này danh mục thu được bao nhiêu và
   đang có việc gì chờ họ quyết định.
 - **Bố cục màn hình:**
 
-  `[Ảnh: bảng điều hành Host — thẻ doanh thu/chi phí/lợi nhuận, tỷ lệ lấp đầy, danh sách việc chờ]`
+  `[Ảnh: bảng điều hành Owner — thẻ doanh thu/chi phí/lợi nhuận, tỷ lệ lấp đầy, danh sách việc chờ]`
 
 - **Chi tiết chức năng:**
   - Thanh đầu trang có ô tìm kiếm ("Tìm kiếm bất động sản, quản lý, khách thuê..."), đồng hồ kèm
@@ -1144,11 +1144,11 @@
 
 ---
 
-## 3.2.24 `<Host>` Danh mục bất động sản
+## 3.2.24 `<Owner>` Danh mục bất động sản
 
-### 3.2.24.1 `<Host>` Xem danh sách bất động sản
+### 3.2.24.1 `<Owner>` Xem danh sách bất động sản
 
-- **Điều kiện kích hoạt:** Host bấm "Bất động sản" trong nhóm "Vận hành".
+- **Điều kiện kích hoạt:** Owner bấm "Bất động sản" trong nhóm "Vận hành".
 - **Mô tả chức năng:** Toàn bộ toà nhà công ty đang vận hành cho chủ nhà này, kèm các con số mà một
   người chủ quan tâm: đang thu bao nhiêu, lấp đầy đến đâu, còn gì chờ quyết định.
 - **Bố cục màn hình:**
@@ -1170,14 +1170,14 @@
     hợp đồng" và thanh lấp đầy ("{n}/{m} phòng có khách").
   - Trạng thái rỗng: "Không có tòa nhà nào khớp bộ lọc." và "Chưa có tòa nhà nào đang quản lý."
 
-### 3.2.24.2 `<Host>` Xem chi tiết một toà nhà
+### 3.2.24.2 `<Owner>` Xem chi tiết một toà nhà
 
-- **Điều kiện kích hoạt:** Host bấm vào một thẻ bất động sản.
+- **Điều kiện kích hoạt:** Owner bấm vào một thẻ bất động sản.
 - **Mô tả chức năng:** Mọi thông tin của một toà nhà: phòng, thiết bị và trạng thái kinh doanh hiện
   tại.
 - **Bố cục màn hình:**
 
-  `[Ảnh: chi tiết bất động sản của Host — tab "Tổng quan" / "Phòng" / "Thiết bị"]`
+  `[Ảnh: chi tiết bất động sản của Owner — tab "Tổng quan" / "Phòng" / "Thiết bị"]`
 
 - **Chi tiết chức năng:**
   - Các tab: "Tổng quan", "Phòng", "Thiết bị".
@@ -1188,11 +1188,11 @@
 
 ---
 
-## 3.2.25 `<Host>` Duyệt giá & kích hoạt nhà mới
+## 3.2.25 `<Owner>` Duyệt giá & kích hoạt nhà mới
 
-### 3.2.25.1 `<Host>` Mở hàng chờ duyệt giá
+### 3.2.25.1 `<Owner>` Mở hàng chờ duyệt giá
 
-- **Điều kiện kích hoạt:** Host bấm "Xem & duyệt →" trên banner, hoặc thẻ "Nhà chờ duyệt giá" ở bảng
+- **Điều kiện kích hoạt:** Owner bấm "Xem & duyệt →" trên banner, hoặc thẻ "Nhà chờ duyệt giá" ở bảng
   điều hành.
 - **Mô tả chức năng:** Liệt kê các hồ sơ Admin đã gửi sang, tách theo loại quyết định cần đưa ra.
 - **Bố cục màn hình:**
@@ -1209,9 +1209,9 @@
   - Mỗi dòng mở hồ sơ bằng "Duyệt ›"; cuối hộp thoại tổng kết "Tổng {n} hồ sơ chờ duyệt". Cột không
     có hồ sơ hiển thị "Không có hồ sơ nào".
 
-### 3.2.25.2 `<Host>` Xem toàn bộ tiền đã bỏ ra cho toà nhà
+### 3.2.25.2 `<Owner>` Xem toàn bộ tiền đã bỏ ra cho toà nhà
 
-- **Điều kiện kích hoạt:** Host mở một hồ sơ từ hàng chờ.
+- **Điều kiện kích hoạt:** Owner mở một hồ sơ từ hàng chờ.
 - **Mô tả chức năng:** "Duyệt giá & Kích hoạt Tòa nhà — Xem toàn bộ tiền đã bỏ ra cho {tên nhà}, đặt
   mục tiêu lãi, rồi chốt giá cho thuê." Đây là quyết định biến một hồ sơ tiếp nhận thành sản phẩm
   bán được.
@@ -1240,9 +1240,9 @@
     khoản mới, không tính lại từ đầu."
   - "THIẾT BỊ VẬN HÀNH" tóm tắt thiết bị đang lắp ("{n} đang dùng · {tiền}").
 
-### 3.2.25.3 `<Host>` Tính giá thuê đề xuất
+### 3.2.25.3 `<Owner>` Tính giá thuê đề xuất
 
-- **Điều kiện kích hoạt:** Host xem khối mục tiêu, hoặc bấm "Tính lại theo cấu hình".
+- **Điều kiện kích hoạt:** Owner xem khối mục tiêu, hoặc bấm "Tính lại theo cấu hình".
 - **Mô tả chức năng:** Tính ra mức giá thuê vừa thu hồi được vốn vừa đạt mục tiêu lãi của chủ nhà,
   và trình bày từng bước thay vì chỉ đưa ra một con số.
 - **Bố cục màn hình:**
@@ -1271,9 +1271,9 @@
     hình chưa có tiền lãi mục tiêu / tỷ lệ sinh lời mục tiêu. Vào "Cấu hình duyệt giá" để nhập
     trước."; "Không tính được giá"; "Không tải được dữ liệu".
 
-### 3.2.25.4 `<Host>` Chốt giá thuê
+### 3.2.25.4 `<Owner>` Chốt giá thuê
 
-- **Điều kiện kích hoạt:** Host sửa các ô giá ở phần cuối trang.
+- **Điều kiện kích hoạt:** Owner sửa các ô giá ở phần cuối trang.
 - **Mô tả chức năng:** Ấn định mức giá sẽ chào cho khách thuê.
 - **Bố cục màn hình:**
 
@@ -1304,9 +1304,9 @@
   - Một thanh cố định luôn hiển thị quyết định khi cuộn trang: "GIÁ CHỐT / THÁNG", "TIỀN LỜI THẬT /
     THÁNG" (kèm mục tiêu bên dưới), "TIỀN LỜI THẬT CẢ KỲ ({n} THÁNG)" và nút "Xác nhận & Kích hoạt".
 
-### 3.2.25.5 `<Host>` Kích hoạt cho thuê
+### 3.2.25.5 `<Owner>` Kích hoạt cho thuê
 
-- **Điều kiện kích hoạt:** Host bấm "Xác nhận & Kích hoạt".
+- **Điều kiện kích hoạt:** Owner bấm "Xác nhận & Kích hoạt".
 - **Mô tả chức năng:** Ấn định giá niêm yết và mở toà nhà cho kinh doanh.
 - **Bố cục màn hình:**
 
@@ -1326,11 +1326,11 @@
 
 ---
 
-## 3.2.26 `<Host>` Duyệt lại giá sau cải tạo bổ sung
+## 3.2.26 `<Owner>` Duyệt lại giá sau cải tạo bổ sung
 
-### 3.2.26.1 `<Host>` Duyệt giá niêm yết mới
+### 3.2.26.1 `<Owner>` Duyệt giá niêm yết mới
 
-- **Điều kiện kích hoạt:** Host mở một hồ sơ ở cột "Cải tạo bổ sung — duyệt lại giá".
+- **Điều kiện kích hoạt:** Owner mở một hồ sơ ở cột "Cải tạo bổ sung — duyệt lại giá".
 - **Mô tả chức năng:** Quyết định phần tiền chi cho đợt cải tạo mới có được tính vào giá cho khách
   sau này hay không, và ở mức nào.
 - **Bố cục màn hình:**
@@ -1354,11 +1354,11 @@
 
 ---
 
-## 3.2.27 `<Host>` Cấu hình duyệt giá
+## 3.2.27 `<Owner>` Cấu hình duyệt giá
 
-### 3.2.27.1 `<Host>` Đặt mục tiêu lãi, chi phí và các biên dự phòng
+### 3.2.27.1 `<Owner>` Đặt mục tiêu lãi, chi phí và các biên dự phòng
 
-- **Điều kiện kích hoạt:** Host bấm "Cấu hình giá" trong nhóm "Hệ thống", hoặc "Sửa cấu hình duyệt
+- **Điều kiện kích hoạt:** Owner bấm "Cấu hình giá" trong nhóm "Hệ thống", hoặc "Sửa cấu hình duyệt
   giá" từ một trang duyệt giá.
 - **Mô tả chức năng:** "Cấu hình duyệt giá — Áp dụng cho **tất cả** căn nhà. Màn duyệt giá của từng
   căn sẽ dùng đúng những số này — không phải nhập lại ở đó nữa."
@@ -1409,11 +1409,11 @@
 
 ---
 
-## 3.2.28 `<Host>` Quản lý khách thuê
+## 3.2.28 `<Owner>` Quản lý khách thuê
 
-### 3.2.28.1 `<Host>` Xem danh sách khách thuê
+### 3.2.28.1 `<Owner>` Xem danh sách khách thuê
 
-- **Điều kiện kích hoạt:** Host bấm "Khách thuê" trong nhóm "Vận hành".
+- **Điều kiện kích hoạt:** Owner bấm "Khách thuê" trong nhóm "Vận hành".
 - **Mô tả chức năng:** "Ai đang ở đâu, phòng nào còn trống."
 - **Bố cục màn hình:**
 
@@ -1435,11 +1435,11 @@
 
 ---
 
-## 3.2.29 `<Host>` Quản lý hợp đồng
+## 3.2.29 `<Owner>` Quản lý hợp đồng
 
-### 3.2.29.1 `<Host>` Xem hợp đồng
+### 3.2.29.1 `<Owner>` Xem hợp đồng
 
-- **Điều kiện kích hoạt:** Host bấm "Hợp đồng" trong nhóm "Vận hành".
+- **Điều kiện kích hoạt:** Owner bấm "Hợp đồng" trong nhóm "Vận hành".
 - **Mô tả chức năng:** "Hợp đồng cho khách thuê (nguồn thu) và master lease ký với chủ nhà (nguồn
   chi) — bấm một dòng để xem toàn bộ chi tiết."
 - **Bố cục màn hình:**
@@ -1447,7 +1447,7 @@
   `[Ảnh: "Hợp đồng" — hai tab, sáu thẻ KPI, bảng hợp đồng]`
 
 - **Chi tiết chức năng:**
-  - Hai tab kèm số lượng: "Quản lý ↔ Khách thuê" và "Host ↔ Chủ nhà (master lease)".
+  - Hai tab kèm số lượng: "Quản lý ↔ Khách thuê" và "Owner ↔ Chủ nhà (master lease)".
   - Thẻ KPI: "TỔNG HỢP ĐỒNG" ("{n} đang chạy"), "ĐANG HIỆU LỰC" ("{tiền}/tháng"), "CHỜ ĐÓN KHÁCH"
     ("Đã lập hồ sơ, chưa giao phòng"), "CHỜ KÍCH HOẠT" ("Đã giao phòng, chờ thu tiền"), "SẮP HẾT HẠN
     ≤60N" ("Cần chốt gia hạn sớm") và "ĐÃ KẾT THÚC" ("Chấm dứt + hết hạn").
@@ -1466,29 +1466,29 @@
 
 ---
 
-## 3.2.30 `<Host>` Đơn xin gia hạn
+## 3.2.30 `<Owner>` Đơn xin gia hạn
 
-### 3.2.30.1 `<Host>` Theo dõi đơn xin gia hạn
+### 3.2.30.1 `<Owner>` Theo dõi đơn xin gia hạn
 
-- **Điều kiện kích hoạt:** Host bấm "Đơn gia hạn" trong nhóm "Vận hành".
+- **Điều kiện kích hoạt:** Owner bấm "Đơn gia hạn" trong nhóm "Vận hành".
 - **Mô tả chức năng:** Cho chủ nhà thấy khách nào xin ở thêm và đơn đã được xử lý ra sao. Quyền
   quyết định thuộc về Admin (3.2.14).
 - **Bố cục màn hình:**
 
-  `[Ảnh: danh sách đơn gia hạn phía Host]`
+  `[Ảnh: danh sách đơn gia hạn phía Owner]`
 
 - **Chi tiết chức năng:**
   - Mỗi đơn hiển thị khách thuê, toà nhà và phòng, thời gian xin thêm và trạng thái hiện tại ("Chờ
     duyệt" hoặc đã xử lý).
-  - Thành công: Host chủ động biết phòng nào sắp trống, phòng nào tiếp tục có khách.
+  - Thành công: Owner chủ động biết phòng nào sắp trống, phòng nào tiếp tục có khách.
 
 ---
 
-## 3.2.31 `<Host>` Quản lý nhân sự vận hành
+## 3.2.31 `<Owner>` Quản lý nhân sự vận hành
 
-### 3.2.31.1 `<Host>` Xem danh sách quản lý vận hành
+### 3.2.31.1 `<Owner>` Xem danh sách quản lý vận hành
 
-- **Điều kiện kích hoạt:** Host bấm "Quản lý vận hành" trong nhóm "Nhân sự".
+- **Điều kiện kích hoạt:** Owner bấm "Quản lý vận hành" trong nhóm "Nhân sự".
 - **Mô tả chức năng:** "{n} quản lý vận hành đang giám sát các bất động sản Hoàng Bình Land" — những
   người trực tiếp vận hành và khối lượng việc từng người đang gánh.
 - **Bố cục màn hình:**
@@ -1502,9 +1502,9 @@
   - Ô tìm kiếm khớp tên hoặc số điện thoại; quản lý chưa có khu vực được đánh dấu "Chưa phụ trách khu
     vực nào".
 
-### 3.2.31.2 `<Host>` Nhập bảng lương quản lý
+### 3.2.31.2 `<Owner>` Nhập bảng lương quản lý
 
-- **Điều kiện kích hoạt:** Host bấm "Lương quản lý" trong nhóm "Nhân sự", hoặc "Sửa bảng lương" trong
+- **Điều kiện kích hoạt:** Owner bấm "Lương quản lý" trong nhóm "Nhân sự", hoặc "Sửa bảng lương" trong
   màn cấu hình duyệt giá.
 - **Mô tả chức năng:** Ghi nhận mức lương của từng quản lý vận hành, để phân bổ vào các toà nhà họ
   phụ trách và đưa vào công thức tính giá (3.2.27).
@@ -1523,16 +1523,16 @@
 
 ---
 
-## 3.2.32 `<Host>` Phân công khu vực cho quản lý
+## 3.2.32 `<Owner>` Phân công khu vực cho quản lý
 
-### 3.2.32.1 `<Host>` Xem bảng phân công khu vực
+### 3.2.32.1 `<Owner>` Xem bảng phân công khu vực
 
-- **Điều kiện kích hoạt:** Host bấm "Phân công khu vực" trong nhóm "Nhân sự".
+- **Điều kiện kích hoạt:** Owner bấm "Phân công khu vực" trong nhóm "Nhân sự".
 - **Mô tả chức năng:** "Khu vực & Quản lý — Mỗi quận/huyện do **một** quản lý vận hành phụ trách —
-  gán cho khu vực là gán cho mọi nhà bên trong." Host là vai quyết định việc này.
+  gán cho khu vực là gán cho mọi nhà bên trong." Owner là vai quyết định việc này.
 - **Bố cục màn hình:**
 
-  `[Ảnh: "Khu vực & Quản lý" (giao diện Host) — thẻ KPI, các dòng khu vực kèm thao tác]`
+  `[Ảnh: "Khu vực & Quản lý" (giao diện Owner) — thẻ KPI, các dòng khu vực kèm thao tác]`
 
 - **Chi tiết chức năng:**
   - Thẻ KPI: "Tổng khu vực" và "{n}/{m} Đều đã có quản lý".
@@ -1542,9 +1542,9 @@
   - Khu vực có tài khoản quản lý bị vô hiệu hoá sẽ được cảnh báo "Tài khoản quản lý của khu vực này
     đang không hoạt động".
 
-### 3.2.32.2 `<Host>` Gán, đổi hoặc gỡ quản lý của một khu vực
+### 3.2.32.2 `<Owner>` Gán, đổi hoặc gỡ quản lý của một khu vực
 
-- **Điều kiện kích hoạt:** Host bấm "Đổi quản lý" trên một dòng khu vực, hoặc "Gỡ" để khu vực trở về
+- **Điều kiện kích hoạt:** Owner bấm "Đổi quản lý" trên một dòng khu vực, hoặc "Gỡ" để khu vực trở về
   trạng thái chưa gán.
 - **Mô tả chức năng:** Giao toàn bộ toà nhà của một quận/huyện cho một quản lý, chỉ bằng một thao
   tác.
@@ -1563,11 +1563,11 @@
 
 ---
 
-## 3.2.33 `<Host>` Quản lý dòng tiền
+## 3.2.33 `<Owner>` Quản lý dòng tiền
 
-### 3.2.33.1 `<Host>` Đối soát dòng tiền vào và ra
+### 3.2.33.1 `<Owner>` Đối soát dòng tiền vào và ra
 
-- **Điều kiện kích hoạt:** Host bấm "Tổng quan" trong nhóm "Tài chính".
+- **Điều kiện kích hoạt:** Owner bấm "Tổng quan" trong nhóm "Tài chính".
 - **Mô tả chức năng:** "Quản lý Dòng tiền — Đối soát dòng tiền vào/ra & lợi nhuận ròng các nhà đã
   duyệt giá."
 - **Bố cục màn hình:**
@@ -1589,16 +1589,16 @@
 
 ---
 
-## 3.2.34 `<Host>` Quản lý hoá đơn
+## 3.2.34 `<Owner>` Quản lý hoá đơn
 
-### 3.2.34.1 `<Host>` Xem danh sách hoá đơn
+### 3.2.34.1 `<Owner>` Xem danh sách hoá đơn
 
-- **Điều kiện kích hoạt:** Host bấm "Hoá đơn" trong nhóm "Tài chính". Màn này chỉ dành cho Host,
+- **Điều kiện kích hoạt:** Owner bấm "Hoá đơn" trong nhóm "Tài chính". Màn này chỉ dành cho Owner,
   Admin không mở được.
 - **Mô tả chức năng:** Mọi hoá đơn đã phát hành cho khách thuê trong danh mục và tình trạng thu tiền.
 - **Bố cục màn hình:**
 
-  `[Ảnh: hoá đơn phía Host — thẻ KPI, bộ lọc, bảng hoá đơn]`
+  `[Ảnh: hoá đơn phía Owner — thẻ KPI, bộ lọc, bảng hoá đơn]`
 
 - **Chi tiết chức năng:**
   - Bộ lọc: loại hoá đơn ("Mọi loại hoá đơn" / "Tiền phòng" / "Tiền điện" / "Tiền nước" / "Dịch vụ" /
@@ -1610,11 +1610,11 @@
 
 ---
 
-## 3.2.35 `<Host>` Quản lý công nợ
+## 3.2.35 `<Owner>` Quản lý công nợ
 
-### 3.2.35.1 `<Host>` Xem công nợ theo tuổi nợ
+### 3.2.35.1 `<Owner>` Xem công nợ theo tuổi nợ
 
-- **Điều kiện kích hoạt:** Host bấm "Công nợ" trong nhóm "Tài chính". Chỉ dành cho Host.
+- **Điều kiện kích hoạt:** Owner bấm "Công nợ" trong nhóm "Tài chính". Chỉ dành cho Owner.
 - **Mô tả chức năng:** Hiển thị số tiền khách đang nợ, sắp theo độ dài thời gian nợ — cơ sở để quyết
   định gọi ai trước.
 - **Bố cục màn hình:**
@@ -1629,11 +1629,11 @@
 
 ---
 
-## 3.2.36 `<Host>` Sổ cọc
+## 3.2.36 `<Owner>` Sổ cọc
 
-### 3.2.36.1 `<Host>` Theo dõi tiền cọc
+### 3.2.36.1 `<Owner>` Theo dõi tiền cọc
 
-- **Điều kiện kích hoạt:** Host bấm "Sổ cọc" trong nhóm "Tài chính". Chỉ dành cho Host.
+- **Điều kiện kích hoạt:** Owner bấm "Sổ cọc" trong nhóm "Tài chính". Chỉ dành cho Owner.
 - **Mô tả chức năng:** "Tiền cọc đang giữ của khách thuê — khoản phải hoàn khi kết thúc hợp đồng
   (không phải doanh thu)."
 - **Bố cục màn hình:**
@@ -1660,11 +1660,11 @@
 
 ---
 
-## 3.2.37 `<Host>` Báo cáo & phân tích
+## 3.2.37 `<Owner>` Báo cáo & phân tích
 
-### 3.2.37.1 `<Host>` Xem báo cáo tài chính và hiệu suất vận hành
+### 3.2.37.1 `<Owner>` Xem báo cáo tài chính và hiệu suất vận hành
 
-- **Điều kiện kích hoạt:** Host bấm "Báo cáo" trong nhóm "Tài chính".
+- **Điều kiện kích hoạt:** Owner bấm "Báo cáo" trong nhóm "Tài chính".
 - **Mô tả chức năng:** "Hiệu suất vận hành và tài chính Hoàng Bình Land" qua nhiều kỳ liên tiếp.
 - **Bố cục màn hình:**
 
@@ -1683,11 +1683,11 @@
 
 ---
 
-## 3.2.38 `<Host>` Trung tâm thông báo
+## 3.2.38 `<Owner>` Trung tâm thông báo
 
-### 3.2.38.1 `<Host>` Đọc và lọc thông báo
+### 3.2.38.1 `<Owner>` Đọc và lọc thông báo
 
-- **Điều kiện kích hoạt:** Host bấm "Thông báo" trong nhóm "Hệ thống", hoặc chuông trên thanh đầu
+- **Điều kiện kích hoạt:** Owner bấm "Thông báo" trong nhóm "Hệ thống", hoặc chuông trên thanh đầu
   trang. Mục menu hiển thị số thông báo chưa đọc.
 - **Mô tả chức năng:** "Trung tâm Thông báo — {n} thông báo chưa đọc": các sự kiện chủ nhà không được
   bỏ lỡ, lọc theo chủ đề.

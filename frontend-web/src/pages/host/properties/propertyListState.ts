@@ -1,5 +1,5 @@
 /**
- * State lọc / sắp xếp / phân trang cho màn "Bất động sản" của Host.
+ * State lọc / sắp xếp / phân trang cho màn "Bất động sản" của Owner.
  * Tách khỏi file .tsx để phần component chỉ export component (điều kiện để
  * React Fast Refresh hot-reload được).
  */
@@ -54,28 +54,44 @@ export const STATUS_BADGE: Record<string, { label: string; cls: string; dot: str
   DISABLED:                  { label: 'Vô hiệu',         cls: 'bg-rose-100 text-rose-600',       dot: 'bg-rose-400' },
 };
 
-/** Chip lọc nhanh — chỉ các trạng thái Host thực sự thấy trên màn này. */
+/**
+ * Vòng đời hồ sơ để HIỂN THỊ và LỌC: `RENTED` gộp vào `ACTIVE`.
+ *
+ * Luồng thật của BE không bao giờ gán `RENTED` — nhà có khách vẫn là `ACTIVE`. Chỉ file seed
+ * demo (`capstone-defense-demo-seed.sql`) gán `RENTED` cho MTX#1–#6, kể cả nhà chia phòng.
+ * Để nguyên thì hai căn cùng đang có khách hiện hai nhãn khác nhau tuỳ nhà đến từ seed hay
+ * từ import, và card nhà seed hiện cả "Đã cho thuê" lẫn "Đang cho thuê" (03/10/2026).
+ * "Có khách hay không" đã có `RentalState` trả lời — nhãn vòng đời không nói lại lần nữa.
+ */
+export const lifecycleOf = (status: string) => (status === 'RENTED' ? 'ACTIVE' : status);
+
+/**
+ * Nhà đang kinh doanh thì card chỉ cần nhãn cho thuê (`RentalState`); nhãn vòng đời chỉ hiện
+ * khi nhà CHƯA kinh doanh (chờ gán quản lý, đang cải tạo, vô hiệu…) — đó mới là tin owner cần.
+ */
+export const showLifecycleBadge = (status: string) => lifecycleOf(status) !== 'ACTIVE';
+
+/** Chip lọc nhanh — chỉ các trạng thái Owner thực sự thấy trên màn này. */
 export const HOST_STATUS_CHIPS: { value: string; label: string; cls: string }[] = [
   { value: 'all',                       label: 'Tất cả',         cls: 'border-slate-900 bg-slate-900 text-white' },
   { value: 'ACTIVE',                    label: 'Hoạt động',      cls: 'border-emerald-600 bg-emerald-600 text-white' },
-  { value: 'RENTED',                    label: 'Đã cho thuê',    cls: 'border-blue-600 bg-blue-600 text-white' },
   { value: 'PENDING_OPERATION_MANAGER', label: 'Chờ gán quản lý', cls: 'border-violet-600 bg-violet-600 text-white' },
   { value: 'UNDER_RENOVATION',          label: 'Đang cải tạo',   cls: 'border-amber-500 bg-amber-500 text-white' },
   { value: 'DISABLED',                  label: 'Vô hiệu',        cls: 'border-rose-600 bg-rose-600 text-white' },
 ];
 
 /**
- * Nhà đã được Host duyệt thành công (chỉ những căn này mới hiện ở màn Bất động sản của Host).
- * - ACTIVE / RENTED / PENDING_OPERATION_MANAGER: chắc chắn đã qua host-confirm.
+ * Nhà đã được Owner duyệt thành công (chỉ những căn này mới hiện ở màn Bất động sản của Owner).
+ * - ACTIVE / RENTED / PENDING_OPERATION_MANAGER: chắc chắn đã qua owner-confirm.
  * - UNDER_RENOVATION / DISABLED: chỉ tính nếu đã từng được duyệt (đã có giá thuê hoặc đã có quản lý)
- *   → loại các căn admin đang onboarding (cải tạo lần đầu / nháp bị vô hiệu) chưa gửi Host.
+ *   → loại các căn admin đang onboarding (cải tạo lần đầu / nháp bị vô hiệu) chưa gửi Owner.
  *
  * Vế `operationManagerId` vẫn giữ dù quản lý nay đến từ khu vực chứ không gán tay:
- * đường duy nhất để một nhà có quản lý là host-confirm (tự nhận theo khu vực) hoặc
+ * đường duy nhất để một nhà có quản lý là owner-confirm (tự nhận theo khu vực) hoặc
  * gán khu vực — mà gán khu vực chỉ chạm vào nhà ĐÃ duyệt. Nên "có quản lý ⇒ đã duyệt"
  * vẫn đúng. Bỏ vế này sẽ ẩn mất nhà CHIA PHÒNG đang cải tạo, vì loại đó để
  * `price` null (giá nằm trên từng phòng) nên không qua được `price > 0`.
- * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Host"), PENDING_HOST_REVIEW (đang chờ duyệt).
+ * Ẩn hẳn: DRAFT, RENOVATION_COMPLETED (admin chưa "Định giá & gửi Owner"), PENDING_HOST_REVIEW (đang chờ duyệt).
  */
 export const isHostApproved = (p: PropertyResponse): boolean => {
   if (p.status === 'ACTIVE' || p.status === 'RENTED' || p.status === 'PENDING_OPERATION_MANAGER') return true;
@@ -176,7 +192,7 @@ export interface PropertyListFilters {
  * @param opStatus id nhà → tình trạng khai thác & thu tiền. Truyền `undefined` (hoặc
  *   map rỗng lúc đang tải) thì hai bộ lọc `rental`/`bill` KHÔNG lọc gì cả — không
  *   được lọc bằng dữ liệu chưa về, vì như thế danh sách sẽ trống trơn rồi tự đầy lại,
- *   host tưởng mất nhà.
+ *   owner tưởng mất nhà.
  */
 export const usePropertyListFilters = (
   items: PropertyResponse[],
@@ -204,7 +220,7 @@ export const usePropertyListFilters = (
 
   const statusCounts = useMemo(() => {
     const acc: Record<string, number> = { all: items.length };
-    items.forEach(p => { acc[p.status] = (acc[p.status] ?? 0) + 1; });
+    items.forEach(p => { const s = lifecycleOf(p.status); acc[s] = (acc[s] ?? 0) + 1; });
     return acc;
   }, [items]);
 
@@ -216,7 +232,7 @@ export const usePropertyListFilters = (
   const filtered = useMemo(() => {
     const kw = normalizeVi(search.trim());
     const list = items.filter(p => {
-      if (status !== 'all' && p.status !== status) return false;
+      if (status !== 'all' && lifecycleOf(p.status) !== lifecycleOf(status)) return false;
       if (zone !== 'all' && p.zoneName !== zone) return false;
       if (type === 'whole' && p.wholeHouse !== true) return false;
       if (type === 'room' && p.wholeHouse !== false) return false;

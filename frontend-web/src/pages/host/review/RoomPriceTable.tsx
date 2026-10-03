@@ -15,7 +15,7 @@ import { capitalParts, roomCapital, type RoomCapital } from './capitalItems';
  *      ngoài một chút thì cuộn cả trang. Đang so giá phòng 3 với phòng 5 mà trang nhảy
  *      đi chỗ khác thì mất dấu hoàn toàn.
  *   2. **Không so sánh được** — mỗi thẻ cao ~400px trong cột hẹp, màn hình chỉ thấy được
- *      một phòng tại một thời điểm, trong khi việc của Host chính là so các phòng với nhau.
+ *      một phòng tại một thời điểm, trong khi việc của Owner chính là so các phòng với nhau.
  *
  * Nên đổi sang BẢNG full-width: mỗi phòng đúng một dòng, các con số cùng loại thẳng cột
  * để liếc dọc là so được. Trang chỉ có MỘT thanh cuộn dọc duy nhất (của trình duyệt);
@@ -277,7 +277,7 @@ export const RoomPriceTable = ({ calc, rooms, prices, onChange, readOnly, revenu
                     </tr>
                   )}
 
-                  {/* Dòng xổ: bóc tách vốn của riêng phòng — chỉ hiện khi Host chủ động mở.
+                  {/* Dòng xổ: bóc tách vốn của riêng phòng — chỉ hiện khi Owner chủ động mở.
                       Bốn thẻ đọc từ trái sang phải chính là bốn bước suy luận: phòng này gánh
                       bao nhiêu vốn → vì sao gánh chừng đó → nên giá không được thấp hơn đâu →
                       chốt mức đang nhập thì lãi bao nhiêu. */}

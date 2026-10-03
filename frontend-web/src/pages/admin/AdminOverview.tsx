@@ -37,7 +37,7 @@ import { formatShortVnd, formatVnd } from './shared';
 //   /admin/hosts · /users · /properties · /maintenance/dashboard
 //   /host/reports/property-performance → lấp đầy phòng (HostController cho cả ADMIN)
 //
-// Ghi chú số liệu: hoá đơn không mang thông tin Host (ManagerInvoiceResponse chỉ có
+// Ghi chú số liệu: hoá đơn không mang thông tin Owner (ManagerInvoiceResponse chỉ có
 // property) nên mọi biểu đồ gom theo TOÀ NHÀ — xem
 // docs/BE-NEED-admin-billing-fields-2026-08-07.md.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -348,7 +348,7 @@ export const SuperAdminOverview = () => {
     return c;
   }, [users]);
   const userPie = [
-    { name: 'Host (chủ nhà)', value: userComp.hosts, color: '#06b6d4' },
+    { name: 'Owner (chủ nhà)', value: userComp.hosts, color: '#06b6d4' },
     { name: 'Quản lý vận hành', value: userComp.managers, color: '#6366f1' },
     { name: 'Khách thuê', value: userComp.tenants, color: '#10b981' },
   ].filter(x => x.value > 0);
@@ -360,7 +360,7 @@ export const SuperAdminOverview = () => {
    * KHÔNG cộng `PropertyResponse.totalRooms`: field đó là số phòng KHAI BÁO lúc
    * nhập hồ sơ/import Excel (`Property.totalRooms`), không đồng bộ với số phòng đã
    * tạo thật, nên trộn 2 nguồn sẽ ra hai con số khác nhau cho cùng một thứ (349 vs
-   * 265) và làm tỷ lệ lấp đầy sai mẫu số. Xem docs/BE-NEED-host-finance-modules.
+   * 265) và làm tỷ lệ lấp đầy sai mẫu số. Xem docs/BE-NEED-owner-finance-modules.
    */
   const rooms = useMemo(() => {
     const total = perf.reduce((s, p) => s + (p.totalRooms ?? 0), 0);
@@ -403,7 +403,7 @@ export const SuperAdminOverview = () => {
     pendingVerify.length > 0 && { label: `${pendingVerify.length} giao dịch chờ đối soát`, to: '/admin/billing', icon: BadgeCheck, cls: 'border-blue-200 bg-blue-50 text-blue-700' },
     money.overdueCount > 0 && { label: `${money.overdueCount} hoá đơn quá hạn · ${formatShortVnd(money.overdueAmt)}`, to: '/admin/billing', icon: AlertTriangle, cls: 'border-rose-200 bg-rose-50 text-rose-700' },
     mtnOpen > 0 && { label: `${mtnOpen} yêu cầu bảo trì đang mở`, to: '/admin/maintenance', icon: Wrench, cls: 'border-amber-200 bg-amber-50 text-amber-700' },
-    pendingPriceReview > 0 && { label: `${pendingPriceReview} toà nhà chờ Host duyệt giá`, to: '/admin/buildings/configuration', icon: Tag, cls: 'border-violet-200 bg-violet-50 text-violet-700' },
+    pendingPriceReview > 0 && { label: `${pendingPriceReview} toà nhà chờ Owner duyệt giá`, to: '/admin/buildings/configuration', icon: Tag, cls: 'border-violet-200 bg-violet-50 text-violet-700' },
     depositStats.waitingCount > 0 && { label: `${depositStats.waitingCount} hợp đồng chưa thu cọc`, to: '/admin/billing', icon: PiggyBank, cls: 'border-teal-200 bg-teal-50 text-teal-700' },
   ].filter(Boolean) as { label: string; to: string; icon: LucideIcon; cls: string }[];
 
@@ -426,7 +426,7 @@ export const SuperAdminOverview = () => {
         name: 'Tổng quan',
         rows: [{
           'Thời điểm': monthLabel(currentMonth()),
-          'Host': hosts?.length ?? userComp.hosts, 'Quản lý vận hành': userComp.managers, 'Khách thuê': userComp.tenants,
+          'Owner': hosts?.length ?? userComp.hosts, 'Quản lý vận hành': userComp.managers, 'Khách thuê': userComp.tenants,
           'Toà nhà': properties?.length ?? 0, 'Tổng phòng': rooms.total,
           'Phòng đang thuê': rooms.occupied, 'Tỷ lệ lấp đầy (%)': rooms.rate ?? '',
           'Đã thu (₫)': money.paidAmt, 'Chưa thu (₫)': money.pendingAmt, 'Quá hạn (₫)': money.overdueAmt,
@@ -474,7 +474,7 @@ export const SuperAdminOverview = () => {
             </div>
             <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">Quản trị toàn hệ thống Hoàng Bình Land</h1>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Giám sát Host, người dùng, toà nhà, dòng tiền & bảo trì toàn nền tảng — số liệu trực tiếp từ hệ thống,
+              Giám sát Owner, người dùng, toà nhà, dòng tiền & bảo trì toàn nền tảng — số liệu trực tiếp từ hệ thống,
               cập nhật tới {monthLabel(currentMonth()).toLowerCase()}.
             </p>
           </div>
@@ -527,7 +527,7 @@ export const SuperAdminOverview = () => {
       <div>
         <p className="mb-2 text-[11px] font-black uppercase tracking-wider text-slate-400">Quy mô nền tảng</p>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard title="Host" value={String(hosts?.length ?? userComp.hosts)} icon={ShieldCheck} tone="cyan"
+          <MetricCard title="Owner" value={String(hosts?.length ?? userComp.hosts)} icon={ShieldCheck} tone="cyan"
             helper={`${userComp.managers} quản lý · ${userComp.tenants} khách thuê`} to="/admin/users" />
           <MetricCard title="Toà nhà" value={String(properties?.length ?? 0)} icon={Building2} tone="blue"
             helper={`${rooms.total} phòng · ${pendingPriceReview} chờ duyệt giá`} to="/admin/buildings" />
@@ -607,7 +607,7 @@ export const SuperAdminOverview = () => {
           )}
         </Panel>
 
-        <Panel title="Cơ cấu người dùng" subtitle="Host · quản lý vận hành · khách thuê" icon={UserCog}
+        <Panel title="Cơ cấu người dùng" subtitle="Owner · quản lý vận hành · khách thuê" icon={UserCog}
           action={<PanelLink to="/admin/users">Người dùng</PanelLink>}>
           {userPie.length === 0
             ? <EmptyChart note="Chưa tải được danh sách người dùng" loading={loading} />

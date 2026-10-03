@@ -160,6 +160,56 @@ export const billMonthLabel = (
 };
 
 /**
+ * THÁNG TIÊU THỤ đọc từ chuỗi kỳ của hoá đơn điện/nước, hoặc `null` nếu không đọc được.
+ *
+ * Điện/nước TRẢ SAU: phát hành ngày 03/10 là tiền của tháng 9. Tiền nhà thì TRẢ TRƯỚC (tháng
+ * 10 trả cho tháng 10) — hàm này không dành cho tiền nhà.
+ *
+ * Máy chủ gán `month`/`year` của hoá đơn khách bằng cách đọc chuỗi kỳ; đọc không ra thì nó
+ * lấy THÁNG PHÁT HÀNH. Trước 03/10/2026 trang admin gửi nguyên dải ngày in trên giấy
+ * (`04/09/2026 – 04/10/2026`) — dạng máy chủ không đọc được — nên hoá đơn nước tháng 9 của
+ * khách hiện "T10/2026". Đọc lại từ chuỗi kỳ thì sửa được cả những hoá đơn đã lỡ phát hành.
+ *
+ * Nhận: `2026-09` · `09/2026` · `Tháng 9/2026` · dải ngày `04/09/2026 – 04/10/2026` hoặc
+ * `01/09 – 30/09/2026` (lấy tháng ở mốc ĐẦU kỳ — kỳ chốt số vắt qua hai tháng nhưng thuộc
+ * tháng bắt đầu, khớp cách admin chọn kỳ).
+ */
+export const utilityUsagePeriod = (raw?: string | null): { month: number; year: number } | null => {
+  const s = (raw ?? '').trim();
+  if (!s) return null;
+  const ok = (month: number, year: number) =>
+    month >= 1 && month <= 12 && year >= 2000 ? { month, year } : null;
+
+  let m = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (m) return ok(Number(m[2]), Number(m[1]));
+  m = s.match(/^(?:tháng\s*)?(\d{1,2})\/(\d{4})$/i);
+  if (m) return ok(Number(m[1]), Number(m[2]));
+
+  // Dải ngày: đầu kỳ có thể lược năm → mượn năm cuối kỳ (lùi một năm nếu vắt qua Tết dương).
+  m = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*[–—-]\s*\d{1,2}\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    const startMonth = Number(m[2]);
+    const endYear = Number(m[5]);
+    const startYear = m[3] ? Number(m[3]) : startMonth > Number(m[4]) ? endYear - 1 : endYear;
+    return ok(startMonth, startYear);
+  }
+  return null;
+};
+
+/**
+ * Sửa `month`/`year` của hoá đơn ĐIỆN/NƯỚC về tháng tiêu thụ — xem `utilityUsagePeriod`.
+ * Loại khác (tiền nhà, sửa chữa, cọc…) giữ nguyên số của máy chủ.
+ */
+export const withUsageMonth = <T extends { type?: string | null; billingPeriod?: string | null; month: number; year: number }>(
+  inv: T,
+): T => {
+  const type = (inv.type ?? '').toUpperCase();
+  if (type !== 'ELECTRICITY' && type !== 'WATER') return inv;
+  const usage = utilityUsagePeriod(inv.billingPeriod);
+  return usage && (usage.month !== inv.month || usage.year !== inv.year) ? { ...inv, ...usage } : inv;
+};
+
+/**
  * Lấy tháng/năm hiện tại theo chuỗi
  * @example getCurrentMonthYear() => "Tháng 04/2026"
  */

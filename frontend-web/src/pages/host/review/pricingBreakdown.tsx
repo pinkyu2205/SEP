@@ -3,10 +3,10 @@ import { AlertCircle, Check, ChevronDown, ChevronUp, HelpCircle } from 'lucide-r
 import type { PricingCalculationResponse } from '@/types/api.types';
 
 /**
- * Khối "bóc tách con số" của màn Duyệt giá — tách riêng vì đây mới là phần Host thật sự
+ * Khối "bóc tách con số" của màn Duyệt giá — tách riêng vì đây mới là phần Owner thật sự
  * đọc, và nó dài hơn cả phần còn lại của trang.
  *
- * Nguyên tắc: **mọi con số hiện ra đều phải nói được nó từ đâu mà có.** Host đang ký một
+ * Nguyên tắc: **mọi con số hiện ra đều phải nói được nó từ đâu mà có.** Owner đang ký một
  * quyết định giá trị vài trăm triệu; đưa ra một con số "giá đề xuất" trần trụi rồi bắt bấm
  * Xác nhận là bắt người ta tin vào hộp đen. Nên mỗi dòng kết quả đều kèm phép tính bằng
  * đúng những số đã hiện ở trên.
@@ -135,7 +135,7 @@ export const Panel = ({ title, icon: Icon, subtitle, children, tone = 'plain' }:
   </section>
 );
 
-/** Thẻ số lớn — ba con số Host phải nhớ khi rời trang. */
+/** Thẻ số lớn — ba con số Owner phải nhớ khi rời trang. */
 export const BigStat = ({ label, value, sub, tone = 'slate' }: {
   label: string;
   value: string;

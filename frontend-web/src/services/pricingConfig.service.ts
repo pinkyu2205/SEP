@@ -4,7 +4,7 @@ import type { PricingMode } from '@/types/api.types';
 /**
  * CẤU HÌNH DUYỆT GIÁ DÙNG CHUNG CHO MỌI CĂN NHÀ.
  *
- * Trước đây Host phải nhập lại 4 con số mục tiêu (lãi/ROI, chi phí vận hành, biên trống
+ * Trước đây Owner phải nhập lại 4 con số mục tiêu (lãi/ROI, chi phí vận hành, biên trống
  * phòng) ở TỪNG màn duyệt giá. Nhập tay lặp lại trên hàng chục căn thì kiểu gì cũng lệch,
  * mà lệch ở đây nghĩa là hai căn giống hệt nhau lại ra hai mức giá khác nhau — không giải
  * thích được với ai.
@@ -42,7 +42,7 @@ export interface PricingConfig {
    * Quản lý bị xoá thì khoá thừa nằm lại vô hại, `managerPayroll()` bỏ qua khoá không
    * khớp ai.
    *
-   * Sửa ở màn **Lương quản lý** (`/host/manager-salaries`), không sửa ở trang cấu hình giá.
+   * Sửa ở màn **Lương quản lý** (`/owner/manager-salaries`), không sửa ở trang cấu hình giá.
    */
   managerSalaries: Record<string, number>;
 
@@ -88,13 +88,13 @@ export interface PricingConfig {
    *
    * ⚠️ BE đang chốt cứng 1 tháng ở `InboundLeaseRules.HANDOVER_BUFFER_MONTHS` và tự tính
    * `revenueMonths` — mẫu số chia vốn. FE gửi số này lên nhưng BE CHƯA nhận, nên tới khi
-   * BE sửa thì đổi ở đây chưa ăn thua. Màn cấu hình phải nói rõ điều đó, đừng để Host
+   * BE sửa thì đổi ở đây chưa ăn thua. Màn cấu hình phải nói rõ điều đó, đừng để Owner
    * chỉnh xong tưởng đã có hiệu lực.
    */
   handoverBufferMonths: number;
 }
 
-/** Mức tăng giá mặc định mỗi năm (%). Host sửa được ở trang cấu hình. */
+/** Mức tăng giá mặc định mỗi năm (%). Owner sửa được ở trang cấu hình. */
 export const DEFAULT_ANNUAL_INCREASE_PCT = 5;
 
 /** Thuê chưa đủ bấy nhiêu tháng tính tới 01/01 thì hoãn kỳ tăng đó. */
@@ -186,7 +186,7 @@ export const pricingConfigService = {
   },
 
   /**
-   * Lưu cấu hình. LUÔN ghi xuống máy trước rồi mới gọi máy chủ — máy chủ hỏng thì Host
+   * Lưu cấu hình. LUÔN ghi xuống máy trước rồi mới gọi máy chủ — máy chủ hỏng thì Owner
    * vẫn giữ được thứ vừa nhập, không mất công gõ lại.
    * Trả về nơi thực sự lưu được để màn hình báo đúng sự thật.
    */
@@ -220,7 +220,7 @@ export interface ZoneManagerLink {
  *
  * ⚠️ PHẢI tra qua KHU VỰC, không được tra qua `property.operationManagerId`.
  *
- * Quy trình của hệ thống: Host duyệt giá xong thì nhà MỚI tự nhận quản lý của khu vực nó
+ * Quy trình của hệ thống: Owner duyệt giá xong thì nhà MỚI tự nhận quản lý của khu vực nó
  * nằm trong. Nghĩa là ngay lúc đang duyệt giá — đúng lúc cần biết chi phí lương để tính
  * giá — thì `operationManagerId` vẫn còn trống. Bám vào nó thì căn nào cũng rơi vào nhánh
  * "chưa gán quản lý" và lấy mức bình quân, tức là con số lương gần như không bao giờ đúng.
@@ -254,7 +254,7 @@ export const propertyCountByManager = (
 };
 
 /**
- * Trong số nhà đếm được, bao nhiêu căn CHƯA được Host duyệt giá.
+ * Trong số nhà đếm được, bao nhiêu căn CHƯA được Owner duyệt giá.
  *
  * Cần tách ra để nói đúng chữ: nhà chờ duyệt thì quản lý **chưa thực sự coi** nó — chưa
  * bàn giao, chưa có khách. Gộp chung rồi ghi "đang coi 2 nhà" là sai sự thật, và mâu thuẫn
@@ -306,13 +306,13 @@ export const managerPayroll = (
  *
  * Thu hồi đủ 100% quỹ lương ở mọi thời điểm: coi 1 nhà thì nhà đó gánh trọn, coi 5 nhà thì
  * mỗi nhà gánh 1/5. Không có khoản nào rơi ra ngoài, không phải đoán trước tháng này sẽ
- * nhận được bao nhiêu nhà — điều mà Host không quyết định được vì nhà do admin gửi sang.
+ * nhận được bao nhiêu nhà — điều mà Owner không quyết định được vì nhà do admin gửi sang.
  *
  * ⚠️ ĐÁNH ĐỔI ĐÃ BIẾT, đừng coi là bug: giá chốt lúc duyệt thì đóng băng, còn mẫu số này
  * đổi mỗi lần khu vực nhận thêm nhà. Nên căn duyệt sớm gánh nhiều hơn căn duyệt muộn —
  * quản lý coi 1 nhà thì căn đó gánh trọn lương, tới căn thứ 5 chỉ còn 1/5. Hệ quả là hai
  * căn giống hệt nhau có thể khác giá vì thứ tự duyệt, và tổng thu hồi vượt quỹ lương khi
- * số nhà tăng. `driftOf()` bày phần vượt đó ra để Host thấy mà cân lại giá nếu muốn.
+ * số nhà tăng. `driftOf()` bày phần vượt đó ra để Owner thấy mà cân lại giá nếu muốn.
  */
 export const costPerPropertyOf = (m: ManagerPayroll): number =>
   m.propertyCount > 0 ? Math.round(m.salary / m.propertyCount) : 0;
@@ -352,7 +352,7 @@ export const managerCostForProperty = (
 /**
  * Tổng chi phí vận hành mỗi tháng gửi lên BE = chi phí khác + lương quản lý của căn này.
  *
- * BE chỉ có một ô `oOperation`, không biết tới lương quản lý. Tách ra ở FE là để Host nhìn
+ * BE chỉ có một ô `oOperation`, không biết tới lương quản lý. Tách ra ở FE là để Owner nhìn
  * thấy tiền đi đâu; tới lúc gửi thì cộng lại thành một con số BE hiểu được.
  */
 export const totalOpex = (c: PricingConfig, managerCost: number): number =>

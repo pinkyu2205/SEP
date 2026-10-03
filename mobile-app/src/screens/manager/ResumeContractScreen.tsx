@@ -171,8 +171,8 @@ const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string
   // Hai nhãn dưới là "chờ người khác" — quản lý không làm gì được, chỉ nhắc khách.
   wait_tenant_otp: { label: 'Chờ khách nhập OTP',    short: 'Chờ khách OTP', color: '#0891B2', bg: '#ECFEFF' },
   wait_tenant_ok:  { label: 'Đã thu — chờ khách xác nhận', short: 'Chờ khách', color: '#0891B2', bg: '#ECFEFF' },
-  wait_price:     { label: 'Chờ Host duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
-  price_rejected: { label: 'Host từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
+  wait_price:     { label: 'Chờ Owner duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
+  price_rejected: { label: 'Owner từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
   // Nhãn/màu 3 bước đầu lấy đúng nhãn BE (`statusLabel`) — xem constants/tenantOnboard.ts.
   wait_transfer:  { label: ONBOARD_STATUS_META.AWAITING_PAYMENT.label, short: 'Chờ thu tiền', color: '#0891B2', bg: '#ECFEFF' },
   onboard:        { label: ONBOARD_STATUS_META.AWAITING_ONBOARD.label, short: 'Chờ onboard', color: ONBOARD_STATUS_META.AWAITING_ONBOARD.color, bg: ONBOARD_STATUS_META.AWAITING_ONBOARD.bg },
@@ -810,10 +810,10 @@ const ContractActionPanel: React.FC<{
       <ScrollView contentContainerStyle={styles.panelBody}>
         <View style={[styles.banner, { backgroundColor: '#FFFBEB' }]}>
           <Icon name="hourglass" size={36} color="#D97706" strokeWidth={1.6} />
-          <Text style={styles.bannerTitle}>Đang chờ Host duyệt giá</Text>
+          <Text style={styles.bannerTitle}>Đang chờ Owner duyệt giá</Text>
           <Text style={styles.bannerDesc}>
             Hợp đồng {contract.contractCode}
-            {contract.rentAmount != null ? ` (${formatVnd(contract.rentAmount)} đ/tháng)` : ''} đang chờ Host
+            {contract.rentAmount != null ? ` (${formatVnd(contract.rentAmount)} đ/tháng)` : ''} đang chờ Owner
             phê duyệt. Bạn sẽ được thông báo khi có phản hồi.
           </Text>
         </View>
@@ -843,8 +843,8 @@ const RejectedPanel: React.FC<{
    * chuỗi `"null"` — mà chuỗi đó TRUTHY, nên nhánh `value={deposit ? ... : ''}` vẫn
    * chạy, `parseNum("null")` lọc hết chữ còn `""` → `Number("") || 0` → ô hiện **"0"**.
    *
-   * Hậu quả thật: Host từ chối giá → manager sửa ô giá thuê, KHÔNG đụng ô cọc (nhìn
-   * thấy có số nên tưởng là số cũ) → bấm gửi → hợp đồng sang Host duyệt với **cọc = 0**.
+   * Hậu quả thật: Owner từ chối giá → manager sửa ô giá thuê, KHÔNG đụng ô cọc (nhìn
+   * thấy có số nên tưởng là số cũ) → bấm gửi → hợp đồng sang Owner duyệt với **cọc = 0**.
    * Im lặng, không báo lỗi gì.
    *
    * Để rỗng + placeholder thì vừa đúng thật (manager không được phép thấy giá cũ, thì
@@ -867,7 +867,7 @@ const RejectedPanel: React.FC<{
         rentAmount,
         deposit: depositVal,
       })
-      showAlert('Đã gửi lại', 'Hợp đồng đã được gửi Host duyệt lại.')
+      showAlert('Đã gửi lại', 'Hợp đồng đã được gửi Owner duyệt lại.')
       onChanged(updated)
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Không gửi lại được hợp đồng.'))
@@ -902,7 +902,7 @@ const RejectedPanel: React.FC<{
     <ScrollView contentContainerStyle={styles.panelBody}>
       <View style={[styles.banner, { backgroundColor: '#FEF2F2' }]}>
         <Icon name="error" size={36} color={Colors.error} strokeWidth={1.6} />
-        <Text style={styles.bannerTitle}>Host đã từ chối giá</Text>
+        <Text style={styles.bannerTitle}>Owner đã từ chối giá</Text>
         {!!contract.priceRejectReason && (
           <Text style={styles.bannerDesc}>Lý do: {contract.priceRejectReason}</Text>
         )}
@@ -936,7 +936,7 @@ const RejectedPanel: React.FC<{
             {busy ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={styles.primaryBtnText}>Gửi Host duyệt lại</Text>
+              <Text style={styles.primaryBtnText}>Gửi Owner duyệt lại</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -2062,7 +2062,7 @@ const DepositOtpPanel: React.FC<{
           strokeWidth={1.6}
         />
         <Text style={styles.bannerTitle}>
-          {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu tiền'}
+          {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Owner đã duyệt giá' : 'Đón khách — thu tiền'}
         </Text>
         <Text style={styles.bannerDesc}>
           {contract.tenantFullName}. Tạo mã thanh toán để khách quét, rồi xác thực OTP

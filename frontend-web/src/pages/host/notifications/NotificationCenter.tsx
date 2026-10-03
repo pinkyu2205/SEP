@@ -11,12 +11,12 @@ const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
   APPROVAL_NEEDED: 'approval_needed',
   CONTRACT_EXPIRY: 'contract_expiry',
   /**
-   * `CONTRACT_EXPIRING` — cron nhắc HĐ KHÁCH THUÊ sắp hết hạn (BE 01/09/2026); host nhận
+   * `CONTRACT_EXPIRING` — cron nhắc HĐ KHÁCH THUÊ sắp hết hạn (BE 01/09/2026); owner nhận
    * ở mốc D-30 và D-0.
    *
    * Khác đúng một chữ G so với `CONTRACT_EXPIRY` ngay trên, mà tra map là tra CHÍNH XÁC
    * khoá — nên nó rơi vào fallback `approval_needed`, hiện thành "Chờ phê duyệt" với icon
-   * bảng kiểm. Host đọc vào tưởng có hồ sơ đang chờ mình duyệt, trong khi thực tế là một
+   * bảng kiểm. Owner đọc vào tưởng có hồ sơ đang chờ mình duyệt, trong khi thực tế là một
    * căn sắp trống cần đi tìm khách mới.
    */
   CONTRACT_EXPIRING: 'contract_expiry',
@@ -25,13 +25,13 @@ const NOTI_TYPE_FROM_API: Record<string, NotificationType> = {
   MAINTENANCE_DELAY: 'maintenance_delay',
   OCCUPANCY_ALERT: 'occupancy_alert',
   LOSS_ALERT: 'occupancy_alert',
-  // Type BE thực tế gửi cho host (duyệt giá HĐ, bảo trì vượt ngưỡng, nhắc nợ) —
+  // Type BE thực tế gửi cho owner (duyệt giá HĐ, bảo trì vượt ngưỡng, nhắc nợ) —
   // trước đây đều rơi vào fallback approval_needed, map tường minh cho đúng nhãn.
   CONTRACT: 'approval_needed',
   MAINTENANCE: 'maintenance_delay',
   BILLING_REMINDER: 'unpaid_invoice',
   BILLING_OVERDUE: 'unpaid_invoice',
-  // Quá hạn → báo host (BE 24/09/2026: mọi loại hoá đơn, không chỉ tiền nhà). Trước đây
+  // Quá hạn → báo owner (BE 24/09/2026: mọi loại hoá đơn, không chỉ tiền nhà). Trước đây
   // RENT_OVERDUE_HOST cũng không có ở đây nên rơi vào fallback "Chờ phê duyệt".
   RENT_OVERDUE_HOST: 'unpaid_invoice',
   INVOICE_OVERDUE_HOST: 'unpaid_invoice',

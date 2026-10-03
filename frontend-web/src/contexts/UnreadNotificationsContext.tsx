@@ -4,19 +4,19 @@ import { notificationService } from '@/services/notification.service';
 import { useWebAuth } from '@/auth/WebAuthContext';
 
 /**
- * Badge chuông thông báo cho web (host + admin).
+ * Badge chuông thông báo cho web (owner + admin).
  *
  * Đếm GỘP hai nguồn vì BE lưu ở hai bảng khác nhau:
  *   • `notifications`      — thông báo nghiệp vụ do cron/service bắn (nhắc hạn, quá hạn,
  *                            khách đã thanh toán, cần chụp công tơ…). CÓ realtime qua SSE.
- *   • `host_notifications` — nhắc việc riêng của host (căn chờ duyệt giá, HĐ chờ duyệt,
+ *   • `host_notifications` — nhắc việc riêng của owner (căn chờ duyệt giá, HĐ chờ duyệt,
  *                            master lease sắp hết hạn). KHÔNG có event, phải poll.
  *
  * Trước 13/08/2026 chỗ này chỉ đếm `host_notifications`, nên nối SSE vào cũng vô ích:
  * event bắn từ bảng `notifications` mà badge lại đọc bảng kia — số không bao giờ nhúc nhích.
  */
 
-/** Nhịp poll cho nguồn host (BE không có event cho bảng này). */
+/** Nhịp poll cho nguồn owner (BE không có event cho bảng này). */
 const HOST_POLL_MS = 60_000;
 
 interface UnreadContextValue {
@@ -34,8 +34,8 @@ export const UnreadNotificationsProvider = ({ children }: { children: React.Reac
   const esRef = useRef<EventSource | null>(null);
 
   /**
-   * `allSettled` chứ không phải `all`: một nguồn lỗi (BE chưa bật endpoint, host
-   * notifications 500 — xem docs/BE-HANDOFF-host-notifications-500) thì vẫn hiện được
+   * `allSettled` chứ không phải `all`: một nguồn lỗi (BE chưa bật endpoint, owner
+   * notifications 500 — xem docs/BE-HANDOFF-owner-notifications-500) thì vẫn hiện được
    * số của nguồn còn lại, thay vì badge tụt về 0 và người dùng tưởng hết việc.
    */
   const refresh = useCallback(async () => {
@@ -47,7 +47,7 @@ export const UnreadNotificationsProvider = ({ children }: { children: React.Reac
     if (host.status === 'fulfilled') setHostUnread(Number(host.value) || 0);
   }, []);
 
-  // Nạp lần đầu + poll nguồn host. Chạy lại khi đổi tài khoản để không giữ số của
+  // Nạp lần đầu + poll nguồn owner. Chạy lại khi đổi tài khoản để không giữ số của
   // người đăng nhập trước.
   useEffect(() => {
     if (!user) {

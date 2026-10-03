@@ -38,7 +38,7 @@ const formatDate = (s: string | null) =>
 
 /**
  * Tên vị trí dễ đọc. Trước đây phòng hiện "Phòng #30" — đó là id nội bộ, không phải số
- * phòng (101, 201…), host đọc không ra phòng nào. Giờ tra số phòng thật; chưa tải được
+ * phòng (101, 201…), owner đọc không ra phòng nào. Giờ tra số phòng thật; chưa tải được
  * danh sách phòng thì mới rơi về id.
  */
 const locOf = (e: OperationalEquipmentResponse, roomNo: Map<number, RoomResponse>): string => {
@@ -191,7 +191,7 @@ export const EquipmentItemRow = ({ eq, place, tickets, ticketsLoaded, showVersio
  */
 export const RoomEquipmentSection = ({ propertyId, roomId, roomLabel, roomUnderMaintenance = false }: {
   propertyId: number; roomId: number; roomLabel: string;
-  /** BE đặt phòng MAINTENANCE khi có phiếu sửa mở — dùng khi không đọc được phiếu (host). */
+  /** BE đặt phòng MAINTENANCE khi có phiếu sửa mở — dùng khi không đọc được phiếu (owner). */
   roomUnderMaintenance?: boolean;
 }) => {
   const [items, setItems] = useState<OperationalEquipmentResponse[] | null>(null);
@@ -277,7 +277,7 @@ export const RoomEquipmentSection = ({ propertyId, roomId, roomLabel, roomUnderM
 /**
  * Thanh cảnh báo thiết bị cho tab Tổng quan (cả nhà nguyên căn lẫn chia phòng).
  *
- * Trả lời hai câu host hay hỏi mà trước đây phải mở từng thiết bị mới biết: "nhà này có
+ * Trả lời hai câu owner hay hỏi mà trước đây phải mở từng thiết bị mới biết: "nhà này có
  * món nào đang sửa không" và "tiền sửa thu khách đã trả chưa". Không có gì thì KHÔNG hiện
  * — nhà bình thường không phải nhìn thêm một khối trống.
  */
@@ -374,7 +374,7 @@ export const OperationalEquipmentPanel = ({ propertyId, collapsible }: {
   const [status, setStatus] = useState('all');
   const [perPage, setPerPage] = useState(PER_PAGE_OPTIONS[0]);
   const [page, setPage] = useState(1);
-  /** Mặc định xem THEO VỊ TRÍ: host hỏi "phòng 101 có gì" chứ ít khi đọc bảng phẳng. */
+  /** Mặc định xem THEO VỊ TRÍ: owner hỏi "phòng 101 có gì" chứ ít khi đọc bảng phẳng. */
   const [view, setView] = useState<ViewMode>('group');
   /** Nhóm vị trí đang mở. */
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());

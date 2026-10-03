@@ -4,7 +4,7 @@ import { Eye, EyeOff, type LucideIcon } from 'lucide-react';
 /**
  * Hiển thị dữ liệu định danh (SĐT, CCCD) ở dạng CHE, bấm mắt mới hiện đủ.
  *
- * Host và Admin đều có quyền xem đầy đủ — che ở đây không phải để chặn quyền, mà để dữ liệu
+ * Owner và Admin đều có quyền xem đầy đủ — che ở đây không phải để chặn quyền, mà để dữ liệu
  * không nằm phơi trên màn hình mọi lúc (chụp màn hình, share màn hình khi họp, người ngồi
  * cạnh liếc thấy). Một cú bấm là ra đủ.
  *

@@ -564,7 +564,7 @@ export const StepOnboardingOptions = ({ property, onNext, onBack, onPropertyUpda
               </div>
               <div className="flex-1">
                 <h3 className="font-bold text-slate-800">Lịch thi công</h3>
-                <p className="text-xs text-slate-400">Bắt buộc phải có lịch trước khi gửi Host phê duyệt</p>
+                <p className="text-xs text-slate-400">Bắt buộc phải có lịch trước khi gửi Owner phê duyệt</p>
               </div>
               {scheduleSaved && <Check className="h-5 w-5 text-emerald-500 shrink-0" />}
             </div>

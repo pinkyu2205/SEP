@@ -29,7 +29,7 @@
  *     `invoice_unlock_log` — kiểm soát bằng dấu vết, không bằng cách che số.
  *
  * ⚠️ CÒN 2 MÀN CHƯA ẨN vì ẩn là HỎNG chức năng, đang chờ chốt hướng xử lý:
- *   • ResumeContractScreen — hai ô NHẬP giá thuê + cọc ở `RejectedPanel` (khi Host từ
+ *   • ResumeContractScreen — hai ô NHẬP giá thuê + cọc ở `RejectedPanel` (khi Owner từ
  *     chối giá, manager sửa rồi gửi lại). Phần còn lại của màn đã bỏ hết số tiền.
  *     ⚠️ Hai ô này từng gửi cọc = 0 âm thầm: BE mask về `null`, `String(null)` ra
  *     `"null"` (truthy) → parse ra 0. Đã sửa 13/08/2026 — khởi tạo rỗng + chặn chưa nhập.
@@ -50,7 +50,7 @@
  * Ẩn sạch số hoá ra bất tiện: quản lý không đối chiếu được người vừa gọi cho mình là
  * khách nào, và hai khách trùng tên trong cùng một nhà thì không phân biệt nổi. Ba số
  * cuối đủ để đối chiếu mà vẫn không đọc ra được số đầy đủ, nên KHÔNG kèm nút xem đủ
- * (khác màn của host/admin — hai role đó được xem trọn số, bấm để mở).
+ * (khác màn của owner/admin — hai role đó được xem trọn số, bấm để mở).
  * Dùng `maskTenantPhone`/`maskTenantCccd` bên dưới, đừng gọi `maskMiddle` trực tiếp
  * ở màn manager nữa — mỗi màn tự chọn head/tail là lại lệch nhau như trước.
  *

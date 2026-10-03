@@ -154,6 +154,20 @@ const reading = (v: unknown): string => {
 const serverPeriod = (raw?: string): string =>
   raw && !periodProblem(raw) ? raw.trim() : '';
 
+/**
+ * KỲ GỬI LÊN MÁY CHỦ = THÁNG TIÊU THỤ admin chọn, dạng `2026-09`. KHÔNG gửi dải ngày in trên giấy.
+ *
+ * Máy chủ gán tháng cho hoá đơn của KHÁCH bằng cách đọc chuỗi kỳ (`ContractBillingCalendar.
+ * parsePeriod`, chỉ hiểu `yyyy-MM` / `MM/yyyy`); đọc không ra thì lấy THÁNG PHÁT HÀNH. Trước
+ * 03/10/2026 trang này gửi `04/09/2026 – 04/10/2026` (kỳ in trên giấy) → hoá đơn nước tháng 9
+ * của khách MTX#2 hiện "T10/2026", như thể trả trước giống tiền nhà. Điện/nước là TRẢ SAU.
+ *
+ * Dải ngày trên giấy vẫn còn nguyên trên ảnh hoá đơn và vẫn được đối chiếu ở ô "Kỳ hoá đơn";
+ * chỉ là không làm khoá kỳ nữa. `yyyy-MM` cũng là dạng dữ liệu cũ đang dùng (`2026-08`), nên
+ * quản lý lọc theo kỳ và máy chủ chặn trùng kỳ (`LIKE %kỳ%`) đều đi cùng một chuỗi.
+ */
+const usagePeriodKey = (month: number, year: number) => `${year}-${String(month).padStart(2, '0')}`;
+
 const fromEvn = (b: EvnBill): PublishedBill => ({ ...b, totalQuantity: b.totalKwh });
 const fromWater = (b: WaterBill): PublishedBill => ({ ...b });
 
@@ -206,7 +220,9 @@ export const KINDS: Record<UtilityKind, KindConfig> = {
     },
     list: async (params) => (await evnBillService.list(params)).map(fromEvn),
     publish: async ({ qty, amount, ...rest }, opts) =>
-      fromEvn(await evnBillService.publish({ ...rest, totalKwh: qty, totalAmount: amount }, opts)),
+      fromEvn(await evnBillService.publish({
+        ...rest, billingPeriod: usagePeriodKey(rest.month, rest.year), totalKwh: qty, totalAmount: amount,
+      }, opts)),
     revoke: (id) => evnBillService.revoke(id),
   },
   WATER: {
@@ -253,7 +269,9 @@ export const KINDS: Record<UtilityKind, KindConfig> = {
     },
     list: async (params) => (await waterBillService.list(params)).map(fromWater),
     publish: async ({ qty, amount, ...rest }, opts) =>
-      fromWater(await waterBillService.create({ ...rest, totalQuantity: qty, totalAmount: amount }, opts)),
+      fromWater(await waterBillService.create({
+        ...rest, billingPeriod: usagePeriodKey(rest.month, rest.year), totalQuantity: qty, totalAmount: amount,
+      }, opts)),
     revoke: (id) => waterBillService.revoke(id),
   },
 };

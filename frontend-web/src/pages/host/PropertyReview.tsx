@@ -40,11 +40,11 @@ import {
 } from './review/pricingBreakdown';
 
 /**
- * DUYỆT GIÁ & KÍCH HOẠT TÒA NHÀ (Host).
+ * DUYỆT GIÁ & KÍCH HOẠT TÒA NHÀ (Owner).
  *
- * Đây là màn Host ký một quyết định tiền bạc kéo dài vài năm, nên toàn bộ thiết kế xoay
+ * Đây là màn Owner ký một quyết định tiền bạc kéo dài vài năm, nên toàn bộ thiết kế xoay
  * quanh một câu: **con số này ở đâu ra?** Mỗi kết quả tính đều hiện kèm phép tính bằng
- * đúng những số đã nêu phía trên, và mỗi ô Host nhập đều nói rõ nó tác động vào đâu.
+ * đúng những số đã nêu phía trên, và mỗi ô Owner nhập đều nói rõ nó tác động vào đâu.
  *
  * Bố cục đi theo đúng thứ tự suy nghĩ, mỗi phần chiếm trọn chiều ngang:
  *   1. Tòa nhà là cái gì            → thông tin + bản đồ + ảnh
@@ -94,7 +94,7 @@ const parseDate = (d: string) => {
  *
  * ⚠️ Bản trước FE cộng thêm 1 ngày vào ngày kết thúc rồi mới đếm, tức là tính theo kiểu
  * "trọn ngày cuối". Với HĐ 01/05/2027 → 31/05/2029 thì FE ra 25 tháng còn BE ra 24, và
- * trang hiện đồng thời cả hai con số ở hai chỗ khác nhau — Host nhìn vào chỉ thấy hệ
+ * trang hiện đồng thời cả hai con số ở hai chỗ khác nhau — Owner nhìn vào chỉ thấy hệ
  * thống tự mâu thuẫn. Giờ FE đếm y hệt BE, và mọi nơi đều lấy `calc.contractMonths` làm
  * gốc nếu đã tính giá xong.
  */
@@ -245,7 +245,7 @@ const MoneyInput = ({
 );
 
 /**
- * `/host/review/:id` — chọn đúng màn duyệt giá.
+ * `/owner/review/:id` — chọn đúng màn duyệt giá.
  *
  * • Nhà mới tiếp nhận (chỉ có đợt cải tạo 1, hoặc không cải tạo) → [[OnboardingPriceReview]]: xem toàn bộ
  *   vốn, chốt giá lần đầu, kích hoạt cho thuê.
@@ -296,7 +296,7 @@ const OnboardingPriceReview = () => {
    * Kích hoạt là hành động MỘT CHIỀU về mặt vận hành: nhà lên danh sách cho thuê, quản lý
    * khu vực nhận nhà, và từ lúc có khách vào thì giá bị khoá cho tới khi khách rời đi
    * (xem `PriceManagerPanel`). Nút cũ nằm ở thanh dính đáy trang, bấm phát là chạy luôn —
-   * mà đúng lúc đó Host thường đang cuộn ở giữa trang, không nhìn thấy giá từng phòng.
+   * mà đúng lúc đó Owner thường đang cuộn ở giữa trang, không nhìn thấy giá từng phòng.
    */
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -305,7 +305,7 @@ const OnboardingPriceReview = () => {
    * Cách định giá mà máy chủ ĐÃ DÙNG cho kết quả đang hiện (FORWARD/REVERSE).
    *
    * Khác `cfg.mode` — cái đó là cấu hình hiện tại, còn cái này là cấu hình lúc tính. Hai
-   * số có thể lệch nhau khi Host vừa đổi cấu hình mà chưa bấm tính lại, nên chuỗi giải
+   * số có thể lệch nhau khi Owner vừa đổi cấu hình mà chưa bấm tính lại, nên chuỗi giải
    * thích phép tính phải bám theo `mode` này, không bám cấu hình.
    *
    * Ba ô nhập cũ (`pDesired` / `roiExpected` / `oOperation`) đã bỏ khỏi state: trang không
@@ -319,7 +319,7 @@ const OnboardingPriceReview = () => {
   const [cfgSource, setCfgSource] = useState<PricingConfigSource>('default');
   /** Lương + số nhà phụ trách của từng quản lý — để lấy đúng chi phí của riêng căn này. */
   const [payroll, setPayroll] = useState<ManagerPayroll[]>([]);
-  /** Bảng phân công khu vực — đường duy nhất biết ai sẽ coi căn này khi Host duyệt xong. */
+  /** Bảng phân công khu vực — đường duy nhất biết ai sẽ coi căn này khi Owner duyệt xong. */
   const [zoneLinks, setZoneLinks] = useState<ZoneManagerLink[]>([]);
   /** Chặn tự tính lặp: mỗi lần vào trang chỉ tự tính đúng một lần. */
   const autoCalcRef = useRef(false);
@@ -332,7 +332,7 @@ const OnboardingPriceReview = () => {
   const [wholePrice, setWholePrice] = useState<number | ''>('');
   const [roomPrices, setRoomPrices] = useState<Record<number, number>>({});
   /**
-   * Host đã tự xác nhận là biết nhà chưa tới ngày hợp đồng với chủ nhà mà vẫn kích hoạt.
+   * Owner đã tự xác nhận là biết nhà chưa tới ngày hợp đồng với chủ nhà mà vẫn kích hoạt.
    *
    * Không chặn cứng vì duyệt giá sớm là việc hợp lệ (chốt giá trước cho kịp mở bán). Nhưng
    * kích hoạt = nhà vào trạng thái ACTIVE = quản lý đón khách được ngay, kể cả trước ngày
@@ -367,7 +367,7 @@ const OnboardingPriceReview = () => {
         // Kết quả tính giá đã lưu (nếu có) — 404 = chưa tính, bỏ qua (interceptor không toast 404).
         // Nhà còn chờ duyệt thì KHÔNG hiện ngay: trang sẽ tự tính lại theo cấu hình (xem effect tự
         // tính bên dưới), bản lưu chỉ để dự phòng khi tính lại thất bại. Hiện trước rồi mới thay
-        // thì Host kịp thấy số sai nhấp nháy một hai giây.
+        // thì Owner kịp thấy số sai nhấp nháy một hai giây.
         try {
           const saved = await propertyService.getPricing(propertyId);
           if (summaryData.status === 'PENDING_HOST_REVIEW') savedCalcRef.current = saved;
@@ -390,7 +390,7 @@ const OnboardingPriceReview = () => {
   //   • danh sách nhà → đếm mỗi người đang coi bao nhiêu căn (mẫu số chia lương)
   //
   // Quản lý của căn này tra qua KHU VỰC chứ không qua `operationManagerId`: nhà chỉ tự
-  // nhận quản lý SAU khi Host duyệt giá, nên ngay lúc đang duyệt thì trường đó còn trống.
+  // nhận quản lý SAU khi Owner duyệt giá, nên ngay lúc đang duyệt thì trường đó còn trống.
   useEffect(() => {
     let alive = true;
     Promise.all([
@@ -475,16 +475,16 @@ const OnboardingPriceReview = () => {
   };
 
   /**
-   * TỰ TÍNH MỖI LẦN MỞ TRANG — Host không phải bấm "Tính lại theo cấu hình" nữa.
+   * TỰ TÍNH MỖI LẦN MỞ TRANG — Owner không phải bấm "Tính lại theo cấu hình" nữa.
    *
-   * Bản trước chỉ tự tính khi máy chủ CHƯA lưu kết quả nào. Nhưng lúc admin bấm gửi Host,
+   * Bản trước chỉ tự tính khi máy chủ CHƯA lưu kết quả nào. Nhưng lúc admin bấm gửi Owner,
    * `submitToHost` bên BE đã tự tính một lần bằng thông số MẶC ĐỊNH và lưu lại — nên nhà nào mở
-   * ra cũng "đã có kết quả", điều kiện tự tính không bao giờ đúng, Host luôn phải bấm nút. Kết
+   * ra cũng "đã có kết quả", điều kiện tự tính không bao giờ đúng, Owner luôn phải bấm nút. Kết
    * quả lưu sẵn đó còn sai: không theo cấu hình duyệt giá, và `GET /pricing` không trả bảng khoản
    * vốn nên tiền bỏ ra bị tính = 0 (ca thật 16/09/2026: thanh đáy báo lãi 279 triệu, tính lại mới
    * ra 81 triệu).
    *
-   * Tính lại không làm mất quyết định nào của Host: giá Host chốt chỉ được lưu khi bấm
+   * Tính lại không làm mất quyết định nào của Owner: giá Owner chốt chỉ được lưu khi bấm
    * "Xác nhận & Kích hoạt"; trước đó kết quả tính chỉ là bản nháp của máy chủ. Nhà không còn chờ
    * duyệt thì không tính (hiện đúng bản đã lưu). Tính lỗi hoặc cấu hình chưa đủ thì mới lùi về bản
    * lưu sẵn, kèm thông báo lỗi.
@@ -523,7 +523,7 @@ const OnboardingPriceReview = () => {
    * lý sau không làm hệ thống tính lại, căn đó gánh thiếu chi phí suốt cả kỳ hợp đồng. Với
    * lương 15tr chia 5 nhà, HĐ 22 tháng thì đó là ~66 triệu không bao giờ thu được.
    *
-   * Đây là loại sai KHÔNG sửa lại được, nên không để Host tự chịu trách nhiệm bằng một
+   * Đây là loại sai KHÔNG sửa lại được, nên không để Owner tự chịu trách nhiệm bằng một
    * dòng cảnh báo. Đường lùi vẫn còn và rất ngắn: đi gán khu vực (một thao tác) rồi quay
    * lại — nút tự mở.
    *
@@ -534,7 +534,7 @@ const OnboardingPriceReview = () => {
 
   /**
    * LƯỚI AN TOÀN cho hai lỗi BE đã biết (doc-be/BE-NGHIEMTHU-LAN2-...-2026-09-14.md), cả hai đều
-   * ra một con số giá trông bình thường nhưng sai, Host bấm duyệt là đóng băng luôn:
+   * ra một con số giá trông bình thường nhưng sai, Owner bấm duyệt là đóng băng luôn:
    *
    *   • Bảng khoản vốn không có tiền thuê chủ nhà — nhà duyệt giá trước 14/09/2026 chưa có khoản
    *     vốn phiên bản 1, đợt cải tạo bổ sung chỉ còn khoản mới. Hoàn vốn/tháng rơi từ ~3,6tr xuống
@@ -580,7 +580,7 @@ const OnboardingPriceReview = () => {
 
     // KHÔNG gửi operationManagerId nữa: quản lý vận hành được phân công theo KHU VỰC
     // (màn /host/zones), không gán riêng cho từng nhà. Nhà thuộc quận chưa có quản lý sẽ
-    // ở trạng thái PENDING_OPERATION_MANAGER cho tới khi Host gán cho khu vực đó.
+    // ở trạng thái PENDING_OPERATION_MANAGER cho tới khi Owner gán cho khu vực đó.
     const payload: HostConfirmRequest = { contingencyPercent: CONTINGENCY_FOR_CONFIRM };
 
     if (isRoomScope) {
@@ -630,18 +630,18 @@ const OnboardingPriceReview = () => {
           <span className="font-semibold text-violet-600">Chờ gán quản lý</span> cho tới khi bạn gán.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <button onClick={() => navigate(`/host/properties/${propertyId}`)} className="btn-primary rounded-xl px-8 py-3">
+          <button onClick={() => navigate(`/owner/properties/${propertyId}`)} className="btn-primary rounded-xl px-8 py-3">
             Xem chi tiết tòa nhà
           </button>
           <button
-            onClick={() => navigate('/host/zones')}
+            onClick={() => navigate('/owner/zones')}
             className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
           >
             Gán quản lý khu vực
           </button>
         </div>
         <button
-          onClick={() => navigate('/host/properties')}
+          onClick={() => navigate('/owner/properties')}
           className="mx-auto mt-5 flex items-center gap-1.5 text-sm font-bold text-slate-500 transition hover:text-indigo-600"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -704,13 +704,13 @@ const OnboardingPriceReview = () => {
   /**
    * Vì sao mất bấy nhiêu tháng — bằng NGÀY cụ thể, không chỉ một con số.
    *
-   * Câu hỏi thật từ Host (17/09/2026): HĐ chủ nhà bắt đầu 15/09, cho thuê được từ 17/09 — chỉ
+   * Câu hỏi thật từ Owner (17/09/2026): HĐ chủ nhà bắt đầu 15/09, cho thuê được từ 17/09 — chỉ
    * trễ 2 ngày mà màn hình ghi "−1 tháng". Đúng, vì BE đếm bằng `ChronoUnit.MONTHS.between`:
    * chỉ tính THÁNG TRÒN. Từ 17/09/2026 tới hết HĐ là 23 tháng + 29 ngày lẻ → bỏ 29 ngày lẻ →
    * 23 tháng, so với 24 tháng của cả HĐ là mất 1. Không nói ra thì trông như máy chủ trừ bừa.
    *
    * Ngày cho thuê được = muộn nhất trong (ngày HĐ bắt đầu, ngày cải tạo xong, hôm nay) — xem
-   * `InboundLeaseRules.rentableFrom`. Đoán lại lý do bằng cách so ngày để nói cho Host hiểu.
+   * `InboundLeaseRules.rentableFrom`. Đoán lại lý do bằng cách so ngày để nói cho Owner hiểu.
    */
   const lostExplain = (() => {
     if (lostMonths <= 0 || !inbound?.startDate || !inbound?.endDate || !calc?.rentableFrom) return null;
@@ -803,7 +803,7 @@ const OnboardingPriceReview = () => {
    *
    * ⚠️ Bản trước chỉ lấy `tổng thu − vốn đầu tư` rồi gọi đó là "lãi cả kỳ" — QUÊN TRỪ CHI PHÍ
    * VẬN HÀNH. Với chi phí vận hành 20tr/tháng suốt 25 tháng thì con số bị thổi lên 500 triệu:
-   * host nhập mục tiêu lãi 1tr/tháng mà màn hình báo lãi 652tr, không cách nào đối chiếu được.
+   * owner nhập mục tiêu lãi 1tr/tháng mà màn hình báo lãi 652tr, không cách nào đối chiếu được.
    *
    * Chi phí vận hành đã được cộng vào GIÁ THUÊ (khách trả), nhưng nó vẫn là tiền chi ra hằng
    * tháng nên phải trừ khỏi lợi nhuận. Không trừ là tính lãi hai lần.
@@ -828,7 +828,7 @@ const OnboardingPriceReview = () => {
   })();
 
   /**
-   * Vì sao lãi ròng lại VƯỢT mục tiêu host đặt ra. Bốn nguồn dưới đây cộng lại phải đúng bằng
+   * Vì sao lãi ròng lại VƯỢT mục tiêu owner đặt ra. Bốn nguồn dưới đây cộng lại phải đúng bằng
    * lãi ròng; nếu không khớp (BE đổi công thức) thì không hiện, thà im còn hơn giải thích sai.
    */
   const surplus = (() => {
@@ -962,7 +962,7 @@ const OnboardingPriceReview = () => {
             bấm xong là nhà bắt đầu chạy thật, và mỗi tháng admin nhập hoá đơn điện/nước theo lô
             sẽ khớp nhà theo đúng hai mã này. Thiếu mã thì hoá đơn không tự đối chiếu được, mà
             lúc đó nhà đã có khách — sửa muộn hơn nhiều so với chặn lại ở đây.
-            Host không tự khai được hai mã này (admin khai ở Cấu hình khai thác) nên chỉ hiện
+            Owner không tự khai được hai mã này (admin khai ở Cấu hình khai thác) nên chỉ hiện
             để đối chiếu, và chỉ cảnh báo khi thiếu.
           */}
           <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 text-sm">
@@ -1206,10 +1206,10 @@ const OnboardingPriceReview = () => {
       {/* ── 3 + 4. Mục tiêu và chuỗi tính ra giá ─────────────────────────────── */}
       <div className="mb-5 grid gap-5 lg:grid-cols-[minmax(0,380px)_1fr]">
         {/* Mục tiêu — CHỈ ĐỌC, lấy từ cấu hình chung.
-            Trước đây Host phải gõ lại 4 con số ở TỪNG căn. Nhập tay lặp lại trên hàng chục
+            Trước đây Owner phải gõ lại 4 con số ở TỪNG căn. Nhập tay lặp lại trên hàng chục
             căn thì kiểu gì cũng lệch, mà lệch ở đây nghĩa là hai căn giống hệt nhau ra hai
             mức giá khác nhau — không giải thích được với ai. Nay chốt một lần ở
-            /host/pricing-config, màn này chỉ hiện lại để Host đối chiếu rồi duyệt. */}
+            /host/pricing-config, màn này chỉ hiện lại để Owner đối chiếu rồi duyệt. */}
         <Panel title="Mục tiêu của bạn" icon={Target} tone="accent"
           subtitle="Lấy từ Cấu hình duyệt giá — áp dụng cho mọi căn nhà. Muốn đổi thì sửa ở đó, không sửa riêng từng căn.">
           <div className="space-y-3">
@@ -1255,7 +1255,7 @@ const OnboardingPriceReview = () => {
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                  {/* Nhắc luôn mốc + ân hạn: Host đọc màn này ngay trước khi chốt giá, đó là
+                  {/* Nhắc luôn mốc + ân hạn: Owner đọc màn này ngay trước khi chốt giá, đó là
                       lúc cần biết mình đang cam kết điều gì với khách. */}
                   <ReadRow
                     label="Tăng giá thuê mỗi năm"
@@ -1269,7 +1269,7 @@ const OnboardingPriceReview = () => {
                     label="Trừ tháng trả nhà"
                     value={`−${handoverBuffer} tháng`}
                     /* Lệch với cấu hình = chốt chặn hợp đồng ngắn đã can thiệp, KHÔNG phải
-                       máy chủ bỏ qua lựa chọn của Host. Nói đúng lý do, đừng để Host đi sửa
+                       máy chủ bỏ qua lựa chọn của Owner. Nói đúng lý do, đừng để Owner đi sửa
                        cấu hình một cách vô ích. */
                     hint={cfg.handoverBufferMonths !== handoverBuffer
                       ? `Cấu hình −${cfg.handoverBufferMonths}, nhưng HĐ này còn dưới 6 tháng khai thác nên không trừ`
@@ -1302,7 +1302,7 @@ const OnboardingPriceReview = () => {
                       </p>
                       <button
                         type="button"
-                        onClick={() => navigate('/host/zones')}
+                        onClick={() => navigate('/owner/zones')}
                         className="mt-1.5 font-bold text-rose-800 underline hover:text-rose-950"
                       >
                         Đi gán quản lý khu vực →
@@ -1311,7 +1311,7 @@ const OnboardingPriceReview = () => {
                   </div>
                 )}
 
-                {/* Cấu hình chỉ nằm trên máy này — nói thẳng, đừng để Host tưởng đã lưu chung. */}
+                {/* Cấu hình chỉ nằm trên máy này — nói thẳng, đừng để Owner tưởng đã lưu chung. */}
                 {cfgSource !== 'server' && (
                   <Note tone="amber">
                     {cfgSource === 'default'
@@ -1322,7 +1322,7 @@ const OnboardingPriceReview = () => {
 
                 <button
                   type="button"
-                  onClick={() => navigate('/host/pricing-config')}
+                  onClick={() => navigate('/owner/pricing-config')}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-indigo-200 bg-white px-4 py-2.5 text-sm font-bold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50"
                 >
                   <SlidersHorizontal className="h-4 w-4" />
@@ -1603,7 +1603,7 @@ const OnboardingPriceReview = () => {
               {overCountedMonths === 0 && realMonths - revenueMonths > 0 && (
                 <Note>
                   <b>Hợp đồng dài {realMonths} tháng nhưng chỉ {revenueMonths} tháng được tính có doanh thu.</b>{' '}
-                  {realMonths - revenueMonths} tháng cuối để dành làm <b>cửa sổ bàn giao</b>: cho khách dọn đi,
+                  {realMonths - revenueMonths} tháng cuối để dành <b>trả nhà cho chủ</b>: cho khách dọn đi,
                   tháo nội thất, sơn sửa hoàn trả hiện trạng cho chủ nhà gốc — quãng đó không có khách nào ở.
                   <span className="mt-1 block">
                     Tiền thuê trả chủ vẫn tính <b>đủ trọn gói {formatVND(d?.capexParts.rent ?? calc.cRent ?? 0)}</b> cho cả {realMonths} tháng
@@ -1896,10 +1896,10 @@ const OnboardingPriceReview = () => {
                 {totalMonthly > 0 ? formatVND(totalMonthly) : '—'}
               </p>
             </div>
-            {/* Thanh đáy chỉ hiện thứ Host thật sự quyết định dựa vào: giá chốt, và LÃI RÒNG —
+            {/* Thanh đáy chỉ hiện thứ Owner thật sự quyết định dựa vào: giá chốt, và LÃI RÒNG —
                 lãi đã trừ cả vốn lẫn chi phí vận hành. Bản trước hiện "So với mục tiêu
                 +395.450" = chênh lệch giữa giá chốt và doanh thu mục tiêu/tháng; con số đó
-                vừa mơ hồ (mục tiêu gì?) vừa không phải điều Host cần biết lúc bấm Xác nhận. */}
+                vừa mơ hồ (mục tiêu gì?) vừa không phải điều Owner cần biết lúc bấm Xác nhận. */}
             {calc && pnl && (
               <>
                 <BarStat
@@ -1954,13 +1954,13 @@ const OnboardingPriceReview = () => {
             {/* Nút xám thì PHẢI nói vì sao ngay cạnh nó. Người dùng đứng ở thanh cuối trang,
                 không tự cuộn ngược lên tìm khối cảnh báo để đoán lý do. */}
             {summary.status !== 'PENDING_HOST_REVIEW' ? (
-              <p className="text-xs font-semibold text-amber-600">Chỉ xác nhận được khi ở trạng thái &quot;Chờ Host duyệt&quot;</p>
+              <p className="text-xs font-semibold text-amber-600">Chỉ xác nhận được khi ở trạng thái &quot;Chờ Owner duyệt&quot;</p>
             ) : pricingDataBroken ? (
               <p className="text-xs font-semibold text-rose-600">Kết quả tính giá của máy chủ đang sai — xem cảnh báo đầu trang</p>
             ) : !zoneHasManager ? (
               <button
                 type="button"
-                onClick={() => navigate('/host/zones')}
+                onClick={() => navigate('/owner/zones')}
                 className="text-xs font-bold text-rose-600 underline hover:text-rose-800"
               >
                 {property?.zoneName ?? 'Khu vực'} chưa có quản lý — gán trước rồi mới duyệt được →
@@ -2008,7 +2008,7 @@ const OnboardingPriceReview = () => {
 /**
  * Hộp xác nhận cuối trước khi kích hoạt cho thuê.
  *
- * Gộp lại đúng ba thứ Host cần thấy lần cuối, mà thanh dính đáy trang KHÔNG nói được:
+ * Gộp lại đúng ba thứ Owner cần thấy lần cuối, mà thanh dính đáy trang KHÔNG nói được:
  *   1. GIÁ TỪNG PHÒNG — thanh đáy chỉ có tổng. Chốt nhầm một phòng thì cả bảng tổng vẫn
  *      trông bình thường, và giá sai chỉ lộ ra khi khách đầu tiên vào ở.
  *   2. LỜI THẬT so với mục tiêu — con số quyết định có nên chốt hay không.

@@ -10,8 +10,8 @@
  *   INSPECTING       chụp ảnh · đối chiếu thiết bị · chốt điện/nước · ghi hư hỏng
  *      │ manager chốt bảng tiền
  *   WAITING_TENANT   khách xem biên bản + bảng quyết toán
- *      │ đồng ý              └─ không đồng ý ─► DISPUTED ─► host xử lý ─► quay lại
- *   SETTLING         host/tài chính hoàn cọc · khách đóng thêm qua PayOS nếu còn nợ
+ *      │ đồng ý              └─ không đồng ý ─► DISPUTED ─► owner xử lý ─► quay lại
+ *   SETTLING         owner/tài chính hoàn cọc · khách đóng thêm qua PayOS nếu còn nợ
  *                    (manager KHÔNG chuyển tiền — bỏ khỏi vai này 18/08/2026)
  *      │
  *   COMPLETED        BE terminate HĐ + giải phóng phòng/thiết bị

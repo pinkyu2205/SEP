@@ -11,9 +11,9 @@ export const ROUTES = {
   // Auth
   LOGIN: '/login',
 
-  // Dashboard - Host
-  HOST_ROOT: '/host',
-  HOST_PROPERTIES: '/host/properties',
+  // Dashboard - Owner
+  HOST_ROOT: '/owner',
+  HOST_PROPERTIES: '/owner/properties',
 
   // Dashboard - Admin
   ADMIN_ROOT: '/admin',

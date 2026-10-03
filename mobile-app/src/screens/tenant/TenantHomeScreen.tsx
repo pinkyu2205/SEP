@@ -70,7 +70,7 @@ const checkoutNeedsTenant = (c: CheckoutRequestDto | null): string | null => {
   const s = c.settlement;
   if (!s) return null;
   if (s.chargesSettled === false) return 'Thanh toán khoản phí cuối kỳ';
-  // Host đã chuyển cọc mà khách chưa xác nhận — bước dễ bị bỏ quên nhất cả luồng.
+  // Owner đã chuyển cọc mà khách chưa xác nhận — bước dễ bị bỏ quên nhất cả luồng.
   if (s.refundedAt && !s.refundConfirmedAt && !s.refundDisputedAt) {
     return 'Xác nhận bạn đã nhận đủ tiền cọc';
   }
@@ -189,7 +189,7 @@ export const TenantHomeScreen: React.FC = () => {
     electricityRate: b?.electricityRate ?? 0,
     waterRate: b?.waterRate ?? 0,
     serviceCharge: b?.serviceCharge ?? 0,
-    // "Chủ nhà" hiển thị cho tenant = người quản lý (manager) trực tiếp; fallback host nếu BE chưa có manager.
+    // "Chủ nhà" hiển thị cho tenant = người quản lý (manager) trực tiếp; fallback owner nếu BE chưa có manager.
     hostName: b?.managerName ?? b?.hostName ?? '—',
     hostPhone: b?.managerPhone ?? b?.hostPhone ?? '',
   };

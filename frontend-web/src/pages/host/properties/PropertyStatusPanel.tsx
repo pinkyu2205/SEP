@@ -1,9 +1,9 @@
 /**
- * Khối "Tình trạng nhà" ở màn CHI TIẾT bất động sản của Host.
+ * Khối "Tình trạng nhà" ở màn CHI TIẾT bất động sản của Owner.
  *
  * Cùng câu hỏi với hai cột mới ngoài danh sách ("căn này có khách chưa", "kỳ này thu
  * đủ chưa") nhưng ở đây trả lời sâu hơn một bậc: danh sách chỉ nói được "còn 2 hoá
- * đơn chưa thu", vào đây phải biết PHÒNG NÀO chưa thu thì host mới đi đòi được.
+ * đơn chưa thu", vào đây phải biết PHÒNG NÀO chưa thu thì owner mới đi đòi được.
  *
  * Dữ liệu khai thác lấy từ chính danh sách phòng màn này đã tải (`rooms`), KHÔNG gọi
  * lại `occupancyFromProperty`: ở đây có sẵn phòng thật nên đếm thẳng vẫn đúng hơn con
@@ -190,7 +190,7 @@ const LINE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 /**
- * Bảng từng hoá đơn — mở ra khi host muốn biết đích xác đang chờ khoản nào của ai.
+ * Bảng từng hoá đơn — mở ra khi owner muốn biết đích xác đang chờ khoản nào của ai.
  * Dùng cả ở thẻ "Khách thuê hiện tại" của nhà nguyên căn (`PropertyDetail`).
  */
 export const BillLines = ({ lines, showWhere = true }: {

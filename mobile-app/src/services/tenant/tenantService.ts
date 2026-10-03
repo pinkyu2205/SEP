@@ -100,7 +100,7 @@ export interface OnboardTenantRequest {
 
   // mobile: tạo HĐ PENDING, cần thanh toán cọc + OTP rồi confirm
   requireDepositPayment?: boolean;
-  // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Host duyệt giá, CHƯA thu cọc.
+  // Case 2: manager chưa chắc giá -> BE tạo HĐ chờ Owner duyệt giá, CHƯA thu cọc.
   requireHostPriceApproval?: boolean;
   // Thiết bị lắp thêm theo yêu cầu khách (vẫn được gửi) — gửi kèm ngay trong request
   // tạo/sửa để BE link đúng vào contract (KHÔNG tạo qua endpoint equipment chung riêng
@@ -251,7 +251,7 @@ export interface TenantContractResponse {
   tenantAccountCreated?: boolean; // true nếu vừa tạo mới tài khoản
   tenantRolePromoted?: boolean;   // true nếu vừa nâng ROLE_USER -> ROLE_TENANT
 
-  /** Người ĐANG phụ trách — đổi mỗi khi host đổi quản lý khu vực. */
+  /** Người ĐANG phụ trách — đổi mỗi khi owner đổi quản lý khu vực. */
   assignedManagerName?: string;
   /**
    * Người THỰC SỰ đón khách lúc onboard (BE thêm 20/08/2026). Ghi một lần, KHÔNG bị ghi đè
@@ -272,11 +272,11 @@ export interface TenantContractResponse {
   selectedExistingIds?: number[]; // ID nội thất có sẵn đã gắn (≈ toàn bộ available)
 }
 
-// Trạng thái duyệt giá của hợp đồng (Case 2 — gửi Host duyệt).
+// Trạng thái duyệt giá của hợp đồng (Case 2 — gửi Owner duyệt).
 export type ContractPriceApprovalStatus =
-  | 'PENDING_PRICE_APPROVAL'   // chờ Host duyệt
-  | 'APPROVED_AWAITING_DEPOSIT' // Host đồng ý, chờ manager thu cọc
-  | 'PRICE_REJECTED';          // Host từ chối (+ lý do)
+  | 'PENDING_PRICE_APPROVAL'   // chờ Owner duyệt
+  | 'APPROVED_AWAITING_DEPOSIT' // Owner đồng ý, chờ manager thu cọc
+  | 'PRICE_REJECTED';          // Owner từ chối (+ lý do)
 
 export interface OcrMeterResponse {
   reading: string;
@@ -500,7 +500,7 @@ export const realTenantService = {
     return data?.content ?? [];
   },
 
-  // Manager chỉnh giá sau khi Host từ chối -> gửi Host duyệt lại.
+  // Manager chỉnh giá sau khi Owner từ chối -> gửi Owner duyệt lại.
   resubmitPriceApproval: async (
     contractId: number,
     body: { rentAmount: number; deposit: number },
