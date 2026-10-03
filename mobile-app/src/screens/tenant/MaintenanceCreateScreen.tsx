@@ -24,6 +24,7 @@ import { CameraCaptureModal } from '../../components/common/CameraCaptureModal';
 import { PhotoLightbox, type LightboxState } from '../../components/common/PhotoLightbox';
 import { AppointmentSlotPicker } from '../../components/common/AppointmentSlotPicker';
 import { MAINTENANCE_VISIT_SLOT_MINUTES } from '@/constants/maintenance';
+import { TICKET_STATUS_META } from '@/hooks/useMyEquipmentTickets';
 import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
@@ -122,6 +123,40 @@ export const MaintenanceCreateScreen: React.FC = () => {
         if (!cancelled && Number.isFinite(pid) && pid > 0) setAvailabilityPropertyId(pid);
       } catch {
         // Best-effort — lưới giờ vẫn dùng được, chỉ là không tô xám được slot bận.
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Chặn báo trùng NGAY KHI MỞ FORM (03/10/2026). Cùng luật với BE `createRequest`:
+   *   • thiết bị BROKEN/DISPOSED (đang chờ thay mới) → EQUIPMENT_AWAITING_REPLACEMENT
+   *   • thiết bị còn phiếu chưa CLOSED/CANCELLED/OUTSTANDING_DAMAGE → DUPLICATE_EQUIPMENT_TICKET
+   * Trước đây khách quét QR, chụp ảnh, chọn giờ xong mới bị BE từ chối lúc bấm gửi.
+   */
+  const [blockedBy, setBlockedBy] = useState<{
+    kind: 'open' | 'replace'; ticketId?: number; ticketCode?: string; statusLabel?: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!equipment) return;
+    const st = String(equipment.status || '').toUpperCase();
+    if (st === 'BROKEN' || st === 'DISPOSED') { setBlockedBy({ kind: 'replace' }); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const page = await realMaintenanceService.getMyRequests({ size: 200 });
+        const open = (page?.content ?? []).find(t =>
+          Number(t.equipmentId) === Number(equipment.id)
+          && !['CLOSED', 'CANCELLED', 'OUTSTANDING_DAMAGE'].includes(String(t.status)));
+        if (!cancelled && open) {
+          setBlockedBy({
+            kind: 'open', ticketId: open.id, ticketCode: open.requestCode,
+            statusLabel: TICKET_STATUS_META[open.status]?.label,
+          });
+        }
+      } catch {
+        // Không kiểm tra được thì vẫn cho điền — BE chặn lại lúc gửi (xem catch trong handleSubmit).
       }
     })();
     return () => { cancelled = true; };
@@ -340,6 +375,14 @@ export const MaintenanceCreateScreen: React.FC = () => {
       return;
     } catch (e: any) {
       setSubmitting(false);
+      // Lưới đỡ khi kiểm tra trước (useEffect bên trên) chưa kịp/không bắt được: BE vẫn là nguồn chốt.
+      const code = e?.response?.data?.code;
+      if (code === 'DUPLICATE_EQUIPMENT_TICKET') {
+        const existingId = Number(e?.response?.data?.details?.existingRequestId);
+        setBlockedBy({ kind: 'open', ticketId: Number.isFinite(existingId) ? existingId : undefined });
+        return;
+      }
+      if (code === 'EQUIPMENT_AWAITING_REPLACEMENT') { setBlockedBy({ kind: 'replace' }); return; }
       const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Không thể kết nối máy chủ.';
       showAlert('Gửi yêu cầu thất bại', msg);
     }
@@ -347,6 +390,42 @@ export const MaintenanceCreateScreen: React.FC = () => {
 
   const isValid = !!title.trim() && images.length > 0 && (!needsCategory || !!category)
     && !!visitDate && !!visitTime;
+
+  // Thiết bị đang có phiếu chưa xong / đang chờ thay mới → không cho điền form (khỏi chụp ảnh, chọn giờ
+  // xong mới bị BE từ chối). Phủ mọi lối vào: chi tiết thiết bị, quét QR, danh sách thiết bị.
+  if (blockedBy) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>Quay lại</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Báo hỏng thiết bị</Text>
+          <View style={{ width: 60 }} />
+        </View>
+        <View style={{ padding: Spacing.lg }}>
+          <View style={styles.noticeCard}>
+            <Text style={[styles.noticeText, { fontWeight: '700', marginBottom: 4 }]}>
+              {blockedBy.kind === 'replace' ? 'Thiết bị đang chờ thay mới' : 'Thiết bị đang có yêu cầu chưa xử lý xong'}
+            </Text>
+            <Text style={styles.noticeText}>
+              {blockedBy.kind === 'replace'
+                ? `${equipment ? equipName(equipment) : 'Thiết bị này'} đã được xác định hỏng và đang chờ quản lý thay thiết bị mới — chưa cần báo hỏng lại.`
+                : `${equipment ? equipName(equipment) : 'Thiết bị này'} đang có yêu cầu bảo trì${blockedBy.ticketCode ? ` ${blockedBy.ticketCode}` : ''}${blockedBy.statusLabel ? ` (${blockedBy.statusLabel})` : ''}. Vui lòng theo dõi yêu cầu đó — khi xong hoặc bị huỷ mới báo lại được.`}
+            </Text>
+          </View>
+          {blockedBy.kind === 'open' && blockedBy.ticketId != null && (
+            <TouchableOpacity
+              style={[styles.submitBtn, { marginTop: Spacing.lg }]}
+              onPress={() => navigation.replace('MaintenanceDetail', { requestId: blockedBy.ticketId })}
+            >
+              <Text style={styles.submitBtnText}>Xem yêu cầu đang xử lý</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
