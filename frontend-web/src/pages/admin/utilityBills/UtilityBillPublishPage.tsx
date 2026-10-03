@@ -304,6 +304,7 @@ export const UtilityBillPublishPage = ({ kind }: { kind: UtilityKind }) => {
     year,
     roomPendingQty: rooms?.pendingQty ?? null,
     lastQty: lastBill?.totalQuantity ?? null,
+    paperOtherTotals: readout?.otherTotals ?? null,
   });
   const active = !!imageUrl || touched;
   const billMatch = useMemo(

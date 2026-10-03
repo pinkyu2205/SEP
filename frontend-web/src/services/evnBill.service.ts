@@ -176,12 +176,12 @@ export const evnBillService = {
    * BE phải IDEMPOTENT theo (propertyId, month, year): kỳ đó đã có bản PUBLISHED thì
    * trả 409 chứ đừng tạo thêm — hai bản cùng kỳ sẽ làm manager tính theo đơn giá khác nhau.
    */
-  publish: async (input: CreateEvnBillInput): Promise<EvnBill> => {
+  publish: async (input: CreateEvnBillInput, opts?: { silent?: boolean }): Promise<EvnBill> => {
     const { totalKwh, ...rest } = input;
     // BE nhận `totalQuantity` (dùng chung cho kWh/m³) — xem ghi chú ở BASE.
     const row = await api.post<unknown, any>(BASE, {
       ...rest, type: TYPE, totalQuantity: totalKwh,
-    });
+    }, { skipErrorToast: opts?.silent } as object);
     return toEvnBill(row);
   },
 
