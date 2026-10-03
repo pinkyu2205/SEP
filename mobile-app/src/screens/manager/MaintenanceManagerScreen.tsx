@@ -9,7 +9,7 @@ import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTicket } from '@/services/shared/maintenanceMappers';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 import {
-  MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS,
+  MAINTENANCE_STATUS_META, MAINTENANCE_PRIORITY_META, MAINTENANCE_SLA_DAYS, TENANT_CHARGE_STATUS_META,
 } from '@/constants/maintenance';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { readApiError } from '@/utils/apiError';
@@ -374,6 +374,9 @@ const TicketRow: React.FC<{ t: MaintenanceTicket; last: boolean; onPress: () => 
   if (isDone(t) && t.resolvedAt) facts.push(`Xong ${formatDateTime(t.resolvedAt)}`);
   if (cost > 0) facts.push(fmtMoney(cost));
   if (t.companyAbsorbedFault) facts.push('Công ty trả hộ');
+  // BE a5d7969: phiếu đã CLOSED vẫn có thể còn nợ — hiện nhãn tiền dưới nhãn trạng thái.
+  const charge = t.tenantChargeStatus && t.tenantChargeStatus !== 'none'
+    ? TENANT_CHARGE_STATUS_META[t.tenantChargeStatus] : null;
 
   return (
     <TouchableOpacity style={[s.row, !last && s.rowBorder]} onPress={onPress} activeOpacity={0.7}>
@@ -398,6 +401,11 @@ const TicketRow: React.FC<{ t: MaintenanceTicket; last: boolean; onPress: () => 
         <View style={[s.statusPill, { backgroundColor: st.bg }]}>
           <Text style={[s.statusText, { color: st.color }]}>{st.label}</Text>
         </View>
+        {charge && (
+          <View style={[s.statusPill, { backgroundColor: charge.bg, marginTop: 4 }]}>
+            <Text style={[s.statusText, { color: charge.color }]}>{charge.label}</Text>
+          </View>
+        )}
         <Text style={[s.priText, { color: pri?.color ?? Colors.textMuted }]}>
           {pri?.label ?? 'Chưa phân loại'}
         </Text>

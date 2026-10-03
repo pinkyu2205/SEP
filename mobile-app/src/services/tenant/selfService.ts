@@ -274,7 +274,8 @@ export interface CheckoutInspectionDto {
  */
 export interface CheckoutSettlementDto {
   // ── Khối A: khách phải trả ────────────────────────────────────────────
-  finalCharges?: Array<{ id: number; code?: string; type?: string; amount: number }>;
+  /** maintenanceRequestId: hoá đơn MAINTENANCE (phí sửa chữa còn nợ) — BE a5d7969. */
+  finalCharges?: Array<{ id: number; code?: string; type?: string; amount: number; maintenanceRequestId?: number }>;
   chargesTotal: number;
   chargesPaid: number;
   /** Đã trả hết chưa — điều kiện mở khoá hoàn cọc. */

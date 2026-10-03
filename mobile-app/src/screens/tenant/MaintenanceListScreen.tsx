@@ -9,7 +9,7 @@ import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import { formatDate } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON, TENANT_CHARGE_STATUS_META } from '@/constants/maintenance';
 import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
@@ -82,6 +82,15 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       {!!latest?.note && (
         <IconText icon="chat" gap={4} style={styles.update} numberOfLines={1}>
           {latest.note} · {formatDate(latest.updatedAt)}
+        </IconText>
+      )}
+
+      {/* BE a5d7969: sửa xong phiếu đóng luôn, khoản phải trả (nếu có) vẫn còn — nhắc ngay trên thẻ. */}
+      {(item.tenantChargeStatus === 'unpaid' || item.tenantChargeStatus === 'overdue') && (
+        <IconText icon="card" gap={4}
+          style={[styles.update, { color: TENANT_CHARGE_STATUS_META[item.tenantChargeStatus].color, fontWeight: '700' }]}>
+          {item.tenantChargeStatus === 'overdue' ? 'Quá hạn thanh toán' : 'Cần thanh toán'}
+          {item.issuedInvoice?.grandTotal ? ` ${item.issuedInvoice.grandTotal.toLocaleString('vi-VN')} đ` : ''} — mở để quét QR
         </IconText>
       )}
 
