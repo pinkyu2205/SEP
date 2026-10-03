@@ -9,6 +9,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import { Colors, Spacing, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { serverNow } from '@/utils/serverTime';
+import { Icon, IconText } from '@/components/common/Icon';
 
 const SH = Dimensions.get('window').height;
 // Trước đây là `new Date(2026, 4, 21)` — ngày CỨNG, nên mọi phép "còn bao nhiêu ngày"
@@ -277,7 +278,7 @@ export const TenantContractDetailScreen: React.FC = () => {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backBtnText}>‹</Text>
+          <Icon name="back" size={28} color="#0F172A" />
         </TouchableOpacity>
         <View style={s.headerCenter}>
           <Text style={s.title} numberOfLines={1}>Hợp đồng của {tenantName}</Text>
@@ -294,7 +295,7 @@ export const TenantContractDetailScreen: React.FC = () => {
         // Lỗi mạng/API — KHÁC với "chưa có hợp đồng", đừng gộp làm một kẻo người dùng
         // tưởng khách chưa ký hợp đồng trong khi thật ra chỉ là rớt mạng.
         <View style={s.empty}>
-          <Text style={s.emptyIcon}>⚠️</Text>
+          <Icon name="alert" size={44} color={Colors.warning} strokeWidth={1.5} />
           <Text style={s.emptyTitle}>Không tải được hợp đồng</Text>
           <Text style={s.emptyDesc}>{error}</Text>
           <TouchableOpacity style={s.retryBtn} onPress={load}>
@@ -303,7 +304,7 @@ export const TenantContractDetailScreen: React.FC = () => {
         </View>
       ) : contract === null ? (
         <View style={s.empty}>
-          <Text style={s.emptyIcon}>📋</Text>
+          <Icon name="contract" size={44} color={Colors.textMuted} strokeWidth={1.5} />
           <Text style={s.emptyTitle}>Chưa có hợp đồng</Text>
           <Text style={s.emptyDesc}>Khách thuê này chưa có hợp đồng nào.</Text>
         </View>
@@ -320,7 +321,7 @@ export const TenantContractDetailScreen: React.FC = () => {
               <Text style={s.tenantSub}>{propertyName} · {roomName}</Text>
             </View>
             <TouchableOpacity style={s.callBtn} onPress={handleCall}>
-              <Text style={s.callBtnText}>📞</Text>
+              <Icon name="phone" size={18} color={Colors.success} />
             </TouchableOpacity>
           </View>
 
@@ -339,11 +340,14 @@ export const TenantContractDetailScreen: React.FC = () => {
             {/* Expiry alert */}
             {(contract.status === 'expiring_soon' || contract.status === 'expired') && (
               <View style={[s.expiryAlert, contract.status === 'expired' && { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}>
-                <Text style={[s.expiryAlertText, contract.status === 'expired' && { color: '#DC2626' }]}>
+                <IconText
+                  icon={contract.status === 'expired' ? 'calendar-x' : 'calendar-clock'}
+                  style={[s.expiryAlertText, contract.status === 'expired' && { color: '#DC2626' }]}
+                >
                   {contract.status === 'expired'
-                    ? `❌ Hết hạn ${Math.abs(daysRemaining!)} ngày trước (${contract.endDate})`
-                    : `⏰ Còn ${daysRemaining} ngày đến ${contract.endDate}`}
-                </Text>
+                    ? `Hết hạn ${Math.abs(daysRemaining!)} ngày trước (${contract.endDate})`
+                    : `Còn ${daysRemaining} ngày đến ${contract.endDate}`}
+                </IconText>
               </View>
             )}
 
@@ -438,18 +442,18 @@ export const TenantContractDetailScreen: React.FC = () => {
           {(contract.status === 'active' || contract.status === 'expiring_soon' || contract.status === 'expired') && (
             <View style={s.actionsRow}>
               <TouchableOpacity style={s.renewBtn} onPress={handleRenew}>
-                <Text style={s.renewBtnText}>
-                  {contract.status === 'expired' ? '📋 Tạo hợp đồng mới' : '📋 Gia hạn hợp đồng'}
-                </Text>
+                <IconText icon={contract.status === 'expired' ? 'contract' : 'refresh'} style={s.renewBtnText}>
+                  {contract.status === 'expired' ? 'Tạo hợp đồng mới' : 'Gia hạn hợp đồng'}
+                </IconText>
               </TouchableOpacity>
             </View>
           )}
 
           {contract.status === 'pending' && (
             <View style={s.pendingBox}>
-              <Text style={s.pendingText}>
-                📝 Hợp đồng đang chờ được ký. Khi khách thuê ký xong, trạng thái sẽ cập nhật sang "Đang hiệu lực".
-              </Text>
+              <IconText icon="hourglass" multiline style={s.pendingText}>
+                Hợp đồng đang chờ được ký. Khi khách thuê ký xong, trạng thái sẽ cập nhật sang "Đang hiệu lực".
+              </IconText>
             </View>
           )}
 
@@ -544,7 +548,7 @@ const s = StyleSheet.create({
 
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   backBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  backBtnText: { fontSize: 28, color: '#0F172A', lineHeight: 32 },
+
   headerCenter: { flex: 1 },
   title: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
   subtitle: { fontSize: 12, color: '#64748B', marginTop: 1 },
@@ -558,7 +562,7 @@ const s = StyleSheet.create({
   tenantName: { fontSize: 14, fontWeight: '700', color: '#1E1B4B' },
   tenantSub: { fontSize: 12, color: '#4F46E5', marginTop: 1 },
   callBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#C7D2FE', alignItems: 'center', justifyContent: 'center' },
-  callBtnText: { fontSize: 18 },
+
 
   contractCard: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, marginBottom: 16, ...Shadow.sm },
   contractCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
@@ -600,7 +604,7 @@ const s = StyleSheet.create({
   pendingText: { fontSize: 13, color: '#92400E', lineHeight: 20 },
 
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  emptyIcon: { fontSize: 52 },
+
   emptyTitle: { fontSize: 16, fontWeight: '700', color: '#334155' },
   emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
   retryBtn: {

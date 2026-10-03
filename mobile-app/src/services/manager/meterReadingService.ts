@@ -11,8 +11,8 @@ import { serverNow } from '@/utils/serverTime';
  * **một** thông báo/ngày. Không có danh sách này thì manager quản nhiều nhà phải tự đi
  * dò từng phòng, rồi tới cuối kỳ mới phát hiện bị chặn hoá đơn.
  *
- * Từ 10/09/2026 mốc của ĐIỆN là NGÀY CUỐI THÁNG: `meterDueDate` của dòng điện là ngày
- * cuối tháng của kỳ, không còn là ngày admin phát hành hoá đơn EVN. Nước giữ nguyên.
+ * Từ BE 303ca9d (02/10/2026) điện và nước cùng một luật: dòng việc chỉ xuất hiện khi admin
+ * đã đẩy hoá đơn tổng của kỳ mà còn phòng thiếu số. Điện không còn mốc ngày cuối tháng.
  *
  * Đường lùi khi thật sự không chụp được (công tơ hỏng, không vào được phòng): xin mã
  * admin — xem `meterOverrideService`, gửi kèm `overrideToken` lúc tạo hoá đơn.
@@ -62,8 +62,8 @@ export const meterReadingService = {
    * Vì sao không hỏi đúng một kỳ: hai loại đồng hồ chạy theo hai lịch khác nhau kể từ
    * 10/09/2026.
    *
-   *  • ĐIỆN đi theo kỳ chốt số — bình thường là THÁNG TRƯỚC, riêng ngày cuối tháng là
-   *    tháng hiện tại (`meterReadingPeriodIso`). CHỈ kỳ đó, không lấy kỳ chưa tới hạn.
+   *  • ĐIỆN đi theo kỳ chốt số = THÁNG TRƯỚC (`meterReadingPeriodIso`): chụp tháng 10 là
+   *    số của hoá đơn tháng 9. CHỈ kỳ đó, không lấy kỳ chưa có hoá đơn.
    *  • NƯỚC đi theo hoá đơn admin vừa phát hành, tức thường rơi vào THÁNG DƯƠNG LỊCH
    *    hiện tại, và tới hạn ngay lúc phát hành.
    *
@@ -71,18 +71,12 @@ export const meterReadingService = {
    * mất việc điện còn nợ của tháng trước. Cả hai đều là im lặng bỏ sót — màn hình khoe
    * "đã chụp đủ" trong khi vẫn còn phòng chưa ai đụng tới. Nên hỏi cả hai, rồi lọc.
    *
-   * Máy chủ lọc theo quyền sẵn, và ngày cuối tháng hai kỳ trùng nhau nên chỉ còn một
-   * lời gọi. Lỗi một kỳ không làm hỏng kỳ kia.
+   * Máy chủ lọc theo quyền sẵn. Lỗi một kỳ không làm hỏng kỳ kia.
    */
   listAllPending: async (): Promise<PendingMeterReadingItem[]> => {
     const now = serverNow();
     const readingPeriod = meterReadingPeriodIso(now);
     const calendarPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-    if (readingPeriod === calendarPeriod) {
-      // Ngày cuối tháng: hai kỳ là một, hỏi một lần là đủ.
-      return meterReadingService.listPending(readingPeriod).catch(() => []);
-    }
 
     const [readingRows, calendarRows] = await Promise.all([
       meterReadingService.listPending(readingPeriod).catch(() => [] as PendingMeterReadingItem[]),
@@ -124,14 +118,15 @@ export const meterReadingService = {
 /**
  * ─── CHỐT CHỈ SỐ TRƯỚC, PHÁT HÀNH SAU (10/09/2026) ────────────────────────────
  *
- * Điện đổi luồng: quản lý đi chụp đồng hồ vào NGÀY CUỐI THÁNG và **lưu chỉ số lại**, chưa
- * gửi gì cho khách. Tới khi admin đẩy hoá đơn EVN của kỳ đó lên, máy chủ lấy chỉ số đã
- * chốt nhân đơn giá rồi tự phát hành thẳng cho khách thuê, đồng thời báo cho cả quản lý
- * lẫn khách. Xem `meterReadingPeriod` trong `constants/utilityCycle`.
+ * Điện đổi luồng: quản lý đi chụp đồng hồ (ngày nào trong tháng cũng được từ 03/10/2026 —
+ * chụp tháng M là số của hoá đơn tháng M − 1) và **lưu chỉ số lại**, chưa gửi gì cho khách.
+ * Tới khi admin đẩy hoá đơn EVN của kỳ đó lên, máy chủ lấy chỉ số đã chốt nhân đơn giá rồi
+ * tự phát hành thẳng cho khách thuê, đồng thời báo cho cả quản lý lẫn khách. Xem
+ * `meterReadingPeriod` trong `constants/utilityCycle`.
  *
  * Vì sao tách khỏi `createRoomUtilityInvoice`: hàm kia PHÁT HÀNH — tạo ra tiền phải trả và
- * bắn thông báo cho khách. Chỉ số chốt lúc cuối tháng thì chưa tính ra tiền được (chưa có
- * đơn giá của kỳ), nên phải là một bản ghi riêng, sửa được cho tới lúc phát hành.
+ * bắn thông báo cho khách. Chỉ số chốt trước khi có hoá đơn tổng thì chưa tính ra tiền được
+ * (chưa có đơn giá của kỳ), nên phải là một bản ghi riêng, sửa được cho tới lúc phát hành.
  *
  * BE đã ship 10/09/2026 (commit c36de01) đúng contract này. Một hành vi phải nhớ: nếu chỉ
  * số được chốt SAU khi admin đã đẩy hoá đơn EVN thì máy chủ phát hành NGAY trong chính lệnh

@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius } from '@/constants';
 import { realTenantEquipmentService } from '@/services/tenant/equipmentService';
 import { showAlert } from '@/utils';
+import { Icon } from '@/components/common/Icon';
 
 const parseParams = (raw: string): Record<string, string> => {
   try {
@@ -52,7 +53,7 @@ export const ScanScreen: React.FC = () => {
   if (!permission.granted) {
     return (
       <View style={styles.permissionContainer}>
-        <Text style={styles.permissionEmoji}>📷</Text>
+        <Icon name="camera" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.permissionIcon} />
         <Text style={styles.permissionTitle}>Cần quyền Camera</Text>
         <Text style={styles.permissionDesc}>
           Chúng tôi cần quyền Camera để quét mã QR trên thiết bị trong phòng của bạn.
@@ -111,7 +112,7 @@ export const ScanScreen: React.FC = () => {
       >
         <View style={styles.scanOverlay}>
           <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.closeBtnText}>✕</Text>
+            <Icon name="close" size={20} color={Colors.white} />
           </TouchableOpacity>
 
           <Text style={styles.scanTitle}>Quét mã QR thiết bị</Text>
@@ -141,7 +142,7 @@ export const ScanScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   permissionContainer: { flex: 1, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
-  permissionEmoji: { fontSize: 48, marginBottom: Spacing.base },
+  permissionIcon: { marginBottom: Spacing.base },
   permissionTitle: { fontSize: 20, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   permissionDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: Spacing.xl },
   permissionBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg },
@@ -158,7 +159,7 @@ const styles = StyleSheet.create({
   scanCornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
   scanHint: { fontSize: 14, color: 'rgba(255,255,255,0.8)', textAlign: 'center', lineHeight: 22, marginBottom: Spacing.xl },
   closeBtn: { position: 'absolute', top: 52, left: Spacing.lg, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
-  closeBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+
   analyzingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
   analyzingText: { color: Colors.white, fontSize: 15, fontWeight: '600' },
 });

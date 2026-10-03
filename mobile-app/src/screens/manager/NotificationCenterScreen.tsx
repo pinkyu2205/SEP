@@ -1,13 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Colors } from '@/constants';
 import { realNotificationService, ApiNotification } from '@/services/shared/notificationService';
 import { navigateFromNotification } from '@/navigation/navigationRef';
-import { serverNow } from '@/utils/serverTime';
+import type { IconName } from '@/components/common/Icon';
+import {
+  NotificationFeed, applyFeedFilter, buildFeedFilters, type FeedItem,
+} from '@/components/common/NotificationFeed';
 
 // ===================== TYPES =====================
 type NotifType =
@@ -20,129 +19,59 @@ type NotifType =
   | 'contract_assigned' | 'checkout_request'
   | 'equipment_damaged' | 'tenant_onboarded' | 'meter_reading_due' | 'system';
 
-type NotifPriority = 'high' | 'normal' | 'low';
-
 interface AppNotification {
   id: string;
   title: string;
   body: string;
   type: NotifType;
   isRead: boolean;
-  priority: NotifPriority;
   createdAt: string;
-  referenceId?: string;
   actionRoute?: string;
   /** Tham số route BE gửi kèm (vd { checkoutId: 12 }). */
   actionParams?: Record<string, any>;
-  actionLabel?: string;
 }
 
 // ===================== CONFIG =====================
-const TYPE_CONFIG: Record<NotifType, { icon: string; color: string; bg: string; category: string }> = {
-  new_bill: { icon: '🧾', color: Colors.info, bg: Colors.infoLight, category: 'Hóa đơn' },
-  bill_overdue: { icon: '🚨', color: Colors.error, bg: Colors.errorLight, category: 'Hóa đơn' },
-  payment_success: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Thanh toán' },
-  payment_pending_verify: { icon: '💳', color: Colors.warning, bg: Colors.warningLight, category: 'Thanh toán' },
-  contract_expiring: { icon: '📋', color: Colors.info, bg: Colors.infoLight, category: 'Hợp đồng' },
+const TYPE_CONFIG: Record<NotifType, { icon: IconName; color: string; bg: string; category: string }> = {
+  new_bill: { icon: 'receipt', color: Colors.info, bg: Colors.infoLight, category: 'Hóa đơn' },
+  bill_overdue: { icon: 'alert', color: Colors.error, bg: Colors.errorLight, category: 'Hóa đơn' },
+  payment_success: { icon: 'success', color: Colors.success, bg: Colors.successLight, category: 'Thanh toán' },
+  payment_pending_verify: { icon: 'card', color: Colors.warning, bg: Colors.warningLight, category: 'Thanh toán' },
+  contract_expiring: { icon: 'calendar-clock', color: Colors.info, bg: Colors.infoLight, category: 'Hợp đồng' },
   // D-0: hôm nay hết hạn, hệ thống vừa mở phiếu trả phòng — quản lý phải đi nhận phòng.
   // Không dùng chung màu xanh của `contract_expiring` (mốc nhắc trước, chưa phải làm gì).
-  contract_expired: { icon: '📕', color: Colors.error, bg: Colors.errorLight, category: 'Hợp đồng' },
-  // Đơn gia hạn (BE 02/09/2026). Cùng category 'Hợp đồng' để tab lọc gom chung, nhưng
-  // tách icon/màu: "đơn mới về" là việc phải xem, "đã duyệt" là tin đã xong.
-  extension_requested: { icon: '📝', color: Colors.warning, bg: Colors.warningLight, category: 'Hợp đồng' },
-  extension_approved:  { icon: '📗', color: Colors.success, bg: Colors.successLight, category: 'Hợp đồng' },
-  extension_closed:    { icon: '📄', color: Colors.textMuted, bg: Colors.background, category: 'Hợp đồng' },
-  maintenance_new: { icon: '🔧', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
-  maintenance_resolved: { icon: '✅', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
-  maintenance_accepted: { icon: '🔧', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },
-  // Bốn nhánh bảo trì tách từ BE 13/08/2026. Cùng category 'Bảo trì' nên tab lọc
-  // (khớp theo tiền tố 'maintenance') vẫn gom đủ.
-  maintenance_confirm: { icon: '📝', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
-  maintenance_cost: { icon: '💵', color: Colors.accent, bg: Colors.primaryBg, category: 'Bảo trì' },
-  maintenance_cancelled: { icon: '🚫', color: Colors.textSecondary, bg: Colors.divider, category: 'Bảo trì' },
-  maintenance_rejected: { icon: '↩️', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
+  contract_expired: { icon: 'calendar-x', color: Colors.error, bg: Colors.errorLight, category: 'Hợp đồng' },
+  // Đơn gia hạn (BE 02/09/2026). Cùng mục 'Hợp đồng' để chip lọc gom chung, nhưng tách
+  // icon/màu: "đơn mới về" là việc phải xem, "đã duyệt" là tin đã xong.
+  extension_requested: { icon: 'contract', color: Colors.warning, bg: Colors.warningLight, category: 'Hợp đồng' },
+  extension_approved:  { icon: 'calendar-check', color: Colors.success, bg: Colors.successLight, category: 'Hợp đồng' },
+  extension_closed:    { icon: 'document', color: Colors.textMuted, bg: Colors.divider, category: 'Hợp đồng' },
+  maintenance_new: { icon: 'wrench', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
+  maintenance_resolved: { icon: 'success', color: Colors.success, bg: Colors.successLight, category: 'Bảo trì' },
+  maintenance_accepted: { icon: 'hard-hat', color: Colors.info, bg: Colors.infoLight, category: 'Bảo trì' },
+  // Bốn nhánh bảo trì tách từ BE 13/08/2026 — chung mục 'Bảo trì'.
+  maintenance_confirm: { icon: 'clipboard-check', color: Colors.warning, bg: Colors.warningLight, category: 'Bảo trì' },
+  maintenance_cost: { icon: 'cash', color: Colors.accentDark, bg: '#CFFAFE', category: 'Bảo trì' },
+  maintenance_cancelled: { icon: 'ban', color: Colors.textSecondary, bg: Colors.divider, category: 'Bảo trì' },
+  maintenance_rejected: { icon: 'undo', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
   // Khách quá hạn tự sửa — quản lý phải đi nhắc. Khác biểu tượng với "bị từ chối".
-  maintenance_overdue: { icon: '⏰', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
-  contract_assigned: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
-  checkout_request: { icon: '🚪', color: Colors.error, bg: Colors.errorLight, category: 'Tiễn khách' },
-  equipment_damaged: { icon: '📦', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
-  tenant_onboarded: { icon: '🤝', color: Colors.primary, bg: Colors.primaryBg, category: 'Khách thuê' },
-  // Chưa có ảnh công tơ kỳ này → BE chặn phát hành hoá đơn điện/nước cho tới khi chụp.
-  meter_reading_due: { icon: '📸', color: Colors.warning, bg: Colors.warningLight, category: 'Ghi điện nước' },
-  system: { icon: '🔔', color: Colors.textSecondary, bg: Colors.divider, category: 'Hệ thống' },
+  maintenance_overdue: { icon: 'alarm', color: Colors.error, bg: Colors.errorLight, category: 'Bảo trì' },
+  contract_assigned: { icon: 'handshake', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
+  checkout_request: { icon: 'door', color: Colors.error, bg: Colors.errorLight, category: 'Tiễn khách' },
+  equipment_damaged: { icon: 'package', color: Colors.error, bg: Colors.errorLight, category: 'Thiết bị' },
+  tenant_onboarded: { icon: 'key', color: Colors.primary, bg: Colors.primaryBg, category: 'Đón khách' },
+  // Hoá đơn tổng đã về mà còn phòng chưa chốt số → chụp xong khách mới nhận hoá đơn.
+  meter_reading_due: { icon: 'camera', color: Colors.warning, bg: Colors.warningLight, category: 'Ghi điện nước' },
+  system: { icon: 'bell', color: Colors.textSecondary, bg: Colors.divider, category: 'Hệ thống' },
 };
 // BE có thể gửi type FE chưa biết — luôn fallback, KHÔNG để cfg undefined làm crash render.
 const cfgOf = (type: string) => TYPE_CONFIG[type as NotifType] ?? TYPE_CONFIG.system;
 
-const FILTER_TABS = [
-  { key: 'all', label: 'Tất cả' },
-  { key: 'unread', label: 'Chưa đọc' },
-  { key: 'bill_overdue', label: 'Hóa đơn' },
-  { key: 'maintenance_new', label: 'Bảo trì' },
-  { key: 'checkout_request', label: 'Tiễn khách' },
-  { key: 'contract_expiring', label: 'Hợp đồng' },
-  // Lọc theo tiền tố (xem `filtered`): key 'payment_*' gom cả `payment_success` mà
-  // BE bắn khi khách vừa thanh toán.
-  { key: 'payment_pending_verify', label: 'Thanh toán' },
-  { key: 'meter_reading_due', label: 'Ghi điện nước' },
+/** Thứ tự chip lọc: việc phải làm (tiền, đồng hồ, bảo trì) trước, tin tham khảo sau. */
+const CATEGORY_ORDER = [
+  'Hóa đơn', 'Thanh toán', 'Ghi điện nước', 'Bảo trì', 'Thiết bị',
+  'Đón khách', 'Tiễn khách', 'Hợp đồng', 'Hệ thống',
 ];
-
-function timeAgo(dateStr: string): string {
-  const now = serverNow();
-  const date = new Date(dateStr);
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 60) return `${diffMins} phút trước`;
-  if (diffHours < 24) return `${diffHours} giờ trước`;
-  return `${diffDays} ngày trước`;
-}
-
-// ===================== NOTIFICATION CARD =====================
-const NotifCard: React.FC<{
-  notif: AppNotification;
-  onPress: () => void;
-  onMarkRead: () => void;
-}> = ({ notif, onPress, onMarkRead }) => {
-  const cfg = cfgOf(notif.type);
-  return (
-    <TouchableOpacity
-      style={[styles.card, !notif.isRead && styles.cardUnread]}
-      onPress={onPress}
-      activeOpacity={0.8}
-    >
-      <View style={[styles.cardIconWrap, { backgroundColor: cfg.bg }]}>
-        <Text style={styles.cardIcon}>{cfg.icon}</Text>
-      </View>
-      <View style={styles.cardBody}>
-        <View style={styles.cardTitleRow}>
-          <Text style={[styles.cardTitle, !notif.isRead && styles.cardTitleUnread]}>
-            {notif.title}
-          </Text>
-          {!notif.isRead && <View style={styles.unreadDot} />}
-        </View>
-        <Text style={styles.cardBody2} numberOfLines={2}>{notif.body}</Text>
-        <View style={styles.cardFooter}>
-          <Text style={styles.cardTime}>{timeAgo(notif.createdAt)}</Text>
-          <View style={[styles.categoryChip, { backgroundColor: cfg.bg }]}>
-            <Text style={[styles.categoryText, { color: cfg.color }]}>{cfg.category}</Text>
-          </View>
-        </View>
-        {notif.actionLabel && (
-          <TouchableOpacity style={styles.actionBtn} onPress={onPress}>
-            <Text style={styles.actionBtnText}>{notif.actionLabel} →</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      {!notif.isRead && (
-        <TouchableOpacity style={styles.readBtn} onPress={onMarkRead}>
-          <Text style={styles.readBtnText}>✓</Text>
-        </TouchableOpacity>
-      )}
-    </TouchableOpacity>
-  );
-};
 
 // ===================== MAIN =====================
 export const NotificationCenterScreen: React.FC = () => {
@@ -158,7 +87,7 @@ export const NotificationCenterScreen: React.FC = () => {
       setNotifications(rows.map((n: ApiNotification): AppNotification => ({
         id: String(n.id), title: n.title, body: n.body,
         type: n.type as AppNotification['type'], isRead: n.isRead,
-        priority: 'normal', createdAt: n.createdAt,
+        createdAt: n.createdAt,
         actionRoute: n.screen, actionParams: n.params,
       })));
     } catch {
@@ -172,12 +101,15 @@ export const NotificationCenterScreen: React.FC = () => {
     setRefreshing(false);
   }, [load]);
 
-  const filtered = useMemo(() => {
-    if (activeFilter === 'all') return notifications;
-    if (activeFilter === 'unread') return notifications.filter(n => !n.isRead);
-    return notifications.filter(n => n.type === activeFilter || n.type.startsWith(activeFilter.split('_')[0]));
-  }, [notifications, activeFilter]);
-
+  const items: FeedItem[] = useMemo(() => notifications.map((n) => {
+    const cfg = cfgOf(n.type);
+    return {
+      id: n.id, title: n.title, body: n.body, createdAt: n.createdAt, isRead: n.isRead,
+      icon: cfg.icon, color: cfg.color, bg: cfg.bg, category: cfg.category,
+    };
+  }), [notifications]);
+  const filters = useMemo(() => buildFeedFilters(items, CATEGORY_ORDER), [items]);
+  const visible = useMemo(() => applyFeedFilter(items, activeFilter), [items, activeFilter]);
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const markRead = (id: string) => {
@@ -193,6 +125,11 @@ export const NotificationCenterScreen: React.FC = () => {
 
   const TAB_ROUTES = ['ManagerBilling', 'ManagerMaintenance', 'UtilityBilling', 'ManagerHome'];
 
+  /**
+   * Bấm một dòng là đánh dấu đã đọc rồi mở đúng nơi cần làm. Thông báo không có nơi để
+   * mở (vd tin hệ thống) thì bấm vào chỉ đánh dấu đã đọc — thay cho nút tích riêng ở mỗi
+   * thẻ trước đây.
+   */
   const handleNotifPress = (notif: AppNotification) => {
     markRead(notif.id);
     // BE trả sẵn màn + tham số (từ 05/08/2026) → mở đúng hồ sơ/hoá đơn, khỏi đoán.
@@ -250,180 +187,21 @@ export const NotificationCenterScreen: React.FC = () => {
     }
   };
 
-  const highPriorityUnread = notifications.filter(n => !n.isRead && n.priority === 'high');
-
   return (
-    <SafeAreaView style={styles.safe}>
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          {navigation.canGoBack() && (
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.backBtnText}>‹</Text>
-            </TouchableOpacity>
-          )}
-          <View>
-            <Text style={styles.title}>Thông báo</Text>
-            {unreadCount > 0 && (
-              <Text style={styles.subtitle}>{unreadCount} chưa đọc</Text>
-            )}
-          </View>
-        </View>
-        {unreadCount > 0 && (
-          <TouchableOpacity style={styles.markAllBtn} onPress={markAllRead}>
-            <Text style={styles.markAllText}>Đọc tất cả</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Urgent alerts */}
-      {highPriorityUnread.length > 0 && (
-        <View style={styles.urgentSection}>
-          <Text style={styles.urgentTitle}>🚨 Cần xử lý ngay ({highPriorityUnread.length})</Text>
-          {highPriorityUnread.slice(0, 2).map(n => (
-            <TouchableOpacity
-              key={n.id}
-              style={styles.urgentCard}
-              onPress={() => handleNotifPress(n)}
-            >
-              <Text style={styles.urgentCardText} numberOfLines={1}>{n.title}</Text>
-              <Text style={styles.urgentCardArrow}>›</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {/* Filter tabs */}
-      <View style={styles.filterContainer}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={FILTER_TABS}
-          keyExtractor={i => i.key}
-          contentContainerStyle={styles.filterContent}
-          renderItem={({ item }) => {
-            const count = item.key === 'all'
-              ? notifications.length
-              : item.key === 'unread'
-              ? unreadCount
-              : notifications.filter(n => n.type === item.key || n.type.startsWith(item.key.split('_')[0])).length;
-            return (
-              <TouchableOpacity
-                style={[styles.filterChip, activeFilter === item.key && styles.filterChipActive]}
-                onPress={() => setActiveFilter(item.key)}
-              >
-                <Text style={[styles.filterText, activeFilter === item.key && styles.filterTextActive]}>
-                  {item.label} {count > 0 ? `(${count})` : ''}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-
-      {/* Notification list */}
-      <FlatList
-        data={filtered}
-        keyExtractor={i => i.id}
-        renderItem={({ item }) => (
-          <NotifCard
-            notif={item}
-            onPress={() => handleNotifPress(item)}
-            onMarkRead={() => markRead(item.id)}
-          />
-        )}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-        ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={{ fontSize: 48 }}>🔔</Text>
-            <Text style={styles.emptyTitle}>Không có thông báo</Text>
-            <Text style={styles.emptySubtitle}>Bạn đã xem hết tất cả thông báo</Text>
-          </View>
-        }
-      />
-    </SafeAreaView>
+    <NotificationFeed
+      items={visible}
+      filters={filters}
+      activeFilter={activeFilter}
+      onFilter={setActiveFilter}
+      unreadCount={unreadCount}
+      onMarkAllRead={markAllRead}
+      onPressItem={(id) => {
+        const n = notifications.find(x => x.id === id);
+        if (n) handleNotifPress(n);
+      }}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
+    />
   );
 };
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.background },
-
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.sm,
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, flex: 1 },
-  backBtn: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
-  },
-  backBtnText: { fontSize: 24, lineHeight: 26, color: Colors.primary, fontWeight: '900' },
-  title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary },
-  subtitle: { fontSize: 13, color: Colors.error, fontWeight: '600', marginTop: 2 },
-  markAllBtn: {
-    backgroundColor: Colors.primaryBg, paddingHorizontal: Spacing.md,
-    paddingVertical: 6, borderRadius: BorderRadius.lg,
-  },
-  markAllText: { fontSize: 13, fontWeight: '600', color: Colors.primary },
-
-  // Urgent section
-  urgentSection: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.sm },
-  urgentTitle: { fontSize: 13, fontWeight: '700', color: Colors.error, marginBottom: Spacing.sm },
-  urgentCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.errorLight,
-    borderRadius: BorderRadius.lg, padding: Spacing.md, marginBottom: Spacing.xs,
-    borderWidth: 1, borderColor: Colors.error + '30',
-  },
-  urgentCardText: { flex: 1, fontSize: 13, fontWeight: '700', color: Colors.error },
-  urgentCardArrow: { fontSize: 20, color: Colors.error, fontWeight: '600' },
-
-  // Filter
-  filterContainer: { height: 46 },
-  filterContent: { paddingHorizontal: Spacing.lg, alignItems: 'center' },
-  filterChip: {
-    paddingHorizontal: Spacing.md, paddingVertical: 7,
-    borderRadius: BorderRadius.full, backgroundColor: Colors.white,
-    borderWidth: 1, borderColor: Colors.border, marginRight: Spacing.sm,
-  },
-  filterChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSecondary },
-  filterTextActive: { color: Colors.white },
-
-  listContent: { paddingHorizontal: Spacing.lg, paddingBottom: 100, paddingTop: Spacing.md },
-
-  card: {
-    flexDirection: 'row', backgroundColor: Colors.white,
-    borderRadius: BorderRadius.lg, padding: Spacing.base, ...Shadow.sm,
-    alignItems: 'flex-start', gap: Spacing.md,
-  },
-  cardUnread: { borderWidth: 1.5, borderColor: Colors.primary + '30', backgroundColor: Colors.primaryBg + '60' },
-  cardIconWrap: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  cardIcon: { fontSize: 20 },
-  cardBody: { flex: 1 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, marginBottom: 4 },
-  cardTitle: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, flex: 1, lineHeight: 20 },
-  cardTitleUnread: { fontWeight: '800', color: Colors.textPrimary },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.primary, marginTop: 4, flexShrink: 0 },
-  cardBody2: { fontSize: 13, color: Colors.textSecondary, lineHeight: 18, marginBottom: Spacing.sm },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardTime: { fontSize: 11, color: Colors.textMuted },
-  categoryChip: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full },
-  categoryText: { fontSize: 10, fontWeight: '700' },
-  actionBtn: { marginTop: Spacing.sm },
-  actionBtnText: { fontSize: 12, fontWeight: '700', color: Colors.primary },
-  readBtn: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.primaryBg,
-    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  readBtnText: { fontSize: 12, fontWeight: '800', color: Colors.primary },
-
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: Spacing.md },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
-  emptySubtitle: { fontSize: 14, color: Colors.textMuted },
-});

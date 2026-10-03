@@ -81,7 +81,6 @@ export const ExtensionRequestCard: React.FC<Props> = ({ contractId, active }) =>
       showAlert(
         'Đã gửi đơn',
         'Quản lý và bộ phận quản trị sẽ xem đơn của bạn. Bạn sẽ nhận được thông báo khi có kết quả.',
-        undefined, '📝',
       );
     } catch (e: any) {
       showAlert('Không gửi được', e?.response?.data?.message || e?.message || 'Vui lòng thử lại.');

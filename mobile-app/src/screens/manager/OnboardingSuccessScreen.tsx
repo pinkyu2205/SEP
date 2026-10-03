@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon } from '@/components/common/Icon';
 
 /**
  * Màn hình thành công sau khi hoàn tất onboarding tenant (xác nhận OTP).
@@ -35,10 +36,10 @@ export const OnboardingSuccessScreen: React.FC<any> = ({ navigation, route }) =>
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.iconCircle}>
-          <Text style={styles.iconText}>✓</Text>
+          <Icon name="check" size={44} color={Colors.success} strokeWidth={2.5} />
         </View>
 
-        <Text style={styles.title}>Hoàn tất khởi tạo 🎉</Text>
+        <Text style={styles.title}>Hoàn tất khởi tạo</Text>
         <Text style={styles.subtitle}>
           Đã hoàn tất hợp đồng cho khách thuê. Khách có thể đăng nhập app để theo dõi hoá đơn,
           thanh toán và gửi yêu cầu sửa chữa.
@@ -101,7 +102,7 @@ const styles = StyleSheet.create({
     width: 88, height: 88, borderRadius: 44, backgroundColor: Colors.successLight,
     alignItems: 'center', justifyContent: 'center', marginTop: Spacing.xl, marginBottom: Spacing.lg,
   },
-  iconText: { fontSize: 44, color: Colors.success, fontWeight: '800' },
+
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
   subtitle: {
     fontSize: 14, color: Colors.textSecondary, textAlign: 'center',

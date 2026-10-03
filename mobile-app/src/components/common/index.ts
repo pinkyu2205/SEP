@@ -19,3 +19,5 @@ export { NotificationToast } from './NotificationToast';
 export { BackgroundWatcher } from './BackgroundWatcher';
 export { RealtimeBadge } from './RealtimeBadge';
 export { AppointmentSlotPicker } from './AppointmentSlotPicker';
+export { Icon, IconText, Dot } from './Icon';
+export type { IconName } from './Icon';

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, canTerminateForUnpaidInvoice, isMeterReadingDay, isPreCollectStatus } from '@/constants';
+import { Colors, canTerminateForUnpaidInvoice, isPreCollectStatus } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import type { ManagedProperty } from '@/types/managedProperty';
 import { managerPropertyService } from '@/services/manager/propertyService';
@@ -12,6 +12,7 @@ import { checkoutService } from '@/services/manager/checkoutService';
 import { meterReadingService, type PendingMeterReadingItem } from '@/services/manager/meterReadingService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { todayIso } from '@/utils/serverTime';
+import type { IconName } from '@/components/common/Icon';
 
 /**
  * DANH SÁCH VIỆC CỦA MANAGER — MỘT nguồn cho cả trang chủ ("My Task — hôm nay") lẫn màn
@@ -28,7 +29,7 @@ export type TaskUrgency = 'critical' | 'warning' | 'upcoming';
 
 export interface ManagerTaskItem {
   id: string;
-  icon: string;
+  icon: IconName;
   label: string;
   /** Một dòng giải thích việc phải làm — hiện ở màn "Việc của tôi". */
   hint: string;
@@ -81,7 +82,6 @@ export const buildManagerTasks = (d: ManagerTaskInputs): ManagerTaskItem[] => {
   const overdueUtility = inv.filter(i => i.status === 'OVERDUE' && isUtility(i)).length;
   // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
   const terminable = inv.filter(i => canTerminateForUnpaidInvoice(i)).length;
-  const pendingVerify = d.payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   const receptionDue = d.draftContracts.filter(c => { const r = receptionDateOf(c); return !!r && r <= today; }).length;
   const receptionSoon = d.draftContracts.filter(c => {
@@ -96,7 +96,6 @@ export const buildManagerTasks = (d: ManagerTaskInputs): ManagerTaskItem[] => {
   const maintenance = d.properties.reduce((s, p) => s + p.maintenance, 0);
   const pendingElec = d.pendingMeters.filter(r => r.utilityType === 'ELECTRICITY').length;
   const pendingWater = d.pendingMeters.length - pendingElec;
-  const elecDueToday = isMeterReadingDay();
 
   const expiring = d.activeContracts.filter(c => {
     const end = c.endDate ? String(c.endDate).slice(0, 10) : null;
@@ -105,35 +104,35 @@ export const buildManagerTasks = (d: ManagerTaskInputs): ManagerTaskItem[] => {
 
   const all: ManagerTaskItem[] = [
     // ── Làm ngay ──
-    { id: 'reception', icon: '🤝', label: 'Khách đến hạn đón', hint: 'Đã tới hoặc quá ngày vào ở — đi bàn giao phòng',
+    { id: 'reception', icon: 'handshake', label: 'Khách đến hạn đón', hint: 'Đã tới hoặc quá ngày vào ở — đi bàn giao phòng',
       count: receptionDue, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
-    { id: 'rentOverdue', icon: '🧾', label: 'Tiền nhà quá hạn', hint: 'Nhắc khách trả, hoặc ghi nhận khách đã trả tiền mặt',
+    { id: 'rentOverdue', icon: 'receipt', label: 'Tiền nhà quá hạn', hint: 'Nhắc khách trả, hoặc ghi nhận khách đã trả tiền mặt',
       count: overdueRent, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
-    { id: 'rentTerminate', icon: '⛔', label: 'Nợ quá hạn — được chấm dứt HĐ', hint: 'Khách nợ quá hạn đủ lâu để chấm dứt hợp đồng',
+    { id: 'rentTerminate', icon: 'ban', label: 'Nợ quá hạn — được chấm dứt HĐ', hint: 'Khách nợ quá hạn đủ lâu để chấm dứt hợp đồng',
       count: terminable, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
     // Nợ quá hạn → tab "Đang nợ" của Tiền khách thuê: gom theo từng khách, đủ cả tiền nhà lẫn điện nước.
-    { id: 'utilOverdue', icon: '⚡', label: 'Điện/nước quá hạn', hint: 'Hoá đơn điện nước khách chưa trả',
+    { id: 'utilOverdue', icon: 'electric', label: 'Điện/nước quá hạn', hint: 'Hoá đơn điện nước khách chưa trả',
       count: overdueUtility, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
-    { id: 'maintenance', icon: '🔧', label: 'Bảo trì cần xử lý', hint: 'Phiếu sửa chữa đang mở ở các nhà bạn quản lý',
+    { id: 'maintenance', icon: 'wrench', label: 'Bảo trì cần xử lý', hint: 'Phiếu sửa chữa đang mở ở các nhà bạn quản lý',
       count: maintenance, urgency: 'critical', color: Colors.error, route: 'ManagerMaintenance' },
-    { id: 'checkoutPending', icon: '🚪', label: 'Yêu cầu trả phòng chờ duyệt', hint: 'Khách vừa gửi — duyệt để hẹn ngày kiểm tra phòng',
+    { id: 'checkoutPending', icon: 'door', label: 'Yêu cầu trả phòng chờ duyệt', hint: 'Khách vừa gửi — duyệt để hẹn ngày kiểm tra phòng',
       count: checkoutPending, urgency: 'critical', color: '#DC2626', route: 'CheckoutRequests' },
     // Chưa chụp công tơ thì không phát hành được hoá đơn — chặn cả kỳ thu tiền.
-    { id: 'elec', icon: '⚡', label: elecDueToday ? 'Chốt chỉ số điện — hạn hôm nay' : 'Chỉ số điện quá hạn chưa chốt',
-      hint: 'Chụp công tơ điện từng phòng', count: pendingElec, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
-    { id: 'water', icon: '💧', label: 'Phòng chưa chụp đồng hồ nước', hint: 'Chụp đồng hồ nước theo lịch người ghi',
+    // Từ BE 303ca9d máy chủ chỉ trả việc điện khi admin ĐÃ đẩy hoá đơn EVN mà còn phòng thiếu
+    // số — không còn hạn cuối tháng, nên không nói "quá hạn" hay "hạn hôm nay" nữa.
+    { id: 'elec', icon: 'electric', label: 'Phòng chưa chốt số điện', hint: 'Hoá đơn EVN đã về — chụp công tơ để khách nhận hoá đơn',
+      count: pendingElec, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
+    { id: 'water', icon: 'water', label: 'Phòng chưa chụp đồng hồ nước', hint: 'Chụp đồng hồ nước theo lịch người ghi',
       count: pendingWater, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
 
     // ── Cần làm ──
-    { id: 'verify', icon: '💳', label: 'Chờ xác nhận thanh toán', hint: 'Khách báo đã chuyển khoản — kiểm tra rồi xác nhận',
-      count: pendingVerify, urgency: 'warning', color: Colors.warning, route: 'ManagerBilling' },
-    { id: 'checkoutProgress', icon: '📋', label: 'Hồ sơ trả phòng đang xử lý', hint: 'Kiểm tra phòng, lập biên bản, quyết toán cọc',
+    { id: 'checkoutProgress', icon: 'clipboard', label: 'Hồ sơ trả phòng đang xử lý', hint: 'Kiểm tra phòng, lập biên bản, quyết toán cọc',
       count: checkoutInProgress, urgency: 'warning', color: '#DC2626', route: 'CheckoutRequests' },
 
     // ── Sắp tới ──
-    { id: 'receptionSoon', icon: '📅', label: `Khách sẽ đến trong ${RECEPTION_AHEAD_DAYS} ngày`, hint: 'Chuẩn bị phòng, hẹn giờ bàn giao',
+    { id: 'receptionSoon', icon: 'calendar', label: `Khách sẽ đến trong ${RECEPTION_AHEAD_DAYS} ngày`, hint: 'Chuẩn bị phòng, hẹn giờ bàn giao',
       count: receptionSoon, urgency: 'upcoming', color: Colors.info, route: 'ResumeContract' },
-    { id: 'expiring', icon: '⏳', label: `Hợp đồng hết hạn trong ${EXPIRING_DAYS} ngày`, hint: 'Hỏi khách gia hạn hay dọn đi',
+    { id: 'expiring', icon: 'hourglass', label: `Hợp đồng hết hạn trong ${EXPIRING_DAYS} ngày`, hint: 'Hỏi khách gia hạn hay dọn đi',
       count: expiring, urgency: 'upcoming', color: Colors.info, route: 'ManagerContracts' },
   ];
   return all.filter(t => t.count > 0);

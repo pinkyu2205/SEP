@@ -15,6 +15,7 @@ import {
 } from '@/utils';
 import { realTenantService, TenantContractResponse } from '@/services/tenant/tenantService';
 import { managerPropertyService } from '@/services/manager/propertyService';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * Hợp đồng khách thuê của MỘT bất động sản (quản lý bấm vào từ màn Hợp đồng).
@@ -180,7 +181,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => setSelected(null)}>
-            <Text style={styles.backArrow}>‹</Text>
+            <Icon name="back" size={26} color={Colors.textPrimary} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>{roomLabel(selected)}</Text>
@@ -194,7 +195,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
           <View style={[styles.heroCard, { borderLeftColor: meta.color }]}>
             <View style={styles.heroTop}>
               <View style={[styles.badge, { backgroundColor: meta.bg }]}>
-                <Text style={[styles.badgeText, { color: meta.color }]}>{meta.icon} {meta.label}</Text>
+                <IconText icon={meta.icon} gap={4} iconSize={12} style={[styles.badgeText, { color: meta.color }]}>{meta.label}</IconText>
               </View>
               {!!remain && !isEndedStatus(status) && (
                 <Text style={[styles.heroRemain, { color: meta.color }]}>{remain}</Text>
@@ -206,7 +207,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
 
           <View style={styles.quickRow}>
             <TouchableOpacity style={styles.quickBtn} onPress={() => callTenant(selected.tenantPhone)}>
-              <Text style={styles.quickBtnText}>📞 Gọi khách</Text>
+              <IconText icon="phone" style={styles.quickBtnText}>Gọi khách</IconText>
             </TouchableOpacity>
             {selected.contractFileAvailable && (
               <TouchableOpacity
@@ -216,7 +217,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
               >
                 {downloading
                   ? <ActivityIndicator size="small" color={Colors.white} />
-                  : <Text style={[styles.quickBtnText, styles.quickBtnPrimaryText]}>📄 Xem hợp đồng</Text>}
+                  : <IconText icon="document" style={[styles.quickBtnText, styles.quickBtnPrimaryText]}>Xem hợp đồng</IconText>}
               </TouchableOpacity>
             )}
           </View>
@@ -250,7 +251,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
                   fontSize: 14,
                   color: selected.paymentStatus === 'PAID' ? Colors.success : Colors.warning,
                 }]}>
-                  {selected.paymentStatus === 'PAID' ? '✓ Đã thu' : 'Chưa thu'}
+                  {selected.paymentStatus === 'PAID' ? 'Đã thu' : 'Chưa thu'}
                 </Text>
               </View>
             </View>
@@ -338,7 +339,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backArrow}>‹</Text>
+          <Icon name="back" size={26} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>Hợp đồng khách thuê</Text>
@@ -381,16 +382,16 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
 
               {stats.expiring > 0 && (
                 <View style={styles.alertBanner}>
-                  <Text style={styles.alertText}>
-                    ⏰ {stats.expiring} hợp đồng sắp hết hạn — liên hệ khách để gia hạn hoặc hẹn ngày trả phòng.
-                  </Text>
+                  <IconText icon="calendar-clock" multiline style={styles.alertText}>
+                    {stats.expiring} hợp đồng sắp hết hạn — liên hệ khách để gia hạn hoặc hẹn ngày trả phòng.
+                  </IconText>
                 </View>
               )}
 
               {stats.total > 0 && (
                 <>
                   <View style={styles.searchBar}>
-                    <Text style={styles.searchIcon}>⌕</Text>
+                    <Icon name="search" size={17} color={Colors.textMuted} />
                     <TextInput
                       style={styles.searchInput}
                       placeholder="Tìm tên khách, số phòng, mã hợp đồng"
@@ -400,7 +401,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
                     />
                     {search.length > 0 && (
                       <TouchableOpacity onPress={() => setSearch('')}>
-                        <Text style={styles.clearText}>×</Text>
+                        <Icon name="close" size={16} color={Colors.textMuted} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -428,7 +429,13 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
 
               {list.length === 0 ? (
                 <View style={styles.emptyBox}>
-                  <Text style={styles.emptyIcon}>{stats.total === 0 ? '📄' : '🔍'}</Text>
+                  <Icon
+                    name={stats.total === 0 ? 'document' : 'search'}
+                    size={34}
+                    color={Colors.textMuted}
+                    strokeWidth={1.5}
+                    style={styles.emptyIcon}
+                  />
                   <Text style={styles.emptyTitle}>
                     {stats.total === 0 ? 'Chưa có khách nào đang thuê' : 'Không có hợp đồng khớp'}
                   </Text>
@@ -475,7 +482,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
                         fontSize: 13,
                         color: c.paymentStatus === 'PAID' ? Colors.success : Colors.warning,
                       }]}>
-                        {c.paymentStatus === 'PAID' ? '✓ Đã thu cọc' : 'Chưa thu cọc'}
+                        {c.paymentStatus === 'PAID' ? 'Đã thu cọc' : 'Chưa thu cọc'}
                       </Text>
                     </View>
 
@@ -492,7 +499,7 @@ export const BuildingContractScreen: React.FC<any> = ({ navigation, route }) => 
               })}
 
               {!!propAddress && (
-                <Text style={styles.addressNote} numberOfLines={2}>📍 {propAddress}</Text>
+                <IconText icon="location" gap={4} style={styles.addressNote} numberOfLines={2}>{propAddress}</IconText>
               )}
             </>
           )}
@@ -545,7 +552,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.background },
-  backArrow: { fontSize: 26, color: Colors.textPrimary, lineHeight: 30 },
+
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   headerSub: { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
@@ -580,9 +587,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md, borderWidth: 1, borderColor: Colors.border,
     marginBottom: Spacing.sm,
   },
-  searchIcon: { fontSize: 17, color: Colors.textMuted },
+
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary, paddingVertical: 0 },
-  clearText: { fontSize: 20, color: Colors.textMuted, paddingHorizontal: 2 },
+
 
   filterRow: { flexGrow: 0, marginBottom: Spacing.md },
   filterContent: { gap: Spacing.sm, paddingRight: Spacing.base },
@@ -624,7 +631,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
     padding: Spacing.lg, alignItems: 'center', borderWidth: 1, borderColor: Colors.border,
   },
-  emptyIcon: { fontSize: 34, marginBottom: Spacing.sm },
+  emptyIcon: { marginBottom: Spacing.sm },
   emptyTitle: { fontSize: 14, fontWeight: '900', color: Colors.textPrimary, textAlign: 'center' },
   emptyText: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginTop: 6, lineHeight: 18 },
   errorBox: {

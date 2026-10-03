@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, Image, TouchableOpacity, Pressable, Dimensions } from 'react-native';
 import { Colors } from '@/constants';
+import { Icon } from './Icon';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -26,7 +27,7 @@ export const PhotoLightbox: React.FC<{
     <Modal visible transparent animationType="fade" onRequestClose={() => onChange(null)}>
       <Pressable style={ls.backdrop} onPress={() => onChange(null)}>
         <TouchableOpacity style={ls.closeBtn} onPress={() => onChange(null)}>
-          <Text style={ls.closeBtnText}>✕</Text>
+          <Icon name="close" size={20} color={Colors.white} />
         </TouchableOpacity>
         <Pressable style={ls.imageWrap} onPress={() => {}}>
           <Image source={{ uri: uris[index] }} style={ls.image} resizeMode="contain" />
@@ -34,10 +35,10 @@ export const PhotoLightbox: React.FC<{
         {uris.length > 1 && (
           <>
             <TouchableOpacity style={[ls.navBtn, ls.navLeft]} onPress={() => go(-1)}>
-              <Text style={ls.navBtnText}>‹</Text>
+              <Icon name="chevron-left" size={26} color={Colors.white} />
             </TouchableOpacity>
             <TouchableOpacity style={[ls.navBtn, ls.navRight]} onPress={() => go(1)}>
-              <Text style={ls.navBtnText}>›</Text>
+              <Icon name="chevron-right" size={26} color={Colors.white} />
             </TouchableOpacity>
             <View style={ls.counter}>
               <Text style={ls.counterText}>{index + 1} / {uris.length}</Text>
@@ -64,14 +65,14 @@ const ls = StyleSheet.create({
     position: 'absolute', top: 48, right: 20, width: 36, height: 36, borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 2,
   },
-  closeBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+
   navBtn: {
     position: 'absolute', top: '50%', marginTop: -22, width: 44, height: 44, borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
   },
   navLeft:  { left: 12 },
   navRight: { right: 12 },
-  navBtnText: { color: Colors.white, fontSize: 26, fontWeight: '700', marginTop: -2 },
+
   counter: {
     position: 'absolute', bottom: 40, alignSelf: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4,

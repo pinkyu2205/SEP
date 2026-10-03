@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import {
   View, Text, TextInput, TextInputProps, StyleSheet, StyleProp, TextStyle,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
+import { Icon, type IconName } from './Icon';
 
 /**
  * Ô NHẬP MANG MÀU THƯƠNG HIỆU — dùng cho các màn xác thực (đăng nhập, kích hoạt, quên MK).
@@ -24,7 +24,7 @@ import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
 
 export interface BrandFieldProps extends TextInputProps {
   label?: string;
-  icon?: React.ComponentProps<typeof MaterialIcons>['name'];
+  icon?: IconName;
   /** Có lỗi thì viền + biểu tượng chuyển đỏ và câu lỗi hiện dưới ô. */
   error?: string;
   /** Câu hướng dẫn hiện khi KHÔNG có lỗi — lỗi luôn được ưu tiên, không hiện chồng. */
@@ -45,7 +45,7 @@ export const BrandField: React.FC<BrandFieldProps> = ({
     <View style={s.field}>
       {!!label && <Text style={s.label}>{label}</Text>}
       <View style={[s.box, { borderColor: tone }, focused && !error && s.boxFocused]}>
-        {!!icon && <MaterialIcons name={icon} size={20} color={iconTone} />}
+        {!!icon && <Icon name={icon} size={20} color={iconTone} />}
         <TextInput
           style={[s.input, inputStyle]}
           placeholderTextColor={Colors.textMuted}

@@ -13,6 +13,7 @@ import {
 } from '@/constants/maintenance';
 import { serverNow, todayIso } from '@/utils/serverTime';
 import { readApiError } from '@/utils/apiError';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * BẢO TRÌ & SỬA CHỮA — màn tổng của manager (làm lại 24/09/2026).
@@ -203,7 +204,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
         {/* ── Đầu màn ── */}
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={handleBack}>
-            <Text style={s.backBtnText}>‹</Text>
+            <Icon name="back" size={24} color={Colors.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={s.title}>Bảo trì & Sửa chữa</Text>
@@ -215,9 +216,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
 
         {totalLate > 0 && (
           <View style={s.lateBanner}>
-            <Text style={s.lateBannerText}>
-              ⏰ {totalLate} phiếu đã quá hạn xử lý theo mức ưu tiên — xếp đầu mỗi tab
-            </Text>
+            <IconText icon="alarm" multiline style={s.lateBannerText}>
+              {totalLate} phiếu đã quá hạn xử lý theo mức ưu tiên — xếp đầu mỗi tab
+            </IconText>
           </View>
         )}
 
@@ -237,7 +238,9 @@ export const MaintenanceManagerScreen: React.FC = () => {
                   <Text style={[s.tabNum, { color: c.n > 0 ? x.color : Colors.textMuted }]}>{c.n}</Text>
                   {(c.urgent > 0 || c.late > 0) && (
                     <View style={s.tabAlert}>
-                      <Text style={s.tabAlertText}>{c.urgent > 0 ? `🚨 ${c.urgent}` : `⏰ ${c.late}`}</Text>
+                      <IconText icon={c.urgent > 0 ? 'siren' : 'alarm'} gap={2} iconSize={11} style={s.tabAlertText}>
+                        {c.urgent > 0 ? c.urgent : c.late}
+                      </IconText>
                     </View>
                   )}
                 </View>
@@ -249,13 +252,16 @@ export const MaintenanceManagerScreen: React.FC = () => {
         </View>
 
         {/* ── Tìm + lọc nhà ── */}
-        <TextInput
-          style={s.searchInput}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="🔍  Tìm mã phiếu, thiết bị, phòng, khách..."
-          placeholderTextColor={Colors.textMuted}
-        />
+        <View style={s.searchBox}>
+          <Icon name="search" size={16} color={Colors.textMuted} />
+          <TextInput
+            style={s.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Tìm mã phiếu, thiết bị, phòng, khách..."
+            placeholderTextColor={Colors.textMuted}
+          />
+        </View>
         {properties.length > 1 && (
           <View style={s.chipWrap}>
             <TouchableOpacity
@@ -281,7 +287,7 @@ export const MaintenanceManagerScreen: React.FC = () => {
         {/* ── Danh sách: gom theo nhà ── */}
         {loadError ? (
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>⚠️</Text>
+            <Icon name="alert" size={36} color={Colors.warning} strokeWidth={1.5} />
             <Text style={s.emptyText}>{loadError}</Text>
             <TouchableOpacity style={s.retryBtn} onPress={load}>
               <Text style={s.retryBtnText}>Thử lại</Text>
@@ -291,7 +297,12 @@ export const MaintenanceManagerScreen: React.FC = () => {
           <View style={s.empty}><Text style={s.emptyText}>Đang tải…</Text></View>
         ) : groups.length === 0 ? (
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>{search.trim() || propertyFilter !== 'all' ? '🔍' : '🎉'}</Text>
+            <Icon
+              name={search.trim() || propertyFilter !== 'all' ? 'search' : 'inbox'}
+              size={36}
+              color={Colors.textMuted}
+              strokeWidth={1.5}
+            />
             <Text style={s.emptyText}>
               {search.trim() || propertyFilter !== 'all'
                 ? 'Không có phiếu khớp bộ lọc.'
@@ -308,10 +319,17 @@ export const MaintenanceManagerScreen: React.FC = () => {
                 })}
                 activeOpacity={0.7}
               >
-                <Text style={s.groupName} numberOfLines={1}>
-                  {g.type === 'WHOLE_HOUSE' ? '🏡' : '🏢'} {g.name}
-                </Text>
-                <Text style={s.groupLink}>{g.items.length} phiếu · Xem theo nhà ›</Text>
+                <IconText
+                  icon={g.type === 'WHOLE_HOUSE' ? 'home' : 'building'}
+                  iconColor={Colors.textSecondary}
+                  style={s.groupName}
+                  numberOfLines={1}
+                >
+                  {g.name}
+                </IconText>
+                <IconText icon="chevron-right" trailing gap={2} style={s.groupLink}>
+                  {g.items.length} phiếu · Xem theo nhà
+                </IconText>
               </TouchableOpacity>
 
               <View style={s.card}>
@@ -349,13 +367,13 @@ const TicketRow: React.FC<{ t: MaintenanceTicket; last: boolean; onPress: () => 
   const cost = Number(t.invoiceAmount ?? t.estimatedDamageAmount ?? 0);
 
   const facts: string[] = [];
-  if (t.status === 'open' && t.visitAppointmentAt) facts.push(`🗓 Hẹn xem ${formatDateTime(t.visitAppointmentAt)}`);
-  if (t.status === 'repair_scheduled' && t.repairAppointmentAt) facts.push(`🗓 Hẹn sửa ${formatDateTime(t.repairAppointmentAt)}`);
-  if (t.status === 'pending_tenant_repair' && t.selfRepairDeadline) facts.push(`⏳ Hạn khách sửa ${t.selfRepairDeadline.slice(0, 10).split('-').reverse().join('/')}`);
+  if (t.status === 'open' && t.visitAppointmentAt) facts.push(`Hẹn xem ${formatDateTime(t.visitAppointmentAt)}`);
+  if (t.status === 'repair_scheduled' && t.repairAppointmentAt) facts.push(`Hẹn sửa ${formatDateTime(t.repairAppointmentAt)}`);
+  if (t.status === 'pending_tenant_repair' && t.selfRepairDeadline) facts.push(`Hạn khách sửa ${t.selfRepairDeadline.slice(0, 10).split('-').reverse().join('/')}`);
   if (!isDone(t)) facts.push(age === 0 ? 'Báo hôm nay' : `Treo ${age} ngày`);
   if (isDone(t) && t.resolvedAt) facts.push(`Xong ${formatDateTime(t.resolvedAt)}`);
   if (cost > 0) facts.push(fmtMoney(cost));
-  if (t.companyAbsorbedFault) facts.push('🏢 Công ty trả hộ');
+  if (t.companyAbsorbedFault) facts.push('Công ty trả hộ');
 
   return (
     <TouchableOpacity style={[s.row, !last && s.rowBorder]} onPress={onPress} activeOpacity={0.7}>
@@ -368,9 +386,13 @@ const TicketRow: React.FC<{ t: MaintenanceTicket; last: boolean; onPress: () => 
         <Text style={s.rowWhere} numberOfLines={1}>
           {where}{t.tenantName ? ` · ${t.tenantName}` : ''}{t.equipmentName ? ` · ${t.equipmentName}` : ''}
         </Text>
-        <Text style={[s.rowFacts, late && { color: Colors.error, fontWeight: '700' }]} numberOfLines={1}>
-          {late ? '⏰ Quá hạn · ' : ''}{facts.join(' · ')}
-        </Text>
+        {late ? (
+          <IconText icon="alarm" gap={4} style={[s.rowFacts, { color: Colors.error, fontWeight: '700' }]} numberOfLines={1}>
+            Quá hạn · {facts.join(' · ')}
+          </IconText>
+        ) : (
+          <Text style={s.rowFacts} numberOfLines={1}>{facts.join(' · ')}</Text>
+        )}
       </View>
       <View style={s.rowRight}>
         <View style={[s.statusPill, { backgroundColor: st.bg }]}>
@@ -394,7 +416,7 @@ const s = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
   },
-  backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
+
   title: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   subtitle: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
 
@@ -418,11 +440,12 @@ const s = StyleSheet.create({
   tabLabel: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, marginTop: 2 },
   tabHint: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
 
-  searchInput: {
+  searchBox: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.white, borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md, paddingVertical: 10, fontSize: 13,
-    borderWidth: 1, borderColor: Colors.border, color: Colors.textPrimary, marginBottom: Spacing.sm,
+    paddingHorizontal: Spacing.md, borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.sm,
   },
+  searchInput: { flex: 1, paddingVertical: 10, fontSize: 13, color: Colors.textPrimary },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: Spacing.sm },
   chip: {
     maxWidth: '100%', paddingHorizontal: 12, paddingVertical: 6, borderRadius: BorderRadius.full,
@@ -455,7 +478,7 @@ const s = StyleSheet.create({
   priText: { fontSize: 10, fontWeight: '700' },
 
   empty: { alignItems: 'center', paddingVertical: 48, gap: 8 },
-  emptyIcon: { fontSize: 36 },
+
   emptyText: { fontSize: 13, fontWeight: '600', color: Colors.textMuted, textAlign: 'center' },
   retryBtn: { marginTop: 4, backgroundColor: Colors.primary, paddingHorizontal: 22, paddingVertical: 9, borderRadius: BorderRadius.lg },
   retryBtnText: { color: Colors.white, fontWeight: '700', fontSize: 13 },

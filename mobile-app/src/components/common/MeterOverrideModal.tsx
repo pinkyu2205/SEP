@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { BorderRadius, Colors, Spacing } from '@/constants';
 import { readApiError } from '@/utils';
+import { IconText } from './Icon';
 import {
   meterOverrideService, type MeterOverrideKind, type MeterOverridePurpose,
 } from '@/services/manager/meterOverrideService';
@@ -108,7 +109,7 @@ export const MeterOverrideModal: React.FC<{
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={s.backdrop}>
         <View style={s.sheet}>
-          <Text style={s.title}>🔑 Xin mã nhập chỉ số {label}</Text>
+          <Text style={s.title}>Xin mã nhập chỉ số {label}</Text>
           {!!contextLabel && <Text style={s.context}>{contextLabel}</Text>}
           <Text style={s.desc}>
             Chỉ dùng khi thật sự không chụp được ảnh đồng hồ. Ghi lý do, gửi yêu cầu cho
@@ -136,10 +137,10 @@ export const MeterOverrideModal: React.FC<{
               vẫn nhập mã được bình thường. */}
           {requestState === 'sent' ? (
             <View style={[s.notice, s.noticeOk]}>
-              <Text style={s.noticeOkText}>
-                ✅ Đã gửi yêu cầu. Admin sẽ thấy ai xin mã {label}, ở đâu và vì sao — chờ admin
+              <IconText icon="success" multiline style={s.noticeOkText}>
+                Đã gửi yêu cầu. Admin sẽ thấy ai xin mã {label}, ở đâu và vì sao — chờ admin
                 đọc mã, hoặc gọi admin nếu gấp.
-              </Text>
+              </IconText>
             </View>
           ) : requestState === 'unsupported' ? (
             <View style={[s.notice, s.noticeWarn]}>
@@ -155,9 +156,9 @@ export const MeterOverrideModal: React.FC<{
             >
               {requestState === 'sending'
                 ? <ActivityIndicator color={Colors.primary} size="small" />
-                : <Text style={s.requestBtnText}>
-                    📨 {requestState === 'failed' ? 'Gửi lại yêu cầu cho admin' : 'Gửi yêu cầu xin mã cho admin'}
-                  </Text>}
+                : <IconText icon="send" style={s.requestBtnText}>
+                    {requestState === 'failed' ? 'Gửi lại yêu cầu cho admin' : 'Gửi yêu cầu xin mã cho admin'}
+                  </IconText>}
             </TouchableOpacity>
           )}
           {requestState === 'failed' && (

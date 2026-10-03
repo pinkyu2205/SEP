@@ -11,6 +11,7 @@ import { formatDate, showAlert } from '@/utils';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { useAuth } from '@/hooks';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * Tenant theo dõi TIẾN TRÌNH TRẢ PHÒNG — dữ liệu thật GET /tenant/me/checkout-requests.
@@ -133,9 +134,9 @@ const CHARGE_LABEL: Record<string, string> = {
   OTHER: 'Khoản khác',
 };
 
-const SectionCard: React.FC<{ title: string; children: React.ReactNode; noPad?: boolean }> = ({ title, children, noPad }) => (
+const SectionCard: React.FC<{ title: string; icon: IconName; children: React.ReactNode; noPad?: boolean }> = ({ title, icon, children, noPad }) => (
   <View style={styles.sectionCard}>
-    <Text style={styles.sectionTitle}>{title}</Text>
+    <IconText icon={icon} iconColor={Colors.primary} style={styles.sectionTitle}>{title}</IconText>
     <View style={noPad ? undefined : styles.sectionBody}>{children}</View>
   </View>
 );
@@ -202,7 +203,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         { text: 'Xem lại quyết toán', style: 'cancel' },
         { text: 'Đăng xuất', onPress: () => { logout(); } },
       ],
-      '👋',
+      'door',
     );
   }, [checkout?.id, checkout?.status]);
 
@@ -338,13 +339,13 @@ export const CheckoutDetailScreen: React.FC = () => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backArrow}>←</Text>
+            <Icon name="back" size={26} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Tiến trình trả phòng</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>🏠</Text>
+          <Icon name="door" size={48} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
           <Text style={styles.emptyTitle}>Chưa có yêu cầu trả phòng</Text>
           <Text style={styles.emptyDesc}>
             Bạn chưa gửi yêu cầu trả phòng nào. Khi cần kết thúc hợp đồng, vui lòng sử dụng tính năng này.
@@ -353,7 +354,7 @@ export const CheckoutDetailScreen: React.FC = () => {
             style={styles.emptyBtn}
             onPress={() => navigation.navigate('RequestCheckout')}
           >
-            <Text style={styles.emptyBtnText}>🏠 Tạo yêu cầu trả phòng</Text>
+            <Text style={styles.emptyBtnText}>Tạo yêu cầu trả phòng</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -377,7 +378,7 @@ export const CheckoutDetailScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tiến trình trả phòng</Text>
         <View style={{ width: 40 }} />
@@ -410,7 +411,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         {/* Banner kết cục */}
         {isCompleted && (
           <View style={[styles.banner, { backgroundColor: Colors.successLight }]}>
-            <Text style={styles.bannerIcon}>🎉</Text>
+            <Icon name="success" size={36} color={Colors.success} strokeWidth={1.6} />
             <Text style={[styles.bannerTitle, { color: Colors.success }]}>Trả phòng hoàn tất!</Text>
             <Text style={styles.bannerDesc}>
               Hợp đồng đã kết thúc{checkout.completedAt ? ` ngày ${formatDate(checkout.completedAt)}` : ''}.
@@ -420,7 +421,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         )}
         {isRejected && (
           <View style={[styles.banner, { backgroundColor: Colors.errorLight }]}>
-            <Text style={styles.bannerIcon}>❌</Text>
+            <Icon name="error" size={36} color={Colors.error} strokeWidth={1.6} />
             <Text style={[styles.bannerTitle, { color: Colors.error }]}>Yêu cầu bị từ chối</Text>
             <Text style={styles.bannerDesc}>
               {checkout.rejectReason || 'Quản lý đã từ chối yêu cầu này. Liên hệ quản lý để biết thêm chi tiết.'}
@@ -429,7 +430,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         )}
         {isCancelled && (
           <View style={[styles.banner, { backgroundColor: '#F1F5F9' }]}>
-            <Text style={styles.bannerIcon}>🚫</Text>
+            <Icon name="ban" size={36} color="#475569" strokeWidth={1.6} />
             <Text style={[styles.bannerTitle, { color: '#475569' }]}>Yêu cầu đã hủy</Text>
             <Text style={styles.bannerDesc}>Bạn đã hủy yêu cầu này. Có thể gửi yêu cầu mới bất cứ lúc nào.</Text>
           </View>
@@ -447,7 +448,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         </View>
 
         {/* Thông tin yêu cầu */}
-        <SectionCard title="📋 Thông tin yêu cầu">
+        <SectionCard icon="clipboard" title="Thông tin yêu cầu">
           <InfoRow label="Phòng" value={checkout.roomNumber || 'Nguyên căn'} />
           <InfoRow label="Tòa nhà" value={checkout.propertyName || '—'} />
           <InfoRow label="Mã hợp đồng" value={checkout.contractCode || `#${checkout.contractId}`} />
@@ -467,7 +468,7 @@ export const CheckoutDetailScreen: React.FC = () => {
 
         {/* Timeline */}
         {!isCancelled && !isRejected && (
-          <SectionCard title="📍 Tiến trình" noPad>
+          <SectionCard icon="steps" title="Tiến trình" noPad>
             <View style={styles.timeline}>
               {TIMELINE_STEPS.map((step, i) => {
                 const isDone = i < currentStep;
@@ -481,7 +482,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                         isDone && styles.timelineDotDone,
                         isActive && styles.timelineDotActive,
                       ]}>
-                        {isDone ? <Text style={styles.timelineDotCheck}>✓</Text>
+                        {isDone ? <Icon name="check" size={12} color={Colors.white} strokeWidth={3} />
                           : isActive ? <View style={styles.timelineDotPulse} /> : null}
                       </View>
                       {!isLast && <View style={[styles.timelineLine, isDone && styles.timelineLineDone]} />}
@@ -500,7 +501,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                       </Text>
                       {i === 2 && status === 'APPROVED' && checkout.expectedMoveOutDate && (
                         <View style={styles.timelineTag}>
-                          <Text style={styles.timelineTagText}>📅 Dự kiến {formatDate(checkout.expectedMoveOutDate)}</Text>
+                          <IconText icon="calendar" gap={4} style={styles.timelineTagText}>Dự kiến {formatDate(checkout.expectedMoveOutDate)}</IconText>
                         </View>
                       )}
                     </View>
@@ -513,7 +514,7 @@ export const CheckoutDetailScreen: React.FC = () => {
 
         {/* Phản hồi của quản lý */}
         {(checkout.managerNote || checkout.reviewedByName) && (
-          <SectionCard title="📝 Phản hồi từ quản lý">
+          <SectionCard icon="chat" title="Phản hồi từ quản lý">
             {!!checkout.reviewedByName && (
               <InfoRow label="Người xử lý" value={checkout.reviewedByName} />
             )}
@@ -528,7 +529,7 @@ export const CheckoutDetailScreen: React.FC = () => {
 
         {/* Biên bản kiểm tra phòng */}
         {!!inspection && (
-          <SectionCard title="📷 Biên bản kiểm tra phòng">
+          <SectionCard icon="clipboard-check" title="Biên bản kiểm tra phòng">
             {!!inspection.photos?.length && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: Spacing.sm }}>
                 <View style={{ flexDirection: 'row', gap: Spacing.sm }}>
@@ -549,13 +550,13 @@ export const CheckoutDetailScreen: React.FC = () => {
               <View style={styles.meterPhotoRow}>
                 {!!inspection.electricMeterImageUrl && (
                   <View style={styles.meterPhotoItem}>
-                    <Text style={styles.meterPhotoLabel}>⚡ Đồng hồ điện</Text>
+                    <IconText icon="electric" gap={4} style={styles.meterPhotoLabel}>Đồng hồ điện</IconText>
                     <Image source={{ uri: inspection.electricMeterImageUrl }} style={styles.inspPhoto} />
                   </View>
                 )}
                 {!!inspection.waterMeterImageUrl && (
                   <View style={styles.meterPhotoItem}>
-                    <Text style={styles.meterPhotoLabel}>💧 Đồng hồ nước</Text>
+                    <IconText icon="water" gap={4} style={styles.meterPhotoLabel}>Đồng hồ nước</IconText>
                     <Image source={{ uri: inspection.waterMeterImageUrl }} style={styles.inspPhoto} />
                   </View>
                 )}
@@ -590,7 +591,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         */}
         {!!settlement && (
           <>
-            <SectionCard title="🧾 Khoản bạn cần thanh toán">
+            <SectionCard icon="receipt" title="Khoản bạn cần thanh toán">
               {(settlement.finalCharges ?? []).map(inv => (
                 <View key={inv.id} style={styles.settleRow}>
                   <Text style={styles.settleLabel}>
@@ -621,7 +622,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                   { color: settlement.chargesSettled ? Colors.success : Colors.error },
                 ]}>
                   {settlement.chargesSettled
-                    ? `✓ ${money(settlement.chargesPaid || settlement.chargesTotal)}`
+                    ? money(settlement.chargesPaid || settlement.chargesTotal)
                     : money(Math.max(0, (settlement.chargesTotal ?? 0) - (settlement.chargesPaid ?? 0)))}
                 </Text>
               </View>
@@ -634,7 +635,7 @@ export const CheckoutDetailScreen: React.FC = () => {
               )}
             </SectionCard>
 
-            <SectionCard title="💰 Tiền cọc được hoàn">
+            <SectionCard icon="deposit" title="Tiền cọc được hoàn">
               <View style={styles.settleRow}>
                 <Text style={styles.settleLabel}>Tiền cọc đã đóng</Text>
                 <Text style={styles.settleValueBold}>{money(settlement.depositAmount)}</Text>
@@ -663,17 +664,17 @@ export const CheckoutDetailScreen: React.FC = () => {
                 * xem xong không biết bao giờ nhận được tiền.
                 */}
               {!paidAtOf(settlement) && (
-                <Text style={styles.refundEtaNote}>
-                  💸 Sau khi bạn thanh toán đủ các khoản cuối kỳ, chủ nhà chuyển tiền cọc trong
+                <IconText icon="wallet" multiline style={styles.refundEtaNote}>
+                  Sau khi bạn thanh toán đủ các khoản cuối kỳ, chủ nhà chuyển tiền cọc trong
                   {' '}<Text style={{ fontWeight: '800' }}>1–3 ngày làm việc</Text>, về tài khoản
                   bạn đã điền khi gửi yêu cầu trả phòng.
-                </Text>
+                </IconText>
               )}
 
               {!!paidAtOf(settlement) && (
-                <Text style={styles.refundedNote}>
-                  ✓ Chủ nhà đã chuyển cọc ngày {formatDate(paidAtOf(settlement))}
-                </Text>
+                <IconText icon="success" style={styles.refundedNote}>
+                  Chủ nhà đã chuyển cọc ngày {formatDate(paidAtOf(settlement))}
+                </IconText>
               )}
 
               {/*
@@ -694,7 +695,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                     onPress={confirmRefund}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.confirmRefundBtnText}>✓ Tôi đã nhận đủ tiền cọc</Text>
+                    <Text style={styles.confirmRefundBtnText}>Tôi đã nhận đủ tiền cọc</Text>
                   </TouchableOpacity>
 
                   {/*
@@ -720,9 +721,9 @@ export const CheckoutDetailScreen: React.FC = () => {
               {!!settlement.refundDisputedAt && !settlement.refundDisputeResolvedAt
                 && !settlement.refundConfirmedAt && (
                 <View style={styles.disputeRefundBox}>
-                  <Text style={styles.disputeRefundTitle}>
-                    ⏳ Đang tra soát phản ánh của bạn
-                  </Text>
+                  <IconText icon="hourglass" style={styles.disputeRefundTitle}>
+                    Đang tra soát phản ánh của bạn
+                  </IconText>
                   <Text style={styles.disputeRefundText}>
                     Bạn đã báo chưa nhận được tiền ngày {formatDate(settlement.refundDisputedAt)}.
                     Chủ nhà và quản trị viên đang kiểm tra và sẽ liên hệ lại.
@@ -746,14 +747,17 @@ export const CheckoutDetailScreen: React.FC = () => {
                   styles.disputeRefundBox,
                   settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOk,
                 ]}>
-                  <Text style={[
-                    styles.disputeRefundTitle,
-                    settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOkText,
-                  ]}>
+                  <IconText
+                    icon={settlement.refundDisputeOutcome === 'RETRANSFERRED' ? 'success' : 'info'}
+                    style={[
+                      styles.disputeRefundTitle,
+                      settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOkText,
+                    ]}
+                  >
                     {settlement.refundDisputeOutcome === 'RETRANSFERRED'
-                      ? '✓ Đã chuyển lại tiền cọc cho bạn'
-                      : 'ℹ️ Đã tra soát xong phản ánh của bạn'}
-                  </Text>
+                      ? 'Đã chuyển lại tiền cọc cho bạn'
+                      : 'Đã tra soát xong phản ánh của bạn'}
+                  </IconText>
                   <Text style={[
                     styles.disputeRefundText,
                     settlement.refundDisputeOutcome === 'RETRANSFERRED' && styles.disputeResolvedOkText,
@@ -766,9 +770,9 @@ export const CheckoutDetailScreen: React.FC = () => {
               )}
 
               {!!settlement.refundConfirmedAt && (
-                <Text style={styles.refundedNote}>
-                  ✓ Bạn đã xác nhận nhận đủ ngày {formatDate(settlement.refundConfirmedAt)}
-                </Text>
+                <IconText icon="success" style={styles.refundedNote}>
+                  Bạn đã xác nhận nhận đủ ngày {formatDate(settlement.refundConfirmedAt)}
+                </IconText>
               )}
             </SectionCard>
           </>
@@ -797,7 +801,7 @@ export const CheckoutDetailScreen: React.FC = () => {
                 onPress={handleAccept}
                 disabled={busy}
               >
-                <Text style={styles.acceptBtnText}>✓ Đồng ý</Text>
+                <Text style={styles.acceptBtnText}>Đồng ý</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -805,7 +809,7 @@ export const CheckoutDetailScreen: React.FC = () => {
 
         {status === 'DISPUTED' && !!checkout.disputeReason && (
           <View style={[styles.banner, { backgroundColor: Colors.warningLight }]}>
-            <Text style={styles.bannerIcon}>⏳</Text>
+            <Icon name="hourglass" size={36} color="#B45309" strokeWidth={1.6} />
             <Text style={[styles.bannerTitle, { color: '#B45309' }]}>Đang xử lý phản hồi của bạn</Text>
             <Text style={styles.bannerDesc}>"{checkout.disputeReason}"</Text>
           </View>
@@ -824,7 +828,7 @@ export const CheckoutDetailScreen: React.FC = () => {
         {status === 'PENDING' && (
           checkout.origin === 'CONTRACT_EXPIRED' ? (
             <View style={[styles.banner, { backgroundColor: Colors.background }]}>
-              <Text style={styles.bannerIcon}>📋</Text>
+              <Icon name="clipboard" size={36} color={Colors.textSecondary} strokeWidth={1.6} />
               <Text style={[styles.bannerTitle, { color: Colors.textPrimary }]}>
                 Phiếu này do hệ thống tạo
               </Text>
@@ -840,7 +844,7 @@ export const CheckoutDetailScreen: React.FC = () => {
               disabled={cancelling}
               activeOpacity={0.8}
             >
-              <Text style={styles.cancelBtnText}>{cancelling ? 'Đang hủy...' : '🚫 Hủy yêu cầu trả phòng'}</Text>
+              <Text style={styles.cancelBtnText}>{cancelling ? 'Đang hủy...' : 'Hủy yêu cầu trả phòng'}</Text>
             </TouchableOpacity>
           )
         )}
@@ -850,7 +854,7 @@ export const CheckoutDetailScreen: React.FC = () => {
             onPress={() => navigation.replace('RequestCheckout')}
             activeOpacity={0.8}
           >
-            <Text style={styles.emptyBtnText}>🏠 Gửi yêu cầu mới</Text>
+            <Text style={styles.emptyBtnText}>Gửi yêu cầu mới</Text>
           </TouchableOpacity>
         )}
 
@@ -945,13 +949,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   body: { padding: Spacing.lg, gap: Spacing.md },
 
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
-  emptyIcon: { fontSize: 52, marginBottom: Spacing.md },
+  emptyIcon: { marginBottom: Spacing.md },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary, marginBottom: Spacing.sm },
   emptyDesc: { fontSize: 14, color: Colors.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: Spacing.xl },
   emptyBtn: { backgroundColor: Colors.primary, paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, alignItems: 'center', ...Shadow.md },
@@ -968,7 +972,7 @@ const styles = StyleSheet.create({
   switchChipTextActive: { color: Colors.primary },
 
   banner: { borderRadius: BorderRadius.xl, padding: Spacing.lg, alignItems: 'center', gap: Spacing.xs },
-  bannerIcon: { fontSize: 40 },
+
   bannerTitle: { fontSize: 18, fontWeight: '800' },
   bannerDesc: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: 4 },
 
@@ -1007,7 +1011,7 @@ const styles = StyleSheet.create({
   },
   timelineDotDone: { backgroundColor: Colors.success, borderColor: Colors.success },
   timelineDotActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  timelineDotCheck: { fontSize: 12, fontWeight: '800', color: Colors.white },
+
   timelineDotPulse: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.white },
   timelineLine: { flex: 1, width: 2, backgroundColor: Colors.divider, marginVertical: 2 },
   timelineLineDone: { backgroundColor: Colors.success },

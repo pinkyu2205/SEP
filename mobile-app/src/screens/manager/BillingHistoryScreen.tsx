@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { billMonthLabel } from '@/utils';
+import { Dot, Icon, IconText, type IconName } from '@/components/common/Icon';
 import { managerPropertyService } from '@/services/manager/propertyService';
 import {
   realManagerInvoiceService, ManagerInvoice, ManagerInvoiceStatus,
@@ -37,12 +38,12 @@ const monthKey = (i: ManagerInvoice) => `${i.year}-${String(i.month).padStart(2,
 /** Hoá đơn không thuộc kỳ nào (thu lúc nhận phòng) thì để gạch, đừng ra "Tnull/undefined". */
 const monthText = (i: ManagerInvoice) => billMonthLabel(i) ?? '—';
 
-const TYPE_CFG: Record<string, { icon: string; label: string; color: string; bg: string }> = {
-  RENT:        { icon: '🏠', label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },
-  ELECTRICITY: { icon: '⚡', label: 'Điện',        color: '#D97706', bg: '#FEF9C3' },
-  WATER:       { icon: '💧', label: 'Nước',        color: '#2563EB', bg: '#DBEAFE' },
-  SERVICE:     { icon: '🧹', label: 'Dịch vụ',     color: '#0891B2', bg: '#ECFEFF' },
-  OTHER:       { icon: '🧾', label: 'Khác',        color: '#64748B', bg: '#F1F5F9' },
+const TYPE_CFG: Record<string, { icon: IconName; label: string; color: string; bg: string }> = {
+  RENT:        { icon: 'home',     label: 'Tiền phòng', color: '#7C3AED', bg: '#F5F3FF' },
+  ELECTRICITY: { icon: 'electric', label: 'Điện',        color: '#D97706', bg: '#FEF9C3' },
+  WATER:       { icon: 'water',    label: 'Nước',        color: '#2563EB', bg: '#DBEAFE' },
+  SERVICE:     { icon: 'cleaning', label: 'Dịch vụ',     color: '#0891B2', bg: '#ECFEFF' },
+  OTHER:       { icon: 'receipt',  label: 'Khác',        color: '#64748B', bg: '#F1F5F9' },
 };
 const typeCfg = (t?: string) => TYPE_CFG[(t || 'OTHER').toUpperCase()] ?? TYPE_CFG.OTHER;
 
@@ -205,7 +206,7 @@ export const BillingHistoryScreen: React.FC = () => {
     return (
       <View key={inv.id} style={s.invRow}>
         <View style={[s.typeChip, { backgroundColor: tc.bg }]}>
-          <Text style={s.typeChipText}>{tc.icon}</Text>
+          <Icon name={tc.icon} size={15} color={tc.color} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.invTitle}>{tc.label} · {monthText(inv)}</Text>
@@ -243,7 +244,7 @@ export const BillingHistoryScreen: React.FC = () => {
       ? { bar: Colors.error, bg: Colors.errorLight, text: Colors.error, label: `Quá hạn ${overdueCount}` }
       : unpaidCount > 0
         ? { bar: Colors.warning, bg: Colors.warningLight, text: '#B45309', label: unpaidCount > 1 ? `Chưa thu ${unpaidCount}` : 'Chưa thu' }
-        : { bar: Colors.success, bg: Colors.successLight, text: Colors.success, label: '✓ Đã thu đủ' };
+        : { bar: Colors.success, bg: Colors.successLight, text: Colors.success, label: 'Đã thu đủ' };
 
     return (
       <View key={g.key} style={[s.groupCard, { borderLeftWidth: 4, borderLeftColor: tone.bar }]}>
@@ -262,7 +263,7 @@ export const BillingHistoryScreen: React.FC = () => {
           <View style={[s.groupStatus, { backgroundColor: tone.bg }]}>
             <Text style={[s.groupStatusText, { color: tone.text }]}>{tone.label}</Text>
           </View>
-          <Text style={s.groupChevron}>{open ? '⌄' : '›'}</Text>
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={18} color={Colors.textMuted} />
         </TouchableOpacity>
 
         {/* Màn lịch sử chỉ để TRA CỨU — muốn ghi nhận thanh toán / thao tác thì sang
@@ -279,7 +280,7 @@ export const BillingHistoryScreen: React.FC = () => {
               });
             }}
           >
-            <Text style={s.groupActionText}>💵  Xem & thu hộ · còn {unpaidCount} hoá đơn  →</Text>
+            <IconText icon="cash" style={s.groupActionText}>Xem & thu hộ · còn {unpaidCount} hoá đơn</IconText>
           </TouchableOpacity>
         )}
 
@@ -308,7 +309,7 @@ export const BillingHistoryScreen: React.FC = () => {
                     <Text style={[s.monthPillText, {
                       color: allPaid ? Colors.success : Colors.textSecondary,
                     }]}>
-                      {allPaid ? `✓ đã thu đủ ${list.length}` : `đã thu ${mPaid}/${list.length}`}
+                      {allPaid ? `đã thu đủ ${list.length}` : `đã thu ${mPaid}/${list.length}`}
                     </Text>
                   </View>
                 </View>
@@ -328,7 +329,7 @@ export const BillingHistoryScreen: React.FC = () => {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle}>Lịch sử tiền phòng</Text>
@@ -355,9 +356,9 @@ export const BillingHistoryScreen: React.FC = () => {
                   style={[s.propChip, selectedId === null && s.propChipActive]}
                   onPress={() => { setSelectedId(null); setOpenUnit(null); }}
                 >
-                  <Text style={[s.propChipText, selectedId === null && s.propChipTextActive]}>
-                    🗂 Tất cả nhà ({props.length})
-                  </Text>
+                  <IconText icon="grid" gap={4} iconSize={13} style={[s.propChipText, selectedId === null && s.propChipTextActive]}>
+                    Tất cả nhà ({props.length})
+                  </IconText>
                 </TouchableOpacity>
                 {props.map(p => (
                   <TouchableOpacity
@@ -365,9 +366,14 @@ export const BillingHistoryScreen: React.FC = () => {
                     style={[s.propChip, selectedId === p.id && s.propChipActive]}
                     onPress={() => { setSelectedId(p.id); setOpenUnit(null); }}
                   >
-                    <Text style={[s.propChipText, selectedId === p.id && s.propChipTextActive]}>
-                      {p.wholeHouse ? '🏠' : '🏢'} {p.name}
-                    </Text>
+                    <IconText
+                      icon={p.wholeHouse ? 'home' : 'building'}
+                      gap={4}
+                      iconSize={13}
+                      style={[s.propChipText, selectedId === p.id && s.propChipTextActive]}
+                    >
+                      {p.name}
+                    </IconText>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -395,7 +401,7 @@ export const BillingHistoryScreen: React.FC = () => {
                     >
                       <Text style={[s.summaryNum, { color: x.color }]}>{x.n}</Text>
                       <Text style={[s.summaryLbl, on && { color: Colors.primary, fontWeight: '800' }]}>
-                        {x.label}{on ? ' ✓' : ''}
+                        {x.label}
                       </Text>
                     </TouchableOpacity>
                   </React.Fragment>
@@ -414,7 +420,7 @@ export const BillingHistoryScreen: React.FC = () => {
 
           {/* Tìm kiếm */}
           <View style={s.searchBox}>
-            <Text style={s.searchIcon}>🔍</Text>
+            <Icon name="search" size={15} color={Colors.textMuted} />
             <TextInput
               style={s.searchInput}
               value={search}
@@ -426,7 +432,7 @@ export const BillingHistoryScreen: React.FC = () => {
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Text style={s.searchClear}>✕</Text>
+                <Icon name="close" size={15} color={Colors.textMuted} style={s.searchClear} />
               </TouchableOpacity>
             )}
           </View>
@@ -445,14 +451,17 @@ export const BillingHistoryScreen: React.FC = () => {
                 onPress={() => stepPeriod(-1)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={[s.periodArrowText,
-                  (periodFilter === 'all' || periods.indexOf(activePeriod) >= periods.length - 1) && s.periodArrowOff]}>‹</Text>
+                <Icon
+                  name="chevron-left"
+                  size={22}
+                  color={(periodFilter === 'all' || periods.indexOf(activePeriod) >= periods.length - 1) ? Colors.border : Colors.primary}
+                />
               </TouchableOpacity>
               <TouchableOpacity style={s.periodCenter} onPress={() => setPickerOpen(true)} activeOpacity={0.7}>
                 <Text style={s.periodLabel}>
                   {periodFilter === 'all' ? `Tất cả ${periods.length} kỳ` : `Tháng ${Number(activePeriod.slice(5))}/${activePeriod.slice(0, 4)}`}
                 </Text>
-                <Text style={s.periodCaret}>▾</Text>
+                <Icon name="chevron-down" size={14} color={Colors.textMuted} />
                 {periodFilter !== 'all' && unpaidPeriods.has(activePeriod) && <View style={s.periodDot} />}
               </TouchableOpacity>
               <TouchableOpacity
@@ -461,8 +470,11 @@ export const BillingHistoryScreen: React.FC = () => {
                 onPress={() => stepPeriod(1)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={[s.periodArrowText,
-                  (periodFilter === 'all' || periods.indexOf(activePeriod) <= 0) && s.periodArrowOff]}>›</Text>
+                <Icon
+                  name="chevron-right"
+                  size={22}
+                  color={(periodFilter === 'all' || periods.indexOf(activePeriod) <= 0) ? Colors.border : Colors.primary}
+                />
               </TouchableOpacity>
             </View>
           )}
@@ -470,7 +482,7 @@ export const BillingHistoryScreen: React.FC = () => {
 
           {groups.length === 0 ? (
             <View style={s.emptyBox}>
-              <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🧾</Text>
+              <Icon name="receipt" size={40} color={Colors.textMuted} strokeWidth={1.5} style={{ marginBottom: Spacing.sm }} />
               <Text style={s.emptyText}>
                 {invoices.length === 0
                   ? 'Chưa có hoá đơn nào được phát hành.'
@@ -525,7 +537,10 @@ export const BillingHistoryScreen: React.FC = () => {
                 </View>
               ))}
             </ScrollView>
-            <Text style={s.pickerHint}>● chấm đỏ = kỳ còn hoá đơn chưa thu</Text>
+            <View style={s.pickerHintRow}>
+              <Dot color={Colors.error} size={6} />
+              <Text style={s.pickerHint}>Chấm đỏ: kỳ còn hoá đơn chưa thu</Text>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -543,7 +558,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   headerSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
 
@@ -556,9 +571,9 @@ const s = StyleSheet.create({
     paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
     borderWidth: 1, borderColor: Colors.border, marginBottom: Spacing.base, ...Shadow.sm,
   },
-  searchIcon: { fontSize: 14 },
+
   searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, paddingVertical: 4 },
-  searchClear: { fontSize: 15, fontWeight: '800', color: Colors.textMuted, paddingHorizontal: 4 },
+  searchClear: { marginHorizontal: 4 },
   propChip: {
     paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
@@ -585,11 +600,10 @@ const s = StyleSheet.create({
     borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm,
   },
   periodArrow: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
-  periodArrowText: { fontSize: 24, fontWeight: '700', color: Colors.primary },
-  periodArrowOff: { color: Colors.border },
+
   periodCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: Spacing.md },
   periodLabel: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
-  periodCaret: { fontSize: 12, color: Colors.textMuted },
+
   periodDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.error },
 
   pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: Spacing.lg },
@@ -611,7 +625,8 @@ const s = StyleSheet.create({
   pickerCellOn: { backgroundColor: Colors.primary },
   pickerCellText: { fontSize: 13, fontWeight: '800', color: Colors.primary },
   pickerDot: { position: 'absolute', top: 5, right: 7, width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.error },
-  pickerHint: { marginTop: Spacing.md, fontSize: 11, color: Colors.textMuted, textAlign: 'center' },
+  pickerHintRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: Spacing.md },
+  pickerHint: { fontSize: 11, color: Colors.textMuted },
   filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   filterChip: {
     paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: BorderRadius.full,
@@ -630,7 +645,7 @@ const s = StyleSheet.create({
   groupHeader: { flexDirection: 'row', alignItems: 'center', padding: Spacing.base, gap: Spacing.sm },
   groupTitle: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary },
   groupMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  groupChevron: { fontSize: 18, color: Colors.textMuted, fontWeight: '700' },
+
 
   monthBlock: {
     borderTopWidth: 1, borderTopColor: Colors.divider,
@@ -650,7 +665,7 @@ const s = StyleSheet.create({
 
   invRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   typeChip: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  typeChipText: { fontSize: 14 },
+
   invTitle: { fontSize: 13, fontWeight: '700', color: Colors.textPrimary },
   invMeta: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
   invAmount: { fontSize: 13, fontWeight: '800', color: Colors.textPrimary },

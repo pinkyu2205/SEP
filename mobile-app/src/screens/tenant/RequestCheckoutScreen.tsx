@@ -11,7 +11,7 @@ import {
 } from '@/constants';
 
 import { Contract } from '@/types';
-import { DatePickerField } from '@/components/common';
+import { DatePickerField, Icon, IconText } from '@/components/common';
 import { realTenantSelfService } from '@/services/tenant/selfService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { serverNow } from '@/utils/serverTime';
@@ -176,7 +176,7 @@ export const RequestCheckoutScreen: React.FC = () => {
         refundAccountHolder: accountHolder.trim() || undefined,
       });
       showAlert(
-        '✅ Đã gửi yêu cầu trả phòng',
+        'Đã gửi yêu cầu trả phòng',
         'Quản lý sẽ xem xét và phản hồi. Bạn có thể theo dõi tiến trình bất cứ lúc nào.',
         [{ text: 'Xem tiến trình', onPress: () => navigation.replace('CheckoutDetail', { requestId: created.id }) }],
       );
@@ -208,7 +208,7 @@ export const RequestCheckoutScreen: React.FC = () => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+            <Icon name="back" size={26} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Yêu cầu trả phòng</Text>
           <View style={{ width: 72 }} />
@@ -242,7 +242,7 @@ export const RequestCheckoutScreen: React.FC = () => {
                       done && styles.tlDotDone,
                       active && { backgroundColor: meta.color, borderColor: meta.color },
                     ]}>
-                      {done && <Text style={styles.tlCheck}>✓</Text>}
+                      {done && <Icon name="check" size={11} color={Colors.white} strokeWidth={3} />}
                     </View>
                     {i < CHECKOUT_FLOW.length - 1 && (
                       <View style={[styles.tlLine, done && styles.tlLineDone]} />
@@ -269,9 +269,9 @@ export const RequestCheckoutScreen: React.FC = () => {
             style={[styles.submitBtn, needsTenantAction && styles.submitBtnUrgent]}
             onPress={() => navigation.replace('CheckoutDetail', { requestId: openRequest.id })}
           >
-            <Text style={styles.submitBtnText}>
-              {needsTenantAction ? 'Xem bảng quyết toán →' : 'Xem chi tiết hồ sơ →'}
-            </Text>
+            <IconText icon="arrow-right" trailing style={styles.submitBtnText}>
+              {needsTenantAction ? 'Xem bảng quyết toán' : 'Xem chi tiết hồ sơ'}
+            </IconText>
           </TouchableOpacity>
 
           <Text style={styles.openFoot}>
@@ -287,7 +287,7 @@ export const RequestCheckoutScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>← Hủy</Text>
+          <Text style={styles.backText}>Hủy</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Yêu cầu trả phòng</Text>
         <View style={{ width: 56 }} />
@@ -297,14 +297,14 @@ export const RequestCheckoutScreen: React.FC = () => {
 
         {/* Helper Banner */}
         <View style={styles.helperBanner}>
-          <Text style={styles.helperText}>
-            💡 Yêu cầu trả phòng sẽ được quản lý xác nhận trước khi tiến hành kiểm tra hiện trạng và hoàn cọc.
-          </Text>
+          <IconText icon="info" multiline style={styles.helperText}>
+            Yêu cầu trả phòng sẽ được quản lý xác nhận trước khi tiến hành kiểm tra hiện trạng và hoàn cọc.
+          </IconText>
         </View>
 
         {/* Thông tin HĐ thật */}
         <View style={styles.infoCard}>
-          <Text style={styles.infoCardTitle}>📋 Thông tin phòng & hợp đồng</Text>
+          <IconText icon="clipboard" iconColor={Colors.primary} style={styles.infoCardTitle}>Thông tin phòng & hợp đồng</IconText>
           {[
             { label: 'Phòng', value: roomName || 'Nguyên căn' },
             { label: 'Tòa nhà', value: buildingName || '—' },
@@ -330,7 +330,7 @@ export const RequestCheckoutScreen: React.FC = () => {
             minDate={minMoveOutDate}
           />
           {moveOutSummary ? (
-            <Text style={styles.fieldPicked}>📅 {moveOutSummary}</Text>
+            <IconText icon="calendar" gap={4} style={styles.fieldPicked}>{moveOutSummary}</IconText>
           ) : (
             <Text style={styles.fieldHint}>
               Sớm nhất là {MIN_NOTICE_DAYS} ngày kể từ hôm nay, để quản lý kịp sắp lịch kiểm tra phòng.
@@ -416,9 +416,9 @@ export const RequestCheckoutScreen: React.FC = () => {
 
         {/* Notice */}
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeText}>
-            🔔 Sau khi gửi yêu cầu, quản lý sẽ liên hệ để xác nhận lịch kiểm tra phòng. Tiền cọc sẽ được hoàn trả sau khi hoàn tất kiểm tra và quyết toán.
-          </Text>
+          <IconText icon="bell" multiline style={styles.noticeText}>
+            Sau khi gửi yêu cầu, quản lý sẽ liên hệ để xác nhận lịch kiểm tra phòng. Tiền cọc sẽ được hoàn trả sau khi hoàn tất kiểm tra và quyết toán.
+          </IconText>
         </View>
 
         {/* Submit */}
@@ -429,7 +429,7 @@ export const RequestCheckoutScreen: React.FC = () => {
           activeOpacity={0.8}
         >
           <Text style={styles.submitBtnText}>
-            {submitting ? 'Đang gửi...' : '🏠 Gửi yêu cầu trả phòng'}
+            {submitting ? 'Đang gửi...' : 'Gửi yêu cầu trả phòng'}
           </Text>
         </TouchableOpacity>
 
@@ -477,7 +477,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   tlDotDone: { backgroundColor: Colors.success, borderColor: Colors.success },
-  tlCheck: { fontSize: 10, fontWeight: '900', color: Colors.white },
+
   tlLine: { width: 2, flex: 1, minHeight: 22, backgroundColor: Colors.border },
   tlLineDone: { backgroundColor: Colors.success },
   tlBody: { flex: 1, paddingBottom: Spacing.md },

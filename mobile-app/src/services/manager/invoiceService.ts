@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import type { IconName } from '@/components/common/Icon';
 
 /**
  * Manager tạo & gửi hoá đơn cho tenant (nối backend Spring THẬT).
@@ -279,15 +280,8 @@ export const realManagerInvoiceService = {
     return unwrap(data);
   },
 
-  // POST /api/v1/manager/payments/{id}/verify  — xác nhận đã nhận tiền
-  verifyPayment: async (id: number | string): Promise<void> => {
-    await realApiClient.post(`/api/v1/manager/payments/${id}/verify`);
-  },
-
-  // POST /api/v1/manager/payments/{id}/reject  — từ chối giao dịch
-  rejectPayment: async (id: number | string, reason?: string): Promise<void> => {
-    await realApiClient.post(`/api/v1/manager/payments/${id}/reject`, { reason });
-  },
+  // verifyPayment / rejectPayment đã XOÁ 30/09/2026: manager không duyệt tay thanh toán
+  // nữa — khách trả PayOS thì webhook tự ghi nhận hoá đơn PAID.
 
   /**
    * POST /api/v1/manager/invoices/{id}/payment-qr — xin mã QR để NỘP THAY khách.
@@ -339,17 +333,17 @@ export const isOnboardEnvelope = (inv: Pick<ManagerInvoice, 'code'>): boolean =>
 /** Nhãn + icon theo loại, đã tách riêng hoá đơn đón khách. */
 export const invoiceKind = (
   inv: Pick<ManagerInvoice, 'code' | 'type'>,
-): { icon: string; label: string } => {
-  if (isOnboardEnvelope(inv)) return { icon: '🔑', label: 'Cọc + tiền nhà kỳ đầu' };
+): { icon: IconName; label: string } => {
+  if (isOnboardEnvelope(inv)) return { icon: 'key', label: 'Cọc + tiền nhà kỳ đầu' };
   // HD-MAINT-{contractId}-{ts}: BE gom các khoản đền bù sửa chữa (khách làm hư) thành một
   // hoá đơn loại MAINTENANCE — manager nhận về dạng OTHER nên phải nhận theo mã.
-  if ((inv.code || '').toUpperCase().startsWith('HD-MAINT')) return { icon: '🔧', label: 'Phí sửa chữa (khách làm hư)' };
+  if ((inv.code || '').toUpperCase().startsWith('HD-MAINT')) return { icon: 'wrench', label: 'Phí sửa chữa (khách làm hư)' };
   switch (inv.type) {
-    case 'RENT':        return { icon: '🏠', label: 'Tiền nhà' };
-    case 'ELECTRICITY': return { icon: '⚡', label: 'Tiền điện' };
-    case 'WATER':       return { icon: '💧', label: 'Tiền nước' };
-    case 'SERVICE':     return { icon: '🧾', label: 'Phí dịch vụ' };
-    default:            return { icon: '📄', label: 'Khoản khác' };
+    case 'RENT':        return { icon: 'home', label: 'Tiền nhà' };
+    case 'ELECTRICITY': return { icon: 'electric', label: 'Tiền điện' };
+    case 'WATER':       return { icon: 'water', label: 'Tiền nước' };
+    case 'SERVICE':     return { icon: 'receipt', label: 'Phí dịch vụ' };
+    default:            return { icon: 'document', label: 'Khoản khác' };
   }
 };
 

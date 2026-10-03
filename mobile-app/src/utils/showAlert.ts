@@ -1,4 +1,5 @@
 import { Alert, Platform } from 'react-native';
+import type { IconName } from '@/components/common/Icon';
 
 export type AlertButton = {
   text?: string;
@@ -10,8 +11,8 @@ export interface AlertRequest {
   title: string;
   message?: string;
   buttons?: AlertButton[];
-  /** Emoji hiển thị trong vòng tròn. Bỏ trống thì AlertHost tự đoán theo tiêu đề. */
-  icon?: string;
+  /** Icon trong vòng tròn. Bỏ trống thì AlertHost tự đoán theo tiêu đề. */
+  icon?: IconName;
 }
 
 type Handler = (req: AlertRequest) => void;
@@ -39,7 +40,7 @@ export function registerAlertHost(fn: Handler): () => void {
  * Nếu AlertHost chưa mount (hiếm — vd gọi rất sớm lúc khởi động) thì rơi về
  * Alert.alert native / window.confirm để không nuốt mất thông báo.
  */
-export function showAlert(title: string, message?: string, buttons?: AlertButton[], icon?: string) {
+export function showAlert(title: string, message?: string, buttons?: AlertButton[], icon?: IconName) {
   if (handler) {
     handler({ title, message, buttons, icon });
     return;

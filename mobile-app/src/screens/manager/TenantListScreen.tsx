@@ -19,6 +19,7 @@ import {
   StatusBadge, InfoChip,
   type Tenant, type TenantStatus, type ChipInfo,
 } from '@/components/manager/TenantDetailSheet';
+import { Icon } from '@/components/common/Icon';
 
 type FilterKey =
   | 'all' | TenantStatus
@@ -186,7 +187,7 @@ const TenantCard: React.FC<{
   if (contractChip) chips.push(contractChip);
   if (inspectionChip) chips.push(inspectionChip);
   if (isWholeHouse)
-    chips.push({ label: '🏘 Nguyên căn', color: '#B45309', bg: '#FEF3C7' });
+    chips.push({ label: 'Nguyên căn', icon: 'home', color: '#B45309', bg: '#FEF3C7' });
 
   return (
     <TouchableOpacity
@@ -203,9 +204,9 @@ const TenantCard: React.FC<{
       {/* TOP: Avatar + Name + Status */}
       <View style={cStyles.topRow}>
         <View style={[cStyles.avatar, { backgroundColor: avatarColor.bg }]}>
-          <Text style={[cStyles.avatarText, { color: avatarColor.text }]}>
-            {isWholeHouse ? '🏠' : tenant.fullName.charAt(0)}
-          </Text>
+          {isWholeHouse
+            ? <Icon name="home" size={20} color={avatarColor.text} />
+            : <Text style={[cStyles.avatarText, { color: avatarColor.text }]}>{tenant.fullName.charAt(0)}</Text>}
         </View>
         <View style={cStyles.nameBlock}>
           <Text style={cStyles.fullName} numberOfLines={1}>{tenant.fullName}</Text>
@@ -225,7 +226,7 @@ const TenantCard: React.FC<{
         <View style={cStyles.topRight}>
           <StatusBadge status={tenant.status} />
           <TouchableOpacity style={cStyles.moreBtn} onPress={onQuickAction} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={cStyles.moreBtnText}>•••</Text>
+            <Icon name="more" size={18} color="#94A3B8" />
           </TouchableOpacity>
         </View>
       </View>
@@ -239,17 +240,17 @@ const TenantCard: React.FC<{
             và phân biệt hai khách trùng tên; muốn gọi thì bấm nút ••• (không hiện số). */}
         {!!tenant.phone && (
           <View style={cStyles.infoItem}>
-            <Text style={cStyles.infoIcon}>📱</Text>
+            <Icon name="smartphone" size={13} color="#94A3B8" />
             <Text style={cStyles.infoText}>{maskTenantPhone(tenant.phone)}</Text>
           </View>
         )}
         <View style={cStyles.infoItem}>
-          <Text style={cStyles.infoIcon}>📅</Text>
+          <Icon name="calendar" size={13} color="#94A3B8" />
           <Text style={cStyles.infoText}>Vào {tenant.moveInDate}</Text>
         </View>
         {!!tenant.contractEndDate && (
           <View style={cStyles.infoItem}>
-            <Text style={cStyles.infoIcon}>📋</Text>
+            <Icon name="contract" size={13} color="#94A3B8" />
             <Text style={cStyles.infoText}>HĐ đến {fmtIsoDate(tenant.contractEndDate)}</Text>
           </View>
         )}
@@ -296,13 +297,13 @@ const cStyles = StyleSheet.create({
   locationRoom: { fontWeight: '700', color: '#334155' },
   topRight: { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
   moreBtn: { paddingHorizontal: 4, paddingVertical: 2 },
-  moreBtnText: { fontSize: 11, color: '#94A3B8', fontWeight: '700', letterSpacing: 1 },
+
 
   divider: { height: 1, backgroundColor: '#F1F5F9', marginVertical: 10 },
 
   middleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   infoItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  infoIcon: { fontSize: 12 },
+
   infoText: { fontSize: 12, color: '#475569', fontWeight: '500' },
 
   chipsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
@@ -330,7 +331,7 @@ const PropertySectionHeader: React.FC<{ section: PropertySection; onToggle: () =
   section, onToggle,
 }) => (
   <TouchableOpacity style={secStyles.wrap} onPress={onToggle} activeOpacity={0.7}>
-    <Text style={secStyles.icon}>{section.isWholeHouse ? '🏠' : '🏢'}</Text>
+    <Icon name={section.isWholeHouse ? 'home' : 'building'} size={17} color={Colors.textSecondary} />
     <View style={secStyles.textBlock}>
       <Text style={secStyles.name} numberOfLines={2}>{section.propertyName}</Text>
       <Text style={secStyles.meta}>
@@ -338,7 +339,7 @@ const PropertySectionHeader: React.FC<{ section: PropertySection; onToggle: () =
         {section.todo > 0 && <Text style={secStyles.metaTodo}>{`  ·  ${section.todo} cần xử lý`}</Text>}
       </Text>
     </View>
-    <Text style={secStyles.chevron}>{section.collapsed ? '▸' : '▾'}</Text>
+    <Icon name={section.collapsed ? 'chevron-right' : 'chevron-down'} size={17} color="#94A3B8" style={secStyles.chevron} />
   </TouchableOpacity>
 );
 
@@ -348,12 +349,12 @@ const secStyles = StyleSheet.create({
     backgroundColor: '#F8FAFC',       // trùng màu nền màn — header dính không bị lẫn vào thẻ
     paddingTop: Spacing.md, paddingBottom: 8,
   },
-  icon: { fontSize: 16 },
+
   textBlock: { flex: 1 },
   name: { fontSize: 14, fontWeight: '800', color: '#0F172A' },
   meta: { fontSize: 11, color: '#94A3B8', fontWeight: '600', marginTop: 1 },
   metaTodo: { color: '#D97706' },
-  chevron: { fontSize: 13, color: '#94A3B8', fontWeight: '700', paddingHorizontal: 4 },
+  chevron: { marginHorizontal: 4 },
 });
 
 // ===================== SUMMARY STAT TILE =====================
@@ -627,15 +628,15 @@ export const TenantListScreen: React.FC = () => {
       [
         { text: 'Xem chi tiết', onPress: () => setSelectedTenant(tenant) },
         ...(tenant.phone
-          ? [{ text: '📞 Gọi điện', onPress: () => Linking.openURL(`tel:${tenant.phone}`) }]
+          ? [{ text: 'Gọi điện', onPress: () => Linking.openURL(`tel:${tenant.phone}`) }]
           : []),
         ...(pending
-          ? [{ text: '🚚 Đón khách', onPress: () => handleAction('reception', tenant) }]
+          ? [{ text: 'Đón khách', onPress: () => handleAction('reception', tenant) }]
           : [
-            { text: '🧾 Hóa đơn', onPress: () => handleAction('billing', tenant) },
-            { text: '🔧 Yêu cầu bảo trì', onPress: () => handleAction('maintenance', tenant) },
+            { text: 'Hóa đơn', onPress: () => handleAction('billing', tenant) },
+            { text: 'Yêu cầu bảo trì', onPress: () => handleAction('maintenance', tenant) },
           ]),
-        { text: '📋 Hợp đồng', onPress: () => handleAction('contract', tenant) },
+        { text: 'Hợp đồng', onPress: () => handleAction('contract', tenant) },
         { text: 'Hủy', style: 'cancel' as const },
       ]
     );
@@ -648,7 +649,7 @@ export const TenantListScreen: React.FC = () => {
         <View style={styles.headerLeft}>
           {navigation.canGoBack() && (
             <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.backBtnText}>‹</Text>
+              <Icon name="back" size={28} color="#0F172A" />
             </TouchableOpacity>
           )}
           <View>
@@ -663,10 +664,11 @@ export const TenantListScreen: React.FC = () => {
           do admin soạn, quản lý chỉ nhận việc rồi đi bàn giao. Nút này mở DANH SÁCH hồ sơ
           đang chờ (`ResumeContract`) — là chỗ xem việc, không phải chỗ thêm bản ghi.
 
-          Biểu tượng đổi sang 🤝 cho khớp mục cùng đường dẫn ở Trang chủ — cùng một nơi
-          đến thì không nên mỗi chỗ một icon.
+          Biểu tượng bắt tay (`handshake`) cho khớp mục cùng đường dẫn ở Trang chủ — cùng một
+          nơi đến thì không nên mỗi chỗ một icon.
         */}
         <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('ResumeContract')}>
+          <Icon name="handshake" size={15} color="#FFFFFF" />
           <Text style={styles.addBtnText}>Khách chờ đón</Text>
           {waitingCount > 0 && (
             <View style={styles.addBtnBadge}>
@@ -694,7 +696,7 @@ export const TenantListScreen: React.FC = () => {
 
       {/* Search */}
       <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Icon name="search" size={15} color="#94A3B8" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Tìm theo tên, SĐT, phòng, CCCD..."
@@ -704,7 +706,7 @@ export const TenantListScreen: React.FC = () => {
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')} style={styles.clearBtn}>
-            <Text style={styles.clearBtnText}>✕</Text>
+            <Icon name="close" size={13} color="#94A3B8" />
           </TouchableOpacity>
         )}
       </View>
@@ -769,7 +771,7 @@ export const TenantListScreen: React.FC = () => {
             </View>
           ) : tenants.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🏠</Text>
+              <Icon name="users" size={44} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={styles.emptyTitle}>Chưa có khách thuê</Text>
               <Text style={styles.emptyDesc}>
                 Khách thuê sẽ hiển thị khi có hợp đồng trong các nhà bạn quản lý
@@ -779,7 +781,7 @@ export const TenantListScreen: React.FC = () => {
             // Có khách nhưng bộ lọc/từ khoá loại hết — nói rõ và cho lối ra, đừng để
             // quản lý tưởng mất dữ liệu rồi đi tải lại màn.
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🔍</Text>
+              <Icon name="search" size={44} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={styles.emptyTitle}>Không có khách nào khớp</Text>
               <Text style={styles.emptyDesc}>
                 {tenants.length} khách đang thuê, nhưng bộ lọc hoặc từ khoá hiện tại loại hết.
@@ -816,7 +818,7 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', ...Shadow.sm },
-  backBtnText: { fontSize: 28, color: '#0F172A', lineHeight: 32 },
+
   title: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
   subtitle: { fontSize: 12, color: '#64748B', marginTop: 1 },
   addBtn: {
@@ -837,10 +839,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', borderRadius: 12, paddingHorizontal: 12,
     marginBottom: 10, ...Shadow.sm,
   },
-  searchIcon: { fontSize: 14, marginRight: 6 },
+  searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, fontSize: 14, color: '#0F172A', paddingVertical: 11 },
   clearBtn: { padding: 4 },
-  clearBtnText: { fontSize: 12, color: '#94A3B8', fontWeight: '700' },
+
 
   filterScroll: { flexGrow: 0 },
   filterContent: {
@@ -855,7 +857,7 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: 100 },
 
   empty: { alignItems: 'center', paddingTop: 72, gap: 8, paddingHorizontal: Spacing.lg },
-  emptyIcon: { fontSize: 44 },
+
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
   emptyDesc: { fontSize: 13, color: '#94A3B8', textAlign: 'center' },
   resetBtn: {

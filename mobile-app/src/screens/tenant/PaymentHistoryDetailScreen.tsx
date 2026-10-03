@@ -5,19 +5,20 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { PaymentTransaction } from '@/types';
 import { formatCurrency, formatDateTime } from '@/utils';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
-const METHOD_CONFIG: Record<string, { label: string; emoji: string }> = {
-  qr: { label: 'QR Code / VietQR', emoji: '📱' },
-  bank_transfer: { label: 'Chuyển khoản ngân hàng', emoji: '🏦' },
-  cash: { label: 'Tiền mặt', emoji: '💵' },
-  other: { label: 'Khác', emoji: '💳' },
+const METHOD_CONFIG: Record<string, { label: string }> = {
+  qr: { label: 'QR Code / VietQR' },
+  bank_transfer: { label: 'Chuyển khoản ngân hàng' },
+  cash: { label: 'Tiền mặt' },
+  other: { label: 'Khác' },
 };
 
-const STATUS_META: Record<string, { label: string; color: string; bg: string; emoji: string }> = {
-  pending: { label: 'Chờ xác nhận', color: Colors.warning, bg: Colors.warningLight, emoji: '🕐' },
-  processing: { label: 'Đang xử lý', color: Colors.info, bg: Colors.infoLight, emoji: '⏳' },
-  verified: { label: 'Đã xác nhận', color: Colors.success, bg: Colors.successLight, emoji: '✅' },
-  rejected: { label: 'Bị từ chối', color: Colors.error, bg: Colors.errorLight, emoji: '❌' },
+const STATUS_META: Record<string, { label: string; color: string; bg: string; icon: IconName }> = {
+  pending: { label: 'Chờ xác nhận', color: Colors.warning, bg: Colors.warningLight, icon: 'clock' },
+  processing: { label: 'Đang xử lý', color: Colors.info, bg: Colors.infoLight, icon: 'hourglass' },
+  verified: { label: 'Đã xác nhận', color: Colors.success, bg: Colors.successLight, icon: 'success' },
+  rejected: { label: 'Bị từ chối', color: Colors.error, bg: Colors.errorLight, icon: 'error' },
 };
 
 const TIMELINE_STEPS = ['pending', 'processing', 'verified'] as const;
@@ -53,7 +54,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={[styles.backBtnText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết giao dịch</Text>
         <View style={{ width: 80 }} />
@@ -63,17 +64,17 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
 
         {/* Status banner */}
         <View style={[styles.statusBanner, { backgroundColor: status.bg }]}>
-          <Text style={styles.statusEmoji}>{status.emoji}</Text>
+          <Icon name={status.icon} size={28} color={status.color} />
           <View style={{ flex: 1 }}>
             <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
-            <Text style={styles.statusSub}>{method.emoji} {method.label}</Text>
+            <Text style={styles.statusSub}>{method.label}</Text>
           </View>
           <Text style={styles.amountBig}>{formatCurrency(transaction.amount)}</Text>
         </View>
 
         {/* Transaction timeline */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⏱ Trạng thái giao dịch</Text>
+          <Text style={styles.sectionTitle}>Trạng thái giao dịch</Text>
           <View style={styles.card}>
             <View style={styles.timelineRow}>
               {TIMELINE_STEPS.map((step, i) => {
@@ -84,7 +85,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
                   <React.Fragment key={step}>
                     <View style={styles.timelineStep}>
                       <View style={[styles.timelineDot, { backgroundColor: stepColor }]}>
-                        {isReached && <Text style={{ fontSize: 9, color: Colors.white }}>✓</Text>}
+                        {isReached && <Icon name="check" size={11} color={Colors.white} strokeWidth={3} />}
                       </View>
                       <Text style={[styles.timelineLabel, { color: isReached ? Colors.textPrimary : Colors.textMuted }]}>
                         {TIMELINE_LABELS[step]}
@@ -99,7 +100,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
             </View>
             {transaction.status === 'rejected' && (
               <View style={styles.rejectedBanner}>
-                <Text style={styles.rejectedText}>❌ Giao dịch bị từ chối. Liên hệ quản lý để biết thêm chi tiết.</Text>
+                <IconText icon="error" multiline style={styles.rejectedText}>Giao dịch bị từ chối. Liên hệ quản lý để biết thêm chi tiết.</IconText>
               </View>
             )}
           </View>
@@ -107,7 +108,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
 
         {/* Transaction info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🧾 Thông tin giao dịch</Text>
+          <Text style={styles.sectionTitle}>Thông tin giao dịch</Text>
           <View style={styles.card}>
             <InfoRow label="Mã hóa đơn" value={transaction.invoiceCode} />
             <View style={styles.divider} />
@@ -115,7 +116,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
             <View style={styles.divider} />
             <InfoRow label="Số tiền" value={formatCurrency(transaction.amount)} accent />
             <View style={styles.divider} />
-            <InfoRow label="Phương thức" value={`${method.emoji}  ${method.label}`} />
+            <InfoRow label="Phương thức" value={method.label} />
             {transaction.bankCode && (
               <>
                 <View style={styles.divider} />
@@ -139,7 +140,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
 
         {/* Time info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📅 Thời gian</Text>
+          <Text style={styles.sectionTitle}>Thời gian</Text>
           <View style={styles.card}>
             <InfoRow label="Thời gian GD" value={formatDateTime(transaction.createdAt)} />
             {transaction.verifiedAt && (
@@ -160,7 +161,7 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
         {/* Notes */}
         {transaction.notes && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📝 Ghi chú</Text>
+            <Text style={styles.sectionTitle}>Ghi chú</Text>
             <View style={styles.card}>
               <Text style={styles.noteText}>{transaction.notes}</Text>
             </View>
@@ -171,9 +172,9 @@ export const PaymentHistoryDetailScreen: React.FC = () => {
         {transaction.status === 'verified' && (
           <View style={[styles.section, { marginBottom: 40 }]}>
             <View style={styles.confirmedBanner}>
-              <Text style={styles.confirmedText}>
-                ✅ Giao dịch đã được xác nhận thành công bởi quản lý
-              </Text>
+              <IconText icon="success" multiline style={styles.confirmedText}>
+                Giao dịch đã được xác nhận thành công bởi quản lý
+              </IconText>
             </View>
           </View>
         )}
@@ -191,7 +192,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backBtnText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   scroll: { padding: Spacing.base, paddingBottom: 40 },
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     borderRadius: BorderRadius.lg, padding: Spacing.base, marginBottom: Spacing.md,
   },
-  statusEmoji: { fontSize: 28 },
+
   statusLabel: { fontSize: 16, fontWeight: '700' },
   statusSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   amountBig: { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },

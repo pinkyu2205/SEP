@@ -18,6 +18,7 @@ import { serverNow, todayIso } from '@/utils/serverTime';
 import { CollectPaymentSheet } from '@/components/manager/CollectPaymentSheet';
 import { useBillingRealtime } from '@/hooks/useBillingRealtime';
 import { RealtimeBadge } from '@/components/common';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -28,12 +29,12 @@ type FilterType = 'all' | BillStatus;
 // ===================== CONSTANTS =====================
 const fmt = (n: number) => (n ?? 0).toLocaleString('vi-VN') + 'đ';
 
-const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: string }> = {
-  pending:   { label: 'Chưa thanh toán',     color: '#F59E0B', bg: '#FFFBEB', icon: '⏳' },
-  paid:      { label: 'Đã thanh toán',       color: '#10B981', bg: '#F0FDF4', icon: '✅' },
-  overdue:   { label: 'Quá hạn',             color: '#EF4444', bg: '#FEF2F2', icon: '🚨' },
-  partial:   { label: 'Thanh toán một phần', color: '#3B82F6', bg: '#EFF6FF', icon: '💛' },
-  cancelled: { label: 'Đã huỷ',              color: '#9CA3AF', bg: '#F3F4F6', icon: '🚫' },
+const STATUS_CONFIG: Record<BillStatus, { label: string; color: string; bg: string; icon: IconName }> = {
+  pending:   { label: 'Chưa thanh toán',     color: '#F59E0B', bg: '#FFFBEB', icon: 'hourglass' },
+  paid:      { label: 'Đã thanh toán',       color: '#10B981', bg: '#F0FDF4', icon: 'success' },
+  overdue:   { label: 'Quá hạn',             color: '#EF4444', bg: '#FEF2F2', icon: 'alert' },
+  partial:   { label: 'Thanh toán một phần', color: '#3B82F6', bg: '#EFF6FF', icon: 'wallet' },
+  cancelled: { label: 'Đã huỷ',              color: '#9CA3AF', bg: '#F3F4F6', icon: 'ban' },
 };
 
 // `FILTERS` đã xoá cùng hàng chip trạng thái (17/08/2026) — 3 ô trên thẻ tổng quan
@@ -316,7 +317,7 @@ export const BuildingBillingScreen: React.FC = () => {
       {/* ── Header ───────────────────────────────────────────────── */}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={s.backIcon}>‹</Text>
+          <Icon name="back" size={28} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={s.headerTitle} numberOfLines={1}>{propertyName}</Text>
@@ -387,7 +388,7 @@ export const BuildingBillingScreen: React.FC = () => {
 
       {/* ── Search ───────────────────────────────────────────────── */}
       <View style={s.searchBar}>
-        <Text style={s.searchIcon}>🔍</Text>
+        <Icon name="search" size={16} color={Colors.textMuted} />
         <TextInput
           style={s.searchInput}
           placeholder="Tìm theo tên, phòng, mã hóa đơn..."
@@ -396,8 +397,8 @@ export const BuildingBillingScreen: React.FC = () => {
           onChangeText={setSearch}
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={s.searchClear}>✕</Text>
+          <TouchableOpacity onPress={() => setSearch('')} style={s.searchClear}>
+            <Icon name="close" size={15} color={Colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -453,7 +454,7 @@ export const BuildingBillingScreen: React.FC = () => {
                 )}
                 <View style={[s.monthPill, { backgroundColor: section.paid === section.data.length ? Colors.successLight : Colors.white }]}>
                   <Text style={[s.monthPillText, { color: section.paid === section.data.length ? Colors.success : Colors.textSecondary }]}>
-                    {section.paid === section.data.length ? `✓ đã thu đủ ${section.data.length}` : `đã thu ${section.paid}/${section.data.length}`}
+                    {section.paid === section.data.length ? `đã thu đủ ${section.data.length}` : `đã thu ${section.paid}/${section.data.length}`}
                   </Text>
                 </View>
               </View>
@@ -483,7 +484,7 @@ export const BuildingBillingScreen: React.FC = () => {
                     </Text>
                   </View>
                   <View style={[s.statusBadge, { backgroundColor: cfg.bg }]}>
-                    <Text style={s.statusIcon}>{cfg.icon}</Text>
+                    <Icon name={cfg.icon} size={12} color={cfg.color} />
                     <Text style={[s.statusText, { color: cfg.color }]}>{cfg.label}</Text>
                   </View>
                 </View>
@@ -499,7 +500,7 @@ export const BuildingBillingScreen: React.FC = () => {
           ItemSeparatorComponent={() => <View style={{ height: Spacing.sm }} />}
           ListEmptyComponent={
             <View style={s.emptyState}>
-              <Text style={{ fontSize: 40 }}>🏠</Text>
+              <Icon name="receipt" size={40} color={Colors.textMuted} strokeWidth={1.5} />
               <Text style={s.emptyText}>
                 {hiddenCount > 0
                   ? `Nhà này có ${hiddenCount} hoá đơn tiền nhà, nhưng không hoá đơn nào khớp hợp đồng đang hiệu lực`
@@ -527,13 +528,13 @@ export const BuildingBillingScreen: React.FC = () => {
                   contentContainerStyle={s.billDetailContent}>
                   <View style={s.modalHeader}>
                     <Text style={s.modalTitle}>{selectedBill.code}</Text>
-                    <TouchableOpacity onPress={() => setSelectedBill(null)}>
-                      <Text style={s.modalClose}>✕</Text>
+                    <TouchableOpacity onPress={() => setSelectedBill(null)} style={s.modalClose}>
+                      <Icon name="close" size={20} color={Colors.textMuted} />
                     </TouchableOpacity>
                   </View>
 
                   <View style={[s.statusBannerFull, { backgroundColor: cfg.bg }]}>
-                    <Text style={s.statusBannerIcon}>{cfg.icon}</Text>
+                    <Icon name={cfg.icon} size={22} color={cfg.color} />
                     <Text style={[s.statusBannerText, { color: cfg.color }]}>{cfg.label}</Text>
                   </View>
 
@@ -556,7 +557,7 @@ export const BuildingBillingScreen: React.FC = () => {
                   <View style={s.totalRowCompact}>
                     <Text style={s.totalLabel}>TIỀN NHÀ</Text>
                     <Text style={[s.totalAmount, { fontSize: 16, color: st === 'paid' ? Colors.success : Colors.warning }]}>
-                      {st === 'paid' ? '✓ Khách đã thanh toán' : 'Khách chưa thanh toán'}
+                      {st === 'paid' ? 'Khách đã thanh toán' : 'Khách chưa thanh toán'}
                     </Text>
                   </View>
                   {/* Một dòng là đủ — hằng RENT_AMOUNT_HIDDEN_NOTE dài 2 câu, nhét vào
@@ -581,7 +582,7 @@ export const BuildingBillingScreen: React.FC = () => {
                         activeOpacity={0.85}
                         onPress={() => { setCollecting({ bill: selectedBill, purpose: 'CASH_COLLECT' }); setSelectedBill(null); }}
                       >
-                        <Text style={s.collectBtnText}>💵  Khách trả tiền mặt</Text>
+                        <IconText icon="cash" style={s.collectBtnText}>Khách trả tiền mặt</IconText>
                         <Text style={s.collectBtnSub}>Bạn nhận tiền mặt rồi tự chuyển vào QR</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -589,7 +590,7 @@ export const BuildingBillingScreen: React.FC = () => {
                         activeOpacity={0.85}
                         onPress={() => { setCollecting({ bill: selectedBill, purpose: 'PROXY_PAY' }); setSelectedBill(null); }}
                       >
-                        <Text style={s.collectBtnText}>👥  Có người trả hộ</Text>
+                        <IconText icon="users" style={s.collectBtnText}>Có người trả hộ</IconText>
                         <Text style={s.collectBtnSub}>Người trả hộ tự quét QR · phải ghi tên họ</Text>
                       </TouchableOpacity>
                     </View>
@@ -632,7 +633,7 @@ export const BuildingBillingScreen: React.FC = () => {
                             activeOpacity={0.8}
                             onPress={() => { setSelectedBill(null); navigation.navigate('CheckoutRequests'); }}
                           >
-                            <Text style={s.terminateBtnText}>🚪  Sang mục Trả phòng  →</Text>
+                            <IconText icon="door" style={s.terminateBtnText}>Sang mục Trả phòng</IconText>
                           </TouchableOpacity>
                         )}
                         {canTerminate && (
@@ -642,7 +643,9 @@ export const BuildingBillingScreen: React.FC = () => {
                             disabled={terminating}
                             onPress={() => confirmTerminate(selectedBill)}
                           >
-                            <Text style={s.terminateBtnText}>{terminating ? "Đang xử lý…" : "⛔  Chấm dứt hợp đồng"}</Text>
+                            {terminating
+                              ? <Text style={s.terminateBtnText}>Đang xử lý…</Text>
+                              : <IconText icon="ban" style={s.terminateBtnText}>Chấm dứt hợp đồng</IconText>}
                           </TouchableOpacity>
                         )}
                       </View>
@@ -651,7 +654,7 @@ export const BuildingBillingScreen: React.FC = () => {
 
                   {st === 'paid' && (
                     <View style={s.paidInfo}>
-                      <Text style={s.paidInfoText}>✅ Hóa đơn đã được thanh toán.</Text>
+                      <IconText icon="success" style={s.paidInfoText}>Hóa đơn đã được thanh toán.</IconText>
                     </View>
                   )}
                 </ScrollView>
@@ -690,7 +693,7 @@ const s = StyleSheet.create({
     borderBottomWidth: 1, borderColor: Colors.divider, backgroundColor: Colors.white,
   },
   backBtn:   { padding: 4 },
-  backIcon:  { fontSize: 30, color: Colors.primary, fontWeight: '300', lineHeight: 34 },
+
   headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary },
   headerSub:   { fontSize: 12, color: Colors.textSecondary, marginTop: 1 },
 
@@ -708,9 +711,9 @@ const s = StyleSheet.create({
     ...Shadow.sm, marginHorizontal: Spacing.base, marginBottom: Spacing.sm,
     borderWidth: 1, borderColor: Colors.border,
   },
-  searchIcon:  { fontSize: 15 },
+
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary },
-  searchClear: { fontSize: 14, color: Colors.textMuted, fontWeight: '600', padding: 4 },
+  searchClear: { padding: 4 },
 
   filterScroll:     { flexGrow: 0, marginBottom: Spacing.md },
   filterContent:    { paddingHorizontal: Spacing.base, paddingBottom: 4, gap: Spacing.sm },
@@ -735,7 +738,7 @@ const s = StyleSheet.create({
   billCode:         { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
   billRoomStrong:   { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   statusBadge:      { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: BorderRadius.full, gap: 4 },
-  statusIcon:       { fontSize: 11 },
+
   statusText:       { fontSize: 11, fontWeight: '700' },
   billDue:          { fontSize: 12, color: Colors.textSecondary, marginTop: 6 },
 
@@ -755,13 +758,13 @@ const s = StyleSheet.create({
   billDetailContent: { padding: Spacing.xl, paddingBottom: 40 },
   modalHeader:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
   modalTitle:        { fontSize: 20, fontWeight: '800', color: Colors.textPrimary },
-  modalClose:        { fontSize: 20, color: Colors.textMuted, fontWeight: '600', padding: 4 },
+  modalClose:        { padding: 4 },
 
   statusBannerFull: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     padding: Spacing.md, borderRadius: BorderRadius.lg, marginBottom: Spacing.lg,
   },
-  statusBannerIcon: { fontSize: 22 },
+
   statusBannerText: { fontSize: 16, fontWeight: '700' },
 
   detailSection: { marginBottom: Spacing.md },

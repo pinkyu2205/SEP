@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native'
 import { BorderRadius, Colors, Spacing } from '../../constants'
+import { Icon, IconText } from './Icon'
 
 /**
  * Modal chụp ảnh bằng expo-camera. Dùng thay ImagePicker.launchCameraAsync trên web,
@@ -82,7 +83,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       <View style={styles.container}>
         {!permission?.granted ? (
           <View style={styles.permissionBox}>
-            <Text style={styles.permissionEmoji}>📷</Text>
+            <Icon name="camera" size={48} color={Colors.white} />
             <Text style={styles.permissionText}>
               Cần quyền truy cập camera để chụp ảnh.
             </Text>
@@ -109,19 +110,19 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             <Image source={{ uri: preview }} style={styles.preview} resizeMode="contain" />
             {/* Bỏ luôn ảnh vừa chụp và đóng — khỏi phải chụp lại rồi mới thoát được. */}
             <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-              <Text style={styles.closeBtnText}>✕</Text>
+              <Icon name="close" size={22} color={Colors.white} />
             </TouchableOpacity>
             <View style={styles.previewHint}>
               <Text style={styles.previewHintText}>Ảnh rõ chưa? Xem lại trước khi gửi.</Text>
             </View>
             <View style={styles.previewBar}>
               <TouchableOpacity style={styles.retakeBtn} onPress={() => setPreview(null)}>
-                <Text style={styles.retakeBtnText}>↺ Chụp lại</Text>
+                <IconText icon="undo" style={styles.retakeBtnText}>Chụp lại</IconText>
               </TouchableOpacity>
               <TouchableOpacity style={styles.useBtn} onPress={confirmPhoto}>
-                <Text style={styles.useBtnText}>
-                  {multi ? '✓ Dùng ảnh & chụp tiếp' : '✓ Dùng ảnh này'}
-                </Text>
+                <IconText icon="check" style={styles.useBtnText}>
+                  {multi ? 'Dùng ảnh & chụp tiếp' : 'Dùng ảnh này'}
+                </IconText>
               </TouchableOpacity>
             </View>
           </>
@@ -129,7 +130,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
           <>
             <CameraView ref={camRef} style={styles.camera} facing={facing} />
             <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-              <Text style={styles.closeBtnText}>✕</Text>
+              <Icon name="close" size={22} color={Colors.white} />
             </TouchableOpacity>
             {multi && count > 0 && (
               <View style={styles.countBadge}>
@@ -143,7 +144,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
                   setFacing((f) => (f === 'back' ? 'front' : 'back'))
                 }
               >
-                <Text style={styles.sideBtnText}>🔄</Text>
+                <Icon name="switch-camera" size={28} color={Colors.white} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.shutter}
@@ -245,11 +246,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeBtnText: {
-    color: Colors.white,
-    fontSize: 18,
-    fontWeight: '700',
-  },
+
   countBadge: {
     position: 'absolute',
     top: Spacing.xl,
@@ -278,9 +275,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sideBtnText: {
-    fontSize: 26,
-  },
+
   doneText: {
     color: Colors.white,
     fontSize: 16,
@@ -308,9 +303,7 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
     gap: Spacing.base,
   },
-  permissionEmoji: {
-    fontSize: 48,
-  },
+
   permissionText: {
     color: Colors.white,
     fontSize: 15,

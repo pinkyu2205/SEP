@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { formatDateTime } from '@/utils';
+import { IconText } from '@/components/common/Icon';
 import type { SharedBill } from '@/types/bill';
 
 /**
@@ -78,12 +79,12 @@ export const UtilityEvidenceCard: React.FC<Props> = ({ invoice, onZoom }) => {
   if (!hasReadings && !meterImageUrl && !utilityBillImageUrl && !invoice.billingAddress) {
     return (
       <View style={s.section}>
-        <Text style={s.sectionTitle}>🔍 Căn cứ tính tiền</Text>
+        <IconText icon="search" style={s.sectionTitle}>Căn cứ tính tiền</IconText>
         <View style={[s.card, s.warnCard]}>
-          <Text style={s.warnText}>
-            ⚠️ Hoá đơn này chưa đính ảnh chỉ số. Bạn có quyền yêu cầu tra soát để được
+          <IconText icon="warning" multiline style={s.warnText}>
+            Hoá đơn này chưa đính ảnh chỉ số. Bạn có quyền yêu cầu tra soát để được
             cung cấp ảnh đồng hồ / hoá đơn gốc trước khi thanh toán.
-          </Text>
+          </IconText>
         </View>
       </View>
     );
@@ -91,7 +92,7 @@ export const UtilityEvidenceCard: React.FC<Props> = ({ invoice, onZoom }) => {
 
   return (
     <View style={s.section}>
-      <Text style={s.sectionTitle}>🔍 Căn cứ tính tiền</Text>
+      <IconText icon="search" style={s.sectionTitle}>Căn cứ tính tiền</IconText>
 
       <View style={s.card}>
         {/* ── Đây có phải nhà mình không ── */}
@@ -120,10 +121,10 @@ export const UtilityEvidenceCard: React.FC<Props> = ({ invoice, onZoom }) => {
       {/* Lệch thì phải nói to, và nói luôn khách nên làm gì — chứ không chỉ tô đỏ con số. */}
       {readingMismatch && (
         <View style={[s.card, s.errorCard]}>
-          <Text style={s.errorText}>
-            🚨 Chênh lệch chỉ số ({readingDelta} {unit}) không khớp với lượng đang tính
+          <IconText icon="alert" multiline style={s.errorText}>
+            Chênh lệch chỉ số ({readingDelta} {unit}) không khớp với lượng đang tính
             tiền ({used} {unit}). Bạn nên gửi yêu cầu tra soát trước khi thanh toán.
-          </Text>
+          </IconText>
         </View>
       )}
 
@@ -132,16 +133,16 @@ export const UtilityEvidenceCard: React.FC<Props> = ({ invoice, onZoom }) => {
         <View style={s.photoRow}>
           {!!meterImageUrl && (
             <View style={s.photoCol}>
-              <Text style={s.photoLabel}>
+              <IconText icon={isWholeHouse ? 'document' : 'camera'} gap={5} style={s.photoLabel}>
                 {isWholeHouse
-                  ? `📄 Hoá đơn ${isElectric ? 'EVN' : 'nước'} của căn nhà`
-                  : '📷 Đồng hồ phòng bạn'}
-              </Text>
+                  ? `Hoá đơn ${isElectric ? 'EVN' : 'nước'} của căn nhà`
+                  : 'Đồng hồ phòng bạn'}
+              </IconText>
               <TouchableOpacity activeOpacity={0.85} onPress={() => onZoom(meterImageUrl)}>
                 <Image source={{ uri: meterImageUrl }} style={s.thumb} />
               </TouchableOpacity>
               {!!invoice.meterCapturedAt && (
-                <Text style={s.photoMeta}>🕒 {formatDateTime(invoice.meterCapturedAt)}</Text>
+                <IconText icon="clock" gap={4} style={s.photoMeta}>{formatDateTime(invoice.meterCapturedAt)}</IconText>
               )}
               <Text style={s.photoHint}>Chạm để xem cỡ lớn</Text>
             </View>
@@ -153,7 +154,7 @@ export const UtilityEvidenceCard: React.FC<Props> = ({ invoice, onZoom }) => {
           */}
           {!isWholeHouse && !!utilityBillImageUrl && (
             <View style={s.photoCol}>
-              <Text style={s.photoLabel}>📄 Hoá đơn cả nhà</Text>
+              <IconText icon="document" gap={5} style={s.photoLabel}>Hoá đơn cả nhà</IconText>
               <TouchableOpacity activeOpacity={0.85} onPress={() => onZoom(utilityBillImageUrl)}>
                 <Image source={{ uri: utilityBillImageUrl }} style={s.thumb} />
               </TouchableOpacity>

@@ -10,7 +10,7 @@ import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 // Alert.alert của react-native-web là no-op → dùng showAlert, không thì nút
 // Đăng xuất / Hỗ trợ bấm trên web không ra gì cả.
 import { showAlert } from '@/utils';
-import { ConfirmDialog } from '@/components/common';
+import { ConfirmDialog, Icon, type IconName } from '@/components/common';
 import { TenureCard } from '@/components/tenant';
 import { useAuth } from '@/hooks';
 import { isClosedContract } from '@/utils';
@@ -42,7 +42,7 @@ const NOTIF_PREF_KEY = 'notifEnabled';
 
 // ── Row item ──────────────────────────────────────────────
 const MenuItem: React.FC<{
-  icon: string;
+  icon: IconName;
   label: string;
   value?: string;
   onPress?: () => void;
@@ -58,7 +58,7 @@ const MenuItem: React.FC<{
     disabled={toggle}
   >
     <View style={[styles.menuIconWrap, { backgroundColor: danger ? Colors.errorLight : Colors.background }]}>
-      <Text style={styles.menuIcon}>{icon}</Text>
+      <Icon name={icon} size={18} color={danger ? Colors.error : Colors.textSecondary} />
     </View>
     <Text style={[styles.menuLabel, danger && { color: Colors.error }]}>{label}</Text>
     {toggle ? (
@@ -71,7 +71,7 @@ const MenuItem: React.FC<{
     ) : value ? (
       <Text style={styles.menuValue}>{value}</Text>
     ) : (
-      <Text style={styles.menuChevron}>›</Text>
+      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
     )}
   </TouchableOpacity>
 );
@@ -303,7 +303,7 @@ export const ProfileScreen: React.FC = () => {
         {user?.role === 'tenant' && (
           <View style={styles.tenantInfoCard}>
             <View style={styles.tenantInfoRow}>
-              <Text style={styles.tenantInfoIcon}>🏠</Text>
+              <Icon name="home" size={20} color={Colors.primary} />
               <View>
                 <Text style={styles.tenantInfoLabel}>Phòng đang thuê</Text>
                 <Text style={styles.tenantInfoValue}>{tenantRoom}</Text>
@@ -311,7 +311,7 @@ export const ProfileScreen: React.FC = () => {
             </View>
             <View style={styles.tenantInfoDivider} />
             <View style={styles.tenantInfoRow}>
-              <Text style={styles.tenantInfoIcon}>📋</Text>
+              <Icon name="contract" size={20} color={Colors.primary} />
               <View>
                 <Text style={styles.tenantInfoLabel}>Hợp đồng hết hạn</Text>
                 <Text style={styles.tenantInfoValue}>{tenantContractEnd}</Text>
@@ -323,26 +323,26 @@ export const ProfileScreen: React.FC = () => {
         {/* ── Thông tin cá nhân ── */}
         <SectionHeader title="Thông tin cá nhân" />
         <View style={styles.card}>
-          <MenuItem icon="📧" label="Email"      value={user?.email ?? '—'} />
+          <MenuItem icon="mail" label="Email"      value={user?.email ?? '—'} />
           <View style={styles.itemDivider} />
-          <MenuItem icon="📞" label="Điện thoại" value={user?.phone ?? '—'} />
+          <MenuItem icon="phone" label="Điện thoại" value={user?.phone ?? '—'} />
           <View style={styles.itemDivider} />
           {/* Đã bỏ dòng "Tham gia": `user.createdAt` được gán bằng nowIso() lúc đăng nhập
               (xem useAuth.applyRealAuthResponse) nên nó là GIỜ ĐĂNG NHẬP chứ không phải
               ngày tạo tài khoản — hiện lên là nói dối. `/auth/me` không trả ngày tạo;
               BE có `createAt` ở /api/v1/user, cần expose thêm thì mới hiện lại được. */}
-          <MenuItem icon="✏️" label="Chỉnh sửa hồ sơ" onPress={handleEditProfile} />
+          <MenuItem icon="edit" label="Chỉnh sửa hồ sơ" onPress={handleEditProfile} />
         </View>
 
         {/* ── Cài đặt ── */}
         <SectionHeader title="Cài đặt" />
         <View style={styles.card}>
           <MenuItem
-            icon="🔔" label="Thông báo"
+            icon="bell" label="Thông báo"
             toggle toggleValue={notifEnabled} onToggle={notifBusy ? () => {} : toggleNotif}
           />
           <View style={styles.itemDivider} />
-          <MenuItem icon="🔒" label="Đổi mật khẩu" onPress={handleChangePassword} />
+          <MenuItem icon="lock" label="Đổi mật khẩu" onPress={handleChangePassword} />
         </View>
 
         {/* ── Hợp đồng & Trả phòng (tenant only) ── */}
@@ -351,13 +351,13 @@ export const ProfileScreen: React.FC = () => {
             <SectionHeader title="Hợp đồng" />
             <View style={styles.card}>
               <MenuItem
-                icon="🚪"
+                icon="door"
                 label="Yêu cầu kết thúc hợp đồng"
                 onPress={() => navigation.navigate('RequestCheckout')}
               />
               <View style={styles.itemDivider} />
               <MenuItem
-                icon="📍"
+                icon="clipboard-check"
                 label="Tiến trình trả phòng"
                 onPress={() => navigation.navigate('CheckoutDetail')}
               />
@@ -368,14 +368,14 @@ export const ProfileScreen: React.FC = () => {
         {/* ── Hỗ trợ ── */}
         <SectionHeader title="Hỗ trợ" />
         <View style={styles.card}>
-          <MenuItem icon="💬" label="Liên hệ hỗ trợ"   onPress={handleHelp} />
+          <MenuItem icon="chat" label="Liên hệ hỗ trợ"   onPress={handleHelp} />
           <View style={styles.itemDivider} />
-          <MenuItem icon="ℹ️" label="Về ứng dụng"       value="v1.0.0" />
+          <MenuItem icon="info" label="Về ứng dụng"       value="v1.0.0" />
         </View>
 
         {/* ── Đăng xuất ── */}
         <View style={styles.card}>
-          <MenuItem icon="🚪" label="Đăng xuất" onPress={() => setLogoutOpen(true)} danger />
+          <MenuItem icon="logout" label="Đăng xuất" onPress={() => setLogoutOpen(true)} danger />
         </View>
 
         <View style={{ height: 32 }} />
@@ -385,7 +385,7 @@ export const ProfileScreen: React.FC = () => {
       <Modal visible={showPwdModal} transparent animationType="slide" onRequestClose={() => setShowPwdModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>🔒 Đổi mật khẩu</Text>
+            <Text style={styles.modalTitle}>Đổi mật khẩu</Text>
             <TextInput
               style={styles.modalInput}
               placeholder="Mật khẩu hiện tại"
@@ -428,7 +428,7 @@ export const ProfileScreen: React.FC = () => {
       <Modal visible={showEditModal} transparent animationType="slide" onRequestClose={() => setShowEditModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>✏️ Chỉnh sửa hồ sơ</Text>
+            <Text style={styles.modalTitle}>Chỉnh sửa hồ sơ</Text>
 
             <Text style={styles.inputLabel}>Họ và tên</Text>
             <TextInput
@@ -469,7 +469,7 @@ export const ProfileScreen: React.FC = () => {
       {/* Xác nhận đăng xuất */}
       <ConfirmDialog
         visible={logoutOpen}
-        icon="🚪"
+        icon="logout"
         title="Đăng xuất"
         message={`Bạn sẽ cần đăng nhập lại để tiếp tục sử dụng${user?.fullName ? ` tài khoản ${user.fullName}` : ''}.`}
         confirmText="Đăng xuất"
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     paddingVertical: Spacing.md,
   },
-  tenantInfoIcon: { fontSize: 20 },
+
   tenantInfoLabel: { fontSize: 11, color: Colors.textSecondary },
   tenantInfoValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, marginTop: 2 },
   tenantInfoDivider: { height: 1, backgroundColor: Colors.divider },
@@ -557,10 +557,10 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 10,
     alignItems: 'center', justifyContent: 'center',
   },
-  menuIcon: { fontSize: 18 },
+
   menuLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: Colors.textPrimary },
   menuValue: { fontSize: 13, color: Colors.textSecondary },
-  menuChevron: { fontSize: 20, color: Colors.textMuted, fontWeight: '400' },
+
 
   // Modal đổi mật khẩu
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

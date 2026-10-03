@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon, type IconName } from './Icon';
 
 /**
  * Hộp thoại xác nhận trong app — thay cho window.confirm của trình duyệt.
@@ -14,8 +15,8 @@ export interface ConfirmDialogProps {
   visible: boolean;
   title: string;
   message?: string;
-  /** Emoji hiển thị trong vòng tròn trên cùng. Bỏ trống thì ẩn luôn vòng tròn. */
-  icon?: string;
+  /** Icon trong vòng tròn trên cùng. Bỏ trống thì ẩn luôn vòng tròn. */
+  icon?: IconName;
   confirmText?: string;
   cancelText?: string;
   /** Nút xác nhận màu đỏ — dùng cho hành động khó hoàn tác. */
@@ -36,7 +37,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <TouchableOpacity style={s.box} activeOpacity={1}>
         {!!icon && (
           <View style={[s.iconWrap, danger && s.iconWrapDanger]}>
-            <Text style={s.icon}>{icon}</Text>
+            <Icon name={icon} size={26} color={danger ? Colors.error : Colors.primary} />
           </View>
         )}
         <Text style={s.title}>{title}</Text>
@@ -79,7 +80,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md,
   },
   iconWrapDanger: { backgroundColor: Colors.errorLight },
-  icon:    { fontSize: 26 },
+
   title:   { fontSize: 17, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
   message: { fontSize: 13.5, color: Colors.textSecondary, textAlign: 'center', lineHeight: 20, marginTop: 6 },
 

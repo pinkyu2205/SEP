@@ -3,11 +3,11 @@ import {
   View, Text, StyleSheet, KeyboardAvoidingView, ScrollView, Platform,
   TouchableOpacity, ActivityIndicator, StatusBar,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
-import { BrandField } from '@/components/common';
+import { BrandField, Icon } from '@/components/common';
 import { useAuth, useOtpCooldown, RESEND_COOLDOWN_SEC } from '@/hooks';
 import { realAuthService } from '@/services/auth/realAuthService';
 import { isAccountEndedError, TENANT_ACCOUNT_ENDED_TITLE } from '@/services/tenant/accountAccess';
@@ -138,7 +138,7 @@ export const TenantActivateScreen: React.FC = () => {
       // Thành công: token đã lưu + user đã set trong context, RootNavigator tự chuyển vào app.
     } catch (err: any) {
       if (isAccountEndedError(err)) {
-        showAlert(TENANT_ACCOUNT_ENDED_TITLE, err.message, undefined, '👋');
+        showAlert(TENANT_ACCOUNT_ENDED_TITLE, err.message, undefined, 'door');
         return;
       }
       showAlert('Kích hoạt thất bại', err?.message || 'Vui lòng thử lại.');
@@ -174,7 +174,7 @@ export const TenantActivateScreen: React.FC = () => {
             onPress={goBackStep}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <MaterialIcons name="arrow-back" size={20} color={Brand.greenDark} />
+            <Icon name="back" size={20} color={Brand.greenDark} />
             <Text style={s.backText}>{step === 'phone' ? 'Đăng nhập' : 'Bước trước'}</Text>
           </TouchableOpacity>
         </View>
@@ -188,8 +188,8 @@ export const TenantActivateScreen: React.FC = () => {
 
           <View style={s.header}>
             <View style={s.iconTile}>
-              <MaterialIcons
-                name={step === 'phone' ? 'vpn-key' : step === 'otp' ? 'sms' : 'lock-reset'}
+              <Icon
+                name={step === 'phone' ? 'key' : step === 'otp' ? 'sms' : 'lock'}
                 size={30}
                 color={Brand.greenDark}
               />
@@ -210,7 +210,7 @@ export const TenantActivateScreen: React.FC = () => {
             {step === 'phone' && (
               <BrandField
                 label="Số điện thoại"
-                icon="phone-iphone"
+                icon="smartphone"
                 placeholder="Ví dụ: 0901234567"
                 value={phone}
                 onChangeText={setPhone}
@@ -257,7 +257,7 @@ export const TenantActivateScreen: React.FC = () => {
                 */}
                 <BrandField
                   label="Mật khẩu mới"
-                  icon="lock-outline"
+                  icon="lock"
                   placeholder="Ít nhất 6 ký tự"
                   value={newPassword}
                   onChangeText={setNewPassword}
@@ -268,17 +268,13 @@ export const TenantActivateScreen: React.FC = () => {
                       onPress={() => setShowPassword(v => !v)}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <MaterialIcons
-                        name={showPassword ? 'visibility-off' : 'visibility'}
-                        size={20}
-                        color={Colors.textMuted}
-                      />
+                      <Icon name={showPassword ? 'eye-off' : 'eye'} size={20} color={Colors.textMuted} />
                     </TouchableOpacity>
                   )}
                 />
                 <BrandField
                   label="Xác nhận mật khẩu"
-                  icon="lock-outline"
+                  icon="lock"
                   placeholder="Nhập lại mật khẩu mới"
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}

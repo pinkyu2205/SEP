@@ -24,6 +24,7 @@
  * là vai duy nhất huỷ được hoá đơn đã phát hành (xem `constants/utilityCycle.ts`
  * → `alreadySentReason`), tức là vai duy nhất thi hành được kết luận "khách đúng".
  */
+import type { IconName } from '@/components/common/Icon';
 
 /** Lý do khiếu nại — chọn từ danh sách để người xử lý biết ngay phải kiểm cái gì. */
 export type InvoiceDisputeReason =
@@ -45,42 +46,42 @@ export type InvoiceDisputeReason =
  */
 export const DISPUTE_REASONS: Array<{
   code: InvoiceDisputeReason;
-  icon: string;
+  icon: IconName;
   label: string;
   hint: string;
   placeholder: string;
 }> = [
   {
     code: 'WRONG_PROPERTY',
-    icon: '🏠',
+    icon: 'home',
     label: 'Không phải hoá đơn của nhà tôi',
     hint: 'Địa chỉ hoặc mã khách hàng in trên ảnh hoá đơn không phải nơi tôi đang thuê.',
     placeholder: 'VD: Ảnh hoá đơn ghi địa chỉ 45 Lê Lợi, nhưng tôi thuê ở 128 Trần Hưng Đạo.',
   },
   {
     code: 'WRONG_READING',
-    icon: '🔢',
+    icon: 'meter',
     label: 'Chỉ số không khớp với ảnh',
     hint: 'Số trên mặt đồng hồ trong ảnh khác với chỉ số hệ thống dùng để tính tiền.',
     placeholder: 'VD: Ảnh đồng hồ đọc được 1250 nhưng hoá đơn ghi chỉ số mới là 1750.',
   },
   {
     code: 'NO_EVIDENCE',
-    icon: '📷',
+    icon: 'image-off',
     label: 'Không có ảnh / ảnh không đọc được',
     hint: 'Hoá đơn không đính ảnh, hoặc ảnh quá mờ để kiểm chứng.',
     placeholder: 'VD: Hoá đơn không có ảnh đồng hồ nên tôi không kiểm tra được chỉ số.',
   },
   {
     code: 'WRONG_PERIOD',
-    icon: '📅',
+    icon: 'calendar',
     label: 'Sai kỳ tính tiền',
     hint: 'Kỳ này tôi chưa dọn vào, đã dọn đi, hoặc đã trả tiền kỳ này rồi.',
     placeholder: 'VD: Tôi nhận phòng ngày 20/08 nhưng hoá đơn tính từ 01/08.',
   },
   {
     code: 'OTHER',
-    icon: '✏️',
+    icon: 'edit',
     label: 'Lý do khác',
     hint: 'Mô tả cụ thể điểm bạn thấy chưa đúng.',
     placeholder: 'VD: Số tiền không bằng số kWh nhân đơn giá ghi trên hoá đơn.',

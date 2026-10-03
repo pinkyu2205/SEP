@@ -4,8 +4,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius, canTerminateForUnpaidInvoice, isMeterReadingDay, isPreCollectStatus } from '@/constants';
+
+import { Colors, Spacing, BorderRadius, canTerminateForUnpaidInvoice, isPreCollectStatus } from '@/constants';
 import { activeRentingKeys, belongsToActiveTenant } from '@/utils';
 import { useAuth } from '@/hooks';
 import { useUnreadNotifications } from '@/hooks/useUnreadNotifications';
@@ -21,6 +21,7 @@ import { checkoutService } from '@/services/manager/checkoutService';
 import { meterReadingService, type PendingMeterReadingItem } from '@/services/manager/meterReadingService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
 import { serverNow, todayIso } from '@/utils/serverTime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 /**
  * Lối tắt tới những màn KHÔNG nằm trong thanh tab dưới đáy, xếp thành lưới 4×2.
@@ -39,18 +40,18 @@ const QUICK_ACTIONS = [
   // — Hàng 1: việc thao tác hằng ngày —
   // Từ 13/08/2026 "Đón khách" và "Khách chờ đón" là MỘT luồng — cả hai vào
   // ResumeContract. Màn wizard cũ (OnboardingV2) đã gỡ khỏi navigator.
-  { emoji: '🤝', label: 'Đón khách',      route: 'ResumeContract',        color: Colors.primary },
+  { icon: 'handshake', label: 'Đón khách',      route: 'ResumeContract',        color: Colors.primary },
   // Đối xứng với 'Đón khách' — hai đầu vòng đời khách thuê, cùng nhìn từ phía manager.
   // Không đặt 'Trả phòng': đó là hành động của KHÁCH, manager chỉ tiếp nhận và xử lý hồ sơ.
-  { emoji: '🚪', label: 'Tiễn khách',     route: 'CheckoutRequests',      color: Colors.error   },
+  { icon: 'door', label: 'Tiễn khách',     route: 'CheckoutRequests',      color: Colors.error   },
   // Đơn xin gia hạn (BE 02/09/2026). Đặt CẠNH 'Tiễn khách' vì hai thứ là hai ngã rẽ của
   // cùng một thời điểm: 30 ngày cuối hợp đồng, khách hoặc xin ở tiếp hoặc dọn đi.
   // Quản lý KHÔNG duyệt ở đây — chỉ xem và ghi ý kiến cho quản trị viên.
-  { emoji: '📝', label: 'Đơn gia hạn',    route: 'ExtensionRequests',     color: Colors.warning },
+  { icon: 'calendar-clock', label: 'Đơn gia hạn',    route: 'ExtensionRequests',     color: Colors.warning },
   // Mọi khoản thu ngoài tiền nhà (cọc, bảo trì, điện nước) — tách khỏi tab Hoá đơn để
   // hai việc không lẫn vào nhau.
   // Gộp 24/09/2026: một chỗ cho mọi chuyện tiền của khách — đang nợ / đã thu / cọc.
-  { emoji: '💳', label: 'Tiền khách thuê', route: 'ManagerPaymentHistory', color: Colors.info    },
+  { icon: 'wallet', label: 'Tiền khách thuê', route: 'ManagerPaymentHistory', color: Colors.info    },
   // "Cần chụp số" từng ở đây, nay chuyển xuống "Cần xử lý": nó là một VIỆC có hạn và có
   // số lượng, không phải một nơi để đi tới. Ở lưới này nó chiếm chỗ cố định dù hầu hết
   // thời gian đếm bằng 0; ở dưới kia nó chỉ hiện khi thật sự còn phòng chưa chụp, và hiện
@@ -58,27 +59,24 @@ const QUICK_ACTIONS = [
 
   // — Hàng 2: định kỳ và tra cứu —
   /*
-    Ô này vẽ HAI biểu tượng, không phải emoji.
+    Ô này vẽ HAI biểu tượng.
 
-    Trước đây là mỗi tia sét ⚡ — chỉ nói được một nửa việc, trong khi bấm vào là vào màn
-    có cả tab Điện lẫn tab Nước. Càng dễ nhầm từ 10/09/2026, khi hai luồng tách hẳn nhau:
-    điện chốt số cuối tháng, nước ghi theo ngày admin phát hành. Ai đang cần làm nước mà
-    nhìn thấy tia sét thì sẽ đi tìm ô khác.
+    Trước đây chỉ có tia sét — nói được một nửa việc, trong khi bấm vào là vào màn có cả
+    tab Điện lẫn tab Nước. Ai đang cần làm nước mà nhìn thấy tia sét thì sẽ đi tìm ô khác.
 
-    Không ghép hai emoji "⚡💧": ở cỡ 17px trong ô 36px chúng chật và mỗi hệ điều hành vẽ
-    một kiểu. Dùng glyph có sẵn thì canh được cỡ, và tô đúng màu quy ước — vàng cho điện,
-    xanh nước biển cho nước — nên đọc ra nghĩa trước cả khi đọc nhãn.
+    Hai icon nhỏ cạnh nhau, tô đúng màu quy ước — vàng cho điện, xanh nước biển cho
+    nước — nên đọc ra nghĩa trước cả khi đọc nhãn.
   */
   {
     icons: [
-      { name: 'bolt', color: '#F59E0B' },
-      { name: 'water-drop', color: '#0EA5E9' },
+      { name: 'electric', color: '#F59E0B' },
+      { name: 'water', color: '#0EA5E9' },
     ],
     label: 'Ghi điện nước', route: 'UtilityBilling', color: Colors.accent,
   },
-  { emoji: '👥', label: 'Khách thuê',     route: 'TenantList',            color: Colors.primary },
-  { emoji: '📋', label: 'Hợp đồng',       route: 'ManagerContracts',      color: Colors.info    },
-  { emoji: '📦', label: 'Thiết bị',       route: 'Equipment',             color: Colors.textSecondary },
+  { icon: 'users', label: 'Khách thuê',     route: 'TenantList',            color: Colors.primary },
+  { icon: 'contract', label: 'Hợp đồng',       route: 'ManagerContracts',      color: Colors.info    },
+  { icon: 'package', label: 'Thiết bị',       route: 'Equipment',             color: Colors.textSecondary },
 ] as const;
 
 const ACTIONS_PER_ROW = 4;
@@ -219,7 +217,6 @@ export const ManagerHomeScreen: React.FC = () => {
   // Tiền phòng quá hạn tới mức được quyền chấm dứt HĐ (từ ngày 8 — xem @/constants/rentCycle).
   // Mọi loại hoá đơn (24/09/2026): tiền nhà từ ngày 8; loại khác quá 5 ngày kể từ ngày phát hành.
   const rentTerminable = actionableInvoices.filter(i => canTerminateForUnpaidInvoice(i)).length;
-  const pendingVerify = payments.filter(p => p.status === 'PENDING_VERIFY').length;
 
   /**
    * Lịch đón khách — hợp đồng nháp đã gán cho manager này, đến hạn đón hôm nay
@@ -254,34 +251,31 @@ export const ManagerHomeScreen: React.FC = () => {
   ).length;
 
   /*
-    Việc chụp công tơ tách ĐIỆN và NƯỚC: điện chỉ tới hạn vào ngày cuối tháng (hôm đó là
-    "hạn hôm nay", qua ngày là quá hạn), nước tới hạn theo lịch người ghi nước. Gộp một ô
-    "Phòng chưa chụp công tơ" thì đúng ngày cuối tháng quản lý không đọc ra là phải đi chốt
-    số điện. `listAllPending` chỉ trả việc ĐÃ tới hạn nên giữa tháng hai ô này tự bằng 0.
+    Việc chụp công tơ tách ĐIỆN và NƯỚC thành hai ô để quản lý biết đi chụp đồng hồ nào.
+    Cả hai chỉ có số khi admin đã đẩy hoá đơn tổng mà còn phòng thiếu số (BE 303ca9d,
+    02/10/2026) — không còn hạn cuối tháng cho điện.
   */
   const pendingElecCount  = pendingMeters.filter(r => r.utilityType === 'ELECTRICITY').length;
   const pendingWaterCount = pendingMeters.length - pendingElecCount;
-  const elecDueToday = isMeterReadingDay();
 
   const priorityItems = [
-    { id: 'p0', icon: '🤝', label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
-    { id: 'p1', icon: '🧾', label: 'Tiền nhà quá hạn',          count: overdueRent + overdueOther, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
+    { id: 'p0', icon: 'handshake' as IconName, label: 'Khách đến hạn đón',          count: receptionToday.length, urgency: 'critical', color: Colors.primary, route: 'ResumeContract' },
+    { id: 'p1', icon: 'receipt' as IconName, label: 'Tiền nhà quá hạn',          count: overdueRent + overdueOther, urgency: 'critical', color: Colors.error, route: 'ManagerBilling' },
     // `tab: 'history'` để vào thẳng danh sách hoá đơn điện/nước, không rơi vào bước
     // ghi chỉ số — việc cần làm ở đây là đi đòi, không phải chụp đồng hồ.
-    { id: 'p1b', icon: '⚡', label: 'Điện/nước quá hạn',        count: overdueUtility, urgency: 'critical', color: Colors.error, route: 'UtilityBilling', params: { tab: 'history' } },
-    { id: 'p2', icon: '🔧', label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
-    { id: 'p4', icon: '🚪', label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
+    { id: 'p1b', icon: 'electric' as IconName, label: 'Điện/nước quá hạn',        count: overdueUtility, urgency: 'critical', color: Colors.error, route: 'UtilityBilling', params: { tab: 'history' } },
+    { id: 'p2', icon: 'wrench' as IconName, label: 'Bảo trì cần xử lý',        count: m.maintenance, urgency: m.maintenance > 0 ? 'critical' : 'info', color: Colors.error, route: 'ManagerMaintenance' },
+    { id: 'p4', icon: 'door' as IconName, label: checkoutPending > 0 ? 'Yêu cầu trả phòng chờ duyệt' : 'Hồ sơ trả phòng đang xử lý',
       count: checkoutPending > 0 ? checkoutPending : checkoutTodo,
       urgency: checkoutPending > 0 ? 'critical' : 'warning', color: '#DC2626', route: 'CheckoutRequests' },
     // Vào màn Hoá đơn tiền nhà, KHÔNG phải màn Tiền phòng tự động: màn kia chỉ để cấu
     // hình lịch phát hành, còn thao tác chấm dứt HĐ nằm ở mục "Cần xử lý" của màn này.
-    { id: 'p5', icon: '⛔', label: 'Nợ quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
-    { id: 'p3', icon: '💳', label: 'Chờ xác nhận thanh toán',  count: pendingVerify, urgency: 'warning',  color: Colors.warning, route: 'ManagerBilling' },
+    { id: 'p5', icon: 'ban' as IconName, label: 'Nợ quá hạn — được chấm dứt HĐ', count: rentTerminable, urgency: 'critical', color: Colors.error, route: 'ManagerPaymentHistory', params: { filter: 'DEBT' } },
     // Không chụp được ảnh công tơ thì không phát hành được hoá đơn điện/nước — việc này
     // chặn cả kỳ thu tiền, nên xếp cùng nhóm gấp với tiền quá hạn.
-    { id: 'p6', icon: '⚡', label: elecDueToday ? 'Chốt chỉ số điện — hạn hôm nay' : 'Chỉ số điện quá hạn chưa chốt',
+    { id: 'p6', icon: 'electric' as IconName, label: 'Phòng chưa chốt số điện',
       count: pendingElecCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
-    { id: 'p7', icon: '💧', label: 'Phòng chưa chụp đồng hồ nước', count: pendingWaterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
+    { id: 'p7', icon: 'water' as IconName, label: 'Phòng chưa chụp đồng hồ nước', count: pendingWaterCount, urgency: 'critical', color: Colors.warning, route: 'MeterReadingPending' },
   ];
 
   const activeItems    = priorityItems.filter(p => p.count > 0);
@@ -318,12 +312,12 @@ export const ManagerHomeScreen: React.FC = () => {
           bày thêm một cái nữa trong app là thừa.
         */}
         <View style={s.header}>
-          <Text style={s.headerName} numberOfLines={1}>Chào, {firstName} 👋</Text>
+          <Text style={s.headerName} numberOfLines={1}>Chào, {firstName}</Text>
 
           <View style={s.headerRight}>
             <Text style={s.headerDate}>{todayStr}</Text>
             <TouchableOpacity style={s.notifBtn} onPress={() => navigation.navigate('NotificationCenter')}>
-              <Text style={s.notifIcon}>🔔</Text>
+              <Icon name="bell" size={18} color={Colors.textSecondary} />
               {(realUnread ?? 0) > 0 && (
                 <View style={s.notifBadge}>
                   <Text style={s.notifBadgeText}>
@@ -346,9 +340,9 @@ export const ManagerHomeScreen: React.FC = () => {
           {/* Trang chủ chỉ đủ chỗ 2 thẻ khẩn — việc thứ 3 trở đi (và việc "sắp tới") xem ở
               màn "Việc của tôi", cùng luật đếm (hooks/useManagerTasks). */}
           <TouchableOpacity onPress={() => navigation.navigate('ManagerTasks')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={s.allTasksLink}>
-              {activeItems.length > 0 ? `Tất cả ${activeItems.length} việc ›` : 'Xem việc ›'}
-            </Text>
+            <IconText icon="chevron-right" trailing gap={2} style={s.allTasksLink}>
+              {activeItems.length > 0 ? `Tất cả ${activeItems.length} việc` : 'Xem việc'}
+            </IconText>
           </TouchableOpacity>
         </View>
 
@@ -356,14 +350,12 @@ export const ManagerHomeScreen: React.FC = () => {
           /*
             ── Hết việc gấp ──
 
-            KHÔNG báo trước việc chốt số điện của kỳ chưa tới hạn (gỡ 18/09/2026). Bản trước
-            hiện "Chốt chỉ số điện · N phòng · còn 12 ngày" suốt cả tháng: quản lý bấm vào thì
-            màn Điện đang ở kỳ tháng trước — không có gì để chụp — nên họ đọc thành "app bắt
-            chốt số giữa tháng mà không cho chụp". Việc điện chỉ hiện ở My Task từ đúng ngày
-            cuối tháng (ô "Chốt chỉ số điện — hạn hôm nay" phía trên).
+            KHÔNG báo trước việc chốt số điện (gỡ 18/09/2026). Từ 03/10/2026 điện không còn
+            hạn cuối tháng: máy chủ chỉ trả việc điện khi admin đã đẩy hoá đơn EVN mà còn
+            phòng thiếu số — lúc đó nó hiện ở ô "Phòng chưa chốt số điện" phía trên.
           */
           <View style={s.clearCard}>
-            <Text style={s.clearText}>✅  Mọi thứ ổn định hôm nay</Text>
+            <IconText icon="success" iconColor={Colors.success} style={s.clearText}>Mọi thứ ổn định hôm nay</IconText>
           </View>
         ) : (
           <>
@@ -383,7 +375,7 @@ export const ManagerHomeScreen: React.FC = () => {
                     {/* Icon + count badge */}
                     <View style={s.featuredTop}>
                       <View style={[s.featuredIconWrap, { backgroundColor: item.color + '1A' }]}>
-                        <Text style={s.featuredEmoji}>{item.icon}</Text>
+                        <Icon name={item.icon} size={15} color={item.color} />
                       </View>
                       <View style={[s.featuredCountBadge, { backgroundColor: item.color }]}>
                         <Text style={s.featuredCountText}>{item.count}</Text>
@@ -394,7 +386,7 @@ export const ManagerHomeScreen: React.FC = () => {
                     <Text style={s.featuredLabel} numberOfLines={2}>{item.label}</Text>
 
                     {/* CTA */}
-                    <Text style={[s.featuredCta, { color: item.color }]}>Xử lý →</Text>
+                    <IconText icon="arrow-right" trailing gap={3} iconSize={12} style={[s.featuredCta, { color: item.color }]}>Xử lý</IconText>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -414,13 +406,13 @@ export const ManagerHomeScreen: React.FC = () => {
                     activeOpacity={0.75}
                   >
                     <View style={[s.secondaryIconWrap, { backgroundColor: item.color + '14' }]}>
-                      <Text style={s.secondaryEmoji}>{item.icon}</Text>
+                      <Icon name={item.icon} size={14} color={item.color} />
                     </View>
                     <Text style={s.secondaryLabel}>{item.label}</Text>
                     <View style={[s.secondaryBadge, { backgroundColor: item.color + '15' }]}>
                       <Text style={[s.secondaryBadgeText, { color: item.color }]}>{item.count}</Text>
                     </View>
-                    <Text style={s.chevron}>›</Text>
+                    <Icon name="chevron-right" size={16} color={Colors.textMuted} />
                   </TouchableOpacity>
                 ))}
               </View>
@@ -441,7 +433,7 @@ export const ManagerHomeScreen: React.FC = () => {
             </View>
             {urgentTotal > 0 && (
               <View style={s.ovCardBadge}>
-                <Text style={s.ovCardBadgeText}>⚠ {urgentTotal} việc</Text>
+                <IconText icon="warning" gap={3} iconSize={11} style={s.ovCardBadgeText}>{urgentTotal} việc</IconText>
               </View>
             )}
           </View>
@@ -451,7 +443,7 @@ export const ManagerHomeScreen: React.FC = () => {
             {/* Khách thuê đang ở */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.primaryBg }]}>
-                <MaterialIcons name="perm-identity" size={22} color={Colors.primary} />
+                <Icon name="user" size={21} color={Colors.primary} />
               </View>
               <View style={s.ovKpiTexts}>
                 <Text style={[s.ovKpiVal, { color: Colors.primary }]}>{m.tenants}</Text>
@@ -465,7 +457,7 @@ export const ManagerHomeScreen: React.FC = () => {
             {/* Phòng trống */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.successLight }]}>
-                <MaterialIcons name="meeting-room" size={22} color={Colors.success} />
+                <Icon name="door" size={21} color={Colors.success} />
               </View>
               <View style={s.ovKpiTexts}>
                 <Text style={[s.ovKpiVal, { color: Colors.success }]}>{m.roomsAvailable}</Text>
@@ -479,7 +471,7 @@ export const ManagerHomeScreen: React.FC = () => {
             {/* Bảo trì */}
             <View style={s.ovKpiItem}>
               <View style={[s.ovKpiIcon, { backgroundColor: Colors.warningLight }]}>
-                <MaterialIcons name="build" size={20} color={Colors.warning} />
+                <Icon name="wrench" size={20} color={Colors.warning} />
               </View>
               <View style={s.ovKpiTexts}>
                 <Text style={[s.ovKpiVal, { color: Colors.warning }]}>{m.maintenance}</Text>
@@ -494,7 +486,7 @@ export const ManagerHomeScreen: React.FC = () => {
             {/* Phòng lẻ */}
             <View style={[s.ovRentalPill, { backgroundColor: Colors.primaryBg }]}>
               <View style={[s.ovRentalIconWrap, { backgroundColor: Colors.primary + '20' }]}>
-                <MaterialIcons name="apartment" size={18} color={Colors.primary} />
+                <Icon name="building" size={18} color={Colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[s.ovRentalLabel, { color: Colors.primary }]}>Phòng lẻ</Text>
@@ -509,7 +501,7 @@ export const ManagerHomeScreen: React.FC = () => {
             {/* Nhà nguyên căn */}
             <View style={[s.ovRentalPill, { backgroundColor: Colors.successLight }]}>
               <View style={[s.ovRentalIconWrap, { backgroundColor: Colors.success + '25' }]}>
-                <MaterialIcons name="home" size={18} color={Colors.success} />
+                <Icon name="home" size={18} color={Colors.success} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[s.ovRentalLabel, { color: Colors.success }]}>Nhà nguyên căn</Text>
@@ -547,11 +539,11 @@ export const ManagerHomeScreen: React.FC = () => {
                   {'icons' in a ? (
                     <View style={s.actionIconPair}>
                       {a.icons.map((ic) => (
-                        <MaterialIcons key={ic.name} name={ic.name} size={15} color={ic.color} />
+                        <Icon key={ic.name} name={ic.name} size={15} color={ic.color} />
                       ))}
                     </View>
                   ) : (
-                    <Text style={s.actionEmoji}>{a.emoji}</Text>
+                    <Icon name={a.icon} size={18} color={a.color} />
                   )}
                 </View>
                 <Text style={s.actionLabel} numberOfLines={2}>{a.label}</Text>
@@ -569,7 +561,7 @@ export const ManagerHomeScreen: React.FC = () => {
         <View style={[s.sectionRow, { marginTop: Spacing.lg }]}>
           <Text style={s.sectionTitle}>Cần chú ý</Text>
           <TouchableOpacity onPress={() => navigation.navigate('BuildingList')}>
-            <Text style={s.sectionLink}>Xem tất cả →</Text>
+            <IconText icon="chevron-right" trailing gap={2} style={s.sectionLink}>Xem tất cả</IconText>
           </TouchableOpacity>
         </View>
 
@@ -615,7 +607,7 @@ export const ManagerHomeScreen: React.FC = () => {
                     </Text>
                   </View>
                 )}
-                <Text style={s.chevron}>›</Text>
+                <Icon name="chevron-right" size={16} color={Colors.textMuted} />
               </View>
             </TouchableOpacity>
           );
@@ -627,8 +619,8 @@ export const ManagerHomeScreen: React.FC = () => {
           onPress={() => navigation.navigate('BuildingList')}
           activeOpacity={0.8}
         >
-          <Text style={s.viewAllText}>🏢  Quản lý tất cả toà nhà ({m.totalBuildings})</Text>
-          <Text style={s.viewAllArrow}>→</Text>
+          <IconText icon="building" style={s.viewAllText}>Quản lý tất cả toà nhà ({m.totalBuildings})</IconText>
+          <Icon name="arrow-right" size={16} color={Colors.primary} />
         </TouchableOpacity>
 
         <View style={{ height: 100 }} />
@@ -659,7 +651,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
   },
-  notifIcon:      { fontSize: 16 },
+
   notifBadge:     {
     position: 'absolute', top: 4, right: 4, minWidth: 14, height: 14,
     borderRadius: 7, backgroundColor: Colors.error,
@@ -841,7 +833,7 @@ const s = StyleSheet.create({
     width: 28, height: 28, borderRadius: 9,
     alignItems: 'center', justifyContent: 'center',
   },
-  featuredEmoji:      { fontSize: 14 },
+
   featuredCountBadge: {
     minWidth: 22, height: 22, borderRadius: 11,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
@@ -869,7 +861,7 @@ const s = StyleSheet.create({
     width: 26, height: 26, borderRadius: 7,
     alignItems: 'center', justifyContent: 'center',
   },
-  secondaryEmoji:     { fontSize: 13 },
+
   secondaryLabel:     { flex: 1, fontSize: 12, fontWeight: '500', color: Colors.textPrimary },
   secondaryBadge:     {
     minWidth: 22, height: 17, borderRadius: 9,
@@ -877,7 +869,6 @@ const s = StyleSheet.create({
   },
   secondaryBadgeText: { fontSize: 10, fontWeight: '700' },
 
-  chevron: { fontSize: 15, color: Colors.textMuted },
 
   // ── Quick actions ─────────────────────────────────────────────────
   actionsRow: {
@@ -895,7 +886,7 @@ const s = StyleSheet.create({
     width: 36, height: 36, borderRadius: 10,
     alignItems: 'center', justifyContent: 'center', marginBottom: 5,
   },
-  actionEmoji:     { fontSize: 17 },
+
   // Hai glyph sát nhau, khít trong ô 36px — xem chú thích ở ô "Ghi điện nước".
   actionIconPair:  { flexDirection: 'row', alignItems: 'center', gap: 1 },
   /**
@@ -935,5 +926,5 @@ const s = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   viewAllText:  { fontSize: 13, fontWeight: '600', color: Colors.primary },
-  viewAllArrow: { fontSize: 15, color: Colors.primary, fontWeight: '600' },
+
 });
