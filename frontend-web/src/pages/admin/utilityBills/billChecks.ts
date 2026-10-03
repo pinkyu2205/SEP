@@ -56,6 +56,8 @@ export interface EvalContext {
   roomPendingQty?: number | null;
   /** Tổng tiêu thụ trên hoá đơn kỳ trước — để bắt đọc dư/thiếu một chữ số. */
   lastQty?: number | null;
+  /** Tổng tiêu thụ in ở chỗ khác trên CÙNG tờ giấy (`BillReadout.otherTotals`). */
+  paperOtherTotals?: string[] | null;
 }
 
 export interface BillEvaluation {
@@ -182,6 +184,22 @@ export const evaluateBill = (d: BillDraft, ctx: EvalContext): BillEvaluation => 
     qtyCheck = { tone: 'ok', label: pct === 0 ? 'Bằng kỳ trước' : `${pct > 0 ? '+' : '−'}${Math.abs(pct)}% so kỳ trước` };
   } else {
     qtyCheck = { tone: 'ok', label: '' };
+  }
+
+  /*
+    Tờ giấy tự mâu thuẫn: EVN in tổng ở hai chỗ (dưới bảng chỉ số và trong bảng tiền), hai
+    chỗ lệch nhau. Bộ đọc lấy số khớp bảng chỉ số, nhưng admin phải được biết là còn một
+    số khác — không chặn, vì số kia có khi chính là chỗ OCR đọc hỏng.
+  */
+  const otherTotals = [...new Set((ctx.paperOtherTotals ?? []).map(Number))]
+    .filter((n) => n > 0 && n !== qty);
+  if (qty && otherTotals.length > 0 && qtyCheck.tone !== 'block') {
+    qtyCheck = {
+      tone: 'warn',
+      label: 'Giấy in 2 tổng khác nhau',
+      detail: `Tờ giấy còn in tổng ${otherTotals.map(vn).join(', ')} ${unit} ở chỗ khác, lệch với ${vn(qty)} ${unit} đang điền. `
+        + 'Hệ thống lấy số khớp bảng chỉ số (mới − cũ). Soi lại ảnh xem số nào đúng trước khi phát hành.',
+    };
   }
 
   // ── Tổng tiền + đơn giá ──
@@ -443,6 +461,17 @@ export const publishErrorMessage = (e: any, cfg: KindConfig): string => {
   }
   if (code === 'ROOM_SUM_EXCEEDS_BILL') {
     return 'Tổng chỉ số các phòng đã chốt vượt tổng trên giấy — kiểm lại tổng tiêu thụ hoặc chỉ số từng phòng.';
+  }
+  if (code === 'INVOICE_ALREADY_EXISTS') {
+    /*
+      Nhà chia phòng: máy chủ lập hoá đơn từ MỌI bản chốt chưa gắn hoá đơn của nhà, kể cả bản
+      cũ từ hồi phòng còn trống. Một phòng có hai bản như vậy thì bản thứ hai đụng bản thứ nhất
+      trong cùng lượt → máy chủ huỷ CẢ NHÀ (03/10/2026, MTX#4 · MTX#5). Câu gốc "đã nhận hoá đơn"
+      nghe như thành công — phải nói rõ là chưa có gì được tạo.
+    */
+    const said = String(data?.message || data?.error || '').trim().replace(/\.$/, '');
+    return `Chưa phát hành nhà này — máy chủ báo "${said || 'trùng hoá đơn phòng'}" rồi huỷ cả lượt. `
+      + 'Phòng đó còn bản chốt cũ chưa gắn hoá đơn nên bị tính hai lần trong cùng kỳ: lỗi dữ liệu phía máy chủ, sửa ở màn này không được.';
   }
   return data?.message || data?.error || e?.message || 'Không phát hành được hoá đơn.';
 };

@@ -100,8 +100,8 @@ export const waterBillService = {
   ocr: (imageUrl: string): Promise<OcrEvnBillResponse> =>
     api.post('/api/v1/ocr/evn-bill', { imageUrl, type: 'WATER' }),
 
-  create: (input: CreateWaterBillInput): Promise<WaterBill> =>
-    api.post<unknown, WaterBill>(BASE, { ...input, type: TYPE }),
+  create: (input: CreateWaterBillInput, opts?: { silent?: boolean }): Promise<WaterBill> =>
+    api.post<unknown, WaterBill>(BASE, { ...input, type: TYPE }, { skipErrorToast: opts?.silent } as object),
 
   list: async (params: { propertyId?: number; month?: number; year?: number }): Promise<WaterBill[]> => {
     const raw = await api.get<unknown, unknown>(BASE, { params: { ...params, type: TYPE } });

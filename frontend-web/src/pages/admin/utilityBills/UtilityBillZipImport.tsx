@@ -16,7 +16,7 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  AlertTriangle, CheckCircle2, FileArchive, Loader2, Send, Upload, X,
+  AlertTriangle, CheckCircle2, FileArchive, Loader2, RotateCcw, Send, Upload, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { uploadToCloudinary } from '@/services/upload.service';
@@ -24,7 +24,8 @@ import { loadUtilityCycle, pickLastBill, type LastBill, type UtilityCycle } from
 import { periodProblem } from '@/utils/evnInvoiceParser';
 import { inspectZipBills, type ZipBillPreview } from '@/utils/zipUtilityBills';
 import type { PropertyResponse } from '@/types/api.types';
-import type { KindConfig } from './kinds';
+import type { BillReadout, KindConfig } from './kinds';
+import { rereadBill } from './billReading';
 import {
   EMPTY_DRAFT, evaluateBill, loadRoomReadings, normCode, pickPaperCode, publishErrorMessage,
   showCode, summarizeRooms, type BillDraft, type BillEvaluation, type Check, type RoomSummary,
@@ -47,8 +48,13 @@ interface Row {
   cycle?: UtilityCycle | null;
   lastBill?: LastBill | null;
   rooms?: RoomSummary | null;
+  /** Kết quả đọc ảnh gần nhất — giữ lại để đối chiếu các tổng in trên giấy. */
+  readout?: BillReadout | null;
   /** Ghi chú của bước đọc: OCR hỏng, không ra số… */
   note?: string;
+  /** Kết quả lần bấm "Đọc lại" gần nhất: ô nào vừa được cập nhật. */
+  readInfo?: string;
+  rereading?: boolean;
   /** Kỳ này nhà đã có hoá đơn — bỏ qua, khỏi phát hành trùng. */
   already: boolean;
   /** Admin bỏ tick — không phát hành nhà này trong lượt này. */
@@ -126,6 +132,33 @@ export const UtilityBillZipImport = ({
   };
 
   // ── Chặng 2: tải ảnh + đọc + tra hồ sơ từng nhà ───────────────────────────────
+
+  /** Hồ sơ để đối chiếu: nguyên căn tra chỉ số kỳ trước, chia phòng tra các phòng đã chốt. */
+  const loadDossier = async (property: PropertyResponse): Promise<Partial<Row>> => {
+    if (property.wholeHouse === true) {
+      try {
+        const c = await loadUtilityCycle(property.id, cfg.kind, month, year);
+        return { cycle: c, lastBill: c.lastBill ?? null };
+      } catch {
+        return { cycle: null };
+      }
+    }
+    const [lastBill, rooms] = await Promise.all([
+      cfg.list({ propertyId: property.id }).then((bills) => pickLastBill(bills, month, year)).catch(() => null),
+      loadRoomReadings(cfg.kind, property.id, month, year).then(summarizeRooms).catch(() => null),
+    ]);
+    return { lastBill, rooms };
+  };
+
+  const draftFromReadout = (r: BillReadout, property: PropertyResponse): BillDraft => ({
+    customerCode: pickPaperCode(r.codeCandidates, cfg.storedCode(property)),
+    paperPrev: r.prev,
+    paperNew: r.next,
+    qty: r.qty,
+    amount: r.amount,
+    period: r.period,
+  });
+
   const runReading = async () => {
     if (!preview) return;
     setStage('reading');
@@ -147,19 +180,7 @@ export const UtilityBillZipImport = ({
         setProgress((p) => ({ ...p, done: p.done + 1 }));
         return row;
       }
-      const whole = m.property.wholeHouse === true;
-      const dossier = whole
-        ? loadUtilityCycle(m.property.id, cfg.kind, month, year)
-          .then((c) => { row.cycle = c; row.lastBill = c.lastBill ?? null; })
-          .catch(() => { row.cycle = null; })
-        : Promise.all([
-          cfg.list({ propertyId: m.property.id })
-            .then((bills) => { row.lastBill = pickLastBill(bills, month, year); })
-            .catch(() => { row.lastBill = null; }),
-          loadRoomReadings(cfg.kind, m.property.id, month, year)
-            .then((rs) => { row.rooms = summarizeRooms(rs); })
-            .catch(() => { row.rooms = null; }),
-        ]);
+      const dossier = loadDossier(m.property).then((patch) => { Object.assign(row, patch); });
 
       const reading = (async () => {
         try {
@@ -170,14 +191,8 @@ export const UtilityBillZipImport = ({
         }
         try {
           const r = await cfg.read(row.imageUrl);
-          row.draft = {
-            customerCode: pickPaperCode(r.codeCandidates, cfg.storedCode(m.property)),
-            paperPrev: r.prev,
-            paperNew: r.next,
-            qty: r.qty,
-            amount: r.amount,
-            period: r.period || batchPeriod,
-          };
+          row.readout = r;
+          row.draft = { ...draftFromReadout(r, m.property), period: r.period || batchPeriod };
           row.periodSource = r.period ? 'ocr' : 'default';
           if (!r.qty && !r.amount) row.note = 'Không đọc được số — nhập tay';
         } catch {
@@ -198,8 +213,72 @@ export const UtilityBillZipImport = ({
   // ── Chặng 3: duyệt ────────────────────────────────────────────────────────────
   const patchRow = (idx: number, patch: Partial<Row>) =>
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  // Sửa một ô là gỡ trạng thái "máy chủ từ chối" — số đã khác thì lượt sau được thử lại.
   const patchDraft = (idx: number, patch: Partial<BillDraft>, extra?: Partial<Row>) =>
-    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...extra, draft: { ...r.draft, ...patch } } : r)));
+    setRows((rs) => rs.map((r, i) => (i === idx
+      ? {
+          ...r,
+          ...(r.state === 'error' ? { state: 'idle' as const, error: undefined } : {}),
+          ...extra,
+          draft: { ...r.draft, ...patch },
+        }
+      : r)));
+
+  const FIELD_NAMES: Record<keyof BillDraft, string> = {
+    customerCode: cfg.codeLabel.toLowerCase(),
+    paperPrev: 'chỉ số cũ',
+    paperNew: 'chỉ số mới',
+    qty: 'tiêu thụ',
+    amount: 'tổng tiền',
+    period: 'kỳ',
+  };
+
+  /**
+   * "Đọc lại" một nhà: đọc ảnh gốc + hai bản xử lý ảnh (`rereadBill`), tra lại hồ sơ — quản
+   * lý có thể vừa chốt thêm phòng trong lúc admin đang duyệt. Ô nào lần này đọc ra thì thay,
+   * ô nào không ra thì giữ số đang có, không xoá trắng công admin đã gõ.
+   */
+  const rereadRow = async (idx: number) => {
+    const row = rows[idx];
+    if (!row || row.rereading) return;
+    patchRow(idx, { rereading: true, readInfo: undefined });
+    const fresh: Partial<Row> = {};
+    try {
+      fresh.imageUrl = row.imageUrl ?? await uploadToCloudinary(row.file, 'image');
+      const [r, dossier] = await Promise.all([rereadBill(cfg, fresh.imageUrl), loadDossier(row.property)]);
+      const read = draftFromReadout(r, row.property);
+      setRows((rs) => rs.map((x, i) => {
+        if (i !== idx) return x;
+        const keys = (Object.keys(read) as (keyof BillDraft)[]).filter((k) => read[k] !== '');
+        // Nhà chia phòng không có ô chỉ số trên thẻ — khỏi báo "cập nhật chỉ số" cho ô không thấy.
+        const visible = x.property.wholeHouse === true ? keys : keys.filter((k) => k !== 'paperPrev' && k !== 'paperNew');
+        const changed = visible.filter((k) => read[k] !== x.draft[k]);
+        const draft = { ...x.draft };
+        keys.forEach((k) => { draft[k] = read[k]; });
+        return {
+          ...x,
+          ...fresh,
+          ...dossier,
+          draft,
+          readout: r,
+          periodSource: r.period ? 'ocr' : x.periodSource,
+          rereading: false,
+          state: x.state === 'error' ? 'idle' : x.state,
+          error: undefined,
+          note: keys.some((k) => k === 'qty' || k === 'amount') ? undefined : 'Đọc lại vẫn không ra số — nhập tay',
+          readInfo: changed.length
+            ? `Đọc lại: cập nhật ${changed.map((k) => FIELD_NAMES[k]).join(', ')}`
+            : 'Đọc lại: không có số nào khác lần trước',
+        };
+      }));
+    } catch {
+      patchRow(idx, {
+        ...fresh,
+        rereading: false,
+        note: fresh.imageUrl ? 'Đọc lại không được — dịch vụ đọc hoá đơn lỗi' : 'Không tải được ảnh lên',
+      });
+    }
+  };
 
   /** Đổi kỳ chung → chảy xuống mọi dòng còn đang dùng kỳ đoán (chừa dòng đọc được / tự gõ / đã xong). */
   const changeBatchPeriod = (value: string) => {
@@ -230,6 +309,7 @@ export const UtilityBillZipImport = ({
       year,
       roomPendingQty: r.rooms?.pendingQty ?? null,
       lastQty: r.lastBill?.totalQuantity ?? null,
+      paperOtherTotals: r.readout?.otherTotals ?? null,
     });
     const owners = codeOwners.get(normCode(r.draft.customerCode)) ?? [];
     if (owners.length > 1) {
@@ -255,13 +335,15 @@ export const UtilityBillZipImport = ({
   const isDone = (r: Row) => r.already || r.state === 'done';
   const isReady = (i: number) => {
     const r = rows[i];
-    return !isDone(r) && r.include && evals[i]?.ready;
+    // Nhà vừa bị máy chủ từ chối không tự lọt vào lượt sau — admin sửa ô, bấm "Đọc lại" hoặc
+    // "Thử lại" thì mới quay về sẵn sàng. Không thì bấm phát hành lần nữa lại ăn đúng lỗi cũ.
+    return !isDone(r) && r.include && !r.rereading && r.state !== 'error' && evals[i]?.ready;
   };
   const FILTERS: { key: FilterKey; label: string; on: string; match: (i: number) => boolean }[] = [
     { key: 'all', label: 'Tất cả', on: 'bg-slate-900 text-white', match: () => true },
     {
       key: 'issue', label: 'Cần sửa', on: 'bg-rose-600 text-white',
-      match: (i) => !isDone(rows[i]) && !evals[i]?.ready,
+      match: (i) => !isDone(rows[i]) && (!evals[i]?.ready || rows[i].state === 'error'),
     },
     { key: 'ready', label: 'Sẵn sàng', on: 'bg-emerald-600 text-white', match: isReady },
     {
@@ -289,6 +371,8 @@ export const UtilityBillZipImport = ({
       const whole = r.property.wholeHouse === true;
       patchRow(i, { state: 'publishing', error: undefined });
       try {
+        // `silent`: lỗi từng nhà hiện ngay trong thẻ của nhà đó. Để toast lỗi chung của máy chủ
+        // bật thêm thì dấu X đỏ đè lên toast thành công, không biết cái nào của nhà nào.
         await cfg.publish({
           propertyId: r.property.id,
           billingPeriod: r.draft.period.trim(),
@@ -301,7 +385,7 @@ export const UtilityBillZipImport = ({
           newReading: whole ? ev.sendNew ?? undefined : undefined,
           customerCode: normCode(r.draft.customerCode) ? r.draft.customerCode.trim() : undefined,
           ocrConfirmed: true,
-        });
+        }, { silent: true });
         patchRow(i, { state: 'done' });
         ok += 1;
       } catch (e: any) {
@@ -310,10 +394,20 @@ export const UtilityBillZipImport = ({
       setProgress((p) => ({ ...p, done: p.done + 1 }));
     }
     setBusy(false);
-    if (ok > 0) {
+    // MỘT toast tổng kết cho cả lượt — nói rõ bao nhiêu nhà chưa đi, kể cả khi phần lớn đã xong.
+    const failed = targets.length - ok;
+    if (failed === 0) {
       toast.success(`Đã phát hành hoá đơn ${cfg.noun} cho ${ok} nhà`);
-      onDone();
+    } else if (ok > 0) {
+      toast(`Đã phát hành ${ok}/${targets.length} nhà · ${failed} nhà CHƯA phát hành được — lý do ghi trong thẻ đỏ`, {
+        icon: <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />,
+        duration: 8000,
+      });
+    } else {
+      toast.error(`Chưa phát hành được nhà nào — lý do ghi trong từng thẻ`);
     }
+    if (failed > 0) setFilter('issue');
+    if (ok > 0) onDone();
   };
 
   const visibleIdx = rows.map((_, i) => i).filter((i) => FILTERS.find((f) => f.key === filter)!.match(i));
@@ -570,6 +664,8 @@ export const UtilityBillZipImport = ({
                       month={month}
                       onDraft={(patch, extra) => patchDraft(i, patch, extra)}
                       onToggle={() => patchRow(i, { include: !rows[i].include })}
+                      onReread={() => rereadRow(i)}
+                      onRetry={() => patchRow(i, { state: 'idle', error: undefined })}
                       onZoom={setZoom}
                       locked={busy}
                     />
@@ -650,19 +746,21 @@ const Cell = ({ label, system, children, check }: {
   </div>
 );
 
-const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onZoom, locked }: {
+const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onReread, onRetry, onZoom, locked }: {
   cfg: KindConfig;
   row: Row;
   ev: BillEvaluation;
   month: number;
   onDraft: (patch: Partial<BillDraft>, extra?: Partial<Row>) => void;
   onToggle: () => void;
+  onReread: () => void;
+  onRetry: () => void;
   onZoom: (url: string) => void;
   locked: boolean;
 }) => {
   const whole = row.property.wholeHouse === true;
   const done = row.already || row.state === 'done';
-  const disabled = done || locked;
+  const disabled = done || locked || row.rereading === true;
   const stored = showCode(cfg.storedCode(row.property));
   const d = row.draft;
   const firstBlock = ev.blockers[0];
@@ -704,8 +802,23 @@ const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onZoom, locked }: 
             {row.lastBill && (
               <span> · kỳ trước {fmtNum(row.lastBill.totalQuantity)} {cfg.unit} / {fmtVnd(row.lastBill.totalAmount)}</span>
             )}
+            {row.readInfo && <span className="font-semibold text-slate-600"> · {row.readInfo}</span>}
           </p>
         </div>
+        {!done && row.state !== 'publishing' && (
+          <button
+            type="button"
+            onClick={onReread}
+            disabled={locked || row.rereading}
+            title="Đọc lại ảnh này (kèm bản làm nét, phóng to) và tra lại hồ sơ nhà. Ô nào đọc ra số thì thay, ô nào không ra thì giữ nguyên."
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {row.rereading
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RotateCcw className="h-3.5 w-3.5" />}
+            {row.rereading ? 'Đang đọc…' : row.imageUrl ? 'Đọc lại' : 'Tải & đọc lại'}
+          </button>
+        )}
         <div className="shrink-0 text-right">
           {row.already ? (
             <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-bold text-slate-600">Kỳ này đã có</span>
@@ -715,6 +828,10 @@ const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onZoom, locked }: 
             </span>
           ) : row.state === 'publishing' ? (
             <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+          ) : row.state === 'error' ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-bold text-rose-700">
+              <X className="h-3.5 w-3.5" /> Chưa phát hành được
+            </span>
           ) : !row.include ? (
             <span className="text-xs font-bold text-slate-500">Không phát hành lượt này</span>
           ) : ev.ready ? (
@@ -851,7 +968,18 @@ const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onZoom, locked }: 
         </p>
       )}
       {row.state === 'error' && row.error && (
-        <p className="mx-4 mb-3 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700">{row.error}</p>
+        <div className="mx-4 mb-3 flex items-start gap-3 rounded-lg bg-rose-50 px-3 py-1.5">
+          <p className="min-w-0 flex-1 text-xs font-semibold leading-relaxed text-rose-700">{row.error}</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={locked}
+            title="Đưa nhà này về danh sách sẵn sàng để phát hành lại ở lượt sau"
+            className="shrink-0 rounded-md border border-rose-200 bg-white px-2 py-0.5 text-[11px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+          >
+            Thử lại
+          </button>
+        </div>
       )}
     </div>
   );
