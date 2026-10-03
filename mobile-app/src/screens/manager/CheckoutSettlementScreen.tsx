@@ -150,7 +150,8 @@ export const CheckoutSettlementScreen: React.FC<any> = ({ navigation, route }) =
     if (invoices.length) {
       invoices.forEach(inv => rows.push({
         key: `inv-${inv.id}`,
-        label: `${CHARGE_LABEL[inv.type ?? ''] ?? 'Hoá đơn'} ${inv.code || `#${inv.id}`}`,
+        label: `${CHARGE_LABEL[inv.type ?? ''] ?? 'Hoá đơn'} ${inv.code || `#${inv.id}`}`
+          + (inv.maintenanceRequestId ? ` (phiếu bảo trì M-${inv.maintenanceRequestId})` : ''),
         amount: inv.amount,
       }));
     } else if (chargesTotal > 0) {

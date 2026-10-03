@@ -141,6 +141,8 @@ export interface MaintenanceTicket {
   updatedAt: string;
   /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo. */
   issuedInvoice?: MaintenanceRequest['issuedInvoice'];
+  tenantChargeStatus?: MaintenanceRequest['tenantChargeStatus'];
+  tenantChargePaidAt?: string;
   /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
   /** Lịch hẹn manager tới xem sự cố — tenant đặt lúc tạo / đổi qua reschedule-visit. */

@@ -1,5 +1,11 @@
 # Bảo trì: sửa lỗi "đã trả tiền mà phiếu vẫn Chờ thanh toán" + đóng phiếu ngay, khách trả sau — 03/10/2026
 
+> **ĐÃ XONG — BE `a5d7969` ("chinh sua qui trinh bao tri v2.1"), FE đã khớp.**
+> Mục 1: `REQUIRES_NEW` + migration đóng phiếu `WAITING_PAYMENT` cũ. Mục 2: phiếu luôn `CLOSED`, có
+> `tenantChargeStatus` + `tenantChargePaidAt`. Mục 3: huỷ phiếu huỷ hoá đơn chưa trả; đã trả → lỗi
+> `MAINTENANCE_CHARGE_ALREADY_PAID`. Mục 4: `finalCharges[].maintenanceRequestId` trong quyết toán.
+> BE còn cho `complete()` nhận `equipmentNeedsReplacement` (đang sửa mới phát hiện phải thay) — không bắt ảnh AFTER/hoá đơn.
+
 Đã đọc code thật ở `origin/dev` **`a647792`** ("chinh sua qui trinh bao tri v2"). Cảm ơn BE đã ship phần
 "thay mới kết thúc tại chẩn đoán" + chặn tạo phiếu cho thiết bị `BROKEN` — FE đã khớp.
 

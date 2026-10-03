@@ -205,6 +205,9 @@ export interface MaintenanceRequest {
   updatedAt: string;
   /** Chỉ có khi vừa complete() Luồng B (manager sửa hộ) — hoá đơn MAINTENANCE vừa tạo kèm QR PayOS. */
   issuedInvoice?: MaintenanceIssuedInvoiceDto;
+  /** Trạng thái khoản thu khách (tính lúc đọc từ hoá đơn) — phiếu sửa xong luôn closed. */
+  tenantChargeStatus?: 'none' | 'unpaid' | 'overdue' | 'paid';
+  tenantChargePaidAt?: string;
   /** Log ảnh đầy đủ mọi vòng (append-only) — không bị mất khi tạo phiếu mới. */
   photoHistory?: MaintenancePhotoHistoryDto[];
   /** Lịch hẹn manager tới xem sự cố — tenant đặt lúc tạo / đổi qua reschedule-visit. */
@@ -338,6 +341,9 @@ export interface MaintenanceRequestDto {
   updatedAt: string;
   /** Luôn có khi billingHint=TENANT_CHARGE_PENDING và hoá đơn chưa PAID/CANCELLED (mọi GET, không chỉ ngay sau complete()). */
   issuedInvoice?: MaintenanceIssuedInvoiceDto;
+  /** BE a5d7969: NONE = không thu khách; UNPAID/OVERDUE = còn nợ (có issuedInvoice); PAID = đã trả. */
+  tenantChargeStatus?: 'NONE' | 'UNPAID' | 'OVERDUE' | 'PAID';
+  tenantChargePaidAt?: string;
   /** Lịch hẹn manager tới xem sự cố (bắt buộc lúc tạo). */
   visitAppointmentAt?: string;
   /** Manager quét QR xác nhận có mặt — không đổi status, chỉ ghi mốc thời gian. */
