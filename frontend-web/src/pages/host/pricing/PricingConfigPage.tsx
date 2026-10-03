@@ -636,7 +636,7 @@ export const PricingConfigPage = () => {
           {/* ── 4. Dự phòng ───────────────────────────────────────────────── */}
           <Card
             title="Dự phòng rủi ro" icon={Calculator} defaultOpen={false}
-            summary={`Trống ${cfg.vRatePct}% · bàn giao ${cfg.handoverBufferMonths} tháng`}
+            summary={`Trống ${cfg.vRatePct}% · trả nhà ${cfg.handoverBufferMonths} tháng`}
           >
             <div className="space-y-4">
               <div>
@@ -657,8 +657,12 @@ export const PricingConfigPage = () => {
               </div>
 
               <Field
-                label="Trừ cửa sổ bàn giao cuối kỳ"
-                hint={<>Số tháng cuối HĐ chủ nhà <b>không có doanh thu</b> (dọn đi, sơn sửa trả nhà). 0 = không chừa.</>}
+                label="Số tháng cuối để trả nhà cho chủ"
+                hint={<>
+                  Cuối hợp đồng thuê nhà gốc, khách dọn đi và công ty sơn sửa để trả lại nhà. Những tháng
+                  đó nhà trống, <b>không thu được tiền phòng</b>, nên giá được tính để thu hồi vốn sớm hơn.
+                  Thường 1 tháng. Nhập 0 nếu không cần chừa.
+                </>}
               >
                 <div className="relative">
                   <input type="number" min={0} max={12} value={cfg.handoverBufferMonths}
@@ -713,8 +717,8 @@ export const PricingConfigPage = () => {
                 <dd className="font-bold tabular-nums text-slate-900">{cfg.vRatePct}%</dd>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-slate-600">Cửa sổ bàn giao</dt>
-                <dd className="font-bold tabular-nums text-slate-400">−{cfg.handoverBufferMonths} tháng</dd>
+                <dt className="text-slate-600">Tháng trả nhà (không thu tiền)</dt>
+                <dd className="font-bold tabular-nums text-slate-900">{cfg.handoverBufferMonths} tháng</dd>
               </div>
             </dl>
 

@@ -1603,7 +1603,7 @@ const OnboardingPriceReview = () => {
               {overCountedMonths === 0 && realMonths - revenueMonths > 0 && (
                 <Note>
                   <b>Hợp đồng dài {realMonths} tháng nhưng chỉ {revenueMonths} tháng được tính có doanh thu.</b>{' '}
-                  {realMonths - revenueMonths} tháng cuối để dành làm <b>cửa sổ bàn giao</b>: cho khách dọn đi,
+                  {realMonths - revenueMonths} tháng cuối để dành <b>trả nhà cho chủ</b>: cho khách dọn đi,
                   tháo nội thất, sơn sửa hoàn trả hiện trạng cho chủ nhà gốc — quãng đó không có khách nào ở.
                   <span className="mt-1 block">
                     Tiền thuê trả chủ vẫn tính <b>đủ trọn gói {formatVND(d?.capexParts.rent ?? calc.cRent ?? 0)}</b> cho cả {realMonths} tháng
