@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon } from './Icon';
 
 interface SearchBarProps {
   mode?: 'compact' | 'active';
@@ -21,7 +22,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
 }) => {
   const content = (
     <View style={[styles.container, mode === 'active' && styles.activeContainer]}>
-      <Text style={styles.icon}>🔍</Text>
+      <Icon name="search" size={18} color={Colors.textMuted} style={styles.icon} />
       {mode === 'compact' ? (
         <Text style={styles.placeholder}>{placeholder}</Text>
       ) : (
@@ -37,7 +38,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
       )}
       {mode === 'active' && !!value && (
         <TouchableOpacity onPress={() => onChangeText?.('')} style={styles.clearBtn}>
-          <Text style={styles.clearIcon}>✕</Text>
+          <Icon name="close" size={16} color={Colors.textMuted} />
         </TouchableOpacity>
       )}
     </View>
@@ -65,7 +66,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   icon: {
-    fontSize: 18,
     marginRight: Spacing.sm,
   },
   placeholder: {
@@ -82,8 +82,4 @@ const styles = StyleSheet.create({
   clearBtn: {
     padding: Spacing.xs,
   },
-  clearIcon: {
-    fontSize: 14,
-    color: Colors.textMuted,
-  }
 });

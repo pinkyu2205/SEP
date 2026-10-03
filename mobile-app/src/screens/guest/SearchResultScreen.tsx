@@ -6,7 +6,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Colors, Spacing, BorderRadius, Typography, Shadow } from '@/constants';
-import { PropertyCard, FilterChips } from '@/components/common';
+import { PropertyCard, FilterChips, Icon } from '@/components/common';
+import type { FilterChipOption } from '@/components/common/FilterChips';
 import { searchService } from '@/services';
 import { PropertyListing } from '@/types';
 import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
@@ -14,10 +15,10 @@ import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 type NavigationProp = NativeStackNavigationProp<GuestStackParamList, 'SearchResult'>;
 type RouteProps = RouteProp<GuestStackParamList, 'SearchResult'>;
 
-const SORT_OPTIONS = [
+const SORT_OPTIONS: FilterChipOption[] = [
   { id: 'newest', label: 'Mới nhất' },
-  { id: 'price_asc', label: '↑ Giá thấp' },
-  { id: 'price_desc', label: '↓ Giá cao' },
+  { id: 'price_asc', label: 'Giá thấp', icon: 'arrow-up' },
+  { id: 'price_desc', label: 'Giá cao', icon: 'arrow-down' },
 ];
 
 export const SearchResultScreen: React.FC = () => {
@@ -49,8 +50,8 @@ export const SearchResultScreen: React.FC = () => {
 
   const getFilterSummary = () => {
     const parts: string[] = [];
-    if (filters.propertyType === 'whole_house') parts.push('🏠 Thuê nguyên căn');
-    else if (filters.propertyType === 'apartment') parts.push('🛏 Thuê theo phòng');
+    if (filters.propertyType === 'whole_house') parts.push('Thuê nguyên căn');
+    else if (filters.propertyType === 'apartment') parts.push('Thuê theo phòng');
     if (filters.cityId) parts.push('Theo thành phố');
     if (filters.priceMax) parts.push('Dưới ' + (filters.priceMax / 1_000_000) + 'tr');
     if (filters.keyword) parts.push(`"${filters.keyword}"`);
@@ -62,20 +63,20 @@ export const SearchResultScreen: React.FC = () => {
       {/* ── Header ── */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backIcon}>←</Text>
+          <Icon name="back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Kết quả tìm kiếm</Text>
           <Text style={styles.headerSub}>{total} bất động sản</Text>
         </View>
         <TouchableOpacity style={styles.filterIconBtn} onPress={() => navigation.navigate('Search')}>
-          <Text style={styles.filterIconText}>⚙️</Text>
+          <Icon name="filter" size={19} color={Colors.primary} />
         </TouchableOpacity>
       </View>
 
       {/* ── Filter summary ── */}
       <View style={styles.summaryBar}>
-        <Text style={styles.summaryIcon}>🔍</Text>
+        <Icon name="search" size={15} color={Colors.primaryDark} style={styles.summaryIcon} />
         <Text style={styles.summaryText} numberOfLines={1}>{getFilterSummary()}</Text>
         <TouchableOpacity style={styles.editBtn} onPress={() => navigation.navigate('Search')}>
           <Text style={styles.editBtnText}>Sửa lọc</Text>
@@ -101,7 +102,7 @@ export const SearchResultScreen: React.FC = () => {
         </View>
       ) : results.length === 0 ? (
         <View style={styles.centerContainer}>
-          <Text style={styles.emptyIcon}>🏠</Text>
+          <Icon name="home" size={48} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
           <Text style={styles.emptyTitle}>Chưa tìm thấy kết quả</Text>
           <Text style={styles.emptySubText}>Hãy thử điều chỉnh lại bộ lọc hoặc mở rộng khu vực tìm kiếm.</Text>
           <TouchableOpacity style={styles.resetBtn} onPress={() => navigation.navigate('Search')}>
@@ -152,11 +153,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backIcon: {
-    fontSize: 22,
-    color: Colors.textPrimary,
-    lineHeight: 26,
-  },
+
   headerCenter: {
     flex: 1,
     marginHorizontal: Spacing.md,
@@ -179,9 +176,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  filterIconText: {
-    fontSize: 18,
-  },
+
 
   // ── Summary bar ───────────────────────────────────────────────────────────
   summaryBar: {
@@ -194,7 +189,6 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.primaryLight + '40',
   },
   summaryIcon: {
-    fontSize: 14,
     marginRight: Spacing.xs,
   },
   summaryText: {
@@ -243,7 +237,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   emptyIcon: {
-    fontSize: 56,
     marginBottom: Spacing.md,
   },
   emptyTitle: {

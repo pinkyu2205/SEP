@@ -26,8 +26,7 @@ import ExtensionRequests from '@/pages/admin/ExtensionRequests';
 import UtilityDisputes from '@/pages/admin/UtilityDisputes';
 import { HandoverMonitoring } from '@/pages/admin/HandoverMonitoring';
 import { MeterOverridePasscodes } from '@/pages/admin/MeterOverridePasscodes';
-import { EvnBillPublishing } from '@/pages/admin/EvnBillPublishing';
-import { WaterBillPublishing } from '@/pages/admin/WaterBillPublishing';
+import { UtilityBillPublishPage } from '@/pages/admin/utilityBills/UtilityBillPublishPage';
 import { MaintenanceEquipmentMonitoring } from '@/pages/admin/MaintenanceEquipmentMonitoring';
 import { RefusedPayments } from '@/pages/admin/RefusedPayments';
 import { SuperAdminOverview } from '@/pages/admin/AdminOverview';
@@ -127,8 +126,10 @@ function App() {
             <Route path="/admin/utility-disputes" element={<UtilityDisputes />} />
             <Route path="/admin/handover" element={<HandoverMonitoring />} />
             <Route path="/admin/meter-override" element={<MeterOverridePasscodes />} />
-            <Route path="/admin/evn-bills" element={<EvnBillPublishing />} />
-            <Route path="/admin/water-bills" element={<WaterBillPublishing />} />
+            {/* `key` riêng: hai route dùng chung một component, không có key thì chuyển từ
+                điện sang nước React giữ nguyên state (nhà đang chọn, ảnh, số đã gõ) của trang kia. */}
+            <Route path="/admin/evn-bills" element={<UtilityBillPublishPage key="ELECTRIC" kind="ELECTRIC" />} />
+            <Route path="/admin/water-bills" element={<UtilityBillPublishPage key="WATER" kind="WATER" />} />
             <Route path="/admin/zones" element={<ZoneManagement />} />
             <Route path="/admin/zones/assignment" element={<AdminZoneOverview />} />
             <Route path="/admin/maintenance" element={<MaintenanceEquipmentMonitoring />} />

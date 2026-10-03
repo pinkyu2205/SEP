@@ -10,6 +10,7 @@ import { ManagedProperty, getPropPriority, getIssueCount } from '@/types/managed
 import { managerPropertyService } from '@/services/manager/propertyService';
 import { formatDate, normalizeVi } from '@/utils/helpers';
 import { serverNow } from '@/utils/serverTime';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * Danh sách bất động sản của quản lý vận hành.
@@ -309,7 +310,7 @@ export const BuildingListScreen: React.FC = () => {
       >
         <View style={s.header}>
           <TouchableOpacity style={s.backBtn} onPress={handleBack}>
-            <Text style={s.backBtnText}>‹</Text>
+            <Icon name="back" size={24} color={Colors.primary} />
           </TouchableOpacity>
           <Text style={s.title}>Bất động sản</Text>
 
@@ -332,7 +333,7 @@ export const BuildingListScreen: React.FC = () => {
         </View>
 
         <View style={s.searchBar}>
-          <Text style={s.searchIcon}>⌕</Text>
+          <Icon name="search" size={17} color={Colors.textMuted} />
           <TextInput
             style={s.searchInput}
             placeholder="Tên, địa chỉ, quận, khách thuê, trạng thái..."
@@ -344,7 +345,7 @@ export const BuildingListScreen: React.FC = () => {
           />
           {search.length > 0 && (
             <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={s.searchClear}>×</Text>
+              <Icon name="close" size={16} color={Colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -384,7 +385,7 @@ export const BuildingListScreen: React.FC = () => {
               </TouchableOpacity>
             )}
             <TouchableOpacity style={s.sortBtn} onPress={cycleSort} activeOpacity={0.7}>
-              <Text style={s.sortText}>⇅ {SORTS.find(o => o.id === sort)!.label}</Text>
+              <IconText icon="sort" gap={4} iconSize={13} style={s.sortText}>{SORTS.find(o => o.id === sort)!.label}</IconText>
             </TouchableOpacity>
           </View>
         </View>
@@ -396,7 +397,7 @@ export const BuildingListScreen: React.FC = () => {
           </View>
         ) : error ? (
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>⚠️</Text>
+            <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} style={s.emptyIcon} />
             <Text style={s.emptyText}>{error}</Text>
             <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); load(); }}>
               <Text style={s.retryBtnText}>Thử lại</Text>
@@ -404,7 +405,7 @@ export const BuildingListScreen: React.FC = () => {
           </View>
         ) : filtered.length === 0 ? (
           <View style={s.empty}>
-            <Text style={s.emptyIcon}>🏢</Text>
+            <Icon name="building" size={40} color={Colors.textMuted} strokeWidth={1.5} style={s.emptyIcon} />
             <Text style={s.emptyText}>
               {properties.length === 0 ? 'Chưa có bất động sản nào' : 'Không có căn nào khớp bộ lọc'}
             </Text>
@@ -447,7 +448,7 @@ const PropertyCard = ({ prop, onPress }: { prop: ManagedProperty; onPress: () =>
         {/* Icon là dấu hiệu nhanh nhất để phân biệt loại nhà — nhanh hơn đọc chữ
             "Toà nhà" nằm lẫn giữa tên, và không ăn mất chỗ của tên. */}
         <View style={[s.icon, isWhole ? s.iconHouse : s.iconBuilding]}>
-          <Text style={s.iconText}>{isWhole ? '🏠' : '🏢'}</Text>
+          <Icon name={isWhole ? 'home' : 'building'} size={17} color={isWhole ? Colors.textSecondary : Colors.primary} />
         </View>
 
         <View style={s.cardMain}>
@@ -511,7 +512,7 @@ const PropertyCard = ({ prop, onPress }: { prop: ManagedProperty; onPress: () =>
 
       {issues > 0 && (
         <View style={s.issueRow}>
-          <Text style={s.issueText}>⚠︎ {issues} việc cần xử lý</Text>
+          <IconText icon="warning" gap={4} style={s.issueText}>{issues} việc cần xử lý</IconText>
         </View>
       )}
     </TouchableOpacity>
@@ -537,7 +538,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center',
     marginBottom: Spacing.sm,
   },
-  backBtnText: { fontSize: 26, lineHeight: 28, color: Colors.primary, fontWeight: '900' },
+
   title: { fontSize: 24, fontWeight: '800', color: Colors.textPrimary, marginBottom: Spacing.md },
 
   summary: {
@@ -562,9 +563,9 @@ const s = StyleSheet.create({
     ...Shadow.sm, marginBottom: Spacing.md,
     gap: Spacing.sm, borderWidth: 1, borderColor: Colors.border,
   },
-  searchIcon: { fontSize: 17, color: Colors.textMuted },
+
   searchInput: { flex: 1, fontSize: 13, color: Colors.textPrimary, padding: 0 },
-  searchClear: { fontSize: 18, color: Colors.textMuted, fontWeight: '600', padding: 2 },
+
 
   filterGroup: { marginBottom: Spacing.sm },
   filterLbl: {
@@ -600,7 +601,7 @@ const s = StyleSheet.create({
   sortText: { fontSize: 11, fontWeight: '800', color: Colors.textSecondary },
 
   empty: { alignItems: 'center', paddingVertical: Spacing['3xl'] },
-  emptyIcon: { fontSize: 40, marginBottom: Spacing.sm },
+  emptyIcon: { marginBottom: Spacing.sm },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
   retryBtn: {
     marginTop: Spacing.md, backgroundColor: Colors.primary,
@@ -621,7 +622,7 @@ const s = StyleSheet.create({
   },
   iconBuilding: { backgroundColor: Colors.primaryBg },
   iconHouse: { backgroundColor: Colors.divider },
-  iconText: { fontSize: 16 },
+
   cardMain: { flex: 1, minWidth: 0 },
   cardName: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, lineHeight: 18 },
   cardAddr: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },

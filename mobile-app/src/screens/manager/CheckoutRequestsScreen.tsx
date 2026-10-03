@@ -8,6 +8,7 @@ import { Colors, Spacing, BorderRadius, Shadow, checkoutMeta } from '@/constants
 import { formatDate, showAlert, readApiError } from '@/utils';
 import { checkoutService } from '@/services/manager/checkoutService';
 import type { CheckoutRequestDto } from '@/services/tenant/selfService';
+import { Icon, IconText } from '@/components/common/Icon';
 
 /**
  * Manager xử lý YÊU CẦU TRẢ PHÒNG của tenant — /api/v1/checkout-requests.
@@ -129,7 +130,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={s.headerTitle}>Tiễn khách</Text>
@@ -162,7 +163,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
         <View style={s.center}><ActivityIndicator color={Colors.primary} size="large" /></View>
       ) : loadError ? (
         <View style={s.center}>
-          <Text style={{ fontSize: 40, marginBottom: Spacing.md }}>⚠️</Text>
+          <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} style={{ marginBottom: Spacing.md }} />
           <Text style={s.emptyTitle}>Không tải được danh sách</Text>
           <TouchableOpacity style={s.retryBtn} onPress={() => { setLoading(true); load(); }}>
             <Text style={s.retryBtnText}>Thử lại</Text>
@@ -176,7 +177,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
         >
           {filtered.length === 0 && (
             <View style={s.emptyBox}>
-              <Text style={{ fontSize: 40, marginBottom: Spacing.sm }}>🚪</Text>
+              <Icon name="door" size={40} color={Colors.textMuted} strokeWidth={1.5} style={{ marginBottom: Spacing.sm }} />
               {/*
                 Phân biệt "chưa có hồ sơ nào" với "bộ lọc này rỗng".
                 Bản cũ khi list rỗng hoàn toàn mà đang lọc PENDING vẫn nói "Không có yêu cầu
@@ -200,7 +201,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                 <View style={s.emptyHints}>
                   {FILTERS.filter(f => f.key && f.key !== filter && countOf(f.key) > 0).map(f => (
                     <TouchableOpacity key={f.label} style={s.emptyHintBtn} onPress={() => setFilter(f.key)}>
-                      <Text style={s.emptyHintText}>{f.label} ({countOf(f.key)}) →</Text>
+                      <IconText icon="chevron-right" trailing gap={2} style={s.emptyHintText}>{f.label} ({countOf(f.key)})</IconText>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -228,11 +229,11 @@ export const CheckoutRequestsScreen: React.FC = () => {
                 </View>
 
                 <View style={s.cardRows}>
-                  <Text style={s.cardRow}>📋 HĐ {r.contractCode || `#${r.contractId}`}</Text>
+                  <IconText icon="contract" iconColor={Colors.textMuted} style={s.cardRow}>HĐ {r.contractCode || `#${r.contractId}`}</IconText>
                   {!!r.expectedMoveOutDate && (
-                    <Text style={s.cardRow}>📅 Muốn trả: {formatDate(r.expectedMoveOutDate)}</Text>
+                    <IconText icon="calendar" iconColor={Colors.textMuted} style={s.cardRow}>Muốn trả: {formatDate(r.expectedMoveOutDate)}</IconText>
                   )}
-                  {!!r.reason && <Text style={s.cardRow}>💬 {r.reason}</Text>}
+                  {!!r.reason && <IconText icon="chat" iconColor={Colors.textMuted} multiline style={s.cardRow}>{r.reason}</IconText>}
                   {!!r.note && <Text style={s.cardNote}>{r.note}</Text>}
                   {!!r.rejectReason && <Text style={[s.cardNote, { color: '#DC2626' }]}>Lý do từ chối: {r.rejectReason}</Text>}
                   {!!r.managerNote && <Text style={s.cardNote}>Ghi chú QL: {r.managerNote}</Text>}
@@ -245,7 +246,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                 </View>
 
                 {/* Việc kế tiếp phải làm — để manager không phải nhớ luồng */}
-                {!!meta.managerHint && <Text style={s.hint}>→ {meta.managerHint}</Text>}
+                {!!meta.managerHint && <IconText icon="arrow-right" gap={4} multiline style={s.hint}>{meta.managerHint}</IconText>}
 
                 {status === 'PENDING' && (
                   <View style={s.actionRow}>
@@ -261,7 +262,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                       disabled={busy}
                       onPress={() => openAction('approve', r)}
                     >
-                      <Text style={s.actionApproveText}>{busy ? 'Đang xử lý...' : '✓ Duyệt yêu cầu'}</Text>
+                      <Text style={s.actionApproveText}>{busy ? 'Đang xử lý...' : 'Duyệt yêu cầu'}</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -269,7 +270,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                 {status === 'APPROVED' && (
                   <View style={s.actionRow}>
                     <TouchableOpacity style={[s.actionBtn, s.actionApprove]} onPress={() => goInspection(r)}>
-                      <Text style={s.actionApproveText}>📋 Lập biên bản kiểm tra</Text>
+                      <Text style={s.actionApproveText}>Lập biên bản kiểm tra</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -280,7 +281,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                       <Text style={s.actionGhostText}>Sửa biên bản</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[s.actionBtn, s.actionApprove]} onPress={() => goSettlement(r)}>
-                      <Text style={s.actionApproveText}>💰 Quyết toán</Text>
+                      <Text style={s.actionApproveText}>Quyết toán</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -292,7 +293,7 @@ export const CheckoutRequestsScreen: React.FC = () => {
                       onPress={() => goSettlement(r)}
                     >
                       <Text style={status === 'SETTLING' ? s.actionApproveText : s.actionGhostText}>
-                        {status === 'SETTLING' ? '🏁 Hoàn tất trả phòng' : 'Xem bảng quyết toán'}
+                        {status === 'SETTLING' ? 'Hoàn tất trả phòng' : 'Xem bảng quyết toán'}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -376,7 +377,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   /** Dòng phụ thay cho "(N chờ)" nhét trong tiêu đề — nói rõ N là số gì. */
   headerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },

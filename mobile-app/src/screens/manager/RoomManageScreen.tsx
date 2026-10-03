@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { showAlert } from '@/utils';
 import { maskTenantPhone } from '@/constants/managerVisibility';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, HIDDEN_AMOUNT_TEXT } from '@/constants';
@@ -53,9 +54,9 @@ const VALID_TRANSITIONS: Record<OpStatus, { status: OpStatus; desc: string }[]> 
 const WHOLE_META: Record<'rented' | 'vacant' | 'maintenance', {
   label: string; color: string; bg: string; dot: string;
 }> = {
-  rented:      { label: 'Đang cho thuê', color: '#2563EB', bg: '#EFF6FF', dot: '🔵' },
-  vacant:      { label: 'Còn trống',     color: '#16A34A', bg: '#F0FDF4', dot: '🟢' },
-  maintenance: { label: 'Đang bảo trì',  color: '#D97706', bg: '#FFFBEB', dot: '🟡' },
+  rented:      { label: 'Đang cho thuê', color: '#2563EB', bg: '#EFF6FF', dot: '#3B82F6' },
+  vacant:      { label: 'Còn trống',     color: '#16A34A', bg: '#F0FDF4', dot: '#10B981' },
+  maintenance: { label: 'Đang bảo trì',  color: '#D97706', bg: '#FFFBEB', dot: '#F59E0B' },
 };
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
@@ -96,7 +97,7 @@ const RoomCard: React.FC<{
           onPress={onAction}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={cardSt.menuDots}>•••</Text>
+          <Icon name="more" size={18} color={Colors.textMuted} />
         </TouchableOpacity>
       </View>
 
@@ -110,22 +111,25 @@ const RoomCard: React.FC<{
           disabled={!room.contract}
           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
         >
-          <Text style={cardSt.tenant}>
-            👤 {room.tenantName}{!!room.contract && <Text style={cardSt.tenantLink}>  Xem ›</Text>}
-          </Text>
+          <View style={cardSt.tenantRow}>
+            <IconText icon="user" gap={5} style={cardSt.tenant}>{room.tenantName}</IconText>
+            {!!room.contract && (
+              <IconText icon="chevron-right" trailing gap={1} style={cardSt.tenantLink}>Xem</IconText>
+            )}
+          </View>
         </TouchableOpacity>
       ) : room.status === 'available' ? (
         <Text style={cardSt.vacantHint}>Chưa có khách thuê</Text>
       ) : null}
 
       {room.status === 'maintenance' && (
-        <Text style={cardSt.maintNote}>🔧 Phòng đang khoá để sửa chữa</Text>
+        <IconText icon="wrench" gap={5} style={cardSt.maintNote}>Phòng đang khoá để sửa chữa</IconText>
       )}
       {room.fixing && (
-        <Text style={cardSt.maintNote}>🔧 Có thiết bị đang sửa — khách vẫn ở bình thường</Text>
+        <IconText icon="wrench" gap={5} multiline style={cardSt.maintNote}>Có thiết bị đang sửa — khách vẫn ở bình thường</IconText>
       )}
       {isDisabled && (
-        <Text style={cardSt.disabledNote}>⛔ Phòng ngưng khai thác — không nhận khách / hóa đơn</Text>
+        <IconText icon="ban" gap={5} multiline style={cardSt.disabledNote}>Phòng ngưng khai thác — không nhận khách / hóa đơn</IconText>
       )}
 
       <View style={[cardSt.priceRow, isDisabled && { opacity: 0.45 }]}>
@@ -133,10 +137,10 @@ const RoomCard: React.FC<{
             (xem @/constants/managerVisibility). Chip điện/nước giữ lại vì manager tự
             chốt chỉ số và phát hành hoá đơn, không thấy đơn giá thì không làm được. */}
         {room.electricityRate ? (
-          <Text style={cardSt.priceChip}>⚡ {room.electricityRate.toLocaleString('vi-VN')}đ/kWh</Text>
+          <IconText icon="electric" gap={3} iconSize={11} style={cardSt.priceChip}>{room.electricityRate.toLocaleString('vi-VN')}đ/kWh</IconText>
         ) : null}
         {room.waterRate ? (
-          <Text style={cardSt.priceChip}>💧 {room.waterRate.toLocaleString('vi-VN')}đ/m³</Text>
+          <IconText icon="water" gap={3} iconSize={11} style={cardSt.priceChip}>{room.waterRate.toLocaleString('vi-VN')}đ/m³</IconText>
         ) : null}
       </View>
     </View>
@@ -152,9 +156,9 @@ const cardSt = StyleSheet.create({
   badge:        { paddingHorizontal: 8, paddingVertical: 2, borderRadius: BorderRadius.full, marginRight: 8 },
   badgeText:    { fontSize: 10, fontWeight: '700' },
   menuBtn:      { padding: 4 },
-  menuDots:     { fontSize: 15, color: Colors.textMuted, letterSpacing: 1, fontWeight: '800' },
   meta:         { fontSize: 12, color: Colors.textSecondary, marginBottom: 4 },
-  tenant:       { fontSize: 13, fontWeight: '600', color: Colors.primary, marginBottom: 4 },
+  tenantRow:    { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: 4 },
+  tenant:       { fontSize: 13, fontWeight: '600', color: Colors.primary },
   tenantLink:   { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
   vacantHint:   { fontSize: 12, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
   maintNote:    { fontSize: 12, color: '#D97706', fontWeight: '600', marginBottom: 4 },
@@ -165,7 +169,7 @@ const cardSt = StyleSheet.create({
 
 // ======================== ACTION ITEM ========================
 const ActionItem: React.FC<{
-  icon: string; label: string; sublabel?: string;
+  icon: IconName; label: string; sublabel?: string;
   onPress: () => void; primary?: boolean; danger?: boolean; disabled?: boolean;
 }> = ({ icon, label, sublabel, onPress, primary, danger, disabled }) => (
   <TouchableOpacity
@@ -173,27 +177,31 @@ const ActionItem: React.FC<{
     onPress={disabled ? undefined : onPress}
     activeOpacity={disabled ? 1 : 0.7}
   >
-    <Text style={[actSt.icon, disabled && { opacity: 0.4 }]}>{icon}</Text>
+    <Icon
+      name={icon}
+      size={20}
+      color={danger ? Colors.error : primary ? Colors.primary : Colors.textSecondary}
+      style={actSt.icon}
+    />
     <View style={{ flex: 1 }}>
       <Text style={[actSt.label, primary && actSt.labelPrimary, danger && actSt.labelDanger, disabled && actSt.labelDisabled]}>
         {label}
       </Text>
       {sublabel ? <Text style={actSt.sublabel}>{sublabel}</Text> : null}
     </View>
-    <Text style={[actSt.chevron, disabled && { opacity: 0.3 }]}>›</Text>
+    <Icon name="chevron-right" size={18} color={Colors.textMuted} style={disabled ? { opacity: 0.3 } : undefined} />
   </TouchableOpacity>
 );
 const actSt = StyleSheet.create({
   item:         { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: Colors.divider },
   itemPrimary:  { backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.md, borderBottomWidth: 0, marginBottom: 2, paddingHorizontal: Spacing.sm },
   itemDisabled: { opacity: 0.5 },
-  icon:         { fontSize: 20, width: 34 },
+  icon:         { marginRight: 14 },
   label:        { fontSize: 15, color: Colors.textPrimary, fontWeight: '500' },
   labelPrimary: { color: Colors.primary, fontWeight: '700' },
   labelDanger:  { color: Colors.error },
   labelDisabled:{ color: Colors.textMuted },
   sublabel:     { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
-  chevron:      { fontSize: 18, color: Colors.textMuted },
 });
 
 // ======================== INFO LINE (nhà nguyên căn) ========================
@@ -450,7 +458,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-          <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
@@ -470,7 +478,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
   if (errorProps) {
     return shell(
       <>
-        <Text style={styles.emptyIcon}>⚠️</Text>
+        <Icon name="alert" size={44} color={Colors.warning} strokeWidth={1.5} style={styles.emptyIcon} />
         <Text style={styles.emptyText}>{errorProps}</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoadingProps(true); loadProperties(); }}>
           <Text style={styles.retryBtnText}>Thử lại</Text>
@@ -484,7 +492,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
   if (!property) {
     return shell(
       <>
-        <Text style={styles.emptyIcon}>🏢</Text>
+        <Icon name="building" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
         <Text style={styles.emptyText}>
           Không mở được nhà này. Hãy chọn nhà từ mục Bất động sản.
         </Text>
@@ -506,7 +514,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-            <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+            <Icon name="back" size={26} color={Colors.primary} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
@@ -529,7 +537,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
         >
           <View style={styles.houseCard}>
             <View style={styles.houseTop}>
-              <Text style={styles.houseIcon}>🏠</Text>
+              <Icon name="home" size={28} color={Colors.primary} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.houseTitle}>Toàn bộ căn nhà</Text>
                 <Text style={styles.houseSub}>Cho thuê nguyên căn — không chia phòng</Text>
@@ -552,7 +560,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
               <View style={styles.houseInfo}>
                 <Text style={styles.houseVacant}>
                   {w.status === 'maintenance'
-                    ? '🔧 Căn nhà đang bảo trì — chưa nhận khách.'
+                    ? 'Căn nhà đang bảo trì — chưa nhận khách.'
                     : 'Chưa có khách thuê.'}
                 </Text>
                 <InfoLine label="Giá chào thuê" value={HIDDEN_AMOUNT_TEXT} />
@@ -565,25 +573,25 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
             {rented ? (
               <>
                 <ActionItem
-                  icon="📋" label="Hợp đồng khách thuê"
+                  icon="contract" label="Hợp đồng khách thuê"
                   sublabel="Xem chi tiết, gia hạn, thanh lý"
                   onPress={() => navigation.navigate('ManagerContracts')}
                 />
                 <ActionItem
-                  icon="🚪" label="Xử lý trả nhà"
+                  icon="door" label="Xử lý trả nhà"
                   sublabel="Duyệt yêu cầu, lập biên bản, quyết toán cọc"
                   onPress={() => navigation.navigate('CheckoutRequests')}
                 />
               </>
             ) : (
               <ActionItem
-                icon="🤝" label="Khách chờ đón" primary
+                icon="handshake" label="Khách chờ đón" primary
                 sublabel="Mở danh sách khách chờ đón để bàn giao nhà"
                 onPress={() => navigation.navigate('ResumeContract')}
               />
             )}
             <ActionItem
-              icon="🔧" label="Bảo trì"
+              icon="wrench" label="Bảo trì"
               sublabel="Xem và xử lý yêu cầu sửa chữa của căn nhà"
               onPress={() => navigation.navigate('BuildingMaintenance', {
                 propertyId: property.propertyId, propertyName: property.name,
@@ -591,14 +599,14 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
               })}
             />
             <ActionItem
-              icon="⚡" label="Ghi chỉ số & hóa đơn"
+              icon="meter" label="Ghi chỉ số & hóa đơn"
               sublabel="Chốt điện/nước cho căn nhà"
               onPress={() => navigation.navigate('UtilityBilling')}
             />
           </View>
 
           <View style={styles.adminNote}>
-            <Text style={styles.adminNoteIcon}>ℹ️</Text>
+            <Icon name="info" size={16} color={Colors.primary} style={styles.adminNoteIcon} />
             <Text style={styles.adminNoteText}>
               Nhà nguyên căn do Admin Web Portal cấu hình. Manager vận hành theo hợp đồng của cả căn.
             </Text>
@@ -617,7 +625,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerSide}>
-          <Text style={[styles.headerBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>{property.name}</Text>
@@ -681,7 +689,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
         ) : errorRooms ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>⚠️</Text>
+            <Icon name="alert" size={44} color={Colors.warning} strokeWidth={1.5} style={styles.emptyIcon} />
             <Text style={styles.emptyText}>{errorRooms}</Text>
             <TouchableOpacity
               style={styles.retryBtn}
@@ -692,7 +700,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
           </View>
         ) : filtered.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>🚪</Text>
+            <Icon name="door" size={44} color={Colors.textMuted} strokeWidth={1.5} style={styles.emptyIcon} />
             <Text style={styles.emptyText}>Không có phòng nào</Text>
           </View>
         ) : (
@@ -712,7 +720,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
         )}
 
         <View style={styles.adminNote}>
-          <Text style={styles.adminNoteIcon}>ℹ️</Text>
+          <Icon name="info" size={16} color={Colors.primary} style={styles.adminNoteIcon} />
           <Text style={styles.adminNoteText}>
             Phòng được cấu hình bởi Admin Web Portal. Manager chỉ cập nhật trạng thái vận hành.
           </Text>
@@ -737,7 +745,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                       Tầng {actionRoom.floor} · {actionRoom.area}m² · {actionRoom.maxOccupants} người
                     </Text>
                     {actionRoom.tenantName && (
-                      <Text style={styles.sheetTenant}>👤 {actionRoom.tenantName}</Text>
+                      <IconText icon="user" gap={4} style={styles.sheetTenant}>{actionRoom.tenantName}</IconText>
                     )}
                   </View>
                   <View style={[styles.sheetBadge, { backgroundColor: STATUS_META[actionRoom.status].bg }]}>
@@ -757,7 +765,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 {/* ── Phòng CÓ khách ── */}
                 {actionRoom.status === 'occupied' && !!actionRoom.contract && (
                   <ActionItem
-                    icon="👤"
+                    icon="user"
                     label="Khách thuê"
                     sublabel={`${actionRoom.tenantName ?? ''} · hợp đồng, hoá đơn, báo hỏng`}
                     primary
@@ -766,17 +774,17 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 )}
                 {actionRoom.fixing && (
                   <View style={styles.sheetInfo}>
-                    <Text style={styles.sheetInfoText}>
-                      🔧 Phòng có thiết bị đang sửa theo phiếu khách báo. Khách vẫn ở bình thường —
+                    <IconText icon="wrench" multiline style={styles.sheetInfoText}>
+                      Phòng có thiết bị đang sửa theo phiếu khách báo. Khách vẫn ở bình thường —
                       trạng thái tự về như cũ khi đóng phiếu.
-                    </Text>
+                    </IconText>
                   </View>
                 )}
 
                 {/* ── Phòng TRỐNG ── */}
                 {actionRoom.status === 'available' && (
                   <ActionItem
-                    icon="🤝"
+                    icon="handshake"
                     label="Khách chờ đón"
                     sublabel="Hồ sơ khách admin đã soạn, chờ bạn đi bàn giao"
                     primary
@@ -785,7 +793,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 )}
                 {actionRoom.status === 'maintenance' && (
                   <ActionItem
-                    icon="✅"
+                    icon="success"
                     label="Mở lại cho thuê"
                     sublabel="Đã sửa xong — phòng nhận khách trở lại"
                     primary
@@ -794,7 +802,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 )}
                 {actionRoom.status === 'disabled' && (
                   <ActionItem
-                    icon="🟢"
+                    icon="refresh"
                     label="Kích hoạt lại phòng"
                     primary
                     onPress={() => applyStatus(actionRoom, 'available')}
@@ -802,17 +810,17 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 )}
 
                 {/* ── Xem thông tin (mọi phòng) ── */}
-                <ActionItem icon="📦" label="Thiết bị trong phòng" sublabel="Tình trạng, lịch sử sửa, mã QR"
+                <ActionItem icon="package" label="Thiết bị trong phòng" sublabel="Tình trạng, lịch sử sửa, mã QR"
                   onPress={() => { closeAction(); navigation.navigate('Equipment', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
-                <ActionItem icon="📜" label="Lịch sử thuê" sublabel="Các đời khách đã ở phòng này"
+                <ActionItem icon="history" label="Lịch sử thuê" sublabel="Các đời khách đã ở phòng này"
                   onPress={() => { closeAction(); navigation.navigate('BuildingContract', { propertyId: selectedPropId, roomCode: actionRoom.code }); }} />
-                <ActionItem icon="📋" label="Thông tin phòng" sublabel="Diện tích, sức chứa, mô tả"
+                <ActionItem icon="info" label="Thông tin phòng" sublabel="Diện tích, sức chứa, mô tả"
                   onPress={() => setActionView('detail')} />
 
                 {/* ── Thao tác đổi trạng thái (ít dùng, để cuối) ── */}
                 {actionRoom.status === 'occupied' && (
                   <ActionItem
-                    icon="🚪"
+                    icon="door"
                     label="Trả phòng (Check-out)"
                     sublabel="Lập biên bản hiện trạng và kết thúc hợp đồng"
                     onPress={() => handleCheckOut(actionRoom)}
@@ -821,13 +829,13 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 {actionRoom.status === 'available' && (
                   <>
                     <ActionItem
-                      icon="🔧"
+                      icon="wrench"
                       label="Khoá phòng để sửa chữa"
                       sublabel="Tạm không nhận khách cho tới khi mở lại"
                       onPress={() => handleReportMaintenance(actionRoom)}
                     />
                     <ActionItem
-                      icon="⛔"
+                      icon="ban"
                       label="Ngưng khai thác"
                       sublabel="Không nhận khách, không tạo hoá đơn"
                       onPress={() => applyStatus(actionRoom, 'disabled')}
@@ -845,7 +853,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
             {actionRoom && actionView === 'status' && (
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <TouchableOpacity style={styles.sheetBackRow} onPress={() => setActionView('menu')}>
-                  <Text style={[styles.sheetBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">‹</Text>
+                  <Icon name="back" size={26} color={Colors.primary} />
                 </TouchableOpacity>
                 <Text style={styles.statusTitle}>Cập nhật trạng thái</Text>
                 <Text style={styles.statusSub}>
@@ -857,9 +865,9 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
 
                 {actionRoom.status === 'occupied' && (
                   <View style={styles.statusWarning}>
-                    <Text style={styles.statusWarningText}>
-                      ⚠️ Để phòng về Trống, cần thực hiện Trả phòng (Check-out) qua quy trình biên bản hiện trạng, không thể chuyển thẳng.
-                    </Text>
+                    <IconText icon="warning" multiline style={styles.statusWarningText}>
+                      Để phòng về Trống, cần thực hiện Trả phòng (Check-out) qua quy trình biên bản hiện trạng, không thể chuyển thẳng.
+                    </IconText>
                   </View>
                 )}
 
@@ -877,7 +885,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                         <Text style={styles.statusOptionLabel}>{meta.label}</Text>
                         <Text style={styles.statusOptionDesc}>{t.desc}</Text>
                       </View>
-                      <Text style={{ fontSize: 18, color: Colors.textMuted }}>›</Text>
+                      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
                     </TouchableOpacity>
                   );
                 })}
@@ -892,7 +900,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
             {actionRoom && actionView === 'detail' && (
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <TouchableOpacity style={styles.sheetBackRow} onPress={() => setActionView('menu')}>
-                  <Text style={[styles.sheetBackText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">‹</Text>
+                  <Icon name="back" size={26} color={Colors.primary} />
                 </TouchableOpacity>
 
                 <View style={styles.detailTop}>
@@ -911,7 +919,7 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
 
                 {actionRoom.tenantName && (
                   <View style={styles.detailTenantCard}>
-                    <Text style={styles.detailTenantHeading}>👤 Khách thuê hiện tại</Text>
+                    <IconText icon="user" gap={4} style={styles.detailTenantHeading}>Khách thuê hiện tại</IconText>
                     <Text style={styles.detailTenantName}>{actionRoom.tenantName}</Text>
                     {actionRoom.tenantPhone && (
                       <Text style={styles.detailTenantPhone}>{maskTenantPhone(actionRoom.tenantPhone)}</Text>
@@ -938,9 +946,9 @@ export const RoomManageScreen: React.FC<any> = ({ navigation, route }) => {
                 </View>
 
                 <View style={styles.readonlyNote}>
-                  <Text style={styles.readonlyNoteText}>
-                    🔒 Thông tin cấu hình phòng chỉ có thể thay đổi qua Admin Web Portal.
-                  </Text>
+                  <IconText icon="lock" multiline style={styles.readonlyNoteText}>
+                    Thông tin cấu hình phòng chỉ có thể thay đổi qua Admin Web Portal.
+                  </IconText>
                 </View>
 
                 <TouchableOpacity style={styles.sheetCancel} onPress={closeAction}>
@@ -977,7 +985,7 @@ const styles = StyleSheet.create({
     ...Shadow.sm,
   },
   headerSide:     { width: 80 },
-  headerBackText: { color: Colors.primary, fontWeight: '600', fontSize: 14 },
+
   headerCenter:   { flex: 1, alignItems: 'center' },
   headerTitle:    { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
   headerSub:      { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
@@ -1003,7 +1011,7 @@ const styles = StyleSheet.create({
 
   // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 48 },
-  emptyIcon:  { fontSize: 44, marginBottom: Spacing.md },
+  emptyIcon:  { marginBottom: Spacing.md },
   emptyText:  { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.lg },
   retryBtn:     { marginTop: Spacing.md, backgroundColor: Colors.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
@@ -1012,7 +1020,7 @@ const styles = StyleSheet.create({
   // ── Nhà nguyên căn ──
   houseCard:     { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, padding: Spacing.base, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm },
   houseTop:      { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
-  houseIcon:     { fontSize: 30 },
+
   houseTitle:    { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   houseSub:      { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
   houseBadge:    { paddingHorizontal: 10, paddingVertical: 4, borderRadius: BorderRadius.full },
@@ -1023,7 +1031,7 @@ const styles = StyleSheet.create({
   actionCard:    { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, paddingHorizontal: Spacing.base, borderWidth: 1, borderColor: Colors.border, ...Shadow.sm },
 
   adminNote:     { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, backgroundColor: Colors.primaryBg, borderRadius: BorderRadius.lg, padding: Spacing.md, marginTop: Spacing.md, borderWidth: 1, borderColor: Colors.primary + '25' },
-  adminNoteIcon: { fontSize: 15 },
+  adminNoteIcon: { marginTop: 1 },
   adminNoteText: { flex: 1, fontSize: 12, color: Colors.primary, lineHeight: 18 },
 
   // Bottom sheet
@@ -1044,7 +1052,7 @@ const styles = StyleSheet.create({
   sheetInfo:      { backgroundColor: '#EFF6FF', borderRadius: 12, padding: Spacing.md, marginVertical: Spacing.xs },
   sheetInfoText:  { fontSize: 12, color: '#1D4ED8', lineHeight: 18 },
   sheetBackRow:   { marginBottom: Spacing.md },
-  sheetBackText:  { fontSize: 14, fontWeight: '600', color: Colors.primary },
+
   sheetCancel:    { paddingVertical: 14, alignItems: 'center', marginTop: Spacing.sm },
   sheetCancelText:{ fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
 

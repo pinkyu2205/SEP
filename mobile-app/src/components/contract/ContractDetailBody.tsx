@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
 import { Contract } from '@/types';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import {
   formatDate, getContractStatusLabel, getContractStatusColor, getDaysUntil,
   getContractTerminationTypeLabel,
@@ -63,9 +64,11 @@ export const mapDetail = (d: ContractDetailDto): Contract => {
   };
 };
 
-export const SectionCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+export const SectionCard: React.FC<{ title: string; icon?: IconName; children: React.ReactNode }> = ({ title, icon, children }) => (
   <View style={styles.sectionCard}>
-    <Text style={styles.sectionTitle}>{title}</Text>
+    {icon
+      ? <IconText icon={icon} iconColor={Colors.primary} style={styles.sectionTitle}>{title}</IconText>
+      : <Text style={styles.sectionTitle}>{title}</Text>}
     {children}
   </View>
 );
@@ -82,7 +85,7 @@ export const ImageViewerModal: React.FC<{ url: string | null; onClose: () => voi
   <Modal visible={!!url} transparent animationType="fade">
     <View style={styles.viewer}>
       <TouchableOpacity style={styles.viewerClose} onPress={onClose}>
-        <Text style={styles.viewerCloseText}>×</Text>
+        <Icon name="close" size={22} color={Colors.white} />
       </TouchableOpacity>
       {url && <Image source={{ uri: url }} style={styles.viewerImage} resizeMode="contain" />}
     </View>
@@ -140,7 +143,7 @@ export const ContractDetailBody: React.FC<Props> = ({
         <Text style={styles.codeValue}>{contract.code}</Text>
       </View>
 
-      <SectionCard title="👥 Thông tin các bên">
+      <SectionCard icon="users" title="Thông tin các bên">
         <InfoRow label="Bên cho thuê" value={contract.lessorName} />
         {contract.lessorPhone && <InfoRow label="SĐT bên cho thuê" value={contract.lessorPhone} />}
         <InfoRow label="Bên thuê" value={contract.lesseeName} />
@@ -148,7 +151,7 @@ export const ContractDetailBody: React.FC<Props> = ({
         <InfoRow label="SĐT bên thuê" value={contract.lesseePhone} />
       </SectionCard>
 
-      <SectionCard title="🏠 Thông tin phòng">
+      <SectionCard icon="home" title="Thông tin phòng">
         <InfoRow label="Tòa nhà" value={contract.propertyName} />
         {contract.roomCode && <InfoRow label="Phòng" value={contract.roomCode} />}
         <InfoRow label="Ngày bắt đầu" value={formatDate(contract.startDate)} />
@@ -166,7 +169,7 @@ export const ContractDetailBody: React.FC<Props> = ({
         HĐ tạo trước 20/08/2026 chưa có dữ liệu người đón khách nên ẩn hẳn dòng đó.
       */}
       {(detailDto?.assignedManagerName || detailDto?.onboardedByManagerName) && (
-        <SectionCard title="👤 Người phụ trách">
+        <SectionCard icon="user" title="Người phụ trách">
           {detailDto.assignedManagerName && (
             <InfoRow label="Quản lý phụ trách" value={detailDto.assignedManagerName} />
           )}
@@ -184,13 +187,13 @@ export const ContractDetailBody: React.FC<Props> = ({
         </SectionCard>
       )}
 
-      <SectionCard title="💰 Tài chính">
+      <SectionCard icon="wallet" title="Tài chính">
         <InfoRow label="Tiền thuê hàng tháng" value={`${contract.rentAmount.toLocaleString('vi-VN')} đ`} highlight />
         <InfoRow label="Tiền đặt cọc" value={`${contract.depositAmount.toLocaleString('vi-VN')} đ`} />
       </SectionCard>
 
       {contract.equipmentList.length > 0 && (
-        <SectionCard title="📦 Tài sản bàn giao">
+        <SectionCard icon="package" title="Tài sản bàn giao">
           {contract.equipmentList.map((eq, i) => (
             <View key={eq.id} style={[styles.assetRow, i < contract.equipmentList.length - 1 && styles.assetRowBorder]}>
               <View style={styles.assetInfo}>
@@ -207,29 +210,29 @@ export const ContractDetailBody: React.FC<Props> = ({
         !!handover.electricMeterImageUrl || !!handover.waterMeterImageUrl ||
         (handover.roomConditionPhotos?.length ?? 0) > 0 || (handover.roomConditionUrls?.length ?? 0) > 0
       ) && (
-        <SectionCard title="📷 Hình ảnh hiện trạng lúc bàn giao">
+        <SectionCard icon="camera" title="Hình ảnh hiện trạng lúc bàn giao">
           {(!!handover.electricMeterImageUrl || !!handover.waterMeterImageUrl) && (
             <View style={styles.meterRow}>
               {!!handover.electricMeterImageUrl && (
                 <View style={styles.meterCol}>
-                  <Text style={styles.meterLabel}>
-                    ⚡ Điện{handover.initialElectricReading != null ? ` — ${handover.initialElectricReading} kWh` : ''}
-                  </Text>
+                  <IconText icon="electric" gap={4} style={styles.meterLabel}>
+                    Điện{handover.initialElectricReading != null ? ` — ${handover.initialElectricReading} kWh` : ''}
+                  </IconText>
                   <TouchableOpacity onPress={() => onImagePress(handover.electricMeterImageUrl!)}>
                     <Image source={{ uri: handover.electricMeterImageUrl }} style={styles.meterThumb} />
                   </TouchableOpacity>
-                  <Text style={styles.capturedAtText}>🕒 {formatDateTime(handover.electricMeterCapturedAt)}</Text>
+                  <IconText icon="clock" gap={4} style={styles.capturedAtText}>{formatDateTime(handover.electricMeterCapturedAt)}</IconText>
                 </View>
               )}
               {!!handover.waterMeterImageUrl && (
                 <View style={styles.meterCol}>
-                  <Text style={styles.meterLabel}>
-                    💧 Nước{handover.initialWaterReading != null ? ` — ${handover.initialWaterReading} m³` : ''}
-                  </Text>
+                  <IconText icon="water" gap={4} style={styles.meterLabel}>
+                    Nước{handover.initialWaterReading != null ? ` — ${handover.initialWaterReading} m³` : ''}
+                  </IconText>
                   <TouchableOpacity onPress={() => onImagePress(handover.waterMeterImageUrl!)}>
                     <Image source={{ uri: handover.waterMeterImageUrl }} style={styles.meterThumb} />
                   </TouchableOpacity>
-                  <Text style={styles.capturedAtText}>🕒 {formatDateTime(handover.waterMeterCapturedAt)}</Text>
+                  <IconText icon="clock" gap={4} style={styles.capturedAtText}>{formatDateTime(handover.waterMeterCapturedAt)}</IconText>
                 </View>
               )}
             </View>
@@ -237,7 +240,7 @@ export const ContractDetailBody: React.FC<Props> = ({
 
           {((handover.roomConditionPhotos?.length ?? handover.roomConditionUrls?.length ?? 0) > 0) && (
             <>
-              <Text style={[styles.meterLabel, { marginTop: Spacing.md }]}>🏠 Hiện trạng phòng lúc nhận</Text>
+              <IconText icon="home" gap={4} style={[styles.meterLabel, { marginTop: Spacing.md }]}>Hiện trạng phòng lúc nhận</IconText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.imageRow}>
                 {(handover.roomConditionPhotos?.length ?? 0) > 0
                   ? handover.roomConditionPhotos!.map((p, i) => (
@@ -245,7 +248,7 @@ export const ContractDetailBody: React.FC<Props> = ({
                         <TouchableOpacity onPress={() => onImagePress(p.url)}>
                           <Image source={{ uri: p.url }} style={styles.thumbImage} />
                         </TouchableOpacity>
-                        <Text style={styles.capturedAtText}>🕒 {formatDateTime(p.capturedAt)}</Text>
+                        <IconText icon="clock" gap={4} style={styles.capturedAtText}>{formatDateTime(p.capturedAt)}</IconText>
                       </View>
                     ))
                   : handover.roomConditionUrls!.map((uri, i) => (
@@ -260,12 +263,12 @@ export const ContractDetailBody: React.FC<Props> = ({
       )}
 
       {contract.notes && (
-        <SectionCard title="📝 Điều khoản & Ghi chú">
+        <SectionCard icon="note" title="Điều khoản & Ghi chú">
           <Text style={styles.notesText}>{contract.notes}</Text>
         </SectionCard>
       )}
 
-      <SectionCard title="📜 Lịch sử">
+      <SectionCard icon="history" title="Lịch sử">
         {contract.signedAt && (
           <View style={styles.historyItem}>
             <View style={[styles.historyDot, { backgroundColor: Colors.success }]} />
@@ -371,7 +374,7 @@ export const contractBodyStyles = StyleSheet.create({
   viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '82%' },
   viewerClose: { position: 'absolute', top: 48, right: 24, zIndex: 2, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-  viewerCloseText: { color: Colors.white, fontSize: 30, lineHeight: 34 },
+
 
   historyItem: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, paddingVertical: Spacing.sm },
   historyDot: { width: 10, height: 10, borderRadius: 5, marginTop: 4 },

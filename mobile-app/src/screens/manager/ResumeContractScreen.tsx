@@ -29,6 +29,7 @@ import {
   findPersonLabel, showAlert, splitMeterReading, validateMeterPhoto, validateRoomPhoto,
 } from '@/utils';
 import { MeterOverrideModal } from '@/components/common';
+import { Icon, IconText } from '@/components/common/Icon';
 import type { MeterOverrideKind } from '@/services/manager/meterOverrideService';
 import {
   visionService, isVisionUsableUrl, DESCRIBE_ROOM_MAX_IMAGES, type VisionLabel,
@@ -166,10 +167,10 @@ const STATUS_KEYS: StatusKey[] = [
 const STATUS_UI: Record<StatusKey, { label: string; short: string; color: string; bg: string }> = {
   // Khách đã đồng ý hợp đồng và mã của quản lý đã gửi — quản lý chỉ cần nhập là xong.
   // Việc gấp nhất, phải thắng mọi nhãn khác.
-  my_otp:          { label: '🔔 Chờ BẠN nhập OTP',   short: 'Bạn nhập OTP', color: '#047857', bg: '#ECFDF5' },
+  my_otp:          { label: 'Chờ BẠN nhập OTP',      short: 'Bạn nhập OTP', color: '#047857', bg: '#ECFDF5' },
   // Hai nhãn dưới là "chờ người khác" — quản lý không làm gì được, chỉ nhắc khách.
   wait_tenant_otp: { label: 'Chờ khách nhập OTP',    short: 'Chờ khách OTP', color: '#0891B2', bg: '#ECFEFF' },
-  wait_tenant_ok:  { label: '✅ Đã thu — chờ khách xác nhận', short: 'Chờ khách', color: '#0891B2', bg: '#ECFEFF' },
+  wait_tenant_ok:  { label: 'Đã thu — chờ khách xác nhận', short: 'Chờ khách', color: '#0891B2', bg: '#ECFEFF' },
   wait_price:     { label: 'Chờ Host duyệt giá',     short: 'Chờ duyệt giá', color: '#D97706', bg: '#FFFBEB' },
   price_rejected: { label: 'Host từ chối giá',       short: 'Bị từ chối',   color: '#DC2626', bg: '#FEF2F2' },
   // Nhãn/màu 3 bước đầu lấy đúng nhãn BE (`statusLabel`) — xem constants/tenantOnboard.ts.
@@ -233,9 +234,9 @@ type TimeKey = 'all' | 'overdue' | 'ready' | 'early'
 
 const TIME_CHIPS: { key: TimeKey; label: string }[] = [
   { key: 'all', label: 'Mọi thời điểm' },
-  { key: 'overdue', label: '⚠️ Quá hạn' },
-  { key: 'ready', label: '✅ Đón được' },
-  { key: 'early', label: '🗓 Chưa tới hạn' },
+  { key: 'overdue', label: 'Quá hạn' },
+  { key: 'ready', label: 'Đón được' },
+  { key: 'early', label: 'Chưa tới hạn' },
 ]
 
 export const ResumeContractScreen: React.FC = () => {
@@ -532,7 +533,7 @@ export const ResumeContractScreen: React.FC = () => {
             {viewingContract ? (
               <ActivityIndicator size="small" color={Colors.primary} />
             ) : (
-              <Text style={styles.viewContractBarText}>📄 Xem hợp đồng — {selected.contractCode}</Text>
+              <IconText icon="document" style={styles.viewContractBarText}>Xem hợp đồng — {selected.contractCode}</IconText>
             )}
           </TouchableOpacity>
         ) : (
@@ -558,20 +559,28 @@ export const ResumeContractScreen: React.FC = () => {
       {/* MỘT hàng: tìm kiếm + nút Lọc. Trước đây 3 hàng chip luôn mở, cộng ô tìm là
           4 hàng — ăn gần nửa màn hình điện thoại trước khi thấy hợp đồng nào. */}
       <View style={styles.topRow}>
-        <TextInput
-          style={styles.searchInputFlex}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Tìm tên, SĐT, phòng, mã HĐ..."
-          placeholderTextColor={Colors.textMuted}
-        />
+        <View style={styles.searchBox}>
+          <Icon name="search" size={15} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInputFlex}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Tìm tên, SĐT, phòng, mã HĐ..."
+            placeholderTextColor={Colors.textMuted}
+          />
+        </View>
         <TouchableOpacity
           style={[styles.filterBtn, (filterOpen || activeFilterCount > 0) && styles.filterBtnOn]}
           onPress={() => setFilterOpen((o) => !o)}
         >
-          <Text style={[styles.filterBtnText, (filterOpen || activeFilterCount > 0) && styles.filterBtnTextOn]}>
-            ⚙︎ Lọc{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
-          </Text>
+          <IconText
+            icon="filter"
+            gap={4}
+            iconSize={14}
+            style={[styles.filterBtnText, (filterOpen || activeFilterCount > 0) && styles.filterBtnTextOn]}
+          >
+            Lọc{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+          </IconText>
         </TouchableOpacity>
       </View>
 
@@ -585,19 +594,19 @@ export const ResumeContractScreen: React.FC = () => {
           <Text style={styles.countInline}>{filteredList.length}/{list.length}</Text>
           {statusFilter !== 'all' && (
             <TouchableOpacity style={styles.activeChip} onPress={() => setStatusFilter('all')}>
-              <Text style={styles.activeChipText}>{STATUS_UI[statusFilter].short} ✕</Text>
+              <IconText icon="close" trailing gap={4} iconSize={12} style={styles.activeChipText}>{STATUS_UI[statusFilter].short}</IconText>
             </TouchableOpacity>
           )}
           {timeFilter !== 'all' && (
             <TouchableOpacity style={styles.activeChip} onPress={() => setTimeFilter('all')}>
-              <Text style={styles.activeChipText}>
-                {TIME_CHIPS.find((t) => t.key === timeFilter)?.label} ✕
-              </Text>
+              <IconText icon="close" trailing gap={4} iconSize={12} style={styles.activeChipText}>
+                {TIME_CHIPS.find((t) => t.key === timeFilter)?.label}
+              </IconText>
             </TouchableOpacity>
           )}
           {!!dateFilter && (
             <TouchableOpacity style={styles.activeChip} onPress={() => setDateFilter('')}>
-              <Text style={styles.activeChipText}>📅 {isoToVi(dateFilter)} ✕</Text>
+              <IconText icon="close" trailing gap={4} iconSize={12} style={styles.activeChipText}>{isoToVi(dateFilter)}</IconText>
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={clearFilters}>
@@ -662,7 +671,7 @@ export const ResumeContractScreen: React.FC = () => {
             <DatePickerField
               value={dateFilter ? isoToVi(dateFilter) : ''}
               onChange={(v) => setDateFilter(v ? viToIso(v) : '')}
-              placeholder="📅 Chọn ngày khác"
+              placeholder="Chọn ngày khác"
             />
           </View>
         </View>
@@ -673,12 +682,12 @@ export const ResumeContractScreen: React.FC = () => {
       >
         {list.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyIcon}>📭</Text>
+            <Icon name="inbox" size={44} color={Colors.textMuted} strokeWidth={1.5} />
             <Text style={styles.emptyText}>Không có hợp đồng nào chờ xử lý.</Text>
           </View>
         ) : filteredList.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.emptyIcon}>🔍</Text>
+            <Icon name="search" size={44} color={Colors.textMuted} strokeWidth={1.5} />
             <Text style={styles.emptyText}>Không tìm thấy khách hàng nào khớp.</Text>
           </View>
         ) : (
@@ -717,13 +726,15 @@ export const ResumeContractScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{c.tenantFullName}</Text>
                   {!!c.tenantPhone && (
-                    <Text style={styles.cardPhone}>📞 {maskTenantPhone(c.tenantPhone)}</Text>
+                    <IconText icon="phone" gap={4} iconSize={12} style={styles.cardPhone}>{maskTenantPhone(c.tenantPhone)}</IconText>
                   )}
                   <Text style={styles.cardMeta}>
                     {c.contractCode}
                     {c.roomNumber ? ` · Phòng ${c.roomNumber}` : ''}
                   </Text>
-                  {!!c.propertyName && <Text style={styles.cardProperty}>🏠 {c.propertyName}</Text>}
+                  {!!c.propertyName && (
+                    <IconText icon="building" gap={4} iconSize={12} style={styles.cardProperty}>{c.propertyName}</IconText>
+                  )}
                   {/* Hiện giá thuê. BE hiện đang trả `null` cho tài khoản MANAGER
                       (`isManager ? null : c.getRentAmount()`) — chừng nào BE còn mask thì
                       dòng này ẩn, KHÔNG hiện "0 đ/tháng" như trước vì `formatVnd(null)`
@@ -734,14 +745,14 @@ export const ResumeContractScreen: React.FC = () => {
                   {/* Ngày hẹn đón đã nằm ở tiêu đề nhóm — không lặp lại trên thẻ.
                       Chỉ nói phần tiêu đề nhóm KHÔNG nói được: chưa được phép đón. */}
                   {early && (
-                    <Text style={styles.cardEarlyNote}>
-                      🗓 Chỉ đón sớm được {MAX_EARLY_ONBOARD_DAYS} ngày trước ngày vào ở
-                    </Text>
+                    <IconText icon="calendar" gap={4} multiline style={styles.cardEarlyNote}>
+                      Chỉ đón sớm được {MAX_EARLY_ONBOARD_DAYS} ngày trước ngày vào ở
+                    </IconText>
                   )}
                   {overdue && (
-                    <Text style={styles.cardOverdueNote}>
-                      ⚠️ Đã qua ngày vào ở {Math.abs(days!)} ngày
-                    </Text>
+                    <IconText icon="warning" gap={4} style={styles.cardOverdueNote}>
+                      Đã qua ngày vào ở {Math.abs(days!)} ngày
+                    </IconText>
                   )}
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
@@ -779,7 +790,7 @@ const ContractActionPanel: React.FC<{
     return (
       <ScrollView contentContainerStyle={styles.panelBody}>
         <View style={[styles.banner, { backgroundColor: '#FFF7ED' }]}>
-          <Text style={styles.bannerIcon}>🗓</Text>
+          <Icon name="calendar-clock" size={36} color="#EA580C" strokeWidth={1.6} />
           <Text style={styles.bannerTitle}>Chưa tới hạn đón khách</Text>
           <Text style={styles.bannerDesc}>
             {contract.tenantFullName} có lịch đón ngày {formatDateVi(onboardDueDate(contract) ?? contract.moveInDate)} — còn {early} ngày.
@@ -798,7 +809,7 @@ const ContractActionPanel: React.FC<{
     return (
       <ScrollView contentContainerStyle={styles.panelBody}>
         <View style={[styles.banner, { backgroundColor: '#FFFBEB' }]}>
-          <Text style={styles.bannerIcon}>⏳</Text>
+          <Icon name="hourglass" size={36} color="#D97706" strokeWidth={1.6} />
           <Text style={styles.bannerTitle}>Đang chờ Host duyệt giá</Text>
           <Text style={styles.bannerDesc}>
             Hợp đồng {contract.contractCode}
@@ -890,7 +901,7 @@ const RejectedPanel: React.FC<{
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
       <View style={[styles.banner, { backgroundColor: '#FEF2F2' }]}>
-        <Text style={styles.bannerIcon}>❌</Text>
+        <Icon name="error" size={36} color={Colors.error} strokeWidth={1.6} />
         <Text style={styles.bannerTitle}>Host đã từ chối giá</Text>
         {!!contract.priceRejectReason && (
           <Text style={styles.bannerDesc}>Lý do: {contract.priceRejectReason}</Text>
@@ -925,13 +936,13 @@ const RejectedPanel: React.FC<{
             {busy ? (
               <ActivityIndicator color={Colors.white} />
             ) : (
-              <Text style={styles.primaryBtnText}>📨 Gửi Host duyệt lại</Text>
+              <Text style={styles.primaryBtnText}>Gửi Host duyệt lại</Text>
             )}
           </TouchableOpacity>
         </View>
       ) : (
         <TouchableOpacity style={styles.primaryBtn} onPress={() => setEditing(true)}>
-          <Text style={styles.primaryBtnText}>✏️ Chỉnh giá & gửi lại</Text>
+          <Text style={styles.primaryBtnText}>Chỉnh giá & gửi lại</Text>
         </TouchableOpacity>
       )}
 
@@ -1062,7 +1073,7 @@ const InspectionSection: React.FC<{
 
       const check = validateMeterPhoto(kind, ocr)
       if (!check.ok) {
-        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, '🚫')
+        showAlert(`Ảnh không phải đồng hồ ${label}`, check.reason, undefined, 'image-off')
         return
       }
 
@@ -1082,7 +1093,7 @@ const InspectionSection: React.FC<{
               'Ảnh có người trong khung',
               `Máy nhận ra "${person}" trong ảnh. Chụp thẳng vào MẶT SỐ của đồng hồ ${label}, không có người che.`,
               undefined,
-              '🚫',
+              'image-off',
             )
             return
           }
@@ -1100,7 +1111,7 @@ const InspectionSection: React.FC<{
           `Không tách được dãy số trên đồng hồ ${label} — thường do ảnh mờ, chụp xa hoặc bị loá. `
             + 'Chụp lại gần hơn, lấy rõ phần ô số và tránh ánh sáng phản chiếu.',
           undefined,
-          '🚫',
+          'image-off',
         )
         return
       }
@@ -1276,7 +1287,7 @@ const InspectionSection: React.FC<{
           rejected.length === urls.length ? 'Ảnh không hợp lệ' : `Đã bỏ ${rejected.length} ảnh không hợp lệ`,
           rejected[0],
           undefined,
-          '🚫',
+          'image-off',
         )
       }
     } catch (err: any) {
@@ -1404,10 +1415,20 @@ const InspectionSection: React.FC<{
         onPress={() => { if (!locked) setExpanded((v) => !v) }}
         activeOpacity={locked ? 1 : 0.7}
       >
-        <Text style={styles.inspectionTitle}>{hasData ? '✅' : '📋'} Hiện trạng phòng & điện nước</Text>
-        <Text style={styles.inspectionToggle}>
-          {locked ? '🔒 Đã chốt' : expanded ? 'Thu gọn ▲' : 'Chỉnh sửa ▼'}
-        </Text>
+        <IconText
+          icon={hasData ? 'success' : 'clipboard'}
+          iconColor={hasData ? Colors.success : Colors.textSecondary}
+          style={styles.inspectionTitle}
+        >
+          Hiện trạng phòng & điện nước
+        </IconText>
+        {locked ? (
+          <IconText icon="lock" gap={4} iconSize={13} style={styles.inspectionToggle}>Đã chốt</IconText>
+        ) : (
+          <IconText icon={expanded ? 'chevron-up' : 'chevron-down'} trailing gap={2} style={styles.inspectionToggle}>
+            {expanded ? 'Thu gọn' : 'Chỉnh sửa'}
+          </IconText>
+        )}
       </TouchableOpacity>
       {!expanded && (
         <Text style={styles.inspectionSummary}>
@@ -1424,14 +1445,16 @@ const InspectionSection: React.FC<{
           </Text>
           {(['elec', 'water'] as const).map((kind) => (
             <View key={kind} style={styles.meterCardSm}>
-              <Text style={styles.label}>{kind === 'elec' ? '⚡ Chỉ số điện (kWh)' : '💧 Chỉ số nước (m³)'}</Text>
+              <IconText icon={kind === 'elec' ? 'electric' : 'water'} gap={4} style={styles.label}>
+                {kind === 'elec' ? 'Chỉ số điện (kWh)' : 'Chỉ số nước (m³)'}
+              </IconText>
               <View style={styles.methodRow}>
                 <TouchableOpacity
                   style={styles.secondaryBtnSm}
                   onPress={() => setCameraTarget(kind)}
                   disabled={ocrLoading !== null}
                 >
-                  <Text style={styles.secondaryBtnSmText}>📷 Chụp</Text>
+                  <IconText icon="camera" gap={4} style={styles.secondaryBtnSmText}>Chụp</IconText>
                 </TouchableOpacity>
                 {gallerySOS[kind] && (
                   <TouchableOpacity
@@ -1439,7 +1462,7 @@ const InspectionSection: React.FC<{
                     onPress={() => pickMeterFromGallery(kind)}
                     disabled={ocrLoading !== null}
                   >
-                    <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+                    <IconText icon="images" gap={4} style={styles.secondaryBtnSmText}>Chọn ảnh</IconText>
                   </TouchableOpacity>
                 )}
                 {ocrLoading === kind && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
@@ -1468,14 +1491,14 @@ const InspectionSection: React.FC<{
                       setMeterCapturedAt((prev) => ({ ...prev, [kind]: undefined }))
                     }}
                   >
-                    <Text style={styles.removePhotoText}>×</Text>
+                    <Icon name="close" size={13} color={Colors.white} strokeWidth={3} />
                   </TouchableOpacity>
                 </View>
               )}
               {!!meterCapturedAt[kind] && (
-                <Text style={styles.meterCapturedAt}>
-                  🕒 Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
-                </Text>
+                <IconText icon="clock" gap={4} style={styles.meterCapturedAt}>
+                  Chụp lúc {new Date(meterCapturedAt[kind]!).toLocaleString('vi-VN')}
+                </IconText>
               )}
               {/* Ô nhập bị KHOÁ khi chưa có ảnh và chưa xin mã — xem meterUnlocked. */}
               <TextInput
@@ -1500,7 +1523,7 @@ const InspectionSection: React.FC<{
                 placeholder={
                   meterUnlocked(kind)
                     ? 'OCR tự điền, có thể chỉnh'
-                    : '🔒 Chụp ảnh đồng hồ, hoặc xin mã để nhập tay'
+                    : 'Chụp ảnh đồng hồ, hoặc xin mã để nhập tay'
                 }
                 placeholderTextColor={Colors.textMuted}
               />
@@ -1513,17 +1536,17 @@ const InspectionSection: React.FC<{
                 <TouchableOpacity
                   onPress={() => setOverrideTarget(kind === 'elec' ? 'ELEC' : 'WATER')}
                 >
-                  <Text style={styles.overrideLink}>
-                    🔑 Không chụp được ảnh? Xin mã từ quản trị để nhập tay
-                  </Text>
+                  <IconText icon="key" gap={4} multiline style={styles.overrideLink}>
+                    Không chụp được ảnh? Xin mã từ quản trị để nhập tay
+                  </IconText>
                 </TouchableOpacity>
               )}
 
               {!!meterOverride[kind] && (
                 <View style={styles.overrideBadge}>
-                  <Text style={styles.overrideBadgeText} numberOfLines={2}>
-                    🔑 Nhập tay có mã · {meterOverride[kind]!.reason}
-                  </Text>
+                  <IconText icon="key" gap={4} multiline style={styles.overrideBadgeText} numberOfLines={2}>
+                    Nhập tay có mã · {meterOverride[kind]!.reason}
+                  </IconText>
                   <TouchableOpacity
                     onPress={() => setMeterOverride((prev) => ({ ...prev, [kind]: undefined }))}
                   >
@@ -1562,7 +1585,7 @@ const InspectionSection: React.FC<{
                   onPress={() => setManualConfirmed((prev) => ({ ...prev, [kind]: !prev[kind] }))}
                 >
                   <View style={[styles.checkbox, manualConfirmed[kind] && styles.checkboxChecked]}>
-                    {manualConfirmed[kind] && <Text style={styles.checkboxTick}>✓</Text>}
+                    {manualConfirmed[kind] && <Icon name="check" size={13} color={Colors.white} strokeWidth={3} />}
                   </View>
                   <Text style={styles.confirmText}>
                     Tôi xác nhận đã nhập đúng số liệu (nhập tay, khác/thay OCR) và chịu trách nhiệm.
@@ -1576,10 +1599,10 @@ const InspectionSection: React.FC<{
             <Text style={styles.label}>Ảnh hiện trạng phòng</Text>
             <View style={styles.methodRow}>
               <TouchableOpacity style={styles.secondaryBtnSm} onPress={() => setCameraTarget('condition')} disabled={photoUploading}>
-                <Text style={styles.secondaryBtnSmText}>📸 Chụp ảnh</Text>
+                <IconText icon="camera" gap={4} style={styles.secondaryBtnSmText}>Chụp ảnh</IconText>
               </TouchableOpacity>
               <TouchableOpacity style={styles.secondaryBtnSm} onPress={pickConditionFromGallery} disabled={photoUploading}>
-                <Text style={styles.secondaryBtnSmText}>🖼 Chọn ảnh</Text>
+                <IconText icon="images" gap={4} style={styles.secondaryBtnSmText}>Chọn ảnh</IconText>
               </TouchableOpacity>
               {photoUploading && <ActivityIndicator color={Colors.primary} style={{ marginLeft: 8 }} />}
             </View>
@@ -1601,7 +1624,7 @@ const InspectionSection: React.FC<{
                         setPhotosCapturedAt((prev) => prev.filter((_, idx) => idx !== i))
                       }}
                     >
-                      <Text style={styles.removePhotoText}>×</Text>
+                      <Icon name="close" size={13} color={Colors.white} strokeWidth={3} />
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -1621,11 +1644,11 @@ const InspectionSection: React.FC<{
                   {describing ? (
                     <ActivityIndicator size="small" color={Colors.primary} />
                   ) : (
-                    <Text style={styles.aiBtnText}>
+                    <IconText icon="note" gap={4} style={styles.aiBtnText}>
                       {/* Đã có chữ trong ô → nút này là "làm lại từ đầu", nên phải nói
                           rõ là TẠO LẠI để không ai bấm nhầm rồi mất phần đã soạn. */}
-                      ✨ {note.trim() ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
-                    </Text>
+                      {note.trim() ? 'Tạo lại mô tả' : 'Mô tả từ ảnh'}
+                    </IconText>
                   )}
                 </TouchableOpacity>
               )}
@@ -1651,9 +1674,9 @@ const InspectionSection: React.FC<{
                 thường là chữ manager gõ trộn với câu AI soạn. Vẫn phải nhắc đọc lại —
                 đây là căn cứ trừ cọc lúc trả phòng. */}
             {!!note && aiDrafted && (
-              <Text style={styles.aiHint}>
-                ✨ Có phần do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
-              </Text>
+              <IconText icon="info" gap={4} multiline style={styles.aiHint}>
+                Có phần do AI soạn từ ảnh — đọc lại và sửa cho đúng trước khi lưu.
+              </IconText>
             )}
           </View>
 
@@ -1666,11 +1689,11 @@ const InspectionSection: React.FC<{
             disabled={saving || !!saveBlockReason}
           >
             {saving ? <ActivityIndicator color={Colors.white} /> : (
-              <Text style={styles.primaryBtnText}>{capturable ? '💾 Lưu & chốt hiện trạng' : '💾 Lưu hiện trạng'}</Text>
+              <Text style={styles.primaryBtnText}>{capturable ? 'Lưu & chốt hiện trạng' : 'Lưu hiện trạng'}</Text>
             )}
           </TouchableOpacity>
           {!!saveBlockReason && !saving && (
-            <Text style={styles.saveBlockHint}>⚠️ {saveBlockReason}</Text>
+            <IconText icon="warning" gap={4} multiline style={styles.saveBlockHint}>{saveBlockReason}</IconText>
           )}
         </View>
       )}
@@ -1691,12 +1714,12 @@ const InspectionSection: React.FC<{
             <Image source={{ uri: previewUrl }} style={styles.previewImage} resizeMode="contain" />
           )}
           {!!previewCapturedAt && (
-            <Text style={styles.previewCapturedAt}>
-              🕒 Chụp lúc {new Date(previewCapturedAt).toLocaleString('vi-VN')}
-            </Text>
+            <IconText icon="clock" gap={5} style={styles.previewCapturedAt}>
+              Chụp lúc {new Date(previewCapturedAt).toLocaleString('vi-VN')}
+            </IconText>
           )}
           <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewUrl(null)}>
-            <Text style={styles.previewCloseText}>✕</Text>
+            <Icon name="close" size={20} color={Colors.white} />
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -2016,7 +2039,7 @@ const DepositOtpPanel: React.FC<{
         'Đã ghi nhận mã của bạn',
         'Còn chờ khách nhập mã trên máy của khách là hợp đồng có hiệu lực.',
         undefined,
-        '✅',
+        'success',
       )
     } catch (err: any) {
       showAlert('Lỗi', readErr(err, 'Không hoàn tất được hợp đồng.'))
@@ -2032,7 +2055,12 @@ const DepositOtpPanel: React.FC<{
   return (
     <ScrollView contentContainerStyle={styles.panelBody}>
       <View style={[styles.banner, { backgroundColor: '#ECFEFF' }]}>
-        <Text style={styles.bannerIcon}>{contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? '✅' : '🤝'}</Text>
+        <Icon
+          name={contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'success' : 'handshake'}
+          size={36}
+          color={contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? Colors.success : '#0891B2'}
+          strokeWidth={1.6}
+        />
         <Text style={styles.bannerTitle}>
           {contract.priceApprovalStatus === 'APPROVED_AWAITING_DEPOSIT' ? 'Host đã duyệt giá' : 'Đón khách — thu tiền'}
         </Text>
@@ -2041,9 +2069,9 @@ const DepositOtpPanel: React.FC<{
           để kích hoạt hợp đồng.
         </Text>
         {!!contract.expectedReceptionDate && (
-          <Text style={styles.bannerReception}>
-            📅 Hẹn đón khách ngày {formatDateVi(contract.expectedReceptionDate)}
-          </Text>
+          <IconText icon="calendar" gap={5} style={styles.bannerReception}>
+            Hẹn đón khách ngày {formatDateVi(contract.expectedReceptionDate)}
+          </IconText>
         )}
       </View>
 
@@ -2057,16 +2085,16 @@ const DepositOtpPanel: React.FC<{
           {/* Chưa lưu hiện trạng thì KHÔNG hiện nút — một dòng nói đúng việc phải làm.
               (Lý do dài dòng đã bỏ: manager cần biết LÀM GÌ, không cần nghe giảng.) */}
           {pastGrace && (
-            <Text style={styles.stepLockNote}>
-              ⚠️ Đã quá {ONBOARD_NO_SHOW_GRACE_DAYS} ngày kể từ ngày đón
+            <IconText icon="warning" gap={5} multiline style={styles.stepLockNote}>
+              Đã quá {ONBOARD_NO_SHOW_GRACE_DAYS} ngày kể từ ngày đón
               {recWindow.due ? ` (${formatDateVi(recWindow.due)})` : ''} — hệ thống không cho tạo mã thanh toán
               nữa và sẽ tự hủy hồ sơ chưa thu tiền. Liên hệ admin để dời ngày đón nếu khách vẫn vào ở.
-            </Text>
+            </IconText>
           )}
           {!inspectionSaved ? (
-            <Text style={styles.stepLockNote}>
-              🔒 Lưu hiện trạng phòng xong mới thu được tiền
-            </Text>
+            <IconText icon="lock" gap={5} style={styles.stepLockNote}>
+              Lưu hiện trạng phòng xong mới thu được tiền
+            </IconText>
           ) : needsCapture ? (
             <TouchableOpacity
               style={[styles.primaryBtn, busy && styles.btnDisabled]}
@@ -2120,13 +2148,13 @@ const DepositOtpPanel: React.FC<{
       ) : (
         <View style={styles.formCard}>
           <View style={styles.paidBox}>
-            <Text style={styles.paidIcon}>✅</Text>
+            <Icon name="success" size={22} color={Colors.success} />
             <Text style={styles.paidText}>Đã ghi nhận thanh toán!</Text>
           </View>
 
           {managerDone ? (
             <View style={{ marginTop: Spacing.md, gap: Spacing.sm }}>
-              <Text style={styles.confirmStepTitle}>✅ Bạn đã xác nhận</Text>
+              <IconText icon="success" iconColor={Colors.success} style={styles.confirmStepTitle}>Bạn đã xác nhận</IconText>
               <View style={styles.confirmWaitRow}>
                 <ActivityIndicator size="small" color={Colors.primary} />
                 <Text style={styles.confirmStepText}>
@@ -2143,9 +2171,13 @@ const DepositOtpPanel: React.FC<{
                   Nói bừa "khách chưa gửi" thì quản lý đi giục nhầm; nói bừa "đã gửi"
                   thì quản lý đi tìm một tin nhắn chưa hề tồn tại.
                 */}
-                <Text style={styles.confirmStepTitle}>
-                  {tenantDone ? '✅ Khách đã xác nhận' : '⏳ Chờ khách xác nhận hợp đồng'}
-                </Text>
+                <IconText
+                  icon={tenantDone ? 'success' : 'hourglass'}
+                  iconColor={tenantDone ? Colors.success : Colors.warning}
+                  style={styles.confirmStepTitle}
+                >
+                  {tenantDone ? 'Khách đã xác nhận' : 'Chờ khách xác nhận hợp đồng'}
+                </IconText>
                 {!tenantDone && (
                   <Text style={styles.confirmStepText}>
                     Hướng dẫn khách: mở app →{' '}
@@ -2200,7 +2232,7 @@ const DepositOtpPanel: React.FC<{
 const Header: React.FC<{ onBack: () => void; title?: string }> = ({ onBack, title }) => (
   <View style={styles.header}>
     <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-      <Text style={[styles.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+      <Icon name="back" size={26} color={Colors.primary} />
     </TouchableOpacity>
     <Text style={styles.headerTitle}>{title ?? 'Hợp đồng chờ xử lý'}</Text>
     <View style={{ width: 70 }} />
@@ -2220,7 +2252,7 @@ const styles = StyleSheet.create({
     ...Shadow.sm,
   },
   backBtn: { width: 70 },
-  backText: { color: Colors.primary, fontWeight: '600' },
+
   headerTitle: { fontSize: 18, fontWeight: '700', color: Colors.textPrimary },
 
   viewContractBar: {
@@ -2245,7 +2277,7 @@ const styles = StyleSheet.create({
 
   listBody: { padding: Spacing.lg, gap: Spacing.md },
   emptyBox: { alignItems: 'center', paddingVertical: 80, gap: Spacing.md },
-  emptyIcon: { fontSize: 44 },
+
   emptyText: { fontSize: 14, color: Colors.textSecondary },
 
   card: {
@@ -2291,13 +2323,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     paddingHorizontal: Spacing.lg, paddingTop: Spacing.md,
   },
-  searchInputFlex: {
-    flex: 1,
+  searchBox: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: Colors.white,
     borderWidth: 1, borderColor: Colors.border, borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md, paddingVertical: 9,
-    fontSize: 13.5, color: Colors.textPrimary,
+    paddingHorizontal: Spacing.md,
   },
+  searchInputFlex: { flex: 1, paddingVertical: 9, fontSize: 13.5, color: Colors.textPrimary },
   filterBtn: {
     paddingHorizontal: Spacing.md, paddingVertical: 9, borderRadius: BorderRadius.md,
     backgroundColor: Colors.white, borderWidth: 1, borderColor: Colors.border,
@@ -2340,7 +2372,7 @@ const styles = StyleSheet.create({
 
   panelBody: { padding: Spacing.lg, gap: Spacing.md },
   banner: { borderRadius: BorderRadius.xl, padding: Spacing.lg, alignItems: 'center', gap: 6 },
-  bannerIcon: { fontSize: 40 },
+
   bannerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
   bannerDesc: { fontSize: 13, color: Colors.textSecondary, textAlign: 'center', lineHeight: 19 },
   bannerReception: { fontSize: 13, fontWeight: '700', color: Colors.primary, marginTop: 4 },
@@ -2441,7 +2473,7 @@ const styles = StyleSheet.create({
   webviewBox: { height: 460, borderRadius: BorderRadius.lg, overflow: 'hidden', marginTop: Spacing.md },
 
   paidBox: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
-  paidIcon: { fontSize: 22 },
+
   paidText: { fontSize: 15, fontWeight: '700', color: Colors.success },
 
   inspectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -2481,7 +2513,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.border, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.white,
   },
   checkboxChecked: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  checkboxTick: { color: Colors.white, fontSize: 13, fontWeight: '800' },
+
   confirmRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginTop: Spacing.sm },
   confirmText: { flex: 1, fontSize: 12, color: Colors.textSecondary, lineHeight: 17 },
   saveBlockHint: {
@@ -2552,7 +2584,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  removePhotoText: { color: Colors.white, fontSize: 18, fontWeight: '900', lineHeight: 21 },
+
   notesInput: { minHeight: 80, textAlignVertical: 'top' },
   // AI mô tả hiện trạng
   noteHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -2584,6 +2616,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewCloseText: { color: Colors.white, fontSize: 18, fontWeight: '700' },
+
   previewCapturedAt: { marginTop: Spacing.sm, color: Colors.white, fontSize: 13 },
 })

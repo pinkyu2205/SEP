@@ -15,6 +15,7 @@ import { SharedBill, InvoiceType } from '@/types/bill';
 import { realTenantBillingService, toSharedBill } from '@/services/tenant/billingService';
 import { InvoicePaymentModal } from '@/components/invoice/InvoicePaymentModal';
 import { isDisputeOpen } from '@/types/invoiceDispute';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 
 type Invoice = SharedBill;
 /** MỘT bộ lọc duy nhất: tất cả / quá hạn / từng loại phí. */
@@ -37,19 +38,21 @@ type Filter = 'all' | 'overdue' | InvoiceType;
 
 const TYPE_ORDER: InvoiceType[] = ['rent', 'electricity', 'water', 'maintenance', 'deposit'];
 
-const TYPE_CONFIG: Record<InvoiceType, { label: string; icon: string; color: string; bg: string }> = {
-  rent:        { label: 'Tiền phòng', icon: '🏠', color: '#7C3AED', bg: '#F5F3FF' },
-  electricity: { label: 'Tiền điện',  icon: '⚡', color: '#D97706', bg: '#FEF9C3' },
-  water:       { label: 'Tiền nước',  icon: '💧', color: '#2563EB', bg: '#DBEAFE' },
-  maintenance: { label: 'Phí sửa chữa', icon: '🔧', color: '#DC2626', bg: '#FEE2E2' },
+type TypeCfg = { label: string; icon: IconName; color: string; bg: string };
+
+const TYPE_CONFIG: Record<InvoiceType, TypeCfg> = {
+  rent:        { label: 'Tiền phòng', icon: 'home',     color: '#7C3AED', bg: '#F5F3FF' },
+  electricity: { label: 'Tiền điện',  icon: 'electric', color: '#D97706', bg: '#FEF9C3' },
+  water:       { label: 'Tiền nước',  icon: 'water',    color: '#2563EB', bg: '#DBEAFE' },
+  maintenance: { label: 'Phí sửa chữa', icon: 'wrench', color: '#DC2626', bg: '#FEE2E2' },
   // `deposit` = hoá đơn HD-ONBOARD-*, GỘP cọc + tiền nhà chu kỳ đầu (xem types/bill.ts).
-  deposit:     { label: 'Thu khi nhận phòng', icon: '🔐', color: '#059669', bg: '#ECFDF5' },
+  deposit:     { label: 'Thu khi nhận phòng', icon: 'key', color: '#059669', bg: '#ECFDF5' },
 };
-const FALLBACK_TYPE = { label: 'Khoản khác', icon: '📄', color: Colors.textSecondary, bg: Colors.background };
+const FALLBACK_TYPE: TypeCfg = { label: 'Khoản khác', icon: 'document', color: Colors.textSecondary, bg: Colors.background };
 const typeCfgOf = (t: InvoiceType) => TYPE_CONFIG[t] ?? FALLBACK_TYPE;
 
 const CHIP_LABEL: Record<InvoiceType, string> = {
-  rent: '🏠 Phòng', electricity: '⚡ Điện', water: '💧 Nước', maintenance: '🔧 Sửa chữa', deposit: '🔐 Nhận phòng',
+  rent: 'Phòng', electricity: 'Điện', water: 'Nước', maintenance: 'Sửa chữa', deposit: 'Nhận phòng',
 };
 
 type PendingCharge = Awaited<ReturnType<typeof realTenantBillingService.listPendingCharges>>[number];
@@ -167,7 +170,7 @@ export const InvoiceListScreen: React.FC = () => {
       >
         <View style={styles.cardTop}>
           <View style={[styles.typeIcon, { backgroundColor: typeCfg.bg }]}>
-            <Text style={styles.typeIconText}>{typeCfg.icon}</Text>
+            <Icon name={typeCfg.icon} size={19} color={typeCfg.color} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle} numberOfLines={1}>
@@ -177,7 +180,7 @@ export const InvoiceListScreen: React.FC = () => {
               {[item.roomName && `Phòng ${item.roomName}`, usage].filter(Boolean).join(' · ') || item.propertyName}
             </Text>
           </View>
-          <Text style={styles.chevron}>›</Text>
+          <Icon name="chevron-right" size={20} color={Colors.textMuted} />
         </View>
 
         <View style={styles.amountRow}>
@@ -297,7 +300,7 @@ export const InvoiceListScreen: React.FC = () => {
         <Text style={styles.title}>Hoá đơn</Text>
         {/* Trỏ về PaymentHistory — nơi xem mọi khoản đã trả. */}
         <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('PaymentHistory')}>
-          <Text style={styles.historyBtnText}>🕘 Đã trả</Text>
+          <IconText icon="history" gap={5} style={styles.historyBtnText}>Đã trả</IconText>
         </TouchableOpacity>
       </View>
 
@@ -319,7 +322,7 @@ export const InvoiceListScreen: React.FC = () => {
           ListEmptyComponent={
             owing.length === 0 ? (
               <View style={styles.empty}>
-                <Text style={styles.emptyEmoji}>✅</Text>
+                <Icon name="success" size={44} color={Colors.success} strokeWidth={1.5} />
                 <Text style={styles.emptyTitle}>Đã thanh toán hết</Text>
                 <Text style={styles.emptyDesc}>Xem lại các khoản đã trả ở mục "Đã trả".</Text>
               </View>
@@ -396,10 +399,10 @@ const styles = StyleSheet.create({
   cardOverdue: { borderColor: '#FCA5A5', borderLeftWidth: 4, borderLeftColor: Colors.error },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   typeIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  typeIconText: { fontSize: 18 },
+
   cardTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary },
   cardSub: { fontSize: 12, color: Colors.textMuted, marginTop: 1 },
-  chevron: { fontSize: 22, color: Colors.textMuted },
+
   amountRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: Spacing.md, gap: Spacing.sm },
   amount: { fontSize: 22, fontWeight: '800', color: Colors.textPrimary },
   lateFee: { fontSize: 11, color: Colors.error, marginTop: 1 },
@@ -417,7 +420,7 @@ const styles = StyleSheet.create({
   payBtnText: { fontSize: 14, fontWeight: '800', color: Colors.white },
 
   empty: { alignItems: 'center', paddingVertical: 48, gap: 6 },
-  emptyEmoji: { fontSize: 44 },
+
   emptyTitle: { fontSize: 16, fontWeight: '800', color: Colors.textPrimary },
   emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
 });

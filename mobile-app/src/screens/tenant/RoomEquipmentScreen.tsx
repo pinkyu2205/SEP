@@ -14,17 +14,12 @@ import {
   formatDate, getEquipmentLifecycleLabel, getEquipmentLifecycleColor,
   equipmentNeedsAttention, guessEquipmentCategory,
 } from '@/utils';
-
-const CATEGORY_ICON: Record<string, string> = {
-  electrical: '⚡',
-  plumbing: '🚰',
-  furniture: '🛋️',
-  appliance: '❄️',
-  other: '🔧',
-};
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
+import { MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
 
 const equipName = (e: EquipmentDto) => e.equipmentName || e.catalogName || 'Thiết bị';
-const getIcon = (e: EquipmentDto) => CATEGORY_ICON[guessEquipmentCategory(equipName(e))] ?? '🔧';
+const getIcon = (e: EquipmentDto): IconName =>
+  MAINTENANCE_CATEGORY_ICON[guessEquipmentCategory(equipName(e))] ?? 'wrench';
 
 export const RoomEquipmentScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -83,7 +78,7 @@ export const RoomEquipmentScreen: React.FC = () => {
       >
         <View style={styles.cardLeft}>
           <View style={[styles.iconWrap, { backgroundColor: Colors.primaryBg }]}>
-            <Text style={styles.iconText}>{icon}</Text>
+            <Icon name={icon} size={22} color={Colors.primary} />
           </View>
         </View>
 
@@ -101,7 +96,7 @@ export const RoomEquipmentScreen: React.FC = () => {
             <Text style={styles.equipCode}>{item.qrCode}</Text>
             {isMultiRoom && !!roomLabel && (
               <View style={styles.roomChip}>
-                <Text style={styles.roomChipText}>🚪 {roomLabel}</Text>
+                <IconText icon="door" gap={3} iconSize={11} style={styles.roomChipText}>{roomLabel}</IconText>
               </View>
             )}
           </View>
@@ -117,7 +112,7 @@ export const RoomEquipmentScreen: React.FC = () => {
                     : 'Chưa phải sửa lần nào'}
             </Text>
             <View style={styles.qrChip}>
-              <Text style={styles.qrChipText}>📷 QR</Text>
+              <IconText icon="qr" gap={3} iconSize={11} style={styles.qrChipText}>QR</IconText>
             </View>
           </View>
         </View>
@@ -132,7 +127,7 @@ export const RoomEquipmentScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backArrow}>‹</Text>
+          <Icon name="back" size={28} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Thiết bị phòng</Text>
@@ -176,7 +171,13 @@ export const RoomEquipmentScreen: React.FC = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>{loadError ? '⚠️' : '🔧'}</Text>
+              <Icon
+                name={loadError ? 'alert' : 'package'}
+                size={44}
+                color={loadError ? Colors.warning : Colors.textMuted}
+                strokeWidth={1.5}
+                style={styles.emptyIcon}
+              />
               <Text style={styles.emptyText}>
                 {loadError
                   ? 'Không tải được danh sách thiết bị. Kéo xuống để thử lại.'
@@ -200,7 +201,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
+
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.textPrimary },
   headerSub: { fontSize: 11, color: Colors.textMuted, marginTop: 1 },
@@ -228,7 +229,7 @@ const styles = StyleSheet.create({
     width: 48, height: 48, borderRadius: BorderRadius.md,
     alignItems: 'center', justifyContent: 'center',
   },
-  iconText: { fontSize: 24 },
+
 
   cardBody: { flex: 1 },
   cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: Spacing.xs },
@@ -250,6 +251,6 @@ const styles = StyleSheet.create({
   qrChipText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
 
   empty: { alignItems: 'center', paddingTop: 80 },
-  emptyIcon: { fontSize: 48, marginBottom: Spacing.md },
+  emptyIcon: { marginBottom: Spacing.md },
   emptyText: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', paddingHorizontal: Spacing.xl },
 });

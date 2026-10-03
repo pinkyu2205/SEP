@@ -6,6 +6,7 @@ import { Colors, Spacing, Shadow } from '@/constants';
 import { maskTenantPhone, maskTenantCccd } from '@/constants/managerVisibility';
 import { EXPIRING_SOON_DAYS } from '@/utils/contractStatus';
 import { serverNow } from '@/utils/serverTime';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import type { TenantContractResponse } from '@/services/tenant/tenantService';
 
 /**
@@ -171,7 +172,7 @@ const AVATAR_PALETTE = [
 export const getAvatarColor = (name: string) =>
   AVATAR_PALETTE[name.charCodeAt(0) % AVATAR_PALETTE.length];
 
-export interface ChipInfo { label: string; color: string; bg: string }
+export interface ChipInfo { label: string; color: string; bg: string; icon?: IconName }
 
 /**
  * Chip tình trạng THU CỌC của khách — thứ duy nhất về tiền mà endpoint này trả thật
@@ -186,16 +187,16 @@ export const getFinancialChip = (t: Tenant): ChipInfo | null => {
   if (t.status === 'pending_activation')
     return { label: 'Chưa nhận phòng', color: '#94A3B8', bg: '#F1F5F9' };
   return t.depositPaid
-    ? { label: '✓ Đã thu cọc', color: '#16A34A', bg: '#F0FDF4' }
+    ? { label: 'Đã thu cọc', icon: 'check', color: '#16A34A', bg: '#F0FDF4' }
     : { label: 'Chưa thu cọc', color: '#D97706', bg: '#FFFBEB' };
 };
 
 export const getContractChip = (t: Tenant): ChipInfo | null => {
   if (!t.contractEndDate || t.status === 'moved_out') return null;
   const days = getDaysRemaining(t.contractEndDate);
-  if (days < 0) return { label: `❌ Hết hạn ${-days} ngày`, color: '#DC2626', bg: '#FEE2E2' };
-  if (days <= EXPIRING_SOON_DAYS) return { label: `⏰ Còn ${days} ngày`, color: '#B45309', bg: '#FEF3C7' };
-  if (days <= 90) return { label: `📋 Còn ${days} ngày`, color: '#0369A1', bg: '#E0F2FE' };
+  if (days < 0) return { label: `Hết hạn ${-days} ngày`, icon: 'calendar-x', color: '#DC2626', bg: '#FEE2E2' };
+  if (days <= EXPIRING_SOON_DAYS) return { label: `Còn ${days} ngày`, icon: 'clock', color: '#B45309', bg: '#FEF3C7' };
+  if (days <= 90) return { label: `Còn ${days} ngày`, icon: 'calendar', color: '#0369A1', bg: '#E0F2FE' };
   return null;
 };
 
@@ -206,7 +207,7 @@ export const hasInspection = (t: Tenant): boolean =>
 /** Cảnh báo thiếu hiện trạng — chỉ khách đã nhận phòng mới cần. */
 export const getInspectionChip = (t: Tenant): ChipInfo | null =>
   t.status === 'active' && !hasInspection(t)
-    ? { label: '📷 Thiếu hiện trạng', color: '#7C3AED', bg: '#F5F3FF' }
+    ? { label: 'Thiếu hiện trạng', icon: 'camera', color: '#7C3AED', bg: '#F5F3FF' }
     : null;
 
 export const STATUS_CONFIG: Record<TenantStatus, { label: string; color: string; bg: string }> = {
@@ -233,9 +234,11 @@ const badgeStyles = StyleSheet.create({
 });
 
 // ===================== INFO CHIP =====================
-export const InfoChip: React.FC<{ label: string; color: string; bg: string }> = ({ label, color, bg }) => (
+export const InfoChip: React.FC<ChipInfo> = ({ label, color, bg, icon }) => (
   <View style={[chipStyles.chip, { backgroundColor: bg, borderColor: color + '30' }]}>
-    <Text style={[chipStyles.text, { color }]}>{label}</Text>
+    {icon
+      ? <IconText icon={icon} gap={4} iconSize={12} style={[chipStyles.text, { color }]}>{label}</IconText>
+      : <Text style={[chipStyles.text, { color }]}>{label}</Text>}
   </View>
 );
 
@@ -281,9 +284,13 @@ export const TenantDetailSheet: React.FC<{
             {/* Header */}
             <View style={mStyles.header}>
               <View style={[mStyles.avatarLarge, { backgroundColor: avatarColor.bg }]}>
-                <Text style={[mStyles.avatarText, { color: avatarColor.text }]}>
-                  {isWholeHouse ? '🏠' : tenant.fullName.charAt(0)}
-                </Text>
+                {isWholeHouse
+                  ? <Icon name="home" size={26} color={avatarColor.text} />
+                  : (
+                    <Text style={[mStyles.avatarText, { color: avatarColor.text }]}>
+                      {tenant.fullName.charAt(0)}
+                    </Text>
+                  )}
               </View>
               <View style={mStyles.headerInfo}>
                 <Text style={mStyles.tenantName} numberOfLines={2}>{tenant.fullName}</Text>
@@ -297,13 +304,13 @@ export const TenantDetailSheet: React.FC<{
                   <StatusBadge status={tenant.status} />
                   {isWholeHouse && (
                     <View style={[badgeStyles.badge, { backgroundColor: '#FEF3C7' }]}>
-                      <Text style={[badgeStyles.label, { color: '#B45309' }]}>🏘 Nguyên căn</Text>
+                      <IconText icon="home" gap={4} iconSize={12} style={[badgeStyles.label, { color: '#B45309' }]}>Nguyên căn</IconText>
                     </View>
                   )}
                 </View>
               </View>
               <TouchableOpacity onPress={onClose} style={mStyles.closeBtn}>
-                <Text style={mStyles.closeBtnText}>✕</Text>
+                <Icon name="close" size={16} color="#64748B" />
               </TouchableOpacity>
             </View>
 
@@ -319,21 +326,21 @@ export const TenantDetailSheet: React.FC<{
             {/* ─── HỢP ĐỒNG ─── */}
             <View style={mStyles.section}>
               <Text style={mStyles.sectionTitle}>Hợp đồng thuê</Text>
-              {!!tenant.contractCode && <InfoRow label="🔖 Mã hợp đồng" value={tenant.contractCode} />}
+              {!!tenant.contractCode && <InfoRow label="Mã hợp đồng" value={tenant.contractCode} />}
               <InfoRow
-                label={isWholeHouse ? '🏠 Tài sản' : '🚪 Phòng'}
+                label={isWholeHouse ? 'Tài sản' : 'Phòng'}
                 value={isWholeHouse ? `${tenant.propertyName} — nguyên căn` : `${tenant.roomName} · ${tenant.propertyName}`}
               />
               {tenant.status === 'pending_activation' && !!tenant.expectedReceptionDate && (
-                <InfoRow label="🚚 Hẹn đón khách" value={fmtIsoDate(tenant.expectedReceptionDate)} accent />
+                <InfoRow label="Hẹn đón khách" value={fmtIsoDate(tenant.expectedReceptionDate)} accent />
               )}
-              <InfoRow label="📅 Ngày vào ở" value={tenant.moveInDate || '—'} />
+              <InfoRow label="Ngày vào ở" value={tenant.moveInDate || '—'} />
               {!!tenant.contractStartDate && tenant.contractStartDate !== tenant.moveInDate && (
-                <InfoRow label="📆 HĐ hiệu lực từ" value={fmtIsoDate(tenant.contractStartDate)} />
+                <InfoRow label="HĐ hiệu lực từ" value={fmtIsoDate(tenant.contractStartDate)} />
               )}
               {!!tenant.contractEndDate && (
                 <InfoRow
-                  label="📋 Hạn hợp đồng"
+                  label="Hạn hợp đồng"
                   value={`${fmtIsoDate(tenant.contractEndDate)}${remainingText}`}
                   highlight={getDaysRemaining(tenant.contractEndDate) <= EXPIRING_SOON_DAYS}
                 />
@@ -344,20 +351,20 @@ export const TenantDetailSheet: React.FC<{
             <View style={mStyles.section}>
               <Text style={mStyles.sectionTitle}>Tiền cọc</Text>
               <InfoRow
-                label="💰 Trạng thái"
-                value={tenant.depositPaid ? '✓ Đã thu' : 'Chưa thu'}
+                label="Trạng thái"
+                value={tenant.depositPaid ? 'Đã thu' : 'Chưa thu'}
                 accent={tenant.depositPaid}
                 highlight={!tenant.depositPaid}
               />
               {!!tenant.depositMonths && (
-                <InfoRow label="📐 Mức cọc" value={`${tenant.depositMonths} tháng tiền nhà`} />
+                <InfoRow label="Mức cọc" value={`${tenant.depositMonths} tháng tiền nhà`} />
               )}
               {!!tenant.depositPaidAt && (
-                <InfoRow label="🕒 Thu lúc" value={fmtDateTime(tenant.depositPaidAt)} />
+                <InfoRow label="Thu lúc" value={fmtDateTime(tenant.depositPaidAt)} />
               )}
               {!!tenant.depositMethod && (
                 <InfoRow
-                  label="🏦 Hình thức"
+                  label="Hình thức"
                   value={DEPOSIT_METHOD_LABEL[tenant.depositMethod.toUpperCase()] ?? tenant.depositMethod}
                 />
               )}
@@ -376,21 +383,21 @@ export const TenantDetailSheet: React.FC<{
               ) : hasAnyInspectionData ? (
                 <>
                   <InfoRow
-                    label="⚡ Chỉ số điện đầu"
+                    label="Chỉ số điện đầu"
                     value={tenant.initialElectricReading != null ? `${tenant.initialElectricReading} kWh` : 'Chưa ghi'}
                     highlight={tenant.initialElectricReading == null}
                   />
                   <InfoRow
-                    label="💧 Chỉ số nước đầu"
+                    label="Chỉ số nước đầu"
                     value={tenant.initialWaterReading != null ? `${tenant.initialWaterReading} m³` : 'Chưa ghi'}
                     highlight={tenant.initialWaterReading == null}
                   />
                   <InfoRow
-                    label="📷 Ảnh hiện trạng"
+                    label="Ảnh hiện trạng"
                     value={tenant.roomPhotoCount > 0 ? `${tenant.roomPhotoCount} ảnh phòng` : 'Chưa có ảnh'}
                     highlight={tenant.roomPhotoCount === 0}
                   />
-                  {tenant.hasMeterPhotos && <InfoRow label="🔢 Ảnh đồng hồ" value="Đã chụp" />}
+                  {tenant.hasMeterPhotos && <InfoRow label="Ảnh đồng hồ" value="Đã chụp" />}
                   {!!tenant.roomConditionNote && (
                     <View style={mStyles.notesBox}>
                       <Text style={mStyles.notesLabel}>GHI CHÚ HIỆN TRẠNG</Text>
@@ -403,9 +410,9 @@ export const TenantDetailSheet: React.FC<{
                 // phải "chưa tới bước đó" — thiếu bằng chứng đầu kỳ thì lúc trả phòng
                 // không có gì đối chiếu, và hoá đơn điện/nước kỳ đầu không chốt được.
                 <View style={mStyles.warnBox}>
-                  <Text style={mStyles.warnText}>
-                    ⚠️ Chưa lưu hiện trạng phòng và chỉ số điện/nước đầu kỳ.
-                  </Text>
+                  <IconText icon="warning" multiline style={mStyles.warnText}>
+                    Chưa lưu hiện trạng phòng và chỉ số điện/nước đầu kỳ.
+                  </IconText>
                 </View>
               )}
             </View>
@@ -425,7 +432,7 @@ export const TenantDetailSheet: React.FC<{
                   Trước 17/08/2026 chỗ này lệch nhau: SĐT ẩn sạch còn CCCD hiện NGUYÊN SỐ,
                   tức chính sách chỉ thực thi một nửa mà nửa hở lại là giấy tờ tuỳ thân. */}
               <InfoRow
-                label="📱 Điện thoại"
+                label="Điện thoại"
                 value={maskTenantPhone(tenant.phone)}
                 right={
                   !!tenant.phone && (
@@ -438,9 +445,9 @@ export const TenantDetailSheet: React.FC<{
                   )
                 }
               />
-              <InfoRow label="🪪 CCCD / MST" value={maskTenantCccd(tenant.cccd)} />
+              <InfoRow label="CCCD / MST" value={maskTenantCccd(tenant.cccd)} />
               {!!tenant.tenantUsername && (
-                <InfoRow label="👤 Tài khoản app" value={tenant.tenantUsername} />
+                <InfoRow label="Tài khoản app" value={tenant.tenantUsername} />
               )}
             </View>
 
@@ -449,18 +456,18 @@ export const TenantDetailSheet: React.FC<{
               <View style={mStyles.section}>
                 <Text style={mStyles.sectionTitle}>Thao tác nhanh</Text>
                 <View style={mStyles.actionsGrid}>
-                  {[
-                    { key: 'billing', icon: '🧾', label: 'Hóa đơn', color: Colors.warning },
-                    { key: 'contract', icon: '📋', label: 'Hợp đồng', color: Colors.info },
-                    { key: 'maintenance', icon: '🔧', label: 'Bảo trì', color: Colors.primary },
-                    { key: 'checkout', icon: '🚪', label: isWholeHouse ? 'Trả nhà' : 'Trả phòng', color: Colors.error },
-                  ].map(({ key, icon, label, color }) => (
+                  {([
+                    { key: 'billing', icon: 'receipt', label: 'Hóa đơn', color: Colors.warning },
+                    { key: 'contract', icon: 'contract', label: 'Hợp đồng', color: Colors.info },
+                    { key: 'maintenance', icon: 'wrench', label: 'Bảo trì', color: Colors.primary },
+                    { key: 'checkout', icon: 'door', label: isWholeHouse ? 'Trả nhà' : 'Trả phòng', color: Colors.error },
+                  ] as { key: string; icon: IconName; label: string; color: string }[]).map(({ key, icon, label, color }) => (
                     <TouchableOpacity
                       key={key}
                       style={[mStyles.actionBtn, { borderColor: color + '40', backgroundColor: color + '10' }]}
                       onPress={() => onAction(key, tenant)}
                     >
-                      <Text style={mStyles.actionIcon}>{icon}</Text>
+                      <Icon name={icon} size={22} color={color} style={mStyles.actionIcon} />
                       <Text style={[mStyles.actionLabel, { color }]}>{label}</Text>
                     </TouchableOpacity>
                   ))}
@@ -477,7 +484,7 @@ export const TenantDetailSheet: React.FC<{
                 style={mStyles.activateBtn}
                 onPress={() => onAction('reception', tenant)}
               >
-                <Text style={mStyles.activateBtnText}>🚚 Sang màn đón khách</Text>
+                <IconText icon="key" style={mStyles.activateBtnText}>Sang màn đón khách</IconText>
               </TouchableOpacity>
             )}
           </ScrollView>
@@ -525,7 +532,7 @@ const mStyles = StyleSheet.create({
   tenantSub: { fontSize: 13, color: '#64748B', marginBottom: 6 },
   headerBadges: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
-  closeBtnText: { fontSize: 14, color: '#64748B', fontWeight: '700' },
+
 
   chipRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: Spacing.md },
 
@@ -561,7 +568,7 @@ const mStyles = StyleSheet.create({
     flex: 1, minWidth: '40%', borderRadius: 12,
     paddingVertical: Spacing.md, alignItems: 'center', borderWidth: 1.5,
   },
-  actionIcon: { fontSize: 22, marginBottom: 4 },
+  actionIcon: { marginBottom: 4 },
   actionLabel: { fontSize: 11, fontWeight: '700' },
 
   activateBtn: {

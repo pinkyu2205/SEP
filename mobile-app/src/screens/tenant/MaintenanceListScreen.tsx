@@ -9,7 +9,8 @@ import { MaintenanceRequest, MaintenanceStatus } from '@/types';
 import { formatDate } from '@/utils';
 import { realMaintenanceService } from '@/services/shared/maintenanceService';
 import { dtoToTenantRequest } from '@/services/shared/maintenanceMappers';
-import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_EMOJI } from '@/constants/maintenance';
+import { MAINTENANCE_STATUS_META, MAINTENANCE_CATEGORY_ICON } from '@/constants/maintenance';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import { useMaintenanceRealtime } from '@/hooks/useBillingRealtime';
 
 /**
@@ -33,11 +34,11 @@ const STEPS = ['Tiếp nhận', 'Sửa chữa', 'Hoàn tất'];
 /** Bước hiện tại trên thanh tiến độ. Nhánh phụ (lỗi khách, chờ thanh toán…) nằm ở bước 2. */
 const stepOf = (s: string) => (s === 'open' ? 0 : s === 'closed' ? 2 : 1);
 
-const REPORT_OPTIONS = [
-  { key: 'scan', icon: '📷', label: 'Quét QR', sub: 'trên thiết bị', route: 'Scan' },
-  { key: 'list', icon: '📦', label: 'Chọn thiết bị', sub: 'trong phòng', route: 'RoomEquipment' },
-  { key: 'other', icon: '📝', label: 'Sự cố khác', sub: 'sàn, tường, cửa…', route: 'MaintenanceCreate' },
-] as const;
+const REPORT_OPTIONS: { key: string; icon: IconName; label: string; sub: string; route: string }[] = [
+  { key: 'scan', icon: 'scan-qr', label: 'Quét QR', sub: 'trên thiết bị', route: 'Scan' },
+  { key: 'list', icon: 'package', label: 'Chọn thiết bị', sub: 'trong phòng', route: 'RoomEquipment' },
+  { key: 'other', icon: 'home', label: 'Sự cố khác', sub: 'sàn, tường, cửa…', route: 'MaintenanceCreate' },
+];
 
 const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = ({ item, onPress }) => {
   const meta = MAINTENANCE_STATUS_META[item.status as keyof typeof MAINTENANCE_STATUS_META]
@@ -45,13 +46,13 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
   const latest = item.timeline[item.timeline.length - 1];
   const cancelled = item.status === 'cancelled';
   const step = stepOf(item.status);
-  const icon = (item.category && MAINTENANCE_CATEGORY_EMOJI[item.category]) ?? '🔧';
+  const icon: IconName = (item.category && MAINTENANCE_CATEGORY_ICON[item.category]) || 'wrench';
 
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.75}>
       <View style={styles.cardTop}>
         <View style={[styles.catIcon, { backgroundColor: meta.bg }]}>
-          <Text style={{ fontSize: 18 }}>{icon}</Text>
+          <Icon name={icon} size={18} color={meta.color} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.equipmentName || item.title}</Text>
@@ -79,9 +80,9 @@ const RepairCard: React.FC<{ item: MaintenanceRequest; onPress: () => void }> = 
       )}
 
       {!!latest?.note && (
-        <Text style={styles.update} numberOfLines={1}>
-          💬 {latest.note} · {formatDate(latest.updatedAt)}
-        </Text>
+        <IconText icon="chat" gap={4} style={styles.update} numberOfLines={1}>
+          {latest.note} · {formatDate(latest.updatedAt)}
+        </IconText>
       )}
 
       {item.status === 'closed' && !!item.invoiceAmount && (
@@ -151,7 +152,7 @@ export const MaintenanceListScreen: React.FC = () => {
               activeOpacity={0.8}
               onPress={() => navigation.navigate(o.route)}
             >
-              <View style={styles.reportIcon}><Text style={{ fontSize: 20 }}>{o.icon}</Text></View>
+              <View style={styles.reportIcon}><Icon name={o.icon} size={20} color={Colors.primary} /></View>
               <Text style={styles.reportLabel}>{o.label}</Text>
               <Text style={styles.reportSub}>{o.sub}</Text>
             </TouchableOpacity>
@@ -200,7 +201,7 @@ export const MaintenanceListScreen: React.FC = () => {
         ListEmptyComponent={
           loadError ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>⚠️</Text>
+              <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} />
               <Text style={styles.emptyTitle}>Không tải được danh sách</Text>
               <TouchableOpacity style={styles.retryBtn} onPress={onRefresh}>
                 <Text style={styles.retryText}>Thử lại</Text>
@@ -208,7 +209,12 @@ export const MaintenanceListScreen: React.FC = () => {
             </View>
           ) : remote == null ? null : (
             <View style={styles.empty}>
-              <Text style={styles.emptyEmoji}>{tab === 'active' ? '✅' : '🗂️'}</Text>
+              <Icon
+                name={tab === 'active' ? 'success' : 'archive'}
+                size={40}
+                color={tab === 'active' ? Colors.success : Colors.textMuted}
+                strokeWidth={1.5}
+              />
               <Text style={styles.emptyTitle}>
                 {tab === 'active' ? 'Không có sự cố nào đang xử lý' : 'Chưa có phiếu nào hoàn tất'}
               </Text>
@@ -292,7 +298,7 @@ const styles = StyleSheet.create({
   cost: { fontSize: 12, fontWeight: '700', color: Colors.success, marginTop: Spacing.sm },
 
   empty: { alignItems: 'center', paddingVertical: 40, gap: 6, paddingHorizontal: Spacing.lg },
-  emptyEmoji: { fontSize: 40 },
+
   emptyTitle: { fontSize: 15, fontWeight: '800', color: Colors.textPrimary, textAlign: 'center' },
   emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
   retryBtn: {

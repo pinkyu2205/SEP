@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, FlatList, TextInput } from 'react-native';
 import { Colors, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon } from './Icon';
 
 interface PickerModalProps {
   visible: boolean;
@@ -47,13 +48,13 @@ export const PickerModal: React.FC<PickerModalProps> = ({
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Text style={styles.closeIcon}>✕</Text>
+              <Icon name="close" size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
           {searchable && (
             <View style={styles.searchContainer}>
-              <Text style={styles.searchIcon}>🔍</Text>
+              <Icon name="search" size={16} color={Colors.textMuted} style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Tìm kiếm..."
@@ -84,7 +85,7 @@ export const PickerModal: React.FC<PickerModalProps> = ({
                       <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
                     )}
                   </View>
-                  {isSelected && <Text style={styles.checkIcon}>✓</Text>}
+                  {isSelected && <Icon name="check" size={18} color={Colors.primary} style={styles.checkIcon} />}
                 </TouchableOpacity>
               );
             }}
@@ -139,10 +140,7 @@ const styles = StyleSheet.create({
   closeBtn: {
     padding: Spacing.xs,
   },
-  closeIcon: {
-    fontSize: 18,
-    color: Colors.textSecondary,
-  },
+
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -153,7 +151,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
   },
   searchIcon: {
-    fontSize: 14,
     marginRight: Spacing.sm,
   },
   searchInput: {
@@ -192,9 +189,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   checkIcon: {
-    fontSize: 16,
-    color: Colors.primary,
-    fontWeight: '700',
     marginLeft: Spacing.sm,
   },
   emptyText: {

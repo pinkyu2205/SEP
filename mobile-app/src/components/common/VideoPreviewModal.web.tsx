@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { Colors } from '@/constants';
+import { Icon } from './Icon';
 
 /**
  * Bản Web của VideoPreviewModal — react-native-webview KHÔNG có bản build cho web (chỉ
@@ -20,7 +21,7 @@ export const VideoPreviewModal: React.FC<{
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={s.backdrop} onPress={onClose}>
         <TouchableOpacity style={s.closeBtn} onPress={onClose}>
-          <Text style={s.closeBtnText}>✕</Text>
+          <Icon name="close" size={20} color={Colors.white} />
         </TouchableOpacity>
         <Pressable style={s.wrap} onPress={() => {}}>
           {/* Thẻ DOM thật — file này chỉ chạy trên web (react-native-web render qua react-dom). */}
@@ -44,5 +45,5 @@ const s = StyleSheet.create({
     position: 'absolute', top: 48, right: 20, width: 36, height: 36, borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 2,
   },
-  closeBtnText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
+
 });

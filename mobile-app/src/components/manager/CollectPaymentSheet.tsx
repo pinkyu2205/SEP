@@ -10,6 +10,7 @@ import {
 } from '@/services/manager/invoiceUnlockService';
 import { realManagerInvoiceService, type ManagerPaymentQr } from '@/services/manager/invoiceService';
 import { serverNow } from '@/utils/serverTime';
+import { Icon, type IconName } from '@/components/common/Icon';
 
 const SH = Dimensions.get('window').height;
 
@@ -36,17 +37,17 @@ const SH = Dimensions.get('window').height;
 type Step = 'mode' | 'passcode' | 'qr';
 
 const PURPOSE_UI: Record<InvoiceUnlockPurpose, {
-  icon: string; title: string; desc: string; color: string; bg: string;
+  icon: IconName; title: string; desc: string; color: string; bg: string;
 }> = {
   CASH_COLLECT: {
-    icon: '💵',
+    icon: 'cash',
     title: 'Khách trả tiền mặt',
     desc: 'Bạn nhận tiền mặt, rồi tự chuyển đúng số đó vào QR. Cần có sẵn tiền trong tài khoản.',
     color: '#B45309',
     bg: '#FFFBEB',
   },
   PROXY_PAY: {
-    icon: '👥',
+    icon: 'users',
     title: 'Có người trả hộ',
     desc: 'Người trả hộ tự quét QR bằng app bank của họ. Bạn không cầm tiền.',
     color: '#4F46E5',
@@ -183,7 +184,7 @@ export const CollectPaymentSheet: React.FC<{
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10} style={s.closeBtn}>
-              <Text style={s.closeText}>✕</Text>
+              <Icon name="close" size={16} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -200,12 +201,12 @@ export const CollectPaymentSheet: React.FC<{
                       onPress={() => { setPurpose(key); setStep('passcode'); setErr(null); setErrHint(null); }}
                       activeOpacity={0.85}
                     >
-                      <Text style={s.modeIcon}>{cfg.icon}</Text>
+                      <Icon name={cfg.icon} size={26} color={cfg.color} />
                       <View style={{ flex: 1 }}>
                         <Text style={[s.modeTitle, { color: cfg.color }]}>{cfg.title}</Text>
                         <Text style={s.modeDesc}>{cfg.desc}</Text>
                       </View>
-                      <Text style={[s.modeChevron, { color: cfg.color }]}>›</Text>
+                      <Icon name="chevron-right" size={22} color={cfg.color} />
                     </TouchableOpacity>
                   );
                 })}
@@ -223,7 +224,7 @@ export const CollectPaymentSheet: React.FC<{
             {step === 'passcode' && !!ui && (
               <>
                 <View style={[s.modeBanner, { backgroundColor: ui.bg }]}>
-                  <Text style={s.modeIcon}>{ui.icon}</Text>
+                  <Icon name={ui.icon} size={22} color={ui.color} />
                   <Text style={[s.modeBannerText, { color: ui.color }]}>{ui.title}</Text>
                   {!initialPurpose && (
                     <TouchableOpacity onPress={() => { setStep('mode'); setErr(null); setErrHint(null); }} hitSlop={8}>
@@ -298,7 +299,7 @@ export const CollectPaymentSheet: React.FC<{
                     <QRCode value={qr.qrCode} size={220} />
                   ) : (
                     <View style={s.qrDead}>
-                      <Text style={s.qrDeadIcon}>⌛</Text>
+                      <Icon name="timer-off" size={40} color={Colors.textMuted} />
                       <Text style={s.qrDeadText}>Mã QR đã hết hạn</Text>
                       <Text style={s.qrDeadHint}>Xin admin mã mới rồi tạo lại.</Text>
                     </View>
@@ -358,7 +359,7 @@ const s = StyleSheet.create({
     width: 30, height: 30, borderRadius: 15, backgroundColor: Colors.background,
     alignItems: 'center', justifyContent: 'center',
   },
-  closeText: { fontSize: 13, color: Colors.textSecondary, fontWeight: '700' },
+
 
   body: { paddingHorizontal: Spacing.lg, paddingBottom: 40, gap: Spacing.sm },
 
@@ -366,10 +367,10 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
     padding: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1,
   },
-  modeIcon: { fontSize: 26 },
+
   modeTitle: { fontSize: 15, fontWeight: '800' },
   modeDesc: { fontSize: 12, color: Colors.textSecondary, marginTop: 3, lineHeight: 17 },
-  modeChevron: { fontSize: 24, fontWeight: '700' },
+
 
   modeBanner: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
@@ -427,7 +428,7 @@ const s = StyleSheet.create({
     minHeight: 252,
   },
   qrDead: { alignItems: 'center', gap: 6, paddingVertical: Spacing.xl },
-  qrDeadIcon: { fontSize: 40 },
+
   qrDeadText: { fontSize: 15, fontWeight: '800', color: Colors.error },
   qrDeadHint: { fontSize: 12, color: Colors.textSecondary },
 

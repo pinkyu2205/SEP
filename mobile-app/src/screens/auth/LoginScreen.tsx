@@ -14,10 +14,10 @@ import {
 import Svg, {
   Defs, LinearGradient as SvgLinearGradient, RadialGradient, Rect, Stop,
 } from 'react-native-svg';
-import { MaterialIcons } from '@expo/vector-icons';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Brand, Spacing, BorderRadius } from '@/constants';
-import { BrandField } from '@/components/common';
+import { BrandField, Icon } from '@/components/common';
 import { useAuth } from '@/hooks';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { showAlert } from '@/utils';
@@ -108,7 +108,7 @@ export const LoginScreen: React.FC = () => {
       const msg: string = error?.message || 'Sai số điện thoại hoặc mật khẩu. Vui lòng thử lại.';
       if (isAccountEndedError(error)) {
         // Khách đã trả phòng xong — không phải lỗi sai mật khẩu, nói cho tử tế.
-        showAlert(TENANT_ACCOUNT_ENDED_TITLE, msg, undefined, '👋');
+        showAlert(TENANT_ACCOUNT_ENDED_TITLE, msg, undefined, 'door');
       } else if (msg.toLowerCase().includes(NOT_ACTIVATED_HINT)) {
         showAlert('Tài khoản chưa kích hoạt', msg, [
           { text: 'Để sau', style: 'cancel' },
@@ -164,7 +164,7 @@ export const LoginScreen: React.FC = () => {
 
               <BrandField
                 label="Số điện thoại / Tài khoản"
-                icon="person-outline"
+                icon="user"
                 placeholder="Nhập số điện thoại hoặc tài khoản"
                 value={phone}
                 onChangeText={setPhone}
@@ -176,7 +176,7 @@ export const LoginScreen: React.FC = () => {
 
               <BrandField
                 label="Mật khẩu"
-                icon="lock-outline"
+                icon="lock"
                 placeholder="Nhập mật khẩu"
                 value={password}
                 onChangeText={setPassword}
@@ -190,11 +190,7 @@ export const LoginScreen: React.FC = () => {
                     onPress={() => setShowPassword(!showPassword)}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <MaterialIcons
-                      name={showPassword ? 'visibility-off' : 'visibility'}
-                      size={20}
-                      color={Colors.textMuted}
-                    />
+                    <Icon name={showPassword ? 'eye-off' : 'eye'} size={20} color={Colors.textMuted} />
                   </TouchableOpacity>
                 )}
               />
@@ -228,7 +224,7 @@ export const LoginScreen: React.FC = () => {
                 onPress={() => navigation.navigate('TenantActivate', { phone: phone.trim() })}
                 activeOpacity={0.8}
               >
-                <MaterialIcons name="how-to-reg" size={18} color={Brand.greenDark} />
+                <Icon name="user-check" size={18} color={Brand.greenDark} />
                 <Text style={s.activateText}>Lần đầu thuê? Kích hoạt tài khoản</Text>
               </TouchableOpacity>
             </View>
@@ -245,7 +241,7 @@ export const LoginScreen: React.FC = () => {
                 onPress={() => navigation.goBack()}
                 activeOpacity={0.8}
               >
-                <MaterialIcons name="travel-explore" size={18} color={Colors.white} />
+                <Icon name="search" size={18} color={Colors.white} />
                 <Text style={s.exploreText}>Xem phòng trọ không cần đăng nhập</Text>
               </TouchableOpacity>
             </View>

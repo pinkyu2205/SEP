@@ -3,10 +3,11 @@ import {
   View, Text, TextInput, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
+
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { Colors, Spacing, BorderRadius, Shadow, meterReadingPeriodIso, toPeriodKey } from '@/constants';
 import { serverNow } from '@/utils/serverTime';
+import { Icon } from '@/components/common/Icon';
 import {
   meterReadingService,
   type PendingMeterReadingItem,
@@ -263,7 +264,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
           <Text style={s.cardFooterText}>
             Hạn chụp {formatDateVi(g.meterDueDate)} · mốc thu tiền ngày {g.billingDay}
           </Text>
-          <MaterialIcons name="chevron-right" size={18} color={Colors.primary} />
+          <Icon name="chevron-right" size={18} color={Colors.primary} />
         </View>
       </TouchableOpacity>
     );
@@ -273,7 +274,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.backBtn}>
-          <Text style={s.backArrow}>←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Cần chụp công tơ</Text>
         <View style={{ width: 40 }} />
@@ -287,13 +288,13 @@ export const MeterReadingPendingScreen: React.FC = () => {
           {totalRooms > 0 && ` · ${totalRooms} phòng ở ${groups.length} nhà`}
         </Text>
         <Text style={s.periodHint}>
-          Điện phải chốt xong trong ngày cuối tháng · chưa có ảnh thì không phát hành được hoá đơn.
+          Hoá đơn tổng đã về, còn các phòng này chưa chốt số · chụp xong là khách nhận hoá đơn ngay.
         </Text>
       </View>
 
       {showSearch && (
         <View style={s.searchWrap}>
-          <MaterialIcons name="search" size={18} color={Colors.textMuted} />
+          <Icon name="search" size={18} color={Colors.textMuted} />
           <TextInput
             style={s.searchInput}
             placeholder="Tìm nhà..."
@@ -304,7 +305,7 @@ export const MeterReadingPendingScreen: React.FC = () => {
           />
           {!!query && (
             <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <MaterialIcons name="close" size={18} color={Colors.textMuted} />
+              <Icon name="close" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
           )}
         </View>
@@ -329,24 +330,24 @@ export const MeterReadingPendingScreen: React.FC = () => {
           ListEmptyComponent={
             loadError ? (
               <View style={s.emptyBox}>
-                <Text style={s.emptyIcon}>⚠️</Text>
+                <Icon name="alert" size={40} color={Colors.warning} strokeWidth={1.5} style={s.emptyIcon} />
                 <Text style={s.emptyTitle}>Không tải được danh sách</Text>
                 <Text style={s.emptyText}>Kéo xuống để thử lại.</Text>
               </View>
             ) : query ? (
               <View style={s.emptyBox}>
-                <Text style={s.emptyIcon}>🔍</Text>
+                <Icon name="search" size={40} color={Colors.textMuted} strokeWidth={1.5} style={s.emptyIcon} />
                 <Text style={s.emptyTitle}>Không có nhà nào khớp</Text>
                 <Text style={s.emptyText}>Thử bớt chữ trong ô tìm.</Text>
               </View>
             ) : (
               <View style={s.emptyBox}>
-                <Text style={s.emptyIcon}>✅</Text>
+                <Icon name="success" size={40} color={Colors.success} strokeWidth={1.5} style={s.emptyIcon} />
                 <Text style={s.emptyTitle}>Đã chụp đủ</Text>
                 <Text style={s.emptyText}>
                   {pinnedPeriod
                     ? `Không còn công tơ nào thiếu ảnh trong kỳ ${periodLabel.replace('-', '/')}.`
-                    : 'Không còn công tơ nào thiếu ảnh. Việc chốt số điện kỳ mới mở vào ngày cuối tháng.'}
+                    : 'Không còn phòng nào chờ chốt số. Việc mới chỉ hiện khi admin đẩy hoá đơn điện/nước lên mà còn phòng thiếu số.'}
                 </Text>
               </View>
             )
@@ -365,7 +366,7 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, borderBottomWidth: 1, borderBottomColor: Colors.divider,
   },
   backBtn: { padding: Spacing.sm },
-  backArrow: { fontSize: 18, fontWeight: '600', color: Colors.primary },
+
   headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.textPrimary },
 
   periodBar: {
@@ -422,7 +423,7 @@ const s = StyleSheet.create({
   badgeTextError: { color: Colors.error },
 
   emptyBox: { alignItems: 'center', paddingVertical: Spacing.xl * 2 },
-  emptyIcon: { fontSize: 40, marginBottom: Spacing.sm },
+  emptyIcon: { marginBottom: Spacing.sm },
   emptyTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
   emptyText: { fontSize: 12, color: Colors.textSecondary, marginTop: 4, textAlign: 'center' },
 });

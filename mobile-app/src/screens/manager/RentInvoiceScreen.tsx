@@ -18,6 +18,7 @@ import { realTenantService, TenantContractResponse } from '@/services/tenant/ten
 import { realManagerInvoiceService, RentInvoiceLite } from '@/services/manager/invoiceService';
 import { checkoutService } from '@/services/manager/checkoutService';
 import { todayIso } from '@/utils/serverTime';
+import { Icon, IconText } from '@/components/common/Icon';
 
 const fmt = (n: number | null | undefined) => (n || 0).toLocaleString('vi-VN') + 'đ';
 const fmtDay = (iso: string) => iso.split('-').reverse().join('/');
@@ -246,7 +247,12 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
         activeOpacity={0.7}
       >
         <Text style={[s.propName, active && s.propNameActive]} numberOfLines={1}>{p.name}</Text>
-        <Text style={[s.propChevron, active && s.propCheck]}>{active ? '✓' : '›'}</Text>
+        <Icon
+          name={active ? 'check' : 'chevron-right'}
+          size={18}
+          color={active ? Colors.primary : Colors.textMuted}
+          strokeWidth={active ? 2.5 : undefined}
+        />
       </TouchableOpacity>
     );
   };
@@ -286,8 +292,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
           ]}>
             <Text style={[s.badgeText, { color: inv || collectedAtOnboarding ? Colors.white : Colors.textMuted }]}>
               {collectedAtOnboarding
-                ? '✓ Đã thu lúc đón khách'
-                : paid ? '✓ Đã thu' : inv ? (od > 0 ? `Quá hạn ${od} ngày` : '✓ Đã phát hành') : 'Chờ phát hành'}
+                ? 'Đã thu lúc đón khách'
+                : paid ? 'Đã thu' : inv ? (od > 0 ? `Quá hạn ${od} ngày` : 'Đã phát hành') : 'Chờ phát hành'}
             </Text>
           </View>
         </View>
@@ -301,16 +307,16 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
 
         {stage === 'final' && !canTerminate && (
           <View style={s.warnBox}>
-            <Text style={s.warnBoxText}>
-              ⏰ Quá hạn {od} ngày — khách đã được nhắc. Ngày {RENT_CYCLE.finalReminderDay} nhắc lần cuối.
-            </Text>
+            <IconText icon="alarm" multiline gap={5} style={s.warnBoxText}>
+              Quá hạn {od} ngày — khách đã được nhắc. Ngày {RENT_CYCLE.finalReminderDay} nhắc lần cuối.
+            </IconText>
           </View>
         )}
         {canTerminate && (
           <View style={s.riskBox}>
-            <Text style={s.riskText}>
-              ⛔ Quá hạn {od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.
-            </Text>
+            <IconText icon="ban" multiline gap={5} style={s.riskText}>
+              Quá hạn {od} ngày, đã nhắc đủ các mốc — bạn được quyền chấm dứt hợp đồng.
+            </IconText>
           </View>
         )}
         {/* Kỳ lẻ: nói rõ tính từ ngày nào tới ngày nào + số tiền theo ngày, để manager
@@ -334,8 +340,8 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             color: paid || collectedAtOnboarding ? Colors.success : Colors.textSecondary,
           }]}>
             {collectedAtOnboarding
-              ? '✓ Khách đã trả lúc đón khách'
-              : paid ? '✓ Khách đã thanh toán' : inv ? 'Khách chưa thanh toán' : 'Chờ phát hành'}
+              ? 'Khách đã trả lúc đón khách'
+              : paid ? 'Khách đã thanh toán' : inv ? 'Khách chưa thanh toán' : 'Chờ phát hành'}
           </Text>
           {canTerminate && (
             <TouchableOpacity
@@ -345,7 +351,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             >
               {terminatingId === row.contractId
                 ? <ActivityIndicator color={Colors.white} />
-                : <Text style={s.terminateBtnText}>⛔ Chấm dứt hợp đồng</Text>}
+                : <IconText icon="ban" style={s.terminateBtnText}>Chấm dứt hợp đồng</IconText>}
             </TouchableOpacity>
           )}
         </View>
@@ -357,7 +363,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={s.headerSide}>
-          <Text style={[s.backText, { fontSize: 24, lineHeight: 28 }]} accessibilityLabel="Quay lại">←</Text>
+          <Icon name="back" size={26} color={Colors.primary} />
         </TouchableOpacity>
         <Text style={s.headerTitle}>Tiền phòng tự động</Text>
         <View style={s.headerSide} />
@@ -375,10 +381,12 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             onPress={() => setPolicyOpen(o => !o)}
             activeOpacity={0.7}
           >
-            <Text style={s.policyTitle} numberOfLines={1}>
-              🤖 Tự động · {RENT_POLICY_SHORT}
-            </Text>
-            <Text style={s.policyToggle}>{policyOpen ? 'Thu gọn ▴' : 'Chi tiết ▾'}</Text>
+            <IconText icon="repeat" gap={5} style={s.policyTitle} numberOfLines={1}>
+              Tự động · {RENT_POLICY_SHORT}
+            </IconText>
+            <IconText icon={policyOpen ? 'chevron-up' : 'chevron-down'} trailing gap={2} style={s.policyToggle}>
+              {policyOpen ? 'Thu gọn' : 'Chi tiết'}
+            </IconText>
           </TouchableOpacity>
 
           {policyOpen && (
@@ -406,7 +414,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
 
         {props.length > 0 && (
           <View style={s.searchWrap}>
-            <Text style={s.searchIcon}>🔍</Text>
+            <Icon name="search" size={15} color={Colors.textMuted} />
             <TextInput
               style={s.searchInput}
               value={search}
@@ -417,7 +425,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
-                <Text style={s.searchClear}>✕</Text>
+                <Icon name="close" size={15} color={Colors.textMuted} />
               </TouchableOpacity>
             )}
           </View>
@@ -427,24 +435,28 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
           <View style={s.state}><ActivityIndicator color={Colors.primary} /><Text style={s.stateText}>Đang tải...</Text></View>
         ) : errorProps ? (
           <View style={s.state}>
-            <Text style={s.stateEmoji}>⚠️</Text>
+            <Icon name="alert" size={32} color={Colors.warning} strokeWidth={1.5} />
             <Text style={s.stateText}>{errorProps}</Text>
             <TouchableOpacity style={s.retryBtn} onPress={() => { setLoadingProps(true); loadProps(); }}>
               <Text style={s.retryBtnText}>Thử lại</Text>
             </TouchableOpacity>
           </View>
         ) : props.length === 0 ? (
-          <View style={s.state}><Text style={s.stateEmoji}>🏢</Text><Text style={s.stateText}>Chưa có tòa nhà được giao</Text></View>
+          <View style={s.state}><Icon name="building" size={32} color={Colors.textMuted} strokeWidth={1.5} /><Text style={s.stateText}>Chưa có tòa nhà được giao</Text></View>
         ) : filteredProps.length === 0 ? (
           <View style={s.state}>
-            <Text style={s.stateEmoji}>🔍</Text>
+            <Icon name="search" size={32} color={Colors.textMuted} strokeWidth={1.5} />
             <Text style={s.stateText}>Không có tòa nhà nào khớp “{search}”</Text>
           </View>
         ) : (
           <>
-            {multi.length > 0 && <Text style={s.groupLabel}>🏢 Nhà nhiều phòng</Text>}
+            {multi.length > 0 && <IconText icon="building" gap={4} style={s.groupLabel}>Nhà nhiều phòng</IconText>}
             {multi.map(renderPropRow)}
-            {whole.length > 0 && <Text style={[s.groupLabel, multi.length > 0 && { marginTop: Spacing.md }]}>🏠 Nhà nguyên căn</Text>}
+            {whole.length > 0 && (
+              <IconText icon="home" gap={4} style={[s.groupLabel, multi.length > 0 && { marginTop: Spacing.md }]}>
+                Nhà nguyên căn
+              </IconText>
+            )}
             {whole.map(renderPropRow)}
           </>
         )}
@@ -452,15 +464,15 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
         {selectedId != null && (
           <>
             <View style={s.monthRow}>
-              <TouchableOpacity style={s.monthBtn} onPress={() => shiftMonth(-1)}><Text style={s.monthBtnText}>‹</Text></TouchableOpacity>
+              <TouchableOpacity style={s.monthBtn} onPress={() => shiftMonth(-1)}><Icon name="chevron-left" size={20} color={Colors.primary} /></TouchableOpacity>
               <Text style={s.monthLabel}>Kỳ thu: {monthLabel(month)}</Text>
-              <TouchableOpacity style={s.monthBtn} onPress={() => shiftMonth(1)}><Text style={s.monthBtnText}>›</Text></TouchableOpacity>
+              <TouchableOpacity style={s.monthBtn} onPress={() => shiftMonth(1)}><Icon name="chevron-right" size={20} color={Colors.primary} /></TouchableOpacity>
             </View>
 
             {loadingRows ? (
               <View style={s.state}><ActivityIndicator color={Colors.primary} /></View>
             ) : rows.length === 0 ? (
-              <View style={s.state}><Text style={s.stateEmoji}>🏠</Text><Text style={s.stateText}>Chưa có hợp đồng đang hiệu lực để thu tiền phòng.</Text></View>
+              <View style={s.state}><Icon name="contract" size={32} color={Colors.textMuted} strokeWidth={1.5} /><Text style={s.stateText}>Chưa có hợp đồng đang hiệu lực để thu tiền phòng.</Text></View>
             ) : (
               <>
                 {/* ── Tình trạng chu kỳ ── */}
@@ -468,7 +480,7 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
                   <View style={s.cycleTop}>
                     <Text style={s.cycleTitle}>Đã phát hành {cycle.issued}/{cycle.total} hợp đồng</Text>
                     <View style={s.autoChip}>
-                      <Text style={s.autoChipText}>🤖 Tự động</Text>
+                      <IconText icon="repeat" gap={3} iconSize={11} style={s.autoChipText}>Tự động</IconText>
                     </View>
                   </View>
                   <Text style={s.cycleMeta}>
@@ -492,13 +504,13 @@ export const RentInvoiceScreen: React.FC<any> = ({ navigation, route }) => {
                   </View>
 
                   {cycle.settled ? (
-                    <Text style={s.cycleDone}>
-                      ✅ Kỳ này đã thu đủ — hệ thống sẽ tự phát hành lại vào ngày {RENT_CYCLE.issueDay} kỳ sau.
-                    </Text>
+                    <IconText icon="success" multiline gap={5} style={s.cycleDone}>
+                      Kỳ này đã thu đủ — hệ thống sẽ tự phát hành lại vào ngày {RENT_CYCLE.issueDay} kỳ sau.
+                    </IconText>
                   ) : cycle.missing === 0 ? (
-                    <Text style={s.cycleDone}>
-                      ✅ Hệ thống đã phát hành đủ {cycle.total}/{cycle.total} hợp đồng và đã báo cho khách.
-                    </Text>
+                    <IconText icon="success" multiline gap={5} style={s.cycleDone}>
+                      Hệ thống đã phát hành đủ {cycle.total}/{cycle.total} hợp đồng và đã báo cho khách.
+                    </IconText>
                   ) : (
                     <Text style={s.cycleWarn}>
                       {cycle.missing} hợp đồng chưa có hoá đơn kỳ này
@@ -534,7 +546,6 @@ const s = StyleSheet.create({
     backgroundColor: Colors.white, ...Shadow.sm,
   },
   headerSide: { width: 80 },
-  backText: { color: Colors.primary, fontWeight: '600', fontSize: 14 },
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.textPrimary },
   scroll: { padding: Spacing.lg },
   sectionTitle: { fontSize: 13, fontWeight: '700', color: Colors.textSecondary, marginBottom: Spacing.sm },
@@ -573,8 +584,7 @@ const s = StyleSheet.create({
   propRowActive: { borderColor: Colors.primary, backgroundColor: Colors.primaryBg },
   propName: { flex: 1, fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   propNameActive: { color: Colors.primary },
-  propChevron: { fontSize: 18, color: Colors.textMuted, fontWeight: '400' },
-  propCheck: { fontSize: 16, color: Colors.primary, fontWeight: '900' },
+
 
   // ── Tiêu đề + ô tìm ──
   pickHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -585,19 +595,19 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
     paddingHorizontal: Spacing.md, paddingVertical: 8, marginBottom: Spacing.sm,
   },
-  searchIcon: { fontSize: 13 },
+
   searchInput: { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
-  searchClear: { fontSize: 14, color: Colors.textMuted, fontWeight: '700' },
+
 
   state: { alignItems: 'center', paddingVertical: Spacing.lg, gap: Spacing.sm },
-  stateEmoji: { fontSize: 32 },
+
   stateText: { fontSize: 13, color: Colors.textMuted, textAlign: 'center' },
   retryBtn: { marginTop: Spacing.xs, backgroundColor: Colors.primary, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
   retryBtnText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
 
   monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.md, marginTop: Spacing.md, marginBottom: Spacing.sm },
   monthBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.primaryBg, alignItems: 'center', justifyContent: 'center' },
-  monthBtnText: { fontSize: 20, color: Colors.primary, fontWeight: '900', lineHeight: 22 },
+
   monthLabel: { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, minWidth: 150, textAlign: 'center' },
 
   cycleCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, padding: Spacing.md, marginBottom: Spacing.md, ...Shadow.sm, borderWidth: 1, borderColor: Colors.border },

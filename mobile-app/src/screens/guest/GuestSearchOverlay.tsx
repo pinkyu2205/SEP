@@ -5,8 +5,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import Svg, { Path } from 'react-native-svg';
 import { Colors, Brand, Spacing, BorderRadius, Shadow } from '@/constants';
+import { Icon, IconText, type IconName } from '@/components/common/Icon';
 import { PropertyListing } from '@/types';
 import { GuestStackParamList } from '@/navigation/GuestStackNavigator';
 import { formatCurrency } from '@/utils/helpers';
@@ -26,18 +26,6 @@ type NavigationProp = NativeStackNavigationProp<GuestStackParamList>;
  * SAI NGHĨA — bánh răng nói "cài đặt", không phải "lọc"; ba gạch thu dần mới là ký
  * hiệu lọc mà ai cũng đọc được ngay.
  */
-const IconBack = () => (
-  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-    <Path d="M15 5 L8 12 L15 19" stroke={Colors.textPrimary} strokeWidth={2.2}
-      strokeLinecap="round" strokeLinejoin="round" />
-  </Svg>
-);
-
-const IconFilter: React.FC<{ color: string }> = ({ color }) => (
-  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-    <Path d="M4 6h16M7 12h10M10 18h4" stroke={color} strokeWidth={2.3} strokeLinecap="round" />
-  </Svg>
-);
 
 /**
  * BĐS chưa gắn giá thì BE trả 0, mà `formatCurrency(0)` ra "0 đ" — đọc như nhà cho
@@ -48,12 +36,12 @@ const priceLabel = (from: number) =>
 
 // ============================================================================
 const SEARCH_SUGGESTIONS = [
-  { icon: '🏢', label: 'Phòng trọ Thủ Đức',   filters: { propertyType: 'apartment',   wardIds: ['hcm-lc', 'hcm-lt'], cityId: 'hcm' } },
-  { icon: '🏡', label: 'Nguyên căn Quận 7',   filters: { propertyType: 'whole_house', wardIds: ['hcm-tp', 'hcm-bt'], cityId: 'hcm' } },
-  { icon: '📍', label: 'Bình Thạnh',          filters: { wardIds: ['hcm-p25', 'hcm-p13'],                            cityId: 'hcm' } },
-  { icon: '💰', label: 'Dưới 3 triệu',        filters: { propertyType: 'apartment',   maxPrice: 3000000,             cityId: 'hcm' } },
-  { icon: '🏡', label: 'Nguyên căn Tân Bình', filters: { propertyType: 'whole_house', wardIds: ['hcm-tb'],           cityId: 'hcm' } },
-  { icon: '📍', label: 'Gò Vấp',              filters: { cityId: 'hcm' } },
+  { icon: 'building' as IconName, label: 'Phòng trọ Thủ Đức',   filters: { propertyType: 'apartment',   wardIds: ['hcm-lc', 'hcm-lt'], cityId: 'hcm' } },
+  { icon: 'home' as IconName, label: 'Nguyên căn Quận 7',   filters: { propertyType: 'whole_house', wardIds: ['hcm-tp', 'hcm-bt'], cityId: 'hcm' } },
+  { icon: 'location' as IconName, label: 'Bình Thạnh',          filters: { wardIds: ['hcm-p25', 'hcm-p13'],                            cityId: 'hcm' } },
+  { icon: 'cash' as IconName, label: 'Dưới 3 triệu',        filters: { propertyType: 'apartment',   maxPrice: 3000000,             cityId: 'hcm' } },
+  { icon: 'home' as IconName, label: 'Nguyên căn Tân Bình', filters: { propertyType: 'whole_house', wardIds: ['hcm-tb'],           cityId: 'hcm' } },
+  { icon: 'location' as IconName, label: 'Gò Vấp',              filters: { cityId: 'hcm' } },
 ];
 
 const PRICE_FILTERS = [
@@ -66,8 +54,8 @@ const PRICE_FILTERS = [
 
 const TYPE_FILTERS = [
   { label: 'Tất cả',       value: '' },
-  { label: '🏢 Phòng trọ', value: 'apartment' },
-  { label: '🏠 Nguyên căn',value: 'whole_house' },
+  { label: 'Phòng trọ',  value: 'apartment' },
+  { label: 'Nguyên căn', value: 'whole_house' },
 ];
 
 const WARD_FILTERS = [
@@ -88,15 +76,15 @@ const AREA_FILTERS = [
   { label: '> 50m²',   min: 50, max: Infinity },
 ];
 
-const AMENITY_OPTIONS = [
-  { label: 'Máy lạnh',   icon: '❄️' },
-  { label: 'Wifi',       icon: '📶' },
-  { label: 'Máy giặt',  icon: '🫧' },
-  { label: 'Giữ xe',    icon: '🅿️' },
-  { label: 'Bảo vệ',    icon: '🔒' },
-  { label: 'Ban công',  icon: '🌿' },
-  { label: 'Bếp riêng', icon: '🍳' },
-  { label: 'Nội thất',  icon: '🛋️' },
+const AMENITY_OPTIONS: { label: string; icon: IconName }[] = [
+  { label: 'Máy lạnh',  icon: 'snowflake' },
+  { label: 'Wifi',      icon: 'wifi' },
+  { label: 'Máy giặt',  icon: 'washer' },
+  { label: 'Giữ xe',    icon: 'parking' },
+  { label: 'Bảo vệ',    icon: 'shield' },
+  { label: 'Ban công',  icon: 'leaf' },
+  { label: 'Bếp riêng', icon: 'kitchen' },
+  { label: 'Nội thất',  icon: 'sofa' },
 ];
 
 const SearchPropertyRow: React.FC<{ property: PropertyListing; onPress: () => void }> = ({ property, onPress }) => {
@@ -107,7 +95,7 @@ const SearchPropertyRow: React.FC<{ property: PropertyListing; onPress: () => vo
       <View style={ov.rowImgWrap}>
         {property.photos?.[0]
           ? <Image source={{ uri: property.photos[0] }} style={ov.rowImg} resizeMode="cover" />
-          : <Text style={ov.rowImgFallback}>{isWH ? '🏡' : '🏢'}</Text>
+          : <Icon name={isWH ? 'home' : 'building'} size={24} color={Colors.textMuted} />
         }
       </View>
       <View style={ov.rowInfo}>
@@ -125,7 +113,7 @@ const SearchPropertyRow: React.FC<{ property: PropertyListing; onPress: () => vo
           )}
         </View>
       </View>
-      <Text style={ov.rowArrow}>›</Text>
+      <Icon name="chevron-right" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
   );
 };
@@ -217,11 +205,11 @@ const FilterSheet: React.FC<FilterSheetProps> = ({
           {/* ── Loại hình ── */}
           <Text style={fs.sectionTitle}>Loại hình</Text>
           <View style={fs.typeGrid}>
-            {[
-              { value: '',            icon: '🏘️', label: 'Tất cả',        sub: 'Mọi loại hình' },
-              { value: 'apartment',   icon: '🏢', label: 'Phòng trọ',     sub: 'Thuê theo phòng' },
-              { value: 'whole_house', icon: '🏠', label: 'Nguyên căn',    sub: 'Thuê nguyên căn' },
-            ].map(f => {
+            {([
+              { value: '',            icon: 'grid',     label: 'Tất cả',        sub: 'Mọi loại hình' },
+              { value: 'apartment',   icon: 'building', label: 'Phòng trọ',     sub: 'Thuê theo phòng' },
+              { value: 'whole_house', icon: 'home',     label: 'Nguyên căn',    sub: 'Thuê nguyên căn' },
+            ] as { value: string; icon: IconName; label: string; sub: string }[]).map(f => {
               const active = localType === f.value;
               return (
                 <TouchableOpacity
@@ -230,7 +218,12 @@ const FilterSheet: React.FC<FilterSheetProps> = ({
                   onPress={() => setLocalType(f.value)}
                   activeOpacity={0.8}
                 >
-                  <Text style={fs.typeIcon}>{f.icon}</Text>
+                  <Icon
+                    name={f.icon}
+                    size={24}
+                    color={active ? Brand.greenDark : Colors.textSecondary}
+                    style={fs.typeIcon}
+                  />
                   <Text style={[fs.typeLabel, active && fs.typeLabelActive]}>{f.label}</Text>
                   <Text style={[fs.typeSub, active && fs.typeSubActive]}>{f.sub}</Text>
                   {active && <View style={fs.typeCheckDot} />}
@@ -272,7 +265,7 @@ const FilterSheet: React.FC<FilterSheetProps> = ({
                   }}
                   activeOpacity={0.8}
                 >
-                  {active && <Text style={fs.wardCheck}>✓ </Text>}
+                  {active && <Icon name="check" size={13} color={Brand.greenDark} style={fs.wardCheck} />}
                   <Text style={[fs.wardChipTxt, active && fs.wardChipTxtActive]}>{f.label}</Text>
                 </TouchableOpacity>
               );
@@ -309,9 +302,9 @@ const FilterSheet: React.FC<FilterSheetProps> = ({
                   onPress={() => toggleAmenity(a.label)}
                   activeOpacity={0.8}
                 >
-                  <Text style={fs.amenityIcon}>{a.icon}</Text>
+                  <Icon name={a.icon} size={16} color={active ? '#059669' : Colors.textSecondary} />
                   <Text style={[fs.amenityTxt, active && fs.amenityTxtActive]}>{a.label}</Text>
-                  {active && <Text style={fs.amenityCheck}>✓</Text>}
+                  {active && <Icon name="check" size={14} color={Brand.greenDark} />}
                 </TouchableOpacity>
               );
             })}
@@ -359,7 +352,7 @@ const fs = StyleSheet.create({
     position: 'relative',
   },
   typeCardActive: { borderColor: Brand.green, backgroundColor: Brand.greenTint },
-  typeIcon:       { fontSize: 24, marginBottom: 4 },
+  typeIcon:       { marginBottom: 4 },
   typeLabel:      { fontSize: 13, fontWeight: '700', color: Colors.textPrimary, marginBottom: 2 },
   typeLabelActive:{ color: Brand.greenDark },
   typeSub:        { fontSize: 10, color: Colors.textMuted, textAlign: 'center' },
@@ -390,7 +383,7 @@ const fs = StyleSheet.create({
     borderColor: Colors.border, backgroundColor: Colors.white,
   },
   wardChipActive:    { backgroundColor: Brand.greenTint, borderColor: Brand.green },
-  wardCheck:         { fontSize: 11, color: Brand.greenDark, fontWeight: '800' },
+  wardCheck:         { marginRight: 4 },
   wardChipTxt:       { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   wardChipTxtActive: { color: Brand.greenDark },
 
@@ -404,10 +397,10 @@ const fs = StyleSheet.create({
     minWidth: '45%', flex: 0,
   },
   amenityChipActive: { backgroundColor: Brand.greenTint, borderColor: Brand.green },
-  amenityIcon:       { fontSize: 14 },
+
   amenityTxt:        { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.textSecondary },
   amenityTxtActive:  { color: '#059669' },
-  amenityCheck:      { fontSize: 11, color: Brand.greenDark, fontWeight: '800' },
+
 
   // Apply
   applyBtn: {
@@ -500,10 +493,10 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
           {/* ── Search input row ── */}
           <View style={ov.header}>
             <TouchableOpacity onPress={onClose} style={ov.backBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <IconBack />
+              <Icon name="back" size={24} color={Colors.textPrimary} />
             </TouchableOpacity>
             <View style={ov.inputWrap}>
-              <Text style={ov.inputIcon}>🔍</Text>
+              <Icon name="search" size={16} color={Colors.textMuted} />
               <TextInput
                 ref={inputRef}
                 style={ov.input}
@@ -516,7 +509,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
               />
               {query.length > 0 && (
                 <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <Text style={ov.clearTxt}>✕</Text>
+                  <Icon name="close" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
@@ -526,7 +519,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
               onPress={() => setShowFilterSheet(true)}
               activeOpacity={0.8}
             >
-              <IconFilter color={hasFilter ? Brand.greenDark : Colors.textSecondary} />
+              <Icon name="filter" size={18} color={hasFilter ? Brand.greenDark : Colors.textSecondary} />
               {activeFilterCount > 0 && (
                 <View style={ov.filterBadge}>
                   <Text style={ov.filterBadgeTxt}>{activeFilterCount}</Text>
@@ -540,41 +533,43 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={ov.activePillsRow}>
               {typeFilter !== '' && (
                 <View style={ov.activePill}>
-                  <Text style={ov.activePillTxt}>{typeFilter === 'apartment' ? '🏢 Phòng trọ' : '🏠 Nguyên căn'}</Text>
+                  <IconText icon={typeFilter === 'apartment' ? 'building' : 'home'} gap={4} iconSize={13} style={ov.activePillTxt}>
+                    {typeFilter === 'apartment' ? 'Phòng trọ' : 'Nguyên căn'}
+                  </IconText>
                   <TouchableOpacity onPress={() => setTypeFilter('')} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                    <Text style={ov.activePillX}> ✕</Text>
+                    <Icon name="close" size={13} color={Brand.greenDark} style={ov.activePillX} />
                   </TouchableOpacity>
                 </View>
               )}
               {priceIdx !== 0 && (
                 <View style={ov.activePill}>
-                  <Text style={ov.activePillTxt}>💰 {PRICE_FILTERS[priceIdx].label}</Text>
+                  <IconText icon="cash" gap={4} iconSize={13} style={ov.activePillTxt}>{PRICE_FILTERS[priceIdx].label}</IconText>
                   <TouchableOpacity onPress={() => setPriceIdx(0)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                    <Text style={ov.activePillX}> ✕</Text>
+                    <Icon name="close" size={13} color={Brand.greenDark} style={ov.activePillX} />
                   </TouchableOpacity>
                 </View>
               )}
               {wardLabel !== 'Tất cả' && (
                 <View style={ov.activePill}>
-                  <Text style={ov.activePillTxt}>📍 {wardLabel}</Text>
+                  <IconText icon="location" gap={4} iconSize={13} style={ov.activePillTxt}>{wardLabel}</IconText>
                   <TouchableOpacity onPress={() => { setWardLabel('Tất cả'); setWardFilter(undefined); }} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                    <Text style={ov.activePillX}> ✕</Text>
+                    <Icon name="close" size={13} color={Brand.greenDark} style={ov.activePillX} />
                   </TouchableOpacity>
                 </View>
               )}
               {areaIdx !== 0 && (
                 <View style={ov.activePill}>
-                  <Text style={ov.activePillTxt}>📐 {AREA_FILTERS[areaIdx].label}</Text>
+                  <IconText icon="area" gap={4} iconSize={13} style={ov.activePillTxt}>{AREA_FILTERS[areaIdx].label}</IconText>
                   <TouchableOpacity onPress={() => setAreaIdx(0)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                    <Text style={ov.activePillX}> ✕</Text>
+                    <Icon name="close" size={13} color={Brand.greenDark} style={ov.activePillX} />
                   </TouchableOpacity>
                 </View>
               )}
               {selectedAmenities.map(a => (
                 <View key={a} style={ov.activePill}>
-                  <Text style={ov.activePillTxt}>✅ {a}</Text>
+                  <IconText icon="check" gap={4} iconSize={13} style={ov.activePillTxt}>{a}</IconText>
                   <TouchableOpacity onPress={() => setSelectedAmenities(prev => prev.filter(x => x !== a))} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-                    <Text style={ov.activePillX}> ✕</Text>
+                    <Icon name="close" size={13} color={Brand.greenDark} style={ov.activePillX} />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -589,7 +584,7 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
               <View style={ov.chipsWrap}>
                 {SEARCH_SUGGESTIONS.map((sg, i) => (
                   <TouchableOpacity key={i} style={ov.suggChip} onPress={() => goSearch(sg.filters)} activeOpacity={0.7}>
-                    <Text style={ov.suggChipIcon}>{sg.icon}</Text>
+                    <Icon name={sg.icon} size={15} color={Brand.greenDark} />
                     <Text style={ov.suggChipTxt}>{sg.label}</Text>
                   </TouchableOpacity>
                 ))}
@@ -606,12 +601,12 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ visible, onClose, 
                 <SearchPropertyRow key={p.id} property={p} onPress={() => goDetail(p.id)} />
               ))}
               <TouchableOpacity style={ov.seeAllBtn} onPress={goSearchWithCurrentFilters}>
-                <Text style={ov.seeAllTxt}>Xem tất cả kết quả →</Text>
+                <IconText icon="arrow-right" trailing style={ov.seeAllTxt}>Xem tất cả kết quả</IconText>
               </TouchableOpacity>
             </>
           ) : (
             <View style={ov.emptyWrap}>
-              <Text style={ov.emptyEmoji}>🔍</Text>
+              <Icon name="search" size={36} color={Colors.textMuted} strokeWidth={1.5} style={ov.emptyIcon} />
               <Text style={ov.emptyTxt}>Không tìm thấy kết quả</Text>
               <Text style={ov.emptyHint}>Thử thay đổi từ khoá hoặc bộ lọc</Text>
             </View>
@@ -657,9 +652,9 @@ const ov = StyleSheet.create({
     paddingHorizontal: Spacing.base, paddingVertical: Spacing.sm,
     borderWidth: 1, borderColor: Colors.border,
   },
-  inputIcon: { fontSize: 13 },
+
   input:     { flex: 1, fontSize: 14, color: Colors.textPrimary, padding: 0 },
-  clearTxt:  { fontSize: 13, color: Colors.textMuted },
+
 
   filterToggle: {
     width: 40, height: 40, borderRadius: BorderRadius.full,
@@ -682,7 +677,7 @@ const ov = StyleSheet.create({
     paddingHorizontal: Spacing.md - 2, paddingVertical: 5, borderRadius: BorderRadius.full,
   },
   activePillTxt: { fontSize: 12, color: Brand.greenDark, fontWeight: '700' },
-  activePillX:   { fontSize: 11, color: Brand.greenDark, fontWeight: '800' },
+  activePillX:   { marginLeft: 4 },
 
   sectionLabel: {
     fontSize: 11, fontWeight: '800', color: Colors.textMuted,
@@ -700,7 +695,7 @@ const ov = StyleSheet.create({
     borderRadius: BorderRadius.full, borderWidth: 1,
     borderColor: Colors.border, backgroundColor: Colors.white,
   },
-  suggChipIcon: { fontSize: 12 },
+
   suggChipTxt:  { fontSize: 13, color: Colors.textPrimary, fontWeight: '600' },
 
   // ── Dòng kết quả ──
@@ -714,7 +709,7 @@ const ov = StyleSheet.create({
     backgroundColor: '#EDF1F5', alignItems: 'center', justifyContent: 'center',
   },
   rowImg:         { width: '100%', height: '100%' },
-  rowImgFallback: { fontSize: 24, opacity: 0.45 },
+
   rowInfo:        { flex: 1 },
   rowName:        { fontSize: 14, fontWeight: '800', color: Colors.textPrimary, letterSpacing: -0.2 },
   rowAddr:        { fontSize: 11.5, color: Colors.textSecondary, marginTop: 2 },
@@ -724,7 +719,7 @@ const ov = StyleSheet.create({
   rowPriceSoft:   { color: Colors.textMuted, fontWeight: '600' },
   rowMetaSep:     { width: 3, height: 3, borderRadius: 2, backgroundColor: Colors.border },
   rowFree:        { fontSize: 11.5, color: Colors.textSecondary, fontWeight: '600' },
-  rowArrow:       { fontSize: 20, color: Colors.textMuted },
+
 
   seeAllBtn: {
     marginHorizontal: Spacing.base, marginTop: Spacing.lg,
@@ -734,7 +729,7 @@ const ov = StyleSheet.create({
   seeAllTxt: { fontSize: 14.5, color: Colors.white, fontWeight: '800' },
 
   emptyWrap:  { alignItems: 'center', paddingTop: 72, paddingHorizontal: Spacing.xl },
-  emptyEmoji: { fontSize: 36, marginBottom: Spacing.md },
+  emptyIcon:  { marginBottom: Spacing.md },
   emptyTxt:   { fontSize: 15.5, fontWeight: '800', color: Colors.textPrimary, marginBottom: 5 },
   emptyHint:  { fontSize: 12.5, color: Colors.textMuted, textAlign: 'center' },
 });
