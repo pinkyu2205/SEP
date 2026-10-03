@@ -20,6 +20,17 @@ const CONTRACT_HEADER = normalizeVi('Mã hợp đồng thuê');
 
 type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
 
+/**
+ * Nhập lại đúng file của đợt vừa xong thì máy chủ báo "Phải gọi start-renovation trước (nhà
+ * ACTIVE → UNDER_RENOVATION, session ≥ 2)…" — câu cho người viết code. Thực tế là đợt bổ sung
+ * đã nhập và gửi Host rồi; muốn cải tạo thêm thì mở một đợt mới.
+ */
+const friendlyError = (message: string): string =>
+  /start-renovation/i.test(message)
+    ? 'Nhà không ở đợt cải tạo bổ sung nào đang mở — đợt trước đã nhập và gửi Host rồi. '
+      + 'Muốn cải tạo thêm thì bấm "Bắt đầu cải tạo lại" cho nhà trước, rồi mới nhập file của đợt mới.'
+    : message;
+
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
@@ -280,7 +291,7 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
                       <td className="px-4 py-2 font-mono text-xs text-slate-500">{e.sheet}</td>
                       <td className="px-4 py-2 font-semibold text-slate-700">{e.rowNumber}</td>
                       <td className="px-4 py-2 text-slate-500">{e.field ?? '—'}</td>
-                      <td className="px-4 py-2 text-rose-600">{e.message}</td>
+                      <td className="px-4 py-2 text-rose-600">{friendlyError(e.message)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,4 +1,5 @@
 import realApiClient from '@/services/core/realApiClient';
+import { withUsageMonth } from '@/utils/helpers';
 import type { SharedBill, BillStatus, InvoiceType, BillPaymentMethod } from '@/types/bill';
 import type { PaymentBreakdown } from '@/services/tenant/tenantService';
 import type { InvoiceDispute } from '@/types/invoiceDispute';
@@ -100,17 +101,18 @@ const BASE = '/api/v1/tenant/me';
 
 export const realTenantBillingService = {
   // GET /api/v1/tenant/me/invoices?status=&type=
+  // `withUsageMonth`: điện/nước trả sau — hiện đúng tháng tiêu thụ, không phải tháng phát hành.
   listInvoices: async (params?: { status?: string; type?: string }): Promise<TenantInvoice[]> => {
     const { data } = await realApiClient.get<SpringPage<TenantInvoice> | TenantInvoice[]>(
       `${BASE}/invoices`, { params },
     );
-    return unwrap(data);
+    return unwrap(data).map(withUsageMonth);
   },
 
   // GET /api/v1/tenant/me/invoices/{id}
   getInvoice: async (id: number | string): Promise<TenantInvoice> => {
     const { data } = await realApiClient.get<TenantInvoice>(`${BASE}/invoices/${id}`);
-    return data;
+    return data ? withUsageMonth(data) : data;
   },
 
   // POST /api/v1/tenant/me/invoices/{id}/payment -> tạo link/QR PayOS cho hoá đơn

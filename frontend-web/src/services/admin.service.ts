@@ -1,5 +1,6 @@
 import api from './api';
 import type { Page } from '@/types/api.types';
+import { periodMonthYear } from '@/utils/evnInvoiceParser';
 
 // =============================================================================
 // Admin (System Admin) service — giám sát tài chính toàn hệ thống.
@@ -139,8 +140,15 @@ const monthPeriod = (month?: number | null, year?: number | null): string =>
 const invoiceToRow = (d: ManagerInvoiceDto): AdminInvoiceRow => {
   const type = (d.type || '').toUpperCase() as AdminInvoiceType;
   const status = (d.status || '').toUpperCase() as AdminInvoiceStatus;
-  const month = d.month ?? undefined;
-  const year = d.year ?? undefined;
+  /*
+    Điện/nước TRẢ SAU: tháng của hoá đơn là THÁNG TIÊU THỤ, đọc từ chuỗi kỳ. Máy chủ gán
+    `month` bằng cách đọc chuỗi kỳ, đọc không ra thì lấy tháng phát hành — hoá đơn phát hành
+    trước 03/10/2026 mang dải ngày trên giấy nên tiền nước tháng 9 thành "T10". Tiền nhà trả
+    trước, giữ nguyên số của máy chủ.
+  */
+  const usage = type === 'ELECTRICITY' || type === 'WATER' ? periodMonthYear(d.billingPeriod) : null;
+  const month = usage?.month ?? d.month ?? undefined;
+  const year = usage?.year ?? d.year ?? undefined;
   const isOnboardEnvelope = isOnboardCode(d.code);
   // `onboardPaid` bật ở cả hai hoá đơn của một lần thu; cái KHÔNG phải vỏ bọc chính là
   // hoá đơn tiền nhà chu kỳ đầu — nó là doanh thu thật, vẫn cộng vào tổng.
@@ -163,7 +171,9 @@ const invoiceToRow = (d: ManagerInvoiceDto): AdminInvoiceRow => {
     month,
     year,
     periodKey: month && year ? `${year}-${pad2(month)}` : undefined,
-    periodLabel: d.billingPeriod?.trim() || monthPeriod(month, year) || 'Không rõ kỳ',
+    // Kỳ dạng máy `2026-09` thì đọc thành "Tháng 09/2026"; chữ khác ("Phí bảo trì"…) giữ nguyên.
+    periodLabel: (/^\d{4}-\d{1,2}$/.test(d.billingPeriod?.trim() ?? '') ? '' : d.billingPeriod?.trim())
+      || monthPeriod(month, year) || 'Không rõ kỳ',
     amount: Number(d.amount) || 0,
     status: INVOICE_STATUSES.includes(status) ? status : 'PENDING',
     dueDate: d.dueDate ?? undefined,

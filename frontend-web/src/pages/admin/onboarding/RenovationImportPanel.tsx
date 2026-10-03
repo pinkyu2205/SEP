@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning,
+  AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning, Info,
   Loader2, RotateCcw, Send, Upload, X,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '@/services/import.service';
-import type { BulkImportError, BulkImportResponse } from '@/types/api.types';
+import type { BulkImportContractResult, BulkImportError, BulkImportResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 const TEMPLATE_URL = '/templates/SLMS2026_import_matrix_dot2.xlsx';
@@ -15,6 +15,44 @@ type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
 
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
+
+/** Nhà đang ở đâu trong quy trình — để câu "đã nhập trước đó" nói được nhà đang chờ ai. */
+const STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'chưa cấu hình',
+  PENDING: 'chưa cấu hình',
+  UNDER_RENOVATION: 'đang cải tạo',
+  PENDING_EQUIPMENT_INSTALLATION: 'chờ lắp thiết bị',
+  RENOVATION_COMPLETED: 'đã cải tạo xong',
+  PENDING_HOST_REVIEW: 'đang chờ Host duyệt giá',
+  PENDING_OPERATION_MANAGER: 'chờ gán quản lý',
+  ACTIVE: 'đang kinh doanh',
+  RENTED: 'đã cho thuê',
+};
+
+/** Căn bị bỏ qua vì sao — máy chủ chỉ có hai lý do, viết lại cho admin biết phải làm gì. */
+const skipText = (r: BulkImportContractResult) => {
+  if (/chưa khởi tạo/i.test(r.message ?? '')) return 'Chưa khởi tạo nhà — nhập file Khởi tạo nhà trước';
+  const st = r.finalStatus ? STATUS_LABEL[r.finalStatus] ?? r.finalStatus : '';
+  return `Đã nhập cải tạo trước đó${st ? ` · ${st}` : ''} — không nhập lại`;
+};
+
+/**
+ * Hai lỗi chặn CẢ FILE khi nhập lại file cũ, mà câu gốc của máy chủ chỉ có người viết code
+ * hiểu ("phải ở trạng thái UNDER_RENOVATION", "dùng POST /import/renovation-supplement-excel").
+ * Cả hai đều có chung một cách gỡ: bỏ dòng của nhà đó khỏi file rồi kiểm tra lại.
+ */
+const friendlyError = (message: string): string => {
+  if (/cải tạo bổ sung/i.test(message)) {
+    return 'Nhà đang cải tạo bổ sung (cải tạo lại sau khi đã kinh doanh) — nhập ở mục Cải tạo bổ sung trong trang của nhà, '
+      + 'không nhập ở đây. Xoá dòng của nhà này khỏi file rồi kiểm tra lại.';
+  }
+  const m = message.match(/UNDER_RENOVATION.*hiện tại:\s*([A-Z_]+)/);
+  if (m) {
+    return `Nhà đang ở bước "${STATUS_LABEL[m[1]] ?? m[1]}", không nhận file cải tạo nữa. `
+      + 'Xoá dòng của nhà này khỏi file rồi kiểm tra lại.';
+  }
+  return message;
+};
 
 /**
  * Panel "Nhập hợp đồng cải tạo từ Excel" — module Cấu hình khai thác.
@@ -52,10 +90,18 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
       setResult(res);
       if (dryRun) {
         setPhase('validated');
-        toast.success(`File hợp lệ — ${res.contractsProcessed} căn sẵn sàng`);
+        if (res.contractsProcessed > 0) {
+          toast.success(`File hợp lệ — ${res.contractsProcessed} căn sẵn sàng`);
+        } else {
+          // Nhập lại file cũ: mọi căn đã qua bước này. Không phải "hợp lệ — 0 căn".
+          toast('Không có căn nào cần nhập — file này đã được nhập trước đó', {
+            icon: <Info className="h-5 w-5 shrink-0 text-sky-600" />,
+          });
+        }
       } else {
         setPhase('done');
-        toast.success(`Đã nhập cải tạo cho ${res.results.length} căn — đã gửi Host`);
+        // `contractsProcessed`, KHÔNG phải `results.length` — `results` gồm cả căn bị bỏ qua.
+        toast.success(`Đã nhập cải tạo cho ${res.contractsProcessed} căn — đã gửi Host`);
         onImported?.();
       }
     } catch (err) {
@@ -72,6 +118,9 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
   };
 
   const busy = phase === 'validating' || phase === 'importing';
+  const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && !errorMessage;
+  /** Căn sẽ được nhập cải tạo lần này — 0 khi nhập lại đúng file cũ. */
+  const newCount = result?.contractsProcessed ?? 0;
 
   return (
     <div className="space-y-5">
@@ -147,7 +196,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                       <td className="px-4 py-2 font-semibold text-slate-700">{e.rowNumber}</td>
                       <td className="px-4 py-2 text-slate-500">{e.contractCode ?? '—'}</td>
                       <td className="px-4 py-2 text-slate-500">{e.field ?? '—'}</td>
-                      <td className="px-4 py-2 text-rose-600">{e.message}</td>
+                      <td className="px-4 py-2 text-rose-600">{friendlyError(e.message)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -158,10 +207,15 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
 
         {phase !== 'done' && (
           <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-            {phase === 'validated' && result && errors.length === 0 && !errorMessage && (
+            {validOk && newCount > 0 && (
               <p className="mr-auto flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {result.contractsProcessed} căn · {result.renovationLinesImported} dòng cải tạo · {result.equipmentRowsImported} thiết bị mua mới
-                {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} bỏ qua`}
+                <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {newCount} căn · {result!.renovationLinesImported} dòng cải tạo · {result!.equipmentRowsImported} thiết bị mua mới
+                {result!.contractsSkipped > 0 && ` · ${result!.contractsSkipped} căn không nhập`}
+              </p>
+            )}
+            {validOk && newCount === 0 && (
+              <p className="mr-auto flex items-center gap-1.5 text-sm font-semibold text-sky-700">
+                <Info className="h-4 w-4" /> Không có căn nào cần nhập — cả {result!.contractsSkipped} căn đã nhập trước đó hoặc chưa khởi tạo
               </p>
             )}
             <button
@@ -172,7 +226,8 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                 ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra...</>
                 : <><CheckCircle2 className="h-4 w-4" /> {phase === 'validated' ? 'Kiểm tra lại' : 'Kiểm tra file'}</>}
             </button>
-            {(phase === 'validated' || phase === 'importing') && result && errors.length === 0 && !errorMessage && (
+            {/* Không có căn mới thì không có nút — bấm vào chỉ để nhận "Đã nhập cải tạo cho 0 căn". */}
+            {(phase === 'validated' || phase === 'importing') && result && errors.length === 0 && !errorMessage && newCount > 0 && (
               <button
                 onClick={() => setConfirmOpen(true)}
                 disabled={busy}
@@ -184,6 +239,23 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
             )}
           </div>
         )}
+
+        {/* Từng căn sẽ ra sao — trước đây chỉ có con số "N bỏ qua", không biết căn nào, vì sao. */}
+        {validOk && result!.results.length > 0 && (
+          <ul className="mt-4 max-h-60 divide-y divide-slate-100 overflow-auto rounded-xl border border-slate-200 text-sm">
+            {result!.results.map((r) => (
+              <li key={r.contractCode} className="flex items-center gap-3 px-4 py-2">
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-semibold text-slate-800">{r.propertyName ?? r.contractCode}</span>
+                  {r.propertyName && <span className="ml-2 font-mono text-xs text-slate-400">{r.contractCode}</span>}
+                </span>
+                <span className={`shrink-0 text-xs ${r.importStatus === 'SKIPPED' ? 'text-slate-500' : 'font-semibold text-emerald-700'}`}>
+                  {r.importStatus === 'SKIPPED' ? skipText(r) : 'Sẽ nhập cải tạo & gửi Host'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Kết quả */}
@@ -191,7 +263,7 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
             <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo cho {result.contractsProcessed} căn — đã gửi Host duyệt
-            {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} bỏ qua`}.
+            {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} căn không nhập lại`}.
           </div>
 
           {result.results.length > 0 && (
@@ -207,9 +279,9 @@ export const RenovationImportPanel = ({ onImported }: { onImported?: () => void 
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.contractCode}</td>
                       <td className="px-4 py-3 text-right">
                         {r.importStatus === 'SKIPPED' ? (
-                          <span title={r.message ?? ''} className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Bỏ qua</span>
+                          <span className="text-xs text-slate-500">{skipText(r)}</span>
                         ) : (
-                          <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Đã gửi Host</span>
+                          <span className="whitespace-nowrap rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Đã gửi Host</span>
                         )}
                       </td>
                     </tr>

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { PropertyResponse } from '@/types/api.types';
+import type { PropertyResponse, TenantContractResponse } from '@/types/api.types';
 import { normalizeVi } from '@/utils/helpers';
 import {
   normalizeRoomNumber, SLOT_LABEL,
@@ -59,7 +59,16 @@ export type PreflightCode =
   | 'ROOM_TAKEN'
   | 'ROOM_DUPLICATED'
   | 'WHOLE_HOUSE_TAKEN'
-  | 'WHOLE_HOUSE_DUPLICATED';
+  | 'WHOLE_HOUSE_DUPLICATED'
+  /**
+   * KHÔNG phải lỗi: chính khách này đã có hồ sơ chờ đón ở đúng phòng/căn đó — file đã được
+   * nhập trước đó. Tách khỏi `ROOM_TAKEN` (phòng bị NGƯỜI KHÁC giữ) vì hai việc khác nhau:
+   * một bên là bỏ qua cho yên, một bên là phải hỏi lại host.
+   */
+  | 'ALREADY_IMPORTED';
+
+/** Dòng có vấn đề thật (cần sửa file / hỏi host) — `ALREADY_IMPORTED` không tính. */
+export const isIssue = (code?: PreflightCode) => !!code && code !== 'ALREADY_IMPORTED';
 
 export interface PreflightRow {
   /** Số dòng Excel (1-based, gồm header) — khớp `BulkImportError.rowNumber` của BE. */
@@ -80,6 +89,8 @@ export interface PreflightGroup {
   rows: PreflightRow[];
   okCount: number;
   issueCount: number;
+  /** Dòng đã nhập trước đó (khách đã có hồ sơ chờ đón ở đúng chỗ). */
+  alreadyCount: number;
   /** Số dòng vượt quá số chỗ còn nhận được — >0 là phải quay lại hỏi host. */
   overCapacity: number;
 }
@@ -88,6 +99,8 @@ export interface PreflightReport {
   totalRows: number;
   okCount: number;
   issueCount: number;
+  /** Dòng đã nhập trước đó — `totalRows` bằng số này nghĩa là cả file đã nhập rồi. */
+  alreadyCount: number;
   groups: PreflightGroup[];
   /** Không đọc được file (hỏng, sai định dạng, không thấy sheet) — im lặng, để BE nói. */
   parseError?: string;
@@ -96,7 +109,7 @@ export interface PreflightReport {
 }
 
 const EMPTY: PreflightReport = {
-  totalRows: 0, okCount: 0, issueCount: 0, groups: [], propertyIds: [],
+  totalRows: 0, okCount: 0, issueCount: 0, alreadyCount: 0, groups: [], propertyIds: [],
 };
 
 const norm = (v: unknown) => normalizeVi(String(v ?? '').trim()).replace(/\s+/g, ' ').trim();
@@ -159,6 +172,8 @@ export const runImportPreflight = async (
   file: File,
   properties: PropertyResponse[],
   occupancyByProperty?: Map<number, PropertyOccupancy>,
+  /** Hồ sơ chờ đón đang có — để nhận ra dòng đã được nhập ở lần trước. */
+  drafts: TenantContractResponse[] = [],
 ): Promise<PreflightReport> => {
   let rows: unknown[][];
   try {
@@ -241,6 +256,29 @@ export const runImportPreflight = async (
     }
   }
 
+  /**
+   * Hồ sơ chờ đón của CHÍNH khách trong dòng này, ở đúng phòng/căn đó — tức dòng đã được
+   * nhập ở lần trước. Khớp theo tên khách (bỏ dấu, gộp khoảng trắng) + nhà + phòng: cùng một
+   * người ở cùng một chỗ thì gần như chắc chắn là cùng một hồ sơ.
+   */
+  const ownDraft = (p: Parsed) => p.property && drafts.find((d) =>
+    d.propertyId === p.property!.id
+    && (p.wholeHouseRow
+      ? d.roomId == null
+      : normalizeRoomNumber(d.roomNumber) === normalizeRoomNumber(p.roomNumber))
+    && norm(d.tenantFullName) === norm(p.tenantName));
+
+  const alreadyImported = (p: Parsed, base: PreflightRow): PreflightRow | null => {
+    const d = ownDraft(p);
+    return d
+      ? {
+          ...base,
+          code: 'ALREADY_IMPORTED',
+          message: `Đã nhập trước đó — hồ sơ ${d.contractCode} (${(d.statusLabel ?? 'chờ đón khách').toLowerCase()}). Không tạo lại.`,
+        }
+      : null;
+  };
+
   const checked: PreflightRow[] = parsed.map((p) => {
     const base: PreflightRow = {
       excelRow: p.excelRow,
@@ -279,6 +317,8 @@ export const runImportPreflight = async (
         };
       }
       if (occ.wholeHouseTaken) {
+        const again = alreadyImported(p, base);
+        if (again) return again;
         return {
           ...base,
           code: 'WHOLE_HOUSE_TAKEN',
@@ -320,6 +360,8 @@ export const runImportPreflight = async (
     }
 
     if (slot.state !== 'AVAILABLE') {
+      const again = alreadyImported(p, base);
+      if (again) return again;
       return {
         ...base,
         code: 'ROOM_TAKEN',
@@ -342,10 +384,13 @@ export const runImportPreflight = async (
       rows: [],
       okCount: 0,
       issueCount: 0,
+      alreadyCount: 0,
       overCapacity: 0,
     };
     g.rows.push(row);
-    if (row.code) g.issueCount += 1; else g.okCount += 1;
+    if (row.code === 'ALREADY_IMPORTED') g.alreadyCount += 1;
+    else if (row.code) g.issueCount += 1;
+    else g.okCount += 1;
     groupMap.set(key, g);
   });
 
@@ -361,14 +406,16 @@ export const runImportPreflight = async (
       : null;
     return {
       ...g,
-      overCapacity: capacity == null ? 0 : Math.max(0, g.rows.length - capacity),
+      // Dòng đã nhập trước đó đang chiếm đúng chỗ của chính nó — không đòi thêm chỗ nào.
+      overCapacity: capacity == null ? 0 : Math.max(0, g.rows.length - g.alreadyCount - capacity),
     };
   }).sort((a, b) => (b.issueCount + b.overCapacity) - (a.issueCount + a.overCapacity));
 
   return {
     totalRows: checked.length,
     okCount: checked.filter((r) => !r.code).length,
-    issueCount: checked.filter((r) => !!r.code).length,
+    issueCount: checked.filter((r) => isIssue(r.code)).length,
+    alreadyCount: checked.filter((r) => r.code === 'ALREADY_IMPORTED').length,
     groups,
     propertyIds,
   };

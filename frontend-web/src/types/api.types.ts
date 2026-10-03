@@ -1210,7 +1210,11 @@ export interface BulkImportError {
 
 /** Kết quả 1 căn nhà trong import (có cả ở dry-run lẫn import thật) */
 export interface BulkImportContractResult {
-  importStatus: 'IMPORTED' | 'SKIPPED';
+  /**
+   * `CODES_UPDATED` — chỉ có ở import Khởi tạo nhà: nhà đã tồn tại, máy chủ ghi đè 2 cột mã KH
+   * điện/nước từ file (ghi đè cả khi mã y hệt, nên KHÔNG có nghĩa là mã đã đổi).
+   */
+  importStatus: 'IMPORTED' | 'SKIPPED' | 'CODES_UPDATED';
   contractCode: string;
   propertyId: number | null;   // null khi dry-run hoặc skip không tra được
   propertyName: string | null;

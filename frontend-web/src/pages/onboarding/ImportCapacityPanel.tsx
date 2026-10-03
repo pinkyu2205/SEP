@@ -1,9 +1,9 @@
-import { AlertTriangle, CheckCircle2, Loader2, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Info, Loader2, Users } from 'lucide-react';
 import {
   CapacityStat, RoomSquares, CapacityBreakdown,
   RoomCountMismatchNote, RoomsNotOpenedNote,
 } from './CapacityBar';
-import type { PreflightGroup, PreflightReport } from './importPreflight';
+import { isIssue, type PreflightGroup, type PreflightReport } from './importPreflight';
 
 /**
  * BẢNG SỨC CHỨA CỦA FILE IMPORT — hiện ngay khi vừa chọn file, trước cả khi bấm kiểm tra.
@@ -79,7 +79,7 @@ const GroupCard = ({ g }: { g: PreflightGroup }) => {
 
       {g.issueCount > 0 && (
         <ul className="mt-2 space-y-1.5 border-t border-black/5 pt-2">
-          {g.rows.filter((r) => r.code).map((r) => (
+          {g.rows.filter((r) => isIssue(r.code)).map((r) => (
             <li key={r.excelRow} className="text-xs leading-relaxed">
               <span className="font-semibold text-slate-700">
                 Dòng {r.excelRow}
@@ -92,9 +92,25 @@ const GroupCard = ({ g }: { g: PreflightGroup }) => {
         </ul>
       )}
 
-      {g.issueCount === 0 && g.overCapacity === 0 && (
+      {/* Đã nhập ở lần trước: không phải lỗi, chỉ là không tạo lại — để màu trung tính. */}
+      {g.alreadyCount > 0 && (
+        <ul className="mt-2 space-y-1 border-t border-black/5 pt-2">
+          {g.rows.filter((r) => r.code === 'ALREADY_IMPORTED').map((r) => (
+            <li key={r.excelRow} className="text-xs leading-relaxed text-slate-500">
+              <span className="font-semibold text-slate-600">
+                Dòng {r.excelRow}
+                {r.roomNumber ? ` · Phòng ${r.roomNumber}` : r.wholeHouseRow ? ' · Nguyên căn' : ''}
+                {' · '}{r.tenantName}
+              </span>
+              {' — '}{r.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {g.issueCount === 0 && g.overCapacity === 0 && g.okCount > 0 && (
         <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-          <CheckCircle2 className="h-3.5 w-3.5" /> Đủ chỗ cho toàn bộ {g.rows.length} khách.
+          <CheckCircle2 className="h-3.5 w-3.5" /> Đủ chỗ cho {g.okCount} khách mới.
         </p>
       )}
     </li>
@@ -133,6 +149,22 @@ export const ImportCapacityPanel = ({ loading, report }: {
 
   const problemGroups = report.groups.filter((g) => g.issueCount > 0 || g.overCapacity > 0);
   const allGood = problemGroups.length === 0;
+
+  // Cả file đã nhập rồi: nói đúng một câu đó, đừng dựng bảng "sức chứa ổn" cho 0 khách mới.
+  if (report.totalRows > 0 && report.alreadyCount === report.totalRows) {
+    return (
+      <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+        <div>
+          <p className="text-sm font-bold text-sky-900">File này đã được nhập trước đó</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-sky-800">
+            Cả {report.totalRows} khách trong file đã có hồ sơ chờ đón ở đúng phòng — không có gì để nhập thêm.
+            Xem và sửa từng hồ sơ ở danh sách Hồ sơ đón khách.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`mt-4 overflow-hidden rounded-xl border ${allGood ? 'border-emerald-200' : 'border-rose-200'}`}>

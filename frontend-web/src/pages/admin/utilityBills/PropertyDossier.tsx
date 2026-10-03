@@ -3,7 +3,7 @@ import type { PropertyResponse } from '@/types/api.types';
 import type { LastBill, UtilityCycle } from '@/services/utilityCycle';
 import type { KindConfig } from './kinds';
 import { showCode, type RoomSummary } from './billChecks';
-import { fmtDate, fmtNum, fmtPeriodTag, fmtVnd } from './ui';
+import { fmtBillPeriod, fmtDate, fmtNum, fmtPeriodTag, fmtVnd } from './ui';
 
 const Label = ({ children }: { children: React.ReactNode }) => (
   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{children}</p>
@@ -138,7 +138,7 @@ export const PropertyDossier = ({
           <Pending text="Đang tải…" />
         ) : lastBill ? (
           <>
-            <p className="mt-1 text-sm font-bold text-slate-800">{lastBill.billingPeriod}</p>
+            <p className="mt-1 text-sm font-bold text-slate-800">{fmtBillPeriod(lastBill.billingPeriod)}</p>
             <p className="mt-0.5 text-xs tabular-nums text-slate-500">
               {fmtNum(lastBill.totalQuantity)} {unit} · {fmtVnd(lastBill.totalAmount)}
               {lastBill.totalQuantity > 0 && (
