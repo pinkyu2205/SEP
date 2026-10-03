@@ -10,7 +10,7 @@ import { StepSubmitToHost } from './StepSubmitToHost';
 const steps = [
   { id: 1, title: 'Thông tin & Hợp đồng', icon: Building },
   { id: 2, title: 'Cấu hình chi tiết', icon: Settings2 },
-  { id: 3, title: 'Xem giá & Gửi Host', icon: Send },
+  { id: 3, title: 'Xem giá & Gửi Owner', icon: Send },
 ];
 
 export const PropertyOnboardingWizard = () => {

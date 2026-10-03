@@ -1,6 +1,6 @@
 /**
  * Nhãn + helper dùng chung cho MỌI màn hợp đồng thuê — cổng Admin
- * (`pages/admin/ContractMonitoring.tsx`) lẫn cổng Host (`pages/host/contracts/ContractList.tsx`)
+ * (`pages/admin/ContractMonitoring.tsx`) lẫn cổng Owner (`pages/host/contracts/ContractList.tsx`)
  * và drawer chi tiết dùng chung ([[ContractDetailDrawer]]).
  *
  * Tách ra đây để hai cổng KHÔNG lệch nhau: cùng một trạng thái phải ra cùng một chữ,
@@ -76,8 +76,8 @@ export const PAYMENT_STATUS: Record<string, Badge> = {
   CANCELLED: { label: 'Đã huỷ', color: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
 };
 
-// KHÔNG có bảng map "duyệt giá" ở đây: hệ thống đã bỏ hẳn luồng manager gửi Host duyệt
-// giá / phê duyệt hợp đồng. Host chỉ còn XEM hợp đồng, không ra quyết định trên web.
+// KHÔNG có bảng map "duyệt giá" ở đây: hệ thống đã bỏ hẳn luồng manager gửi Owner duyệt
+// giá / phê duyệt hợp đồng. Owner chỉ còn XEM hợp đồng, không ra quyết định trên web.
 
 // Đồng bộ với mobile-app/src/utils/helpers.ts getContractTerminationTypeLabel().
 const TERMINATION_TYPE_LABEL: Record<string, string> = {
@@ -220,7 +220,7 @@ export type StatusFilter = 'all' | keyof typeof CONTRACT_STATUS;
  * Hôm nay hồ sơ đã kết thúc mới chiếm ~17% danh sách; sau vài năm vận hành nó sẽ là phần
  * lớn nhất và nhấn chìm mấy hợp đồng đang chạy nếu cứ trộn chung.
  */
-/** 3 nhóm nền, dùng ở màn host — nơi chưa tách được "huỷ trước khi nhận nhà". */
+/** 3 nhóm nền, dùng ở màn owner — nơi chưa tách được "huỷ trước khi nhận nhà". */
 export type BaseContractScope = 'active' | 'ended' | 'all';
 export type ContractScope = BaseContractScope | 'aborted';
 
@@ -286,7 +286,7 @@ export const SCOPE_OPTIONS: { key: BaseContractScope; label: string }[] = [
 
 /**
  * Bản 4 nhóm cho màn admin — nơi có đủ dữ liệu để tách "huỷ trước khi nhận nhà".
- * Màn host vẫn dùng `SCOPE_OPTIONS` 3 nhóm (`HostContractDto` không mang mốc công tơ).
+ * Màn owner vẫn dùng `SCOPE_OPTIONS` 3 nhóm (`HostContractDto` không mang mốc công tơ).
  */
 export const SCOPE_OPTIONS_WITH_ABORTED: { key: ContractScope; label: string }[] = [
   { key: 'active', label: 'Đang theo dõi' },
@@ -331,7 +331,7 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 
 /**
  * Không có `createdAt` riêng nên dùng `id` làm mốc thời gian tạo (BE tăng dần).
- * `id` là number ở `/tenant-contracts` nhưng là string ở `/host/contracts` — ép số
+ * `id` là number ở `/tenant-contracts` nhưng là string ở `/owner/contracts` — ép số
  * ngay trong hàm để hai cổng dùng chung được một bộ so sánh.
  */
 export const sortContracts = <T extends { id: number | string; rentAmount?: number; endDate?: string }>(

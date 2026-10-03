@@ -1,5 +1,5 @@
 /**
- * Chi phí vận hành (Host → /host/expenses).
+ * Chi phí vận hành (Owner → /host/expenses).
  *
  * Trước 15/08/2026 hai kiểu này nằm trong `utils/expenseStore.ts` — một store
  * localStorage tự SEED chi phí giả (tiền thuê 3 căn nhà mock + 5 khoản lặt vặt)

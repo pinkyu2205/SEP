@@ -250,18 +250,30 @@ export const arrearsPeriod = (base = serverNow()): { month: number; year: number
  *
  * Lấy tháng ở mốc ĐẦU kỳ: chu kỳ chốt số thật của EVN vắt qua hai tháng
  * (`07/08/2026 – 06/09/2026`) nhưng admin lưu bản ghi vào tháng 8 — mốc đầu mới là cái
- * khớp với `bill.month`. Năm lấy ở mốc cuối, vì đầu kỳ hay được lược năm.
+ * khớp với `bill.month`. Đầu kỳ hay được lược năm thì mượn năm cuối kỳ (lùi một năm khi kỳ
+ * vắt qua Tết dương: `07/12 – 06/01/2025` là tháng 12/2024).
+ *
+ * Nhận cả `2026-09` và `09/2026` — dạng kỳ máy chủ lưu cho dữ liệu cũ và cho mọi hoá đơn
+ * phát hành từ 03/10/2026 (xem `usagePeriodKey` ở trang phát hành).
  */
 export const periodMonthYear = (raw?: string | null): { month: number; year: number } | null => {
   const s = (raw ?? '').trim();
-  const monthOnly = s.match(/^tháng\s*(\d{1,2})\s*\/\s*(\d{4})$/i);
-  if (monthOnly) return { month: Number(monthOnly[1]), year: Number(monthOnly[2]) };
+  const ok = (month: number, year: number) =>
+    month >= 1 && month <= 12 && year >= 2000 ? { month, year } : null;
 
-  const start = s.match(/(\d{1,2})\/(\d{1,2})/);
-  const year = s.match(/\d{4}/g)?.slice(-1)[0];
-  if (!start || !year) return null;
-  const month = Number(start[2]);
-  return month >= 1 && month <= 12 ? { month, year: Number(year) } : null;
+  let m = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (m) return ok(Number(m[2]), Number(m[1]));
+  m = s.match(/^(?:tháng\s*)?(\d{1,2})\s*\/\s*(\d{4})$/i);
+  if (m) return ok(Number(m[1]), Number(m[2]));
+
+  m = s.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*[–—-]\s*\d{1,2}\/(\d{1,2})\/(\d{4})/);
+  if (m) {
+    const startMonth = Number(m[2]);
+    const endYear = Number(m[5]);
+    const startYear = m[3] ? Number(m[3]) : startMonth > Number(m[4]) ? endYear - 1 : endYear;
+    return ok(startMonth, startYear);
+  }
+  return null;
 };
 
 const daysInMonth = (month: number, year: number) => new Date(year, month, 0).getDate();

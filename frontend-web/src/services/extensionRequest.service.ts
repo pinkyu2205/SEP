@@ -5,7 +5,7 @@ import api from './api';
  *
  * ─── Vì sao ADMIN duyệt chứ không phải quản lý ────────────────────────────────
  * Thứ quyết định gia hạn được hay không là **hợp đồng của công ty với chủ nhà còn bao
- * lâu** — quan hệ đó thuộc về host/admin, quản lý không nắm. Máy chủ đã chặn cứng:
+ * lâu** — quan hệ đó thuộc về owner/admin, quản lý không nắm. Máy chủ đã chặn cứng:
  * `InboundLeaseRules.assertOccupancyWindow` không cho ngày kết thúc mới vượt hạn hợp đồng
  * gốc, và số tháng tối đa được tính sẵn cho khách qua `extension-options`.
  *

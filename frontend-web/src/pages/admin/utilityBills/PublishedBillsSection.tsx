@@ -5,7 +5,7 @@ import { refreshAdminBadges } from '@/utils/adminBadges';
 import { SectionShell, StatusPill, EmptyState } from '../shared';
 import type { KindConfig, PublishedBill } from './kinds';
 import { ReadingProgress } from './ReadingProgress';
-import { fmtDateTime, fmtNum, fmtVnd } from './ui';
+import { fmtBillPeriod, fmtDateTime, fmtNum, fmtVnd } from './ui';
 
 const PER_PAGE = 10;
 
@@ -160,7 +160,7 @@ export const PublishedBillsSection = ({
                                 </span>
                               )}
                             </p>
-                            <p className="truncate text-xs text-slate-400">{b.billingPeriod}</p>
+                            <p className="truncate text-xs text-slate-400">{fmtBillPeriod(b.billingPeriod)}</p>
                           </div>
                         </div>
                       </td>
@@ -252,7 +252,7 @@ export const PublishedBillsSection = ({
                 <h3 className="truncate text-base font-extrabold text-slate-900">
                   {detail.propertyName ?? `Nhà #${detail.propertyId}`}
                 </h3>
-                <p className="mt-0.5 text-sm text-slate-500">Kỳ {detail.billingPeriod}</p>
+                <p className="mt-0.5 text-sm text-slate-500">Kỳ {fmtBillPeriod(detail.billingPeriod)}</p>
               </div>
               {detail.status === 'REVOKED'
                 ? <StatusPill label="Đã thu hồi" color="bg-slate-200 text-slate-600" />
@@ -351,7 +351,7 @@ export const PublishedBillsSection = ({
 
             <div className="mt-4 space-y-1 rounded-xl bg-slate-50 p-3 text-sm">
               <p className="font-bold text-slate-800">{revokeTarget.propertyName ?? `Nhà #${revokeTarget.propertyId}`}</p>
-              <p className="text-slate-500">Kỳ {revokeTarget.billingPeriod}</p>
+              <p className="text-slate-500">Kỳ {fmtBillPeriod(revokeTarget.billingPeriod)}</p>
               <p className="tabular-nums text-slate-500">
                 {fmtNum(revokeTarget.totalQuantity)} {cfg.unit} · {fmtVnd(revokeTarget.totalAmount)} ·{' '}
                 {fmtVnd(unitPriceOf(cfg, revokeTarget))}/{cfg.unit}

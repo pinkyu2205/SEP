@@ -49,7 +49,7 @@ export const WebLogin = () => {
     try {
       const user = await login(username, password);
       const from = (location.state as { from?: string } | null)?.from;
-      const defaultPath = user.role === 'admin' ? '/admin' : '/host';
+      const defaultPath = user.role === 'admin' ? '/admin' : '/owner';
       const validFrom = from && from !== '/login' && (
         user.role === 'admin' ? from.startsWith('/admin') : !from.startsWith('/admin')
       );

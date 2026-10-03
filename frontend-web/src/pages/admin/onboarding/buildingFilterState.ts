@@ -105,7 +105,12 @@ export const useBuildingFilters = (
   },
 ): BuildingFilters => {
   const { storageKey, effectiveStatus, needsAttention } = opts;
-  const statusOf = effectiveStatus ?? ((b: PropertyResponse) => b.status);
+  // RENTED chỉ có ở nhà seed demo — luồng thật nhà có khách vẫn là ACTIVE. Lọc/đếm như ACTIVE
+  // để chip "Đang kinh doanh" gồm cả nhà seed lẫn nhà nhập thật.
+  const statusOf = (b: PropertyResponse) => {
+    const s = (effectiveStatus ?? ((x: PropertyResponse) => x.status))(b);
+    return s === 'RENTED' ? 'ACTIVE' : s;
+  };
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');

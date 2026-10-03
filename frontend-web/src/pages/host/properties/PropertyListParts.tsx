@@ -1,8 +1,8 @@
 /**
- * Các thành phần hiển thị của màn "Bất động sản" (Host).
+ * Các thành phần hiển thị của màn "Bất động sản" (Owner).
  *
  *  - StatTile            : thẻ số liệu, bấm để lọc nhanh
- *  - PendingApprovalPanel: khối nổi bật liệt kê hồ sơ đang chờ Host phê duyệt
+ *  - PendingApprovalPanel: khối nổi bật liệt kê hồ sơ đang chờ Owner phê duyệt
  *  - PropertyCard        : thẻ tòa nhà (khai thác + thu tiền + giá + quản lý).
  *                          KHÔNG có ảnh — xem chú thích hàng badge bên trong.
  *  - PropertyTable       : chế độ xem bảng, dễ so sánh nhiều căn một lúc
@@ -21,7 +21,7 @@ import type { PropertyResponse } from '@/types/api.types';
 import { propertyService } from '@/services/property.service';
 import { normalizeVi } from '@/utils/helpers';
 import {
-  STATUS_BADGE, HOST_STATUS_CHIPS, SORT_LABEL, TYPE_LABEL, MANAGER_LABEL,
+  STATUS_BADGE, HOST_STATUS_CHIPS, SORT_LABEL, TYPE_LABEL, MANAGER_LABEL, lifecycleOf, showLifecycleBadge,
   RENTAL_FILTER_LABEL, BILL_FILTER_LABEL,
   GRID_SIZES, TABLE_SIZES, typeLabel, formatVnd, formatRoomPriceTop,
   type PropertyListFilters, type SortKey, type TypeFilter, type ManagerFilter,
@@ -95,16 +95,16 @@ export const StatTile = ({
   );
 };
 
-// ─── Hồ sơ chờ Host phê duyệt ───────────────────────────────────────────────
+// ─── Hồ sơ chờ Owner phê duyệt ───────────────────────────────────────────────
 /**
- * Hồ sơ chờ duyệt giá có HAI loại, việc Host phải làm khác hẳn nhau:
+ * Hồ sơ chờ duyệt giá có HAI loại, việc Owner phải làm khác hẳn nhau:
  *
- *  - NHÀ MỚI (chỉ có đợt cải tạo 1, hoặc không cải tạo): chưa từng cho thuê. Host đọc toàn bộ
+ *  - NHÀ MỚI (chỉ có đợt cải tạo 1, hoặc không cải tạo): chưa từng cho thuê. Owner đọc toàn bộ
  *    tiền bỏ ra, đặt mục tiêu lãi, chốt giá rồi KÍCH HOẠT cho nhà nhận khách.
- *  - CẢI TẠO BỔ SUNG (có đợt ≥ 2): nhà đang cho thuê, giá cũ đã duyệt. Host chỉ xem đợt vừa làm
+ *  - CẢI TẠO BỔ SUNG (có đợt ≥ 2): nhà đang cho thuê, giá cũ đã duyệt. Owner chỉ xem đợt vừa làm
  *    thêm gì và chốt GIÁ NIÊM YẾT MỚI — khách đang ở giữ nguyên giá hợp đồng.
  *
- * Trộn chung một danh sách thì Host không biết bấm vào sẽ gặp màn nào, cũng không ưu tiên được
+ * Trộn chung một danh sách thì Owner không biết bấm vào sẽ gặp màn nào, cũng không ưu tiên được
  * (nhà đang có khách mà treo duyệt lại giá lâu thì phòng trống vẫn niêm yết giá cũ).
  *
  * Phân loại bằng đúng quy tắc màn /host/review/:id dùng để chọn giao diện
@@ -574,7 +574,7 @@ export const ResultBar = ({ f }: { f: PropertyListFilters }) => {
 // ─── Tình trạng khai thác & thu tiền ────────────────────────────────────────
 
 /**
- * "12.400.000" → "12,4tr" — đủ để host biết nợ nhiều hay ít mà không chiếm cả dòng.
+ * "12.400.000" → "12,4tr" — đủ để owner biết nợ nhiều hay ít mà không chiếm cả dòng.
  *
  * Khác `fmtMillion` ở @/utils/period ("12tr", làm tròn về triệu, không có tỷ/nghìn):
  * hàm kia dùng cho trục biểu đồ, nơi nhãn phải cực ngắn và sai số không quan trọng.
@@ -603,7 +603,7 @@ export const RentalBadge = ({ op, className = '' }: {
 /**
  * Thanh tỉ lệ phòng của nhà CHIA PHÒNG.
  *
- * Vẽ theo tỉ lệ chứ không viết thành câu: một dòng chữ liệt kê 5 con số bắt host tự
+ * Vẽ theo tỉ lệ chứ không viết thành câu: một dòng chữ liệt kê 5 con số bắt owner tự
  * cộng nhẩm mới biết còn bao nhiêu chỗ — cùng lý do `propertyOccupancy.service` đã bỏ
  * hàm `occupancySummary()` cũ. Chỉ chú thích những nhóm KHÁC 0 để card không rối.
  */
@@ -641,7 +641,7 @@ const OccupancyBar = ({ op }: { op: PropertyOperationStatus }) => {
  * Dòng "Khai thác" — trả lời "căn này đang ra tiền chưa".
  *
  * Nguyên căn không có phòng để vẽ thanh tỉ lệ, nên nói bằng chữ + hạn hợp đồng: với
- * loại này thứ host cần biết tiếp theo là bao giờ khách đi để còn tìm khách mới.
+ * loại này thứ owner cần biết tiếp theo là bao giờ khách đi để còn tìm khách mới.
  */
 const OccupancyRow = ({ op }: { op?: PropertyOperationStatus }) => {
   if (!op || op.rental === 'UNKNOWN') return null;
@@ -679,7 +679,7 @@ const OccupancyRow = ({ op }: { op?: PropertyOperationStatus }) => {
 /**
  * Dòng "Hoá đơn kỳ này" — khách đã trả chưa.
  *
- * ⚠️ Ở chế độ `rent-only` (BE chặn host ở `/manager/invoices`) dữ liệu CHỈ có tiền
+ * ⚠️ Ở chế độ `rent-only` (BE chặn owner ở `/manager/invoices`) dữ liệu CHỈ có tiền
  * phòng. Tuyệt đối không viết "đã thu đủ" trong trường hợp đó: khách đang nợ tiền
  * điện mà màn hình báo xanh thì tệ hơn hẳn việc không hiện gì. Nên chữ đổi thành
  * "đã thu đủ tiền phòng" và có ghi chú nguồn.
@@ -746,11 +746,11 @@ export const BillSourceNote = ({ source, loading }: { source: BillSource; loadin
  * ─── Vì sao phải tách (30/08/2026) ───────────────────────────────────────────
  * Card cũ đọc `p.price` (giá niêm yết) và gọi nó là "Giá thuê"; màn chi tiết đọc
  * `appliedPrice` (giá hợp đồng đang chạy) và cũng gọi là "Giá thuê". Cùng một nhãn,
- * hai con số khác nhau ở hai màn — host không biết tin số nào.
+ * hai con số khác nhau ở hai màn — owner không biết tin số nào.
  *
  * Nay: căn có khách thì hiện TIỀN THẬT lấy từ hợp đồng (`activeRent`), căn trống thì
  * hiện giá niêm yết và nói rõ đó là giá chào. Khác nhau thì ghi thêm dòng niêm yết để
- * host thấy được chênh lệch (vd đã tăng giá hàng năm).
+ * owner thấy được chênh lệch (vd đã tăng giá hàng năm).
  *
  * Dùng `activeRent` từ hợp đồng chứ không phải `appliedPrice` của nhà: nhà chia phòng
  * không có con số nào ở cấp toà nhà nói được "căn này đang thu bao nhiêu" — mỗi phòng
@@ -833,8 +833,15 @@ export const PropertyCard = ({ p, roomPrice, op, billSource, onClick }: {
   billSource: BillSource;
   onClick: () => void;
 }) => {
-  const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.DRAFT;
+  const badge = STATUS_BADGE[lifecycleOf(p.status)] ?? STATUS_BADGE.DRAFT;
   const noManager = !p.operationManagerId;
+  /*
+    Nhà đang kinh doanh mà đã biết tình trạng cho thuê thì chỉ một nhãn đó là đủ — trước đây
+    hiện "Hoạt động · Đang cho thuê", nhà seed còn ra "Đã cho thuê · Đang cho thuê" (03/10/2026).
+    Chưa nạp xong tình trạng cho thuê thì vẫn hiện nhãn vòng đời, card không bị trống nhãn.
+  */
+  const rentalKnown = !!op && op.rental !== 'UNKNOWN';
+  const showBadge = showLifecycleBadge(p.status) || !rentalKnown;
 
   return (
     <div onClick={onClick}
@@ -865,9 +872,11 @@ export const PropertyCard = ({ p, roomPrice, op, billSource, onClick }: {
             dính liền nhau dễ bị đọc thành một.
           */}
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${badge.cls}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />{badge.label}
-            </span>
+            {showBadge && (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${badge.cls}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${badge.dot}`} />{badge.label}
+              </span>
+            )}
             <RentalBadge op={op} />
             {noManager && (
               <span className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-2 py-1 text-xs font-bold text-white">
@@ -1053,7 +1062,7 @@ export const PropertyTable = ({ rows, roomPrices = {}, opStatus, billSource, onR
       </thead>
       <tbody className="divide-y divide-slate-100">
         {rows.map(p => {
-          const badge = STATUS_BADGE[p.status] ?? STATUS_BADGE.DRAFT;
+          const badge = STATUS_BADGE[lifecycleOf(p.status)] ?? STATUS_BADGE.DRAFT;
           const op = opStatus.get(p.id);
           return (
             <tr key={p.id} onClick={() => onRowClick(p)}

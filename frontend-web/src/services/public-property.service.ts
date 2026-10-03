@@ -76,7 +76,7 @@ function mapToPublicProperty(p: GuestPropertyResponse, listing: Listing): Public
  *
  * `listedPrice` TRƯỚC `appliedPrice`, và `price` chỉ là đường lui cho dữ liệu cũ:
  *
- *  • `listedPrice` là giá host duyệt, cũng là giá quay về khi khách trả phòng — đúng thứ
+ *  • `listedPrice` là giá owner duyệt, cũng là giá quay về khi khách trả phòng — đúng thứ
  *    một người đang đi tìm phòng cần biết.
  *  • `appliedPrice` là giá của HỢP ĐỒNG đang chạy trong phòng đó. Rao giá này ra ngoài là
  *    công khai giá riêng của khách hiện tại, và cũng không phải giá người mới sẽ trả.

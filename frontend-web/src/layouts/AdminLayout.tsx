@@ -54,7 +54,7 @@ import { UserMenu } from './UserMenu';
  */
 /**
  * ─── Vì sao gom lại như dưới đây (30/08/2026) ────────────────────────────────
- * Gom cùng nguyên tắc với sidebar Host (`layouts/Sidebar.tsx`) — hai cổng dùng chung
+ * Gom cùng nguyên tắc với sidebar Owner (`layouts/Sidebar.tsx`) — hai cổng dùng chung
  * `AppSidebar` thì cũng nên gom menu cùng một kiểu, để người làm cả hai vai không phải
  * học hai bản đồ.
  *
@@ -69,7 +69,7 @@ import { UserMenu } from './UserMenu';
  * Nguyên tắc tách: **mọi "Danh mục *" là DỮ LIỆU NỀN, thuộc Hệ thống** — chúng được
  * khai báo một lần rồi gần như không đụng tới, khác hẳn việc vận hành hằng ngày. Còn
  * "Khu vực & Quản lý" đổi thành "Phân công khu vực" cho đúng việc trang đó làm (gán
- * quản lý cho quận/huyện) — trùng tên với bên Host, vì đúng là cùng một màn.
+ * quản lý cho quận/huyện) — trùng tên với bên Owner, vì đúng là cùng một màn.
  *
  * "Khiếu nại" tách hẳn khỏi Tài chính: phân xử tranh chấp là việc XÉT XỬ (chỉ admin
  * làm được, và làm khi có người tố), khác hẳn việc phát hành hoá đơn / theo dõi thu
@@ -164,7 +164,7 @@ const buildSections = ({
     // Nhãn từng mục bỏ chữ "Khiếu nại" vì tiêu đề nhóm đã nói rồi.
     label: 'Khiếu nại',
     items: [
-      // Chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng host.
+      // Chỉ admin phân xử được, nên nằm ở cổng này chứ không phải cổng owner.
       { label: 'Hoàn cọc', path: '/admin/refund-disputes', icon: ShieldAlert },
       // "Báo lỗi do khách" đã gộp vào Bảo trì & thiết bị → nhóm "Lỗi do khách" (24/09/2026).
       // Khiếu nại hoá đơn điện/nước (24/08/2026) — cùng lý do: là lời tố nhắm vào chính
@@ -333,7 +333,7 @@ export const AdminLayout = () => {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-cyan-500 focus:bg-white focus:ring-2 focus:ring-cyan-100"
-                placeholder="Tìm người dùng, Host, nhà thuê, hóa đơn, hợp đồng..."
+                placeholder="Tìm người dùng, Owner, nhà thuê, hóa đơn, hợp đồng..."
               />
             </div>
           </div>

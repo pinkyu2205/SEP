@@ -12,7 +12,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 const ENDPOINT = '/api/v1/import/onboarding-excel';
 // Endpoint MỚI (BE đang làm — xem doc/BE-tach-import-khoi-tao-va-cai-tao.md):
 //  - lease-excel:      module Khởi tạo nhà — file chỉ có hợp đồng thuê + thiết bị bàn giao (hiển thị).
-//  - renovation-excel: module Cấu hình khai thác — file chỉ có cải tạo, import xong TỰ ĐỘNG gửi Host.
+//  - renovation-excel: module Cấu hình khai thác — file chỉ có cải tạo, import xong TỰ ĐỘNG gửi Owner.
 const LEASE_ENDPOINT = '/api/v1/import/lease-excel';
 const RENOVATION_ENDPOINT = '/api/v1/import/renovation-excel';
 // Cải tạo bổ sung (session v2+) — sau khi nhà ACTIVE + đã gọi renovation/start.
@@ -145,7 +145,7 @@ export const importService = {
   /**
    * POST /api/v1/import/lease-excel?dryRun=... — Module "Khởi tạo nhà".
    * File chỉ chứa hợp đồng thuê (sheet 1) + thiết bị bàn giao (sheet 3, chỉ để hiển thị).
-   * Tạo toà nhà + phòng; KHÔNG cải tạo, KHÔNG gửi Host.
+   * Tạo toà nhà + phòng; KHÔNG cải tạo, KHÔNG gửi Owner.
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
   importLeaseExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
@@ -155,7 +155,7 @@ export const importService = {
   /**
    * POST /api/v1/import/renovation-excel?dryRun=... — Module "Cấu hình khai thác".
    * File chỉ chứa hợp đồng cải tạo (sheet 2), khớp theo mã HĐ thuê của căn đã khởi tạo.
-   * Import thật xong BE TỰ ĐỘNG gửi Host (property → PENDING_HOST_REVIEW).
+   * Import thật xong BE TỰ ĐỘNG gửi Owner (property → PENDING_HOST_REVIEW).
    * @throws BulkImportErrorResult khi HTTP != 2xx
    */
   importRenovationExcel(file: File, dryRun: boolean): Promise<BulkImportResponse> {
@@ -165,8 +165,8 @@ export const importService = {
   /**
    * POST /api/v1/import/renovation-supplement-excel?propertyId=...&dryRun=... — Cải tạo bổ sung (session v2+).
    * Tiên quyết: nhà đã ACTIVE và đã gọi POST /properties/{id}/renovation/start (mở session mới).
-   * Import xong: completeRenovation + tính lại giá + submit-to-host → PENDING_HOST_REVIEW
-   * (đổi chi phí/thiết bị nên host duyệt lại giá); manifest TB mua cộng dồn.
+   * Import xong: completeRenovation + tính lại giá + submit-to-owner → PENDING_HOST_REVIEW
+   * (đổi chi phí/thiết bị nên owner duyệt lại giá); manifest TB mua cộng dồn.
    *
    * `propertyId` BẮT BUỘC (BE c2848dd, 14/09/2026): cải tạo bổ sung làm theo từng nhà, BE từ chối dòng
    * có mã HĐ không thuộc nhà này. Thiếu tham số thì Spring trả 400 ngay.
@@ -190,7 +190,7 @@ export const importService = {
     dryRun: boolean,
     /**
      * true = BE import những dòng hợp lệ và trả kèm danh sách lỗi của các dòng bị bỏ, thay
-     * vì ném lỗi chặn cả file (BE thêm 20/08/2026). Nhà host chưa duyệt nằm lẫn trong file
+     * vì ném lỗi chặn cả file (BE thêm 20/08/2026). Nhà owner chưa duyệt nằm lẫn trong file
      * không còn kéo cả lô chết theo.
      */
     skipInvalidRows = false,

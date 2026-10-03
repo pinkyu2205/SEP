@@ -2,7 +2,7 @@
 
 > **Scope note.** The Hoang Binh Land platform is split across two clients. The **web
 > application** described in this section serves three roles — **Guest** (public website,
-> no account), **Admin** (system operator) and **Host** (property owner). The two
+> no account), **Admin** (system operator) and **Owner** (property owner). The two
 > remaining roles, **Manager** (operations manager) and **Tenant**, work exclusively on the
 > mobile application and are described in section 3.3. A Manager account that signs in on
 > the web is rejected on purpose (see 3.2.2.1).
@@ -135,7 +135,7 @@
     later API call carries it as a Bearer token.
   - Success:
     - Role `ROLE_ADMIN` → the user is redirected to the admin portal `/admin`.
-    - Role `ROLE_OWNER` (Host) → the user is redirected to the host portal `/host`.
+    - Role `ROLE_OWNER` (Owner) → the user is redirected to the owner portal `/owner`.
     - If the user was redirected to the login page from a protected URL, and that URL belongs to
       their own portal, they land on the original URL instead of the portal home.
   - Fail:
@@ -151,16 +151,16 @@
   screens of their own role.
 - **Screen layout:**
 
-  `[Screenshot: admin portal shell and host portal shell side by side]`
+  `[Screenshot: admin portal shell and owner portal shell side by side]`
 
 - **Function details:**
   - Not signed in → the user is sent to `/login`, and the requested URL is remembered.
   - Signed in with the wrong role → the user is sent to the home page of their own portal
-    (`/admin` for Admin, `/host` for Host) instead of seeing a permission error.
+    (`/admin` for Admin, `/owner` for Owner) instead of seeing a permission error.
   - Already signed in and opening `/login` → the user is sent straight back to their portal.
-  - Host screens are also readable by Admin for supervision, except the three money ledgers
-    ("Hoá đơn", "Công nợ", "Sổ cọc") which stay Host-only.
-  - A stored session whose role is neither Admin nor Host is discarded on load.
+  - Owner screens are also readable by Admin for supervision, except the three money ledgers
+    ("Hoá đơn", "Công nợ", "Sổ cọc") which stay Owner-only.
+  - A stored session whose role is neither Admin nor Owner is discarded on load.
 
 ### 3.2.2.3 `<Authenticated>` Logout
 
@@ -189,13 +189,13 @@
   `[Screenshot: admin dashboard — KPI cards, revenue chart, pending work lists]`
 
 - **Function details:**
-  - The portal header carries a global search box ("Tìm người dùng, Host, nhà thuê, hóa đơn, hợp
+  - The portal header carries a global search box ("Tìm người dùng, Owner, nhà thuê, hóa đơn, hợp
     đồng…"), the notification bell with its unread counter, and the account menu.
   - Invoice figures are grouped by state ("Đã thu", "Chưa thu", "Quá hạn", "Đã huỷ") and by type
     ("Tiền phòng", "Tiền điện", "Tiền nước", "Dịch vụ", "Phí bảo trì", "Khác").
   - Payment figures are grouped by reconciliation state ("Chờ đối soát", "Đã xác nhận",
     "Bị từ chối") and by method ("Chuyển khoản", "Tiền mặt", "Ví điện tử").
-  - Account figures are grouped by role ("Host (chủ nhà)", "Quản lý vận hành", "Khách thuê").
+  - Account figures are grouped by role ("Owner (chủ nhà)", "Quản lý vận hành", "Khách thuê").
   - Maintenance figures are grouped by progress ("Chờ xử lý", "Đang xử lý").
   - Success: every card links to the screen that can act on the number behind it.
   - Fail: a section that cannot load shows its own retry control without blocking the page.
@@ -235,7 +235,7 @@
   - Client-side validation: "Vui lòng nhập tên đăng nhập.", "Mật khẩu phải có ít nhất 6 ký tự.",
     "Vui lòng nhập số điện thoại."
   - Success: the account is created and appears in the list, ready to be assigned to a zone by the
-    Host (3.2.32).
+    Owner (3.2.32).
   - Fail: the modal keeps the entered data and shows "Có lỗi xảy ra khi tạo tài khoản".
 
 ### 3.2.4.3 `<Admin>` View user detail and change status
@@ -396,12 +396,12 @@
 - **Function details:**
   - KPI cards: "TỔNG TÒA NHÀ", "CHỜ CẤU HÌNH" ("chưa chọn loại hình"), "ĐÃ CẤU HÌNH" ("đã xác định
     loại hình") and "ĐANG CẢI TẠO" ("cần xác nhận hoàn thành").
-  - Status chips list the pipeline with its counts: "Tất cả", "Đang cải tạo", "Chờ Host duyệt giá",
+  - Status chips list the pipeline with its counts: "Tất cả", "Đang cải tạo", "Chờ Owner duyệt giá",
     "Đang kinh doanh"; the same search, filter, layout, sorting and paging controls as 3.2.5.1.
   - Each card shows the rental type decided by the spreadsheet ("Nhà nguyên căn" / "Phòng trọ"),
     the current stage and, while construction is running, the marker "Đang thi công cải tạo".
   - The table view adds the columns "KHU VỰC", "LOẠI HÌNH", "PHÒNG", "TẦNG", "DIỆN TÍCH",
-    "QUẢN LÝ" ("Chưa gán" until the Host assigns a zone) and "TRẠNG THÁI" ("Đã cải tạo xong",
+    "QUẢN LÝ" ("Chưa gán" until the Owner assigns a zone) and "TRẠNG THÁI" ("Đã cải tạo xong",
     "Đang kinh doanh", …).
 
 ### 3.2.6.2 `<Admin>` Import the operation configuration from Excel
@@ -409,7 +409,7 @@
 - **Function trigger:** Admin clicks "Nhập cải tạo từ Excel".
 - **Function description:** Loads everything the building needs in order to be priced: how it will
   be sold, its rooms, the renovation contract and the equipment bought for it. Importing also
-  hands the file to the Host — no separate "submit" step exists.
+  hands the file to the Owner — no separate "submit" step exists.
 - **Screen layout:**
 
   `[Screenshot: "Cấu hình khai thác từ Excel" modal — file check and import]`
@@ -417,19 +417,19 @@
 - **Function details:**
   - The modal states the content and the consequence: "File gồm cấu hình khai thác (nguyên căn /
     chia phòng), danh sách phòng, hợp đồng cải tạo và thiết bị mua mới — khớp theo mã HĐ thuê của
-    căn đã khởi tạo. Nhập xong, các căn **tự động được gửi Host** duyệt." "Tải template" downloads
+    căn đã khởi tạo. Nhập xong, các căn **tự động được gửi Owner** duyệt." "Tải template" downloads
     the template.
   - "Kiểm tra file" validates first.
     - Success: "File hợp lệ — {n} căn · {m} dòng cải tạo · {k} thiết bị mua mới · {x} bỏ qua",
       with a toast "File hợp lệ — {n} căn sẵn sàng"; "Kiểm tra lại" re-runs it.
     - Fail: the errors are listed per row and nothing is written.
-  - "Nhập & gửi Host" asks for confirmation — "Xác nhận nhập cải tạo & gửi Host? Hệ thống sẽ nhập
-    cải tạo & thiết bị mua mới cho {n} căn nhà từ file {tên file}, sau đó tự động gửi Host duyệt."
-    — with "Nhập & gửi Host" / "Huỷ".
-  - Success: "Đã nhập cải tạo cho {n} căn — đã gửi Host duyệt · {x} bỏ qua." The result table
-    shows "CĂN NHÀ", "MÃ HĐ" and "TRẠNG THÁI" ("Đã gửi Host", or "Bỏ qua" for a building the file
+  - "Nhập & gửi Owner" asks for confirmation — "Xác nhận nhập cải tạo & gửi Owner? Hệ thống sẽ nhập
+    cải tạo & thiết bị mua mới cho {n} căn nhà từ file {tên file}, sau đó tự động gửi Owner duyệt."
+    — with "Nhập & gửi Owner" / "Huỷ".
+  - Success: "Đã nhập cải tạo cho {n} căn — đã gửi Owner duyệt · {x} bỏ qua." The result table
+    shows "CĂN NHÀ", "MÃ HĐ" and "TRẠNG THÁI" ("Đã gửi Owner", or "Bỏ qua" for a building the file
     declares as needing no renovation). "Nhập file khác" restarts the modal.
-  - A building that is skipped keeps its previous state and can still be sent to the Host later.
+  - A building that is skipped keeps its previous state and can still be sent to the Owner later.
 
 ### 3.2.6.3 `<Admin>` Open a building's configuration file
 
@@ -451,14 +451,14 @@
 ### 3.2.6.4 `<Admin>` Confirm that the renovation is finished
 
 - **Function trigger:** Admin clicks "Xác nhận hoàn thành cải tạo" on a building under construction.
-- **Function description:** Declares that construction is over, which is what lets the Host price
+- **Function description:** Declares that construction is over, which is what lets the Owner price
   the building.
 - **Screen layout:**
 
   `[Screenshot: building header with the "Xác nhận hoàn thành cải tạo" action]`
 
 - **Function details:**
-  - Success: the building moves to "Đã cải tạo xong" and appears in the Host's approval queue
+  - Success: the building moves to "Đã cải tạo xong" and appears in the Owner's approval queue
     (3.2.25).
   - Fail: the state is unchanged and the server message is displayed.
 
@@ -475,9 +475,9 @@
   - Opening the round shows "Đã mở đợt cải tạo mới. Tải file cải tạo bổ sung để hoàn tất."
   - "Nhập cải tạo bổ sung từ Excel" accepts only the file of that one building ("Chỉ nhập cho
     {tên nhà} — mọi dòng phải có mã HĐ {mã}"). The file holds the renovation contract and the newly
-    bought equipment, each marked `THÊM_MỚI` or `THAY_THẾ`, and importing "tự động gửi Host duyệt
+    bought equipment, each marked `THÊM_MỚI` or `THAY_THẾ`, and importing "tự động gửi Owner duyệt
     lại giá (vì đổi chi phí/thiết bị)".
-  - Success: "Đã nhập cải tạo bổ sung — {n} dòng cải tạo, {m} thiết bị. Đã gửi Host duyệt lại
+  - Success: "Đã nhập cải tạo bổ sung — {n} dòng cải tạo, {m} thiết bị. Đã gửi Owner duyệt lại
     giá." followed by "Hoàn tất & quay lại".
   - Business rule: a tenant already living in the building is never charged for the supplementary
     renovation. Only an upgrade (`THÊM_MỚI`) raises the listing price for future tenants; replacing
@@ -532,8 +532,8 @@
   - Tenant identity: "Họ và tên khách *", "Số điện thoại *", "CCCD *", "Ngày sinh", "Ngày cấp
     CCCD", "Nơi cấp CCCD", "Hộ khẩu thường trú". Additional occupants are added with
     "+ Thêm thành viên" and removed with "Xóa thành viên".
-  - Money terms: "Giá thuê (đ/tháng) *" is pre-filled from the price the Host approved ("Lấy theo
-    giá niêm yết Host đã duyệt"), together with "Tiền cọc (đ) *" and "Số tháng cọc"
+  - Money terms: "Giá thuê (đ/tháng) *" is pre-filled from the price the Owner approved ("Lấy theo
+    giá niêm yết Owner đã duyệt"), together with "Tiền cọc (đ) *" and "Số tháng cọc"
     ("6 tháng" / "1 năm" / "2 năm" presets are offered for the tenancy term).
   - Validation: "SĐT không đúng định dạng Việt Nam (10 số, đầu 03/05/07/08/09).", "CCCD phải gồm
     đúng 12 chữ số.", "Ngày sinh không hợp lệ — khách phải sinh từ 1930 và đủ 18 tuổi.",
@@ -707,7 +707,7 @@
 - **Function trigger:** Admin clicks "Phân công khu vực" in the "Vận hành" group.
 - **Function description:** Shows which district is covered by which operations manager. The rule
   is stated on the page: "Mỗi quận/huyện do **một** quản lý vận hành phụ trách — gán cho khu vực
-  là gán cho mọi nhà bên trong. Xem toàn hệ thống; việc gán/đổi quản lý do Host quyết định."
+  là gán cho mọi nhà bên trong. Xem toàn hệ thống; việc gán/đổi quản lý do Owner quyết định."
 - **Screen layout:**
 
   `[Screenshot: "Khu vực & Quản lý" (admin view) — KPI cards, filters, zone rows]`
@@ -719,7 +719,7 @@
   - Each row shows the district, its coverage badge ("Đã gán"), its size ("{n} nhà · {m} đơn vị")
     and the manager with the number of districts they cover. "Xem chi tiết" expands the buildings
     inside.
-  - The Admin has read-only access here: the assignment itself is a Host decision (3.2.32), so this
+  - The Admin has read-only access here: the assignment itself is a Owner decision (3.2.32), so this
     screen carries no "Đổi quản lý" action.
 
 ---
@@ -945,7 +945,7 @@
 
 - **Function trigger:** Admin clicks "Hoàn cọc" in the "Khiếu nại" group.
 - **Function description:** Collects the cases where a tenant says the returned deposit is not what
-  was agreed. Only the Admin can arbitrate, because the dispute is aimed at the Host and the
+  was agreed. Only the Admin can arbitrate, because the dispute is aimed at the Owner and the
   manager themselves.
 - **Screen layout:**
 
@@ -974,7 +974,7 @@
 - **Function details:**
   - The Admin records the outcome and the reasoning; the case then shows "Đã khép" together with
     "Quản trị viên kết luận ngày {ngày}".
-  - Success: the case moves to the history tab and both the Host and the tenant see the decision.
+  - Success: the case moves to the history tab and both the Owner and the tenant see the decision.
   - Fail: the case stays pending; "Huỷ" closes the dialog without deciding.
 
 ---
@@ -1132,16 +1132,16 @@
 
 ---
 
-## 3.2.23 `<Host>` Dashboard
+## 3.2.23 `<Owner>` Dashboard
 
-### 3.2.23.1 `<Host>` View business overview
+### 3.2.23.1 `<Owner>` View business overview
 
-- **Function trigger:** Host signs in, or clicks "Bảng điều hành" in the sidebar.
+- **Function trigger:** Owner signs in, or clicks "Bảng điều hành" in the sidebar.
 - **Function description:** Tells the property owner, in one screen, how much the portfolio earned
   this month and what is waiting for their decision.
 - **Screen layout:**
 
-  `[Screenshot: host dashboard — revenue / cost / profit cards, occupancy, pending lists]`
+  `[Screenshot: owner dashboard — revenue / cost / profit cards, occupancy, pending lists]`
 
 - **Function details:**
   - The portal header carries the search box ("Tìm kiếm bất động sản, quản lý, khách thuê..."),
@@ -1158,11 +1158,11 @@
 
 ---
 
-## 3.2.24 `<Host>` Property portfolio
+## 3.2.24 `<Owner>` Property portfolio
 
-### 3.2.24.1 `<Host>` View the property list
+### 3.2.24.1 `<Owner>` View the property list
 
-- **Function trigger:** Host clicks "Bất động sản" in the "Vận hành" group.
+- **Function trigger:** Owner clicks "Bất động sản" in the "Vận hành" group.
 - **Function description:** Every building the company operates for this owner, with the numbers an
   owner cares about: what is being collected, how full it is, and what is waiting for a decision.
 - **Screen layout:**
@@ -1184,14 +1184,14 @@
     {tiền} từ {n} hợp đồng" and the occupancy bar ("{n}/{m} phòng có khách").
   - Empty states: "Không có tòa nhà nào khớp bộ lọc." and "Chưa có tòa nhà nào đang quản lý."
 
-### 3.2.24.2 `<Host>` View a property
+### 3.2.24.2 `<Owner>` View a property
 
-- **Function trigger:** Host clicks a property card.
+- **Function trigger:** Owner clicks a property card.
 - **Function description:** Everything about one building: its rooms, its equipment and its current
   commercial state.
 - **Screen layout:**
 
-  `[Screenshot: host property detail — tabs "Tổng quan" / "Phòng" / "Thiết bị"]`
+  `[Screenshot: owner property detail — tabs "Tổng quan" / "Phòng" / "Thiết bị"]`
 
 - **Function details:**
   - Tabs: "Tổng quan", "Phòng", "Thiết bị".
@@ -1202,11 +1202,11 @@
 
 ---
 
-## 3.2.25 `<Host>` Approve the listing price of a new property
+## 3.2.25 `<Owner>` Approve the listing price of a new property
 
-### 3.2.25.1 `<Host>` Open the approval queue
+### 3.2.25.1 `<Owner>` Open the approval queue
 
-- **Function trigger:** Host clicks "Xem & duyệt →" in the banner, or the dashboard card "Nhà chờ
+- **Function trigger:** Owner clicks "Xem & duyệt →" in the banner, or the dashboard card "Nhà chờ
   duyệt giá".
 - **Function description:** Lists the files the Admin has handed over, separated by what kind of
   decision they need.
@@ -1224,9 +1224,9 @@
   - Each row opens the file with "Duyệt ›"; the footer totals "Tổng {n} hồ sơ chờ duyệt". An empty
     column shows "Không có hồ sơ nào".
 
-### 3.2.25.2 `<Host>` Review the money already spent on the building
+### 3.2.25.2 `<Owner>` Review the money already spent on the building
 
-- **Function trigger:** Host opens a file from the queue.
+- **Function trigger:** Owner opens a file from the queue.
 - **Function description:** "Duyệt giá & Kích hoạt Tòa nhà — Xem toàn bộ tiền đã bỏ ra cho {tên
   nhà}, đặt mục tiêu lãi, rồi chốt giá cho thuê." This is the decision that turns an intake file
   into a sellable property.
@@ -1255,9 +1255,9 @@
     mới, không tính lại từ đầu."
   - "THIẾT BỊ VẬN HÀNH" summarises what is installed ("{n} đang dùng · {tiền}").
 
-### 3.2.25.3 `<Host>` Compute the suggested rent
+### 3.2.25.3 `<Owner>` Compute the suggested rent
 
-- **Function trigger:** Host reviews the target panel, or clicks "Tính lại theo cấu hình".
+- **Function trigger:** Owner reviews the target panel, or clicks "Tính lại theo cấu hình".
 - **Function description:** Derives the rent that recovers the capital and reaches the owner's
   profit target, showing every step instead of a single number.
 - **Screen layout:**
@@ -1286,9 +1286,9 @@
     hình chưa có tiền lãi mục tiêu / tỷ lệ sinh lời mục tiêu. Vào "Cấu hình duyệt giá" để nhập
     trước."; "Không tính được giá"; "Không tải được dữ liệu".
 
-### 3.2.25.4 `<Host>` Fix the rent
+### 3.2.25.4 `<Owner>` Fix the rent
 
-- **Function trigger:** Host edits the price fields at the bottom of the page.
+- **Function trigger:** Owner edits the price fields at the bottom of the page.
 - **Function description:** Sets the price that will actually be quoted to tenants.
 - **Screen layout:**
 
@@ -1320,9 +1320,9 @@
     THÁNG" (with the target beneath it), "TIỀN LỜI THẬT CẢ KỲ ({n} THÁNG)" and the action
     "Xác nhận & Kích hoạt".
 
-### 3.2.25.5 `<Host>` Activate the property
+### 3.2.25.5 `<Owner>` Activate the property
 
-- **Function trigger:** Host clicks "Xác nhận & Kích hoạt".
+- **Function trigger:** Owner clicks "Xác nhận & Kích hoạt".
 - **Function description:** Fixes the listing price and opens the building for business.
 - **Screen layout:**
 
@@ -1343,11 +1343,11 @@
 
 ---
 
-## 3.2.26 `<Host>` Approve a new price after a supplementary renovation
+## 3.2.26 `<Owner>` Approve a new price after a supplementary renovation
 
-### 3.2.26.1 `<Host>` Re-approve the listing price
+### 3.2.26.1 `<Owner>` Re-approve the listing price
 
-- **Function trigger:** Host opens a file from the column "Cải tạo bổ sung — duyệt lại giá".
+- **Function trigger:** Owner opens a file from the column "Cải tạo bổ sung — duyệt lại giá".
 - **Function description:** Decides whether the money spent on the new round is passed on to future
   tenants, and at what price.
 - **Screen layout:**
@@ -1371,11 +1371,11 @@
 
 ---
 
-## 3.2.27 `<Host>` Configure the pricing policy
+## 3.2.27 `<Owner>` Configure the pricing policy
 
-### 3.2.27.1 `<Host>` Set the profit target, the costs and the risk margins
+### 3.2.27.1 `<Owner>` Set the profit target, the costs and the risk margins
 
-- **Function trigger:** Host clicks "Cấu hình giá" in the "Hệ thống" group, or "Sửa cấu hình duyệt
+- **Function trigger:** Owner clicks "Cấu hình giá" in the "Hệ thống" group, or "Sửa cấu hình duyệt
   giá" from a price approval page.
 - **Function description:** "Cấu hình duyệt giá — Áp dụng cho **tất cả** căn nhà. Màn duyệt giá của
   từng căn sẽ dùng đúng những số này — không phải nhập lại ở đó nữa."
@@ -1427,11 +1427,11 @@
 
 ---
 
-## 3.2.28 `<Host>` Tenants
+## 3.2.28 `<Owner>` Tenants
 
-### 3.2.28.1 `<Host>` View tenants
+### 3.2.28.1 `<Owner>` View tenants
 
-- **Function trigger:** Host clicks "Khách thuê" in the "Vận hành" group.
+- **Function trigger:** Owner clicks "Khách thuê" in the "Vận hành" group.
 - **Function description:** "Ai đang ở đâu, phòng nào còn trống."
 - **Screen layout:**
 
@@ -1453,11 +1453,11 @@
 
 ---
 
-## 3.2.29 `<Host>` Contracts
+## 3.2.29 `<Owner>` Contracts
 
-### 3.2.29.1 `<Host>` View contracts
+### 3.2.29.1 `<Owner>` View contracts
 
-- **Function trigger:** Host clicks "Hợp đồng" in the "Vận hành" group.
+- **Function trigger:** Owner clicks "Hợp đồng" in the "Vận hành" group.
 - **Function description:** "Hợp đồng cho khách thuê (nguồn thu) và master lease ký với chủ nhà
   (nguồn chi) — bấm một dòng để xem toàn bộ chi tiết."
 - **Screen layout:**
@@ -1465,7 +1465,7 @@
   `[Screenshot: "Hợp đồng" — two tabs, six KPI cards, contract table]`
 
 - **Function details:**
-  - Tabs with their counts: "Quản lý ↔ Khách thuê" and "Host ↔ Chủ nhà (master lease)".
+  - Tabs with their counts: "Quản lý ↔ Khách thuê" and "Owner ↔ Chủ nhà (master lease)".
   - KPI cards: "TỔNG HỢP ĐỒNG" ("{n} đang chạy"), "ĐANG HIỆU LỰC" ("{tiền}/tháng"),
     "CHỜ ĐÓN KHÁCH" ("Đã lập hồ sơ, chưa giao phòng"), "CHỜ KÍCH HOẠT" ("Đã giao phòng, chờ thu
     tiền"), "SẮP HẾT HẠN ≤60N" ("Cần chốt gia hạn sớm") and "ĐÃ KẾT THÚC" ("Chấm dứt + hết hạn").
@@ -1484,29 +1484,29 @@
 
 ---
 
-## 3.2.30 `<Host>` Extension requests
+## 3.2.30 `<Owner>` Extension requests
 
-### 3.2.30.1 `<Host>` Follow extension requests
+### 3.2.30.1 `<Owner>` Follow extension requests
 
-- **Function trigger:** Host clicks "Đơn gia hạn" in the "Vận hành" group.
+- **Function trigger:** Owner clicks "Đơn gia hạn" in the "Vận hành" group.
 - **Function description:** Lets the owner see which tenants asked to stay longer and how each
   request was settled. The decision itself belongs to the Admin (3.2.14).
 - **Screen layout:**
 
-  `[Screenshot: host extension requests list]`
+  `[Screenshot: owner extension requests list]`
 
 - **Function details:**
   - Requests are listed with the tenant, the building and room, the requested duration and the
     current state ("Chờ duyệt" or decided).
-  - Success: the Host can anticipate which rooms will free up and which will not.
+  - Success: the Owner can anticipate which rooms will free up and which will not.
 
 ---
 
-## 3.2.31 `<Host>` Operations managers
+## 3.2.31 `<Owner>` Operations managers
 
-### 3.2.31.1 `<Host>` View operations managers
+### 3.2.31.1 `<Owner>` View operations managers
 
-- **Function trigger:** Host clicks "Quản lý vận hành" in the "Nhân sự" group.
+- **Function trigger:** Owner clicks "Quản lý vận hành" in the "Nhân sự" group.
 - **Function description:** "{n} quản lý vận hành đang giám sát các bất động sản Hoàng Bình Land" —
   the people who run the buildings day to day, and how much each carries.
 - **Screen layout:**
@@ -1520,9 +1520,9 @@
   - The search box matches name or phone number; a manager with no district is flagged "Chưa phụ
     trách khu vực nào".
 
-### 3.2.31.2 `<Host>` Record the manager salary table
+### 3.2.31.2 `<Owner>` Record the manager salary table
 
-- **Function trigger:** Host clicks "Lương quản lý" in the "Nhân sự" group, or "Sửa bảng lương" in
+- **Function trigger:** Owner clicks "Lương quản lý" in the "Nhân sự" group, or "Sửa bảng lương" in
   the pricing policy.
 - **Function description:** Records what each operations manager is paid, so the salary can be
   spread over the buildings they cover and enter the price calculation (3.2.27).
@@ -1541,16 +1541,16 @@
 
 ---
 
-## 3.2.32 `<Host>` Assign operations managers to zones
+## 3.2.32 `<Owner>` Assign operations managers to zones
 
-### 3.2.32.1 `<Host>` View the zone assignment board
+### 3.2.32.1 `<Owner>` View the zone assignment board
 
-- **Function trigger:** Host clicks "Phân công khu vực" in the "Nhân sự" group.
+- **Function trigger:** Owner clicks "Phân công khu vực" in the "Nhân sự" group.
 - **Function description:** "Khu vực & Quản lý — Mỗi quận/huyện do **một** quản lý vận hành phụ
-  trách — gán cho khu vực là gán cho mọi nhà bên trong." The Host is the role that decides.
+  trách — gán cho khu vực là gán cho mọi nhà bên trong." The Owner is the role that decides.
 - **Screen layout:**
 
-  `[Screenshot: "Khu vực & Quản lý" (host view) — KPI cards, zone rows with their actions]`
+  `[Screenshot: "Khu vực & Quản lý" (owner view) — KPI cards, zone rows with their actions]`
 
 - **Function details:**
   - KPI cards: "Tổng khu vực" and "{n}/{m} Đều đã có quản lý".
@@ -1560,9 +1560,9 @@
   - A district whose manager account is disabled is flagged "Tài khoản quản lý của khu vực này đang
     không hoạt động".
 
-### 3.2.32.2 `<Host>` Assign, change or remove the manager of a zone
+### 3.2.32.2 `<Owner>` Assign, change or remove the manager of a zone
 
-- **Function trigger:** Host clicks "Đổi quản lý" on a district row, or "Gỡ" to leave it unassigned.
+- **Function trigger:** Owner clicks "Đổi quản lý" on a district row, or "Gỡ" to leave it unassigned.
 - **Function description:** Hands every building of a district over to a manager, in one action.
 - **Screen layout:**
 
@@ -1579,11 +1579,11 @@
 
 ---
 
-## 3.2.33 `<Host>` Cash-flow overview
+## 3.2.33 `<Owner>` Cash-flow overview
 
-### 3.2.33.1 `<Host>` Reconcile money in and money out
+### 3.2.33.1 `<Owner>` Reconcile money in and money out
 
-- **Function trigger:** Host clicks "Tổng quan" in the "Tài chính" group.
+- **Function trigger:** Owner clicks "Tổng quan" in the "Tài chính" group.
 - **Function description:** "Quản lý Dòng tiền — Đối soát dòng tiền vào/ra & lợi nhuận ròng các nhà
   đã duyệt giá."
 - **Screen layout:**
@@ -1605,17 +1605,17 @@
 
 ---
 
-## 3.2.34 `<Host>` Invoices
+## 3.2.34 `<Owner>` Invoices
 
-### 3.2.34.1 `<Host>` View invoices
+### 3.2.34.1 `<Owner>` View invoices
 
-- **Function trigger:** Host clicks "Hoá đơn" in the "Tài chính" group. This screen is Host-only:
+- **Function trigger:** Owner clicks "Hoá đơn" in the "Tài chính" group. This screen is Owner-only:
   the Admin cannot open it.
 - **Function description:** Every invoice issued to the tenants of this portfolio and its collection
   state.
 - **Screen layout:**
 
-  `[Screenshot: host invoices — KPI cards, filters, invoice table]`
+  `[Screenshot: owner invoices — KPI cards, filters, invoice table]`
 
 - **Function details:**
   - Filters: invoice type ("Mọi loại hoá đơn" / "Tiền phòng" / "Tiền điện" / "Tiền nước" / "Dịch
@@ -1628,11 +1628,11 @@
 
 ---
 
-## 3.2.35 `<Host>` Receivables
+## 3.2.35 `<Owner>` Receivables
 
-### 3.2.35.1 `<Host>` View receivables by age
+### 3.2.35.1 `<Owner>` View receivables by age
 
-- **Function trigger:** Host clicks "Công nợ" in the "Tài chính" group. Host-only.
+- **Function trigger:** Owner clicks "Công nợ" in the "Tài chính" group. Owner-only.
 - **Function description:** Shows the money owed to the company sorted by how long it has been
   owed, which is what decides who is called first.
 - **Screen layout:**
@@ -1647,11 +1647,11 @@
 
 ---
 
-## 3.2.36 `<Host>` Deposit ledger
+## 3.2.36 `<Owner>` Deposit ledger
 
-### 3.2.36.1 `<Host>` Track deposits
+### 3.2.36.1 `<Owner>` Track deposits
 
-- **Function trigger:** Host clicks "Sổ cọc" in the "Tài chính" group. Host-only.
+- **Function trigger:** Owner clicks "Sổ cọc" in the "Tài chính" group. Owner-only.
 - **Function description:** "Tiền cọc đang giữ của khách thuê — khoản phải hoàn khi kết thúc hợp
   đồng (không phải doanh thu)."
 - **Screen layout:**
@@ -1679,11 +1679,11 @@
 
 ---
 
-## 3.2.37 `<Host>` Reports and analytics
+## 3.2.37 `<Owner>` Reports and analytics
 
-### 3.2.37.1 `<Host>` View financial and operational reports
+### 3.2.37.1 `<Owner>` View financial and operational reports
 
-- **Function trigger:** Host clicks "Báo cáo" in the "Tài chính" group.
+- **Function trigger:** Owner clicks "Báo cáo" in the "Tài chính" group.
 - **Function description:** "Hiệu suất vận hành và tài chính Hoàng Bình Land" over consecutive
   periods.
 - **Screen layout:**
@@ -1703,11 +1703,11 @@
 
 ---
 
-## 3.2.38 `<Host>` Notification centre
+## 3.2.38 `<Owner>` Notification centre
 
-### 3.2.38.1 `<Host>` Read notifications
+### 3.2.38.1 `<Owner>` Read notifications
 
-- **Function trigger:** Host clicks "Thông báo" in the "Hệ thống" group, or the bell in the header.
+- **Function trigger:** Owner clicks "Thông báo" in the "Hệ thống" group, or the bell in the header.
   The menu item carries the unread count.
 - **Function description:** "Trung tâm Thông báo — {n} thông báo chưa đọc": the events an owner must
   not miss, filtered by what they are about.

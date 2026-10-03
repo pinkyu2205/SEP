@@ -15,9 +15,9 @@ import { RealtimeBadge } from '@/pages/admin/shared';
 import { ChipFilter, Pagination, SearchBox, SelectFilter, TableState, matchVi } from '@/pages/host/shared';
 
 /**
- * BẢNG HOÁ ĐƠN DÙNG CHUNG — admin (/admin/billing) và host (/host/billing), 24/09/2026.
+ * BẢNG HOÁ ĐƠN DÙNG CHUNG — admin (/admin/billing) và owner (/host/billing), 24/09/2026.
  *
- * Trước đây là hai file ~650 dòng chép tay của nhau và đã lệch nhau (host có chip trạng
+ * Trước đây là hai file ~650 dòng chép tay của nhau và đã lệch nhau (owner có chip trạng
  * thái, admin không; bộ lọc mỗi bên một kiểu). Giờ một chỗ, mỗi bên chỉ khác:
  *   • nguồn dữ liệu (trang tự tải rồi đưa `rows` vào),
  *   • phần hành động trong khung chi tiết (`renderDetailActions` — admin có phát mã thu hộ),
@@ -35,7 +35,7 @@ import { ChipFilter, Pagination, SearchBox, SelectFilter, TableState, matchVi } 
 // ── Kiểu dữ liệu ─────────────────────────────────────────────────────────────
 export interface InvoiceBoardRow {
   key: string;
-  /** Id thật trong bảng hoá đơn — thiếu ở chế độ rút gọn của host. */
+  /** Id thật trong bảng hoá đơn — thiếu ở chế độ rút gọn của owner. */
   id?: number;
   code: string;
   type: AdminInvoiceType;
@@ -146,13 +146,13 @@ export const InvoiceBoard = ({
   onPeriodChange: (p: string) => void;
   periods: string[];
   allowAllPeriods?: boolean;
-  /** Chế độ rút gọn của host không có dữ liệu chi tiết → không mở khung. */
+  /** Chế độ rút gọn của owner không có dữ liệu chi tiết → không mở khung. */
   canOpenDetail?: boolean;
   renderDetailActions?: (row: InvoiceBoardRow) => ReactNode;
   /** Link sang trang bảo trì cho hoá đơn phí sửa chữa. */
   maintenancePath?: string;
   exportName?: string;
-  /** Khối thông báo riêng của từng trang (vd host đang ở chế độ rút gọn). */
+  /** Khối thông báo riêng của từng trang (vd owner đang ở chế độ rút gọn). */
   notice?: ReactNode;
 }) => {
   const [q, setQ] = useState('');

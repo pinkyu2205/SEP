@@ -54,7 +54,7 @@ export const PropertyList = () => {
     () => properties.filter(p => p.status === 'PENDING_HOST_REVIEW').sort((a, b) => b.id - a.id),
     [properties],
   );
-  // Chỉ hiện nhà Host đã duyệt thành công — xem isHostApproved().
+  // Chỉ hiện nhà Owner đã duyệt thành công — xem isHostApproved().
   const active = useMemo(() => properties.filter(isHostApproved), [properties]);
 
   /** Kỳ đang xem cho phần thu tiền. Khai thác không phụ thuộc kỳ (luôn là hiện tại). */
@@ -218,7 +218,7 @@ export const PropertyList = () => {
       </div>
 
       {/* ── Hồ sơ chờ phê duyệt ── */}
-      <PendingApprovalPanel items={pending} onOpen={p => navigate(`/host/review/${p.id}`)} />
+      <PendingApprovalPanel items={pending} onOpen={p => navigate(`/owner/review/${p.id}`)} />
 
       {/*
         ── Số liệu: bấm để lọc nhanh ──
@@ -303,13 +303,13 @@ export const PropertyList = () => {
           {f.view === 'table' ? (
             <PropertyTable rows={f.paged} roomPrices={roomPrices}
               opStatus={opStatus} billSource={billSource}
-              onRowClick={p => navigate(`/host/properties/${p.id}`)} />
+              onRowClick={p => navigate(`/owner/properties/${p.id}`)} />
           ) : (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
               {f.paged.map(p => (
                 <PropertyCard key={p.id} p={p} roomPrice={roomPrices[p.id]}
                   op={opStatus.get(p.id)} billSource={billSource}
-                  onClick={() => navigate(`/host/properties/${p.id}`)} />
+                  onClick={() => navigate(`/owner/properties/${p.id}`)} />
               ))}
             </div>
           )}

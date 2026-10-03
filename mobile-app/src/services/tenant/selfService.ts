@@ -173,7 +173,7 @@ export interface ContractDetailDto {
   terminationType?: string;
   pdfUrl?: string;
   /**
-   * Người ĐANG phụ trách hợp đồng — đổi mỗi khi host đổi quản lý khu vực.
+   * Người ĐANG phụ trách hợp đồng — đổi mỗi khi owner đổi quản lý khu vực.
    * BE bổ sung cho DTO này 20/08/2026 (trước đó khách không thấy quản lý nào cả).
    */
   assignedManagerName?: string;
@@ -267,7 +267,7 @@ export interface CheckoutInspectionDto {
  *   Khối B — công ty phải hoàn: NGUYÊN cọc, không trừ gì
  *
  * Trước đây bảng này bù trừ (`refundAmount = deposit − nợ − hư hỏng`). Nay cọc là **ràng
- * buộc**: khách trả hết khối A thì host hoàn nguyên khối B, không phải nguồn khấu trừ.
+ * buộc**: khách trả hết khối A thì owner hoàn nguyên khối B, không phải nguồn khấu trừ.
  *
  * Các field cũ `unpaidInvoices / unpaidTotal / damages / damageTotal / refundAmount /
  * extraChargeAmount / extraChargeInvoiceId` BE đã BỎ — đừng thêm lại.
@@ -288,9 +288,9 @@ export interface CheckoutSettlementDto {
   adjustments?: Array<{ label: string; amount: number }>;
   adjustmentTotal?: number;
 
-  /** Host đã ghi nhận CHUYỂN ĐI chưa (chuyển khoản tay + ảnh chứng từ). */
+  /** Owner đã ghi nhận CHUYỂN ĐI chưa (chuyển khoản tay + ảnh chứng từ). */
   /**
-   * Host đã ghi nhận chuyển cọc lúc nào.
+   * Owner đã ghi nhận chuyển cọc lúc nào.
    *
    * BE đặt tên `refundPaidAt` (khớp cột entity `CheckoutSettlement`). `refundedAt` là tên
    * FE dùng từ trước — giữ lại để không phá chỗ nào đang đọc, nhưng ĐỌC THÌ ƯU TIÊN
@@ -302,7 +302,7 @@ export interface CheckoutSettlementDto {
   refundProofUrl?: string;
   /**
    * Khách đã xác nhận NHẬN ĐỦ chưa.
-   * Khác `refundedAt`: cái kia là lời của host, cái này là lời của khách. Đủ cả hai mới
+   * Khác `refundedAt`: cái kia là lời của owner, cái này là lời của khách. Đủ cả hai mới
    * khép được hồ sơ tiền nong.
    */
   refundConfirmedAt?: string;
@@ -382,7 +382,7 @@ export interface CreateCheckoutRequestBody {
    * Tài khoản khách muốn nhận hoàn cọc — BE nhận field riêng từ 20/08/2026.
    *
    * Trước đây FE chỉ gộp vào `note` vì BE chưa có chỗ nhận, nên 3 cột trong DB rỗng và
-   * trang Sổ cọc của host luôn báo "chưa có thông tin tài khoản nhận tiền".
+   * trang Sổ cọc của owner luôn báo "chưa có thông tin tài khoản nhận tiền".
    */
   refundBankName?: string;
   refundBankAccount?: string;
@@ -481,7 +481,7 @@ export const realTenantSelfService = {
     return data;
   },
 
-  /** Không đồng ý: WAITING_TENANT → DISPUTED, BE báo host + manager. */
+  /** Không đồng ý: WAITING_TENANT → DISPUTED, BE báo owner + manager. */
   disputeSettlement: async (
     id: number,
     body: { reason: string; photos?: string[] },
@@ -496,7 +496,7 @@ export const realTenantSelfService = {
    * Khách xác nhận ĐÃ NHẬN ĐỦ tiền cọc (BE thêm 20/08/2026).
    *
    * Không có bước này thì "đã hoàn cọc" chỉ là lời của một bên: ảnh biên lai chứng minh
-   * host ĐÃ CHUYỂN ĐI, không chứng minh tiền TỚI ĐÚNG NGƯỜI. Khách bấm xong mới khép
+   * owner ĐÃ CHUYỂN ĐI, không chứng minh tiền TỚI ĐÚNG NGƯỜI. Khách bấm xong mới khép
    * được hồ sơ về mặt tiền nong.
    */
   confirmRefundReceived: async (id: number): Promise<CheckoutRequestDto> => {
@@ -510,10 +510,10 @@ export const realTenantSelfService = {
    * Báo CHƯA nhận được tiền cọc — đối trọng của `confirmRefundReceived`.
    *
    * Trước 20/08/2026 khách chỉ có nút xác nhận ĐÃ nhận. Không nhận được thì không có đường
-   * nào báo, nên im lặng bị hiểu thành đồng ý và việc host ghi nhận nhầm/sai không ai phát
+   * nào báo, nên im lặng bị hiểu thành đồng ý và việc owner ghi nhận nhầm/sai không ai phát
    * hiện được. Đây là lối ra cho đúng tình huống đó.
    *
-   * BE chỉ nhận khi host đã ghi nhận chuyển tiền và khách CHƯA bấm xác nhận.
+   * BE chỉ nhận khi owner đã ghi nhận chuyển tiền và khách CHƯA bấm xác nhận.
    * `reason` bắt buộc 10–500 ký tự (BE validate, xem DisputeRefundRequest).
    */
   disputeRefundReceived: async (id: number, reason: string): Promise<CheckoutRequestDto> => {

@@ -233,7 +233,7 @@ export const TenantContractDetailScreen: React.FC = () => {
    *
    * BE nhận thêm `newRentAmount` nhưng màn này cố tình không gửi: quản lý không được
    * thấy giá thuê (`@/constants/managerVisibility`), mà cho sửa một con số mình không
-   * nhìn thấy là chuyện vô lý. Đổi giá là việc của host ở màn quản lý giá.
+   * nhìn thấy là chuyện vô lý. Đổi giá là việc của owner ở màn quản lý giá.
    *
    * Bản trước của hàm này chỉ hiện "Yêu cầu gia hạn đã được ghi nhận" rồi thôi — không
    * gọi API nào cả. Quản lý bấm xong tưởng xong việc, tới ngày cron vẫn đổi hợp đồng
@@ -477,7 +477,7 @@ export const TenantContractDetailScreen: React.FC = () => {
  * Chọn mốc gia hạn.
  *
  * Chỉ đưa bốn mốc dựng sẵn thay vì lịch chọn ngày tự do: kỳ thuê thực tế luôn tính tròn
- * tháng, và bấm một nút thì không gõ nhầm được ngày. Cần một ngày lẻ thì host sửa ở màn
+ * tháng, và bấm một nút thì không gõ nhầm được ngày. Cần một ngày lẻ thì owner sửa ở màn
  * hợp đồng — hiếm, không đáng đánh đổi cả màn này.
  *
  * KHÔNG có ô sửa giá: quản lý không được thấy giá thuê, mà cho sửa con số mình không

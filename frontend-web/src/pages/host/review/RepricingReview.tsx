@@ -26,11 +26,11 @@ import { CapitalItemsPanel } from './CapitalItemsPanel';
 import { groupByStart } from './capitalItems';
 
 /**
- * DUYỆT LẠI GIÁ SAU CẢI TẠO BỔ SUNG (Host).
+ * DUYỆT LẠI GIÁ SAU CẢI TẠO BỔ SUNG (Owner).
  *
  * Khác hẳn màn "Duyệt giá & Kích hoạt" của nhà mới tiếp nhận ([[HostPropertyReview]]):
- * nhà này ĐÃ cho thuê, có thể đang có khách ở. Host không cần đọc lại từ đầu tiền thuê chủ nhà,
- * cải tạo lúc tiếp nhận, cách chia vốn… — những thứ đó đã duyệt rồi. Host chỉ cần trả lời 3 câu:
+ * nhà này ĐÃ cho thuê, có thể đang có khách ở. Owner không cần đọc lại từ đầu tiền thuê chủ nhà,
+ * cải tạo lúc tiếp nhận, cách chia vốn… — những thứ đó đã duyệt rồi. Owner chỉ cần trả lời 3 câu:
  *
  *   1. Đợt cải tạo vừa rồi làm gì, cái nào tính vào giá, cái nào công ty tự chịu?
  *   2. Giá niêm yết từng phòng (hoặc cả căn) đổi thành bao nhiêu?
@@ -38,12 +38,12 @@ import { groupByStart } from './capitalItems';
  *
  * Giá mới mặc định = giá niêm yết đang áp + phần tăng do riêng đợt này (khấu hao mới ÷ (1 − trống
  * phòng)). Không lấy thẳng giá đề xuất của máy chủ: con số đó tính lại TOÀN BỘ theo cấu hình hiện
- * tại, có thể lệch xa giá Host đã chốt từ trước dù đợt này chỉ thêm vài triệu — vẫn hiện để tham khảo.
+ * tại, có thể lệch xa giá Owner đã chốt từ trước dù đợt này chỉ thêm vài triệu — vẫn hiện để tham khảo.
  *
  * Quy tắc nghiệp vụ: doc-be/BE-YEUCAU-tinh-lai-gia-khi-cai-tao-bo-sung-2026-09-14.md.
  */
 
-/** Chế độ khấu hao áp cho Host duyệt — giống màn duyệt giá gốc, giá gửi thẳng không cộng dự phòng. */
+/** Chế độ khấu hao áp cho Owner duyệt — giống màn duyệt giá gốc, giá gửi thẳng không cộng dự phòng. */
 const CONTINGENCY_FOR_CONFIRM = 100;
 
 interface Unit {
@@ -86,7 +86,7 @@ export const RepricingReview = ({ propertyId, sessions }: {
   const [calcError, setCalcError] = useState('');
   const autoCalcRef = useRef(false);
 
-  /** Giá niêm yết mới Host chốt — key = roomId (0 = cả căn). */
+  /** Giá niêm yết mới Owner chốt — key = roomId (0 = cả căn). */
   const [prices, setPrices] = useState<Record<number, number>>({});
   const pricesInitRef = useRef(false);
   const [showItems, setShowItems] = useState(false);
@@ -347,10 +347,10 @@ export const RepricingReview = ({ propertyId, sessions }: {
           {rented.length > 0 && <>{rented.length} {wholeHouse ? 'căn' : 'phòng'} đang có khách giữ nguyên giá hợp đồng, giá mới áp khi hết hạn hoặc gia hạn.</>}
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <button onClick={() => navigate(`/host/properties/${propertyId}`)} className="btn-primary rounded-xl px-8 py-3">
+          <button onClick={() => navigate(`/owner/properties/${propertyId}`)} className="btn-primary rounded-xl px-8 py-3">
             Xem chi tiết tòa nhà
           </button>
-          <button onClick={() => navigate('/host/properties')}
+          <button onClick={() => navigate('/owner/properties')}
             className="rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700">
             Về danh sách
           </button>
@@ -426,7 +426,7 @@ export const RepricingReview = ({ propertyId, sessions }: {
         <div className="mb-5">
           <Note tone="rose">
             {property?.zoneName ?? 'Khu vực này'} đang không có quản lý phụ trách — máy chủ không cho duyệt giá khi thiếu quản lý.{' '}
-            <button onClick={() => navigate('/host/zones')} className="font-bold underline">Gán quản lý khu vực →</button>
+            <button onClick={() => navigate('/owner/zones')} className="font-bold underline">Gán quản lý khu vực →</button>
           </Note>
         </div>
       )}
@@ -626,7 +626,7 @@ export const RepricingReview = ({ propertyId, sessions }: {
               {`\nGiá gợi ý = giá đang niêm yết + tăng giá, làm tròn lên 1.000đ`}
             </ExplainFormula>
             <p>
-              Chỉ cộng <b>phần của riêng đợt này</b> lên giá đã duyệt từ trước — không tính lại toàn bộ, vì giá cũ Host
+              Chỉ cộng <b>phần của riêng đợt này</b> lên giá đã duyệt từ trước — không tính lại toàn bộ, vì giá cũ Owner
               đã chốt (có thể cao hơn đề xuất lúc đó). {!wholeHouse && <>Khoản dùng chung (cải tạo, thiết bị khu vực
               chung) chia đều mọi phòng; thiết bị lắp riêng phòng nào thì chỉ phòng đó gánh. </>}
               Chia thêm cho (1 − {Math.round(vRate * 100)}%) để bù những tháng phòng bỏ trống.
@@ -894,7 +894,7 @@ export const RepricingReview = ({ propertyId, sessions }: {
           />
           <div className="flex items-center gap-3">
             {!canEdit ? (
-              <p className="text-xs font-semibold text-amber-600">Chỉ duyệt được khi ở trạng thái &quot;Chờ Host duyệt&quot;</p>
+              <p className="text-xs font-semibold text-amber-600">Chỉ duyệt được khi ở trạng thái &quot;Chờ Owner duyệt&quot;</p>
             ) : dataBroken ? (
               <p className="text-xs font-semibold text-rose-600">Kết quả tính giá đang sai — xem cảnh báo đầu trang</p>
             ) : !zoneLink ? (

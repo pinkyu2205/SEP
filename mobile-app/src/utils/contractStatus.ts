@@ -5,12 +5,12 @@ import type { IconName } from '@/components/common/Icon';
  * Suy trạng thái hiển thị của HỢP ĐỒNG KHÁCH THUÊ từ dữ liệu BE.
  *
  * BE trả 2 trường rời nhau: `status` (vòng đời HĐ) và `priceApprovalStatus` (luồng
- * gửi Host duyệt giá). Gộp lại thành 1 trạng thái duy nhất để UI khỏi phải nhớ luật.
+ * gửi Owner duyệt giá). Gộp lại thành 1 trạng thái duy nhất để UI khỏi phải nhớ luật.
  * Dùng chung cho màn Hợp đồng tổng và màn Hợp đồng theo nhà — 1 nguồn sự thật.
  */
 export type ContractUiStatus =
-  | 'pending_approval'   // chờ Host duyệt giá
-  | 'rejected'           // Host từ chối giá
+  | 'pending_approval'   // chờ Owner duyệt giá
+  | 'rejected'           // Owner từ chối giá
   | 'waiting_deposit'    // đã tạo/duyệt giá, chờ thu cọc + OTP để kích hoạt
   | 'active'             // đang thuê
   | 'expiring_soon'      // đang thuê, còn ≤30 ngày

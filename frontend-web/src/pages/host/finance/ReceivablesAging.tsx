@@ -9,6 +9,7 @@ import {
 } from 'recharts';
 import { formatCurrency } from '@/utils';
 import { hostService, type ReceivablesAging as ReceivablesData, type InvoiceDto } from '@/services/host.service';
+import { loadHostReceivables, type ReceivableRow } from '@/services/hostReceivables';
 import { notificationService, HOST_OVERDUE_TYPES, type AppNotificationDto } from '@/services/notification.service';
 import { exportToExcel } from '@/utils/exportExcel';
 import {
@@ -18,11 +19,15 @@ import {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Công nợ phải thu — 100% API thật, KHÔNG mock.
-//   • Biểu đồ tuổi nợ  ← GET /host/finance/receivables-aging  (BE tự chia 4 nhóm)
-//   • Bảng chi tiết    ← GET /host/invoices?month=…&size=…    (đủ hạn thu + trạng thái)
-// BE dựng hoá đơn theo THÁNG HIỆN TẠI (buildInvoices(YearMonth.now())) và
-// receivables-aging không nhận tham số month → trang này luôn là ảnh chụp kỳ hiện
-// tại, cố ý KHÔNG có bộ chọn kỳ để số liệu 2 khối luôn khớp nhau.
+//   • Biểu đồ tuổi nợ  ← GET /host/finance/receivables-aging  (BE đọc hoá đơn thật)
+//   • Bảng chi tiết    ← GET /manager/invoices (hoá đơn THẬT, mọi loại, mọi kỳ)
+//                        lùi về GET /host/invoices?month=… nếu tài khoản không đọc được
+//
+// ⚠️ `/owner/invoices` KHÔNG phải hoá đơn thật: BE (`HostPortalServiceImpl.buildInvoices`)
+// dựng mỗi hợp đồng ACTIVE một dòng tiền nhà, hạn = CUỐI THÁNG + 5 ngày. Tiền nhà thật
+// phát hành ngày 1, hạn ngày 5 CÙNG tháng — nên trang này từng ghi "Còn 33 ngày tới hạn"
+// (hạn 05/11) cho hoá đơn tháng 10 thực ra hạn 05/10, và số tổng (69,7tr / 9 dòng) lệch
+// hẳn biểu đồ tuổi nợ ngay phía trên (46tr / 6 hoá đơn thật) — 03/10/2026.
 // ══════════════════════════════════════════════════════════════════════════════
 
 const EMPTY_AGING: ReceivablesData = { buckets: [], topDebtors: [] };
@@ -60,9 +65,9 @@ const agingOf = (dueDate: string): Exclude<AgingKey, 'all'> => {
 
 /**
  * Mốc leo thang của BE (BillingCronServiceImpl): hoá đơn quá hạn từ ngần này ngày
- * thì cron 8h sáng bắn cảnh báo cho quản lý vận hành + toàn bộ Host và gắn cờ đề
+ * thì cron 8h sáng bắn cảnh báo cho quản lý vận hành + toàn bộ Owner và gắn cờ đề
  * nghị chấm dứt hợp đồng. Mirror `billing.rent.termination-after-days` (mặc định 3)
- * — chỉ dùng để diễn giải cho Host, không phải nguồn quyết định.
+ * — chỉ dùng để diễn giải cho Owner, không phải nguồn quyết định.
  */
 const ESCALATE_AFTER_DAYS = 3;
 
@@ -75,7 +80,7 @@ const overdueBadge = (days: number) =>
           : days >= -3 ? 'bg-amber-100 text-amber-800'
             : 'bg-emerald-100 text-emerald-700';
 
-/** Còn ngần này ngày là tới hạn → coi như "sắp tới hạn", tô vàng để host nhắc trước. */
+/** Còn ngần này ngày là tới hạn → coi như "sắp tới hạn", tô vàng để owner nhắc trước. */
 const DUE_SOON_DAYS = 3;
 
 /**
@@ -122,7 +127,9 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 
 export const ReceivablesAging = () => {
   const [aging, setAging] = useState<ReceivablesData>(EMPTY_AGING);
-  const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
+  const [invoices, setInvoices] = useState<ReceivableRow[]>([]);
+  /** `true` = bảng đang là hoá đơn thật (mọi kỳ); `false` = nguồn rút gọn của một kỳ. */
+  const [fullSource, setFullSource] = useState(false);
   const [alerts, setAlerts] = useState<AppNotificationDto[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -144,21 +151,23 @@ export const ReceivablesAging = () => {
      * đo thật: tiêu đề ghi "Tháng 10/2026" mà bảng lại hỏi `month=2026-09`.
      */
     const agingRes = await hostService.getReceivablesAging().catch(() => null);
-    const [invoicePage, notifyPage] = await Promise.all([
-      // size lớn: BE phân trang mặc định 20 → lấy trọn kỳ để tổng hợp KPI không bị hụt.
-      hostService.getInvoices({ month: currentMonth(), size: 500 }).catch(() => null),
+    const month = currentMonth();
+    const [rec, notifyPage] = await Promise.all([
+      // Hoá đơn thật mọi kỳ (lùi về nguồn dựng sẵn một kỳ) — xem services/hostReceivables.
+      loadHostReceivables(month).catch(() => null),
       // Cảnh báo quá hạn do cron nghiệp vụ bắn — nằm ở bảng thông báo chung.
       // BE chưa lọc được theo type nên lấy 100 cái gần nhất rồi lọc phía FE.
       notificationService.list({ size: 100 }).catch(() => null),
     ]);
     setAging(agingRes?.buckets?.length ? agingRes : EMPTY_AGING);
-    setInvoices(invoicePage?.content ?? []);
+    setInvoices(rec?.rows ?? []);
+    setFullSource(rec?.full ?? false);
     setAlerts((notifyPage?.content ?? []).filter(n => HOST_OVERDUE_TYPES.includes(n.type)));
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Hoá đơn vừa PAID thì công nợ đổi ngay — nạp lại thay vì để Host thấy số cũ.
+  // Hoá đơn vừa PAID thì công nợ đổi ngay — nạp lại thay vì để Owner thấy số cũ.
   // Nạp lại theo cả 3 lớp (WS · poll dự phòng · quay lại tab) — xem useBillingRealtime.
   useBillingRealtime({ onRefresh: load });
 
@@ -178,7 +187,7 @@ export const ReceivablesAging = () => {
 
   /**
    * Nhóm đã chạm mốc leo thang — đúng nhóm mà cron BE gửi cảnh báo cho quản lý vận
-   * hành + Host và gắn cờ đề nghị chấm dứt hợp đồng. Tính tại chỗ từ hoá đơn nên
+   * hành + Owner và gắn cờ đề nghị chấm dứt hợp đồng. Tính tại chỗ từ hoá đơn nên
    * vẫn đúng kể cả khi cron của hôm nay chưa chạy.
    */
   const escalated = useMemo(() => {
@@ -190,9 +199,9 @@ export const ReceivablesAging = () => {
 
   /**
    * KHÁCH ĐANG NỢ — trước đây trang chỉ bật khối cảnh báo khi đã có hoá đơn QUÁ HẠN; còn
-   * nợ chưa tới hạn (dù cả chục triệu) thì chỉ là một con số trong ô KPI, host dễ lướt qua.
+   * nợ chưa tới hạn (dù cả chục triệu) thì chỉ là một con số trong ô KPI, owner dễ lướt qua.
    * Giờ cứ có khoản chưa thu là hiện danh sách theo từng KHÁCH (không phải từng hoá đơn —
-   * host đi nhắc người, không nhắc mã hoá đơn), xếp gấp nhất lên đầu.
+   * owner đi nhắc người, không nhắc mã hoá đơn), xếp gấp nhất lên đầu.
    */
   const debtors = useMemo<Debtor[]>(() => {
     const map = new Map<string, Debtor>();
@@ -321,7 +330,9 @@ export const ReceivablesAging = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Công nợ phải thu</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Tiền khách thuê đang nợ kỳ {monthLabel(currentMonth())} — phân nhóm theo tuổi nợ để ưu tiên thu hồi
+            {fullSource
+              ? <>Mọi hoá đơn khách thuê chưa trả (tiền nhà, điện, nước, sửa chữa…), theo hạn thanh toán thật — phân nhóm theo tuổi nợ để ưu tiên thu hồi</>
+              : <>Tiền khách thuê đang nợ kỳ {monthLabel(currentMonth())} — phân nhóm theo tuổi nợ để ưu tiên thu hồi</>}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -337,8 +348,8 @@ export const ReceivablesAging = () => {
       </div>
 
       {/* Cảnh báo quá hạn — khách không trả đúng hạn thì cron BE (8h sáng mỗi ngày)
-          nhắc khách, và từ ngày thứ ESCALATE_AFTER_DAYS thì báo quản lý + Host.
-          Khối này hiện lại đúng cảnh báo đó ngay tại chỗ Host đang xem công nợ. */}
+          nhắc khách, và từ ngày thứ ESCALATE_AFTER_DAYS thì báo quản lý + Owner.
+          Khối này hiện lại đúng cảnh báo đó ngay tại chỗ Owner đang xem công nợ. */}
       {(totals.overdueCount > 0 || unreadAlerts.length > 0) && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
           <div className="flex items-start gap-3">
@@ -349,7 +360,7 @@ export const ReceivablesAging = () => {
               </p>
               <p className="mt-0.5 text-xs text-rose-700">
                 Hệ thống tự nhắc khách thuê lúc 8h sáng mỗi ngày. Quá hạn từ {ESCALATE_AFTER_DAYS} ngày, quản lý vận hành
-                và Host nhận cảnh báo, hợp đồng bị gắn cờ đề nghị chấm dứt.
+                và Owner nhận cảnh báo, hợp đồng bị gắn cờ đề nghị chấm dứt.
                 {escalated.count > 0 && (
                   <> Hiện có <b>{escalated.count} hóa đơn đã quá {ESCALATE_AFTER_DAYS} ngày</b> ({formatCurrency(escalated.amount)}).</>
                 )}
@@ -580,7 +591,7 @@ export const ReceivablesAging = () => {
                   <tr key={i.id} className={`transition-colors ${rowTone}`}>
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-slate-900">{i.tenantName?.trim() || '(chưa có tên khách)'}</p>
-                      <p className="text-xs text-slate-400">{i.id}</p>
+                      <p className="text-xs text-slate-400">{i.kind ? <>{i.kind} · </> : null}{i.id}</p>
                     </td>
                     <td className="px-5 py-3.5">
                       <p className="font-medium text-slate-900">{i.propertyName}</p>

@@ -52,8 +52,8 @@ const DETAIL_TABS: { key: DetailTab; label: string; icon: typeof Home }[] = [
 ];
 
 /**
- * Host portal: endpoint /properties/{id}/tenant-contracts chỉ cho MANAGER/ADMIN (host bị 403),
- * nên host lấy HĐ qua /host/contracts. Map về TenantContractResponse để dùng chung với phần
+ * Owner portal: endpoint /properties/{id}/tenant-contracts chỉ cho MANAGER/ADMIN (owner bị 403),
+ * nên owner lấy HĐ qua /host/contracts. Map về TenantContractResponse để dùng chung với phần
  * hiển thị khách thuê (modal phòng, card nhà nguyên căn). roomId suy ra từ roomCode ↔ roomNumber.
  */
 const hostContractToTenant = (hc: HostContractDto, rooms: RoomResponse[]): TenantContractResponse => {
@@ -100,7 +100,7 @@ const roomStatusMap: Record<string, { label: string; cls: string; dot: string; b
   MAINTENANCE: { label: 'Bảo trì',       cls: 'bg-amber-100 text-amber-700',     dot: 'bg-amber-500',   border: 'border-amber-200 hover:border-amber-400' },
   // "Nháp" đọc lên như bản nháp có thể bỏ, trong khi thực chất phòng đã tạo xong và chỉ
   // còn chờ bật cho thuê — cùng lý do đã đổi nhãn DRAFT của hợp đồng thành "Chờ đón khách".
-  // Gọi đúng tên thì host biết mình phải làm gì; gọi là "Nháp" thì không ai đụng tới,
+  // Gọi đúng tên thì owner biết mình phải làm gì; gọi là "Nháp" thì không ai đụng tới,
   // nhà đứng ở trạng thái hoạt động mà admin không xếp được khách nào vào.
   DRAFT:       { label: 'Chưa mở cho thuê', cls: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400',   border: 'border-amber-200 hover:border-amber-300' },
   // Chỉ dùng khi đang xem một THÁNG ĐÃ QUA mà phòng không có hợp đồng nào nằm trong tháng đó.
@@ -127,7 +127,7 @@ const isAwaitingPickup = (c: TenantContractResponse) => c.status === 'DRAFT' || 
  * Hợp đồng có khách ở trong tháng `ym` ("YYYY-MM") không: đã vào ở trước hoặc trong tháng đó, và
  * chưa hết hạn trước tháng đó. Hợp đồng nháp / chờ ký không tính.
  *
- * Giới hạn: HĐ chấm dứt sớm vẫn tính tới `endDate` gốc — `/host/contracts` không trả ngày chấm dứt.
+ * Giới hạn: HĐ chấm dứt sớm vẫn tính tới `endDate` gốc — `/owner/contracts` không trả ngày chấm dứt.
  */
 const contractCoversMonth = (c: TenantContractResponse, ym: string): boolean => {
   if (isNotYetActive(c.status)) return false;
@@ -139,7 +139,9 @@ const contractCoversMonth = (c: TenantContractResponse, ym: string): boolean => 
 
 const propertyStatusLabel: Record<string, { label: string; cls: string }> = {
   ACTIVE:                    { label: 'Đang hoạt động',    cls: 'bg-emerald-500 text-white' },
-  RENTED:                    { label: 'Đã cho thuê',       cls: 'bg-blue-500 text-white' },
+  // `RENTED` chỉ có trong dữ liệu seed — luồng thật nhà có khách vẫn là ACTIVE. Hiện y như
+  // ACTIVE để nhà seed và nhà nhập thật không mang hai nhãn khác nhau (xem `lifecycleOf`).
+  RENTED:                    { label: 'Đang hoạt động',    cls: 'bg-emerald-500 text-white' },
   PENDING_HOST_REVIEW:       { label: 'Chờ phê duyệt',     cls: 'bg-amber-400 text-white' },
   PENDING_OPERATION_MANAGER: { label: 'Chờ gán quản lý',   cls: 'bg-violet-500 text-white' },
   DRAFT:                     { label: 'Nháp',               cls: 'bg-slate-400 text-white' },
@@ -259,7 +261,7 @@ type DepositState = 'paid' | 'unpaid' | 'unknown';
 /**
  * Cọc của một hợp đồng đã thu chưa.
  *
- * `/host/contracts` KHÔNG trả trạng thái thanh toán (`paymentStatus` luôn trống ở màn host), nên
+ * `/owner/contracts` KHÔNG trả trạng thái thanh toán (`paymentStatus` luôn trống ở màn owner), nên
  * trước đây ô cọc luôn báo "Chưa thu cọc" dù khách đã trả. Cọc thu cùng tiền nhà kỳ đầu qua phiếu
  * gộp `HD-ONBOARD-{id hợp đồng}` → phiếu đó đã thu là cọc đã thu. Không tìm thấy phiếu (không có
  * quyền xem hoá đơn, dữ liệu cũ) thì trả `unknown` — thà không nói còn hơn nói sai.
@@ -325,7 +327,7 @@ function RoomInvoiceHistory({ allRows, denied, roomNumber }: {
     );
   }
 
-  // Gom theo kỳ: host đọc hoá đơn theo tháng, không theo dòng rời rạc.
+  // Gom theo kỳ: owner đọc hoá đơn theo tháng, không theo dòng rời rạc.
   const byPeriod = new Map<string, AdminInvoiceRow[]>();
   for (const r of rows) {
     const k = r.periodKey ?? '—';
@@ -767,11 +769,11 @@ export const PropertyDetail = () => {
         propertyService.getPropertyById(Number(id)),
         propertyService.getRooms(Number(id)),
         propertyService.getManagers().catch(() => [] as { id: string; fullName: string; username: string }[]),
-        // Host xem HĐ khách thuê qua /host/contracts (endpoint /properties/.../tenant-contracts chỉ cho MANAGER/ADMIN).
+        // Owner xem HĐ khách thuê qua /host/contracts (endpoint /properties/.../tenant-contracts chỉ cho MANAGER/ADMIN).
         hostService.listAllContracts({ propertyId: Number(id) }).catch(() => null),
       ]);
 
-      // Host dùng /host/contracts; nếu trống (vd manager/admin xem) thì fallback endpoint manager.
+      // Owner dùng /host/contracts; nếu trống (vd manager/admin xem) thì fallback endpoint manager.
       let contractList: TenantContractResponse[];
       if (hostContracts && hostContracts.length) {
         contractList = hostContracts.map(hc => hostContractToTenant(hc, roomList));
@@ -798,7 +800,7 @@ export const PropertyDetail = () => {
   /**
    * Hoá đơn của kỳ đang chọn.
    *
-   * Chờ có `property` mới gọi: chế độ rút gọn (`/host/invoices`) không trả `propertyId`
+   * Chờ có `property` mới gọi: chế độ rút gọn (`/owner/invoices`) không trả `propertyId`
    * nên phải khớp bằng TÊN nhà — gọi trước khi biết tên thì lọc ra rỗng.
    */
   useEffect(() => {
@@ -884,7 +886,7 @@ export const PropertyDetail = () => {
       <div className="text-center py-20">
         <Home className="w-12 h-12 text-slate-300 mx-auto mb-3" />
         <p className="text-slate-500">Không tìm thấy thông tin căn nhà này.</p>
-        <button onClick={() => navigate('/host/properties')} className="mt-4 px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold">Quay lại danh sách</button>
+        <button onClick={() => navigate('/owner/properties')} className="mt-4 px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold">Quay lại danh sách</button>
       </div>
     );
   }
@@ -961,7 +963,7 @@ export const PropertyDetail = () => {
   return (
     <div className="space-y-6 pb-8">
       {/* Back */}
-      <button onClick={() => navigate('/host/properties')}
+      <button onClick={() => navigate('/owner/properties')}
         className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-indigo-600 transition-colors font-medium">
         <ArrowLeft className="w-4 h-4" /> Quay lại danh sách
       </button>
@@ -996,7 +998,7 @@ export const PropertyDetail = () => {
                 {/* Quản lý đến từ KHU VỰC của nhà, không gán riêng lẻ được nữa —
                     chip dẫn thẳng sang màn Khu vực để xem/đổi cho cả vùng. */}
                 <Link
-                  to="/host/zones"
+                  to="/owner/zones"
                   title={`Quản lý được phân công theo khu vực${property.zoneName ? ` ${property.zoneName}` : ''} — bấm để xem hoặc đổi cho cả khu vực`}
                   className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold transition hover:ring-1 hover:ring-indigo-300 ${
                     property.operationManagerId ? 'bg-slate-100 text-slate-600' : 'bg-rose-50 text-rose-600'
@@ -1014,7 +1016,7 @@ export const PropertyDetail = () => {
           {/* Hành động — KHÔNG còn gán quản lý cho từng nhà: quản lý theo khu vực. */}
           <div className="flex shrink-0 items-center gap-2">
             <Link
-              to="/host/zones"
+              to="/owner/zones"
               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
             >
               <MapPin className="h-4 w-4" />

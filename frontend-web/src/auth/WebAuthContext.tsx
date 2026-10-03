@@ -3,7 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import api from '@/services/api';
 import { resetInvoiceAccessProbe } from '@/services/invoiceAccess';
 
-// Web chỉ phục vụ host (ROLE_OWNER) và admin (ROLE_ADMIN).
+// Web chỉ phục vụ owner (ROLE_OWNER) và admin (ROLE_ADMIN).
 // Manager là mobile-only — không có không gian làm việc trên web.
 export type WebRole = 'admin' | 'host';
 
@@ -50,7 +50,7 @@ const readStoredUser = (): WebAuthUser | null => {
       storage.setItem(STORAGE_KEY, JSON.stringify(migrated));
       return migrated;
     }
-    // Chỉ chấp nhận host & admin; mọi role khác (kể cả manager) bị loại bỏ.
+    // Chỉ chấp nhận owner & admin; mọi role khác (kể cả manager) bị loại bỏ.
     if (parsed.role !== 'admin' && parsed.role !== 'host') {
       storage.removeItem(STORAGE_KEY);
       return null;
@@ -144,7 +144,7 @@ export const useWebAuth = () => {
 
 const defaultPathByRole: Record<WebRole, string> = {
   admin: '/admin',
-  host: '/host',
+  host: '/owner',
 };
 
 export const ProtectedRoute = ({ allowedRoles }: { allowedRoles: WebRole[] }) => {

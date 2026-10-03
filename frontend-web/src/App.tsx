@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ProtectedRoute, PublicOnlyRoute } from '@/auth/WebAuthContext';
 import { AuthLayout } from '@/layouts/AuthLayout';
 import { PublicLayout } from '@/layouts/PublicLayout';
@@ -65,6 +65,12 @@ const PaymentFallback = () => (
   </div>
 );
 
+/** `/host/properties?x=1` → `/owner/properties?x=1`. `replace` để nút Quay lại không kẹt vòng. */
+const LegacyHostRedirect = () => {
+  const { pathname, search, hash } = useLocation();
+  return <Navigate to={`${pathname.replace(/^\/host/, '/owner')}${search}${hash}`} replace />;
+};
+
 function App() {
   return (
     <BrowserRouter>
@@ -114,7 +120,7 @@ function App() {
             <Route path="/admin/buildings/draft" element={<TaoDraftPage />} />
             <Route path="/admin/buildings/configuration" element={<CauHinhKhaiThacPage />} />
             <Route path="/admin/buildings/configuration/:id" element={<CauHinhKhaiThacPage />} />
-            {/* Đã gộp: "Nhập nhà hàng loạt" → Khởi tạo nhà; bỏ "Định giá & Phê duyệt" (auto gửi Host ở Cấu hình khai thác) */}
+            {/* Đã gộp: "Nhập nhà hàng loạt" → Khởi tạo nhà; bỏ "Định giá & Phê duyệt" (auto gửi Owner ở Cấu hình khai thác) */}
             <Route path="/admin/buildings/import" element={<Navigate to="/admin/buildings/draft" replace />} />
             <Route path="/admin/buildings/pricing-approval" element={<Navigate to="/admin/buildings/configuration" replace />} />
             <Route path="/admin/buildings/pricing-approval/:id" element={<Navigate to="/admin/buildings/configuration" replace />} />
@@ -142,33 +148,33 @@ function App() {
           </Route>
         </Route>
 
-        {/* ─── Dashboard Host (Admin System) — prefix /host ─── */}
+        {/* ─── Dashboard Owner (Admin System) — prefix /host ─── */}
         <Route element={<ProtectedRoute allowedRoles={['host', 'admin']} />}>
           <Route element={<HostLayout />}>
-            <Route path="/host/review/:id" element={<HostPropertyReview />} />
-            <Route path="/host" element={<Dashboard />} />
-            <Route path="/host/pricing-config" element={<PricingConfigPage />} />
-            <Route path="/host/manager-salaries" element={<ManagerSalaryPage />} />
-            <Route path="/host/properties" element={<PropertyList />} />
-            <Route path="/host/properties/:id" element={<PropertyDetail />} />
-            <Route path="/host/operations-managers" element={<ManagerList />} />
-            <Route path="/host/managers" element={<ManagerList />} />
-            <Route path="/host/zones" element={<HostZoneOverview />} />
-            <Route path="/host/tenants" element={<TenantList />} />
-            <Route path="/host/contracts" element={<ContractList />} />
-            <Route path="/host/extension-requests" element={<ExtensionRequestsHost />} />
-            <Route path="/host/maintenance" element={<MaintenanceList />} />
-            <Route path="/host/financial" element={<FinancialManagement />} />
+            <Route path="/owner/review/:id" element={<HostPropertyReview />} />
+            <Route path="/owner" element={<Dashboard />} />
+            <Route path="/owner/pricing-config" element={<PricingConfigPage />} />
+            <Route path="/owner/manager-salaries" element={<ManagerSalaryPage />} />
+            <Route path="/owner/properties" element={<PropertyList />} />
+            <Route path="/owner/properties/:id" element={<PropertyDetail />} />
+            <Route path="/owner/operations-managers" element={<ManagerList />} />
+            <Route path="/owner/managers" element={<ManagerList />} />
+            <Route path="/owner/zones" element={<HostZoneOverview />} />
+            <Route path="/owner/tenants" element={<TenantList />} />
+            <Route path="/owner/contracts" element={<ContractList />} />
+            <Route path="/owner/extension-requests" element={<ExtensionRequestsHost />} />
+            <Route path="/owner/maintenance" element={<MaintenanceList />} />
+            <Route path="/owner/financial" element={<FinancialManagement />} />
             {/* Chỉ host (ROLE_OWNER) — admin sẽ bị điều hướng về /admin. Config lại sau nếu cần. */}
             <Route element={<ProtectedRoute allowedRoles={['host']} />}>
-              <Route path="/host/billing" element={<BillingPayments />} />
-              <Route path="/host/receivables" element={<ReceivablesAging />} />
-              <Route path="/host/deposits" element={<DepositLedger />} />
+              <Route path="/owner/billing" element={<BillingPayments />} />
+              <Route path="/owner/receivables" element={<ReceivablesAging />} />
+              <Route path="/owner/deposits" element={<DepositLedger />} />
             </Route>
-            <Route path="/host/reports" element={<ReportsAnalytics />} />
-            <Route path="/host/notifications" element={<NotificationCenter />} />
+            <Route path="/owner/reports" element={<ReportsAnalytics />} />
+            <Route path="/owner/notifications" element={<NotificationCenter />} />
             <Route
-              path="/host/settings"
+              path="/owner/settings"
               element={
                 <div className="p-6">
                   <h1 className="text-2xl font-bold text-slate-900">Cài đặt</h1>
@@ -178,6 +184,13 @@ function App() {
             />
           </Route>
         </Route>
+
+        {/*
+          Link cũ `/host/...` → `/owner/...` (03/10/2026, đổi cách gọi vai trò).
+          Giữ nguyên phần đuôi, query và hash: bookmark, link dán trong Zalo hay thông báo
+          cũ vẫn mở đúng trang thay vì rơi về Landing Page.
+        */}
+        <Route path="/host/*" element={<LegacyHostRedirect />} />
 
         {/* Route không khớp -> về Landing Page */}
         <Route path="*" element={<Navigate to="/" replace />} />

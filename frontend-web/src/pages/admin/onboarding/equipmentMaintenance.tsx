@@ -9,7 +9,7 @@ import type { OperationalEquipmentResponse } from '@/types/api.types';
  * LỊCH SỬ BẢO TRÌ THEO THIẾT BỊ — dùng chung cho tab Thiết bị và hộp chi tiết phòng.
  *
  * Nguồn: `GET /api/v1/maintenance?propertyId=` (admin — một lần cả nhà) hoặc
- * `GET /api/v1/equipment/{id}/maintenance-tickets` (mọi vai, kể cả host — theo từng món).
+ * `GET /api/v1/equipment/{id}/maintenance-tickets` (mọi vai, kể cả owner — theo từng món).
  * KHÔNG dùng `/maintenance-history`: server trả `[]` dù có phiếu. Cả hai nguồn trả
  * `MaintenanceRequestResponse` → dùng kiểu gọn riêng ở đây, chỉ lấy trường cần hiện.
  */
@@ -47,8 +47,8 @@ export interface EquipmentTicket {
  *   'list'    — danh sách phiếu theo nhà (`GET /maintenance?propertyId=`) — ĐẦY ĐỦ. Admin/manager.
  *   'history' — tra theo từng thiết bị mà CÓ MÓN LỖI → danh sách có thể thiếu, không được
  *               kết luận "chưa từng bảo trì". Tra đủ không lỗi thì vẫn tính là 'list'.
- *               (Host không gọi được `/maintenance` — 403 — nên luôn đi đường theo thiết bị,
- *               qua `/equipment/{id}/maintenance-tickets`, endpoint này host đọc được.)
+ *               (Owner không gọi được `/maintenance` — 403 — nên luôn đi đường theo thiết bị,
+ *               qua `/equipment/{id}/maintenance-tickets`, endpoint này owner đọc được.)
  */
 export type TicketSource = 'list' | 'history';
 
@@ -137,7 +137,7 @@ export const useEquipmentTickets = (items: OperationalEquipmentResponse[] | null
           /*
            * `/maintenance-tickets` — KHÔNG phải `/maintenance-history`. Đo 03/10/2026: bản
            * history trả `[]` dù có phiếu; bản tickets trả đủ phiếu (kèm issuedInvoice) và mở
-           * cho cả OWNER (host 200) — đúng endpoint app manager đang dùng.
+           * cho cả OWNER (owner 200) — đúng endpoint app manager đang dùng.
            */
           const rows = await api.get<unknown, EquipmentTicket[]>(
             `/api/v1/equipment/${id}/maintenance-tickets`,

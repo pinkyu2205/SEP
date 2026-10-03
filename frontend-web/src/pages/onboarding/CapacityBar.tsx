@@ -37,7 +37,7 @@ const SEGMENT: Record<SlotState, { fill: string; label: string }> = {
   AVAILABLE: { fill: 'bg-emerald-500', label: 'trống' },
   // Hổ phách = đã có người chờ dọn vào.
   HAS_DRAFT: { fill: 'bg-amber-400', label: 'chờ đón khách' },
-  // Xanh dương = đang có khách, khớp `roomStatusMap` bên cổng host. KHÔNG dùng xám: xám
+  // Xanh dương = đang có khách, khớp `roomStatusMap` bên cổng owner. KHÔNG dùng xám: xám
   // đọc như hỏng/vô hiệu, trong khi phòng kín khách là tình trạng tốt nhất có thể.
   RENTED: { fill: 'bg-blue-400', label: 'đang thuê' },
   MAINTENANCE: { fill: 'bg-orange-400', label: 'bảo trì' },
@@ -236,7 +236,7 @@ export const RoomCountMismatchNote = ({ occ }: { occ: PropertyOccupancy }) => {
  * NHÀ ĐÃ HOẠT ĐỘNG NHƯNG CÒN PHÒNG KẸT `DRAFT` — lỗi phía BE, không phải việc admin quên.
  *
  * ─── Quy trình đúng ──────────────────────────────────────────────────────────
- * Host duyệt giá → nhà tự gán cho quản lý khu vực → nhà sang `ACTIVE` → **phòng tự
+ * Owner duyệt giá → nhà tự gán cho quản lý khu vực → nhà sang `ACTIVE` → **phòng tự
  * chuyển `DRAFT` → `AVAILABLE`**. Không có thao tác tay nào. BE làm đúng việc đó bằng
  * `PropertyOnboardingServiceImpl.activateDraftRoomsPerRoom`.
  *

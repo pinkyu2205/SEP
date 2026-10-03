@@ -3,9 +3,9 @@ import api from './api';
 /**
  * Admin xử lý khiếu nại hoàn cọc + cấn trừ cọc bắt buộc.
  *
- * Vì sao ADMIN chứ không phải host: cả hai thao tác đều nhắm vào chính host —
- * bác khiếu nại là bác lời tố "chưa nhận được tiền" của khách nhắm vào host, còn cấn trừ cọc
- * thì host là bên hưởng lợi. Không để một bên tự phân xử việc của mình.
+ * Vì sao ADMIN chứ không phải owner: cả hai thao tác đều nhắm vào chính owner —
+ * bác khiếu nại là bác lời tố "chưa nhận được tiền" của khách nhắm vào owner, còn cấn trừ cọc
+ * thì owner là bên hưởng lợi. Không để một bên tự phân xử việc của mình.
  * BE gác bằng `@PreAuthorize("hasRole('ADMIN')")`.
  */
 
@@ -27,7 +27,7 @@ export interface CheckoutSettlement {
   chargesSettled?: boolean;
   depositAmount?: number;
   refundDueDate?: string;
-  /** Host ghi nhận đã chuyển lúc nào. */
+  /** Owner ghi nhận đã chuyển lúc nào. */
   refundPaidAt?: string;
   refundProofUrl?: string;
   /** Khách xác nhận đã nhận đủ. */
@@ -54,7 +54,7 @@ export interface AdminCheckoutRequest {
   tenantPhone?: string;
   status: string;
   expectedMoveOutDate?: string;
-  /** Tài khoản khách khai khi gửi yêu cầu — để đối chiếu với biên lai host tải lên. */
+  /** Tài khoản khách khai khi gửi yêu cầu — để đối chiếu với biên lai owner tải lên. */
   refundBankName?: string;
   refundBankAccount?: string;
   refundAccountHolder?: string;

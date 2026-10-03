@@ -9,7 +9,7 @@ import { Icon } from './Icon';
  *
  * Mặc định hiện dạng che (`•••••••011`) để số không phơi sẵn trên màn hình (chụp/share
  * màn hình, người đứng cạnh). Bấm vào thì hiện đủ, bấm lần nữa che lại — giống nút con mắt
- * `MaskedField` bên web host/admin. Rỗng thì hiện chữ thay thế, không bấm được.
+ * `MaskedField` bên web owner/admin. Rỗng thì hiện chữ thay thế, không bấm được.
  *
  * ⚠️ Chỉ chống lộ thụ động, không phải phân quyền: dữ liệu đầy đủ vẫn nằm trong response.
  */

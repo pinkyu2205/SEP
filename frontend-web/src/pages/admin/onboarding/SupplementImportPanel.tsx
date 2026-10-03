@@ -20,6 +20,30 @@ const CONTRACT_HEADER = normalizeVi('Mã hợp đồng thuê');
 
 type Phase = 'idle' | 'validating' | 'validated' | 'importing' | 'done';
 
+/**
+ * Nhập lại đúng file của đợt vừa xong thì máy chủ báo "Phải gọi start-renovation trước (nhà
+ * ACTIVE → UNDER_RENOVATION, session ≥ 2)…" — câu cho người viết code. Thực tế là đợt bổ sung
+ * đã nhập và gửi Owner rồi; muốn cải tạo thêm thì mở một đợt mới.
+ */
+const friendlyError = (message: string): string => {
+  if (/start-renovation/i.test(message)) {
+    return 'Nhà không ở đợt cải tạo bổ sung nào đang mở — đợt trước đã nhập và gửi Owner rồi. '
+      + 'Muốn cải tạo thêm thì bấm "Bắt đầu cải tạo lại" cho nhà trước, rồi mới nhập file của đợt mới.';
+  }
+  /*
+    Lỗi của máy chủ, không phải của file (03/10/2026): bộ đọc file cải tạo bổ sung
+    (`ExcelRenovationSupplementWorkbookReader`) KHÔNG đọc cột "Giá phạt hết bảo hành (VNĐ)",
+    trong khi bước gán thiết bị bắt buộc có số đó (từ BE f69b6ea, 21/09/2026). File có điền đủ
+    cột vẫn ăn lỗi này ở bước nhập thật; kiểm tra file thì vẫn qua vì phần kiểm không xét cột đó.
+  */
+  if (/penaltyFee/i.test(message)) {
+    return 'Máy chủ chưa đọc cột "Giá phạt hết bảo hành (VNĐ)" của file cải tạo bổ sung nên không gán được '
+      + 'thiết bị mua mới — lỗi phía máy chủ, file không sai. Chưa có gì được lưu, nhà vẫn ở đợt cải tạo này; '
+      + 'BE sửa xong thì nhập lại đúng file này.';
+  }
+  return message;
+};
+
 const isExcel = (f: File) => /\.(xlsx|xls)$/i.test(f.name);
 const formatBytes = (b: number) => (b < 1024 * 1024 ? `${Math.round(b / 1024)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
@@ -46,7 +70,7 @@ const readContractRows = async (f: File): Promise<FileContractRow[]> => {
 /**
  * Import cải tạo bổ sung (session v2+) — POST /import/renovation-supplement-excel.
  * Tiên quyết: đã gọi renovation/start (nhà đang UNDER_RENOVATION). Nhập xong → BE tính lại giá +
- * gửi Host duyệt lại → PENDING_HOST_REVIEW (vì cải tạo bổ sung đổi chi phí/thiết bị nên cần host duyệt giá mới).
+ * gửi Owner duyệt lại → PENDING_HOST_REVIEW (vì cải tạo bổ sung đổi chi phí/thiết bị nên cần owner duyệt giá mới).
  * File gồm hợp đồng cải tạo (sheet 1) + thiết bị mua mới (sheet 2, có Hành động THEM_MOI/THAY_THE).
  *
  * ⚠️ CHỈ CHO NHÀ ĐANG MỞ. Cải tạo bổ sung làm theo từng nhà (bấm "Bắt đầu cải tạo lại" ở nhà nào thì
@@ -119,13 +143,15 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
         toast.success(`File hợp lệ — ${res.renovationLinesImported} dòng cải tạo · ${res.equipmentRowsImported} thiết bị`);
       } else {
         setPhase('done');
-        toast.success('Đã nhập cải tạo bổ sung — đã gửi Host duyệt lại giá');
+        toast.success('Đã nhập cải tạo bổ sung — đã gửi Owner duyệt lại giá');
       }
     } catch (err) {
       if (isBulkImportError(err)) {
         setErrors(err.errors);
-        setErrorMessage(err.errors.length ? '' : err.message);
-        toast.error(err.errors.length ? `File có ${err.errors.length} lỗi cần sửa` : err.message);
+        setErrorMessage(err.errors.length ? '' : friendlyError(err.message));
+        toast.error(err.errors.length
+          ? `File có ${err.errors.length} lỗi cần sửa`
+          : /penaltyFee/i.test(err.message) ? 'Lỗi phía máy chủ khi gán thiết bị — xem chi tiết bên dưới' : err.message);
       } else {
         setErrorMessage('Có lỗi không xác định khi xử lý file.');
         toast.error('Có lỗi không xác định khi xử lý file.');
@@ -141,7 +167,7 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-          <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo bổ sung — {result.renovationLinesImported} dòng cải tạo, {result.equipmentRowsImported} thiết bị. Đã gửi Host duyệt lại giá.
+          <CheckCircle2 className="h-4 w-4" /> Đã nhập cải tạo bổ sung — {result.renovationLinesImported} dòng cải tạo, {result.equipmentRowsImported} thiết bị. Đã gửi Owner duyệt lại giá.
         </div>
         <button onClick={() => onDone?.()}
           className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition">
@@ -160,7 +186,7 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
           </h3>
           <p className="mt-1 max-w-xl text-sm text-slate-500">
             File gồm hợp đồng cải tạo và thiết bị mua mới (THÊM_MỚI / THAY_THẾ). Nhập xong, hệ thống
-            <b className="text-slate-600"> tự động gửi Host duyệt lại giá</b> (vì đổi chi phí/thiết bị).
+            <b className="text-slate-600"> tự động gửi Owner duyệt lại giá</b> (vì đổi chi phí/thiết bị).
           </p>
           <p className="mt-1 max-w-xl text-xs text-slate-500">
             Chỉ nhập cho <b className="text-slate-700">{property.propertyName}</b>
@@ -280,7 +306,7 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
                       <td className="px-4 py-2 font-mono text-xs text-slate-500">{e.sheet}</td>
                       <td className="px-4 py-2 font-semibold text-slate-700">{e.rowNumber}</td>
                       <td className="px-4 py-2 text-slate-500">{e.field ?? '—'}</td>
-                      <td className="px-4 py-2 text-rose-600">{e.message}</td>
+                      <td className="px-4 py-2 text-rose-600">{friendlyError(e.message)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -319,7 +345,7 @@ export const SupplementImportPanel = ({ property, onDone }: { property: Property
         message={
           <>Hệ thống sẽ nhập <b className="text-slate-700">{result?.renovationLinesImported ?? 0} dòng cải tạo</b> và
           <b className="text-slate-700"> {result?.equipmentRowsImported ?? 0} thiết bị</b> từ file <b className="text-slate-700">{file?.name}</b>,
-          sau đó hoàn tất đợt cải tạo và tự động gửi Host duyệt lại giá.</>
+          sau đó hoàn tất đợt cải tạo và tự động gửi Owner duyệt lại giá.</>
         }
         confirmText="Nhập ngay"
         loading={phase === 'importing'}

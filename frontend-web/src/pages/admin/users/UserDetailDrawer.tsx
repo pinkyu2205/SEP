@@ -16,7 +16,7 @@ import { AssignmentHistoryButton } from '@/components/AssignmentHistoryPanel';
 
 /**
  * Chi tiết một tài khoản cho Admin: người này đang giữ vai gì trong hệ thống
- * (manager phụ trách khu vực nào, host có bao nhiêu nhà & ai vận hành, khách thuê ở đâu).
+ * (manager phụ trách khu vực nào, owner có bao nhiêu nhà & ai vận hành, khách thuê ở đâu).
  *
  * ⚠️ LỊCH SỬ phân công chưa có dữ liệu thật — BE chưa lưu vết
  * (xem doc/BE-NEED-zone-manager-assignment-2026-08-14.md). Nút "Xem lịch sử phân công"
@@ -240,7 +240,7 @@ export const UserDetailDrawer = ({ user, displayName, onClose, onStatusChange }:
       return contracts.filter((c) => (c.propertyId != null ? ids.has(c.propertyId) : names.has(c.propertyName)));
     }
     // BE không trả tenantUserId trên HĐ nên chỉ khớp được theo SĐT (dùng chung helper
-    // với màn Khách thuê của Host để hai nơi không lệch cách ghép).
+    // với màn Khách thuê của Owner để hai nơi không lệch cách ghép).
     if (isTenant) return contractsOfTenant(contracts, { phone: user.phoneNumber });
     return [];
   }, [isManager, isTenant, managed, contracts, user.phoneNumber]);
@@ -338,7 +338,7 @@ export const UserDetailDrawer = ({ user, displayName, onClose, onStatusChange }:
                     <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center">
                       <UserCog className="mx-auto mb-2 h-7 w-7 text-slate-300" />
                       <p className="text-sm font-bold text-slate-600">Chưa được phân công khu vực</p>
-                      <p className="mt-1 text-xs text-slate-400">Host gán tại màn Khu vực &amp; Quản lý.</p>
+                      <p className="mt-1 text-xs text-slate-400">Owner gán tại màn Khu vực &amp; Quản lý.</p>
                     </div>
                   ) : (
                     <>

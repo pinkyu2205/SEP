@@ -17,7 +17,7 @@ import { currentMonth, shiftMonth, useServerPeriod } from '@/pages/host/shared';
 /**
  * Giám sát hoá đơn & thanh toán toàn hệ thống (admin).
  *
- * Tab "Hoá đơn" dùng giao diện chung với host — `components/billing/InvoiceBoard` (làm lại
+ * Tab "Hoá đơn" dùng giao diện chung với owner — `components/billing/InvoiceBoard` (làm lại
  * 24/09/2026). Dữ liệu là hoá đơn THẬT trong bảng `tenant_invoice` qua
  * `GET /api/v1/manager/invoices`. Riêng admin có thêm khối phát mã thu hộ trong khung chi tiết.
  *

@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning,
+  AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileWarning, Info,
   Loader2, RotateCcw, Send, Upload, X, Printer,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '@/services/import.service';
@@ -50,6 +50,8 @@ export const DraftContractImportModal = ({
   const [confirmOpen, setConfirmOpen] = useState(false);
   /** Phần bị để lại ngoài lần import này — hiện lên cho admin biết, không phải để chặn. */
   const [dropped, setDropped] = useState<RowSplit | null>(null);
+  /** Số dòng máy chủ từ chối chỉ vì đã nhập ở lần trước — xem `isAgain`. */
+  const [againCount, setAgainCount] = useState(0);
 
   /**
    * Soát sức chứa NGAY KHI CHỌN FILE, chạy hoàn toàn trên trình duyệt.
@@ -142,7 +144,7 @@ export const DraftContractImportModal = ({
 
       const involved = properties.filter((p) => scan.propertyIds.includes(p.id));
       const occupancy = await loadPropertyOccupancy(involved, drafts);
-      setPreflight(await runImportPreflight(f, properties, occupancy));
+      setPreflight(await runImportPreflight(f, properties, occupancy, drafts));
     } catch {
       setPreflight(null);
     } finally {
@@ -154,13 +156,13 @@ export const DraftContractImportModal = ({
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
     setFile(f); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
-    setDropped(null);
+    setDropped(null); setAgainCount(0);
     void runPreflight(f);
   };
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
-    setDropped(null);
+    setDropped(null); setAgainCount(0);
     setPreflight(null); setPreflighting(false);
     setPrintPhase('idle'); setPrintDone(0); setPrintTotal(0); setPrintFailed([]);
     if (inputRef.current) inputRef.current.value = '';
@@ -173,6 +175,17 @@ export const DraftContractImportModal = ({
    * Trước đó FE phải tự dựng lại file Excel đã lọc rồi gửi lại nhiều vòng — cách đó đã bỏ,
    * kèm luôn cả cái bẫy làm hỏng ô ngày khi ghi lại workbook.
    */
+  /**
+   * Dòng bản soát trước nhận ra là ĐÃ NHẬP Ở LẦN TRƯỚC (khách đã có hồ sơ chờ đón ở đúng
+   * phòng). Máy chủ báo chúng là `ROOM_OCCUPIED` — "phòng đã có hợp đồng chồng lấn" — y như
+   * phòng bị người khác giữ, nên nhập lại đúng file cũ là ra một bảng đỏ "dòng sai dữ liệu,
+   * phải sửa file". Tách riêng ra: không sai gì cả, chỉ là không tạo lại.
+   */
+  const alreadyRows = new Set(
+    preflight?.groups.flatMap((g) => g.rows.filter((r) => r.code === 'ALREADY_IMPORTED').map((r) => r.excelRow)) ?? [],
+  );
+  const isAgain = (e: BulkImportError) => e.code === 'ROOM_OCCUPIED' && alreadyRows.has(e.rowNumber);
+
   const run = async (dryRun: boolean) => {
     if (!file) return;
     setPhase(dryRun ? 'validating' : 'importing');
@@ -182,14 +195,15 @@ export const DraftContractImportModal = ({
       setResult(res);
 
       // BE trả `errors` KÈM kết quả thành công — đó là các dòng bị bỏ, không phải lỗi chặn.
-      const skipped = res.errors ?? [];
+      const skipped = (res.errors ?? []).filter((e) => !isAgain(e));
+      setAgainCount((res.errors ?? []).filter(isAgain).length);
       setDropped(skipped.length > 0 ? splitErrorRows(skipped) : null);
 
       if (dryRun) {
         setPhase('validated');
         toast.success(
           skipped.length > 0
-            ? `${res.contractsProcessed} hợp đồng sẵn sàng · ${res.contractsSkipped} dòng để lại`
+            ? `${res.contractsProcessed} hợp đồng sẵn sàng · ${skipped.length} dòng để lại`
             : `File hợp lệ — ${res.contractsProcessed} hợp đồng sẵn sàng`,
         );
       } else {
@@ -202,10 +216,24 @@ export const DraftContractImportModal = ({
       if (isBulkImportError(err)) {
         // Tới đây nghĩa là KHÔNG còn dòng nào hợp lệ ("Không có dòng nào hợp lệ để import").
         // Vẫn gom theo nhà để admin biết đang kẹt ở đâu, thay vì đổ bảng lỗi thô.
-        const split = err.errors.length > 0 ? splitErrorRows(err.errors) : null;
-        setDropped(split);
+        const real = err.errors.filter((e) => !isAgain(e));
+        const again = err.errors.length - real.length;
+        setAgainCount(again);
         setResult(null);
-        setErrors(split && split.waiting.length > 0 ? [] : err.errors);
+        if (again > 0 && real.length === 0) {
+          // Cả file đã nhập rồi — không phải lỗi, không có bảng đỏ nào cả.
+          setDropped(null);
+          setErrors([]);
+          setErrorMessage('');
+          toast('File này đã được nhập trước đó — không có hợp đồng mới', {
+            icon: <Info className="h-5 w-5 shrink-0 text-sky-600" />,
+          });
+          setPhase(dryRun ? 'idle' : 'validated');
+          return;
+        }
+        const split = real.length > 0 ? splitErrorRows(real) : null;
+        setDropped(split);
+        setErrors(split && split.waiting.length > 0 ? [] : real);
         setErrorMessage(err.errors.length ? '' : err.message);
         toast.error(
           err.errors.length
@@ -286,6 +314,17 @@ export const DraftContractImportModal = ({
           {/* Soát sức chứa — hiện trước mọi kết quả từ BE vì nó có ngay, không cần bấm gì. */}
           {!!file && phase !== 'done' && (
             <ImportCapacityPanel loading={preflighting} report={preflight} />
+          )}
+
+          {/* Dòng đã nhập ở lần trước — trung tính, tách khỏi "sai dữ liệu". */}
+          {againCount > 0 && phase !== 'done' && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+              <p>
+                <b>{againCount} dòng đã được nhập trước đó</b> — khách đã có hồ sơ chờ đón ở đúng phòng, hệ thống
+                không tạo lại. {result ? 'Chỉ những dòng còn lại được nhập.' : 'Không còn dòng nào mới để nhập.'}
+              </p>
+            </div>
           )}
 
           {dropped && (dropped.waiting.length > 0 || dropped.broken.length > 0) && (

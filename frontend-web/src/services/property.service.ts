@@ -218,7 +218,7 @@ export const propertyService = {
   // =========================================================================
   // GIÁ THUÊ — niêm yết / đang áp dụng / lịch sử
   //
-  // Mô hình: `listedPrice` là giá Host duyệt (giá bán), `appliedPrice` là giá hợp đồng
+  // Mô hình: `listedPrice` là giá Owner duyệt (giá bán), `appliedPrice` là giá hợp đồng
   // đang chạy. Khách trả phòng xong thì applied quay về listed. Đơn vị nào ĐANG CÓ KHÁCH
   // thì BE khoá giá (`priceLocked = true`) — gọi PATCH sẽ bị từ chối.
   //
@@ -266,7 +266,7 @@ export const propertyService = {
   },
 
   // =========================================================================
-  // Bước 3 — Depreciation & Submit to Host
+  // Bước 3 — Depreciation & Submit to Owner
   // =========================================================================
 
   /** POST /properties/{id}/depreciation/calculate — Preview giá */
@@ -309,7 +309,7 @@ export const propertyService = {
     return api.get(`${BASE}/${id}/equipments`);
   },
 
-  /** POST /properties/{id}/submit-to-host — Admin gửi cho Host */
+  /** POST /properties/{id}/submit-to-owner — Admin gửi cho Owner */
   submitToHost: (id: number): Promise<OnboardingSummaryResponse> => {
     return api.post(`${BASE}/${id}/submit-to-host`);
   },
@@ -334,10 +334,10 @@ export const propertyService = {
   },
 
   // =========================================================================
-  // Bước 4 — Host Confirm
+  // Bước 4 — Owner Confirm
   // =========================================================================
 
-  /** GET /properties/{id}/onboarding-summary — Tổng hợp cho Host xem */
+  /** GET /properties/{id}/onboarding-summary — Tổng hợp cho Owner xem */
   getOnboardingSummary: (id: number): Promise<OnboardingSummaryResponse> => {
     return api.get(`${BASE}/${id}/onboarding-summary`);
   },

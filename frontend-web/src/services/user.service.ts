@@ -20,7 +20,7 @@ export const userService = {
    *
    * KHÔNG quay lại `/auth/register`: đó là endpoint `permitAll` — ai biết đường dẫn cũng tự
    * tạo được tài khoản. BE nay đã siết nó chỉ cho đăng ký ROLE_TENANT, nên gọi vào đó để tạo
-   * host/manager/admin sẽ bị từ chối ("Chỉ được phép đăng ký tài khoản khách thuê").
+   * owner/manager/admin sẽ bị từ chối ("Chỉ được phép đăng ký tài khoản khách thuê").
    *
    * ⚠️ Cần BE trên VPS cập nhật bản mới; bản cũ chưa có endpoint này sẽ trả 403.
    */

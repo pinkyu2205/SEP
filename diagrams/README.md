@@ -31,7 +31,7 @@ These diagrams are **grounded in the real code** (`frontend-web`/`mobile-app` se
 | `3.6-sequence-equipment.puml` | 3.3.3 Equipment Lifecycle Update |
 | `propimport-class.puml` | 3.4.1 Class Diagram — Property Import & Activation |
 | `propimport-sequence-bulk-import.puml` | 3.4.2 Bulk Import House via Excel |
-| `propimport-sequence-host-review-activation.puml` | 3.4.3 Host Reviews Pricing & Confirms Activation |
+| `propimport-sequence-owner-review-activation.puml` | 3.4.3 Owner Reviews Pricing & Confirms Activation |
 | `propimport-sequence-renovation-supplement.puml` | 3.4.4 Supplement Renovation on an Active Property |
 
 ## System Design & Database (§1–§2)

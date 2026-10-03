@@ -707,6 +707,8 @@ export const UtilityBillZipImport = ({
           {confirmOpen && (
             <ConfirmPublish
               cfg={cfg}
+              month={month}
+              year={year}
               items={readyIdx.map((i) => ({
                 name: rows[i].property.propertyName,
                 period: rows[i].draft.period,
@@ -991,8 +993,11 @@ const ZipRowCard = ({ cfg, row, ev, month, onDraft, onToggle, onReread, onRetry,
  * Nhắc lại đúng những thứ SAI THÌ KHÓ GỠ: bao nhiêu nhà, kỳ nào, nhà nào còn cảnh báo, nhà
  * nào đang theo kỳ đoán, và bao nhiêu nhà nguyên căn sẽ tới tay khách ngay.
  */
-const ConfirmPublish = ({ cfg, items, heldBack, onCancel, onConfirm }: {
+const ConfirmPublish = ({ cfg, month, year, items, heldBack, onCancel, onConfirm }: {
   cfg: KindConfig;
+  /** Tháng TIÊU THỤ — đúng tháng ghi trên hoá đơn khách nhận (điện/nước trả sau). */
+  month: number;
+  year: number;
   items: { name: string; period: string; whole: boolean; warns: string[]; guessedPeriod: boolean }[];
   heldBack: number;
   onCancel: () => void;
@@ -1019,7 +1024,10 @@ const ConfirmPublish = ({ cfg, items, heldBack, onCancel, onConfirm }: {
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="border-b border-slate-100 px-5 py-4">
           <h3 className="text-base font-black text-slate-950">Phát hành hoá đơn {cfg.noun} cho {items.length} nhà?</h3>
-          {mainPeriod && <p className="mt-0.5 text-xs font-semibold tabular-nums text-slate-500">Kỳ {mainPeriod}</p>}
+          <p className="mt-0.5 text-xs font-semibold tabular-nums text-slate-500">
+            Khách nhận "Tiền {cfg.noun} T{String(month).padStart(2, '0')}/{year}" (trả sau)
+            {mainPeriod && <> · giấy in {mainPeriod}</>}
+          </p>
         </div>
 
         <div className="max-h-[46vh] space-y-3 overflow-y-auto px-5 py-4">
@@ -1049,8 +1057,8 @@ const ConfirmPublish = ({ cfg, items, heldBack, onCancel, onConfirm }: {
           )}
           {guessed.length > 0 && (
             <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-              <b>{guessed.length} nhà theo kỳ chung</b> vì không đọc được kỳ trên giấy. Kỳ là khoá để quản lý đối chiếu —
-              sai thì phải thu hồi hoá đơn.
+              <b>{guessed.length} nhà không đọc được kỳ trên giấy</b> nên chưa đối chiếu được ảnh có đúng hoá đơn
+              tháng {month}/{year} không. Soi lại ảnh — gửi nhầm tờ của tháng khác thì phải thu hồi hoá đơn.
             </p>
           )}
           {wholeCount > 0 && (

@@ -2,14 +2,18 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Download, FileArchive, FileSpreadsheet, FileWarning,
+  AlertTriangle, ArrowRight, CheckCircle2, Download, FileArchive, FileSpreadsheet, FileWarning, Info,
   Loader2, MapPin, RotateCcw, Trash2, Upload, X,
 } from 'lucide-react';
 import { importService, isBulkImportError } from '@/services/import.service';
 import { zoneService } from '@/services/zone.service';
+import { propertyService } from '@/services/property.service';
 import type { BulkImportError, BulkImportResponse, BulkImportImagesResponse } from '@/types/api.types';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { inspectZipImages, type ZipImagePreview } from '@/utils/zipImageInspect';
+import {
+  describeChanges, diffExisting, readLeaseRows, willTouch, type ExistingLease,
+} from './leaseReimport';
 
 const TEMPLATE_URL = '/templates/SLMS2026_import_matrix_dot1.xlsx';
 const ACCEPT = '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -93,6 +97,12 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
   const [zipCheckError, setZipCheckError] = useState('');
   const [zipResult, setZipResult] = useState<BulkImportImagesResponse | null>(null);
 
+  /**
+   * Căn ĐÃ CÓ trong hệ thống mà file nhắc lại, kèm mã KH sẽ đổi — xem `leaseReimport.ts`.
+   * `null` = file không có căn nào trùng, hoặc không đọc/so được (khi đó không kết luận gì).
+   */
+  const [existing, setExisting] = useState<ExistingLease[] | null>(null);
+
   const resetZip = () => {
     setZipFile(null); setZipPreview(null); setZipCheckError(''); setZipResult(null);
     if (zipInputRef.current) zipInputRef.current.value = '';
@@ -104,13 +114,27 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
     if (!f) return;
     if (!isExcel(f)) { toast.error('Chỉ chấp nhận file Excel (.xlsx hoặc .xls)'); return; }
     setFile(f); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
+    setExisting(null);
     resetZip(); resetZones();
   };
 
   const resetAll = () => {
     setFile(null); setPhase('idle'); setResult(null); setErrors([]); setErrorMessage('');
+    setExisting(null);
     if (inputRef.current) inputRef.current.value = '';
     resetZip(); resetZones();
+  };
+
+  /** Đối chiếu căn đã có: đọc file + hồ sơ nhà. Lỗi thì bỏ qua — chỉ là lớp giải thích thêm. */
+  const loadExisting = async (f: File, res: BulkImportResponse): Promise<ExistingLease[] | null> => {
+    const codes = new Set(res.results.filter((r) => r.importStatus !== 'IMPORTED').map((r) => r.contractCode));
+    if (codes.size === 0) return null;
+    try {
+      const [rows, properties] = await Promise.all([readLeaseRows(f), propertyService.getAllProperties()]);
+      return diffExisting(rows, codes, properties ?? []);
+    } catch {
+      return null;
+    }
   };
 
   const pickZip = (f: File | null | undefined) => {
@@ -126,9 +150,19 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
     setPhase('validating'); setErrors([]); setErrorMessage(''); setZipPreview(null); resetZones();
     try {
       const res = await importService.importLeaseExcel(file, true);
+      const ex = await loadExisting(file, res);
       setResult(res);
+      setExisting(ex);
       setPhase('validated');
-      toast.success(`File hợp lệ — ${res.contractsProcessed} căn sẵn sàng nhập`);
+      const touch = ex?.filter(willTouch).length ?? 0;
+      if (res.contractsProcessed > 0) {
+        toast.success(`File hợp lệ — ${res.contractsProcessed} căn mới sẵn sàng nhập`);
+      } else if (touch > 0) {
+        toast(`Mọi căn đã có trong hệ thống — ${touch} căn có mã KH điện/nước khác hồ sơ`, { icon: <Info className="h-5 w-5 shrink-0 text-sky-600" /> });
+      } else {
+        // Không phải "thành công": không có gì mới để nhập. Nói thẳng thay vì toast xanh "0 căn".
+        toast('File này đã được nhập trước đó — không có căn mới', { icon: <Info className="h-5 w-5 shrink-0 text-sky-600" /> });
+      }
     } catch (err) {
       if (isBulkImportError(err)) {
         setErrors(err.errors);
@@ -191,6 +225,7 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
         // 3) Kiểm tra lại file
         try {
           const res = await importService.importLeaseExcel(file, true);
+          setExisting(await loadExisting(file, res));
           setResult(res); setErrors([]); setErrorMessage('');
           setMissingZones({ cities: [], districts: [] });
           setPhase('validated');
@@ -244,18 +279,27 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
     if (!file) return;
     setPhase('importing'); setErrors([]); setErrorMessage('');
     try {
-      const res = await importService.importLeaseExcel(file, false);
+      /*
+        Không có căn mới, không đổi mã nào → bỏ hẳn lệnh nhập Excel, chỉ gắn ảnh. Gọi cũng vô
+        hại (máy chủ ghi đè mã bằng chính mã cũ) nhưng sẽ về một bảng "Cập nhật mã KH" cho
+        những căn chẳng có gì thay đổi.
+      */
+      const res = newCount > 0 || touchCount > 0
+        ? await importService.importLeaseExcel(file, false)
+        : result!;
       setResult(res);
+      let attached: number | null = null;
       if (zipFile) {
         try {
           const zr = await importService.importPropertyImagesZip(zipFile, false);
           setZipResult(zr);
+          attached = zr.imagesAttached;
         } catch (zerr) {
           toast.error(isBulkImportError(zerr) ? zerr.message : 'Nhập nhà OK nhưng gắn ảnh lỗi.');
         }
       }
       setPhase('done');
-      toast.success(`Đã nhập ${res.contractsProcessed} căn nhà`);
+      toast.success(doneSummary(res.contractsProcessed, touchCount, attached));
       onImported?.();
     } catch (err) {
       if (isBulkImportError(err)) {
@@ -288,7 +332,39 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
   const busy = phase === 'validating' || phase === 'importing';
   const validOk = (phase === 'validated' || phase === 'importing') && !!result && errors.length === 0 && result.errors.length === 0 && !errorMessage;
   const zipReady = !zipFile || !!zipPreview;            // chưa kèm zip thì coi như sẵn sàng
-  const canImport = validOk && zipReady && !busy;
+
+  /** Căn MỚI sẽ được tạo. */
+  const newCount = result?.contractsProcessed ?? 0;
+  /** Căn đã có mà lần nhập này sẽ đổi mã KH (hoặc không so được hồ sơ). */
+  const touchCount = existing?.filter(willTouch).length ?? 0;
+  /**
+   * Số căn đã có. Không đọc được file để so thì `existing = null` — khi đó KHÔNG kết luận
+   * "không có gì để làm" (có thể file đang đổi mã), cứ để admin nhập như trước.
+   */
+  const existingCount = result?.contractsSkipped ?? 0;
+  const zipImages = zipPreview?.totalImages ?? 0;
+  /** File chỉ nhắc lại căn đã có, mã không đổi, không kèm ảnh → nhập lần nữa chẳng làm gì. */
+  const nothingToDo = validOk && newCount === 0 && existing !== null && touchCount === 0 && !zipFile;
+  const canImport = validOk && zipReady && !busy && !nothingToDo;
+
+  const doneSummary = (created: number, codes: number, images: number | null) => [
+    created > 0 ? `Đã tạo ${created} căn mới` : 'Không tạo căn mới',
+    codes > 0 && `cập nhật mã KH cho ${codes} căn`,
+    images != null && `gắn ${images} ảnh`,
+  ].filter(Boolean).join(' · ');
+
+  const existingOf = (code: string) => existing?.find((e) => e.contractCode === code);
+
+  /** Nhãn nút + câu xác nhận theo đúng việc sẽ làm, không phải lúc nào cũng "tạo N căn". */
+  const actionParts = [
+    newCount > 0 && `tạo ${newCount} căn mới`,
+    touchCount > 0 && `cập nhật mã KH điện/nước cho ${touchCount} căn đã có`,
+    zipFile && `gắn ${zipImages} ảnh`,
+  ].filter(Boolean) as string[];
+  const importLabel = newCount > 0
+    ? `Nhập ${newCount} căn`
+    : touchCount > 0 ? `Cập nhật mã KH ${touchCount} căn`
+      : zipFile ? 'Gắn ảnh' : 'Không có gì để nhập';
 
   return (
     <div className="space-y-5">
@@ -393,10 +469,16 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
 
         {phase !== 'done' && (
           <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-            {validOk && (
+            {validOk && newCount > 0 && (
               <p className="mr-auto flex items-center gap-1.5 text-sm font-semibold text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {result!.contractsProcessed} căn · {result!.equipmentRowsImported} thiết bị bàn giao
-                {result!.contractsSkipped > 0 && ` · ${result!.contractsSkipped} bỏ qua`}
+                <CheckCircle2 className="h-4 w-4" /> File hợp lệ — {newCount} căn mới · {result!.equipmentRowsImported} thiết bị bàn giao
+                {existingCount > 0 && ` · ${existingCount} căn đã có`}
+              </p>
+            )}
+            {validOk && newCount === 0 && (
+              <p className="mr-auto flex items-center gap-1.5 text-sm font-semibold text-sky-700">
+                <Info className="h-4 w-4" /> Cả {existingCount} căn trong file đã có trong hệ thống
+                {existing && (touchCount > 0 ? ` · ${touchCount} căn đổi mã KH` : ' · mã KH không đổi')}
               </p>
             )}
             <button
@@ -407,6 +489,32 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
                 ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang kiểm tra...</>
                 : <><CheckCircle2 className="h-4 w-4" /> {validOk ? 'Kiểm tra lại' : 'Kiểm tra file'}</>}
             </button>
+          </div>
+        )}
+
+        {/* Căn đã có: nói rõ lần nhập này làm gì với từng căn, thay cho một chữ "bỏ qua". */}
+        {validOk && existing && existing.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-2.5">
+              <p className="text-sm font-semibold text-slate-700">
+                {existing.length} căn đã có trong hệ thống — không tạo lại
+              </p>
+              <p className="text-xs text-slate-500">
+                {touchCount > 0 ? `${touchCount} căn sẽ đổi mã KH điện/nước` : 'Mã KH điện/nước không đổi'}
+              </p>
+            </div>
+            <ul className="max-h-60 divide-y divide-slate-100 overflow-auto text-sm">
+              {existing.map((e) => (
+                <li key={e.contractCode} className="flex items-center gap-3 px-4 py-2">
+                  <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{e.propertyName || e.contractCode}</span>
+                  <span className={`shrink-0 text-xs ${e.changes.length ? 'font-semibold text-indigo-700' : 'text-slate-400'}`}>
+                    {e.changes.length > 0
+                      ? describeChanges(e.changes)
+                      : e.unknown ? 'Không dò được hồ sơ — sẽ ghi mã KH trong file' : 'Không đổi gì'}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </div>
@@ -487,9 +595,10 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
               <p className="mt-0.5 text-xs text-slate-500">
                 {!zipReady
                   ? 'Bạn đã đính kèm ảnh — hãy bấm “Kiểm tra ảnh” ở bước 2 trước khi nhập.'
-                  : zipFile
-                    ? <>Tạo <b>{result!.contractsProcessed} căn</b> và gắn <b>{zipPreview?.totalImages ?? 0} ảnh</b>.</>
-                    : <>Tạo <b>{result!.contractsProcessed} căn</b> vào hệ thống.</>}
+                  : nothingToDo
+                    ? <>File này đã được nhập trước đó, <b>không còn gì để nhập</b>. Muốn đổi mã KH điện/nước thì sửa
+                        cột mã trong file rồi kiểm tra lại; muốn thay ảnh thì đính kèm .zip ở bước 2.</>
+                    : <>Sẽ {actionParts.join(', ')}.</>}
               </p>
             </div>
           </div>
@@ -499,7 +608,7 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
             className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-7 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none transition">
             {phase === 'importing'
               ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang nhập...</>
-              : <><Upload className="h-4 w-4" /> Nhập {result!.contractsProcessed} căn</>}
+              : <><Upload className="h-4 w-4" /> {importLabel}</>}
           </button>
         </div>
       )}
@@ -508,9 +617,8 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
       {phase === 'done' && result && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
-            <CheckCircle2 className="h-4 w-4" /> Đã nhập {result.contractsProcessed} căn nhà
-            {result.contractsSkipped > 0 && ` · ${result.contractsSkipped} bỏ qua`}
-            {zipResult && ` · gắn ${zipResult.imagesAttached} ảnh`} — sang Cấu hình khai thác để nhập cải tạo.
+            <CheckCircle2 className="h-4 w-4" /> {doneSummary(result.contractsProcessed, touchCount, zipResult?.imagesAttached ?? null)}
+            {result.contractsProcessed > 0 && ' — sang Cấu hình khai thác để nhập cải tạo.'}
           </div>
 
           {result.results.length > 0 && (
@@ -522,13 +630,17 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
                 <tbody>
                   {result.results.map((r) => (
                     <tr key={r.contractCode} className="border-t border-slate-100">
-                      <td className="px-4 py-3 font-semibold text-slate-800">{r.propertyName ?? '—'}</td>
+                      {/* Máy chủ không trả tên nhà cho căn bỏ qua — lấy tên đọc từ file. */}
+                      <td className="px-4 py-3 font-semibold text-slate-800">{r.propertyName ?? existingOf(r.contractCode)?.propertyName ?? '—'}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{r.contractCode}</td>
                       <td className="px-4 py-3">
-                        {r.importStatus === 'SKIPPED' ? (
-                          <span title={r.message ?? ''} className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Bỏ qua</span>
+                        {r.importStatus === 'IMPORTED' ? (
+                          <span className="whitespace-nowrap rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700">Đã khởi tạo</span>
+                        ) : existingOf(r.contractCode)?.changes.length ? (
+                          <span className="whitespace-nowrap rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">Đổi mã KH</span>
                         ) : (
-                          <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700">Đã khởi tạo</span>
+                          /* CODES_UPDATED mà mã y hệt cũng về đây — máy chủ ghi đè chứ có đổi gì đâu. */
+                          <span title={r.message ?? ''} className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">Đã có sẵn</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
@@ -544,7 +656,11 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
                             </button>
                           </div>
                         ) : (
-                          <p className="text-right text-xs text-slate-400">{r.message ?? '—'}</p>
+                          <p className="text-right text-xs text-slate-400">
+                            {existingOf(r.contractCode)
+                              ? (describeChanges(existingOf(r.contractCode)!.changes) || 'Đã có trong hệ thống — không đổi gì')
+                              : r.message ?? '—'}
+                          </p>
                         )}
                       </td>
                     </tr>
@@ -572,9 +688,9 @@ export const LeaseImportPanel = ({ onImported }: { onImported?: () => void }) =>
         tone="primary"
         title="Xác nhận nhập dữ liệu?"
         message={
-          <>Hệ thống sẽ tạo <b className="text-slate-700">{result?.contractsProcessed ?? 0} căn nhà</b> từ
-          file <b className="text-slate-700">{file?.name}</b>
-          {zipFile && <> và gắn <b className="text-slate-700">{zipPreview?.totalImages ?? 0} ảnh</b> theo mã hợp đồng</>}.
+          <>Hệ thống sẽ <b className="text-slate-700">{actionParts.join(', ')}</b> từ
+          file <b className="text-slate-700">{file?.name}</b>.
+          {existingCount > touchCount && <> {existingCount - touchCount} căn đã có, không đổi gì — giữ nguyên.</>}
           {' '}Thao tác này ghi trực tiếp vào hệ thống.</>
         }
         confirmText="Nhập ngay"

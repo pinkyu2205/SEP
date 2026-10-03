@@ -1,12 +1,12 @@
 /**
- * Bộ phận dùng chung cho 3 module tài chính của Host:
+ * Bộ phận dùng chung cho 3 module tài chính của Owner:
  *   • Quản lý tài chính  (/host/finance)
  *   • Công nợ phải thu   (/host/receivables)
  *   • Sổ cọc             (/host/deposits)
  *
  * Mục tiêu: 3 trang cùng một bố cục lọc — thanh tìm kiếm (bỏ dấu) → chip trạng thái
  * → select thu hẹp → select sắp xếp → phân trang, và MẶC ĐỊNH luôn xếp bản ghi mới
- * nhất lên đầu để Host mở trang là thấy ngay cái vừa phát sinh.
+ * nhất lên đầu để Owner mở trang là thấy ngay cái vừa phát sinh.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw, Search, X, type LucideIcon } from 'lucide-react';
@@ -15,7 +15,7 @@ import { currentMonth, shiftMonth } from '@/utils/period';
 import { isServerTimeSynced } from '@/utils/serverTime';
 
 // Helper kỳ/ngày nằm ở @/utils/period vì Admin cũng dùng; re-export để các trang
-// host chỉ cần import từ một chỗ.
+// owner chỉ cần import từ một chỗ.
 export {
   currentMonth, cmpIsoDesc, daysSince, fmtDate, fmtDateTime, fmtMillion,
   monthLabel, monthShort, safePct, shiftMonth, ymOf,
@@ -58,16 +58,16 @@ export const SearchBox = ({
  * ─── Vì sao không chỉ `useState(currentMonth)` ───────────────────────────────
  * Giờ server suy ra từ header `Date` của response HTTP, mà lúc component render lần
  * đầu thì thường CHƯA có response nào — `currentMonth()` khi đó rơi về đồng hồ máy.
- * Máy lệch 2 tháng là host mở trang ra đã đứng sẵn ở tháng 8 trong khi hệ thống đang
+ * Máy lệch 2 tháng là owner mở trang ra đã đứng sẵn ở tháng 8 trong khi hệ thống đang
  * ở tháng 10, và không có gì báo cho họ biết.
  *
- * Nên: chờ tới lúc bắt được giờ server rồi nhảy về đúng kỳ — nhưng CHỈ khi host chưa
+ * Nên: chờ tới lúc bắt được giờ server rồi nhảy về đúng kỳ — nhưng CHỈ khi owner chưa
  * tự đổi kỳ. Họ chủ động lùi về tháng cũ để xem lại mà bị kéo về tháng hiện tại thì
  * còn khó chịu hơn hẳn.
  */
 export const useServerPeriod = (): [string, (ym: string) => void] => {
   const [period, setPeriodRaw] = useState(currentMonth);
-  /** Host đã tự chọn kỳ chưa — đã chọn thì không tự động kéo đi đâu nữa. */
+  /** Owner đã tự chọn kỳ chưa — đã chọn thì không tự động kéo đi đâu nữa. */
   const touched = useRef(false);
 
   useEffect(() => {
@@ -101,7 +101,7 @@ export const useServerPeriod = (): [string, (ym: string) => void] => {
  * Trước 30/08/2026 chỗ này dùng một hằng số đọc đồng hồ MÁY (tính lúc nạp
  * module). Máy lệch chậm 2 tháng so với server là trần đứng ở tháng 8 trong khi hệ
  * thống đã sang tháng 10 — mọi kỳ từ tháng 8 trở đi đều bị coi là "đã ở kỳ mới nhất",
- * nút "kỳ sau" tắt vĩnh viễn: host lùi về tháng trước rồi KHÔNG quay lại được.
+ * nút "kỳ sau" tắt vĩnh viễn: owner lùi về tháng trước rồi KHÔNG quay lại được.
  */
 export const MonthPicker = ({
   value, onChange, max = currentMonth(),

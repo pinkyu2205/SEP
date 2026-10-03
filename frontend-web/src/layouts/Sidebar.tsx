@@ -8,17 +8,17 @@ import { useLocation } from 'react-router-dom';
 import { useUnreadNotifications } from '@/contexts/UnreadNotificationsContext';
 import { useWebAuth } from '@/auth/WebAuthContext';
 import { extensionRequestService } from '@/services/extensionRequest.service';
-import { hostService } from '@/services/host.service';
+import { loadHostReceivables } from '@/services/hostReceivables';
 import { currentMonth } from '@/utils/period';
 import { AppSidebar, type SidebarNavItem, type SidebarSection } from './AppSidebar';
 
 /**
- * Sidebar Cổng Host — chỉ khai báo menu, phần hiển thị dùng chung AppSidebar
+ * Sidebar Cổng Owner — chỉ khai báo menu, phần hiển thị dùng chung AppSidebar
  * (xem layouts/AppSidebar.tsx) để đồng bộ với Admin Portal.
  */
 
-/** Mục chỉ dành cho ROLE_OWNER; admin xem cổng host thì ẩn đi. */
-const HOST_ONLY = new Set(['/host/billing', '/host/receivables', '/host/deposits']);
+/** Mục chỉ dành cho ROLE_OWNER; admin xem cổng owner thì ẩn đi. */
+const HOST_ONLY = new Set(['/owner/billing', '/owner/receivables', '/owner/deposits']);
 
 /**
  * ─── Vì sao gom lại như dưới đây (30/08/2026) ────────────────────────────────
@@ -29,7 +29,7 @@ const HOST_ONLY = new Set(['/host/billing', '/host/receivables', '/host/deposits
  *     hợp đồng). Tiêu đề nhóm tồn tại để PHÂN LOẠI; đặt trên đúng một dòng thì nó chỉ
  *     tốn chỗ. Nay Bảng điều hành đứng riêng KHÔNG tiêu đề, hợp đồng nhập vào Vận hành.
  *
- *  2. CHỮ "QUẢN LÝ" LẶP 4 LẦN trong một cổng đã tên là "Cổng Quản lý Host" — không
+ *  2. CHỮ "QUẢN LÝ" LẶP 4 LẦN trong một cổng đã tên là "Cổng Quản lý Owner" — không
  *     phân biệt được gì. Nặng nhất là "Khu vực & Quản lý" nằm ngay trên "Quản lý vận
  *     hành": hai NGHĨA khác nhau của cùng một từ, đọc liền nhau. Nay khu vực đổi thành
  *     "Phân công khu vực" (nói đúng việc trang đó làm: gán quản lý cho quận/huyện).
@@ -46,60 +46,60 @@ const HOST_ONLY = new Set(['/host/billing', '/host/receivables', '/host/deposits
 const SECTIONS: SidebarSection[] = [
   {
     // Không tiêu đề — xem điểm 1 ở trên.
-    items: [{ label: 'Bảng điều hành', path: '/host', icon: LayoutDashboard, end: true }],
+    items: [{ label: 'Bảng điều hành', path: '/owner', icon: LayoutDashboard, end: true }],
   },
   {
     label: 'Vận hành',
     items: [
-      { label: 'Bất động sản', path: '/host/properties', icon: Building2 },
-      { label: 'Khách thuê', path: '/host/tenants', icon: Users },
-      { label: 'Hợp đồng', path: '/host/contracts', icon: FileText },
-      // Đơn gia hạn: host CHỈ XEM — quản trị viên duyệt. Đặt cạnh "Hợp đồng" vì cùng một
-      // hồ sơ, và host cần thấy để còn chủ động gia hạn hợp đồng với chủ nhà.
-      { label: 'Đơn gia hạn', path: '/host/extension-requests', icon: CalendarPlus },
+      { label: 'Bất động sản', path: '/owner/properties', icon: Building2 },
+      { label: 'Khách thuê', path: '/owner/tenants', icon: Users },
+      { label: 'Hợp đồng', path: '/owner/contracts', icon: FileText },
+      // Đơn gia hạn: owner CHỈ XEM — quản trị viên duyệt. Đặt cạnh "Hợp đồng" vì cùng một
+      // hồ sơ, và owner cần thấy để còn chủ động gia hạn hợp đồng với chủ nhà.
+      { label: 'Đơn gia hạn', path: '/owner/extension-requests', icon: CalendarPlus },
     ],
   },
   {
     label: 'Nhân sự',
     items: [
-      { label: 'Quản lý vận hành', path: '/host/operations-managers', icon: UserCog },
-      { label: 'Phân công khu vực', path: '/host/zones', icon: MapPin },
-      { label: 'Lương quản lý', path: '/host/manager-salaries', icon: Banknote },
+      { label: 'Quản lý vận hành', path: '/owner/operations-managers', icon: UserCog },
+      { label: 'Phân công khu vực', path: '/owner/zones', icon: MapPin },
+      { label: 'Lương quản lý', path: '/owner/manager-salaries', icon: Banknote },
     ],
   },
   // ẨN NHÓM "GIÁM SÁT" (18/08/2026) — nhóm này chỉ còn mỗi "Giám sát bảo trì", mà
   // trang đó gọi API bảo trì thì BE trả "Access Denied — kiểm tra lại Role hoặc Vùng
-  // quản lý địa lý": endpoint chưa mở cho ROLE_OWNER. Kết quả là host bấm vào chỉ thấy
+  // quản lý địa lý": endpoint chưa mở cho ROLE_OWNER. Kết quả là owner bấm vào chỉ thấy
   // 4 toast lỗi đỏ và bảng rỗng. Giữ một mục luôn hỏng trong menu còn tệ hơn là không
-  // có nó. Route `/host/maintenance` vẫn còn — mở lại menu là dùng được ngay khi BE
-  // cho host vào. (Trước đó nhóm này còn "Thiết bị & Mã QR", đã xoá cùng module
+  // có nó. Route `/owner/maintenance` vẫn còn — mở lại menu là dùng được ngay khi BE
+  // cho owner vào. (Trước đó nhóm này còn "Thiết bị & Mã QR", đã xoá cùng module
   // pages/host/equipments.)
   {
     label: 'Tài chính',
     items: [
-      { label: 'Tổng quan', path: '/host/financial', icon: DollarSign },
-      { label: 'Hoá đơn', path: '/host/billing', icon: CreditCard },
-      { label: 'Công nợ', path: '/host/receivables', icon: Coins },
-      { label: 'Sổ cọc', path: '/host/deposits', icon: PiggyBank },
-      { label: 'Báo cáo', path: '/host/reports', icon: BarChart3 },
+      { label: 'Tổng quan', path: '/owner/financial', icon: DollarSign },
+      { label: 'Hoá đơn', path: '/owner/billing', icon: CreditCard },
+      { label: 'Công nợ', path: '/owner/receivables', icon: Coins },
+      { label: 'Sổ cọc', path: '/owner/deposits', icon: PiggyBank },
+      { label: 'Báo cáo', path: '/owner/reports', icon: BarChart3 },
     ],
   },
   {
     label: 'Hệ thống',
     items: [
-      { label: 'Cấu hình giá', path: '/host/pricing-config', icon: SlidersHorizontal },
-      { label: 'Thông báo', path: '/host/notifications', icon: Bell },
-      { label: 'Cài đặt', path: '/host/settings', icon: Settings },
+      { label: 'Cấu hình giá', path: '/owner/pricing-config', icon: SlidersHorizontal },
+      { label: 'Thông báo', path: '/owner/notifications', icon: Bell },
+      { label: 'Cài đặt', path: '/owner/settings', icon: Settings },
     ],
   },
 ];
 
 /**
- * Số việc cần host để mắt tới, đếm từ đúng API của trang tương ứng — số trên menu phải
- * bằng số dòng host thấy khi bấm vào.
+ * Số việc cần owner để mắt tới, đếm từ đúng API của trang tương ứng — số trên menu phải
+ * bằng số dòng owner thấy khi bấm vào.
  */
 interface HostBadgeCounts {
-  /** Đơn gia hạn PENDING (host chỉ xem, nhưng cần biết để gia hạn HĐ gốc kịp). */
+  /** Đơn gia hạn PENDING (owner chỉ xem, nhưng cần biết để gia hạn HĐ gốc kịp). */
   extensionPending: number;
   /** Hoá đơn kỳ này CHƯA THU (UNPAID + OVERDUE) — cùng nguồn trang Công nợ. */
   debtOpen: number;
@@ -122,7 +122,7 @@ export const Sidebar = () => {
 
   /**
    * Mỗi nguồn độc lập (`allSettled`): một API lỗi thì giữ số cũ của mục đó, không gắn
-   * số sai. Công nợ chỉ đếm khi là host thật — admin xem cổng host không thấy mục này.
+   * số sai. Công nợ chỉ đếm khi là owner thật — admin xem cổng owner không thấy mục này.
    */
   const refreshCounts = useCallback(async () => {
     // TUẦN TỰ, không song song: `currentMonth()` đọc giờ SERVER, mà giờ đó chỉ đồng bộ
@@ -130,7 +130,8 @@ export const Sidebar = () => {
     // (VD 2026-09 trong khi server đã sang 2026-10) → đếm nhầm kỳ, badge lệch trang.
     const [ext] = await Promise.allSettled([extensionRequestService.list('PENDING')]);
     const [inv] = await Promise.allSettled([
-      isHost ? hostService.getInvoices({ month: currentMonth(), size: 500 }) : Promise.reject(new Error('skip')),
+      // Hoá đơn thật (lùi về nguồn dựng sẵn) — cùng nguồn với trang Công nợ, xem services/hostReceivables.
+      isHost ? loadHostReceivables(currentMonth()) : Promise.reject(new Error('skip')),
     ]);
     setCounts(prev => {
       const next = { ...prev };
@@ -138,7 +139,7 @@ export const Sidebar = () => {
         next.extensionPending = ext.value.filter(r => r.status === 'PENDING').length;
       }
       if (inv.status === 'fulfilled') {
-        const open = (inv.value?.content ?? []).filter(i => i.status !== 'PAID');
+        const open = inv.value.rows.filter(i => i.status !== 'PAID');
         next.debtOpen = open.length;
         next.debtOverdue = open.filter(i => i.status === 'OVERDUE').length;
       }
@@ -155,9 +156,9 @@ export const Sidebar = () => {
   const withBadge = (item: SidebarNavItem): SidebarNavItem => {
     switch (item.path) {
       // Badge thông báo lấy từ số chưa đọc THẬT của tài khoản đang đăng nhập.
-      case '/host/notifications':
+      case '/owner/notifications':
         return { ...item, badge: unread || undefined, badgeAlert: true };
-      case '/host/extension-requests':
+      case '/owner/extension-requests':
         return {
           ...item,
           badge: counts.extensionPending || undefined,
@@ -166,7 +167,7 @@ export const Sidebar = () => {
         };
       // Công nợ: có quá hạn → ĐỎ nhấp nháy, đếm số quá hạn (việc phải xử ngay);
       // chỉ còn nợ chưa tới hạn → vàng, đếm số hoá đơn chưa thu.
-      case '/host/receivables':
+      case '/owner/receivables':
         return counts.debtOverdue > 0
           ? {
               ...item,
@@ -197,10 +198,10 @@ export const Sidebar = () => {
       <AppSidebar
         accent="green"
         storageKey="hbl_sidebar_host"
-        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Host' }}
+        brand={{ title: 'Hoàng Bình Land', subtitle: 'Cổng Quản lý Owner' }}
         sections={sections}
         user={{
-          name: user?.fullName || 'Host',
+          name: user?.fullName || 'Owner',
           subtitle: user?.username ? `@${user.username}` : undefined,
           initials: initialsOf(user?.fullName),
         }}

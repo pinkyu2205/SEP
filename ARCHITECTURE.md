@@ -1,7 +1,7 @@
 # Kiến trúc source — tổ chức theo Role
 
 Toàn bộ source được sắp xếp theo **role người dùng** để nhìn vào là biết code nào phục vụ ai.
-5 role: **admin** (quản trị hệ thống) · **host** (chủ nhà) · **manager** (quản lý vận hành) ·
+5 role: **admin** (quản trị hệ thống) · **owner** (chủ nhà) · **manager** (quản lý vận hành) ·
 **tenant** (khách thuê) · **guest** (khách vãng lai / public website).
 
 > Quy ước chung: tên file/thư mục **tiếng Anh**, text UI tiếng Việt.
@@ -11,7 +11,7 @@ Toàn bộ source được sắp xếp theo **role người dùng** để nhìn 
 
 ## 1) `frontend-web/` — Web quản trị + Public website (React + Vite)
 
-Roles trên web: **admin**, **host**, **guest**. (manager & tenant vận hành trên mobile.)
+Roles trên web: **admin**, **owner**, **guest**. (manager & tenant vận hành trên mobile.)
 
 ```
 src/pages/
@@ -23,22 +23,22 @@ src/pages/
     properties/wizard/   wizard khởi tạo nhà
     zones/               quản lý khu vực
     (Overview, UserRoleManagement, HostManagement, *Monitoring, SystemConfiguration, ...)
-  host/       → HOST    — chủ nhà vận hành tài sản của mình
+  host/       → OWNER   — chủ nhà vận hành tài sản của mình
     HostDashboard.tsx · PropertyReview.tsx
     properties/ contracts/ tenants/ managers/ maintenance/
     equipments/ finance/ reports/ notifications/
-  zones/      → DÙNG CHUNG admin + host — "Khu vực & Quản lý" (ZoneOverview)
+  zones/      → DÙNG CHUNG admin + owner — "Khu vực & Quản lý" (ZoneOverview)
 ```
 
 - **`pages/zones/`** là màn dùng chung: cùng dữ liệu, chỉ khác câu chữ theo vai
-  (`<ZoneOverview audience="admin" | "host" />`, route `/admin/zones/assignment` và `/host/zones`).
+  (`<ZoneOverview audience="admin" | "host" />`, route `/admin/zones/assignment` và `/owner/zones`).
   Nghiệp vụ: **một quận/huyện chỉ có MỘT quản lý vận hành**, gán cho khu vực là gán cho mọi
   nhà bên trong — không còn gán quản lý cho từng căn.
 
-- **Routing** (`src/App.tsx`): `/` = public, `/login` = auth, `/admin/*` = admin, `/host/*` = host.
+- **Routing** (`src/App.tsx`): `/` = public, `/login` = auth, `/admin/*` = admin, `/owner/*` = owner.
   URL không đổi khi refactor — chỉ vị trí file thay đổi.
 - **Layout** theo role: `PublicLayout` · `AuthLayout` · `AdminLayout` · `HostLayout`.
-- **Services** (`src/services/`) là các module **domain dùng chung** giữa admin & host, đặt tên thống nhất
+- **Services** (`src/services/`) là các module **domain dùng chung** giữa admin & owner, đặt tên thống nhất
   `*.service.ts` (vd `property.service.ts`, `host.service.ts`, `admin.service.ts`).
   Service riêng cho public: `public-property.service.ts`, `contact.service.ts`. Client lõi: `api.ts`.
 

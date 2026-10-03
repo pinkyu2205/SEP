@@ -115,12 +115,12 @@ The Sub-leasing Management System (SLMS-2026) has 5 main workflows below:
 - Maintenance & Equipment Management Workflow
 - Cash Flow & Financial Reporting Workflow
 
-Each workflow is executed on two clients. The **web application** is used by the Admin and the Host, and the **mobile application** is used by the operations Manager and the Tenant. The sections below are therefore split into "Web" and "Mobile" the same way the work itself is split.
+Each workflow is executed on two clients. The **web application** is used by the Admin and the Owner, and the **mobile application** is used by the operations Manager and the Tenant. The sections below are therefore split into "Web" and "Mobile" the same way the work itself is split.
 
 | Role    | Client       | Responsibility                                                                                              |
 | ------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
 | Admin   | Web          | Property intake, operation configuration, tenant onboarding, utility bill publishing, complaint arbitration |
-| Host    | Web          | Price approval, zone assignment, financial monitoring                                                       |
+| Owner    | Web          | Price approval, zone assignment, financial monitoring                                                       |
 | Manager | Mobile       | Taking over buildings, receiving tenants, meter readings, room invoices, maintenance, checkout              |
 | Tenant  | Mobile       | Signing the contract, paying invoices, reporting faults, requesting checkout                                |
 | Guest   | Web (public) | Browsing listings and calling the hotline                                                                   |
@@ -199,103 +199,103 @@ The system reports the number of buildings, renovation lines, newly bought devic
 
 [Ảnh: luồng cấu hình khai thác/4.jpg]
 
-##### 3.2.2.4 `<Admin>` Import and send to the Host
+##### 3.2.2.4 `<Admin>` Import and send to the Owner
 
-The Admin clicks on "Nhập & gửi Host" and confirms. Importing is also the submission, so there is no separate send button.
+The Admin clicks on "Nhập & gửi Owner" and confirms. Importing is also the submission, so there is no separate send button.
 
 [Ảnh: luồng cấu hình khai thác/5.jpg]
 
-Every imported building moves to "Đã gửi Host" and appears in the Host approval queue.
+Every imported building moves to "Đã gửi Owner" and appears in the Owner approval queue.
 
 [Ảnh: luồng cấu hình khai thác/6.jpg]
 
 ##### 3.2.2.5 `<Admin>` Confirm the renovation is finished
 
-When construction is over, the Admin opens the building and clicks on "Xác nhận hoàn thành cải tạo". The Host can only price a building after this step.
+When construction is over, the Admin opens the building and clicks on "Xác nhận hoàn thành cải tạo". The Owner can only price a building after this step.
 
 [Ảnh: nút xác nhận hoàn thành cải tạo]
 
 #### 3.2.3 Web — Pricing policy
 
-##### 3.2.3.1 `<Host>` Set the profit target and the operating cost
+##### 3.2.3.1 `<Owner>` Set the profit target and the operating cost
 
-The Host clicks on "Cấu hình giá" and enters the profit target and the monthly operating cost. These numbers drive every price approval, so they must be saved before the first building is priced.
+The Owner clicks on "Cấu hình giá" and enters the profit target and the monthly operating cost. These numbers drive every price approval, so they must be saved before the first building is priced.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/1.jpg]
 
-##### 3.2.3.2 `<Host>` Set the yearly rent increase
+##### 3.2.3.2 `<Owner>` Set the yearly rent increase
 
-The Host sets the yearly increase, the grace period for new tenants and how early next year's price is quoted, then checks the simulator at the bottom of the block.
+The Owner sets the yearly increase, the grace period for new tenants and how early next year's price is quoted, then checks the simulator at the bottom of the block.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/3.jpg]
 
-##### 3.2.3.3 `<Host>` Set the risk margins
+##### 3.2.3.3 `<Owner>` Set the risk margins
 
-The Host sets the vacancy margin and the handover window deducted at the end of the master lease, checks the summary and clicks on "Lưu cấu hình".
+The Owner sets the vacancy margin and the handover window deducted at the end of the master lease, checks the summary and clicks on "Lưu cấu hình".
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/4.jpg]
 
-##### 3.2.3.4 `<Host>` Record the manager salary table
+##### 3.2.3.4 `<Owner>` Record the manager salary table
 
-The Host clicks on "Lương quản lý", enters the salary of each operations manager and clicks on "Lưu bảng lương". Each building carries the salary divided by the number of buildings that manager is in charge of.
+The Owner clicks on "Lương quản lý", enters the salary of each operations manager and clicks on "Lưu bảng lương". Each building carries the salary divided by the number of buildings that manager is in charge of.
 
 [Ảnh: host/cấu hình giá cho để tính tiền duyệt giá nhà/màn cấu hình lương cho manager.jpg]
 
 #### 3.2.4 Web — Price approval of a whole-house property
 
-##### 3.2.4.1 `<Host>` Open the approval queue
+##### 3.2.4.1 `<Owner>` Open the approval queue
 
-The Host clicks on "Xem & duyệt" in the banner at the top of "Bất động sản".
+The Owner clicks on "Xem & duyệt" in the banner at the top of "Bất động sản".
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/1.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/1.jpg]
 
-The queue separates new buildings that need a first price from buildings that were renovated again and need a new listed price. The Host clicks on "Duyệt" to open a file.
+The queue separates new buildings that need a first price from buildings that were renovated again and need a new listed price. The Owner clicks on "Duyệt" to open a file.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/2.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/2.jpg]
 
-##### 3.2.4.2 `<Host>` Review the money spent on the building
+##### 3.2.4.2 `<Owner>` Review the money spent on the building
 
-The Host reviews the three cost blocks: the rent paid to the building owner, the renovation cost and the equipment bought new. Equipment handed over by the owner is recorded separately and is not counted as money spent.
+The Owner reviews the three cost blocks: the rent paid to the building owner, the renovation cost and the equipment bought new. Equipment handed over by the owner is recorded separately and is not counted as money spent.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/3.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/3.jpg]
 
-##### 3.2.4.3 `<Host>` Review the capital and depreciation schedule
+##### 3.2.4.3 `<Owner>` Review the capital and depreciation schedule
 
-The Host scrolls to "TỪNG KHOẢN VỐN VÀ LỊCH KHẤU HAO" to see how much of each item is recovered every month and which rooms carry it.
+The Owner scrolls to "TỪNG KHOẢN VỐN VÀ LỊCH KHẤU HAO" to see how much of each item is recovered every month and which rooms carry it.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/4.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/4.jpg]
 
-##### 3.2.4.4 `<Host>` Review the target and the computed rent
+##### 3.2.4.4 `<Owner>` Review the target and the computed rent
 
-The Host checks the profit target taken from "Cấu hình giá" and reads the step-by-step calculation that ends at the rent the building must reach every month. To change the target, the Host clicks on "Sửa cấu hình duyệt giá" and then on "Tính lại theo cấu hình".
+The Owner checks the profit target taken from "Cấu hình giá" and reads the step-by-step calculation that ends at the rent the building must reach every month. To change the target, the Owner clicks on "Sửa cấu hình duyệt giá" and then on "Tính lại theo cấu hình".
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/5.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/5.jpg]
 
-##### 3.2.4.5 `<Host>` Fix the rent
+##### 3.2.4.5 `<Owner>` Fix the rent
 
-The Host clicks on "Lấy giá đề xuất", or on "↑ Làm tròn 100k", or types another figure. The page then shows the profit of the whole period after operating cost and the repair reserve are deducted.
+The Owner clicks on "Lấy giá đề xuất", or on "↑ Làm tròn 100k", or types another figure. The page then shows the profit of the whole period after operating cost and the repair reserve are deducted.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/6.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/6.jpg]
 
-##### 3.2.4.6 `<Host>` Activate the property
+##### 3.2.4.6 `<Owner>` Activate the property
 
-The Host clicks on "Xác nhận & Kích hoạt", reads the final dialog, then clicks on "Kích hoạt cho thuê". The vacant units go live on the public website and the operations manager starts running the building. The price can only be changed while the unit is empty, so it must be corrected before a tenant signs.
+The Owner clicks on "Xác nhận & Kích hoạt", reads the final dialog, then clicks on "Kích hoạt cho thuê". The vacant units go live on the public website and the operations manager starts running the building. The price can only be changed while the unit is empty, so it must be corrected before a tenant signs.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà nguyên căn/7.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà nguyên căn/7.jpg]
 
 #### 3.2.5 Web — Price approval of a room-by-room property
 
-##### 3.2.5.1 `<Host>` Review the money spent on the building
+##### 3.2.5.1 `<Owner>` Review the money spent on the building
 
-The Host opens the file the same way and reviews the same three cost blocks. The description states how many rooms the building was split into.
+The Owner opens the file the same way and reviews the same three cost blocks. The description states how many rooms the building was split into.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà theo phòng/3.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà theo phòng/3.jpg]
 
-##### 3.2.5.2 `<Host>` Fix the rent of each room
+##### 3.2.5.2 `<Owner>` Fix the rent of each room
 
-The Host fills the price column with "Lấy giá đề xuất cho tất cả" and "Làm tròn lên 100k tất cả", or types a figure for each room, and checks the total against the target line at the bottom of the table. The capital is divided equally across the rooms, not by area, so two rooms of different size get the same suggested rent.
+The Owner fills the price column with "Lấy giá đề xuất cho tất cả" and "Làm tròn lên 100k tất cả", or types a figure for each room, and checks the total against the target line at the bottom of the table. The capital is divided equally across the rooms, not by area, so two rooms of different size get the same suggested rent.
 
-[Ảnh: luồng host duyệt nhà/duyệt nhà theo phòng/6.jpg]
+[Ảnh: luồng owner duyệt nhà/duyệt nhà theo phòng/6.jpg]
 
 #### 3.2.6 Web — Supplementary renovation and re-pricing
 
@@ -317,23 +317,23 @@ The Admin selects the file and clicks on "Kiểm tra file". The file accepts onl
 
 [Ảnh: luồng cải tạo bổ xung/5.jpg]
 
-The Admin clicks on "Nhập cải tạo bổ sung". The system imports the round and sends it to the Host for re-pricing automatically, then the Admin confirms the work is over with "Xác nhận hoàn thành cải tạo".
+The Admin clicks on "Nhập cải tạo bổ sung". The system imports the round and sends it to the Owner for re-pricing automatically, then the Admin confirms the work is over with "Xác nhận hoàn thành cải tạo".
 
 [Ảnh: luồng cải tạo bổ xung/7.jpg]
 
-##### 3.2.6.4 `<Host>` Review the new round
+##### 3.2.6.4 `<Owner>` Review the new round
 
-The Host opens the file from the right-hand column of the approval queue and reads how the spending is split between the part that raises the price and the part the company absorbs. Tenants already living in the building keep their contract price.
+The Owner opens the file from the right-hand column of the approval queue and reads how the spending is split between the part that raises the price and the part the company absorbs. Tenants already living in the building keep their contract price.
 
 [Ảnh: luồng cải tạo bổ xung/9.jpg]
 
-The Host can expand the capital schedule to see the new round added on top of the original one.
+The Owner can expand the capital schedule to see the new round added on top of the original one.
 
 [Ảnh: luồng cải tạo bổ xung/11.jpg]
 
-##### 3.2.6.5 `<Host>` Approve the new listed price
+##### 3.2.6.5 `<Owner>` Approve the new listed price
 
-The Host clicks on "Duyệt giá mới" and confirms. The dialog states the old price, the new price and how many rooms it applies to immediately.
+The Owner clicks on "Duyệt giá mới" and confirms. The dialog states the old price, the new price and how many rooms it applies to immediately.
 
 [Ảnh: luồng cải tạo bổ xung/13.jpg]
 
@@ -373,15 +373,15 @@ The Admin clicks on "Người dùng & phân quyền", then on "Tạo tài khoả
 
 [Ảnh: admin/màn người dùng & phân quyền.jpg]
 
-##### 3.3.1.2 `<Host>` Assign a manager to a zone
+##### 3.3.1.2 `<Owner>` Assign a manager to a zone
 
-The Host clicks on "Phân công khu vực", then on "Đổi quản lý" on a district, and selects the manager. One district has exactly one manager, and assigning the district assigns every building inside it. A building without a manager cannot receive tenants.
+The Owner clicks on "Phân công khu vực", then on "Đổi quản lý" on a district, and selects the manager. One district has exactly one manager, and assigning the district assigns every building inside it. A building without a manager cannot receive tenants.
 
 [Ảnh: host/màn phân công khu vực cho Manager quản lý.jpg]
 
-##### 3.3.1.3 `<Host>` Review the workload of each manager
+##### 3.3.1.3 `<Owner>` Review the workload of each manager
 
-The Host clicks on "Quản lý vận hành" to see how many zones, buildings, tenants and open maintenance tickets each manager is carrying.
+The Owner clicks on "Quản lý vận hành" to see how many zones, buildings, tenants and open maintenance tickets each manager is carrying.
 
 [Ảnh: host/màn quản lý manager hệ thống.jpg]
 
@@ -449,11 +449,11 @@ The Manager taps on "Đón khách — thu tiền" to see the tenancies waiting t
 
 [Ảnh: mobile — danh sách chờ đón khách]
 
-##### 3.3.4.2 `<Manager>` Send a new price to the Host when needed
+##### 3.3.4.2 `<Manager>` Send a new price to the Owner when needed
 
-If the tenant agreed on a price different from the listed one, the Manager taps on "Nhập giá mới" and "Nhập tiền cọc" and sends the contract to the Host. The card then shows "Chờ Host duyệt giá", and "Host từ chối giá" if the Host declines.
+If the tenant agreed on a price different from the listed one, the Manager taps on "Nhập giá mới" and "Nhập tiền cọc" and sends the contract to the Owner. The card then shows "Chờ Owner duyệt giá", and "Owner từ chối giá" if the Owner declines.
 
-[Ảnh: mobile — nhập giá mới gửi Host duyệt]
+[Ảnh: mobile — nhập giá mới gửi Owner duyệt]
 
 ##### 3.3.4.3 `<Manager>` Collect the deposit and the first rent
 
@@ -551,15 +551,15 @@ The Admin clicks on "Hợp đồng" to follow every tenancy in the system and th
 
 [Ảnh: admin/màn admin xem hợp đồng của khách thuê.jpg]
 
-##### 3.3.7.3 `<Host>` Review tenants
+##### 3.3.7.3 `<Owner>` Review tenants
 
-The Host clicks on "Khách thuê" to see who is living in which room, which rooms are free and which tenancies expire within 60 days.
+The Owner clicks on "Khách thuê" to see who is living in which room, which rooms are free and which tenancies expire within 60 days.
 
 [Ảnh: host/màn quản lý khách thuê.jpg]
 
-##### 3.3.7.4 `<Host>` Review contracts
+##### 3.3.7.4 `<Owner>` Review contracts
 
-The Host clicks on "Hợp đồng" to see the tenancies on one tab and the master leases signed with the building owners on the other.
+The Owner clicks on "Hợp đồng" to see the tenancies on one tab and the master leases signed with the building owners on the other.
 
 [Ảnh: host/màn quản lý hợp đồng.jpg]
 
@@ -569,9 +569,9 @@ The Admin clicks on "Đơn gia hạn" and approves the request, which only moves
 
 [Ảnh: admin/màn admin xem đơn giai hạn ở thêm của khách thuê.jpg]
 
-##### 3.3.7.6 `<Host>` Follow extension requests
+##### 3.3.7.6 `<Owner>` Follow extension requests
 
-The Host clicks on "Đơn gia hạn" to see which tenants asked to stay longer and how each request was settled. The decision itself belongs to the Admin.
+The Owner clicks on "Đơn gia hạn" to see which tenants asked to stay longer and how each request was settled. The decision itself belongs to the Admin.
 
 [Ảnh: host/màn theo dõi đơn giai hạn của khách thuê.jpg]
 
@@ -681,9 +681,9 @@ The Admin clicks on "Thanh toán" to see every invoice of the system on one tab 
 
 [Ảnh: admin/màn admin xem hoá đơn thanh toán.jpg]
 
-##### 3.4.5.2 `<Host>` Review invoices
+##### 3.4.5.2 `<Owner>` Review invoices
 
-The Host clicks on "Hoá đơn" to filter the invoices issued to their tenants and export the result to Excel.
+The Owner clicks on "Hoá đơn" to filter the invoices issued to their tenants and export the result to Excel.
 
 [Ảnh: host/màn theo dõi hoá đơn thanh toán.jpg]
 
@@ -765,23 +765,23 @@ The Admin clicks on "Danh mục thiết bị", selects the building and the tag 
 
 #### 3.6.1 Web — Cash flow
 
-##### 3.6.1.1 `<Host>` Reconcile money in and money out
+##### 3.6.1.1 `<Owner>` Reconcile money in and money out
 
-The Host clicks on "Tổng quan" to reconcile money in, money out and net profit for the period, per building.
+The Owner clicks on "Tổng quan" to reconcile money in, money out and net profit for the period, per building.
 
 [Ảnh: host/màn theo dõi tổng quan dòng tiền của hệ thống.jpg]
 
-##### 3.6.1.2 `<Host>` Follow receivables
+##### 3.6.1.2 `<Owner>` Follow receivables
 
-The Host clicks on "Công nợ" to see who owes what, sorted by how long the debt has been outstanding.
+The Owner clicks on "Công nợ" to see who owes what, sorted by how long the debt has been outstanding.
 
 [Ảnh: host/màn theo dõi các khoản nợ của khách thuê.jpg]
 
 #### 3.6.2 Web — Deposits
 
-##### 3.6.2.1 `<Host>` Track the deposit ledger
+##### 3.6.2.1 `<Owner>` Track the deposit ledger
 
-The Host clicks on "Sổ cọc" to see the deposits being held. A deposit can only be returned once the tenant has cleared every charge, and it is never used to settle an unpaid invoice.
+The Owner clicks on "Sổ cọc" to see the deposits being held. A deposit can only be returned once the tenant has cleared every charge, and it is never used to settle an unpaid invoice.
 
 [Ảnh: host/màn quản lý tiền cọc của khách thuê.jpg]
 
@@ -793,15 +793,15 @@ The Admin clicks on "Hoàn cọc", reads the tenant claim and the checkout file,
 
 #### 3.6.3 Web — Reporting
 
-##### 3.6.3.1 `<Host>` View financial and operational reports
+##### 3.6.3.1 `<Owner>` View financial and operational reports
 
-The Host clicks on "Báo cáo" to see revenue, cost, profit and occupancy over 6 or 12 periods, together with the performance of each operations manager.
+The Owner clicks on "Báo cáo" to see revenue, cost, profit and occupancy over 6 or 12 periods, together with the performance of each operations manager.
 
 [Ảnh: host/màn báo cáo phân tích hiệu suất vận hành của hệ thống.jpg]
 
-##### 3.6.3.2 `<Host>` Read notifications
+##### 3.6.3.2 `<Owner>` Read notifications
 
-The Host clicks on "Thông báo" to read the events that need attention, filtered by category and by read state.
+The Owner clicks on "Thông báo" to read the events that need attention, filtered by category and by read state.
 
 [Ảnh: host/màn thông báo.jpg]
 
@@ -823,11 +823,11 @@ The tenant taps on "Lịch sử thanh toán" to see every payment they have made
 
 | Message on screen                                                                                | Meaning                                                        | Solution                                                                             |
 | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| "Tài khoản Quản lý vận hành vui lòng sử dụng ứng dụng di động."                                  | A manager account tried to sign in on the web                  | Use the mobile app, the web is for Admin and Host only                               |
+| "Tài khoản Quản lý vận hành vui lòng sử dụng ứng dụng di động."                                  | A manager account tried to sign in on the web                  | Use the mobile app, the web is for Admin and Owner only                               |
 | "Không kết nối được máy chủ. Kiểm tra lại backend rồi thử lại."                                  | The backend is unreachable                                     | Check that the API is running and that `VITE_API_URL` points at it                   |
 | "Có khu vực trong file chưa tồn tại trong hệ thống"                                              | The Excel file names a district that is not in the catalogue   | Click on "Tạo tự động", or add it in "Danh mục khu vực" and check the file again     |
-| "Chưa import được: cả {n} hợp đồng đều thuộc nhà chưa hoạt động"                                 | The buildings have not been activated by the Host yet          | Finish the price approval workflow first, then import the tenancies                  |
-| "Nhà này chưa có quản lý phụ trách…"                                                             | The district of the building has no manager                    | Ask the Host to assign one                                                           |
+| "Chưa import được: cả {n} hợp đồng đều thuộc nhà chưa hoạt động"                                 | The buildings have not been activated by the Owner yet          | Finish the price approval workflow first, then import the tenancies                  |
+| "Nhà này chưa có quản lý phụ trách…"                                                             | The district of the building has no manager                    | Ask the Owner to assign one                                                           |
 | "Cấu hình chưa có tiền lãi mục tiêu…"                                                            | The pricing policy has never been filled in                    | Open "Cấu hình giá" and save it                                                      |
 | "Số danh bộ không khớp…"                                                                         | The subscriber number on the paper differs from the stored one | Check the selected building, then correct the field and try again                    |
 | "Chưa tự đọc được số liệu từ ảnh. Vui lòng nhập tay."                                            | The reader could not parse the photo                           | Type the figures by hand, the photo stays attached as evidence                       |

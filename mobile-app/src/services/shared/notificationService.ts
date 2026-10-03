@@ -104,7 +104,7 @@ const normalizeType = (row: BeNotificationRow): string => {
    * không đổi nên mapping giữ nguyên — chỉ ngày bắn đổi, xem `meterReadingPeriod`.
    */
   if (raw.startsWith('METER_READING')) return 'meter_reading_due';
-  // Host duyệt/từ chối giá → quản lý quay lại màn tiếp tục hợp đồng.
+  // Owner duyệt/từ chối giá → quản lý quay lại màn tiếp tục hợp đồng.
   if (raw.startsWith('PRICE_APPROVAL')) return 'contract_assigned';
   /**
    * Bảo trì — BE tách thành 8 type theo sự kiện từ 13/08/2026 (commit 23f5d97).

@@ -6,10 +6,10 @@ import type { PriceHistoryItem, PropertyResponse, RoomResponse } from '@/types/a
 import { Overlay } from '@/components/Overlay';
 
 /**
- * Quản lý GIÁ THUÊ của một nhà / phòng — dùng ở màn chi tiết bất động sản của Host.
+ * Quản lý GIÁ THUÊ của một nhà / phòng — dùng ở màn chi tiết bất động sản của Owner.
  *
  * Mô hình (chốt với PO 15/08/2026, BE đã làm xong):
- *   • `listedPrice`  — giá Host duyệt, là GIÁ BÁN. Chỉ Host đổi, và chỉ khi đơn vị TRỐNG.
+ *   • `listedPrice`  — giá Owner duyệt, là GIÁ BÁN. Chỉ Owner đổi, và chỉ khi đơn vị TRỐNG.
  *   • `appliedPrice` — giá hợp đồng đang chạy. Hoá đơn/doanh thu chạy theo số này.
  *   • Khách trả phòng xong → applied tự quay về listed.
  *   • `priceLocked = true` ⇒ đang có khách ⇒ KHÔNG sửa được gì cho tới khi khách rời đi.
@@ -204,7 +204,7 @@ const PriceHistoryModal = ({ propertyId, roomId, title, onClose }: {
           ) : rows.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center">
               <p className="text-sm font-bold text-slate-700">Chưa có thay đổi giá</p>
-              <p className="mt-1 text-xs text-slate-500">Giá vẫn giữ nguyên từ lúc Host duyệt.</p>
+              <p className="mt-1 text-xs text-slate-500">Giá vẫn giữ nguyên từ lúc Owner duyệt.</p>
             </div>
           ) : (
             <ul className="space-y-2">

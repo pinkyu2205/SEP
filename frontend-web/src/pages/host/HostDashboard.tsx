@@ -18,20 +18,21 @@ import {
   type HostNotificationDto, type InvoiceDto,
 } from '@/services/host.service';
 import { propertyService } from '@/services/property.service';
+import { loadHostReceivables } from '@/services/hostReceivables';
 import type { PropertyResponse } from '@/types/api.types';
 import {
   currentMonth, daysSince, fmtMillion, monthLabel, monthShort, shiftMonth,
 } from './shared';
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Bảng điều hành Host — 100% API thật, KHÔNG mock, KHÔNG số bịa.
+// Bảng điều hành Owner — 100% API thật, KHÔNG mock, KHÔNG số bịa.
 //
 // Nguồn (đều nhận month=YYYY-MM, chạy theo tháng vận hành hiện tại):
 //   /host/dashboard/summary · /host/finance/cashflow · /host/finance/property-pnl
 //   /host/reports/property-performance · /host/reports/manager-performance
 //   /host/invoices · /host/notifications · /properties
 //
-// Nguyên tắc số liệu: mọi thông số tài chính & vận hành chỉ tính trên nhà Host ĐÃ
+// Nguyên tắc số liệu: mọi thông số tài chính & vận hành chỉ tính trên nhà Owner ĐÃ
 // DUYỆT GIÁ, dùng chung một nguồn với trang Quản lý dòng tiền nên hai trang luôn
 // khớp. Nhà chưa duyệt giá chỉ xuất hiện ở banner + thẻ "Nhà chờ duyệt giá".
 //
@@ -44,7 +45,7 @@ type ChartPoint = { label: string; revenue: number; expense: number; net: number
 type Fin = { revenue: number; leaseCost: number; otherExpense: number; totalExpense: number; net: number };
 const ZERO_FIN: Fin = { revenue: 0, leaseCost: 0, otherExpense: 0, totalExpense: 0, net: 0 };
 
-/** Mốc leo thang của cron BE: quá hạn từ ngần này ngày thì quản lý & Host bị báo. */
+/** Mốc leo thang của cron BE: quá hạn từ ngần này ngày thì quản lý & Owner bị báo. */
 const ESCALATE_AFTER_DAYS = 3;
 
 // Nhà "đã duyệt giá" — mirror isHostApproved() ở propertyListState (xem chú thích ở đó
@@ -156,8 +157,8 @@ export const Dashboard = () => {
       hostService.getManagerPerformance(currentMonth()).catch(() => null),
       propertyService.getAllProperties().catch(() => null),
       hostService.getPropertyPnl(currentMonth()).catch(() => null),
-      // size lớn: BE mặc định 20/trang — cần trọn kỳ để đếm quá hạn cho đúng.
-      hostService.getInvoices({ month: currentMonth(), size: 500 }).catch(() => null),
+      // Hoá đơn thật mọi kỳ (lùi về nguồn dựng sẵn) — cùng nguồn với trang Công nợ.
+      loadHostReceivables(currentMonth()).catch(() => null),
       hostService.listNotifications({ unreadOnly: true, size: 6 }).catch(() => null),
     ]);
 
@@ -178,7 +179,7 @@ export const Dashboard = () => {
       };
     }
     setPnlById(map);
-    setInvoices(invoicePage?.content ?? []);
+    setInvoices(invoicePage?.rows ?? []);
     setAlerts(notify?.content ?? []);
     setLoading(false);
   }, []);
@@ -280,47 +281,47 @@ export const Dashboard = () => {
     {
       title: 'Doanh thu tháng này', value: formatCurrency(agg.revenue), icon: TrendingUp,
       iconBg: 'bg-emerald-50', iconColor: 'text-emerald-600', borderColor: 'border-l-emerald-500',
-      delta: revenueDelta, sub: `${agg.count} nhà đã duyệt giá`, to: '/host/financial',
+      delta: revenueDelta, sub: `${agg.count} nhà đã duyệt giá`, to: '/owner/financial',
     },
     {
       title: 'Tổng chi phí', value: formatCurrency(agg.expense), icon: TrendingDown,
       iconBg: 'bg-rose-50', iconColor: 'text-rose-600', borderColor: 'border-l-rose-500',
       delta: expenseDelta, lowerIsBetter: true,
-      sub: 'Thuê căn + chi phí ghi nhận', to: '/host/financial',
+      sub: 'Thuê căn + chi phí ghi nhận', to: '/owner/financial',
     },
     {
       title: 'Lợi nhuận ròng', value: formatCurrency(agg.net), icon: Wallet,
       iconBg: 'bg-indigo-50', iconColor: agg.net >= 0 ? 'text-indigo-600' : 'text-rose-600',
       borderColor: agg.net >= 0 ? 'border-l-indigo-500' : 'border-l-rose-500',
       delta: netDelta,
-      sub: `Biên LN ${agg.revenue > 0 ? Math.round((agg.net / agg.revenue) * 100) : 0}%`, to: '/host/reports',
+      sub: `Biên LN ${agg.revenue > 0 ? Math.round((agg.net / agg.revenue) * 100) : 0}%`, to: '/owner/reports',
     },
     {
       title: 'Tỷ lệ lấp đầy', value: `${agg.occupancyRate}%`, icon: Home,
       iconBg: 'bg-blue-50', iconColor: 'text-blue-600', borderColor: 'border-l-blue-500',
-      sub: `${agg.occupied}/${agg.totalRooms} phòng · đã duyệt giá`, to: '/host/properties',
+      sub: `${agg.occupied}/${agg.totalRooms} phòng · đã duyệt giá`, to: '/owner/properties',
     },
     {
       title: 'Nhà chờ duyệt giá', value: String(pending.length), icon: Tag,
       iconBg: 'bg-amber-50', iconColor: 'text-amber-600', borderColor: 'border-l-amber-500',
       badge: pending.length > 0 ? 'Cần duyệt' : undefined, badgeColor: 'bg-amber-100 text-amber-700',
-      sub: pending.length > 0 ? 'Chờ bạn chốt giá để vận hành' : 'Không có nhà nào chờ', to: '/host/properties',
+      sub: pending.length > 0 ? 'Chờ bạn chốt giá để vận hành' : 'Không có nhà nào chờ', to: '/owner/properties',
     },
     {
       title: 'Bảo trì chờ xử lý', value: String(agg.openMaintenance), icon: Wrench,
       iconBg: 'bg-rose-50', iconColor: 'text-rose-600', borderColor: 'border-l-rose-500',
-      sub: 'Phòng đang bảo trì', to: '/host/maintenance',
+      sub: 'Phòng đang bảo trì', to: '/owner/maintenance',
     },
     {
       title: 'Quản lý vận hành', value: String(activeManagers), icon: UserCog,
       iconBg: 'bg-violet-50', iconColor: 'text-violet-600', borderColor: 'border-l-violet-500',
       badge: 'Đang hoạt động', badgeColor: 'bg-emerald-100 text-emerald-700',
-      sub: 'Đang phụ trách vận hành', to: '/host/operations-managers',
+      sub: 'Đang phụ trách vận hành', to: '/owner/operations-managers',
     },
     {
       title: 'Hoá đơn chưa thu', value: formatCurrency(outstandingAmount), icon: Receipt,
       iconBg: 'bg-amber-50', iconColor: 'text-amber-600', borderColor: 'border-l-amber-400',
-      sub: `${outstandingInvoices} hoá đơn`, to: '/host/receivables',
+      sub: `${outstandingInvoices} hoá đơn`, to: '/owner/receivables',
     },
   ];
 
@@ -386,7 +387,7 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Việc cần Host xử lý */}
+      {/* Việc cần Owner xử lý */}
       {pending.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50/40 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -396,10 +397,10 @@ export const Dashboard = () => {
               <p className="mt-0.5 truncate text-xs text-amber-700">
                 {pending.slice(0, 3).map(p => p.propertyName).join(', ')}
                 {pending.length > 3 ? ` … và ${pending.length - 3} nhà khác` : ''}
-                {' — đã cấu hình khai thác xong, chờ Host duyệt giá để đưa vào vận hành.'}
+                {' — đã cấu hình khai thác xong, chờ Owner duyệt giá để đưa vào vận hành.'}
               </p>
             </div>
-            <Link to="/host/properties"
+            <Link to="/owner/properties"
               className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-amber-700">
               Xem & duyệt tất cả <ArrowRight className="h-4 w-4" />
             </Link>
@@ -418,10 +419,10 @@ export const Dashboard = () => {
               <p className="mt-0.5 text-xs text-rose-700">
                 {overdue.escalated > 0
                   ? `${overdue.escalated} hoá đơn đã quá ${ESCALATE_AFTER_DAYS} ngày: quản lý vận hành đã nhận cảnh báo và hợp đồng bị gắn cờ đề nghị chấm dứt.`
-                  : `Hệ thống tự nhắc khách mỗi sáng; quá ${ESCALATE_AFTER_DAYS} ngày sẽ báo quản lý vận hành và Host.`}
+                  : `Hệ thống tự nhắc khách mỗi sáng; quá ${ESCALATE_AFTER_DAYS} ngày sẽ báo quản lý vận hành và Owner.`}
               </p>
             </div>
-            <Link to="/host/receivables"
+            <Link to="/owner/receivables"
               className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-rose-700">
               Xem công nợ <ArrowRight className="h-4 w-4" />
             </Link>
@@ -441,7 +442,7 @@ export const Dashboard = () => {
             title="Tổng quan tài chính"
             subtitle={`Dòng tiền ${CHART_MONTHS} kỳ gần nhất · ${monthLabel(currentMonth())}: nhà đã duyệt giá`}
             icon={BarChart3}
-            action={<QuickLink to="/host/financial">Chi tiết</QuickLink>}
+            action={<QuickLink to="/owner/financial">Chi tiết</QuickLink>}
           />
           {chart.length === 0 ? (
             <div className="flex h-[250px] items-center justify-center text-sm text-slate-400">
@@ -506,7 +507,7 @@ export const Dashboard = () => {
           title="Tổng quan vận hành bất động sản"
           subtitle={`${agg.count} nhà đã duyệt giá · ${agg.totalRooms} phòng`}
           icon={Building2}
-          action={<QuickLink to="/host/properties">Xem tất cả</QuickLink>}
+          action={<QuickLink to="/owner/properties">Xem tất cả</QuickLink>}
         />
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
@@ -534,7 +535,7 @@ export const Dashboard = () => {
                 const avail = Math.max(0, prop.totalRooms - prop.occupiedRooms - prop.openMaintenance);
                 const revenue = pnlById[String(prop.propertyId)]?.revenue ?? prop.monthlyRevenue;
                 return (
-                  <Link key={prop.propertyId} to={`/host/properties/${prop.propertyId}`}
+                  <Link key={prop.propertyId} to={`/owner/properties/${prop.propertyId}`}
                     className="group block rounded-xl border border-slate-100 p-4 transition-all hover:border-primary-200 hover:shadow-md">
                     <div className="mb-3 flex items-start justify-between">
                       <div className="min-w-0 flex-1">
@@ -565,7 +566,7 @@ export const Dashboard = () => {
             </div>
             {cards.length > topCards.length && (
               <div className="mt-4 text-center">
-                <Link to="/host/properties" className="text-xs font-semibold text-primary-600 hover:text-primary-700">
+                <Link to="/owner/properties" className="text-xs font-semibold text-primary-600 hover:text-primary-700">
                   Xem thêm {cards.length - topCards.length} nhà khác →
                 </Link>
               </div>
@@ -578,7 +579,7 @@ export const Dashboard = () => {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
           <SectionHeader title="Quản lý vận hành" subtitle={`${mgrPerf.length} quản lý đang hoạt động`} icon={Users}
-            action={<QuickLink to="/host/operations-managers">Tất cả</QuickLink>} />
+            action={<QuickLink to="/owner/operations-managers">Tất cả</QuickLink>} />
           {mgrPerf.length === 0 ? (
             <div className="py-8 text-center text-sm text-slate-400">
               {loading ? 'Đang tải…' : 'Chưa có quản lý vận hành nào đang hoạt động.'}
@@ -614,7 +615,7 @@ export const Dashboard = () => {
 
         <div className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
           <SectionHeader title="Cảnh báo & Thông báo" subtitle={`${alerts.length} thông báo chưa đọc`} icon={AlertTriangle}
-            action={<QuickLink to="/host/notifications">Tất cả</QuickLink>} />
+            action={<QuickLink to="/owner/notifications">Tất cả</QuickLink>} />
           {alerts.length === 0 ? (
             <div className="py-8 text-center text-sm text-slate-400">
               {loading ? 'Đang tải…' : 'Không có thông báo mới.'}

@@ -36,7 +36,7 @@ export const DESCRIBE_ROOM_TIMEOUT_MS = 60_000;
 
 /**
  * BE chỉ nhận ảnh HTTPS thuộc `vision.allowed-image-hosts` (= `res.cloudinary.com`);
- * sai host hoặc sai giao thức là 422 "Chỉ chấp nhận ảnh đã upload lên hệ thống".
+ * sai owner hoặc sai giao thức là 422 "Chỉ chấp nhận ảnh đã upload lên hệ thống".
  *
  * Cần lọc ở FE vì danh sách ảnh của màn đón khách được nạp sẵn từ `roomConditionUrls`
  * của hợp đồng — dữ liệu cũ/seed có thể chứa URL không phải Cloudinary, và chỉ cần MỘT
